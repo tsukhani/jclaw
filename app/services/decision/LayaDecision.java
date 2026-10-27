@@ -28,8 +28,6 @@ public final class LayaDecision {
     public static final String BASE_URL_KEY = "decision.laya.baseUrl";
     /** Sent as a bearer token; a server started without {@code LAYA_API_KEY} needs none. */
     public static final String API_KEY = "decision.laya.apiKey";
-    /** A JSON array of the checkpoints the operator ticked, such as {@code ["english"]}. */
-    public static final String MODELS_KEY = "decision.laya.models";
     public static final String BREAKER_NAME = "decision:laya";
     /**
      * {@code laya-serve}'s own default port, on this machine. {@code LayaDecisionTest} holds it equal to
@@ -67,18 +65,6 @@ public final class LayaDecision {
     public static @Nullable String apiKey() {
         var key = ConfigService.get(API_KEY);
         return key == null || key.isBlank() ? null : key.trim();
-    }
-
-    /** The checkpoints the operator ticked, in the order stored; a stored name that is no checkpoint is left out. */
-    public static List<String> selectedModels() {
-        var stored = OllamaDecision.parseModels(ConfigService.get(MODELS_KEY));
-        return stored == null ? List.of() : stored.stream().filter(CHECKPOINTS::contains).toList();
-    }
-
-    /** Whether {@code value} is a JSON array naming only {@link #CHECKPOINTS}; a blank one names none. */
-    static boolean isSelection(@Nullable String value) {
-        var names = OllamaDecision.parseModels(value);
-        return names != null && CHECKPOINTS.containsAll(names);
     }
 
     /**

@@ -16,8 +16,6 @@ public final class BasetenDecision {
     /** The router's classifier provider id; not {@code baseten}, which an operator may give a Baseten LLM provider. */
     public static final String PROVIDER = "baseten-decision";
     public static final String API_KEY = "decision.baseten.apiKey";
-    /** A JSON array of the IDs of the models the operator ticked. */
-    public static final String MODELS_KEY = "decision.baseten.models";
     public static final String BREAKER_NAME = "decision:baseten";
     static final String ENDPOINT = "https://inference.baseten.co/v1/systemone";
 
@@ -40,18 +38,6 @@ public final class BasetenDecision {
         return key == null || key.isBlank() ? null : key.trim();
     }
 
-    /** The IDs the operator ticked, in the order stored; a stored ID that is no Baseten model is left out. */
-    public static List<String> selectedModels() {
-        var stored = OllamaDecision.parseModels(ConfigService.get(MODELS_KEY));
-        return stored == null ? List.of() : stored.stream().filter(BasetenDecision::isModel).toList();
-    }
-
-    /** Whether {@code value} is a JSON array naming only the IDs of {@link #MODELS}; a blank one names none. */
-    static boolean isSelection(@Nullable String value) {
-        var ids = OllamaDecision.parseModels(value);
-        return ids != null && ids.stream().allMatch(BasetenDecision::isModel);
-    }
-
     /** What Baseten calls the model with {@code id}, or {@code id} itself when it is none of {@link #MODELS}. */
     public static String name(String id) {
         return MODELS.stream().filter(m -> m.id().equals(id)).map(Model::name).findFirst().orElse(id);
@@ -67,7 +53,8 @@ public final class BasetenDecision {
         return JevApi.breaker(target(""));
     }
 
-    private static boolean isModel(String id) {
+    /** Whether {@code id} is the ID of one of {@link #MODELS}. */
+    public static boolean isModel(String id) {
         return MODELS.stream().anyMatch(m -> m.id().equals(id));
     }
 }

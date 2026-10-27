@@ -1,6 +1,10 @@
 import com.google.gson.JsonParser;
 import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
+import mockwebserver3.Dispatcher;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import models.Agent;
 import models.Memory;
 import org.jspecify.annotations.Nullable;
@@ -9,6 +13,8 @@ import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.AgentService;
+import services.ConfigService;
+import services.decision.OllamaDecision;
 import services.grapheval.Agreement;
 import services.grapheval.CompetencyQuestions;
 import services.grapheval.GraphCases;
@@ -104,6 +110,65 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
     void theHostedModelIs400() {
         assertRefused("{\"agent\":\"" + AGENT + "\",\"decisionModels\":[\"tev1\",\"jev-latest\"]}",
                 "local Ollama models only");
+    }
+
+    @Test
+    void aRunThatNamesNoDecisionModelIs400NamingTheModelsTheServerLists() throws Exception {
+        // JF-135: no Settings selection supplies a default. ModelRouterTurnTest reads the address under this lock.
+        JevBreakerTestSync.acquire();
+        var completion = "{\"name\":\"llama3.2:latest\",\"capabilities\":[\"completion\"]}";
+        var tags = new AtomicReference<>("{\"models\":[{\"name\":\"tev1:latest\",\"capabilities\":[\"decision\"]},"
+                + completion + ",{\"name\":\"clef:cloud\",\"capabilities\":[\"decision\"],"
+                + "\"remote_host\":\"https://ollama.com:443\"},{\"name\":\"d1:latest\",\"capabilities\":[\"decision\"]}]}");
+        try (var server = new MockWebServer()) {
+            server.setDispatcher(new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    if (!request.getUrl().encodedPath().equals("/api/tags")) return new MockResponse.Builder().code(404).build();
+                    return new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                            .body(tags.get()).build();
+                }
+            });
+            server.start();
+            var address = server.url("/").toString().replaceAll("/$", "");
+            commitInFreshTx(() -> {
+                ConfigService.set(OllamaDecision.BASE_URL_KEY, address);
+                return null;
+            });
+            try {
+                var listed = evaluate(authed(), "{\"agent\":\"" + AGENT + "\"}");
+                assertEquals(400, listed.status.intValue(), getContent(listed));
+                // clef:cloud runs on ollama.com, which the certifier does not measure.
+                assertEquals("decisionModels is required: name one or more of the decision models the Ollama server at "
+                        + address + " runs (tev1:latest, d1:latest)", message(listed));
+
+                tags.set("{\"models\":[" + completion + "]}");
+                var none = evaluate(authed(), "{\"agent\":\"" + AGENT + "\"}");
+                assertEquals(400, none.status.intValue(), getContent(none));
+                assertEquals("decisionModels is required; the Ollama server at " + address + " runs no decision models",
+                        message(none));
+
+                commitInFreshTx(() -> {
+                    ConfigService.set(OllamaDecision.BASE_URL_KEY, "http://127.0.0.1:1");
+                    return null;
+                });
+                var down = evaluate(authed(), "{\"set\":\"sequences\"}");
+                assertEquals(400, down.status.intValue(), getContent(down));
+                assertEquals("decisionModels is required; the Ollama server at http://127.0.0.1:1 could not be read: "
+                        + "not reachable (ConnectException)", message(down));
+            } finally {
+                commitInFreshTx(() -> {
+                    ConfigService.delete(OllamaDecision.BASE_URL_KEY);
+                    return null;
+                });
+            }
+        } finally {
+            JevBreakerTestSync.release();
+        }
+    }
+
+    private static String message(Http.Response response) {
+        return JsonParser.parseString(getContent(response)).getAsJsonObject().get("message").getAsString();
     }
 
     @Test

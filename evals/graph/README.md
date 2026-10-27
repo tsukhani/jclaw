@@ -5,8 +5,9 @@ extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
 `evals/suites/` dataset: those are offline and agent-turn shaped, while this one needs a
 live decision provider. `GUIDE.md` is how to label; this file is the format and the scoring.
 
-Only local Ollama models are measured, through `Decider.ollama`; the default list is the
-models selected in Settings. A hosted model such as `jev-latest` is refused with a 400.
+Only local Ollama models are measured, through `Decider.ollama`; a run names them in
+`decisionModels` (`--decision-model`), and one that names none is refused with a 400 listing the
+decision models the server runs, cloud ones left out. A hosted model such as `jev-latest` is refused with a 400.
 
 ## Format
 
@@ -585,12 +586,13 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
    before v3 and is refused (`case h<N>: sampled before v3 ...; move the file aside and
    resample`); a label error reads `case h<N>: labels break the v3 rules in
    evals/graph/README.md`, quoting no text.
-3. `./jclaw.sh grapheval run --agent NAME --set heldout` reads the memories where they live:
-   nothing is stored, edited or deleted, and the report checks every row is unchanged and
-   still present. Unlabelled cases are skipped and counted. The owner is the one named in
-   the USER.md of the agent the sampled memories belong to; label their mentions of that name
-   as the operator. Each case runs with its own anchor and author type, `unattributed` read in
-   the owner's voice. A file holding memories of two agents is refused.
+3. `./jclaw.sh grapheval run --agent NAME --set heldout --decision-model ID` reads the
+   memories where they live: nothing is stored, edited or deleted, and the report checks
+   every row is unchanged and still present. Unlabelled cases are skipped and counted. The
+   owner is the one named in the USER.md of the agent the sampled memories belong to; label
+   their mentions of that name as the operator. Each case runs with its own anchor and author
+   type, `unattributed` read in the owner's voice. A file holding memories of two agents is
+   refused.
 
 A labelled held-out case may also carry the three coverage fields (JCLAW-1374), labelled under
 `GUIDE.md` rule 14: `notRepresentable` (the kinds of fact the schema cannot hold), `numbers` (the

@@ -160,8 +160,7 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
      * that is not configured, a model it does not register, or the router itself — which would ask the
      * router to classify the prompt it is routing — is refused. {@link #JEV}, {@link OllamaDecision#PROVIDER},
      * {@link LayaDecision#PROVIDER} and {@link BasetenDecision#PROVIDER} are not registered providers, so their
-     * provider write is not checked against the stored model; an Ollama model, a Laya checkpoint or a Baseten model
-     * must be one selected in Decision Providers.
+     * provider write is not checked against the stored model; their model must be one the provider serves.
      */
     private static @Nullable String classifierRejection(String key, @Nullable String value) {
         if (value == null || value.isBlank()) return null;
@@ -183,63 +182,37 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         return registeredModelRejection(provider, model);
     }
 
-    /** A model the decision provider does not serve: anything but JEV's one, or one not selected on its card. */
+    /**
+     * A model the decision provider does not serve: anything but JEV's one, a Laya checkpoint or a Baseten model's
+     * ID, or a model the Ollama server does not list as a decision model when asked.
+     */
     private static @Nullable String decisionModelRejection(String provider, String model) {
         if (JEV.equals(provider)) {
             return JevApi.MODEL.equals(model) ? null
                     : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
         }
         if (LayaDecision.PROVIDER.equals(provider)) {
-            return LayaDecision.selectedModels().contains(model) ? null
-                    : "%s must be a Laya checkpoint ticked in Settings > Decision Providers (%s)."
-                            .formatted(CLASSIFIER_MODEL, LayaDecision.MODELS_KEY);
+            return LayaDecision.CHECKPOINTS.contains(model) ? null
+                    : "%s must be a Laya checkpoint: %s."
+                            .formatted(CLASSIFIER_MODEL, String.join(", ", LayaDecision.CHECKPOINTS));
         }
         if (BasetenDecision.PROVIDER.equals(provider)) {
-            return BasetenDecision.selectedModels().contains(model) ? null
-                    : "%s must be the ID of a Baseten model ticked in Settings > Decision Providers (%s)."
-                            .formatted(CLASSIFIER_MODEL, BasetenDecision.MODELS_KEY);
+            var ids = BasetenDecision.MODELS.stream().map(m -> m.id() + " (" + m.name() + ")").toList();
+            return BasetenDecision.isModel(model) ? null
+                    : "%s must be the ID of a Baseten model: %s.".formatted(CLASSIFIER_MODEL, String.join(", ", ids));
         }
-        return OllamaDecision.selectedModels().contains(model) ? null
-                : "%s must be an Ollama decision model selected in Settings > Decision Providers (%s)."
-                        .formatted(CLASSIFIER_MODEL, OllamaDecision.MODELS_KEY);
-    }
-
-    /**
-     * The reverse of {@link #decisionModelRejection} (JCLAW-1453): a write of {@link OllamaDecision#MODELS_KEY},
-     * {@link LayaDecision#MODELS_KEY} or {@link BasetenDecision#MODELS_KEY} may not drop the ticked model the stored
-     * classifier uses. Null for any other key; a null or blank {@code value} selects nothing, which is what a delete
-     * leaves.
-     */
-    public static @Nullable String selectionRejection(String key, @Nullable String value) {
-        return selectionRejection(key, value, configuredClassifier());
-    }
-
-    /** {@link #selectionRejection(String, String)} against {@code classifier} rather than the stored one. */
-    public static @Nullable String selectionRejection(String key, @Nullable String value,
-                                                      @Nullable Candidate classifier) {
-        String provider;
-        List<String> stored;
-        if (key.equals(OllamaDecision.MODELS_KEY)) {
-            provider = OllamaDecision.PROVIDER;
-            stored = OllamaDecision.selectedModels();
-        } else if (key.equals(LayaDecision.MODELS_KEY)) {
-            provider = LayaDecision.PROVIDER;
-            stored = LayaDecision.selectedModels();
-        } else if (key.equals(BasetenDecision.MODELS_KEY)) {
-            provider = BasetenDecision.PROVIDER;
-            stored = BasetenDecision.selectedModels();
-        } else {
-            return null;
+        var listing = OllamaDecision.listing(OllamaDecision.baseUrl());
+        if (!listing.reachable()) {
+            return "%s could not be checked against the Ollama server at %s: %s."
+                    .formatted(CLASSIFIER_MODEL, listing.baseUrl(), listing.error());
         }
-        // A classifier left unticked from before this check stays so, or no other box on its card could change.
-        if (classifier == null || !provider.equals(classifier.provider()) || !stored.contains(classifier.model())) {
-            return null;
-        }
-        // A list that does not parse is DecisionSettings' refusal to give.
-        var next = OllamaDecision.parseModels(value);
-        if (next == null || next.contains(classifier.model())) return null;
-        return ("%s must keep %s while the Model Router uses it as its prompt classifier; choose another classifier "
-                + "in Settings > Model Router first.").formatted(key, classifier.model());
+        var listed = listing.models().stream().map(OllamaDecision.ListedModel::name).toList();
+        if (listed.contains(model)) return null;
+        return listed.isEmpty()
+                ? "%s must be a decision model on the Ollama server at %s, which lists none."
+                        .formatted(CLASSIFIER_MODEL, listing.baseUrl())
+                : "%s must be a decision model on the Ollama server at %s: %s."
+                        .formatted(CLASSIFIER_MODEL, listing.baseUrl(), String.join(", ", listed));
     }
 
     /** A provider the registry does not configure, or a model it does not register. */

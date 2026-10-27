@@ -112,6 +112,26 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void theRetiredModelSelectionsAreDeletedOnBoot() throws Exception {
+        // JF-135: the Model Router offers every decision model, so the selections the cards ticked are gone.
+        // renameMovedKeys also moves the legacy JEV key, so this holds the lock its writers hold.
+        var retired = new String[] {"decision.ollama.models", "decision.laya.models", "decision.baseten.models"};
+        var renameMovedKeys = DefaultConfigJob.class.getDeclaredMethod("renameMovedKeys");
+        renameMovedKeys.setAccessible(true);
+        JevBreakerTestSync.acquire();
+        try {
+            for (var key : retired) ConfigService.set(key, "[\"english\"]");
+            renameMovedKeys.invoke(new DefaultConfigJob());
+        } finally {
+            JevBreakerTestSync.release();
+        }
+        for (var key : retired) {
+            Tx.run(() -> assertNull(Config.findByKey(key), key));
+            assertNull(ConfigService.get(key), key);
+        }
+    }
+
+    @Test
     void theOllamaDecisionAddressIsScreenedLikeAProviderUrl() {
         // JCLAW-1336. Only rejectionFor is asked, so nothing here stores an address another class could read.
         var key = OllamaDecision.BASE_URL_KEY;
@@ -125,19 +145,6 @@ class ConfigServiceTest extends UnitTest {
         }
         assertNotNull(ConfigService.setWithSideEffects(key, "http://169.254.169.254"), "refused through the write path");
         assertNull(ConfigService.get(key), "a refused value is not saved");
-    }
-
-    @Test
-    void theOllamaDecisionModelsAreAJsonArrayOfNames() {
-        var key = OllamaDecision.MODELS_KEY;
-        for (var ok : new String[] {"", "[]", "[\"tev1\"]", "[\"tev1\",\"nimble:latest\"]"}) {
-            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
-        }
-        for (var bad : new String[] {"tev1", "{\"tev1\":true}", "[1]", "[\"\"]", "[null]", "[\"tev1\""}) {
-            var rejected = DecisionSettings.rejectionFor(key, bad);
-            assertNotNull(rejected, () -> "accepted " + bad);
-            assertTrue(rejected.contains(key), rejected);
-        }
     }
 
     @Test

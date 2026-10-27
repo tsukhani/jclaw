@@ -1065,9 +1065,9 @@ USAGE
 
 usage_grapheval() {
     cat <<'USAGE'
-Usage: ./jclaw.sh grapheval run --agent NAME [options]
-       ./jclaw.sh grapheval run --set sequences [options]
-       ./jclaw.sh grapheval run --split NAME [--agent NAME] [options]
+Usage: ./jclaw.sh grapheval run --agent NAME --decision-model ID [options]
+       ./jclaw.sh grapheval run --set sequences --decision-model ID [options]
+       ./jclaw.sh grapheval run --split NAME --decision-model ID [--agent NAME] [options]
        ./jclaw.sh grapheval freeze-split --name NAME --set cases|heldout (--share S | --ids A,B) [options]
        ./jclaw.sh grapheval rescore --split NAME --decision-model ID [--check-share S]
        ./jclaw.sh grapheval blind-sheet
@@ -1119,8 +1119,7 @@ coverage        Model-free coverage report (JCLAW-1374): reads
 Options for run:
   --agent NAME             Agent whose memories hold the cases (required,
                            except for --set sequences).
-  --decision-model ID      Ollama decision model; repeatable
-                           (default: the models selected in Settings).
+  --decision-model ID      Ollama decision model (required); repeatable.
   --set cases|heldout|sequences
                            Which set to run (default cases).
   --configuration FILE     JSON thresholds the sequences end-to-end variant

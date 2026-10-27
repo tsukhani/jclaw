@@ -1,15 +1,3 @@
-/** The names in `decision.ollama.models`, `decision.laya.models` or `decision.baseten.models`, or [] when it is unset or not a JSON array of strings. */
-export function parseDecisionModels(raw: string): string[] {
-  if (!raw.trim()) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter((m): m is string => typeof m === 'string' && m.trim() !== '') : []
-  }
-  catch {
-    return []
-  }
-}
-
 export interface LayaCheckpoint {
   name: string
   /** How many tokens of one question the checkpoint reads; the rest of the prompt is cut, not refused. */
@@ -26,14 +14,8 @@ export const LAYA_CHECKPOINTS: readonly LayaCheckpoint[] = [
 /** laya-serve's own default on this machine. LayaDecisionTest holds it equal to `DEFAULT_BASE_URL` in app/services/decision/LayaDecision.java. */
 export const LAYA_DEFAULT_ADDRESS = 'http://localhost:8000'
 
-/** The checkpoints ticked in `decision.laya.models`, in the table's order; a stored name that is no checkpoint is left out. */
-export function tickedLayaCheckpoints(raw: string): LayaCheckpoint[] {
-  const ticked = parseDecisionModels(raw)
-  return LAYA_CHECKPOINTS.filter(c => ticked.includes(c.name))
-}
-
 export interface BasetenModel {
-  /** What Baseten's API takes, and what `decision.baseten.models` stores. */
+  /** What Baseten's API takes, and what `router.classifier.model` stores. */
   id: string
   name: string
   contextTokens: number
@@ -45,12 +27,6 @@ export const BASETEN_MODELS: readonly BasetenModel[] = [
   { id: 'decision-models/baseten-elephant-9b-latest', name: 'elephant-1', contextTokens: 16384, parameters: '9B' },
   { id: 'decision-models/baseten-mammoth-27b-latest', name: 'mammoth-1', contextTokens: 16384, parameters: '27B' },
 ]
-
-/** The models ticked in `decision.baseten.models`, in the table's order; a stored ID that is no Baseten model is left out. */
-export function tickedBasetenModels(raw: string): BasetenModel[] {
-  const ticked = parseDecisionModels(raw)
-  return BASETEN_MODELS.filter(m => ticked.includes(m.id))
-}
 
 /** A context as the UI words it, such as `1,024 tokens`. */
 export function contextLabel(tokens: number): string {

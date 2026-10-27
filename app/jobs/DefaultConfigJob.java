@@ -482,6 +482,11 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-1302: the TypeSafe key moved to Decision Providers; neither consumer needs it re-entered.
         renameKeyIfPresent(DecisionSettings.LEGACY_API_KEY, DecisionSettings.API_KEY);
 
+        // JF-135: the Model Router offers every decision model, so the cards no longer tick a selection.
+        for (var retired : List.of("decision.ollama.models", "decision.laya.models", "decision.baseten.models")) {
+            ConfigService.delete(retired);
+        }
+
         // The scrape sidecars' keys moved under web_scrape.*, where Settings > Web Scraping edits them.
         for (var sidecar : List.of("stealth", "impersonate")) {
             for (var suffix : List.of("enabled", "port", "timeoutSeconds", "idleTimeoutMinutes",

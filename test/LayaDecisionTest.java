@@ -49,8 +49,7 @@ import java.util.regex.Pattern;
  * failure leaves the keyword rules to answer.
  *
  * <p>This class and {@code ApiDecisionControllerTest} write {@code decision.laya.baseUrl} and
- * {@code decision.laya.apiKey}, each under {@link JevBreakerTestSync}; {@code decision.laya.models} is stored by
- * {@code RouterPolicyTest} and {@code ApiDecisionControllerTest}, so nothing here stores it.
+ * {@code decision.laya.apiKey}, each under {@link JevBreakerTestSync}.
  */
 class LayaDecisionTest extends UnitTest {
 
@@ -486,21 +485,6 @@ class LayaDecisionTest extends UnitTest {
         for (var bad : new String[] {"http://169.254.169.254", "http://0.0.0.0:8000", "http://224.0.0.1:8000",
                 "file:///etc/passwd", "localhost:8000"}) {
             assertNotNull(DecisionSettings.rejectionFor(key, bad), () -> "accepted " + bad);
-        }
-    }
-
-    @Test
-    void theModelsAreAJsonArrayOfLayasCheckpoints() {
-        var key = LayaDecision.MODELS_KEY;
-        for (var ok : new String[] {"", "[]", "[\"english\"]", "[\"typed-decisions\",\"multilingual\",\"english\"]"}) {
-            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
-        }
-        for (var bad : new String[] {"english", "{\"english\":true}", "[1]", "[\"\"]", "[\"English\"]", "[\"tev1\"]",
-                "[\"english\",\"laya\"]", "[\"english\""}) {
-            var rejected = DecisionSettings.rejectionFor(key, bad);
-            assertNotNull(rejected, () -> "accepted " + bad);
-            assertTrue(rejected.contains(key), rejected);
-            assertTrue(rejected.contains("english, multilingual, typed-decisions"), rejected);
         }
     }
 

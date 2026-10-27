@@ -33,7 +33,6 @@ const breaker = computed(() => breakersByName.value.get('decision:jev'))
 
 // JCLAW-1336: the operator's Ollama server, whose System One models answer the same questions as JEV.
 const OLLAMA_ADDRESS = 'decision.ollama.baseUrl'
-const OLLAMA_MODELS = 'decision.ollama.models'
 const OLLAMA_PROVIDER = 'ollama-decision'
 const { saveError: ollamaError, attempt } = useSaveAttempt()
 // Lazy: the read dials the server, and must not hold the panel open while it does.
@@ -70,16 +69,7 @@ async function saveAddress() {
   await refreshOllama()
 }
 
-const selectedModels = computed(() => parseDecisionModels(configValue(OLLAMA_MODELS)))
-// A selected model the server no longer lists stays visible, so it can be cleared.
-const modelChoices = computed(() => {
-  const listed = ollama.value?.models ?? []
-  return [
-    ...listed.map(m => ({ name: m.name, note: modelNote(m) })),
-    ...selectedModels.value.filter(name => !listed.some(m => m.name === name))
-      .map(name => ({ name, note: 'not installed' })),
-  ]
-})
+const modelRows = computed(() => (ollama.value?.models ?? []).map(m => ({ name: m.name, note: modelNote(m) })))
 
 // What the server states of a model, as Laya's rows word a checkpoint's context.
 function modelNote(m: OllamaDecisionModel) {
@@ -90,37 +80,20 @@ function modelNote(m: OllamaDecisionModel) {
   ].filter(Boolean).join(', ')
 }
 
-async function toggleModel(name: string, box: HTMLInputElement) {
-  const next = box.checked
-    ? [...selectedModels.value, name]
-    : selectedModels.value.filter(m => m !== name)
-  saving.value = true
-  const saved = await attempt(async () => {
-    if (next.length === 0) await $fetch(`/api/config/${OLLAMA_MODELS}`, { method: 'DELETE' })
-    else await $fetch('/api/config', { method: 'POST', body: { key: OLLAMA_MODELS, value: JSON.stringify(next) } })
-  })
-  await refresh()
-  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
-  if (!saved) box.checked = selectedModels.value.includes(name)
-  saving.value = false
-}
-
 const routerOllamaModel = computed(() =>
   configValue('router.classifier.provider').trim() === OLLAMA_PROVIDER
     ? configValue('router.classifier.model').trim()
     : '')
 
-// Only while ticked, so a router model stored unticked can still be ticked.
-function lockedByRouter(name: string) {
-  return routerOllamaModel.value === name && selectedModels.value.includes(name)
-}
+// The router keeps a model the server has since dropped, and only a server that answered can say so.
+const routerOllamaModelGone = computed(() => routerOllamaModel.value !== '' && ollama.value?.reachable === true
+  && !ollama.value.models.some(m => m.name === routerOllamaModel.value))
 
 const ollamaBreaker = computed(() => breakersByName.value.get('decision:ollama'))
 
 // JCLAW-1447: the operator's laya-serve. JClaw calls its address and starts nothing.
 const LAYA_ADDRESS = 'decision.laya.baseUrl'
 const LAYA_API_KEY = 'decision.laya.apiKey'
-const LAYA_MODELS = 'decision.laya.models'
 const LAYA_PROVIDER = 'laya'
 const layaSave = useSaveAttempt()
 const layaError = layaSave.saveError
@@ -169,24 +142,8 @@ async function saveLayaKey() {
   await refreshLaya()
 }
 
-const tickedCheckpoints = computed(() => tickedLayaCheckpoints(configValue(LAYA_MODELS)).map(c => c.name))
-
 function checkpointNote(c: LayaCheckpoint) {
   return laya.value?.loaded.includes(c.name) ? `${layaContext(c)}, loaded` : layaContext(c)
-}
-
-async function toggleCheckpoint(name: string, box: HTMLInputElement) {
-  const next = LAYA_CHECKPOINTS.map(c => c.name)
-    .filter(n => n === name ? box.checked : tickedCheckpoints.value.includes(n))
-  saving.value = true
-  const saved = await layaSave.attempt(async () => {
-    if (next.length === 0) await $fetch(`/api/config/${LAYA_MODELS}`, { method: 'DELETE' })
-    else await $fetch('/api/config', { method: 'POST', body: { key: LAYA_MODELS, value: JSON.stringify(next) } })
-  })
-  await refresh()
-  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
-  if (!saved) box.checked = tickedCheckpoints.value.includes(name)
-  saving.value = false
 }
 
 const routerLayaCheckpoint = computed(() =>
@@ -194,39 +151,16 @@ const routerLayaCheckpoint = computed(() =>
     ? configValue('router.classifier.model').trim()
     : '')
 
-// As on the Ollama card: only while ticked, so a router checkpoint stored unticked can still be ticked.
-function checkpointLockedByRouter(name: string) {
-  return routerLayaCheckpoint.value === name && tickedCheckpoints.value.includes(name)
-}
-
 const layaBreaker = computed(() => breakersByName.value.get('decision:laya'))
 
 // JF-133: Baseten's hosted decision models. The endpoint is Baseten's own, so the card holds only the key.
 const BASETEN_API_KEY = 'decision.baseten.apiKey'
-const BASETEN_MODELS_KEY = 'decision.baseten.models'
 const BASETEN_PROVIDER = 'baseten-decision'
-const basetenSave = useSaveAttempt()
-const basetenError = basetenSave.saveError
 
 const basetenKeyConfigured = computed(() => configValue(BASETEN_API_KEY).trim().length > 0)
-const tickedBaseten = computed(() => tickedBasetenModels(configValue(BASETEN_MODELS_KEY)).map(m => m.id))
 
 function basetenNote(m: BasetenModel) {
   return `${contextLabel(m.contextTokens)}, ${m.parameters} parameters`
-}
-
-async function toggleBasetenModel(id: string, box: HTMLInputElement) {
-  const next = BASETEN_MODELS.map(m => m.id)
-    .filter(i => i === id ? box.checked : tickedBaseten.value.includes(i))
-  saving.value = true
-  const saved = await basetenSave.attempt(async () => {
-    if (next.length === 0) await $fetch(`/api/config/${BASETEN_MODELS_KEY}`, { method: 'DELETE' })
-    else await $fetch('/api/config', { method: 'POST', body: { key: BASETEN_MODELS_KEY, value: JSON.stringify(next) } })
-  })
-  await refresh()
-  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
-  if (!saved) box.checked = tickedBaseten.value.includes(id)
-  saving.value = false
 }
 
 const routerBasetenModel = computed(() =>
@@ -235,11 +169,6 @@ const routerBasetenModel = computed(() =>
     : '')
 const routerBasetenName = computed(() =>
   BASETEN_MODELS.find(m => m.id === routerBasetenModel.value)?.name ?? routerBasetenModel.value)
-
-// As on the Laya card: only while ticked, so a router model stored unticked can still be ticked.
-function basetenLockedByRouter(id: string) {
-  return routerBasetenModel.value === id && tickedBaseten.value.includes(id)
-}
 
 const basetenBreaker = computed(() => breakersByName.value.get('decision:baseten'))
 
@@ -561,30 +490,26 @@ function playClip(audio: HTMLAudioElement | undefined) {
             >
               Server device: <span class="font-mono">{{ laya.device }}</span>
             </p>
-            <label
-              v-for="c in LAYA_CHECKPOINTS"
-              :key="c.name"
-              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
-              :for="`decision-laya-checkpoint-${c.name}`"
-              :data-testid="`decision-laya-checkpoint-${c.name}`"
-            >
-              <input
-                :id="`decision-laya-checkpoint-${c.name}`"
-                type="checkbox"
-                :checked="tickedCheckpoints.includes(c.name)"
-                :disabled="saving || checkpointLockedByRouter(c.name)"
-                @change="toggleCheckpoint(c.name, $event.target as HTMLInputElement)"
+            <ul class="space-y-1">
+              <li
+                v-for="c in LAYA_CHECKPOINTS"
+                :key="c.name"
+                class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+                :data-testid="`decision-laya-checkpoint-${c.name}`"
               >
-              <!-- One line: the space between the two is what a screen reader hears between name and context. -->
-              <span class="font-mono">{{ c.name }}</span> <span class="text-xs text-fg-muted">{{ checkpointNote(c) }}</span>
-            </label>
+                <!-- One line: the space between the two is what a screen reader hears between name and context. -->
+                <span class="font-mono">{{ c.name }}</span> <span class="text-xs text-fg-muted">{{ checkpointNote(c) }}</span>
+              </li>
+            </ul>
             <p
               class="text-xs text-fg-muted"
               data-testid="decision-laya-cut"
             >
               Each reads that many tokens per question; a longer prompt is cut, not refused (Laya's model card).
-              Only a ticked checkpoint can be the Model Router's classifier, and the one it is using cannot be
-              unticked.
+              Choose one as the prompt classifier in <NuxtLink
+                to="/settings?section=model-router"
+                class="text-fg-strong underline"
+              >Settings → Model Router</NuxtLink>.
             </p>
           </div>
         </div>
@@ -704,7 +629,7 @@ function playClip(audio: HTMLAudioElement | undefined) {
             to="/guide#settings-ollama-cloud"
             class="text-fg-strong underline"
             data-testid="decision-ollama-cloud-link"
-          >Ollama's cloud models</NuxtLink> in the user guide before you tick one. The Model Router's classifier
+          >Ollama's cloud models</NuxtLink> in the user guide before you choose one. The Model Router's classifier
           sends the first 4000 characters of each prompt to the model it uses.
         </p>
       </div>
@@ -775,36 +700,36 @@ function playClip(audio: HTMLAudioElement | undefined) {
               {{ ollama.error }}
             </p>
             <p
-              v-else-if="ollama && modelChoices.length === 0"
+              v-else-if="ollama && modelRows.length === 0"
               class="text-xs text-fg-muted"
               data-testid="decision-ollama-no-models"
             >
               No decision models installed; pull one with <code>ollama pull tev1</code>.
             </p>
-            <label
-              v-for="m in modelChoices"
-              :key="m.name"
-              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
-              :for="`decision-ollama-model-${m.name}`"
-              :data-testid="`decision-ollama-model-${m.name}`"
+            <ul
+              v-if="modelRows.length > 0"
+              class="space-y-1"
             >
-              <input
-                :id="`decision-ollama-model-${m.name}`"
-                type="checkbox"
-                :checked="selectedModels.includes(m.name)"
-                :disabled="saving || lockedByRouter(m.name)"
-                @change="toggleModel(m.name, $event.target as HTMLInputElement)"
+              <li
+                v-for="m in modelRows"
+                :key="m.name"
+                class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+                :data-testid="`decision-ollama-model-${m.name}`"
               >
-              <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
-              <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ m.note }}</span>
-            </label>
+                <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
+                <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ m.note }}</span>
+              </li>
+            </ul>
             <p
-              v-if="modelChoices.length > 0"
+              v-if="modelRows.length > 0"
               class="text-xs text-fg-muted"
-              data-testid="decision-ollama-selection"
+              data-testid="decision-ollama-models-note"
             >
-              Each takes that many tokens per request; a longer prompt is refused, not cut. Only a ticked model can
-              be the Model Router's classifier, and the one it is using cannot be unticked.
+              Each takes that many tokens per request; a longer prompt is refused, not cut. Choose one as the prompt
+              classifier in <NuxtLink
+                to="/settings?section=model-router"
+                class="text-fg-strong underline"
+              >Settings → Model Router</NuxtLink>.
             </p>
           </div>
         </div>
@@ -823,6 +748,11 @@ function playClip(audio: HTMLAudioElement | undefined) {
                 class="text-sm text-fg-strong underline"
               >Model Router</NuxtLink>
               <span class="text-xs text-fg-muted">prompt classifier{{ routerOllamaModel ? ` (${routerOllamaModel})` : '' }}</span>
+              <span
+                v-if="routerOllamaModelGone"
+                class="text-xs text-fg-muted"
+                data-testid="decision-ollama-router-model-gone"
+              >not on this server</span>
               <span
                 v-if="routerOllamaModel"
                 class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
@@ -908,7 +838,7 @@ function playClip(audio: HTMLAudioElement | undefined) {
             to="/guide#settings-baseten-data"
             class="text-fg-strong underline"
             data-testid="decision-baseten-data-link"
-          >Baseten's data and billing</NuxtLink> in the user guide before you tick one.
+          >Baseten's data and billing</NuxtLink> in the user guide before you choose one.
         </p>
       </div>
       <div class="divide-y divide-border">
@@ -940,35 +870,28 @@ function playClip(audio: HTMLAudioElement | undefined) {
         >
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 py-0.5">decision models</span>
           <div class="flex-1 min-w-0 space-y-1">
-            <label
-              v-for="m in BASETEN_MODELS"
-              :key="m.id"
-              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
-              :for="`decision-baseten-model-${m.name}`"
-              :data-testid="`decision-baseten-model-${m.name}`"
-            >
-              <input
-                :id="`decision-baseten-model-${m.name}`"
-                type="checkbox"
-                :checked="tickedBaseten.includes(m.id)"
-                :disabled="saving || basetenLockedByRouter(m.id)"
-                @change="toggleBasetenModel(m.id, $event.target as HTMLInputElement)"
+            <ul class="space-y-1">
+              <li
+                v-for="m in BASETEN_MODELS"
+                :key="m.id"
+                class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+                :data-testid="`decision-baseten-model-${m.name}`"
               >
-              <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
-              <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ basetenNote(m) }}</span>
-            </label>
+                <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
+                <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ basetenNote(m) }}</span>
+              </li>
+            </ul>
             <p
               class="text-xs text-fg-muted"
-              data-testid="decision-baseten-selection"
+              data-testid="decision-baseten-models-note"
             >
-              Only a ticked model can be the Model Router's classifier, and the one it is using cannot be unticked.
+              Choose one as the prompt classifier in <NuxtLink
+                to="/settings?section=model-router"
+                class="text-fg-strong underline"
+              >Settings → Model Router</NuxtLink>.
             </p>
           </div>
         </div>
-        <ApiErrorAlert
-          :error="basetenError"
-          class="px-4 py-2.5"
-        />
         <div
           class="px-4 py-2 flex max-sm:flex-wrap items-start gap-3"
           data-testid="decision-baseten-used-by"

@@ -1,6 +1,5 @@
 package services.decision;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -23,7 +22,6 @@ import utils.SsrfGuard;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,8 +42,6 @@ public final class OllamaDecision {
     /** The router's classifier provider id; not {@code ollama-local}, which names the LLM provider. */
     public static final String PROVIDER = "ollama-decision";
     public static final String BASE_URL_KEY = "decision.ollama.baseUrl";
-    /** A JSON array of the model names the operator selected, such as {@code ["tev1"]}. */
-    public static final String MODELS_KEY = "decision.ollama.models";
     /** How long Ollama keeps the model loaded after a decision request; not {@code provider.ollama-local.keepAlive}. */
     public static final String KEEP_ALIVE_KEY = "decision.ollama.keepAlive";
     public static final String BREAKER_NAME = "decision:ollama";
@@ -95,12 +91,6 @@ public final class OllamaDecision {
     public static boolean customized() {
         var own = ConfigService.get(BASE_URL_KEY);
         return own != null && !own.isBlank();
-    }
-
-    /** The models the operator selected, in the order stored; empty when none or unreadable. */
-    public static List<String> selectedModels() {
-        var parsed = parseModels(ConfigService.get(MODELS_KEY));
-        return parsed == null ? List.of() : parsed;
     }
 
     /** Whether {@code value} is an Ollama duration this key accepts: -1, 0, or a number followed by s, m or h. */
@@ -330,10 +320,39 @@ public final class OllamaDecision {
     /** {@code GET /api/tags} at {@code baseUrl}, keeping only models whose capabilities include {@code decision}. */
     public static Status status(String baseUrl) {
         var base = trimSlash(baseUrl);
+        var tags = tags(base);
+        var error = tags.error();
+        if (error != null) return unreachable(base, error);
+        var models = new ArrayList<DecisionModel>();
+        for (var entry : tags.entries()) if (!runsInCloud(entry)) models.add(describe(base, entry, false));
+        for (var entry : tags.entries()) if (runsInCloud(entry)) models.add(describe(base, entry, true));
+        return new Status(base, true, null, models);
+    }
+
+    /** A decision model {@code /api/tags} lists, and whether the server hands it to ollama.com. */
+    public record ListedModel(String name, boolean cloud) {}
+
+    /** The server's decision models by name, in {@code /api/tags}'s order, or why they could not be read. */
+    public record Listing(String baseUrl, boolean reachable, @Nullable String error, List<ListedModel> models) {}
+
+    /** {@link #status}'s one {@code /api/tags} read, without the {@code /api/show} it makes for each model. */
+    public static Listing listing(String baseUrl) {
+        var base = trimSlash(baseUrl);
+        var tags = tags(base);
+        if (tags.error() != null) return new Listing(base, false, tags.error(), List.of());
+        var models = tags.entries().stream()
+                .map(entry -> new ListedModel(entry.get("name").getAsString(), runsInCloud(entry))).toList();
+        return new Listing(base, true, null, models);
+    }
+
+    /** The decision entries of {@code /api/tags}, or none and why they could not be read. */
+    private record Tags(List<JsonObject> entries, @Nullable String error) {}
+
+    private static Tags tags(String base) {
         try {
             SsrfGuard.assertProviderUrlSafe(base);
         } catch (SecurityException e) {
-            return unreachable(base, e.getMessage());
+            return new Tags(List.of(), String.valueOf(e.getMessage()));
         }
         Request request;
         try {
@@ -341,24 +360,19 @@ public final class OllamaDecision {
                     .get().build();
         } catch (IllegalArgumentException _) {
             // OkHttp refuses an address the write check let through, such as a port above 65535.
-            return unreachable(base, "not a usable address");
+            return new Tags(List.of(), "not a usable address");
         }
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(TAGS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        List<JsonObject> entries;
         try (var response = call.execute()) {
             // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
-            if (!response.isSuccessful()) return unreachable(base, "HTTP " + response.code() + " from /api/tags");
-            entries = decisionEntries(JsonParser.parseString(response.body().string()));
+            if (!response.isSuccessful()) return new Tags(List.of(), "HTTP " + response.code() + " from /api/tags");
+            return new Tags(decisionEntries(JsonParser.parseString(response.body().string())), null);
         } catch (JsonParseException | IllegalStateException | ClassCastException _) {
-            return unreachable(base, "/api/tags did not answer with Ollama's model list");
+            return new Tags(List.of(), "/api/tags did not answer with Ollama's model list");
         } catch (IOException e) {
-            return unreachable(base, "not reachable (" + e.getClass().getSimpleName() + ")");
+            return new Tags(List.of(), "not reachable (" + e.getClass().getSimpleName() + ")");
         }
-        var models = new ArrayList<DecisionModel>();
-        for (var entry : entries) if (!runsInCloud(entry)) models.add(describe(base, entry, false));
-        for (var entry : entries) if (runsInCloud(entry)) models.add(describe(base, entry, true));
-        return new Status(base, true, null, models);
     }
 
     /** {@code entry} from {@code /api/tags}, with what {@code /api/show} adds; a cloud model's size is only its stub's. */
@@ -468,27 +482,6 @@ public final class OllamaDecision {
             if (c.isJsonPrimitive() && DECISION_CAPABILITY.equals(c.getAsString())) return true;
         }
         return false;
-    }
-
-    /** The stored selection, or null when {@code value} is not a JSON array of non-blank names. */
-    public static @Nullable List<String> parseModels(@Nullable String value) {
-        if (value == null || value.isBlank()) return List.of();
-        JsonArray array;
-        try {
-            var root = JsonParser.parseString(value);
-            if (!root.isJsonArray()) return null;
-            array = root.getAsJsonArray();
-        } catch (JsonParseException _) {
-            return null;
-        }
-        var out = new LinkedHashSet<String>();
-        for (var entry : array) {
-            if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString() || entry.getAsString().isBlank()) {
-                return null;
-            }
-            out.add(entry.getAsString().strip());
-        }
-        return List.copyOf(out);
     }
 
     private static Status unreachable(String base, @Nullable String error) {

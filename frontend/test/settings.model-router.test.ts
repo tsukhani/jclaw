@@ -24,15 +24,27 @@ let posts: { key: string, value: string }[] = []
 let deletes: string[] = []
 // Every write in the order it arrived, where the order is what the backend's validation depends on.
 let ops: string[] = []
+let ollama: Record<string, unknown>
+// While set, GET /api/decision/ollama answers only once it settles.
+let ollamaRead: Promise<void> | null = null
+let ollamaReadFails = false
+let laya: Record<string, unknown>
+// A POST this answers true for is refused with 403, as ConfigService refuses a write, and stores nothing.
+let refused: (body: { key: string, value: string }) => boolean = () => false
 
 registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries }) })
 registerEndpoint('/api/config', {
   method: 'POST',
   handler: async (event) => {
-    const { readBody } = await import('h3')
+    const { readBody, setResponseStatus } = await import('h3')
     const body = await readBody(event) as { key: string, value: string }
     posts.push(body)
     ops.push(`POST ${body.key}=${body.value}`)
+    if (refused(body)) {
+      setResponseStatus(event, 403)
+      return { type: 'error', code: 'forbidden', message: `${body.key} refused` }
+    }
+    entries = [...entries.filter(e => e.key !== body.key), body]
     return { status: 'ok' }
   },
 })
@@ -49,6 +61,7 @@ for (const key of ['router.classifier.provider', 'router.classifier.model']) {
     handler: () => {
       deletes.push(key)
       ops.push(`DELETE ${key}`)
+      entries = entries.filter(e => e.key !== key)
       return { status: 'ok' }
     },
   })
@@ -64,6 +77,16 @@ registerEndpoint('/api/config/router.preferPrepaid', {
     return { status: 'ok' }
   },
 })
+registerEndpoint('/api/decision/ollama', async (event) => {
+  if (ollamaRead) await ollamaRead
+  if (ollamaReadFails) {
+    const { setResponseStatus } = await import('h3')
+    setResponseStatus(event, 500)
+    return { type: 'error', code: 'internal', message: 'boom' }
+  }
+  return ollama
+})
+registerEndpoint('/api/decision/laya', () => laya)
 registerEndpoint('/api/router/status', () => ({
   available: true,
   downshiftAt: 0.75,
@@ -82,6 +105,11 @@ beforeEach(() => {
   posts = []
   deletes = []
   ops = []
+  ollamaRead = null
+  ollamaReadFails = false
+  ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: [] }
+  laya = { baseUrl: 'http://localhost:8000', reachable: true, error: null, loaded: [], device: 'cpu' }
+  refused = () => false
   entries = [
     { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
     { key: 'provider.ollama-cloud.models', value: JSON.stringify([{ id: 'glm-5.3-flash' }, { id: 'kimi-k3' }]) },
@@ -90,6 +118,11 @@ beforeEach(() => {
     { key: 'router.chat.models', value: JSON.stringify([{ provider: 'ollama-cloud', model: 'glm-5.3-flash' }]) },
   ]
 })
+
+/** An Ollama decision model as GET /api/decision/ollama lists it, stating nothing else. */
+function ollamaModel(name: string) {
+  return { name, contextTokens: null, parameterSize: null, sizeBytes: null }
+}
 
 describe('SettingsModelRouterPanel', () => {
   it('sits after Chat under Agents & Automation', () => {
@@ -261,39 +294,200 @@ describe('SettingsModelRouterPanel', () => {
     ])
   })
 
-  it('offers each Ollama decision model selected in Decision Providers, and writes the pair', async () => {
-    entries = [...entries, { key: 'decision.ollama.models', value: JSON.stringify(['tev1', 'nimble']) }]
+  it('groups every decision model under its provider, in order, each label naming the provider, with nothing ticked', async () => {
+    ollama = { ...ollama, models: [ollamaModel('tev1:latest'), ollamaModel('clef:cloud')] }
+    entries = [...entries, { key: 'decision.jev.apiKey', value: 'ts-s****' }, { key: 'decision.baseten.apiKey', value: 'bt-s****' }]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const options = c.findAll('[data-testid="router-ollama-decision-option"]')
-    expect(options.map(o => [o.attributes('value'), o.text()])).toEqual([
-      ['ollama-decision::tev1', 'Ollama decision / tev1'],
-      ['ollama-decision::nimble', 'Ollama decision / nimble'],
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    await vi.waitFor(() => expect(select.findAll('optgroup')).toHaveLength(5))
+    // The decision groups run in the Decision Providers cards' order, and the LLM providers' models follow in their own.
+    expect(select.findAll('optgroup').map(g => [g.attributes('label'), g.findAll('option').map(o => o.text())])).toEqual([
+      ['JEV (TypeSafe AI)', ['JEV (TypeSafe AI)']],
+      ['Laya', ['Laya / english (512 tokens)', 'Laya / multilingual (1,024 tokens)', 'Laya / typed-decisions (1,024 tokens)']],
+      ['Ollama', ['Ollama decision / tev1:latest', 'Ollama decision / clef:cloud']],
+      ['Baseten', ['Baseten / elephant-1 (16,384 tokens)', 'Baseten / mammoth-1 (16,384 tokens)']],
+      ['Language models', ['ollama-cloud / glm-5.3-flash', 'ollama-cloud / kimi-k3', 'openrouter / z-ai/glm-5.3-flash']],
+    ])
+    expect(select.findAll('optgroup option').map(o => (o.element as HTMLOptionElement).disabled)).toEqual(Array(11).fill(false))
+    expect(select.findAll(':scope > option').map(o => o.text())).toEqual(['Keyword rules (no model call)'])
+  })
+
+  it('offers each decision model the Ollama server lists, and writes the pair', async () => {
+    ollama = { ...ollama, models: [ollamaModel('tev1:latest'), ollamaModel('nimble:latest')] }
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await vi.waitFor(() => expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(2))
+    expect(c.findAll('[data-testid="router-ollama-decision-option"]').map(o => [o.attributes('value'), o.text()])).toEqual([
+      ['ollama-decision::tev1:latest', 'Ollama decision / tev1:latest'],
+      ['ollama-decision::nimble:latest', 'Ollama decision / nimble:latest'],
     ])
 
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1')
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1:latest')
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
       'POST router.classifier.provider=ollama-decision',
-      'POST router.classifier.model=tev1',
+      'POST router.classifier.model=tev1:latest',
     ])
   })
 
-  it('offers no Ollama decision model until one is selected', async () => {
+  it('an Ollama server that lists no decision model adds no Ollama group', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
+    await vi.waitFor(() => expect(c.findAll('optgroup')).toHaveLength(4))
+    expect(c.findAll('optgroup').map(g => g.attributes('label'))).toEqual(['JEV (TypeSafe AI)', 'Laya', 'Baseten', 'Language models'])
+  })
+
+  it('an unreachable Ollama server is one disabled option', async () => {
+    ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [] }
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const group = () => c.find('optgroup[label="Ollama"]')
+    await vi.waitFor(() => expect(group().exists()).toBe(true))
+    const options = group().findAll('option')
+    expect(options.map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+      ['Ollama decision — server not reachable', true],
+    ])
     expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(0)
   })
 
-  it('offers each Laya checkpoint ticked in Decision Providers with its context, and writes the pair', async () => {
-    entries = [...entries, { key: 'decision.laya.models', value: JSON.stringify(['multilingual', 'laya-next', 'english']) }]
+  it('an Ollama read JClaw could not answer reads as an unreachable server, not as no group', async () => {
+    ollamaReadFails = true
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const group = () => c.find('optgroup[label="Ollama"]')
+    await vi.waitFor(() => expect(group().exists()).toBe(true))
+    expect(group().findAll('option').map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+      ['Ollama decision — server not reachable', true],
+    ])
+  })
+
+  it('an unreachable Laya server disables its checkpoints, and a stored Laya classifier stays selected', async () => {
+    laya = { baseUrl: 'http://localhost:8000', reachable: false, error: 'not reachable (ConnectException)', loaded: [], device: null }
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'laya' },
+      { key: 'router.classifier.model', value: 'english' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const options = () => c.findAll('[data-testid="router-laya-option"]').map(o => [o.text(), (o.element as HTMLOptionElement).disabled])
+    await vi.waitFor(() => expect(options()).toEqual([
+      ['Laya / english (512 tokens) — server not reachable', true],
+      ['Laya / multilingual (1,024 tokens) — server not reachable', true],
+      ['Laya / typed-decisions (1,024 tokens) — server not reachable', true],
+    ]))
+    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+  })
+
+  it('a refused model write puts the previous classifier back and keeps the refusal on the panel', async () => {
+    ollama = { ...ollama, models: [ollamaModel('tev1:latest')] }
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'laya' },
+      { key: 'router.classifier.model', value: 'english' },
+    ]
+    refused = body => body.key === 'router.classifier.model' && body.value === 'tev1:latest'
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await vi.waitFor(() => expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(1))
+
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1:latest')
+    await vi.waitFor(() => expect(ops).toHaveLength(5), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=ollama-decision',
+      'POST router.classifier.model=tev1:latest',
+      'POST router.classifier.provider=laya',
+      'POST router.classifier.model=english',
+    ])
+    expect(entries.filter(e => e.key.startsWith('router.classifier.'))).toEqual([
+      { key: 'router.classifier.provider', value: 'laya' },
+      { key: 'router.classifier.model', value: 'english' },
+    ])
+    await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').text()).toContain('router.classifier.model refused'))
+    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+  })
+
+  it('a stored Ollama classifier the server no longer lists shows as itself, not available', async () => {
+    ollama = { ...ollama, models: [ollamaModel('tev1:latest')] }
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'ollama-decision' },
+      { key: 'router.classifier.model', value: 'tev1:0.8b' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    const stranded = () => select.find('option[value="ollama-decision::tev1:0.8b"]')
+    await vi.waitFor(() => expect(stranded().text()).toBe('Ollama decision / tev1:0.8b — not available'))
+    expect((stranded().element as HTMLOptionElement).disabled).toBe(true)
+    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:0.8b')
+    expect(c.find('optgroup[label="Ollama"]').findAll('option').map(o => o.text()))
+      .toEqual(['Ollama decision / tev1:latest', 'Ollama decision / tev1:0.8b — not available'])
+  })
+
+  it('while the Ollama read is pending, a stored Ollama classifier stays selected and is not called unavailable', async () => {
+    let answer!: () => void
+    ollamaRead = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    ollama = { ...ollama, models: [ollamaModel('nimble:latest'), ollamaModel('tev1:latest')] }
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'ollama-decision' },
+      { key: 'router.classifier.model', value: 'tev1:latest' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    const options = () => c.findAll('[data-testid="router-ollama-decision-option"]').map(o => o.text())
+    expect(options()).toEqual(['Ollama decision / tev1:latest'])
+    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:latest')
+
+    answer()
+    await vi.waitFor(() => expect(options()).toEqual(['Ollama decision / nimble:latest', 'Ollama decision / tev1:latest']))
+    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:latest')
+    expect(c.text()).not.toContain('not available')
+  })
+
+  it('a stored classifier on a model no provider registers shows as itself, not available', async () => {
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'openrouter' },
+      { key: 'router.classifier.model', value: 'z-ai/glm-4.5' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    const stranded = c.find('[data-testid="router-stranded-classifier-option"]')
+    expect(stranded.text()).toBe('openrouter / z-ai/glm-4.5 — not available')
+    expect((stranded.element as HTMLOptionElement).disabled).toBe(true)
+    expect((select.element as HTMLSelectElement).value).toBe('openrouter::z-ai/glm-4.5')
+  })
+
+  it('names no classifier as not available once it is one the lists hold', async () => {
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'laya' },
+      { key: 'router.classifier.model', value: 'typed-decisions' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::typed-decisions')
+    expect(c.find('[data-testid="router-stranded-classifier-option"]').exists()).toBe(false)
+    expect(c.text()).not.toContain('not available')
+  })
+
+  it('offers every Laya checkpoint with its context, and writes the pair', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
     const options = c.findAll('[data-testid="router-laya-option"]')
     expect(options.map(o => [o.attributes('value'), o.text()])).toEqual([
       ['laya::english', 'Laya / english (512 tokens)'],
       ['laya::multilingual', 'Laya / multilingual (1,024 tokens)'],
+      ['laya::typed-decisions', 'Laya / typed-decisions (1,024 tokens)'],
     ])
     expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
 
@@ -306,17 +500,9 @@ describe('SettingsModelRouterPanel', () => {
     ])
   })
 
-  it('offers no Laya checkpoint until one is ticked', async () => {
-    const c = await mountSuspended(Harness)
-    await flushPromises()
-    expect(c.findAll('[data-testid="router-laya-option"]')).toHaveLength(0)
-    expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
-  })
-
   it('states the chosen Laya checkpoint\'s context and limits, each fact with its source', async () => {
     entries = [
       ...entries,
-      { key: 'decision.laya.models', value: JSON.stringify(['english', 'multilingual']) },
       { key: 'router.classifier.provider', value: 'laya' },
       { key: 'router.classifier.model', value: 'english' },
     ]
@@ -349,24 +535,23 @@ describe('SettingsModelRouterPanel', () => {
   it('shows no Laya limits while another classifier is chosen', async () => {
     entries = [
       ...entries,
-      { key: 'decision.laya.models', value: JSON.stringify(['english']) },
       { key: 'decision.jev.apiKey', value: 'ts-s****' },
       { key: 'router.classifier.provider', value: 'jev' },
       { key: 'router.classifier.model', value: 'jev-latest' },
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    expect(c.findAll('[data-testid="router-laya-option"]')).toHaveLength(1)
+    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('jev::jev-latest')
     expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
   })
 
-  it('offers each Baseten model ticked in Decision Providers with its context, disabled with a hint until a key is set', async () => {
-    entries = [...entries, { key: 'decision.baseten.models', value: JSON.stringify(['decision-models/baseten-elephant-9b-latest']) }]
+  it('offers both Baseten models with their context, disabled with a hint until a key is set', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
     const options = c.findAll('[data-testid="router-baseten-option"]')
     expect(options.map(o => [o.attributes('value'), o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
       ['baseten-decision::decision-models/baseten-elephant-9b-latest', 'Baseten / elephant-1 (16,384 tokens) — needs a Baseten API key', true],
+      ['baseten-decision::decision-models/baseten-mammoth-27b-latest', 'Baseten / mammoth-1 (16,384 tokens) — needs a Baseten API key', true],
     ])
     const hint = c.find('[data-testid="router-baseten-key-hint"]')
     expect(hint.text().replace(/\s+/g, ' ')).toBe('To classify with Baseten, set a Baseten API key in Settings → Decision Providers.')
@@ -376,21 +561,18 @@ describe('SettingsModelRouterPanel', () => {
     clearNuxtData()
     const keyed = await mountSuspended(Harness)
     await flushPromises()
-    const enabled = keyed.find('[data-testid="router-baseten-option"]')
-    expect(enabled.text()).toBe('Baseten / elephant-1 (16,384 tokens)')
-    expect((enabled.element as HTMLOptionElement).disabled).toBe(false)
+    const enabled = keyed.findAll('[data-testid="router-baseten-option"]')
+    expect(enabled.map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+      ['Baseten / elephant-1 (16,384 tokens)', false],
+      ['Baseten / mammoth-1 (16,384 tokens)', false],
+    ])
     expect(keyed.find('[data-testid="router-baseten-key-hint"]').exists()).toBe(false)
   })
 
   it('picking a Baseten model writes the pair with the model\'s ID', async () => {
-    entries = [
-      ...entries,
-      { key: 'decision.baseten.apiKey', value: 'bt-s****' },
-      { key: 'decision.baseten.models', value: JSON.stringify(['decision-models/baseten-mammoth-27b-latest', 'elephant-1']) },
-    ]
+    entries = [...entries, { key: 'decision.baseten.apiKey', value: 'bt-s****' }]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    expect(c.findAll('[data-testid="router-baseten-option"]').map(o => o.text())).toEqual(['Baseten / mammoth-1 (16,384 tokens)'])
 
     await c.find('select[aria-label="Prompt classifier model"]').setValue('baseten-decision::decision-models/baseten-mammoth-27b-latest')
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
@@ -401,18 +583,15 @@ describe('SettingsModelRouterPanel', () => {
     ])
   })
 
-  it('offers no Baseten model, and no Baseten hint, until one is ticked', async () => {
+  it('says a Baseten model sends the prompt to Baseten, and an Ollama cloud model to ollama.com', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    expect(c.findAll('[data-testid="router-baseten-option"]')).toHaveLength(0)
-    expect(c.find('[data-testid="router-baseten-key-hint"]').exists()).toBe(false)
-  })
-
-  it('says a Baseten model sends the prompt to Baseten', async () => {
-    const c = await mountSuspended(Harness)
-    await flushPromises()
-    expect(c.text().replace(/\s+/g, ' ')).toContain(
+    const text = c.text().replace(/\s+/g, ' ')
+    expect(text).toContain(
       'JEV sends them to TypeSafe AI, which may record or retain them, and a Baseten model sends them to Baseten.')
+    expect(text).toContain('An Ollama cloud model, such as clef:cloud, sends them to ollama.com: read Ollama\'s cloud models '
+      + 'in the user guide before you choose one.')
+    expect(c.find('[data-testid="router-ollama-cloud-link"]').attributes('href')).toBe('/guide#settings-ollama-cloud')
   })
 
   it('shows the classifier timeout only once a classifier is picked, at the default until one is stored', async () => {

@@ -19,9 +19,8 @@ public final class DecisionSettings {
     /** Where the TypeSafe key lived before JCLAW-1302; {@code DefaultConfigJob} moves it to {@link #API_KEY} on boot. */
     public static final String LEGACY_API_KEY = "browser.jev.apiKey";
 
-    private static final List<String> KEYS = List.of(API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY,
-            OllamaDecision.KEEP_ALIVE_KEY, LayaDecision.BASE_URL_KEY, LayaDecision.API_KEY, LayaDecision.MODELS_KEY,
-            BasetenDecision.API_KEY, BasetenDecision.MODELS_KEY);
+    private static final List<String> KEYS = List.of(API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.KEEP_ALIVE_KEY,
+            LayaDecision.BASE_URL_KEY, LayaDecision.API_KEY, BasetenDecision.API_KEY);
 
     private DecisionSettings() {}
 
@@ -35,21 +34,6 @@ public final class DecisionSettings {
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
         if (key.equals(OllamaDecision.BASE_URL_KEY) || key.equals(LayaDecision.BASE_URL_KEY)) {
             return baseUrlRejection(value);
-        }
-        if (key.equals(OllamaDecision.MODELS_KEY)) {
-            return OllamaDecision.parseModels(value) != null ? null
-                    : "%s must be a JSON array of model names, such as [\"tev1\"].".formatted(key);
-        }
-        if (key.equals(LayaDecision.MODELS_KEY)) {
-            return LayaDecision.isSelection(value) ? null
-                    : "%s must be a JSON array of Laya checkpoints (%s), such as [\"english\"]."
-                            .formatted(key, String.join(", ", LayaDecision.CHECKPOINTS));
-        }
-        if (key.equals(BasetenDecision.MODELS_KEY)) {
-            var ids = BasetenDecision.MODELS.stream().map(BasetenDecision.Model::id).toList();
-            return BasetenDecision.isSelection(value) ? null
-                    : "%s must be a JSON array of Baseten model IDs (%s), such as [\"%s\"]."
-                            .formatted(key, String.join(", ", ids), ids.getFirst());
         }
         if (key.equals(OllamaDecision.KEEP_ALIVE_KEY)) {
             return value == null || value.isBlank() || OllamaDecision.isKeepAlive(value.strip()) ? null

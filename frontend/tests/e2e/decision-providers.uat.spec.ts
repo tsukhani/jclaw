@@ -107,14 +107,10 @@ async function stubLaya(page: Page, status: LayaDecisionStatus) {
   await page.route(url => url.pathname === '/api/decision/laya', route => route.fulfill({ json: status }))
 }
 
-/**
- * Answer GET /api/config with the real entries, each card's model selection, the Baseten key and the router's classifier
- * replaced by `overrides`.
- */
+/** Answer GET /api/config with the real entries, the Baseten key and the router's classifier replaced by `overrides`. */
 async function stubConfig(page: Page, overrides: Record<string, string> = {}) {
   const replaced = new Set([
-    'decision.ollama.models', 'decision.laya.models', 'decision.baseten.models', 'decision.baseten.apiKey',
-    'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides),
+    'decision.baseten.apiKey', 'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides),
   ])
   await page.route(url => url.pathname === '/api/config', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
@@ -126,15 +122,6 @@ async function stubConfig(page: Page, overrides: Record<string, string> = {}) {
     ]
     return route.fulfill({ response, json: config })
   })
-}
-
-/** The bodies of the POST /api/config writes blockApiWrites answers. */
-function recordConfigPosts(page: Page) {
-  const posts: unknown[] = []
-  page.on('request', (req) => {
-    if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/config') posts.push(req.postDataJSON())
-  })
-  return () => posts
 }
 
 test.describe('UAT-23 decision providers', () => {
@@ -228,7 +215,7 @@ test.describe('UAT-23 decision providers', () => {
       await openPanel(page)
       await expect(page.getByTestId('decision-ollama-status')).toHaveText('reachable')
       const models = page.getByTestId('decision-ollama-models')
-      await expect(models.locator('label')).toHaveText(DECISION_MODELS)
+      await expect(models.locator('li')).toHaveText(DECISION_MODELS)
       await expect(page.getByTestId('decision-ollama-error')).toHaveCount(0)
       expect(writes()).toEqual([])
     })
@@ -243,24 +230,21 @@ test.describe('UAT-23 decision providers', () => {
       await openPanel(page)
       await expect(page.getByTestId('decision-ollama-status')).toHaveText('not reachable')
       await expect(page.getByTestId('decision-ollama-error')).toHaveText('not reachable (ConnectException)')
-      await expect(page.getByTestId('decision-ollama-models').locator('label')).toHaveCount(0)
+      await expect(page.getByTestId('decision-ollama-models').locator('li')).toHaveCount(0)
       expect(writes()).toEqual([])
     })
 
-    test('selecting a model sends one write that stores it in decision.ollama.models', async ({ page }) => {
+    test('no card has a checkbox once every card has its models', async ({ page }) => {
       await stubOllama(page, REACHABLE)
+      await stubLaya(page, LAYA_UP)
       await stubConfig(page)
       const writes = await blockApiWrites(page)
-      const posts = recordConfigPosts(page)
       await openPanel(page)
-      // click(), not check(): the stubbed re-read after the write unticks the box, which check() reports as a failure.
-      await page.getByTestId('decision-ollama-model-tev1:latest').getByRole('checkbox').click()
-
-      await expect.poll(writes).toEqual(['POST /api/config'])
-      expect(posts()).toHaveLength(1)
-      const { key, value } = posts()[0] as { key: string, value: string }
-      expect(key).toBe('decision.ollama.models')
-      expect(JSON.parse(value)).toEqual(['tev1:latest'])
+      await expect(page.getByTestId('decision-ollama-models').locator('li')).toHaveText(DECISION_MODELS)
+      await expect(page.getByTestId('decision-laya-checkpoints').locator('li')).toHaveCount(3)
+      await expect(page.getByTestId('decision-baseten-models').locator('li')).toHaveCount(2)
+      await expect(page.locator('[data-testid^="decision-provider-"] input[type="checkbox"]')).toHaveCount(0)
+      expect(writes()).toEqual([])
     })
 
     test('the router classifier on an Ollama model reads in use and names the model', async ({ page }) => {
@@ -306,7 +290,7 @@ test.describe('UAT-23 decision providers', () => {
       await openPanel(page)
       await expect(page.getByTestId('decision-laya-status')).toHaveText('reachable')
       await expect(page.getByTestId('decision-laya-device')).toHaveText('Server device: mps')
-      await expect(page.getByTestId('decision-laya-checkpoints').locator('label')).toHaveText([
+      await expect(page.getByTestId('decision-laya-checkpoints').locator('li')).toHaveText([
         'english 512 tokens, loaded', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens, loaded',
       ])
       await expect(page.getByTestId('decision-laya-error')).toHaveCount(0)
@@ -324,7 +308,7 @@ test.describe('UAT-23 decision providers', () => {
       await expect(page.getByTestId('decision-laya-status')).toHaveText('not reachable')
       await expect(page.getByTestId('decision-laya-error')).toHaveText('not reachable (SocketTimeoutException)')
       await expect(page.getByTestId('decision-laya-device')).toHaveCount(0)
-      await expect(page.getByTestId('decision-laya-checkpoints').locator('label')).toHaveText([
+      await expect(page.getByTestId('decision-laya-checkpoints').locator('li')).toHaveText([
         'english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens',
       ])
       expect(writes()).toEqual([])
@@ -341,23 +325,21 @@ test.describe('UAT-23 decision providers', () => {
       expect(writes()).toEqual([])
     })
 
-    test('ticking a checkpoint sends one write that stores it in decision.laya.models', async ({ page }) => {
+    test('the note under the checkpoints opens the Model Router, which offers every checkpoint', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
       await stubLaya(page, LAYA_UP)
       await stubConfig(page)
       const writes = await blockApiWrites(page)
-      const posts = recordConfigPosts(page)
       await openPanel(page)
-      const box = page.getByTestId('decision-laya-checkpoint-english').getByRole('checkbox')
-      await box.click()
-
-      await expect.poll(writes).toEqual(['POST /api/config'])
-      // Enabled again only once the write and its re-read finish, so the count below is final.
-      await expect(box).toBeEnabled()
-      expect(writes()).toEqual(['POST /api/config'])
-      expect(posts()).toHaveLength(1)
-      const { key, value } = posts()[0] as { key: string, value: string }
-      expect(key).toBe('decision.laya.models')
-      expect(JSON.parse(value)).toEqual(['english'])
+      await page.getByTestId('decision-laya-cut').getByRole('link', { name: 'Settings → Model Router' }).click()
+      await expect(page).toHaveURL(/\/settings\?section=model-router$/)
+      const classifier = page.getByRole('combobox', { name: 'Prompt classifier model' })
+      await expect(classifier.locator('optgroup[label="Laya"] option')).toHaveText([
+        'Laya / english (512 tokens)', 'Laya / multilingual (1,024 tokens)', 'Laya / typed-decisions (1,024 tokens)',
+      ])
+      await expect(classifier.locator('optgroup[label="Ollama"] option')).toHaveText(
+        DECISION_MODELS.map(name => `Ollama decision / ${name}`))
+      expect(writes()).toEqual([])
     })
 
     test('the limits link opens the user guide at Laya\'s limits', async ({ page }) => {
@@ -393,45 +375,24 @@ test.describe('UAT-23 decision providers', () => {
       const writes = await blockApiWrites(page)
       await openPanel(page)
       await expect(page.getByTestId('decision-baseten-status')).toHaveText('needs API key')
-      await expect(page.getByTestId('decision-baseten-models').locator('label')).toHaveText([
+      await expect(page.getByTestId('decision-baseten-models').locator('li')).toHaveText([
         'elephant-1 16,384 tokens, 9B parameters', 'mammoth-1 16,384 tokens, 27B parameters',
       ])
       expect(writes()).toEqual([])
     })
 
-    test('ticking a model sends one write that stores its ID in decision.baseten.models', async ({ page }) => {
-      await stubOllama(page, REACHABLE)
-      await stubConfig(page)
-      const writes = await blockApiWrites(page)
-      const posts = recordConfigPosts(page)
-      await openPanel(page)
-      const box = page.getByTestId('decision-baseten-model-elephant-1').getByRole('checkbox')
-      await box.click()
-
-      await expect.poll(writes).toEqual(['POST /api/config'])
-      // Enabled again only once the write and its re-read finish, so the count below is final.
-      await expect(box).toBeEnabled()
-      expect(writes()).toEqual(['POST /api/config'])
-      expect(posts()).toHaveLength(1)
-      const { key, value } = posts()[0] as { key: string, value: string }
-      expect(key).toBe('decision.baseten.models')
-      expect(JSON.parse(value)).toEqual(['decision-models/baseten-elephant-9b-latest'])
-    })
-
-    test('the model the router uses is locked, and the card names it in use', async ({ page }) => {
+    test('the router classifier on a Baseten model reads in use and names the model', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       await stubConfig(page, {
-        'decision.baseten.models': JSON.stringify(['decision-models/baseten-elephant-9b-latest']),
         'router.classifier.provider': 'baseten-decision',
         'router.classifier.model': 'decision-models/baseten-elephant-9b-latest',
       })
       const writes = await blockApiWrites(page)
       await openPanel(page)
-      const box = page.getByTestId('decision-baseten-model-elephant-1').getByRole('checkbox')
-      await expect(box).toBeChecked()
-      await expect(box).toBeDisabled()
-      await expect(page.getByTestId('decision-baseten-model-mammoth-1').getByRole('checkbox')).toBeEnabled()
-      await expect(page.getByTestId('decision-baseten-consumer-model-router')).toContainText('(elephant-1)')
+      const router = page.getByTestId('decision-baseten-consumer-model-router')
+      await expect(router).toContainText('(elephant-1)')
+      await expect(router).toContainText('in use')
+      await expect(router).not.toContainText('not in use')
       expect(writes()).toEqual([])
     })
 

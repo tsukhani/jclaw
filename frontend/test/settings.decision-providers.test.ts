@@ -12,7 +12,8 @@ import { sectionGroups } from '~/components/settings/sections'
  * The key editor keeps the JCLAW-1274 behaviours it had in the Browser panel. Ollama's card (JCLAW-1336)
  * holds the server, its decision models and the router's use of them. Laya's card (JCLAW-1447) holds
  * the server the operator runs, its optional key, the checkpoints with their context, and its limits.
- * Baseten's card (JF-133) holds its key and its two hosted models.
+ * Baseten's card (JF-133) holds its key and its two hosted models. Since JF-135 every card lists its models as
+ * information: the Model Router is where one is chosen.
  */
 
 let stored: Map<string, string>
@@ -40,7 +41,7 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, o
   registerEndpoint('/api/breakers', () => breakers)
   registerEndpoint('/api/decision/ollama', () => ollama)
   registerEndpoint('/api/decision/laya', () => laya)
-  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models', 'decision.laya.baseUrl', 'decision.laya.models', 'decision.baseten.models']) {
+  for (const key of ['decision.ollama.baseUrl', 'decision.laya.baseUrl']) {
     registerEndpoint(`/api/config/${key}`, {
       method: 'DELETE',
       handler: () => {
@@ -272,6 +273,22 @@ describe('Settings page — Decision Providers', () => {
     expect(row.find('button[aria-label="Restore jev"]').exists()).toBe(true)
   })
 
+  it('lists every card\'s models as information, with no checkbox on any card', async () => {
+    // JF-135: the Model Router offers every decision model, so a card has nothing to tick.
+    stored.set('router.classifier.provider', 'laya')
+    stored.set('router.classifier.model', 'english')
+    baseEndpoints()
+    const component = await mountDecisionProviders()
+    await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-tev1:latest"]').exists()).toBe(true))
+    const cards = component.findAll('[data-testid^="decision-provider-"]')
+    expect(cards.map(c => c.attributes('data-testid'))).toEqual([
+      'decision-provider-jev', 'decision-provider-laya', 'decision-provider-ollama', 'decision-provider-baseten',
+    ])
+    for (const card of cards) expect(card.findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(posted).toEqual([])
+    expect(deleted).toEqual([])
+  })
+
   describe('Ollama card (JCLAW-1336)', () => {
     it('sits directly below the Laya card', async () => {
       baseEndpoints()
@@ -289,7 +306,7 @@ describe('Settings page — Decision Providers', () => {
         'Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions JEV '
         + 'does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps it. '
         + 'One with cloud in its name, such as clef:cloud, runs on ollama.com instead: read Ollama\'s cloud models in '
-        + 'the user guide before you tick one. The Model Router\'s classifier sends the first 4000 characters of each '
+        + 'the user guide before you choose one. The Model Router\'s classifier sends the first 4000 characters of each '
         + 'prompt to the model it uses.')
       expect(note.find('[data-testid="decision-ollama-cloud-link"]').attributes('href')).toBe('/guide#settings-ollama-cloud')
       expect(card.text()).not.toContain('record or retain')
@@ -305,15 +322,16 @@ describe('Settings page — Decision Providers', () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const models = component.find('[data-testid="decision-ollama-models"]')
-      await vi.waitFor(() => expect(models.findAll('label')).toHaveLength(2))
-      expect(models.findAll('label').map(l => words(l.text()))).toEqual([
+      await vi.waitFor(() => expect(models.findAll('li')).toHaveLength(2))
+      expect(models.findAll('li').map(l => words(l.text()))).toEqual([
         'clef-flash:latest 16,384 tokens, 9.5B parameters, 11.5 GB on disk',
         'clef:cloud 65,536 tokens',
       ])
       expect(models.findAll('p').map(p => words(p.text()))).toEqual([
-        'Each takes that many tokens per request; a longer prompt is refused, not cut. Only a ticked model can be '
-        + 'the Model Router\'s classifier, and the one it is using cannot be unticked.',
+        'Each takes that many tokens per request; a longer prompt is refused, not cut. Choose one as the prompt '
+        + 'classifier in Settings → Model Router.',
       ])
+      expect(models.find('[data-testid="decision-ollama-models-note"] a').attributes('href')).toBe('/settings?section=model-router')
     })
 
     it('states only what the server states of a model', async () => {
@@ -321,21 +339,8 @@ describe('Settings page — Decision Providers', () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const models = component.find('[data-testid="decision-ollama-models"]')
-      await vi.waitFor(() => expect(models.findAll('label')).toHaveLength(2))
-      expect(models.findAll('label').map(l => words(l.text()))).toEqual(['tev1:latest 2,050 tokens, 4.1 GB on disk', 'nimble:latest'])
-    })
-
-    it('a cloud model is ticked into the same selection as the others', async () => {
-      ollama = { ...ollama, models: [model('tev1:latest'), model('clef:cloud')] }
-      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest']))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = () => component.find('[data-testid="decision-ollama-model-clef:cloud"] input')
-      await vi.waitFor(() => expect(box().exists()).toBe(true))
-      expect((box().element as HTMLInputElement).checked).toBe(false)
-
-      await box().setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest","clef:cloud"]' }]))
+      await vi.waitFor(() => expect(models.findAll('li')).toHaveLength(2))
+      expect(models.findAll('li').map(l => words(l.text()))).toEqual(['tev1:latest 2,050 tokens, 4.1 GB on disk', 'nimble:latest'])
     })
 
     it('Refresh reads the server again, so a model pulled since the page opened appears', async () => {
@@ -346,7 +351,7 @@ describe('Settings page — Decision Providers', () => {
         return ollama
       })
       const component = await mountDecisionProviders()
-      const names = () => component.find('[data-testid="decision-ollama-models"]').findAll('label').map(l => words(l.text()))
+      const names = () => component.find('[data-testid="decision-ollama-models"]').findAll('li').map(l => words(l.text()))
       await vi.waitFor(() => expect(names()).toEqual(['tev1:latest', 'nimble:latest']))
       expect(reads).toBe(1)
       const refresh = component.find('[data-testid="decision-ollama-refresh"]')
@@ -406,7 +411,7 @@ describe('Settings page — Decision Providers', () => {
       const component = await mountDecisionProviders()
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('reachable'))
       const models = component.find('[data-testid="decision-ollama-models"]')
-      expect(models.findAll('label').map(l => l.text())).toEqual(['tev1:latest', 'nimble:latest'])
+      expect(models.findAll('li').map(l => l.text())).toEqual(['tev1:latest', 'nimble:latest'])
       expect(models.text()).not.toContain('llama3.2')
       expect(component.find('[data-testid="decision-ollama-address"]').text()).toContain('http://localhost:11434')
       expect(component.find('[data-testid="decision-ollama-address"]').text()).toContain('from Ollama Local')
@@ -421,81 +426,29 @@ describe('Settings page — Decision Providers', () => {
       expect(address).not.toContain('from Ollama Local')
     })
 
-    it('selecting a model stores the selection as a JSON array, and clearing the last one deletes the key', async () => {
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-tev1:latest"]').exists()).toBe(true))
-
-      await component.find('[data-testid="decision-ollama-model-tev1:latest"] input').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
-      const box = () => component.find('[data-testid="decision-ollama-model-tev1:latest"] input')
-      await vi.waitFor(() => expect(box().attributes('disabled')).toBeUndefined())
-      expect((box().element as HTMLInputElement).checked).toBe(true)
-
-      await component.find('[data-testid="decision-ollama-model-tev1:latest"] input').setValue(false)
-      await vi.waitFor(() => expect(deleted).toEqual(['decision.ollama.models']))
-    })
-
-    it('the model the Model Router is using cannot be unticked, the card says why, and the others still can', async () => {
-      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
+    it('lists only what the server lists, and says the Model Router\'s model is not on this server', async () => {
       stored.set('router.classifier.provider', 'ollama-decision')
-      stored.set('router.classifier.model', 'tev1:latest')
+      stored.set('router.classifier.model', 'tev1:0.8b')
       baseEndpoints()
       const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
-      await vi.waitFor(() => expect((box('tev1:latest').element as HTMLInputElement).checked).toBe(true))
-      expect(box('tev1:latest').attributes('disabled')).toBeDefined()
-      expect(box('nimble:latest').attributes('disabled')).toBeUndefined()
-      expect(component.find('[data-testid="decision-ollama-selection"]').text().replace(/\s+/g, ' ')).toBe(
-        'Each takes that many tokens per request; a longer prompt is refused, not cut. Only a ticked model can be '
-        + 'the Model Router\'s classifier, and the one it is using cannot be unticked.')
+      const models = component.find('[data-testid="decision-ollama-models"]')
+      await vi.waitFor(() => expect(models.findAll('li').map(l => words(l.text()))).toEqual(['tev1:latest', 'nimble:latest']))
+      expect(models.text()).not.toContain('not installed')
+      const row = component.find('[data-testid="decision-ollama-consumer-model-router"]')
+      expect(row.findAll('span').map(span => words(span.text()))).toEqual(['prompt classifier (tev1:0.8b)', 'not on this server', 'in use'])
+      expect(row.find('[data-testid="decision-ollama-router-model-gone"]').classes()).toContain('text-fg-muted')
 
-      await box('nimble:latest').setValue(false)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
-    })
+      clearNuxtData()
+      stored.set('router.classifier.model', 'nimble:latest')
+      const listed = await mountDecisionProviders()
+      await vi.waitFor(() => expect(listed.find('[data-testid="decision-ollama-status"]').text()).toBe('reachable'))
+      expect(listed.find('[data-testid="decision-ollama-router-model-gone"]').exists()).toBe(false)
 
-    it('a model the Model Router names but nobody ticked can still be ticked', async () => {
-      stored.set('router.classifier.provider', 'ollama-decision')
-      stored.set('router.classifier.model', 'tev1:latest')
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = () => component.find('[data-testid="decision-ollama-model-tev1:latest"] input')
-      await vi.waitFor(() => expect(box().exists()).toBe(true))
-      expect(box().attributes('disabled')).toBeUndefined()
-
-      await box().setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
-      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-nimble:latest"] input').attributes('disabled')).toBeUndefined())
-      expect(box().attributes('disabled')).toBeDefined()
-    })
-
-    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
-      ollama = { ...ollama, models: [model('tev1:latest'), model('tev1:0.8b'), model('nimble:latest')] }
-      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
-      baseEndpoints({ failSaves: true })
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
-      await vi.waitFor(() => expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true))
-
-      await box('tev1:0.8b').setValue(true)
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-ollama"] [data-testid="api-error"]').exists()).toBe(true))
-      await vi.waitFor(() => expect(box('tev1:0.8b').attributes('disabled')).toBeUndefined())
-      expect((box('tev1:0.8b').element as HTMLInputElement).checked).toBe(false)
-
-      // Unticking one of two is a POST too; unticking the last is a DELETE, which this fixture does not refuse.
-      await box('nimble:latest').setValue(false)
-      await vi.waitFor(() => expect(posted).toHaveLength(2))
-      await vi.waitFor(() => expect(box('nimble:latest').attributes('disabled')).toBeUndefined())
-      expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true)
-    })
-
-    it('keeps a selected model the server no longer lists, so it can be cleared', async () => {
-      stored.set('decision.ollama.models', JSON.stringify(['tev1:0.8b']))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-tev1:0.8b"]').exists()).toBe(true))
-      expect(component.find('[data-testid="decision-ollama-model-tev1:0.8b"]').text()).toContain('not installed')
+      clearNuxtData()
+      ollama = { ...ollama, reachable: false, error: 'not reachable (ConnectException)', models: [] }
+      const down = await mountDecisionProviders()
+      await vi.waitFor(() => expect(down.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
+      expect(down.find('[data-testid="decision-ollama-router-model-gone"]').exists()).toBe(false)
     })
 
     it('an unreachable server says why, and lists nothing', async () => {
@@ -504,8 +457,8 @@ describe('Settings page — Decision Providers', () => {
       const component = await mountDecisionProviders()
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
       expect(component.find('[data-testid="decision-ollama-error"]').text()).toBe('not reachable (ConnectException)')
-      expect(component.find('[data-testid="decision-ollama-models"]').findAll('label')).toHaveLength(0)
-      expect(component.find('[data-testid="decision-ollama-selection"]').exists()).toBe(false)
+      expect(component.find('[data-testid="decision-ollama-models"]').findAll('li')).toHaveLength(0)
+      expect(component.find('[data-testid="decision-ollama-models-note"]').exists()).toBe(false)
       expect(component.find('[data-testid="decision-ollama-address"]').text()).not.toContain('from Ollama Local')
     })
 
@@ -630,12 +583,14 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-status"]').text()).toBe('not reachable'))
       expect(component.find('[data-testid="decision-laya-error"]').text()).toBe('not reachable (ConnectException)')
       const checkpoints = component.find('[data-testid="decision-laya-checkpoints"]')
-      expect(checkpoints.findAll('label').map(l => words(l.text()))).toEqual([
+      expect(checkpoints.findAll('li').map(l => words(l.text()))).toEqual([
         'english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens',
       ])
-      expect(words(component.find('[data-testid="decision-laya-cut"]').text())).toBe(
+      const cut = component.find('[data-testid="decision-laya-cut"]')
+      expect(words(cut.text())).toBe(
         'Each reads that many tokens per question; a longer prompt is cut, not refused (Laya\'s model card). '
-        + 'Only a ticked checkpoint can be the Model Router\'s classifier, and the one it is using cannot be unticked.')
+        + 'Choose one as the prompt classifier in Settings → Model Router.')
+      expect(cut.find('a').attributes('href')).toBe('/settings?section=model-router')
     })
 
     it('marks the checkpoints the server has loaded, and names its device', async () => {
@@ -660,92 +615,8 @@ describe('Settings page — Decision Providers', () => {
         'The server answers /health but says no more. If it is laya-serve started with a key, '
         + 'set or correct the key above to see what it has loaded.')
       expect(component.find('[data-testid="decision-laya-device"]').exists()).toBe(false)
-      const rows = component.find('[data-testid="decision-laya-checkpoints"]').findAll('label').map(l => words(l.text()))
+      const rows = component.find('[data-testid="decision-laya-checkpoints"]').findAll('li').map(l => words(l.text()))
       expect(rows).toEqual(['english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens'])
-    })
-
-    it('ticking a checkpoint stores the selection in the table\'s order, and clearing the last one deletes the key', async () => {
-      stored.set('decision.laya.models', JSON.stringify(['multilingual']))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
-      await vi.waitFor(() => expect((box('multilingual').element as HTMLInputElement).checked).toBe(true))
-      expect((box('english').element as HTMLInputElement).checked).toBe(false)
-
-      await box('english').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english","multilingual"]' }]))
-      await vi.waitFor(() => expect(box('english').attributes('disabled')).toBeUndefined())
-      expect((box('english').element as HTMLInputElement).checked).toBe(true)
-
-      await box('multilingual').setValue(false)
-      await vi.waitFor(() => expect(posted).toHaveLength(2))
-      expect(posted[1]).toEqual({ key: 'decision.laya.models', value: '["english"]' })
-      await vi.waitFor(() => expect(box('english').attributes('disabled')).toBeUndefined())
-      await box('english').setValue(false)
-      await vi.waitFor(() => expect(deleted).toEqual(['decision.laya.models']))
-    })
-
-    it('a stored name that is no checkpoint is neither shown nor written back', async () => {
-      stored.set('decision.laya.models', JSON.stringify(['laya-next', 'english']))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
-      await vi.waitFor(() => expect((box('english').element as HTMLInputElement).checked).toBe(true))
-      expect(component.find('[data-testid="decision-laya-checkpoints"]').findAll('label')).toHaveLength(3)
-
-      await box('typed-decisions').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english","typed-decisions"]' }]))
-    })
-
-    it('the checkpoint the Model Router is using cannot be unticked, and the others still can', async () => {
-      stored.set('decision.laya.models', JSON.stringify(['english', 'multilingual']))
-      stored.set('router.classifier.provider', 'laya')
-      stored.set('router.classifier.model', 'english')
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
-      await vi.waitFor(() => expect((box('english').element as HTMLInputElement).checked).toBe(true))
-      expect(box('english').attributes('disabled')).toBeDefined()
-      expect(box('multilingual').attributes('disabled')).toBeUndefined()
-      expect(box('typed-decisions').attributes('disabled')).toBeUndefined()
-
-      await box('multilingual').setValue(false)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
-    })
-
-    it('a checkpoint the Model Router names but nobody ticked can still be ticked', async () => {
-      stored.set('router.classifier.provider', 'laya')
-      stored.set('router.classifier.model', 'english')
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
-      await vi.waitFor(() => expect(box('english').exists()).toBe(true))
-      expect(box('english').attributes('disabled')).toBeUndefined()
-
-      await box('english').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
-      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
-      await vi.waitFor(() => expect(box('multilingual').attributes('disabled')).toBeUndefined())
-      expect(box('english').attributes('disabled')).toBeDefined()
-    })
-
-    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
-      stored.set('decision.laya.models', JSON.stringify(['english', 'typed-decisions']))
-      baseEndpoints({ failSaves: true })
-      const component = await mountDecisionProviders()
-      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
-      await vi.waitFor(() => expect((box('typed-decisions').element as HTMLInputElement).checked).toBe(true))
-
-      await box('multilingual').setValue(true)
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-laya"] [data-testid="api-error"]').exists()).toBe(true))
-      await vi.waitFor(() => expect(box('multilingual').attributes('disabled')).toBeUndefined())
-      expect((box('multilingual').element as HTMLInputElement).checked).toBe(false)
-
-      // Unticking one of two is a POST too; unticking the last is a DELETE, which this fixture does not refuse.
-      await box('typed-decisions').setValue(false)
-      await vi.waitFor(() => expect(posted).toHaveLength(2))
-      await vi.waitFor(() => expect(box('typed-decisions').attributes('disabled')).toBeUndefined())
-      expect((box('typed-decisions').element as HTMLInputElement).checked).toBe(true)
     })
 
     it('stores a different address and shows it, and clears the key when laya-serve\'s default is saved back', async () => {
@@ -863,10 +734,7 @@ describe('Settings page — Decision Providers', () => {
   })
 
   describe('Baseten card (JF-133)', () => {
-    const ELEPHANT = 'decision-models/baseten-elephant-9b-latest'
     const MAMMOTH = 'decision-models/baseten-mammoth-27b-latest'
-    const box = (component: Awaited<ReturnType<typeof mountDecisionProviders>>, name: string) =>
-      component.find(`[data-testid="decision-baseten-model-${name}"] input`)
 
     it('is the last card, directly below the Ollama card', async () => {
       baseEndpoints()
@@ -882,14 +750,12 @@ describe('Settings page — Decision Providers', () => {
       expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('needs API key')
       expect(component.find('[data-testid="decision-baseten-key"]').text()).toBe('(not set)')
       const models = component.find('[data-testid="decision-baseten-models"]')
-      expect(models.findAll('label').map(l => words(l.text()))).toEqual([
+      expect(models.findAll('li').map(l => words(l.text()))).toEqual([
         'elephant-1 16,384 tokens, 9B parameters',
         'mammoth-1 16,384 tokens, 27B parameters',
       ])
-      expect(models.findAll('p').map(p => words(p.text()))).toEqual([
-        'Only a ticked model can be the Model Router\'s classifier, and the one it is using cannot be unticked.',
-      ])
-      expect(models.findAll('input').map(i => (i.element as HTMLInputElement).checked)).toEqual([false, false])
+      expect(models.findAll('p').map(p => words(p.text()))).toEqual(['Choose one as the prompt classifier in Settings → Model Router.'])
+      expect(models.find('[data-testid="decision-baseten-models-note"] a').attributes('href')).toBe('/settings?section=model-router')
       expect(component.find('[data-testid="decision-baseten-breaker"]').exists()).toBe(false)
     })
 
@@ -901,7 +767,7 @@ describe('Settings page — Decision Providers', () => {
         'Decision models from Base Labs, Baseten\'s research team, which answer the same questions JEV does. '
         + 'Baseten runs them; JClaw calls Baseten\'s own address with the key below. The Model Router\'s classifier '
         + 'sends the first 4000 characters of each prompt to Baseten. Read Baseten\'s data and billing in the user '
-        + 'guide before you tick one.')
+        + 'guide before you choose one.')
       expect(about.find('[data-testid="decision-baseten-data-link"]').attributes('href')).toBe('/guide#settings-baseten-data')
       const card = component.find('[data-testid="decision-provider-baseten"]')
       expect(card.text()).not.toContain('record or retain')
@@ -985,79 +851,6 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-baseten"] [data-testid="api-error"]').exists()).toBe(true))
       expect(component.find('input[aria-label="Baseten API key"]').exists()).toBe(true)
       expect(component.find('[data-testid="decision-provider-jev"] [data-testid="api-error"]').exists()).toBe(false)
-    })
-
-    it('ticking a model stores the IDs in the table\'s order, and clearing the last one deletes the key', async () => {
-      stored.set('decision.baseten.models', JSON.stringify([MAMMOTH]))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect((box(component, 'mammoth-1').element as HTMLInputElement).checked).toBe(true))
-
-      await box(component, 'elephant-1').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }]))
-      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
-      expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true)
-
-      await box(component, 'mammoth-1').setValue(false)
-      await vi.waitFor(() => expect(posted).toHaveLength(2))
-      expect(posted[1]).toEqual({ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) })
-      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
-      await box(component, 'elephant-1').setValue(false)
-      await vi.waitFor(() => expect(deleted).toEqual(['decision.baseten.models']))
-    })
-
-    it('a stored ID that is no Baseten model is neither shown nor written back', async () => {
-      stored.set('decision.baseten.models', JSON.stringify(['elephant-1', ELEPHANT]))
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true))
-      expect(component.find('[data-testid="decision-baseten-models"]').findAll('label')).toHaveLength(2)
-
-      await box(component, 'mammoth-1').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }]))
-    })
-
-    it('the model the Model Router is using cannot be unticked, and the other still can', async () => {
-      stored.set('decision.baseten.models', JSON.stringify([ELEPHANT, MAMMOTH]))
-      stored.set('router.classifier.provider', 'baseten-decision')
-      stored.set('router.classifier.model', ELEPHANT)
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true))
-      expect(box(component, 'elephant-1').attributes('disabled')).toBeDefined()
-      expect(box(component, 'mammoth-1').attributes('disabled')).toBeUndefined()
-
-      await box(component, 'mammoth-1').setValue(false)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) }]))
-    })
-
-    it('a model the Model Router names but nobody ticked can still be ticked, and is then locked', async () => {
-      stored.set('router.classifier.provider', 'baseten-decision')
-      stored.set('router.classifier.model', ELEPHANT)
-      baseEndpoints()
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect(box(component, 'elephant-1').exists()).toBe(true))
-      expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined()
-
-      await box(component, 'elephant-1').setValue(true)
-      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) }]))
-      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
-      await vi.waitFor(() => expect(box(component, 'mammoth-1').attributes('disabled')).toBeUndefined())
-      expect(box(component, 'elephant-1').attributes('disabled')).toBeDefined()
-    })
-
-    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
-      stored.set('decision.baseten.models', JSON.stringify([MAMMOTH]))
-      baseEndpoints({ failSaves: true })
-      const component = await mountDecisionProviders()
-      await vi.waitFor(() => expect((box(component, 'mammoth-1').element as HTMLInputElement).checked).toBe(true))
-
-      await box(component, 'elephant-1').setValue(true)
-      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-baseten"] [data-testid="api-error"]').exists()).toBe(true))
-      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
-      expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(false)
-      expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }])
-      expect(stored.get('decision.baseten.models')).toBe(JSON.stringify([MAMMOTH]))
     })
 
     it('shows the Model Router as not in use until it classifies with a Baseten model, then names it', async () => {

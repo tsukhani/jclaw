@@ -272,7 +272,7 @@ measured, so it is left out of the pass rate, but it still fails the run.
 
 Both need the backend running.
 
-`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (repeatable, default the models selected in Settings), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
+`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (required, repeatable), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
 
 ---
 

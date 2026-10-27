@@ -9,6 +9,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import type { LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
 import { ROUTE_CLASS_LABELS } from '~/utils/model-route'
 
 interface RouterCandidate {
@@ -131,31 +132,80 @@ const classifierValue = computed(() => {
 const JEV_CLASSIFIER = 'jev::jev-latest'
 const jevKeySet = computed(() => configValue('decision.jev.apiKey').trim().length > 0)
 
-// JCLAW-1336: the decision models selected on the Ollama card in Settings → Decision Providers.
-const ollamaDecisionOptions = computed(() => parseDecisionModels(configValue('decision.ollama.models'))
-  .map(m => ({ value: `ollama-decision::${m}`, label: `Ollama decision / ${m}` })))
-
-// JCLAW-1447: the checkpoints ticked on the Laya card, each offered with the context it reads.
-const layaOptions = computed(() => tickedLayaCheckpoints(configValue('decision.laya.models'))
-  .map(c => ({ value: `laya::${c.name}`, label: `Laya / ${c.name} (${layaContext(c)})` })))
+// JF-135: every Laya checkpoint, each offered with the context it reads (JCLAW-1447). Lazy: the read dials the server.
+const layaOptions = LAYA_CHECKPOINTS.map(c => ({ value: `laya::${c.name}`, label: `Laya / ${c.name} (${layaContext(c)})` }))
+const { data: laya } = useLazyFetch<LayaDecisionStatus>('/api/decision/laya')
+const layaUnreachable = computed(() => laya.value?.reachable === false)
 const layaClassifier = computed(() => configValue('router.classifier.provider').trim() === 'laya'
   ? LAYA_CHECKPOINTS.find(c => c.name === configValue('router.classifier.model').trim())
   : undefined)
 
-// JF-133: the models ticked on the Baseten card, which need its key as JEV's option needs TypeSafe's.
+// JF-133: Baseten's models, which need its key as JEV's option needs TypeSafe's.
 const basetenKeySet = computed(() => configValue('decision.baseten.apiKey').trim().length > 0)
-const basetenOptions = computed(() => tickedBasetenModels(configValue('decision.baseten.models'))
-  .map(m => ({ value: `baseten-decision::${m.id}`, label: `Baseten / ${m.name} (${contextLabel(m.contextTokens)})` })))
+const basetenOptions = BASETEN_MODELS.map(m =>
+  ({ value: `baseten-decision::${m.id}`, label: `Baseten / ${m.name} (${contextLabel(m.contextTokens)})` }))
+
+const NOT_AVAILABLE = ' — not available'
+const OLLAMA_PREFIX = 'ollama-decision::'
+
+// JCLAW-1336: the decision models the Ollama server lists. Lazy: the read dials the server.
+const { data: ollama, pending: ollamaPending, error: ollamaReadError } = useLazyFetch<OllamaDecisionStatus>('/api/decision/ollama')
+const ollamaReading = computed(() => ollamaPending.value && !ollama.value)
+// A read JClaw itself could not answer says no more about the server than one it could not reach.
+const ollamaUnreachable = computed(() => ollama.value?.reachable === false || !!ollamaReadError.value)
+const ollamaOptions = computed(() => {
+  const listed = (ollama.value?.models ?? [])
+    .map(m => ({ value: `${OLLAMA_PREFIX}${m.name}`, label: `Ollama decision / ${m.name}`, disabled: false }))
+  const stored = classifierValue.value
+  if (!stored.startsWith(OLLAMA_PREFIX) || listed.some(o => o.value === stored)) return listed
+  // In this group under the same key either way, so the select keeps it selected when the read lands.
+  const reading = ollamaReading.value
+  const label = `Ollama decision / ${stored.slice(OLLAMA_PREFIX.length)}${reading ? '' : NOT_AVAILABLE}`
+  return [...listed, { value: stored, label, disabled: !reading }]
+})
+
+const PROVIDER_LABELS: Record<string, string> = { 'jev': 'JEV (TypeSafe AI)', 'laya': 'Laya', 'baseten-decision': 'Baseten' }
+
+// A stored classifier no other list holds, so the select names it rather than reading blank.
+const strandedClassifier = computed(() => {
+  const value = classifierValue.value
+  if (!value || value.startsWith(OLLAMA_PREFIX)) return null
+  const offered = [JEV_CLASSIFIER, ...layaOptions.map(o => o.value), ...basetenOptions.map(o => o.value),
+    ...modelOptions.value.map(o => o.value)]
+  if (offered.includes(value)) return null
+  const sep = value.indexOf('::')
+  const provider = value.slice(0, sep)
+  return { value, label: `${PROVIDER_LABELS[provider] ?? provider} / ${value.slice(sep + 2)}${NOT_AVAILABLE}` }
+})
 
 async function saveClassifier(value: string) {
+  const previous = { provider: configValue('router.classifier.provider'), model: configValue('router.classifier.model') }
   saving.value = true
   await attempt(async () => {
     if (value) {
       const sep = value.indexOf('::')
       // The provider write is checked against the stored model, which belongs to the classifier being replaced.
       await $fetch('/api/config/router.classifier.model', { method: 'DELETE' })
-      await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: value.slice(0, sep) } })
-      await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.model', value: value.slice(sep + 2) } })
+      try {
+        await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: value.slice(0, sep) } })
+        await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.model', value: value.slice(sep + 2) } })
+      }
+      catch (refused) {
+        // A refused model, such as one Ollama no longer lists, would leave the new provider with no model.
+        try {
+          if (previous.provider && previous.model) {
+            await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: previous.provider } })
+            await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.model', value: previous.model } })
+          }
+          else {
+            await $fetch('/api/config/router.classifier.provider', { method: 'DELETE' })
+          }
+        }
+        catch {
+          // The refusal is what the operator needs to read; the refresh below shows what is stored.
+        }
+        throw refused
+      }
     }
     else {
       await $fetch('/api/config/router.classifier.provider', { method: 'DELETE' })
@@ -396,7 +446,12 @@ function usageTone(fraction: number): string {
       questions with a probability for each choice, and leaves a prompt whose class it is unsure of to the
       keyword rules. Either costs one extra call before the reply starts and sees the first 4000 characters
       of the prompt, so a remote classifier is one more place your prompts go: JEV sends them to TypeSafe
-      AI, which may record or retain them, and a Baseten model sends them to Baseten. If the classifier is
+      AI, which may record or retain them, and a Baseten model sends them to Baseten. An Ollama cloud model, such as
+      clef:cloud, sends them to ollama.com: read <NuxtLink
+        to="/guide#settings-ollama-cloud"
+        class="text-fg-strong underline"
+        data-testid="router-ollama-cloud-link"
+      >Ollama's cloud models</NuxtLink> in the user guide before you choose one. If the classifier is
       unreachable, slower than its timeout or answers with something else, the keyword rules decide instead and
       the turn carries on.
     </p>
@@ -415,43 +470,76 @@ function usageTone(fraction: number): string {
               Keyword rules (no model call)
             </option>
             <option
-              :value="JEV_CLASSIFIER"
-              :disabled="!jevKeySet"
+              v-if="strandedClassifier"
+              :value="strandedClassifier.value"
+              disabled
+              data-testid="router-stranded-classifier-option"
             >
-              JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
+              {{ strandedClassifier.label }}
             </option>
-            <option
-              v-for="o in ollamaDecisionOptions"
-              :key="o.value"
-              :value="o.value"
-              data-testid="router-ollama-decision-option"
+            <optgroup label="JEV (TypeSafe AI)">
+              <option
+                :value="JEV_CLASSIFIER"
+                :disabled="!jevKeySet"
+              >
+                JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
+              </option>
+            </optgroup>
+            <optgroup label="Laya">
+              <option
+                v-for="o in layaOptions"
+                :key="o.value"
+                :value="o.value"
+                :disabled="layaUnreachable"
+                data-testid="router-laya-option"
+              >
+                {{ o.label }}{{ layaUnreachable ? ' — server not reachable' : '' }}
+              </option>
+            </optgroup>
+            <optgroup
+              v-if="ollamaOptions.length > 0 || ollamaUnreachable"
+              label="Ollama"
             >
-              {{ o.label }}
-            </option>
-            <option
-              v-for="o in layaOptions"
-              :key="o.value"
-              :value="o.value"
-              data-testid="router-laya-option"
+              <option
+                v-for="o in ollamaOptions"
+                :key="o.value"
+                :value="o.value"
+                :disabled="o.disabled"
+                data-testid="router-ollama-decision-option"
+              >
+                {{ o.label }}
+              </option>
+              <option
+                v-if="ollamaUnreachable"
+                disabled
+                data-testid="router-ollama-unreachable-option"
+              >
+                Ollama decision — server not reachable
+              </option>
+            </optgroup>
+            <optgroup label="Baseten">
+              <option
+                v-for="o in basetenOptions"
+                :key="o.value"
+                :value="o.value"
+                :disabled="!basetenKeySet"
+                data-testid="router-baseten-option"
+              >
+                {{ o.label }}{{ basetenKeySet ? '' : ' — needs a Baseten API key' }}
+              </option>
+            </optgroup>
+            <optgroup
+              v-if="modelOptions.length > 0"
+              label="Language models"
             >
-              {{ o.label }}
-            </option>
-            <option
-              v-for="o in basetenOptions"
-              :key="o.value"
-              :value="o.value"
-              :disabled="!basetenKeySet"
-              data-testid="router-baseten-option"
-            >
-              {{ o.label }}{{ basetenKeySet ? '' : ' — needs a Baseten API key' }}
-            </option>
-            <option
-              v-for="o in modelOptions"
-              :key="o.value"
-              :value="o.value"
-            >
-              {{ o.label }}
-            </option>
+              <option
+                v-for="o in modelOptions"
+                :key="o.value"
+                :value="o.value"
+              >
+                {{ o.label }}
+              </option>
+            </optgroup>
           </select>
         </div>
         <p
@@ -465,7 +553,7 @@ function usageTone(fraction: number): string {
           >Settings → Decision Providers</NuxtLink>.
         </p>
         <p
-          v-if="basetenOptions.length > 0 && !basetenKeySet"
+          v-if="!basetenKeySet"
           class="px-4 pb-2.5 text-xs text-fg-muted"
           data-testid="router-baseten-key-hint"
         >

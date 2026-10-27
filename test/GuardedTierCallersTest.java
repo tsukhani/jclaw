@@ -33,7 +33,7 @@ class GuardedTierCallersTest extends UnitTest {
             "services.discovery.OpenAiCompatDiscoveryStrategy.discover",
             "services.discovery.LeaderboardRanker.fetchLeaderboard",
             "services.decision.JevApi.send",
-            "services.decision.OllamaDecision.status",
+            "services.decision.OllamaDecision.tags",
             "services.decision.OllamaDecision.get",
             "services.decision.OllamaDecision.show",
             "services.decision.OllamaDecision.pin",

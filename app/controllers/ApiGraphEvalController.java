@@ -73,7 +73,7 @@ public class ApiGraphEvalController extends Controller {
     }
 
     /**
-     * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout"|"sequences", split?,
+     * {@code POST /api/graph/eval} with {@code {agent, decisionModels, set?: "cases"|"heldout"|"sequences", split?,
      * runs?, recallFloor?, concurrency?, timeoutSeconds?, pairFilter?, configuration?, agreedShare?, agreedSeed?}};
      * {@code sequences} reads no {@code agent} and takes an optional {@code configuration} (JCLAW-1367). A
      * {@code split} names a frozen certification split, whose set it fixes (JCLAW-1368); without one, a run leaves out
@@ -132,7 +132,8 @@ public class ApiGraphEvalController extends Controller {
         boolean filter = pairFilter;
         int timeoutSeconds = Math.clamp(readInt(body, "timeoutSeconds", DEFAULT_TIMEOUT_SECONDS), 1, MAX_TIMEOUT_SECONDS);
         int concurrency = Math.clamp(readInt(body, "concurrency", DEFAULT_CONCURRENCY), 1, MAX_CONCURRENCY);
-        var modelNames = body.has("decisionModels") ? strings(body, "decisionModels") : OllamaDecision.selectedModels();
+        if (!body.has("decisionModels")) throw invalid(decisionModelsRequired());
+        var modelNames = strings(body, "decisionModels");
         if (modelNames.isEmpty()) throw invalid("decisionModels must not be empty");
         if (modelNames.contains(JevApi.MODEL)) {
             throw invalid(JevApi.MODEL + " is a hosted model; the graph certifier measures local Ollama models only");
@@ -225,6 +226,21 @@ public class ApiGraphEvalController extends Controller {
         stream(progress -> GraphEvalHarness.run(agentId, outside.kept(), inputs.ownerName(), schema, models, runs,
                 floor, concurrency, inputs.secondLabels(), inputs.verdicts(), progress, filter,
                 inputs.secondLabelsReason(), options), false);
+    }
+
+    /** The refusal of a run that names no model: the models the Ollama server runs, or why it could not be read. */
+    private static String decisionModelsRequired() {
+        var listing = OllamaDecision.listing(OllamaDecision.baseUrl());
+        var server = "the Ollama server at " + listing.baseUrl();
+        if (!listing.reachable()) {
+            return "decisionModels is required; %s could not be read: %s".formatted(server, listing.error());
+        }
+        // A cloud model runs on ollama.com, which the certifier does not measure.
+        var names = listing.models().stream().filter(m -> !m.cloud()).map(OllamaDecision.ListedModel::name).toList();
+        return names.isEmpty()
+                ? "decisionModels is required; %s runs no decision models".formatted(server)
+                : "decisionModels is required: name one or more of the decision models %s runs (%s)"
+                        .formatted(server, String.join(", ", names));
     }
 
     /** What a set brings to a certification run or a re-score: its split source, owner, second labels and verdicts. */

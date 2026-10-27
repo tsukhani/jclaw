@@ -47,8 +47,7 @@ import java.util.regex.Pattern;
  * naming the model's ID, under the {@code decision:baseten} breaker, and every failure leaves the keyword rules to
  * answer.
  *
- * <p>Only this class writes {@code decision.baseten.apiKey}, and it and {@code RouterPolicyTest} write
- * {@code decision.baseten.models}, each under {@link JevBreakerTestSync}.
+ * <p>Only this class writes {@code decision.baseten.apiKey}, under {@link JevBreakerTestSync}.
  */
 class BasetenDecisionTest extends UnitTest {
 
@@ -74,7 +73,6 @@ class BasetenDecisionTest extends UnitTest {
     void releaseBreaker() {
         try {
             ConfigService.delete(BasetenDecision.API_KEY);
-            ConfigService.delete(BasetenDecision.MODELS_KEY);
         } finally {
             JevBreakerTestSync.release();
         }
@@ -368,24 +366,10 @@ class BasetenDecisionTest extends UnitTest {
     // --- the write rules -------------------------------------------------------------------
 
     @Test
-    void theModelsAreAJsonArrayOfBasetensModelIds() {
-        var key = BasetenDecision.MODELS_KEY;
-        for (var ok : new String[] {"", "[]", "[\"" + ELEPHANT + "\"]", "[\"" + MAMMOTH + "\",\"" + ELEPHANT + "\"]"}) {
-            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
-        }
-        for (var bad : new String[] {ELEPHANT, "[\"elephant-1\"]", "[\"tev1\"]", "[\"" + ELEPHANT + "\",\"mammoth-1\"]",
-                "[1]", "[\"\"]", "{}", "[\"" + ELEPHANT + "\""}) {
-            assertEquals("decision.baseten.models must be a JSON array of Baseten model IDs (" + ELEPHANT + ", " + MAMMOTH
-                    + "), such as [\"" + ELEPHANT + "\"].", DecisionSettings.rejectionFor(key, bad), () -> "accepted " + bad);
-        }
-    }
-
-    @Test
     void anUnknownDecisionKeyIsRefusedNamingEveryKey() {
         assertEquals("decision.baseten.apikey is not a decision-provider setting; use one of decision.jev.apiKey, "
-                + "decision.ollama.baseUrl, decision.ollama.models, decision.ollama.keepAlive, decision.laya.baseUrl, "
-                + "decision.laya.apiKey, decision.laya.models, decision.baseten.apiKey, decision.baseten.models.",
-                DecisionSettings.rejectionFor("decision.baseten.apikey", "x"));
+                + "decision.ollama.baseUrl, decision.ollama.keepAlive, decision.laya.baseUrl, decision.laya.apiKey, "
+                + "decision.baseten.apiKey.", DecisionSettings.rejectionFor("decision.baseten.apikey", "x"));
     }
 
     @Test
@@ -400,23 +384,11 @@ class BasetenDecisionTest extends UnitTest {
 
     @Test
     void aRefusedWriteLeavesTheStoredValueAsItWas() {
-        ConfigService.set(BasetenDecision.MODELS_KEY, "[\"" + ELEPHANT + "\"]");
         ConfigService.set(BasetenDecision.API_KEY, KEY);
 
-        assertNotNull(ConfigService.setWithSideEffects(BasetenDecision.MODELS_KEY, "[\"tev1\"]"));
         assertNotNull(ConfigService.setWithSideEffects(BasetenDecision.API_KEY, "baseten key"));
 
-        assertEquals("[\"" + ELEPHANT + "\"]", ConfigService.get(BasetenDecision.MODELS_KEY));
         assertEquals(KEY, ConfigService.get(BasetenDecision.API_KEY));
-    }
-
-    @Test
-    void aStoredSelectionTicksOnlyTheIdsThatAreBasetenModels() {
-        // set() skips the write rules, as a row edited by hand would.
-        ConfigService.set(BasetenDecision.MODELS_KEY, "[\"" + MAMMOTH + "\",\"elephant-1\",\"" + ELEPHANT + "\"]");
-        assertEquals(List.of(MAMMOTH, ELEPHANT), BasetenDecision.selectedModels());
-        ConfigService.delete(BasetenDecision.MODELS_KEY);
-        assertEquals(List.of(), BasetenDecision.selectedModels());
     }
 
     // --- what the frontend holds a copy of -------------------------------------------------

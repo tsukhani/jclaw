@@ -270,12 +270,18 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         assertAccepted(LayaDecision.BASE_URL_KEY, "http://localhost:8000");
         assertAccepted(LayaDecision.BASE_URL_KEY, "http://192.168.1.30:8000");
 
-        assertRefused("decision.laya.models must be a JSON array of Laya checkpoints (english, multilingual, "
-                + "typed-decisions), such as [\"english\"].", LayaDecision.MODELS_KEY, "[\"tev1\"]");
-        assertAccepted(LayaDecision.MODELS_KEY, "[\"english\",\"typed-decisions\"]");
-
         assertRefused("decision.laya.apiKey must be printable ASCII with no spaces.", LayaDecision.API_KEY, "laya key");
         assertAccepted(LayaDecision.API_KEY, "laya-key_1.2/3+4=");
+    }
+
+    @Test
+    void theRetiredModelSelectionsAreNoLongerDecisionSettings() {
+        // JF-135: the Model Router offers every decision model, so no card stores a selection.
+        for (var key : List.of("decision.ollama.models", "decision.laya.models", "decision.baseten.models")) {
+            assertRefused(key + " is not a decision-provider setting; use one of decision.jev.apiKey, "
+                    + "decision.ollama.baseUrl, decision.ollama.keepAlive, decision.laya.baseUrl, decision.laya.apiKey, "
+                    + "decision.baseten.apiKey.", key, "[\"english\"]");
+        }
     }
 
     @Test
@@ -288,12 +294,6 @@ class ConfigServiceWriteRulesTest extends UnitTest {
 
     @Test
     void theBasetenKeysAreRefusedAtTheWrite() {
-        assertRefused("decision.baseten.models must be a JSON array of Baseten model IDs "
-                + "(decision-models/baseten-elephant-9b-latest, decision-models/baseten-mammoth-27b-latest), such as "
-                + "[\"decision-models/baseten-elephant-9b-latest\"].", BasetenDecision.MODELS_KEY, "[\"tev1\"]");
-        assertAccepted(BasetenDecision.MODELS_KEY,
-                "[\"decision-models/baseten-elephant-9b-latest\",\"decision-models/baseten-mammoth-27b-latest\"]");
-
         assertRefused("decision.baseten.apiKey must be printable ASCII with no spaces.", BasetenDecision.API_KEY,
                 "baseten key");
         assertAccepted(BasetenDecision.API_KEY, "bt-key_1.2/3+4=");
