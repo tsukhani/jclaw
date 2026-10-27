@@ -20,16 +20,18 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * A recurring task whose scheduled runs keep failing, after their retries, is paused once
- * {@code tasks.pauseAfterFailedOccurrences} of them fail in a row; resuming starts the count again.
+ * {@code tasks.pauseAfterFailedOccurrences} of them have failed; resuming starts the count again.
  */
-class RecurringTaskPauseTest extends UnitTest {
+class JClawFailureHandlerPauseTest extends UnitTest {
 
     private static final Clock FIXED_NOW = Clock.fixed(Instant.parse("2026-10-27T03:00:00Z"), ZoneOffset.UTC);
     private static final String ERROR = "HTTP 401 Unauthorized";
+    private static final String AGENT = "pause-test-agent";
 
     private Agent agent;
 
@@ -38,7 +40,7 @@ class RecurringTaskPauseTest extends UnitTest {
         Fixtures.deleteDatabase();
         ConfigService.delete(JClawFailureHandler.PAUSE_AFTER_KEY);
         agent = new Agent();
-        agent.name = "pause-test-agent";
+        agent.name = AGENT;
         agent.modelProvider = "test-provider";
         agent.modelId = "test-model";
         agent.enabled = true;
@@ -51,12 +53,12 @@ class RecurringTaskPauseTest extends UnitTest {
     }
 
     @Test
-    void theThirdFailedRunInARowPausesTheTaskWithOneAlertNamingThePause() {
+    void theThirdFailedRunPausesTheTaskWithOneAlertNamingThePause() {
         ConfigService.set(JClawFailureHandler.PAUSE_AFTER_KEY, "3");
         var task = recurringTask("Morning briefing");
         var states = new ArrayList<String>();
 
-        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> {
+        var alerts = alertsFor("Morning briefing", () -> {
             for (int i = 0; i < 3; i++) {
                 failOccurrence(task.id, new RuntimeException(ERROR));
                 var t = reload(task.id);
@@ -64,13 +66,12 @@ class RecurringTaskPauseTest extends UnitTest {
             }
         });
 
-        var reason = "Paused after 3 scheduled runs in a row failed. Last error (permanent error): " + ERROR;
+        var reason = "Paused after 3 failed scheduled runs. Last error (permanent error): " + ERROR;
         assertEquals(List.of("1:false:null", "2:false:null", "3:true:" + reason), states);
-        var next = FIXED_NOW.instant().plusSeconds(3600).atZone(ZoneId.of("UTC"));
-        var failed = OperatorAlerts.occurrenceAlert("Morning briefing", "pause-test-agent", "permanent error", ERROR, next);
+        var failed = occurrenceAlert("Morning briefing");
         assertEquals(List.of(failed, failed,
                         "JClaw alert: task 'Morning briefing' (agent pause-test-agent) failed (permanent error): "
-                                + ERROR + ". It has failed 3 scheduled runs in a row, so it is paused until it is"
+                                + ERROR + ". It has failed 3 scheduled runs, so it is paused until it is"
                                 + " resumed on the Tasks page."),
                 alerts);
         assertEquals(Task.Status.ACTIVE, reload(task.id).status, "a pause keeps the task's state");
@@ -81,11 +82,25 @@ class RecurringTaskPauseTest extends UnitTest {
         ConfigService.set(JClawFailureHandler.PAUSE_AFTER_KEY, "1");
         var task = recurringTask("hourly-sync");
 
-        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> failOccurrence(task.id, new RuntimeException(ERROR)));
+        var alerts = alertsFor("hourly-sync", () -> failOccurrence(task.id, new RuntimeException(ERROR)));
 
         assertTrue(reload(task.id).paused);
-        assertEquals(1, alerts.size(), () -> String.valueOf(alerts));
-        assertTrue(alerts.getFirst().contains("It has failed 1 scheduled runs in a row, so it is paused"), alerts::toString);
+        assertEquals(List.of("JClaw alert: task 'hourly-sync' (agent pause-test-agent) failed (permanent error): "
+                + ERROR + ". It has failed 1 scheduled runs, so it is paused until it is resumed on the Tasks page."),
+                alerts);
+    }
+
+    @Test
+    void aTaskTheOperatorPausedDuringTheRunKeepsThatPauseWhenTheRunReachesTheLimit() {
+        ConfigService.set(JClawFailureHandler.PAUSE_AFTER_KEY, "1");
+        var task = recurringTask("paused-mid-run");
+        TaskSchedulingService.pause(task.id);
+
+        var alerts = alertsFor("paused-mid-run", () -> failOccurrence(task.id, new RuntimeException(ERROR)));
+
+        var fresh = reload(task.id);
+        assertEquals("1:true:null", fresh.failedOccurrences + ":" + fresh.paused + ":" + fresh.pauseReason);
+        assertEquals(List.of(occurrenceAlert("paused-mid-run")), alerts);
     }
 
     @Test
@@ -121,7 +136,7 @@ class RecurringTaskPauseTest extends UnitTest {
     void withTheKeyAbsentAFailingTaskIsNeverPaused() {
         var task = recurringTask("never-paused");
 
-        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> {
+        var alerts = alertsFor("never-paused", () -> {
             for (int i = 0; i < 5; i++) failOccurrence(task.id, new RuntimeException(ERROR));
         });
 
@@ -129,7 +144,7 @@ class RecurringTaskPauseTest extends UnitTest {
         assertFalse(fresh.paused);
         assertNull(fresh.pauseReason);
         assertEquals(5, fresh.failedOccurrences);
-        assertEquals(5, alerts.stream().filter(a -> a.contains("It runs again at")).count(), alerts::toString);
+        assertEquals(Collections.nCopies(5, occurrenceAlert("never-paused")), alerts);
     }
 
     @Test
@@ -155,7 +170,7 @@ class RecurringTaskPauseTest extends UnitTest {
             return null;
         });
 
-        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> {
+        var alerts = alertsFor("one-off", () -> {
             var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(task.id, new RuntimeException(ERROR)));
             assertInstanceOf(Decision.Fail.class, decision);
         });
@@ -210,6 +225,18 @@ class RecurringTaskPauseTest extends UnitTest {
         return t;
     }
 
+    /** The task listener is process-wide, so keep only this task's alerts from what concurrent classes decide. */
+    private static List<String> alertsFor(String taskName, Runnable body) {
+        return OperatorAlerts.captureTaskAlertsForTest(body).stream()
+                .filter(a -> a.contains("task '" + taskName + "'"))
+                .toList();
+    }
+
+    private static String occurrenceAlert(String taskName) {
+        var next = FIXED_NOW.instant().plusSeconds(3600).atZone(ZoneId.of("UTC"));
+        return OperatorAlerts.occurrenceAlert(taskName, AGENT, "permanent error", ERROR, next);
+    }
+
     /** One scheduled run that fails for good: a permanent error ends it without a retry. */
     private static void failOccurrence(Long taskId, Throwable error) {
         var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(taskId, error));
@@ -230,7 +257,7 @@ class RecurringTaskPauseTest extends UnitTest {
             var t = (Task) Task.findById(taskId);
             t.failedOccurrences = 3;
             t.paused = true;
-            t.pauseReason = "Paused after 3 scheduled runs in a row failed. Last error (permanent error): " + ERROR;
+            t.pauseReason = "Paused after 3 failed scheduled runs. Last error (permanent error): " + ERROR;
             t.save();
             return null;
         });

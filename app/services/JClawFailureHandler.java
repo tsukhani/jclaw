@@ -26,7 +26,7 @@ import java.time.Instant;
  *   db-scheduler row — except on a recurring Task, where they end only
  *   the occurrence: the row moves to the next one with a full retry
  *   budget, and the task is paused once {@link #PAUSE_AFTER_KEY}
- *   occurrences have failed in a row.</li>
+ *   occurrences have failed since it was created or last resumed.</li>
  * </ul>
  *
  * <h2>Why policy is in its own static method</h2>
@@ -61,7 +61,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      */
     static final long[] BACKOFF_SECONDS = {30, 60, 5 * 60, 15 * 60, 60 * 60};
 
-    /** Settings &gt; Tasks: failed scheduled runs in a row that pause a recurring task. Unset or 0 turns it off. */
+    /** Settings &gt; Tasks: failed scheduled runs, counted until a resume, that pause a recurring task; 0 is off. */
     public static final String PAUSE_AFTER_KEY = "tasks.pauseAfterFailedOccurrences";
 
     /**
@@ -172,7 +172,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                                             outcome.budget(), outcome.backoffSecs(), errorMessage));
             case Decision.NextOccurrence(Instant _, String reason) when outcome.paused() -> {
                 recordFailure(outcome, reason, errorMessage,
-                        "; paused after %d failed runs in a row".formatted(outcome.failedOccurrences()));
+                        "; paused after %d failed runs".formatted(outcome.failedOccurrences()));
                 OperatorAlerts.onTaskPaused(outcome.task(), outcome.agentName(), outcome.failedOccurrences(),
                         reason, errorMessage);
             }
@@ -259,7 +259,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             if (task.status == Task.Status.RUNNING) task.status = Task.Status.ACTIVE;
             task.save();
             // The row still moves on: a paused task's fires are skipped, so resume keeps its cadence.
-            boolean pause = pauseAfter > 0 && task.failedOccurrences >= pauseAfter;
+            // A pause the operator took during this run stands: it keeps its empty reason and sends no pause alert.
+            boolean pause = pauseAfter > 0 && task.failedOccurrences >= pauseAfter && !task.paused;
             if (pause) TaskSchedulingService.pause(task.id, pauseReason(task.failedOccurrences, reason, errorMessage));
             return new DecideOutcome(new Decision.NextOccurrence(next, reason), task, runForLifecycle,
                     task.name, agentName, budget, 0L, currentRetry + 1, task.failedOccurrences, pause);
@@ -274,7 +275,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
 
     /** What the Tasks page shows for a task this handler paused. */
     private static String pauseReason(int failedRuns, String reason, String errorMessage) {
-        return "Paused after %d scheduled runs in a row failed. Last error (%s): %s"
+        return "Paused after %d failed scheduled runs. Last error (%s): %s"
                 .formatted(failedRuns, reason, errorMessage);
     }
 

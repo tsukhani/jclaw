@@ -192,8 +192,9 @@ public class Task extends TimestampedModel {
     public int maxRetries = 3;
 
     /**
-     * Scheduled runs of a recurring task that failed in a row, each after its retries; a completed
-     * run and a resume reset it. {@code tasks.pauseAfterFailedOccurrences} pauses the task when it is reached.
+     * Scheduled runs of a recurring task that failed, each after its retries, since it was created or last
+     * resumed; only a resume resets it, not a completed run. {@code tasks.pauseAfterFailedOccurrences} pauses
+     * the task when it is reached.
      */
     @Column(name = "failed_occurrences", nullable = false)
     @ColumnDefault("0")

@@ -223,7 +223,7 @@ async function saveTasksField(configKey: string, value: string) {
           fallback="0"
           :min="0"
           label-width="w-48"
-          tip="Pause a recurring task when this many of its scheduled runs fail in a row. A run counts as failed only after its retries give up. A run that completes starts the count again, and so does Resume. You get one alert when a task is paused. 0 turns this off."
+          tip="Pause a recurring task when this many of its scheduled runs have failed. A run counts as failed only after its retries give up. Only Resume starts the count again. A run that completes in between does not. You get one alert when a task is paused. 0 turns this off."
         />
       </div>
       <ApiErrorAlert
