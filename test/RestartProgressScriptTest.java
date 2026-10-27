@@ -261,53 +261,55 @@ class RestartProgressScriptTest extends UnitTest {
     }
 
     @Test
-    void aFileAddedToTheFrontendRebuildsTheWebAppWhateverItsOwnStamp() throws Exception {
-        sourceCheckout();
-        buildWebApp();
-        // As mv or a Finder copy leave it: older than the build, and not yet added to git.
-        olderThanTheBuild(Files.writeString(home.resolve("frontend/public/bass.mp3"), "mp3\n"));
+    void aFileAddedToTheFrontendRebuildsTheWebApp() throws Exception {
+        builtSourceCheckout();
+        Files.writeString(home.resolve("frontend/public/bass.mp3"), "mp3\n");
 
-        assertTheWebAppIsRebuiltBecause("frontend/public/");
-    }
-
-    @Test
-    void aFileAddedBesideOnesGitHasNeverSeenRebuildsTheWebApp() throws Exception {
-        sourceCheckout();
-        Files.createDirectories(home.resolve("frontend/public/sounds"));
-        Files.writeString(home.resolve("frontend/public/sounds/a.mp3"), "mp3\n");
-        buildWebApp();
-        olderThanTheBuild(Files.writeString(home.resolve("frontend/public/sounds/b.mp3"), "mp3\n"));
-
-        assertTheWebAppIsRebuiltBecause("frontend/public/sounds/");
+        assertTheWebAppIsRebuiltBecause("frontend/public/bass.mp3 changed since public/spa was built");
     }
 
     @Test
     void aFileDeletedFromTheFrontendRebuildsTheWebApp() throws Exception {
-        sourceCheckout();
-        buildWebApp();
+        builtSourceCheckout();
         Files.delete(home.resolve("frontend/public/favicon.ico"));
 
-        assertTheWebAppIsRebuiltBecause("frontend/public/");
+        assertTheWebAppIsRebuiltBecause("frontend/public/favicon.ico changed since public/spa was built");
     }
 
     @Test
-    void whatATestRunLeavesInTheFrontendKeepsTheBuiltWebApp() throws Exception {
-        sourceCheckout();
-        buildWebApp();
+    void aFileReplacedByOneWithAnOlderStampRebuildsTheWebApp() throws Exception {
+        builtSourceCheckout();
+        // As mv or a Finder copy leave it: new content under a stamp older than the build.
+        var icon = Files.writeString(home.resolve("frontend/public/favicon.ico"), "another icon\n");
+        Files.setLastModifiedTime(icon, FileTime.fromMillis(System.currentTimeMillis() - 86_400_000));
+
+        assertTheWebAppIsRebuiltBecause("frontend/public/favicon.ico changed since public/spa was built");
+    }
+
+    @Test
+    void ignoredFilesInTheFrontendKeepTheBuiltWebApp() throws Exception {
+        builtSourceCheckout();
+        Files.writeString(home.resolve("frontend/public/.DS_Store"), "finder\n");
         Files.createDirectories(home.resolve("frontend/test-report"));
         Files.writeString(home.resolve("frontend/test-report/index.html"), "<html></html>\n");
 
-        var run = harness(Map.of("JCLAW_AOT", "off"), false, "do_start_prod");
-        assertEquals(0, run.exit(), run.out());
+        var run = start();
         assertTrue(run.out().lines().toList().contains("==> Skipping the SPA build and frontend dependencies (public/spa is up to date)"), run.out());
         assertEquals(List.of(), calls().stream().filter(c -> c.startsWith("npx ") || c.startsWith("pnpm ")).toList());
     }
 
-    private void assertTheWebAppIsRebuiltBecause(String newer) throws Exception {
+    private void assertTheWebAppIsRebuiltBecause(String reason) throws Exception {
+        var run = start();
+        assertTrue(run.out().lines().toList().contains("==> Generating static SPA (" + reason + ")..."), run.out());
+        assertEquals(List.of("npx nuxi generate"), calls().stream().filter(c -> c.startsWith("npx ")).toList());
+    }
+
+    /** One start, with no calls left over from an earlier one. */
+    private Run start() throws Exception {
+        Files.deleteIfExists(tmp.resolve("calls.log"));
         var run = harness(Map.of("JCLAW_AOT", "off", "STUB_FAKE_NARRATOR", "1"), false, "do_start_prod");
         assertEquals(0, run.exit(), run.out());
-        assertTrue(run.out().lines().toList().contains("==> Generating static SPA (" + newer + " is newer than public/spa)..."), run.out());
-        assertTrue(calls().contains("npx nuxi generate"), calls().toString());
+        return run;
     }
 
     @Test
@@ -557,31 +559,18 @@ class RestartProgressScriptTest extends UnitTest {
         }
     }
 
-    /** A source checkout whose frontend git tracks, not yet started. */
-    private void sourceCheckout() throws Exception {
+    /** A source checkout whose web app predates the record of its sources, started once to build it and write one. */
+    private void builtSourceCheckout() throws Exception {
         Files.createDirectories(home.resolve("app"));
+        Files.createDirectories(home.resolve("precompiled/java"));
+        Files.createDirectories(home.resolve("public/spa"));
         Files.createDirectories(home.resolve("frontend/public"));
-        Files.writeString(home.resolve("frontend/.gitignore"), "test-report/\n");
+        Files.writeString(home.resolve("frontend/.gitignore"), ".output\n.DS_Store\ntest-report/\n");
         Files.writeString(home.resolve("frontend/public/favicon.ico"), "icon\n");
         git("init", "-q");
         git("add", "frontend");
         Files.delete(home.resolve("server.pid"));
-    }
-
-    /** Builds the classes and the web app an hour ago and dates every source a day ago, so only what a test does next is newer. */
-    private void buildWebApp() throws IOException {
-        Files.createDirectories(home.resolve("precompiled/java"));
-        Files.createDirectories(home.resolve("public/spa"));
-        try (Stream<Path> paths = Files.walk(home)) {
-            for (var p : paths.filter(p -> !p.startsWith(home.resolve(".git"))).toList()) olderThanTheBuild(p);
-        }
-        var built = FileTime.fromMillis(System.currentTimeMillis() - 3_600_000);
-        Files.setLastModifiedTime(home.resolve("precompiled/java"), built);
-        Files.setLastModifiedTime(home.resolve("public/spa"), built);
-    }
-
-    private static Path olderThanTheBuild(Path p) throws IOException {
-        return Files.setLastModifiedTime(p, FileTime.fromMillis(System.currentTimeMillis() - 86_400_000));
+        assertTheWebAppIsRebuiltBecause("no record of the sources public/spa was built from");
     }
 
     private void git(String... args) throws Exception {

@@ -255,9 +255,10 @@ Environment:
                           Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
-                          frontend file or folder is newer than public/spa;
-                          set this when a change leaves none newer (e.g. a
-                          build-time env var) and the SPA must be rebuilt.
+                          frontend source changed since the last build;
+                          set this when the change lies outside those
+                          sources (e.g. a build-time env var) and the SPA
+                          must be rebuilt.
 
 Load-test options (only used with the 'loadtest' command):
   --concurrency <n>       Parallel workers (default: 10). Each worker drives
@@ -689,9 +690,10 @@ Environment:
                           Settings > Maintenance > Restart has the same switch.
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
-                          frontend file or folder is newer than public/spa;
-                          set this when a change leaves none newer (e.g. a
-                          build-time env var) and the SPA must be rebuilt.
+                          frontend source changed since the last build;
+                          set this when the change lies outside those
+                          sources (e.g. a build-time env var) and the SPA
+                          must be rebuilt.
 
 Examples:
   ${INVOKE} start                              # Production in current directory
@@ -3735,23 +3737,21 @@ do_start_prod() {
         #     on next navigation. Gating the rebuild makes "new id" mean
         #     "frontend actually changed", which is the correct semantics.
         #
-        # public/spa's mtime is the threshold: the `cp -r` below stamps it at
-        # build time (cp doesn't preserve mtimes without -p).
+        # build/spa-inputs records a "<blob hash> <path>" line for each input of
+        # the last build, and a start rebuilds when the current list differs.
+        # Content, not mtimes: a file moved in keeps its older stamp, and a
+        # directory's mtime also moves for an ignored entry such as .DS_Store.
         #
         # The inputs are the files under the two build roots that git does not
-        # ignore — tracked ones, and untracked ones not yet added, which the
-        # build ships all the same — asked of git rather than walked with find
-        # (JCLAW-1179). Everything the build itself writes is gitignored —
-        # node_modules, .nuxt, .output, .vite, and the four test-output
-        # directories — so the listing excludes all of it by construction.
-        # Each file's directory counts too, as in the precompile guard: an add,
-        # delete or rename whose file keeps an older stamp (mv, a Finder copy)
-        # shows only in its parent's mtime. frontend/ itself is skipped, since
-        # its own entries are that gitignored output. The predecessor pruned a list of
-        # names instead, and the list was wrong: `pnpm test` and the e2e run
-        # left test-report/, coverage/, test-results/ and playwright-report/
-        # newer than the bundle, so running tests forced a rebuild and, with
-        # it, the hard reload this gate exists to prevent.
+        # ignore, tracked or not yet added, asked of git rather than walked
+        # with find (JCLAW-1179). Everything the build itself writes is
+        # gitignored — node_modules, .nuxt, .output, .vite, and the four
+        # test-output directories — so the listing excludes all of it by
+        # construction. The predecessor pruned a list of names instead, and
+        # the list was wrong: `pnpm test` and the e2e run left test-report/,
+        # coverage/, test-results/ and playwright-report/ behind, so running
+        # tests forced a rebuild and, with it, the hard reload this gate exists
+        # to prevent.
         #
         # Both roots are probed, not just frontend/ (JCLAW-1178).
         # components/guide/sections.ts imports every docs/user-guide/*.md with
@@ -3759,40 +3759,36 @@ do_start_prod() {
         # outside frontend/ — probing only frontend/ skipped the rebuild after
         # a guide edit and served the previous text with no warning.
         #
-        # mtime can't see a change that leaves no newer file (a build-time env
+        # The record can't see a change outside the sources (a build-time env
         # var, say), and a missed input means shipping a frontend change that
         # never appears — strictly worse than a wasted rebuild. Same reasoning
-        # makes an unreadable file list rebuild rather than skip. Hence both
-        # that fallback and the escape hatch.
+        # makes an unreadable file list or a missing record rebuild rather
+        # than skip. Hence those fallbacks and the escape hatch.
+        spa_record="$SCRIPT_DIR/build/spa-inputs"
+        spa_sources=$(/usr/bin/git -C "$SCRIPT_DIR" ls-files -z --cached --others --exclude-standard -- frontend docs/user-guide 2>/dev/null \
+            | while IFS= read -r -d '' spa_src; do
+                # --cached still lists a tracked file deleted from the tree.
+                if [[ -e "$SCRIPT_DIR/$spa_src" ]]; then printf '%s\n' "$spa_src"; fi
+            done || true)
+        spa_inputs=""
+        if [[ -n "$spa_sources" ]]; then
+            spa_inputs=$(paste -d ' ' <(printf '%s\n' "$spa_sources" | /usr/bin/git -C "$SCRIPT_DIR" hash-object --stdin-paths 2>/dev/null) \
+                <(printf '%s\n' "$spa_sources") || true)
+        fi
+
         spa_rebuild_reason=""
-        spa_stale_file=""
         if [[ -n "${JCLAW_FORCE_SPA_BUILD:-}" ]]; then
             spa_rebuild_reason="forced by JCLAW_FORCE_SPA_BUILD"
         elif [[ ! -d "$SCRIPT_DIR/public/spa" ]]; then
             spa_rebuild_reason="public/spa is missing"
-        else
-            # `-nt` is a bash builtin, so this stays one process however many
-            # files git lists, and it is false for a tracked-but-deleted path
-            # rather than an error.
-            spa_listed=0
-            while IFS= read -r -d '' spa_src; do
-                spa_listed=$((spa_listed + 1))
-                spa_src_dir="${spa_src%/*}"
-                if [[ "$SCRIPT_DIR/$spa_src" -nt "$SCRIPT_DIR/public/spa" ]]; then
-                    spa_stale_file="$spa_src"
-                    break
-                fi
-                if [[ "$spa_src_dir" != frontend && "$SCRIPT_DIR/$spa_src_dir" -nt "$SCRIPT_DIR/public/spa" ]]; then
-                    spa_stale_file="$spa_src_dir/"
-                    break
-                fi
-            done < <(/usr/bin/git -C "$SCRIPT_DIR" ls-files -z --cached --others --exclude-standard -- frontend docs/user-guide 2>/dev/null)
-
-            if [[ -n "$spa_stale_file" ]]; then
-                spa_rebuild_reason="$spa_stale_file is newer than public/spa"
-            elif [[ "$spa_listed" -eq 0 ]]; then
-                spa_rebuild_reason="could not list frontend sources"
-            fi
+        elif [[ -z "$spa_inputs" ]]; then
+            spa_rebuild_reason="could not list frontend sources"
+        elif [[ ! -f "$spa_record" ]]; then
+            spa_rebuild_reason="no record of the sources public/spa was built from"
+        elif [[ "$spa_inputs" != "$(cat "$spa_record")" ]]; then
+            # diff's second line is the first input that differs: "< <hash> <path>" or "> <hash> <path>".
+            spa_changed=$(diff "$spa_record" <(printf '%s\n' "$spa_inputs") | sed -n '2s/^[<>] [0-9a-f]* //p' || true)
+            spa_rebuild_reason="${spa_changed:-a frontend source} changed since public/spa was built"
         fi
 
         if [[ -n "$spa_rebuild_reason" ]]; then
@@ -3811,6 +3807,9 @@ do_start_prod() {
             echo "==> Copying SPA build to public/spa/..."
             rm -rf "$SCRIPT_DIR/public/spa"
             cp -r .output/public "$SCRIPT_DIR/public/spa"
+            # Listed before the build, so an edit made while it ran still differs next start.
+            mkdir -p "$SCRIPT_DIR/build"
+            if [[ -n "$spa_inputs" ]]; then printf '%s\n' "$spa_inputs" > "$spa_record"; else rm -f "$spa_record"; fi
         else
             echo "==> Skipping the SPA build and frontend dependencies (public/spa is up to date)"
         fi
