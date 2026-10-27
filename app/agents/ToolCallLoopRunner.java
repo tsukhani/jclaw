@@ -171,6 +171,7 @@ public final class ToolCallLoopRunner {
         var visionState = new VisionRetryState(); // JCLAW-216: single-shot image-format-rejection retry
         var overflow = new ContextWindowManager.OverflowBudget();
         boolean cutOffResent = false;
+        String note = null;
 
         for (int round = 0; round < maxRounds; round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
@@ -181,17 +182,19 @@ public final class ToolCallLoopRunner {
             AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
             var attempt = invokeOneRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially,
-                    overflow);
+                    overflow, note);
             if (attempt.retry()) {
                 currentMessages = attempt.retryMessages();
                 round--;  // re-issue this round with the rewritten messages (gated by audio/vision retryAttempted)
                 continue;
             }
+            note = null;
             if (attempt.terminal() != null) return attempt.terminal();
             if (!cutOffResent && isCutOffToolCall(attempt.okResponse())) {
                 cutOffResent = true;
-                appendSplitNudge(agent, conversation.channelType,
-                        attempt.okResponse().choices().getFirst().finishReason(), round, currentMessages);
+                logCutOffResend(agent, conversation.channelType,
+                        attempt.okResponse().choices().getFirst().finishReason(), round);
+                note = CUT_OFF_NUDGE;
                 round--;  // the cut-off call ran no tools, so sending again does not use a tool round
                 continue;
             }
@@ -236,15 +239,22 @@ public final class ToolCallLoopRunner {
     }
 
     /**
-     * Appends {@link #CUT_OFF_NUDGE} for the turn's one resend of a cut-off call. The call itself is never
-     * added: its arguments are an incomplete JSON fragment, which a provider may refuse in the history.
+     * Logs the turn's one resend of a cut-off call. The call itself is never added to the history: its
+     * arguments are an incomplete JSON fragment, which a provider may refuse.
      */
-    private static void appendSplitNudge(Agent agent, @Nullable String channel, @Nullable String finishReason,
-                                         int round, List<ChatMessage> messages) {
+    private static void logCutOffResend(Agent agent, @Nullable String channel, @Nullable String finishReason,
+                                        int round) {
         EventLogger.warn("llm", agent.name, channel,
                 "Response stopped at the output limit (finish_reason=%s) while writing a tool call in round %d — not running it; asking the model to split it"
                         .formatted(finishReason, round + 1));
-        messages.add(ChatMessage.user(CUT_OFF_NUDGE));
+    }
+
+    /** {@code messages} followed by {@code note} as a user message, in a copy; {@code messages} itself when there is no note. */
+    private static List<ChatMessage> withNote(List<ChatMessage> messages, @Nullable String note) {
+        if (note == null) return messages;
+        var out = new ArrayList<>(messages);
+        out.add(ChatMessage.user(note));
+        return out;
     }
 
     private static void logRoundCap(Agent agent, @Nullable String channel, int maxRounds) {
@@ -315,7 +325,8 @@ public final class ToolCallLoopRunner {
     /**
      * Issue one LLM round (with optional failover to a secondary provider), translating
      * exceptions into either a single-shot audio-format retry or a terminal
-     * {@link LoopOutcome}. Also enforces the empty-choices guard.
+     * {@link LoopOutcome}. Also enforces the empty-choices guard. A {@code note} is sent after
+     * the round's view and never enters {@code currentMessages}.
      */
     @SuppressWarnings("java:S107") // Round invocation surface mirrors the loop's per-round state
     private static RoundAttempt invokeOneRound(Agent agent, Conversation conversation, LlmProvider primary,
@@ -326,12 +337,12 @@ public final class ToolCallLoopRunner {
                                                 List<VisionAudioAssembler.ImageBearer> imageBearers,
                                                 AudioRetryState audioState, VisionRetryState visionState,
                                                 boolean supportsAudioInitially,
-                                                ContextWindowManager.OverflowBudget overflow) {
+                                                ContextWindowManager.OverflowBudget overflow, @Nullable String note) {
         var sendMessages = sendView(currentMessages, agent, conversation, primary, tools, overflow);
         ChatResponse response;
         try {
             response = sendRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
-                    sendMessages, tools, overflow);
+                    sendMessages, tools, overflow, note);
         } catch (Exception e) {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
                     audioState, visionState, supportsAudioInitially, currentMessages);
@@ -346,15 +357,17 @@ public final class ToolCallLoopRunner {
     }
 
     /**
-     * One round's call, failover included. A context-length refusal that still surfaces after the
-     * failover is resent once per turn, trimmed to the turn's overflow budget; a second refusal
-     * propagates.
+     * One round's call on {@code view} followed by {@code note}, failover included. A context-length
+     * refusal that still surfaces after the failover is resent once per turn with {@code view} trimmed to
+     * the turn's overflow budget; a second refusal propagates.
      */
     @SuppressWarnings("java:S107") // the round's call surface plus the turn's overflow budget
     private static ChatResponse sendRound(Agent agent, Conversation conversation, LlmProvider primary,
                                           LlmProvider.@Nullable Fallback fallback, String modelId,
-                                          @Nullable String thinkingMode, List<ChatMessage> sendMessages,
-                                          List<ToolDef> tools, ContextWindowManager.OverflowBudget overflow) {
+                                          @Nullable String thinkingMode, List<ChatMessage> view,
+                                          List<ToolDef> tools, ContextWindowManager.OverflowBudget overflow,
+                                          @Nullable String note) {
+        var sendMessages = withNote(view, note);
         // Recompute per-round so the clamp tracks the growing history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
         try {
@@ -362,11 +375,13 @@ public final class ToolCallLoopRunner {
                     maxTokens, thinkingMode, conversation.channelType);
         } catch (LlmProvider.LlmException e) {
             if (ContextWindowManager.contextWindowRefusal(e) == null) throw e;
-            var trimmed = overflow.trimForRetry(sendMessages, agent, conversation, primary, tools);
+            // Trimmed without the note, which the trim would keep as the turn's question in place of the real one.
+            var trimmed = overflow.trimForRetry(view, agent, conversation, primary, tools);
             if (trimmed == null) throw e;
-            logOverflowRetry(agent, conversation.channelType, sendMessages, trimmed);
-            var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, trimmed, tools);
-            return LlmProvider.chatStreamedWithFailover(primary, fallback, modelId, trimmed, tools,
+            var resend = withNote(trimmed, note);
+            logOverflowRetry(agent, conversation.channelType, sendMessages, resend);
+            var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, resend, tools);
+            return LlmProvider.chatStreamedWithFailover(primary, fallback, modelId, resend, tools,
                     retryMaxTokens, thinkingMode, conversation.channelType);
         }
     }
@@ -787,7 +802,7 @@ public final class ToolCallLoopRunner {
 
         LlmProvider.StreamAccumulator accumulator;
         try {
-            accumulator = streamContinuation(ctx, currentMessages);
+            accumulator = streamContinuation(ctx, currentMessages, null);
             if (accumulator != null) accumulator = resendCutOffStream(ctx, currentMessages, accumulator, round);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -824,20 +839,21 @@ public final class ToolCallLoopRunner {
     }
 
     /**
-     * One streamed call on {@code messages} after tool results or a cut-off: the round's view, the turn's
-     * failover and overflow recovery, and its usage folded into the turn's whatever it resolves to
-     * (JCLAW-76). Null when the turn was canceled while waiting. A context-window refusal the recovery
-     * cannot clear is thrown, so the turn ends through onError and each transport renders it for its own
-     * reader; any other failed call is returned to the caller.
+     * One streamed call on {@code messages} after tool results or a cut-off, followed by {@code note} when
+     * there is one: the round's view, the turn's failover and overflow recovery, and its usage folded into
+     * the turn's whatever it resolves to (JCLAW-76). Null when the turn was canceled while waiting. A
+     * context-window refusal the recovery cannot clear is thrown, so the turn ends through onError and each
+     * transport renders it for its own reader; any other failed call is returned to the caller.
      */
     private static LlmProvider.@Nullable StreamAccumulator streamContinuation(StreamingTurnContext ctx,
-                                                                               List<ChatMessage> messages)
+                                                                               List<ChatMessage> messages,
+                                                                               @Nullable String note)
             throws InterruptedException {
         // JCLAW-108: the effective model id honors the conversation override, same as the round-1 call.
         var modelId = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
-        var sendMessages = sendView(messages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools(),
-                ctx.overflow());
+        var view = sendView(messages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools(), ctx.overflow());
+        var sendMessages = withNote(view, note);
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
@@ -851,7 +867,7 @@ public final class ToolCallLoopRunner {
             return null;
         }
         if (refusedForLength(accumulator) != null) {
-            var recovered = recoverOverflowedStream(ctx, sendMessages, accumulator);
+            var recovered = recoverOverflowedStream(ctx, view, note, accumulator);
             if (recovered == null) return null;
             var refusal = refusedForLength(recovered);
             if (refusal != null) throw refusal;
@@ -863,18 +879,19 @@ public final class ToolCallLoopRunner {
 
     /**
      * The turn's one resend of a streamed call that {@link #isCutOffToolCall(LlmProvider.StreamAccumulator)
-     * stopped at the output limit while writing a tool call}: the call stays out of {@code messages} and {@link #CUT_OFF_NUDGE} is
-     * appended. Returns {@code acc} unchanged when it was not cut off or the turn already resent once,
-     * else the resend, or null when the turn was canceled while waiting.
+     * stopped at the output limit while writing a tool call}: {@code messages} followed by
+     * {@link #CUT_OFF_NUDGE}, leaving {@code messages} as it was. Returns {@code acc} unchanged when it was
+     * not cut off or the turn already resent once, else the resend, or null when the turn was canceled while
+     * waiting.
      */
     static LlmProvider.@Nullable StreamAccumulator resendCutOffStream(StreamingTurnContext ctx,
                                                                        List<ChatMessage> messages,
                                                                        LlmProvider.StreamAccumulator acc, int round)
             throws InterruptedException {
         if (!isCutOffToolCall(acc) || !ctx.cutOffResent().compareAndSet(false, true)) return acc;
-        appendSplitNudge(ctx.agent(), ctx.channelType(), acc.finishReason(), round, messages);
+        logCutOffResend(ctx.agent(), ctx.channelType(), acc.finishReason(), round);
         ctx.cb().onStatus().accept(CUT_OFF_STATUS);
-        return streamContinuation(ctx, messages);
+        return streamContinuation(ctx, messages, CUT_OFF_NUDGE);
     }
 
     /**
@@ -897,8 +914,21 @@ public final class ToolCallLoopRunner {
                                                                          List<ChatMessage> sent,
                                                                          LlmProvider.StreamAccumulator refused)
             throws InterruptedException {
+        return recoverOverflowedStream(ctx, sent, null, refused);
+    }
+
+    /**
+     * {@link #recoverOverflowedStream} for a call that sent {@code view} followed by {@code note}. Only
+     * {@code view} is trimmed: the trim would keep the note as the turn's question in place of the real one.
+     */
+    private static LlmProvider.@Nullable StreamAccumulator recoverOverflowedStream(StreamingTurnContext ctx,
+                                                                                  List<ChatMessage> view,
+                                                                                  @Nullable String note,
+                                                                                  LlmProvider.StreamAccumulator refused)
+            throws InterruptedException {
         var refusal = refusedForLength(refused);
         if (refusal == null) return refused;
+        var sent = withNote(view, note);
         var attempt = refused;
         var fallback = ctx.fallback();
         var failure = refusal.failure();
@@ -915,14 +945,15 @@ public final class ToolCallLoopRunner {
                     ctx.channelType(), ctx.cb())) return null;
             if (refusedForLength(attempt) == null) return attempt;
         }
-        var trimmed = ctx.overflow().trimForRetry(sent, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
+        var trimmed = ctx.overflow().trimForRetry(view, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
         if (trimmed == null) return attempt;
-        logOverflowRetry(ctx.agent(), ctx.channelType(), sent, trimmed);
+        var resend = withNote(trimmed, note);
+        logOverflowRetry(ctx.agent(), ctx.channelType(), sent, resend);
         var modelId = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
-                trimmed, ctx.tools());
-        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), fallback, modelId, trimmed,
+                resend, ctx.tools());
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), fallback, modelId, resend,
                 ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(),
                 ctx.channelType());
         if (!CancellationManager.awaitAccumulatorOrCancel(retry, ctx.isCancelled(), ctx.agent(),
@@ -971,7 +1002,9 @@ public final class ToolCallLoopRunner {
 
     /**
      * Sent once per turn after a response stopped at the output limit mid tool call. Raising the limit is no
-     * remedy: {@link ContextWindowManager#effectiveMaxTokens} already asks for the model's own maximum.
+     * remedy: {@link ContextWindowManager#effectiveMaxTokens} already asks for the model's own maximum. It goes
+     * with the resend only: in the turn's history, the overflow trim and {@link ToolResultPruner} would take it
+     * for the turn's question.
      */
     private static final String CUT_OFF_NUDGE = "Your last response stopped at the output limit while it was "
             + "writing a tool call, so the call was not run. Split its content across smaller calls: for example, "

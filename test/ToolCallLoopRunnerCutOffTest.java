@@ -102,8 +102,8 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals(4, bodies.size());
         assertEquals(List.of("user:" + QUESTION, CLOCK, "user:" + NUDGE), sentAfterSystem(bodies.get(1)),
                 "the cut-off call is left out and the note follows the question");
-        assertEquals(List.of("user:" + QUESTION, CLOCK, "user:" + NUDGE, "assistant->w1", "tool<-w1", "assistant->w2",
-                "tool<-w2"), sentAfterSystem(bodies.get(3)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2"),
+                sentAfterSystem(bodies.get(3)), "the note went with the resend only");
         assertEquals(List.of("user:" + QUESTION, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
                 "assistant:" + ANSWER), stored(convo));
         assertFalse(lastAssistant(convo).truncated);
@@ -148,7 +148,87 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals(List.of("user:" + QUESTION, CLOCK, "user:" + NUDGE), sentAfterSystem(bodies.get(1)));
     }
 
+    @Test
+    void aSyncLengthRefusalLaterInTheTurnKeepsTheQuestionAndTheClockInTheTrimmedResend() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", LARGE_PART), cutOff("length"),
+                write("w2", "appendFile", "Part two.\n"), REFUSED_FOR_LENGTH, text(ANSWER));
+
+        var result = runSync(convo);
+
+        assertEquals(ANSWER, result.response());
+        assertEquals(5, bodies.size());
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2"),
+                sentAfterSystem(bodies.get(3)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w2", "tool<-w2"), sentAfterSystem(bodies.get(4)),
+                "the trim drops the oldest round, not the task");
+    }
+
+    @Test
+    void aSyncResendRefusedForLengthIsTrimmedWithTheQuestionKeptAndTheNoteLast() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", LARGE_PART), write("w2", "appendFile", "Part two.\n"),
+                cutOff("length"), REFUSED_FOR_LENGTH, text(ANSWER));
+
+        var result = runSync(convo);
+
+        assertEquals(ANSWER, result.response());
+        assertEquals(5, bodies.size());
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
+                "user:" + NUDGE), sentAfterSystem(bodies.get(3)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w2", "tool<-w2", "user:" + NUDGE),
+                sentAfterSystem(bodies.get(4)));
+    }
+
+    @Test
+    void aToolResultFromBeforeTheResendIsNotPrunedLaterInTheSameTurn() throws Exception {
+        var convo = turnScriptedAs(read("r1", SOURCE), cutOff("length"), write("w1", "writeFile", "Part 1.\n"),
+                write("w2", "appendFile", "Part 2.\n"), write("w3", "appendFile", "Part 3.\n"),
+                write("w4", "appendFile", "Part 4.\n"), write("w5", "appendFile", "Part 5.\n"),
+                write("w6", "appendFile", "Part 6.\n"), text(ANSWER));
+        var source = AgentService.workspacePath(agentName).resolve(SOURCE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, SOURCE_TEXT);
+
+        var result = runSync(convo);
+
+        assertEquals(ANSWER, result.response());
+        assertEquals(9, bodies.size());
+        assertEquals(toolResult(bodies.get(3), "r1"), toolResult(bodies.get(8), "r1"),
+                "twelve messages later this turn's result is sent as before, not as a pruned stub");
+    }
+
     // ─── streamed turn ───────────────────────────────────────────────────────
+
+    @Test
+    void aStreamedLengthRefusalLaterInTheTurnKeepsTheQuestionAndTheClockInTheTrimmedResend() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", LARGE_PART), cutOff("length"),
+                write("w2", "appendFile", "Part two.\n"), REFUSED_FOR_LENGTH, text(ANSWER));
+
+        var turn = runStreamed(convo);
+
+        assertNull(turn.error.get());
+        assertEquals(ANSWER, turn.completed.get());
+        assertEquals(5, bodies.size());
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2"),
+                sentAfterSystem(bodies.get(3)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w2", "tool<-w2"), sentAfterSystem(bodies.get(4)),
+                "the trim drops the oldest round, not the task");
+    }
+
+    @Test
+    void aStreamedResendRefusedForLengthIsTrimmedWithTheQuestionKeptAndTheNoteLast() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", LARGE_PART), write("w2", "appendFile", "Part two.\n"),
+                cutOff("length"), REFUSED_FOR_LENGTH, text(ANSWER));
+
+        var turn = runStreamed(convo);
+
+        assertNull(turn.error.get());
+        assertEquals(ANSWER, turn.completed.get());
+        assertEquals(5, bodies.size());
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
+                "user:" + NUDGE), sentAfterSystem(bodies.get(3)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w2", "tool<-w2", "user:" + NUDGE),
+                sentAfterSystem(bodies.get(4)));
+    }
 
     @Test
     void aStreamedToolCallCutOffInTheFirstRoundIsSentAgainWithANoteToSplitIt() throws Exception {
@@ -163,6 +243,8 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals("Part one.\nPart two.\n", workspaceFile());
         assertEquals(4, bodies.size());
         assertEquals(List.of("user:" + QUESTION, CLOCK, "user:" + NUDGE), sentAfterSystem(bodies.get(1)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2"),
+                sentAfterSystem(bodies.get(3)), "the note went with the resend only");
         assertEquals(List.of("user:" + QUESTION, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
                 "assistant:" + ANSWER), stored(convo));
         assertFalse(lastAssistant(convo).truncated);
@@ -181,6 +263,8 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals(5, bodies.size());
         assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "user:" + NUDGE),
                 sentAfterSystem(bodies.get(2)));
+        assertEquals(List.of("user:" + QUESTION, CLOCK, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
+                "assistant->w3", "tool<-w3"), sentAfterSystem(bodies.get(4)), "the note went with the resend only");
         assertEquals(List.of("user:" + QUESTION, "assistant->w1", "tool<-w1", "assistant->w2", "tool<-w2",
                 "assistant->w3", "tool<-w3", "assistant:" + ANSWER), stored(convo));
         assertFalse(lastAssistant(convo).truncated);
@@ -246,6 +330,28 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
     private static final String REFUSAL_BODY = """
             {"error":{"message":"Invalid value for 'temperature'.","type":"invalid_request_error",\
             "param":"temperature","code":"invalid_value"}}""";
+
+    /** Stands for a 400 refusing the request as longer than the model's context window. */
+    private static final String REFUSED_FOR_LENGTH = "<refused for length>";
+
+    private static final String LENGTH_REFUSAL_BODY = """
+            {"error":{"message":"This model's maximum context length is 100000 tokens. However, your messages \
+            resulted in 100500 tokens.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}""";
+
+    /** A write body large enough that its round is what a trim drops. */
+    private static final String LARGE_PART = "Part one of the quarterly report, with its tables. ".repeat(200);
+
+    private static final String SOURCE = "source.md";
+    /** Long enough that a pruner would stub its read result once twelve messages follow it. */
+    private static final String SOURCE_TEXT = "The harbour ledger records each ship that docks, its cargo and its berth. "
+            .repeat(110);
+
+    private static String read(String id, String path) {
+        var args = new JsonObject();
+        args.addProperty("action", "readFile");
+        args.addProperty("path", path);
+        return toolCall(id, args.toString(), "tool_calls");
+    }
 
     private static String text(String content) {
         var message = new JsonObject();
@@ -332,6 +438,16 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         return out;
     }
 
+    /** The content of the result for {@code callId} in a request body. */
+    private static String toolResult(String body, String callId) {
+        for (var element : JsonParser.parseString(body).getAsJsonObject().getAsJsonArray("messages")) {
+            var m = element.getAsJsonObject();
+            var id = m.get("tool_call_id");
+            if (id != null && id.isJsonPrimitive() && callId.equals(id.getAsString())) return m.get("content").getAsString();
+        }
+        throw new AssertionError("no result for " + callId + " in the request");
+    }
+
     /** The conversation's stored rows in the same notation as {@link #sentAfterSystem}. */
     private static List<String> stored(Conversation convo) {
         return Tx.run(() -> {
@@ -376,11 +492,11 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         server.createContext("/chat/completions", exchange -> {
             bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             var reply = replies[Math.min(next.getAndIncrement(), replies.length - 1)];
-            if (!REFUSED.equals(reply)) {
+            if (!REFUSED.equals(reply) && !REFUSED_FOR_LENGTH.equals(reply)) {
                 LlmReplyFixture.send(exchange, reply);
                 return;
             }
-            var bytes = REFUSAL_BODY.getBytes(StandardCharsets.UTF_8);
+            var bytes = (REFUSED.equals(reply) ? REFUSAL_BODY : LENGTH_REFUSAL_BODY).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(400, bytes.length);
             exchange.getResponseBody().write(bytes);

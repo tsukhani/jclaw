@@ -434,13 +434,11 @@ final class StreamingAgentRunner {
         var turn = new ToolCallLoopRunner.StreamingTurnContext(agent, conversation, conversation.id, tools, primary,
                 fallback, cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink, overflow);
         if (ToolCallLoopRunner.isCutOffToolCall(accumulator)) {
-            var resent = new ArrayList<>(messages);
-            accumulator = ToolCallLoopRunner.resendCutOffStream(turn, resent, accumulator, 0);
+            accumulator = ToolCallLoopRunner.resendCutOffStream(turn, messages, accumulator, 0);
             if (accumulator == null) {
                 CancellationManager.checkCancelled(isCancelled, agent, channelType, cb);
                 return;
             }
-            messages = resent;
             if (accumulator.error() != null) {
                 cb.onError().accept(accumulator.error());
                 return;
