@@ -59,6 +59,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible
@@ -86,6 +87,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // the calling (virtual) thread for an unbounded interval — cap it so a
     // rogue value can't wedge a request for minutes.
     private static final long RETRY_AFTER_MAX_SECONDS = 60;
+
+    /** The sync turn's usage while {@link #callCountingRounds} runs; unbound everywhere else. */
+    private static final ScopedValue<TurnUsage> TURN_ROUNDS = ScopedValue.newInstance();
 
     // OpenAI-compatible JSON field names used across request/response (de)serialization
     // and chunk-usage augmentation. Centralized so a typo can't drift one call site
@@ -1053,6 +1057,15 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     }
 
     /**
+     * Runs {@code body} with every round a {@link #chatStreamed} call completes folded into {@code usage}, as the
+     * streaming loop folds its own, so a sync turn's usage record comes from the same accumulators (JF-149). Only the
+     * sync tool loop calls {@code chatStreamed}, and a nested turn binds its own.
+     */
+    public static <T> T callCountingRounds(TurnUsage usage, Supplier<T> body) {
+        return ScopedValue.where(TURN_ROUNDS, usage).call(body::get);
+    }
+
+    /**
      * {@link #chatWithFailover} over a streamed exchange, for the sync tool loop: a stream is limited by
      * silence rather than by the length of the reply, so a long answer that keeps producing tokens is not
      * cut off at 180 s and asked again from the top. Nothing reaches a reader before this returns, so unlike
@@ -1110,7 +1123,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 throw new LlmException("Interrupted during request to " + config.name(), ie);
             }
             var error = stream.error();
-            if (error == null) return streamedResponse(stream, model);
+            if (error == null) {
+                if (TURN_ROUNDS.isBound()) TURN_ROUNDS.get().addRound(stream);
+                return streamedResponse(stream, model);
+            }
             last = error instanceof IOException io
                     ? new LlmException.Transport("Transport failure calling %s: %s".formatted(config.name(),
                             io.getMessage()), io, site.failure(Remedy.UNCLASSIFIED, null))

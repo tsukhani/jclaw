@@ -20,10 +20,13 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.Tx;
 import slash.Commands;
 import utils.CircuitBreakers;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -111,6 +114,54 @@ class ModelRouterTurnTest extends UnitTest {
         assertEquals(TaskClass.CHAT, prior.taskClass(), "the next turn reads the route back for stickiness");
         assertEquals(new Target(subscription, "test-model"), prior.target());
         assertEquals(12, prior.promptTokens());
+    }
+
+    @Test
+    void aRoutedSyncTurnRecordsItsRouteForTheNextTurn() throws Exception {
+        startServer(200, 200);
+        configure();
+        var agent = persistAgent();
+        var convo = ConversationService.create(agent, "web", "u-sync-routed");
+        commit();
+
+        assertEquals("from the subscription", runSync(agent, convo, "hello there"));
+
+        var usage = lastAssistantUsage(convo);
+        assertEquals(12, usage.get("prompt").getAsInt());
+        assertEquals(3, usage.get("completion").getAsInt());
+        assertEquals(15, usage.get("total").getAsInt());
+        assertEquals(subscription, usage.get("modelProvider").getAsString());
+        assertEquals("test-model", usage.get("modelId").getAsString());
+        var route = usage.getAsJsonObject("route");
+        assertEquals("chat", route.get("class").getAsString());
+        assertEquals("low", route.get("thinkingMode").getAsString());
+
+        var prior = TurnRouting.readPriorTurn(convo.id, null);
+        assertEquals(TaskClass.CHAT, prior.taskClass());
+        assertEquals(new Target(subscription, "test-model"), prior.target());
+        assertEquals(12, prior.promptTokens());
+    }
+
+    @Test
+    void aSyncTurnSavesTheUsageRecordAStreamedTurnSaves() throws Exception {
+        startServer(200, 200);
+        configure();
+        var agent = persistAgent();
+        var streamedConvo = ConversationService.create(agent, "web", "u-same-streamed");
+        var syncConvo = ConversationService.create(agent, "web", "u-same-sync");
+        commit();
+
+        assertNull(streamAndAwait(agent, streamedConvo, "hello there").error.get());
+        assertEquals("from the subscription", runSync(agent, syncConvo, "hello there"));
+
+        var streamed = lastAssistantUsage(streamedConvo);
+        var sync = lastAssistantUsage(syncConvo);
+        // Timings differ run to run, and only a stream has a body to time.
+        for (var timing : List.of("durationMs", "reasoningDurationMs", "streamBodyMs")) {
+            streamed.remove(timing);
+            sync.remove(timing);
+        }
+        assertEquals(streamed, sync);
     }
 
     @Test
@@ -217,6 +268,24 @@ class ModelRouterTurnTest extends UnitTest {
                 new AtomicBoolean(false), cb, null);
         assertTrue(h.terminated.await(60, TimeUnit.SECONDS), "the turn must reach a terminal callback");
         return h;
+    }
+
+    /** {@link AgentRunner#run}, the path {@code /api/chat/send} takes, on its own thread so it commits its own rows. */
+    private static String runSync(Agent agent, Conversation convo, String text) throws InterruptedException {
+        var reply = new AtomicReference<String>();
+        var error = new AtomicReference<Throwable>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var a = Tx.run(() -> AgentService.findById(agent.id));
+                var c = Tx.run(() -> ConversationService.findById(convo.id));
+                reply.set(AgentRunner.run(Objects.requireNonNull(a), Objects.requireNonNull(c), text).response());
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+        assertTrue(thread.join(Duration.ofSeconds(60)), "the sync turn must finish");
+        assertNull(error.get(), () -> "unexpected error: " + error.get());
+        return reply.get();
     }
 
     /** The subscription provider answers at {@code /sub}, the per-token one at {@code /pt}. */

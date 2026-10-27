@@ -9,6 +9,8 @@ import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
+import java.time.Duration;
+
 import static utils.GsonHolder.GSON;
 
 /**
@@ -101,7 +103,19 @@ public final class UsageMetricsBuilder {
     public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
                                         @Nullable ModelInfo modelInfo, long streamStartMs, Agent agent,
                                         Conversation conversation, long streamBodyMs) {
-        var durationMs = System.currentTimeMillis() - streamStartMs;
+        return composeUsageJson(turnUsage, modelInfo, System.currentTimeMillis() - streamStartMs, agent, conversation,
+                streamBodyMs);
+    }
+
+    /** The usage JSON for a turn that timed itself as {@code elapsed}: the sync turn, which has no stream to time. */
+    public static String buildUsageJson(LlmProvider.TurnUsage turnUsage, @Nullable ModelInfo modelInfo,
+                                        Duration elapsed, Agent agent, Conversation conversation) {
+        return composeUsageJson(turnUsage, modelInfo, elapsed.toMillis(), agent, conversation, 0L);
+    }
+
+    private static String composeUsageJson(LlmProvider.TurnUsage turnUsage, @Nullable ModelInfo modelInfo,
+                                           long durationMs, Agent agent, Conversation conversation,
+                                           long streamBodyMs) {
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
         if (!turnUsage.hasProviderUsage() && !turnUsage.hasJtokkitUsage()) {
             return buildNoProviderUsageJson(durationMs, reasoningMs, streamBodyMs);

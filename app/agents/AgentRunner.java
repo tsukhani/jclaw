@@ -2,6 +2,7 @@ package agents;
 
 import channels.ChannelStreamingSink;
 import llm.FallbackTurn;
+import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
@@ -24,6 +25,7 @@ import services.TaskToolPolicy;
 import services.Tx;
 import utils.LatencyTrace;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -745,10 +747,14 @@ public class AgentRunner {
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
         trace.mark(LatencyTrace.PROLOGUE_DONE);
+        long loopStartNs = System.nanoTime();
+        var turnUsage = new LlmProvider.TurnUsage();
+        var loopInput = prepared;
         // LLM call loop — no transaction open, JDBC connection back in pool
-        var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
-                prepared.messages(), prepared.tools(), prepared.primary(), prepared.fallback(),
-                prepared.audioBearers(), prepared.imageBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
+        var outcome = LlmProvider.callCountingRounds(turnUsage, () -> ToolCallLoopRunner.callWithToolLoop(agent,
+                conversation, conversationId, loopInput.messages(), loopInput.tools(), loopInput.primary(),
+                loopInput.fallback(), loopInput.audioBearers(), loopInput.imageBearers(), sink,
+                null));  // JCLAW-414: chat path is not task-cancellable
         var response = outcome.content();
         var truncated = outcome.truncated();
         trace.mark(LatencyTrace.STREAM_BODY_END);
@@ -766,13 +772,20 @@ public class AgentRunner {
             return new RunResult(response, updatedConv);
         }
 
+        // A turn whose every call failed ends in an error reply that counted no round, so it has no usage to record.
+        var usageJson = turnUsage.hasProviderUsage() || turnUsage.hasJtokkitUsage()
+                ? UsageMetricsBuilder.buildUsageJson(turnUsage,
+                        ModelResolver.resolveModelInfo(agent, conversation, loopInput.primary()).orElse(null),
+                        Duration.ofNanos(System.nanoTime() - loopStartNs), agent, conversation)
+                : null;
+
         // Short persistence transaction: final assistant message.
         // Conversation may have been deleted between LLM call and persist
         // (loadtest cleanup, manual UI delete, etc.); ConversationSink
         // logs + skips internally rather than inserting a row with a
         // null FK.
         boolean committed = sink.commit(() ->
-                sink.appendAssistantMessage(response, null, null, null, truncated));
+                sink.appendAssistantMessage(response, null, usageJson, null, truncated));
 
         EventLogger.info("llm", agent.name, conversation.channelType,
                 "Response generated (%d chars%s)".formatted(response.length(),
