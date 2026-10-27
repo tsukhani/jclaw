@@ -351,6 +351,15 @@ public final class WorkspaceFiles {
         return agent.parentAgent == null ? agent.serviceAgent : ownedByServiceAgent(agent.name);
     }
 
+    /** The agent whose workspace {@code agent} reads: itself, or for a subagent the root of its parent chain. */
+    public static String workspaceOwnerName(Agent agent) {
+        var cursor = agent;
+        for (int hops = 0; cursor.parentAgent != null && hops < MAX_PARENT_WALK_DEPTH; hops++) {
+            cursor = cursor.parentAgent;
+        }
+        return cursor.name;
+    }
+
     // Each file on its own, so one that cannot be deleted does not keep the other.
     private static void removeOwnerFiles(Path dir, String agentName) {
         for (var file : List.of(USER_MD, BOOTSTRAP_MD)) {

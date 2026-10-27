@@ -1,5 +1,7 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Collections;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -114,26 +116,34 @@ public final class MemorySafety {
         return sum % 10 == 0;
     }
 
+    /** Hyphenated names, so text quoting one (a prompt marker, an alert) does not match its own pattern. */
+    private record InjectionRule(String name, Pattern pattern) {}
+
     /**
      * Injection/exfiltration shapes, adapted from the Hermes memory content
      * scanner. Each pattern targets phrasing that has no business in a stored
      * fact about the user; ordinary preferences and biography never match.
      */
-    private static final Pattern[] INJECTION_PATTERNS = {
+    private static final InjectionRule[] INJECTION_RULES = {
             // prompt-injection phrasing ("ignore all previous instructions", "ignore prior instructions")
-            Pattern.compile("(?i)\\bignore\\s+(?:previous|all|above|prior|any)(?:\\s+\\w+)?\\s+instructions\\b"),
-            Pattern.compile("(?i)\\bdisregard\\s+(?:your|all|any)\\s+(?:instructions|rules|guidelines)\\b"),
-            Pattern.compile("(?i)\\byou\\s+are\\s+now\\s"),
-            Pattern.compile("(?i)\\bsystem\\s+prompt\\s+override\\b"),
-            Pattern.compile("(?i)\\bdo\\s+not\\s+tell\\s+the\\s+user\\b"),
-            Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b"),
+            new InjectionRule("ignore-instructions",
+                    Pattern.compile("(?i)\\bignore\\s+(?:previous|all|above|prior|any)(?:\\s+\\w+)?\\s+instructions\\b")),
+            new InjectionRule("disregard-instructions",
+                    Pattern.compile("(?i)\\bdisregard\\s+(?:your|all|any)\\s+(?:instructions|rules|guidelines)\\b")),
+            new InjectionRule("you-are-now", Pattern.compile("(?i)\\byou\\s+are\\s+now\\s")),
+            new InjectionRule("system-prompt-override", Pattern.compile("(?i)\\bsystem\\s+prompt\\s+override\\b")),
+            new InjectionRule("hide-from-user", Pattern.compile("(?i)\\bdo\\s+not\\s+tell\\s+the\\s+user\\b")),
+            new InjectionRule("no-restrictions",
+                    Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b")),
             // exfiltration: fetch tools shipping a credential variable off-box
-            Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)"),
+            new InjectionRule("credential-exfiltration",
+                    Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)")),
             // reading credential files
-            Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)"),
+            new InjectionRule("credential-file-read",
+                    Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)")),
             // SSH persistence / key access
-            Pattern.compile("(?i)authorized_keys"),
-            Pattern.compile("(?i)(?:\\$HOME|~)/\\.ssh\\b"),
+            new InjectionRule("ssh-authorized-keys", Pattern.compile("(?i)authorized_keys")),
+            new InjectionRule("ssh-directory", Pattern.compile("(?i)(?:\\$HOME|~)/\\.ssh\\b")),
     };
 
     /**
@@ -151,12 +161,21 @@ public final class MemorySafety {
      *         must not be persisted to memory.
      */
     public static boolean looksLikeInjection(String text) {
-        if (text == null || text.isBlank()) return false;
-        if (INVISIBLE_CHARS.matcher(text).find()) return true;
-        for (var p : INJECTION_PATTERNS) {
-            if (p.matcher(text).find()) return true;
+        return injectionRule(text) != null;
+    }
+
+    /**
+     * The name of the rule behind {@link #looksLikeInjection}: {@code invisible-character} when one is
+     * present, otherwise the first matching pattern in declaration order, so equal text always names
+     * the same rule. Null when nothing matches.
+     */
+    public static @Nullable String injectionRule(String text) {
+        if (text == null || text.isBlank()) return null;
+        if (INVISIBLE_CHARS.matcher(text).find()) return "invisible-character";
+        for (var rule : INJECTION_RULES) {
+            if (rule.pattern().matcher(text).find()) return rule.name();
         }
-        return false;
+        return null;
     }
 
     private static final String REMOVAL_VERB =

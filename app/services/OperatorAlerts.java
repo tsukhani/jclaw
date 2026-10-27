@@ -6,20 +6,26 @@ import org.jspecify.annotations.Nullable;
 import utils.AppClock;
 import utils.CircuitBreaker;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
  * circuit breaker opening or recovering, a recurring task's occurrence failing for good, an MCP server
- * moved to the handshake protocol, and stored credentials that do not decrypt at boot.
+ * moved to the handshake protocol, stored credentials that do not decrypt at boot, and a persona file
+ * left out of an agent's prompt because it matched a prompt-injection rule.
  *
  * <p>{@link #KEY} holds the destination as a delivery spec ({@code telegram:<chat id>}), sent
  * through the main agent's bindings. Unset, nothing is decided and nothing is sent. The decision
@@ -48,6 +54,10 @@ public final class OperatorAlerts {
     private static final Map<String, Outage> OUTAGES = new HashMap<>();
     private static final Map<String, Instant> LAST_ANNOUNCED = new HashMap<>();
     private static final List<Consumer<String>> LISTENERS = new CopyOnWriteArrayList<>();
+    private static final List<Consumer<String>> PERSONA_LISTENERS = new CopyOnWriteArrayList<>();
+
+    /** The SHA-256 of the content last reported per {@code agent/file}, cleared when the file is next seen clean. */
+    private static final Map<String, String> WITHHELD_PERSONA_FILES = new ConcurrentHashMap<>();
 
     private OperatorAlerts() {}
 
@@ -114,15 +124,50 @@ public final class OperatorAlerts {
      * not a destination is set. Listener-based, so a connect thread's alert is seen.
      */
     public static List<String> captureMcpAlertsForTest(Runnable body) {
+        return capture(LISTENERS, body);
+    }
+
+    private static List<String> capture(List<Consumer<String>> listeners, Runnable body) {
         var seen = new CopyOnWriteArrayList<String>();
         Consumer<String> listener = seen::add;
-        LISTENERS.add(listener);
+        listeners.add(listener);
         try {
             body.run();
         } finally {
-            LISTENERS.remove(listener);
+            listeners.remove(listener);
         }
         return List.copyOf(seen);
+    }
+
+    /**
+     * Called each time a prompt withholds a persona file that matched a prompt-injection rule. Alerts
+     * once per content of that file, so a file left as it is does not alert on every turn.
+     *
+     * @return whether this content had not been reported for the file before
+     */
+    public static boolean onPersonaFileWithheld(String agentName, String filename, String rule, String content) {
+        var hash = sha256(content);
+        if (hash.equals(WITHHELD_PERSONA_FILES.put(agentName + "/" + filename, hash))) return false;
+        var text = personaFileAlert(agentName, filename, rule);
+        for (var listener : PERSONA_LISTENERS) listener.accept(text);
+        send(text);
+        return true;
+    }
+
+    /** Called each time a persona file is not withheld, so the same content withheld again later is reported again. */
+    public static void onPersonaFileClean(String agentName, String filename) {
+        WITHHELD_PERSONA_FILES.remove(agentName + "/" + filename);
+    }
+
+    public static String personaFileAlert(String agentName, String filename, String rule) {
+        return ("JClaw alert: %s of agent '%s' matched the prompt-injection rule \"%s\" and is left out of its prompt."
+                + " The file is unchanged in the agent's workspace; it is loaded again once it no longer matches.")
+                .formatted(filename, agentName, rule);
+    }
+
+    /** Test-only: the persona-file alerts any thread decides while {@code body} runs, whether or not a destination is set. */
+    public static List<String> capturePersonaAlertsForTest(Runnable body) {
+        return capture(PERSONA_LISTENERS, body);
     }
 
     /** Called once a boot when stored credentials do not decrypt under this installation's secret (JCLAW-1455). */
@@ -192,6 +237,14 @@ public final class OperatorAlerts {
             }
             deliver(main, spec, text);
         });
+    }
+
+    private static String sha256(String content) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     private static @Nullable String destination() {

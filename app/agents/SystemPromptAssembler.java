@@ -7,6 +7,7 @@ import llm.TokenUsageEstimator;
 import mcp.McpViewTools;
 import memory.MemoryAutoCapture;
 import memory.MemoryDecay;
+import memory.MemorySafety;
 import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
@@ -18,6 +19,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
+import services.OperatorAlerts;
 import services.WorkspaceFiles;
 import utils.AppClock;
 import utils.ChannelOriginTrust;
@@ -331,22 +333,22 @@ public class SystemPromptAssembler {
         // agent that only populates AGENT.md produces the same prompt as before the
         // four persona files were added.
         b.startSection("SOUL.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "SOUL.md"));
+        appendPersonaFile(b.sb, agent, "SOUL.md");
 
         b.startSection("IDENTITY.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "IDENTITY.md"));
+        appendPersonaFile(b.sb, agent, "IDENTITY.md");
 
         // A service agent has no owner: a copy left on disk, or still in the file cache, must not reach its prompt.
         if (!WorkspaceFiles.ownedByServiceAgent(agent)) {
             b.startSection("USER.md");
-            appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "USER.md"));
+            appendPersonaFile(b.sb, agent, "USER.md");
 
             b.startSection("BOOTSTRAP.md");
-            appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "BOOTSTRAP.md"));
+            appendPersonaFile(b.sb, agent, "BOOTSTRAP.md");
         }
 
         b.startSection("AGENT.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));
+        appendPersonaFile(b.sb, agent, "AGENT.md");
 
         // 4. Skills
         var skills = SkillLoader.loadSkills(agent.name);
@@ -765,6 +767,28 @@ public class SystemPromptAssembler {
 
                 Applies to every workspace file type — documents, generated HTML, images, scripts, data. Example: "Ready to download: [slides.html](<.agent/diagrams/slides.html>)"
                 """);
+    }
+
+    // The agent can rewrite these files, which the Role section calls authoritative. The marker names only
+    // the file and the rule, so a flagged file left as it is keeps the cached prefix byte-identical.
+    private static void appendPersonaFile(StringBuilder sb, Agent agent, String filename) {
+        var content = AgentService.readWorkspaceFile(agent.name, filename);
+        // A leading BOM is how some editors save UTF-8, not smuggling; one anywhere else still matches.
+        var rule = content == null ? null
+                : MemorySafety.injectionRule(content.startsWith("\uFEFF") ? content.substring(1) : content);
+        // A subagent reads its root's files, so the root's name keeps one finding from alerting per subagent.
+        var owner = WorkspaceFiles.workspaceOwnerName(agent);
+        if (content == null || rule == null) {
+            OperatorAlerts.onPersonaFileClean(owner, filename);
+            appendSection(sb, content);
+            return;
+        }
+        if (OperatorAlerts.onPersonaFileWithheld(owner, filename, rule, content)) {
+            EventLogger.warn("agent", "Withheld %s from agent %s's prompt: it matched the prompt-injection rule \"%s\""
+                    .formatted(filename, owner, rule));
+        }
+        appendSection(sb, "[%s was withheld from this prompt: it matched the prompt-injection rule \"%s\".]"
+                .formatted(filename, rule));
     }
 
     private static void appendSection(StringBuilder sb, @Nullable String content) {
