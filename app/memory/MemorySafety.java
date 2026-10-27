@@ -154,6 +154,16 @@ public final class MemorySafety {
     private static final Pattern INVISIBLE_CHARS =
             Pattern.compile("[\\u200B\\u200C\\u200D\\u2060\\uFEFF\\u202A-\\u202E\\u2066-\\u2069]");
 
+    // A joiner between two emoji is how a multi-part emoji such as a woman technologist is spelled. Matched
+    // forward, because a lookbehind cannot see a code point stored as a surrogate pair.
+    private static final Pattern EMOJI_JOINER = Pattern.compile(
+            "([\\p{IsExtended_Pictographic}\\x{FE0F}\\x{1F3FB}-\\x{1F3FF}])\\u200D(?=\\p{IsExtended_Pictographic})");
+
+    private static boolean hasInvisibleChars(String text) {
+        var scanned = text.indexOf('‍') < 0 ? text : EMOJI_JOINER.matcher(text).replaceAll("$1");
+        return INVISIBLE_CHARS.matcher(scanned).find();
+    }
+
     /**
      * @return {@code true} when the text looks like a prompt-injection or
      *         exfiltration payload (hostile directive phrasing, credential
@@ -171,7 +181,7 @@ public final class MemorySafety {
      */
     public static @Nullable String injectionRule(String text) {
         if (text == null || text.isBlank()) return null;
-        if (INVISIBLE_CHARS.matcher(text).find()) return "invisible-character";
+        if (hasInvisibleChars(text)) return "invisible-character";
         for (var rule : INJECTION_RULES) {
             if (rule.pattern().matcher(text).find()) return rule.name();
         }

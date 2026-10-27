@@ -80,6 +80,23 @@ class MemorySafetyTest extends UnitTest {
     }
 
     @Test
+    void aJoinerInsideAnEmojiIsNotHiddenText() {
+        assertNull(MemorySafety.injectionRule("Role: developer \uD83D\uDC69\u200D\uD83D\uDCBB"));       // woman technologist
+        assertNull(MemorySafety.injectionRule("\uD83D\uDC69\uD83C\uDFFD\u200D\uD83D\uDCBB"));            // with a skin tone
+        assertNull(MemorySafety.injectionRule("\uD83D\uDC41\uFE0F\u200D\uD83D\uDDE8\uFE0F"));            // with a variation selector
+        assertNull(MemorySafety.injectionRule("\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67"));      // family: two joiners
+    }
+
+    @Test
+    void aJoinerOutsideAnEmojiIsStillHiddenText() {
+        assertEquals("invisible-character", MemorySafety.injectionRule("ig\u200Dnore"));
+        assertEquals("invisible-character", MemorySafety.injectionRule("\uD83D\uDC69\u200Dnote"));
+        assertEquals("invisible-character", MemorySafety.injectionRule("note\u200D\uD83D\uDCBB"));
+        assertEquals("invisible-character", MemorySafety.injectionRule("\uD83D\uDC69\u200D"));
+        assertEquals("invisible-character", MemorySafety.injectionRule("\uD83D\uDC69\u200D\u200D\uD83D\uDCBB"));
+    }
+
+    @Test
     void injectionScanPassesOrdinaryFacts() {
         assertFalse(MemorySafety.looksLikeInjection("The user lives in Porto, Portugal"));
         assertFalse(MemorySafety.looksLikeInjection("The user is now based in Santa Rosa"));   // "is now", not "you are now"
