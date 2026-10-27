@@ -110,9 +110,9 @@ class OperatorAlertsTest extends UnitTest {
         var text = OperatorAlerts.pauseAlert("Morning briefing", "main", 3, "retries exhausted", "read timed out");
 
         assertEquals("JClaw alert: task 'Morning briefing' (agent main) failed (retries exhausted): read timed out. "
-                + "It has failed 3 scheduled runs, so it is paused until it is resumed on the Tasks page.", text);
+                + "It has failed 3 scheduled runs in a row, so it is paused until it is resumed on the Tasks page.", text);
         assertEquals("JClaw alert: task 't' failed (permanent error): " + "x".repeat(300) + "…. "
-                        + "It has failed 4 scheduled runs, so it is paused until it is resumed on the Tasks page.",
+                        + "It has failed 4 scheduled runs in a row, so it is paused until it is resumed on the Tasks page.",
                 OperatorAlerts.pauseAlert("t", null, 4, "permanent error", "x".repeat(5000)));
     }
 

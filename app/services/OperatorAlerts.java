@@ -24,7 +24,7 @@ import java.util.function.Consumer;
 /**
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
  * circuit breaker opening or recovering, a recurring task's occurrence failing for good or pausing the
- * task after too many, an MCP server moved to the handshake protocol, stored credentials that
+ * task after too many in a row, an MCP server moved to the handshake protocol, stored credentials that
  * do not decrypt at boot, and a persona file left out of an agent's prompt because it matched a
  * prompt-injection rule.
  *
@@ -202,7 +202,7 @@ public final class OperatorAlerts {
 
     public static String pauseAlert(String taskName, @Nullable String agentName, int failedRuns, String reason,
                                     String error) {
-        return ("JClaw alert: task '%s'%s failed (%s): %s. It has failed %d scheduled runs, so it is paused"
+        return ("JClaw alert: task '%s'%s failed (%s): %s. It has failed %d scheduled runs in a row, so it is paused"
                 + " until it is resumed on the Tasks page.")
                 .formatted(taskName, agentLabel(agentName), reason, shorten(error), failedRuns);
     }

@@ -410,7 +410,7 @@ public final class TaskSchedulingService {
     }
 
     /**
-     * Flip {@link Task#paused} to false, and start the count of failed runs again, so a
+     * Flip {@link Task#paused} to false, and start the count of failed runs in a row again, so a
      * task paused for failing is not paused anew by its next failure. Companion to {@link #pause}.
      * A recurring Task's {@code scheduled_tasks} row survived the pause
      * (the handler self-rescheduled through it), so clearing the flag is

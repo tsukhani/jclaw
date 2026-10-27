@@ -241,13 +241,15 @@ public final class TaskExecutor {
 
     /**
      * Close a recurring task's occurrence: back to ACTIVE when still RUNNING, and a full retry budget
-     * for the next one, since the budget is per occurrence rather than for the task's lifetime.
+     * for the next one, since the budget is per occurrence rather than for the task's lifetime. A
+     * completed run also ends the task's run of failed occurrences.
      */
     private static void completeOccurrence(Long taskId) {
         Tx.run(() -> {
             var fresh = (Task) Task.findById(taskId);
             if (fresh == null) return null;
             fresh.retryCount = 0;
+            fresh.failedOccurrences = 0;
             if (fresh.status == Task.Status.RUNNING) fresh.status = Task.Status.ACTIVE;
             fresh.save();
             return null;

@@ -1,5 +1,6 @@
 import models.Agent;
 import models.Task;
+import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import services.ConfigService;
 import services.JClawFailureHandler;
 import services.JClawFailureHandler.Decision;
 import services.OperatorAlerts;
+import services.TaskExecutor;
 import services.TaskSchedulingService;
 import services.Tx;
 import tools.TaskTool;
@@ -25,7 +27,8 @@ import java.util.List;
 
 /**
  * A recurring task whose scheduled runs keep failing, after their retries, is paused once
- * {@code tasks.pauseAfterFailedOccurrences} of them have failed; resuming starts the count again.
+ * {@code tasks.pauseAfterFailedOccurrences} of them fail in a row; a completed run or a resume starts
+ * the count again.
  */
 class JClawFailureHandlerPauseTest extends UnitTest {
 
@@ -66,15 +69,36 @@ class JClawFailureHandlerPauseTest extends UnitTest {
             }
         });
 
-        var reason = "Paused after 3 failed scheduled runs. Last error (permanent error): " + ERROR;
+        var reason = "Paused after 3 scheduled runs in a row failed. Last error (permanent error): " + ERROR;
         assertEquals(List.of("1:false:null", "2:false:null", "3:true:" + reason), states);
         var failed = occurrenceAlert("Morning briefing");
         assertEquals(List.of(failed, failed,
                         "JClaw alert: task 'Morning briefing' (agent pause-test-agent) failed (permanent error): "
-                                + ERROR + ". It has failed 3 scheduled runs, so it is paused until it is"
+                                + ERROR + ". It has failed 3 scheduled runs in a row, so it is paused until it is"
                                 + " resumed on the Tasks page."),
                 alerts);
         assertEquals(Task.Status.ACTIVE, reload(task.id).status, "a pause keeps the task's state");
+    }
+
+    @Test
+    void aCompletedRunBetweenFailuresStartsTheCountAgain() {
+        ConfigService.set(JClawFailureHandler.PAUSE_AFTER_KEY, "3");
+        var task = recurringTask("recovers");
+        Tx.run(() -> {
+            var t = (Task) Task.findById(task.id);
+            t.payloadType = "reminder";
+            t.save();
+            return null;
+        });
+        failOccurrence(task.id, new RuntimeException(ERROR));
+        failOccurrence(task.id, new RuntimeException(ERROR));
+
+        var run = AppClock.callWith(FIXED_NOW, () -> TaskExecutor.runTask(reload(task.id)));
+        assertEquals(TaskRun.Status.COMPLETED, run.status);
+        assertEquals("0:false", reload(task.id).failedOccurrences + ":" + reload(task.id).paused);
+
+        failOccurrence(task.id, new RuntimeException(ERROR));
+        assertEquals("1:false", reload(task.id).failedOccurrences + ":" + reload(task.id).paused);
     }
 
     @Test
@@ -86,7 +110,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
 
         assertTrue(reload(task.id).paused);
         assertEquals(List.of("JClaw alert: task 'hourly-sync' (agent pause-test-agent) failed (permanent error): "
-                + ERROR + ". It has failed 1 scheduled runs, so it is paused until it is resumed on the Tasks page."),
+                + ERROR + ". It has failed 1 scheduled runs in a row, so it is paused until it is resumed on the Tasks page."),
                 alerts);
     }
 
@@ -257,7 +281,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
             var t = (Task) Task.findById(taskId);
             t.failedOccurrences = 3;
             t.paused = true;
-            t.pauseReason = "Paused after 3 failed scheduled runs. Last error (permanent error): " + ERROR;
+            t.pauseReason = "Paused after 3 scheduled runs in a row failed. Last error (permanent error): " + ERROR;
             t.save();
             return null;
         });
