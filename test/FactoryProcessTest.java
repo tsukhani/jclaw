@@ -57,18 +57,33 @@ class FactoryProcessTest extends UnitTest {
     }
 
     @Test
-    void aTimeoutKeepsWhatWasStillInThePipe() {
+    void aTimeoutKeepsWhatWasStillInThePipe(@TempDir Path dir) {
         // A sink that is slow, like a drainer scheduled late under load, leaves "second" in the pipe when the timeout fires.
-        var res = FactoryProcess.runStreaming(List.of("sh", "-c", "echo first; sleep 0.2; echo second; sleep 30"),
-                Duration.ofMillis(800), (buf, off, len) -> {
-                    try {
-                        Thread.sleep(1200);
-                    } catch (InterruptedException _) {
-                        Thread.currentThread().interrupt();
-                    }
-                });
+        var written = dir.resolve("second-written");
+        var command = List.of("sh", "-c",
+                "echo first; sleep 0.2; echo second; touch '" + written + "'; sleep 30");
+        var budget = Duration.ofMillis(800);
+        var res = runWithLateDrainer(command, budget);
+        // The marker, not the output, says sh got that far: missing output is what this test exists to catch.
+        while (!Files.exists(written) && budget.compareTo(Duration.ofMillis(6400)) < 0) {
+            budget = budget.multipliedBy(2);
+            res = runWithLateDrainer(command, budget);
+        }
+        assertTrue(Files.exists(written), "sh wrote no \"second\" within 6.4 s, so nothing was left in the pipe to check");
         assertTrue(res.timedOut(), res::toString);
         assertTrue(res.output().contains("second"), res::toString);
+    }
+
+    /** Holds the drainer in its sink until 400 ms after {@code timeout} fires, inside the 2 s the kill waits for it. */
+    private static FactoryProcess.ExecResult runWithLateDrainer(List<String> command, Duration timeout) {
+        long wakeAt = System.nanoTime() + timeout.plusMillis(400).toNanos();
+        return FactoryProcess.runStreaming(command, timeout, (buf, off, len) -> {
+            try {
+                TimeUnit.NANOSECONDS.sleep(wakeAt - System.nanoTime());
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        });
     }
 
     @Test
