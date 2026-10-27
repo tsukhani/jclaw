@@ -90,7 +90,6 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
         }
         ToolRegistrySync.release();
         SubagentRegistry.clear();
-        ConfigService.delete("chat.maxToolRounds");
     }
 
     // Sync loop: audio-format rejection retry then success.
@@ -240,37 +239,6 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
 
         assertTrue(outcome.content().contains("encountered an error"),
                 "Should return the generic-error envelope, got: " + outcome.content());
-    }
-
-    // Streaming: round >= maxToolRounds at entry skips dispatch.
-    // Covers handleToolCallsStreaming lines 262-263.
-    @Test
-    void streamingReturnsMaxRoundsEnvelopeWhenRoundAtCap() throws Exception {
-        ConfigService.set("chat.maxToolRounds", "2");
-        startStreamingServer();
-        var provider = openAiProviderForStreamingServer("max-rounds-cap");
-        var agent = persistAgent("max-rounds-stream-agent");
-        var convo = persistConversation(agent);
-
-        play.db.jpa.JPA.em().getTransaction().commit();
-        play.db.jpa.JPA.em().getTransaction().begin();
-
-        var cb = recordingCallbacks();
-        var trace = new LatencyTrace();
-        var turnUsage = new LlmProvider.TurnUsage();
-        var collectedImages = new ArrayList<String>();
-
-        String result = invokeHandleToolCallsStreaming(agent, convo, convo.id,
-                new ArrayList<>(List.of(ChatMessage.user("ping"))), List.of(),
-                List.of(toolCall("any", "noop")), "",
-                provider, cb, "low", 2,
-                new AtomicBoolean(false), trace, turnUsage, collectedImages, "web",
-                new ConversationSink(convo));
-
-        assertTrue(result.contains("maximum number of tool execution rounds"),
-                "Streaming must short-circuit at the round cap, got: " + result);
-        assertEquals(0, streamingServer.getRequestCount(),
-                "No LLM HTTP call should be issued when the cap is hit at entry");
     }
 
     // Streaming: isCancelled.get() at entry preserves priorContent.

@@ -240,11 +240,9 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
 
         var result = runOnVirtualThread(agent, convo, "Loop forever");
 
-        assertTrue(result.response().contains("maximum number of tool execution rounds"),
-                "Repeated tool failures must terminate with the deterministic max-rounds envelope, got: "
-                        + result.response());
-        assertEquals(3, llmCalls.get(),
-                "Loop should issue exactly maxToolRounds (3) LLM calls before terminating");
+        assertEquals("I reached the maximum number of tool execution rounds. Please try a simpler request.",
+                result.response(), "a closing call that still asks for a tool ends with the max-rounds envelope");
+        assertEquals(4, llmCalls.get(), "maxToolRounds (3) tool rounds, then one closing call");
     }
 
     // =========================================================

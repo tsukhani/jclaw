@@ -77,6 +77,9 @@ public final class ToolCallLoopRunner {
     private static final String NO_MODEL_CONFIGURED = "agent has no model configured";
     private static final String PROVIDER_ERROR_REPLY =
             "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
+    /** The reply of a turn that used every tool round when the closing call failed or answered nothing. */
+    private static final String ROUND_CAP_REPLY =
+            "I reached the maximum number of tool execution rounds. Please try a simpler request.";
 
     /**
      * The tool names this turn actually put in front of the model, for the dispatch
@@ -132,7 +135,7 @@ public final class ToolCallLoopRunner {
         boolean retryAttempted;
     }
 
-    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry
+    @SuppressWarnings("java:S107") // internal tool-loop dispatcher
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
                                          @Nullable Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
@@ -140,6 +143,19 @@ public final class ToolCallLoopRunner {
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, @Nullable Long taskRunId) {
+        return callWithToolLoop(agent, conversation, conversationId, messages, tools, primary, fallback,
+                audioBearers, imageBearers, sink, taskRunId, AgentRunner.maxToolRounds());
+    }
+
+    /** {@link #callWithToolLoop} with the round cap passed in, so a test need not change the shared config key. */
+    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry
+    static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
+                                         @Nullable Long conversationId,
+                                         List<ChatMessage> messages, List<ToolDef> tools,
+                                         LlmProvider primary, LlmProvider.@Nullable Fallback fallback,
+                                         List<VisionAudioAssembler.AudioBearer> audioBearers,
+                                         List<VisionAudioAssembler.ImageBearer> imageBearers,
+                                         AgentExecutionSink sink, @Nullable Long taskRunId, int maxRounds) {
         // Sibling helpers accept a null conversation, but this loop dereferences
         // conversation.channelType for the provider call — fail here rather than
         // with an opaque NPE deeper in the stack.
@@ -154,7 +170,7 @@ public final class ToolCallLoopRunner {
         var visionState = new VisionRetryState(); // JCLAW-216: single-shot image-format-rejection retry
         var overflow = new ContextWindowManager.OverflowBudget();
 
-        for (int round = 0; round < AgentRunner.maxToolRounds(); round++) {
+        for (int round = 0; round < maxRounds; round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
             // LLM round. Between-rounds is the natural safe point — we
             // never check inside a streaming chunk handler (too chatty)
@@ -179,7 +195,42 @@ public final class ToolCallLoopRunner {
             if (roundOutcome != null) return roundOutcome;
         }
 
-        return new LoopOutcome("I reached the maximum number of tool execution rounds. Please try a simpler request.");
+        return closeAtRoundCap(agent, conversation, primary, fallback, currentMessages, overflow, maxRounds);
+    }
+
+    /**
+     * The reply of a sync turn that used every tool round: the model's closing answer from one more
+     * call offered no tools, else {@link #ROUND_CAP_REPLY}.
+     */
+    private static LoopOutcome closeAtRoundCap(Agent agent, Conversation conversation, LlmProvider primary,
+                                               LlmProvider.@Nullable Fallback fallback,
+                                               List<ChatMessage> currentMessages,
+                                               ContextWindowManager.OverflowBudget overflow, int maxRounds) {
+        logRoundCap(agent, conversation.channelType, maxRounds);
+        var view = new ArrayList<>(sendView(currentMessages, agent, conversation, primary, null, overflow));
+        var closing = retrySyncSynthesis(agent, conversation, primary, fallback, view, null, CLOSING_NUDGE);
+        return closing != null
+                ? new LoopOutcome(closing.content() + ROUND_CAP_NOTE, closing.truncated())
+                : new LoopOutcome(ROUND_CAP_REPLY);
+    }
+
+    private static void logRoundCap(Agent agent, @Nullable String channel, int maxRounds) {
+        EventLogger.warn("llm", agent.name, channel,
+                "Reached the tool-round limit (%d) — asking the model for a closing answer with no tools offered"
+                        .formatted(maxRounds));
+    }
+
+    /**
+     * What a round sends: tool results pruned and compressed (JCLAW-465), then trimmed to the turn's
+     * overflow budget once a refusal set one. The caller's list is left as it was, keeping the
+     * originals for retries, yield detection and the next round's appends.
+     */
+    private static List<ChatMessage> sendView(List<ChatMessage> messages, Agent agent, Conversation conversation,
+                                              LlmProvider provider, @Nullable List<ToolDef> tools,
+                                              ContextWindowManager.OverflowBudget overflow) {
+        return overflow.apply(CompressionPipeline.compress(
+                ToolResultPruner.prune(messages, agent, conversation), agent, conversation),
+                agent, conversation, provider, tools);
     }
 
     /**
@@ -243,13 +294,7 @@ public final class ToolCallLoopRunner {
                                                 AudioRetryState audioState, VisionRetryState visionState,
                                                 boolean supportsAudioInitially,
                                                 ContextWindowManager.OverflowBudget overflow) {
-        // JCLAW-465: compress tool outputs — including this turn's, appended
-        // inside the loop — right before the call. Ephemeral view: the caller's
-        // currentMessages keeps the originals for retries, yield detection and
-        // the next round's appends.
-        var sendMessages = overflow.apply(CompressionPipeline.compress(
-                ToolResultPruner.prune(currentMessages, agent, conversation), agent, conversation),
-                agent, conversation, primary, tools);
+        var sendMessages = sendView(currentMessages, agent, conversation, primary, tools, overflow);
         ChatResponse response;
         try {
             response = sendRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
@@ -643,12 +688,16 @@ public final class ToolCallLoopRunner {
 
     static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
                                            List<ToolCall> toolCalls, String priorContent, int round) {
-        if (round >= AgentRunner.maxToolRounds()) {
-            return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
-        }
+        return handleToolCallsStreaming(ctx, messages, toolCalls, priorContent, round, AgentRunner.maxToolRounds());
+    }
+
+    /** {@link #handleToolCallsStreaming} with the round cap passed in, so a test need not change the shared config key. */
+    static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                           List<ToolCall> toolCalls, String priorContent, int round, int maxRounds) {
         if (ctx.isCancelled().get()) {
             return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         }
+        if (round >= maxRounds) return closeStreamAtRoundCap(ctx, messages, priorContent, round);
         EventLogger.info("tool", ctx.agent().name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
 
@@ -691,11 +740,8 @@ public final class ToolCallLoopRunner {
         // model id honors conversation override, same as the round-1 call.
         var effectiveModelIdForCall = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
-        // JCLAW-465: compress tool outputs (incl. this turn's) before the
-        // continuation call. Ephemeral — currentMessages keeps the originals.
-        var sendMessages = ctx.overflow().apply(CompressionPipeline.compress(
-                ToolResultPruner.prune(currentMessages, ctx.agent(), ctx.conversation()), ctx.agent(), ctx.conversation()),
-                ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
+        var sendMessages = sendView(currentMessages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools(),
+                ctx.overflow());
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
@@ -748,7 +794,8 @@ public final class ToolCallLoopRunner {
         // the deeper round's final buildImagePrefix call. channelType threads
         // through too so buildDownloadSuffix can stay channel-aware.
         if (!accumulator.toolCalls().isEmpty()) {
-            return handleToolCallsStreaming(ctx, currentMessages, accumulator.toolCalls(), accumulator.content(), round + 1);
+            return handleToolCallsStreaming(ctx, currentMessages, accumulator.toolCalls(), accumulator.content(),
+                    round + 1, maxRounds);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -849,6 +896,15 @@ public final class ToolCallLoopRunner {
     /** Nudge for a first call that stopped with no content: there are no tool results to point at. */
     private static final String ANSWER_NUDGE = "Write the full answer now as markdown. Keep any reasoning brief.";
 
+    /** Nudge for the closing call of a turn that used every tool round; the call is offered no tools. */
+    private static final String CLOSING_NUDGE = "You have used every tool round this turn allows, so no more tools can run. "
+            + "Tell me what you did, what is left to do, and anything I need to decide. Write it as markdown.";
+
+    /** Follows a closing answer, so the reader knows the work stopped short. */
+    private static final String ROUND_CAP_NOTE = "\n\n*[This turn stopped at the tool-round limit.]*";
+
+    private static final String SYNTHESIS_STATUS = "Synthesizing response (retry)...";
+
     /** Outcome of the synthesis retries: the content that answered, the canceled-turn reply, or neither. */
     record SynthesisRecovery(@Nullable String content, boolean truncated, @Nullable String cancelled) {
         static final SynthesisRecovery EMPTY = new SynthesisRecovery(null, false, null);
@@ -869,7 +925,8 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
                         .formatted(round + 1, describeEmpty(empty)));
-        var recovery = retrySynthesis(ctx, currentMessages, SYNTHESIS_NUDGE, priorContent, round);
+        var recovery = retrySynthesis(ctx, currentMessages, ctx.tools(), SYNTHESIS_NUDGE, SYNTHESIS_STATUS,
+                priorContent, round);
         if (recovery.cancelled() != null) return recovery.cancelled();
         if (recovery.content() != null) return withImages(ctx, recovery.content());
 
@@ -888,6 +945,23 @@ public final class ToolCallLoopRunner {
     }
 
     /**
+     * The reply of a streamed turn that used every tool round: the model's closing answer from one
+     * more call offered no tools, else {@link #ROUND_CAP_REPLY}. {@code messages} ends with the last
+     * results; the tool calls that reached the cap are neither run nor sent.
+     */
+    private static String closeStreamAtRoundCap(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                                String priorContent, int round) {
+        logRoundCap(ctx.agent(), ctx.channelType(), round);
+        var view = sendView(messages, ctx.agent(), ctx.conversation(), ctx.provider(), null, ctx.overflow());
+        var recovery = retrySynthesis(ctx, view, null, CLOSING_NUDGE,
+                "Writing a closing answer (tool-round limit reached)...", priorContent, round);
+        if (recovery.cancelled() != null) return recovery.cancelled();
+        if (recovery.content() == null) return ROUND_CAP_REPLY;
+        ctx.cb().onToken().accept(ROUND_CAP_NOTE);
+        return withImages(ctx, recovery.content() + ROUND_CAP_NOTE);
+    }
+
+    /**
      * A first call that stopped with no content (JCLAW-1203): the same retries as an empty
      * continuation, with a nudge that does not point at tool results.
      */
@@ -896,7 +970,7 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
                 "Reply stopped with no content on the first call (%s) — retrying with reasoning off"
                         .formatted(describeEmpty(empty)));
-        return retrySynthesis(ctx, messages, ANSWER_NUDGE, "", 0);
+        return retrySynthesis(ctx, messages, ctx.tools(), ANSWER_NUDGE, SYNTHESIS_STATUS, "", 0);
     }
 
     /** What the reader sees when every retry of a first call came back empty. */
@@ -908,21 +982,22 @@ public final class ToolCallLoopRunner {
     }
 
     /**
-     * The retries shared by both empty shapes: the nudge with reasoning off on the primary
-     * (an always-thinking model gets its lowest rung), then the agent's fallback model when
-     * configured. Each attempt counts in the turn's usage.
+     * The retries shared by both empty shapes and the round-cap closing call: the nudge with
+     * reasoning off on the primary (an always-thinking model gets its lowest rung), then the
+     * agent's fallback model when configured. Each attempt counts in the turn's usage.
      */
-    private static SynthesisRecovery retrySynthesis(StreamingTurnContext ctx, List<ChatMessage> base, String nudge,
+    private static SynthesisRecovery retrySynthesis(StreamingTurnContext ctx, List<ChatMessage> base,
+                                                    @Nullable List<ToolDef> tools, String nudge, String status,
                                                     String priorContent, int round) {
-        ctx.cb().onStatus().accept("Synthesizing response (retry)...");
+        ctx.cb().onStatus().accept(status);
         var retryMessages = new ArrayList<>(base);
         retryMessages.add(ChatMessage.user(nudge));
         var modelId = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, tools);
 
         var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
-                modelId, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
+                modelId, retryMessages, tools, ctx.cb().onToken(), ctx.cb().onReasoning(),
                 maxTokens, null, ctx.channelType());
         var cancelled = awaitOrCancel(ctx, retry, priorContent, round);
         if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
@@ -936,7 +1011,7 @@ public final class ToolCallLoopRunner {
                     "Synthesis retry also empty (%s) — retrying on fallback %s"
                             .formatted(describeEmpty(retry), fallback.provider().config().name() + " / " + fallback.modelId()));
             ctx.cb().onStatus().accept("Synthesizing response (fallback model)...");
-            var second = fallback.provider().chatStreamAccumulate(fallback.modelId(), retryMessages, ctx.tools(),
+            var second = fallback.provider().chatStreamAccumulate(fallback.modelId(), retryMessages, tools,
                     ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, null, ctx.channelType());
             cancelled = awaitOrCancel(ctx, second, priorContent, round);
             if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
