@@ -73,8 +73,16 @@ class FactoryProcessTest extends UnitTest {
 
     @Test
     void aTimeoutKillsTheChildrenToo() throws Exception {
-        var res = FactoryProcess.run(List.of("sh", "-c", "sleep 30 & echo $!; wait"), Duration.ofMillis(500));
+        var command = List.of("sh", "-c", "sleep 30 & echo $!; wait");
+        var budget = Duration.ofMillis(500);
+        var res = FactoryProcess.run(command, budget);
+        // The timeout runs from spawn, so a host too loaded to start sh and print the pid in time gets a longer one.
+        while (res.output().isBlank() && budget.compareTo(Duration.ofSeconds(8)) < 0) {
+            budget = budget.multipliedBy(2);
+            res = FactoryProcess.run(command, budget);
+        }
         assertTrue(res.timedOut(), res::toString);
+        assertFalse(res.output().isBlank(), "sh printed no child pid within 8 s, so there is no child to check");
         var child = ProcessHandle.of(Long.parseLong(res.output().trim()));
         if (child.isPresent()) child.get().onExit().get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertFalse(child.map(ProcessHandle::isAlive).orElse(false), res::toString);
