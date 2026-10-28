@@ -717,29 +717,35 @@ public class ToolRegistry {
                 .toList();
     }
 
-    /**
-     * JF-153: whether {@code agent}'s enabled native schemas exceed {@link #DEFERRAL_THRESHOLD_TOKENS}, estimated as the
-     * prompt breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} not {@code false}. Read off the agent's
-     * configuration alone, never the turn, so a conversation sends the same schemas every turn and the provider's
-     * prefix cache holds.
-     */
+    /** JF-153: whether a turn of {@code agent} that no task fences defers, as {@link #deferCold} decides it. */
     public static boolean defersTools(Agent agent) {
+        return defersTools(getToolDefsForAgent(agent));
+    }
+
+    /**
+     * Whether the native schemas in {@code defs} exceed {@link #DEFERRAL_THRESHOLD_TOKENS}, estimated as the prompt
+     * breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} not {@code false}.
+     */
+    private static boolean defersTools(List<ToolDef> defs) {
         if (!ConfigService.getBoolean(TOOL_DEFERRAL_KEY, true)) return false;
         long chars = 0;
-        for (var def : getToolDefsForAgent(agent)) {
+        for (var def : defs) {
             if (isNative(def.function().name())) chars += GsonHolder.GSON.toJson(def).length();
         }
         return Math.round(chars / 4.0) > DEFERRAL_THRESHOLD_TOKENS;
     }
 
     /**
-     * JF-153: {@code defs} as sent to the model. For an agent that {@link #defersTools}, the native tools outside
+     * JF-153: {@code defs} as sent to the model. When their native schemas pass the threshold, the native tools outside
      * {@link #CORE_TOOLS} leave the list and one {@code tool_invoke} definition takes their place after the core ones,
      * its {@code tool} enumerating them in their order; MCP handles stay. Otherwise, or with nothing to defer,
-     * {@code defs} unchanged. Applied after a task fence, so the handle reaches only what the fence lets through.
+     * {@code defs} unchanged. Pass them after a task fence and before {@link #forTurn}: the fence is fixed for a
+     * conversation, so a task held to a few tools sends them whole, while judging after {@code forTurn} would move the
+     * threshold with each turn's {@code jclaw_api} and break the provider's prefix cache.
      */
+    @SuppressWarnings("java:S1172") // agent kept for the callers; the decision reads the fenced defs alone
     public static List<ToolDef> deferCold(Agent agent, List<ToolDef> defs) {
-        if (!defersTools(agent)) return defs;
+        if (!defersTools(defs)) return defs;
         var direct = new ArrayList<ToolDef>();
         var others = new ArrayList<ToolDef>();
         var deferred = new ArrayList<String>();

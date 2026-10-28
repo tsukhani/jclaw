@@ -13,6 +13,7 @@ import services.AttachmentService;
 import services.EventLogger;
 import services.TaskWriteService;
 import services.Tx;
+import tools.ToolInvokeTool;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -416,7 +417,8 @@ public final class EvalCapture {
         /**
          * Pull {@code function.name} out of the single serialized
          * {@code LlmTypes.ToolCall} that {@code ParallelToolExecutor} commits per
-         * call. A shape we cannot parse is skipped rather than thrown: losing one
+         * call, or for a {@code tool_invoke} run the tool it names (JF-153). A shape
+         * we cannot parse is skipped rather than thrown: losing one
          * tool name costs a check its evidence, while throwing would lose the whole
          * case's answer along with it.
          */
@@ -425,18 +427,20 @@ public final class EvalCapture {
                 var obj = JsonParser.parseString(toolCallJson).getAsJsonObject();
                 var fn = obj.getAsJsonObject("function");
                 if (fn == null) return;
-                var name = fn.get("name");
-                if (name == null || name.isJsonNull()) return;
-                attempted.add(name.getAsString());
-                var id = obj.get("id");
-                if (id == null || id.isJsonNull()) return;
-                nameByCallId.put(id.getAsString(), name.getAsString());
+                var nameEl = fn.get("name");
+                if (nameEl == null || nameEl.isJsonNull()) return;
                 // Arguments ride in the same serialized ToolCall the executor commits,
                 // so capturing them needs no extra plumbing — only keeping them.
-                var args = fn.get("arguments");
-                if (args != null && !args.isJsonNull()) {
-                    argsByCallId.put(id.getAsString(), args.getAsString());
-                }
+                var argsEl = fn.get("arguments");
+                var args = argsEl != null && !argsEl.isJsonNull() ? argsEl.getAsString() : null;
+                var invoked = ToolInvokeTool.invokedThrough(nameEl.getAsString(), args);
+                var name = invoked != null ? invoked.name() : nameEl.getAsString();
+                attempted.add(name);
+                var id = obj.get("id");
+                if (id == null || id.isJsonNull()) return;
+                nameByCallId.put(id.getAsString(), name);
+                var callArgs = invoked != null ? invoked.args() : args;
+                if (callArgs != null) argsByCallId.put(id.getAsString(), callArgs);
             } catch (RuntimeException e) {
                 EventLogger.warn(EVENT_CATEGORY, "Unparseable tool call in eval capture: " + e);
             }

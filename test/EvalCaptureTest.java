@@ -93,6 +93,31 @@ class EvalCaptureTest extends UnitTest {
     }
 
     @Test
+    void aRunThroughToolInvokeIsRecordedAsTheToolItRanWithItsOwnArguments() {
+        // JF-153: an agent with many tools reaches most of them through the tool_invoke handle.
+        var run = """
+                {"id":"call_3","type":"function","function":{"name":"tool_invoke",\
+                "arguments":"{\\"tool\\":\\"task_manager\\",\\"args\\":{\\"action\\":\\"list\\"}}"}}""";
+        var list = "{\"id\":\"call_4\",\"type\":\"function\",\"function\":{\"name\":\"tool_invoke\",\"arguments\":\"{}\"}}";
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, list, null, null, false);
+            sink.appendToolResult("call_4", "{\"tools\":[]}", null);
+            sink.noteToolOutcome("call_4", ToolRegistry.ToolResult.Outcome.DISPATCHED);
+            sink.appendAssistantMessage(null, run, null, null, false);
+            sink.appendToolResult("call_3", "No tasks.", null);
+            sink.noteToolOutcome("call_3", ToolRegistry.ToolResult.Outcome.DISPATCHED);
+            return "You have no tasks.";
+        });
+
+        var recorded = capture.responses().get("clock");
+        assertEquals(List.of("tool_invoke", "task_manager"), recorded.toolsCalled());
+        assertEquals(List.of("tool_invoke", "task_manager"), recorded.toolsAttempted());
+        assertEquals(List.of("{\"action\":\"list\"}"), recorded.argsFor("task_manager"));
+        assertEquals(List.of("No tasks."), recorded.resultsFor("task_manager"));
+        assertEquals(List.of("{}"), recorded.argsFor("tool_invoke"), "a list call stays the handle's own");
+    }
+
+    @Test
     void capturedRecordCarriesTheResultOfDispatchedCalls() {
         // JCLAW-891: arguments say what the agent asked for; only the result says what
         // happened. appendToolResult was already being called and discarded.

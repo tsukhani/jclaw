@@ -103,6 +103,16 @@ class ToolDeferralTest extends UnitTest {
     }
 
     @Test
+    void aTaskFencedToToolsUnderTheThresholdIsSentThemWholeOnAnAgentThatDefers() {
+        var defs = ToolRegistry.deferCold(agent, TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
+                Set.of("exec", "cold_b", "cold_danger"), "fenced", agent.name));
+
+        assertTrue(ToolRegistry.defersTools(agent), "control: the agent's unfenced turns defer");
+        assertEquals(List.of("exec", "cold_b", "cold_danger"), names(defs));
+        assertEquals("ran cold_b with {\"n\":3}", dispatch(defs, "cold_b", "{\"n\":3}"));
+    }
+
+    @Test
     void aTurnSentNoHandleRefusesACallToIt() {
         grant("cold_a", false);
         var defs = sentDefs();
@@ -152,10 +162,27 @@ class ToolDeferralTest extends UnitTest {
     void theListAndTheSchemasReachTheModelWholeWhileARunIsTheNamedToolsOwn() {
         var handle = ToolRegistry.lookupTool(ToolInvokeTool.NAME);
 
+        ToolRegistry.publish(List.of(stub("cold_b", "Counts things.", "Counts things.", false), keeper("cold_keep")));
+
         assertTrue(handle.verbatimResult("{}"));
         assertTrue(handle.verbatimResult("{\"describe\":[\"cold_b\"]}"));
+        assertTrue(handle.verbatimResult("{\"tool\":\"cold_keep\",\"args\":{}}"));
+        assertTrue(handle.keepsResultInContext("{\"tool\":\"cold_keep\",\"args\":{}}"));
         assertFalse(handle.verbatimResult("{\"tool\":\"cold_b\",\"args\":{\"n\":3}}"));
+        assertFalse(handle.keepsResultInContext("{\"tool\":\"cold_b\",\"args\":{\"n\":3}}"));
         assertFalse(handle.keepsResultInContext("{}"));
+    }
+
+    @Test
+    void theHandleRunsNoToolItselfSoOnlyTheTurnsGatesDispatchOne() {
+        var refusal = "Error: tool_invoke runs no tool itself; the turn's tool loop dispatches 'cold_danger' as its own call.";
+
+        assertEquals(refusal, ToolRegistry.execute(ToolInvokeTool.NAME, "{\"tool\":\"cold_danger\",\"args\":{}}", agent));
+        var offered = ToolRegistry.executeRich(ToolInvokeTool.NAME, "{\"tool\":\"cold_danger\",\"args\":{}}", agent,
+                ToolRegistry.offeredNames(sentDefs()));
+        assertEquals(refusal, offered.text());
+        assertEquals(ToolRegistry.ToolResult.Outcome.NOT_ENABLED, offered.outcome());
+        assertEquals(List.of(), ran);
     }
 
     @Test
@@ -340,6 +367,19 @@ class ToolDeferralTest extends UnitTest {
                 ran.add(name);
                 return "ran " + name + " with " + argsJson;
             }
+        };
+    }
+
+    /** A stub whose result the model reads whole and keeps, as a skill's text is. */
+    private ToolRegistry.Tool keeper(String name) {
+        var base = stub(name, "Keeps its result.", "Keeps its result.", false);
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return name; }
+            @Override public String description() { return base.description(); }
+            @Override public Map<String, Object> parameters() { return base.parameters(); }
+            @Override public boolean verbatimResult(String argsJson) { return true; }
+            @Override public boolean keepsResultInContext(String argsJson) { return true; }
+            @Override public String execute(String argsJson, Agent caller) { return base.execute(argsJson, caller); }
         };
     }
 

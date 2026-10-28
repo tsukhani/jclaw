@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
+import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentToolConfig;
@@ -17,14 +18,17 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.Tx;
+import tools.JClawApiTool;
 import tools.ToolInvokeTool;
 import utils.CircuitBreakers;
+import utils.GsonHolder;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -158,6 +162,42 @@ class ToolDeferralTurnTest extends UnitTest {
     }
 
     @Test
+    void aFireFencedUnderTheThresholdIsSentItsToolsWholeWhileAnUnfencedFireIsSentTheHandle() throws Exception {
+        var natives = names(ToolRegistry.getToolDefsForAgent(agent()));
+        var fence = Set.of("web_search", "message", "task_manager");
+        var unfenced = new ArrayList<>(natives.stream().filter(CORE::contains).filter(n -> !"jclaw_api".equals(n)).toList());
+        unfenced.add(ToolInvokeTool.NAME);
+
+        fire(fence);
+        fire(null);
+
+        assertTrue(natives.containsAll(fence), "control: the agent holds every fenced tool: " + natives);
+        assertEquals(natives.stream().filter(fence::contains).toList(), requestTools(0));
+        assertEquals(unfenced, requestTools(1), "a fire with no task the owner reads alone is not offered jclaw_api");
+    }
+
+    @Test
+    void aTurnThatWithholdsJclawApiDefersExactlyAsTheOwnersTurnDoes() throws Exception {
+        var agent = agent();
+        var jclawApi = new JClawApiTool();
+        ToolRegistry.publish(List.of(jclawApi));
+        int jclawApiChars = GsonHolder.GSON.toJson(ToolRegistry.getToolDefsForAgent(agent).getFirst()).length();
+        ToolRegistry.publish(List.of(jclawApi, paddedTo("cold_pad", 40_002 - jclawApiChars)));
+        var defs = ToolRegistry.getToolDefsForAgent(agent);
+
+        turn("web", null);
+        turn("app", "an-app");
+
+        assertEquals(40_002, defs.stream().mapToInt(d -> GsonHolder.GSON.toJson(d).length()).sum(),
+                "control: jclaw_api carries the agent's schemas past the threshold");
+        assertEquals(List.of("cold_pad"), names(ToolRegistry.deferCold(agent, ToolRegistry.forTurn(defs, false))),
+                "control: judged without jclaw_api, the schemas fall under it");
+        assertEquals(List.of(JClawApiTool.TOOL_NAME, ToolInvokeTool.NAME), requestTools(0));
+        assertEquals(List.of(ToolInvokeTool.NAME), requestTools(1), "a hosted app's turn is not offered jclaw_api");
+        assertEquals(List.of("cold_pad"), handleNames(1));
+    }
+
+    @Test
     void aCallTheModelMakesThroughTheHandleRunsTheNamedTool() throws Exception {
         replies.add("""
                 {"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[
@@ -180,12 +220,27 @@ class ToolDeferralTurnTest extends UnitTest {
     }
 
     private void turn() throws Exception {
-        var conversationId = Tx.run(() -> ConversationService.create(agent(), "web", null).id);
+        turn("web", null);
+    }
+
+    private void turn(String channel, String peerId) throws Exception {
+        var conversationId = Tx.run(() -> ConversationService.create(agent(), channel, peerId).id);
         commit();
+        onVirtualThread(() -> AgentRunner.run(agent(), Tx.run(() -> ConversationService.findById(conversationId)), "hello"));
+    }
+
+    /** A task fire held to {@code allowedTools}, null for none, with no task run behind it. */
+    private void fire(Set<String> allowedTools) throws Exception {
+        onVirtualThread(() -> AgentRunner.runForTask(agent(), "hello", new AgentExecutionSinkTest.Recorder(),
+                allowedTools, "deferral-fire", null, null));
+    }
+
+    // A turn runs on its own thread with no ambient transaction; the test thread holds one.
+    private static void onVirtualThread(Runnable body) throws Exception {
         var error = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
-                AgentRunner.run(agent(), Tx.run(() -> ConversationService.findById(conversationId)), "hello");
+                body.run();
             } catch (Exception e) {
                 error.set(e);
             }
@@ -193,6 +248,18 @@ class ToolDeferralTurnTest extends UnitTest {
         thread.join(30_000);
         assertFalse(thread.isAlive(), "the turn should complete within 30s");
         if (error.get() != null) throw error.get();
+    }
+
+    /** A native stub whose definition serializes to exactly {@code chars} characters. */
+    private static ToolRegistry.Tool paddedTo(String name, int chars) {
+        Map<String, Object> parameters = Map.of("type", "object");
+        var description = "a".repeat(chars - GsonHolder.GSON.toJson(ToolDef.of(name, "", parameters)).length());
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return name; }
+            @Override public String description() { return description; }
+            @Override public Map<String, Object> parameters() { return parameters; }
+            @Override public String execute(String argsJson, Agent caller) { return "padded"; }
+        };
     }
 
     private List<String> requestTools(int request) {
@@ -221,7 +288,7 @@ class ToolDeferralTurnTest extends UnitTest {
         return requestBodies.get(request).getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString();
     }
 
-    private static List<String> names(List<llm.LlmTypes.ToolDef> defs) {
+    private static List<String> names(List<ToolDef> defs) {
         return defs.stream().map(d -> d.function().name()).toList();
     }
 

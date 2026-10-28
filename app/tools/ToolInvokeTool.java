@@ -99,12 +99,16 @@ public final class ToolInvokeTool implements ToolRegistry.Tool {
     }
 
     /**
-     * The handle's answer on a turn that offered {@code offered}: the list, the schemas asked for, the named tool's
-     * own result, or a refusal. {@code null} reaches every native tool {@code agent} has enabled.
+     * The handle's answer on a turn that offered {@code offered}: the list, the schemas asked for, or a refusal.
+     * {@code null} reaches every native tool {@code agent} has enabled. It never runs a tool: a run reaching here
+     * skipped the dispatcher's unwrap, and with it the offered check, the approval gate and the event log.
      */
     public ToolRegistry.ToolResult invoke(String argsJson, Agent agent, @Nullable Set<String> offered) {
         var invocation = ToolRegistry.unwrapInvocation(NAME, argsJson, offered);
-        if (invocation != null) return ToolRegistry.executeRich(invocation.name(), invocation.args(), agent, offered);
+        if (invocation != null) {
+            return ToolRegistry.ToolResult.refused(("Error: %s runs no tool itself; the turn's tool loop dispatches '%s' "
+                    + "as its own call.").formatted(NAME, invocation.name()), ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
+        }
         var args = argsObject(argsJson);
         var reached = ToolRegistry.deferredTools(agent, offered);
         var named = namedTool(args);
