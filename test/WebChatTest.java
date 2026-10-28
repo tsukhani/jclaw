@@ -58,15 +58,16 @@ class WebChatTest extends UnitTest {
     }
 
     @Test
-    void loadRecentMessagesRespectLimit() {
+    void loadRecentMessagesReturnsAChatUnderTheDefaultCapWholeInOrder() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         for (int i = 0; i < 60; i++) {
             ConversationService.appendUserMessage(convo, "Message %d".formatted(i));
         }
         var messages = ConversationService.loadRecentMessages(convo);
-        assertEquals(50, messages.size()); // Default max is 50
-        // Should be in chronological order
-        assertTrue(messages.getFirst().content.contains("Message 1")); // oldest of last 50
+        // The default cap is 1,000 rows (JF-156); ConversationServiceTest pins the cap itself.
+        assertEquals(60, messages.size());
+        assertEquals("Message 0", messages.getFirst().content);
+        assertEquals("Message 59", messages.getLast().content);
     }
 
     @Test
