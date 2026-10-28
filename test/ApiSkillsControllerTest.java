@@ -311,6 +311,32 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"commands\""));
     }
 
+    @Test
+    void listGlobalSkillFilesSizesSkillMdAndItsReferences() throws Exception {
+        login();
+        var dir = seedGlobalSkill("alpha-skill", "alpha", "First test skill");
+        var skillMd = Files.readString(dir.resolve("SKILL.md"));
+        var reference = "Call the API with a keyword. ".repeat(12);
+        Files.createDirectories(dir.resolve("references"));
+        Files.writeString(dir.resolve("references/api.md"), reference);
+        Files.createDirectories(dir.resolve("tools"));
+        Files.writeString(dir.resolve("tools/README.md"), "How to run the tool.");
+
+        var files = com.google.gson.JsonParser.parseString(getContent(GET("/api/skills/alpha-skill/files")))
+                .getAsJsonObject().getAsJsonArray("files");
+        var byPath = new java.util.HashMap<String, com.google.gson.JsonObject>();
+        files.forEach(f -> byPath.put(f.getAsJsonObject().get("path").getAsString(), f.getAsJsonObject()));
+
+        assertEquals(skillMd.length(), byPath.get("SKILL.md").get("chars").getAsInt());
+        assertEquals(llm.TokenUsageEstimator.estimateText(null, skillMd).tokens(),
+                byPath.get("SKILL.md").get("estimatedTokens").getAsInt());
+        assertEquals(reference.length(), byPath.get("references/api.md").get("chars").getAsInt());
+        assertEquals(llm.TokenUsageEstimator.estimateText(null, reference).tokens(),
+                byPath.get("references/api.md").get("estimatedTokens").getAsInt());
+        assertFalse(byPath.get("tools/README.md").has("chars"), "only what an agent reads into its conversation is sized");
+        assertFalse(byPath.get("tools/README.md").has("estimatedTokens"));
+    }
+
     /**
      * {@code SkillLoader.parseSkillFile} swallows the IOException from an unreadable
      * file and answers null, so the detail endpoint has to check before handing the

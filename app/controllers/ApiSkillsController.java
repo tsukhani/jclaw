@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.AgentSkillConfig;
 import org.jspecify.annotations.Nullable;
@@ -94,7 +95,8 @@ public class ApiSkillsController extends Controller {
 
     public record SkillToolRef(String name, String description) {}
 
-    public record SkillFileEntry(String path, String name, long size, boolean isText) {}
+    public record SkillFileEntry(String path, String name, long size, boolean isText, @Nullable Integer chars,
+                                 @Nullable Integer estimatedTokens) {}
 
     public record SkillFilesResponse(List<SkillFileEntry> files, List<SkillToolRef> tools,
                                      List<String> commands, String author) {}
@@ -831,9 +833,22 @@ public class ApiSkillsController extends Controller {
         var text = isTextFile(p);
         map.put("isText", text);
         if (text) {
-            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) { /* skip unreadable */ }
+            try {
+                var content = Files.readString(p);
+                allTextContent.append(content).append("\n");
+                if (countsTowardContext(rel)) {
+                    map.put("chars", content.length());
+                    map.put("estimatedTokens", TokenUsageEstimator.estimateText(null, content).tokens());
+                }
+            } catch (IOException _) { /* skip unreadable */ }
         }
         return map;
+    }
+
+    /** The files an agent reads into its conversation: SKILL.md and its references, sized on the skill page. */
+    private static boolean countsTowardContext(String relativePath) {
+        var path = relativePath.replace('\\', '/');
+        return SKILL_MD.equals(path) || (path.startsWith("references/") && path.endsWith(".md"));
     }
 
     /**

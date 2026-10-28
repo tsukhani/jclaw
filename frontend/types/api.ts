@@ -610,6 +610,9 @@ export interface SkillFile {
   path: string
   size: number
   isText: boolean
+  /** SKILL.md and references/*.md only: what the file costs an agent's conversation once read. */
+  chars?: number
+  estimatedTokens?: number
 }
 
 /** Minimal tool reference as returned inside a SkillFilesResponse.tools array. */

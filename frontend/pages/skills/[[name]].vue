@@ -748,6 +748,11 @@ onUnmounted(() => {
 // File browser state for view mode — skill file contents are read-only; authoring
 // happens exclusively via the skill-creator skill (using the filesystem tool).
 const skillFiles = ref<SkillFile[]>([])
+/** Matches ToolResultPruner.SKILL_KEEP_CHARS: a long conversation keeps only this much of a SKILL.md. */
+const SKILL_MD_LIMIT_CHARS = 20_000
+const contextFiles = computed(() => skillFiles.value
+  .filter(f => f.chars !== undefined)
+  .sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path))))
 const skillTools = ref<SkillToolRef[]>([])
 // Shell commands this skill contributes to an installing agent's allowlist.
 // Populated from the SKILL.md `jclaw-commands` frontmatter via the files API.
@@ -1612,6 +1617,58 @@ function totalSkillCount(agentId: number) {
             {{ cmd }}
           </span>
         </div>
+      </div>
+
+      <!-- What SKILL.md and its references cost an agent's conversation once read. -->
+      <div
+        v-if="contextFiles.length"
+        class="bg-surface-elevated border border-border px-4 py-3"
+      >
+        <div class="flex items-center gap-2 mb-3">
+          <DocumentTextIcon
+            class="w-4 h-4 text-violet-700 dark:text-violet-400"
+            aria-hidden="true"
+          />
+          <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Context size</span>
+          <span class="text-xs text-fg-muted normal-case tracking-normal">
+            what each file adds to a conversation once the agent reads it
+          </span>
+        </div>
+        <table class="text-xs">
+          <thead>
+            <tr class="text-fg-muted">
+              <th class="text-left font-medium pr-6 pb-1">
+                File
+              </th>
+              <th class="text-right font-medium pr-6 pb-1">
+                Characters
+              </th>
+              <th class="text-right font-medium pb-1">
+                Est. tokens
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="f in contextFiles"
+              :key="f.path"
+            >
+              <td class="font-mono text-fg-strong pr-6 py-0.5">
+                {{ f.path }}
+                <span
+                  v-if="f.path === 'SKILL.md' && f.chars! > SKILL_MD_LIMIT_CHARS"
+                  class="ml-2 font-sans text-amber-700 dark:text-amber-400"
+                >over the {{ SKILL_MD_LIMIT_CHARS.toLocaleString('en-US') }}-character limit</span>
+              </td>
+              <td class="text-right tabular-nums pr-6 py-0.5">
+                {{ f.chars!.toLocaleString('en-US') }}
+              </td>
+              <td class="text-right tabular-nums py-0.5">
+                ~{{ (f.estimatedTokens ?? 0).toLocaleString('en-US') }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div
