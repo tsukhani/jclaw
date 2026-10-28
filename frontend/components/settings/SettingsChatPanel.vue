@@ -186,7 +186,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About compactionReserveTokens"
               content-class="w-72 font-mono"
             >
-              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve. Larger reserve = compaction fires sooner.
+              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches chat.compaction.triggerTokens (default 150,000), whichever comes first. Larger reserve = compaction fires sooner.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'compactionReserveTokens'">

@@ -119,9 +119,12 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void shouldCompact_true_whenOverBudget() {
-        // budget=200k-15k=185k. 190k triggers.
+        // Token trigger off, so only the window rule can fire: one token past the window less the reserve. The
+        // reserve is read rather than assumed 15k, because other classes set it while this one runs.
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
-        assertTrue(SessionCompactor.shouldCompact(190_000, mi));
+        int budget = 200_000 - SessionCompactor.effectiveReserveTokens();
+        assertTrue(SessionCompactor.shouldCompact(budget + 1, mi, 0));
+        assertFalse(SessionCompactor.shouldCompact(budget, mi, 0));
     }
 
     @Test
@@ -257,6 +260,97 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(List.of(List.of()), toolLists);
         assertEquals(1, calls.size());
         assertTranscript(rows.subList(0, result.turnsCompacted()), calls.getFirst());
+    }
+
+    @Test
+    void aKeptUserMessageWhoseTextDiffersFromItsRowSendsTheTranscript() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var rows = rowsOf(conv.id);
+        // Every user slot rewritten, so whichever user row the boundary lands on, the slot after it is a user
+        // message whose text is not that row's: the role check passes and only the text check can refuse.
+        var shifted = new ArrayList<ChatMessage>();
+        for (var m : turnMessages(conv.id)) shifted.add("user".equals(m.role()) ? ChatMessage.user("other text") : m);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(shifted, TOOLS),
+                (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    return reply("TRANSCRIPT SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(List.of()), toolLists);
+        assertTranscript(rows.subList(0, result.turnsCompacted()), calls.getFirst());
+    }
+
+    @Test
+    void aFailedCallOnTheTurnsRequestIsRetriedOnceOnTheTranscript() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var rows = rowsOf(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    if (calls.size() == 1) throw new IllegalStateException("prompt plus max_tokens exceeds the window");
+                    return reply("TRANSCRIPT AFTER FAILURE");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(TOOLS, List.of()), toolLists);
+        assertTranscript(rows.subList(0, result.turnsCompacted()), calls.get(1));
+        commitAndReopen();
+        assertEquals("TRANSCRIPT AFTER FAILURE", SessionCompaction.findLatest(Conversation.findById(conv.id)).summary);
+    }
+
+    @Test
+    void aTranscriptRetryThatFailsTooStoresNoSummary() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.incrementAndGet();
+                    throw new IllegalStateException("provider down");
+                });
+
+        assertEquals(2, calls.get(), "the turn's request, then the transcript once");
+        assertFalse(result.compacted());
+        assertEquals("llm error", result.skipReason());
+        commitAndReopen();
+        assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    @Test
+    void textPartsAloneKeepTheShapeTheTurnSendsThem() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var turn = new ArrayList<>(turnMessages(conv.id));
+        // A user row with a document attachment hydrates as text parts and no media part.
+        var withDocument = new ChatMessage("user", List.of(Map.of("type", "text", "text", "Turn 0 content"),
+                Map.of("type", "text", "text", "[Attached file: notes.pdf]")), null, null, null);
+        turn.set(1, withDocument);
+        var request = new AtomicReference<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(turn, TOOLS),
+                (msgs, defs) -> {
+                    request.set(msgs);
+                    return reply("DOCUMENT SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(withDocument, request.get().get(1));
     }
 
     @Test

@@ -99,6 +99,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertEquals(slice(turnOne, 0, shared), slice(summary, 0, shared));
         assertEquals(List.of(TOOL), toolNames(requests.get(0)));
         assertEquals(requests.get(0).get("tools"), requests.get(1).get("tools"));
+        assertEquals(requests.get(2).get("tools"), requests.get(1).get("tools"), "the turn whose prefix is summarized");
         var instruction = summary.get(summary.size() - 1).getAsJsonObject();
         assertEquals("user", instruction.get("role").getAsString());
         assertEquals(SECTIONS, headings(instruction.get("content").getAsString()));

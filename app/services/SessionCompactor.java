@@ -62,8 +62,8 @@ public final class SessionCompactor {
     }
 
     /**
-     * A turn's request as it goes to the provider: its messages, system prompt first, after pruning and
-     * compression, and its tool definitions.
+     * A turn's request as the compaction gate sees it: its messages, system prompt first, after pruning and
+     * compression but before the media rewrites and the trailing clock and recall message, and its tool definitions.
      */
     public record TurnRequest(List<ChatMessage> messages, List<ToolDef> tools) {}
 
@@ -76,7 +76,7 @@ public final class SessionCompactor {
 
     @FunctionalInterface
     private interface SummaryStep {
-        @SuppressWarnings("java:S112")
+        @SuppressWarnings("java:S112") // as Summarizer.summarize: keeps provider exception types out of the seam
         @Nullable String summarize(CompactionPlan plan) throws Exception;
     }
 
@@ -165,9 +165,13 @@ public final class SessionCompactor {
     /**
      * Automatic compaction on the turn's own prefix (JF-154): the request sends the turn's system prompt,
      * the summarized messages as the turn sent them and its tools, with the instruction last as a user
-     * message, so the provider bills that prefix at its cached rate. A reply that calls a tool is retried
-     * once on the transcript without tools; no tool is ever run. When the turn's list no longer lines up
-     * with the stored rows, the transcript is sent instead.
+     * message. Its message and tool bytes match the turn's up to the first summarized message that carries
+     * an image or audio, which goes as its text; whether a provider reads that prefix from its cache is the
+     * provider's rule, and the request sets no reasoning effort ({@code thinkingMode} null) where the turn
+     * may set one. A reply that calls a tool is retried once on the transcript without tools, and so is a
+     * call that fails, since the turn's prompt, tools and {@code max_tokens} can overflow a small window the
+     * transcript fits; no tool is ever run. When the turn's list no longer lines up with the stored rows,
+     * the transcript is sent instead.
      *
      * @param turn the request the turn is about to send
      * @param call the model call, made outside any transaction
@@ -307,7 +311,14 @@ public final class SessionCompactor {
                     + "the turn's messages no longer match the stored rows").formatted(conversationId));
             return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
         }
-        var reply = call.call(turnRequest(plan, turn.messages()), turn.tools());
+        ChatResponse reply;
+        try {
+            reply = call.call(turnRequest(plan, turn.messages()), turn.tools());
+        } catch (Exception e) {
+            EventLogger.warn("compaction", null, null, ("Compaction on the turn's request failed for conversation %d "
+                    + "(%s); retrying on the transcript").formatted(conversationId, e.getMessage()));
+            return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+        }
         if (!callsATool(reply)) return firstChoiceText(reply);
         EventLogger.info("compaction", null, null,
                 "Compaction reply for conversation %d called a tool; retrying without tools".formatted(conversationId));
@@ -315,7 +326,7 @@ public final class SessionCompactor {
         return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
     }
 
-    /** The turn's list is its system prompt then one message per stored row, so row {@code i} sits at {@code i + 1}. */
+    /** The turn's list is its system prompt then the loaded rows, so the slot after the summarized rows holds the first kept row. */
     private static boolean alignsWith(CompactionPlan plan, List<ChatMessage> turn) {
         int firstKept = plan.toSummarize().size() + 1;
         if (turn.size() <= firstKept) return false;
@@ -332,17 +343,20 @@ public final class SessionCompactor {
         return request;
     }
 
-    // Compaction runs before the media rewrites, so a part the model cannot take would fail the call.
+    // Compaction runs before the media rewrites, so a part the model cannot take would fail the call. Text parts
+    // alone (a document attachment's notes) are left as the turn sends them.
     private static ChatMessage withoutMedia(ChatMessage m) {
-        if (!(m.content() instanceof List<?> parts)) return m;
+        if (!(m.content() instanceof List<?> parts) || parts.stream().allMatch(SessionCompactor::isTextPart)) return m;
         var text = new StringBuilder();
         for (var part : parts) {
-            if (part instanceof Map<?, ?> p && "text".equals(p.get("type")) && p.get("text") instanceof String t) {
-                text.append(t);
-            }
+            if (isTextPart(part) && ((Map<?, ?>) part).get("text") instanceof String t) text.append(t);
         }
         return new ChatMessage(m.role(), text.isEmpty() ? "[attachment]" : text.toString(),
                 m.toolCalls(), m.toolCallId(), m.toolName());
+    }
+
+    private static boolean isTextPart(Object part) {
+        return part instanceof Map<?, ?> p && "text".equals(p.get("type"));
     }
 
     private static boolean callsATool(ChatResponse reply) {

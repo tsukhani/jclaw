@@ -16,6 +16,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.SessionCompactor;
 import utils.CircuitBreakers;
 
@@ -399,7 +400,35 @@ class CompactionGateTest extends UnitTest {
         }
     }
 
+    @Test
+    void aSkipUnderTheTokenTriggerAloneLogsNothingButOneWithTheWindowRuleDoes() {
+        // No history rows, so every attempt skips for want of a boundary before any model call.
+        var provider = ownProvider(1_000_000);
+        try {
+            var conv = ConversationService.create(agent, "web", "user1");
+            commitAndReopen();
+            var primary = llm.ProviderRegistry.get(provider);
+            var current = new MessageHydrator.Hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi")),
+                    List.of(), List.of(), List.of());
+
+            var triggerOnly = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
+                    agent, conv.id, Set.of(), primary, current, List.of(), 150_000));
+            var pastTheWindow = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
+                    agent, conv.id, Set.of(), primary, current, List.of(), 1_000_000));
+
+            assertEquals(List.of(), compactionLines(triggerOnly));
+            assertEquals(List.of("Compaction skipped (no safe boundary or below min-turns); "
+                    + "the context-window trim is left to fit the prompt"), compactionLines(pastTheWindow));
+        } finally {
+            removeProvider(provider);
+        }
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    private static List<String> compactionLines(List<EventLogger.Captured> events) {
+        return events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList();
+    }
 
     /**
      * Points {@link #agent} at a provider no other class names, with one model, {@code gate-model}, and the token

@@ -728,7 +728,7 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 
 | Key                          | Default | Meaning                                                                                                 |
 |------------------------------|---------|---------------------------------------------------------------------------------------------------------|
-| `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
+| `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`, or when it reaches `compaction.triggerTokens`, whichever comes first. Larger reserve = compaction fires sooner. |
 | `compactionMinTurns`         | 10      | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
 | `compactionKeepMessages`     | 10      | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
 | `compaction.triggerTokens`   | 150000  | Auto-compaction also triggers when the next prompt reaches this many tokens, however large the model's context window is, because answers get worse long before a large window fills. Whichever of this and `compactionReserveTokens` comes first applies. Set 0 to keep only the `compactionReserveTokens` rule. |

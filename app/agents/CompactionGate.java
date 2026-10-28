@@ -132,8 +132,12 @@ public final class CompactionGate {
         var result = SessionCompactor.compact(conversationId, modelLabel,
                 new SessionCompactor.TurnRequest(current.messages(), tools), call);
         if (!result.compacted()) {
-            EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                    "Compaction skipped (%s); falling back to drop-oldest".formatted(result.skipReason()));
+            // Under the token trigger alone the window is far off and this would repeat every turn of a long chat.
+            if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0)) {
+                EventLogger.info("compaction", agent.name, snapshot.channelType(),
+                        "Compaction skipped (%s); the context-window trim is left to fit the prompt"
+                                .formatted(result.skipReason()));
+            }
             return current;
         }
         EventLogger.info("compaction", agent.name, snapshot.channelType(),
