@@ -35,7 +35,7 @@ import java.util.function.Predicate;
  *
  * <p>The router is a catalog entry, not an {@link LlmProvider}: nothing ever dispatches to it. A turn
  * resolves it through {@link RoutedTurn}; a call made outside a turn resolves it through
- * {@link #concrete}.
+ * {@link #concrete}, and a compaction summary through {@link #summarizers}.
  */
 public final class ModelRouter {
 
@@ -102,12 +102,26 @@ public final class ModelRouter {
     public static @Nullable Target concrete(@Nullable String provider, @Nullable String modelId) {
         if (provider == null || modelId == null) return null;
         if (!isRouter(provider, modelId)) return new Target(provider, modelId);
+        var decision = outsideATurn(TaskClass.CHAT, "call outside a chat turn");
+        return decision != null ? decision.primary() : null;
+    }
+
+    /**
+     * The models that write a router agent's compaction summary, in the order to try them (JF-160): the summarize
+     * class's choice under the budget guard, then that choice's fallback. Empty when the router has nothing to offer.
+     */
+    public static List<Target> summarizers() {
+        var decision = outsideATurn(TaskClass.SUMMARIZE, "compaction summary");
+        if (decision == null) return List.of();
+        var fallback = decision.fallback();
+        return fallback != null ? List.of(decision.primary(), fallback) : List.of(decision.primary());
+    }
+
+    private static @Nullable RouteDecision outsideATurn(TaskClass taskClass, String reason) {
         var policy = RouterPolicy.load();
         if (!policy.available()) return null;
         var request = new RouteRequest("", null, null, 0, 0, false, false, false);
-        var decision = select(policy, TaskClass.CHAT, TaskClass.CHAT.defaultEffort(),
-                List.of("call outside a chat turn"), null, request);
-        return decision != null ? decision.primary() : null;
+        return select(policy, taskClass, taskClass.defaultEffort(), List.of(reason), null, request);
     }
 
     /** The model a provider/model pair names, the router's own catalog entry included. */

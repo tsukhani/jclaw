@@ -1,6 +1,7 @@
 package slash;
 
 import agents.CompactionGate;
+import agents.SummaryModels;
 import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
@@ -14,7 +15,6 @@ import models.Message;
 import models.Prompt;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
-import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
@@ -28,7 +28,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -474,21 +473,11 @@ public final class Commands {
             return new Result(null, fallback, Command.COMPACT);
         }
 
-        // Provider selection mirrors AgentRunner.run: override → agent default → the agent's own fallback.
-        // The router (JCLAW-1222) resolves to its chat-class model, as for any call outside a turn.
-        var configured = ModelOverrideResolver.resolve(current, agent);
-        var resolved = ModelRouter.concrete(configured.provider(), configured.modelId());
-        var providerName = resolved != null ? resolved.provider() : configured.provider();
-        var primary = ProviderRegistry.get(providerName);
-        var modelId = resolved != null ? resolved.modelId() : configured.modelId();
-        if (primary == null) {
-            var fallback = LlmProvider.Fallback.forAgent(agent);
-            if (fallback != null) {
-                primary = fallback.provider();
-                modelId = fallback.modelId();
-            }
-        }
-        if (primary == null) {
+        // No inbound chat channel here, so dispatcher_wait for the summary call records under "unknown".
+        var configured = ModelOverrideResolver.configured(current, agent);
+        var summary = SummaryModels.resolve(agent, current, () -> ownModel(agent, configured), null);
+        if (summary.isEmpty()) {
+            var providerName = configured.provider();
             var msg = "> Compaction failed\n\nNo LLM provider is configured for this agent"
                     + (providerName != null ? " ('" + providerName + "' is not set up)" : "")
                     + ", and it has no configured fallback. Add one in Settings.";
@@ -503,28 +492,23 @@ public final class Commands {
                     "/compact on conversation %d, which is gone".formatted(current.id));
             return new Result(null, "No active conversation to compact.", Command.COMPACT);
         }
-        var modelLabel = primary.config().name() + "/" + modelId;
-        var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
-
-        final var capturedPrimary = primary;
-        final var capturedModelId = modelId;
-        // Slash-command-triggered compaction has no inbound chat-channel
-        // context (it runs on a programmatic invocation), so dispatcher_wait
-        // for this call records under "unknown".
-        SessionCompactor.ModelCall call = (messages, tools) -> capturedPrimary.chat(
-                Objects.requireNonNull(capturedModelId, "no model configured for compaction"),
-                messages, tools, maxOutput, null, null);
-
-        var modelInfo = primary.config().models().stream().filter(m -> m.id().equals(capturedModelId)).findFirst()
-                .orElse(null);
-        var result = SessionCompactor.compact(current.id, modelLabel, turn, call, /*force*/ true, args,
-                SessionCompactor.summaryCallTokens(modelInfo));
+        var result = SessionCompactor.compact(current.id, summary.first().label(), turn, summary, /*force*/ true, args,
+                summary.callTokens());
         var responseText = buildCompactResponseText(result, args);
         persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())
                         : "skipped: " + result.skipReason());
 
         return new Result(current, responseText, Command.COMPACT);
+    }
+
+    /** The conversation's override, else the agent's default, else the agent's own fallback, as a turn resolves it. */
+    private static SummaryModels.@Nullable Choice ownModel(Agent agent, ModelOverrideResolver.Resolved configured) {
+        var provider = ProviderRegistry.get(configured.provider());
+        var modelId = configured.modelId();
+        if (provider != null && modelId != null) return new SummaryModels.Choice(provider, modelId);
+        var fallback = LlmProvider.Fallback.forAgent(agent);
+        return fallback != null ? new SummaryModels.Choice(fallback.provider(), fallback.modelId()) : null;
     }
 
     /**

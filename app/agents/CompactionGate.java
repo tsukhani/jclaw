@@ -9,13 +9,13 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
-import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -30,8 +30,8 @@ import java.util.Set;
  *
  * <p>The decision is intentionally side-effect-free outside the
  * compactor: a snapshot read in a bounded Tx, a token-count check
- * against {@link ModelInfo}, and the compactor's own summarizer
- * lambda which makes its own LLM call. The summarizer call MUST run
+ * against {@link ModelInfo}, and the summary call {@link SummaryModels}
+ * makes on the model it picks. The summarizer call MUST run
  * outside any JPA transaction because it is LLM-bound and may take
  * tens of seconds — holding a JDBC connection through that would
  * starve the connection pool.
@@ -47,8 +47,9 @@ public final class CompactionGate {
     private CompactionGate() {
     }
 
-    private record CompactionDecision(@Nullable ModelInfo modelInfo, @Nullable String modelId,
-                                      @Nullable String channelType, boolean pastHistoryLimit) {
+    private record CompactionDecision(Conversation conversation, @Nullable ModelInfo modelInfo,
+                                      @Nullable String modelId, @Nullable String channelType,
+                                      boolean pastHistoryLimit) {
     }
 
     /**
@@ -109,13 +110,13 @@ public final class CompactionGate {
             if (conv == null) return null;
             var mi = ModelResolver.resolveModelInfo(agent, conv, primary).orElse(null);
             var modelId = ModelResolver.effectiveModelId(agent, conv);
-            return new CompactionDecision(mi, modelId, conv.channelType, SessionCompactor.pastHistoryLimit(conv));
+            return new CompactionDecision(conv, mi, modelId, conv.channelType, SessionCompactor.pastHistoryLimit(conv));
         });
         // A model missing from the provider's list has no known window, so the token cap and the row limit still apply.
         if (snapshot == null || snapshot.modelId() == null) return current;
         // No-op when the caller has no provider wired up — without one we
         // can't even make the summarization LLM call. Bail out instead of
-        // letting providerName/modelLabel construction NPE later.
+        // letting providerName and the summary label NPE later.
         if (primary == null || primary.config() == null) return current;
         final var providerName = primary.config().name();
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current.messages(), tools);
@@ -129,16 +130,12 @@ public final class CompactionGate {
             return current;
         }
 
-        final var modelId = snapshot.modelId();
-        final var compactionChannel = snapshot.channelType();
-        final var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
-        final var modelLabel = providerName + "/" + modelId;
-
-        SessionCompactor.ModelCall call = (messages, defs) ->
-                primary.chat(modelId, messages, defs, maxOutput, null, compactionChannel);
-        var result = SessionCompactor.compact(conversationId, modelLabel,
-                new SessionCompactor.TurnRequest(current.messages(), tools), call, false, null,
-                SessionCompactor.summaryCallTokens(snapshot.modelInfo()));
+        // The trigger measures the turn's model; a router agent's summary goes to its summarize class (JF-160).
+        var turnModel = new SummaryModels.Choice(primary, snapshot.modelId());
+        var summary = SummaryModels.resolve(agent, snapshot.conversation(), () -> turnModel, snapshot.channelType());
+        var result = SessionCompactor.compact(conversationId, summary.first().label(),
+                new SessionCompactor.TurnRequest(current.messages(), tools), summary, false, null,
+                summary.callTokens());
         if (!result.compacted()) {
             // Under the token trigger or the row limit alone the window is far off, and this would repeat every turn.
             if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
@@ -149,8 +146,8 @@ public final class CompactionGate {
             return current;
         }
         EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                "Compacted %d turns (%d chars) via %s".formatted(
-                        result.turnsCompacted(), result.summaryChars(), modelLabel));
+                "Compacted %d turns (%d chars) via %s".formatted(result.turnsCompacted(), result.summaryChars(),
+                        Objects.requireNonNullElse(summary.answeredBy(), summary.first().label())));
 
         // Rebuild messages: fresh read picks up the bumped compactionSince,
         // appendSummaryToPrompt re-injects the (now stored) summary. No user message, so recall

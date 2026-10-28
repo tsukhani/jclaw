@@ -14,7 +14,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Session compaction: when a conversation's active context approaches the
@@ -77,6 +79,16 @@ public final class SessionCompactor {
     public interface ModelCall {
         @SuppressWarnings("java:S112") // as Summarizer.summarize: keeps provider exception types out of the seam
         ChatResponse call(List<ChatMessage> messages, List<ToolDef> tools) throws Exception;
+
+        /** Whether the summary model's window takes this request; a turn-shaped one it does not goes as the transcript. */
+        default boolean fits(List<ChatMessage> messages, List<ToolDef> tools) {
+            return true;
+        }
+
+        /** The {@code provider/model} that answered the last call when it may differ from the label given (JF-160). */
+        default @Nullable String answeredBy() {
+            return null;
+        }
     }
 
     @FunctionalInterface
@@ -188,7 +200,7 @@ public final class SessionCompactor {
     }
 
     /** The model's window less the reserve; {@link Integer#MAX_VALUE}, never passed, when that leaves nothing. */
-    private static int windowBudget(@Nullable ModelInfo modelInfo) {
+    public static int windowBudget(@Nullable ModelInfo modelInfo) {
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return Integer.MAX_VALUE;
         int budget = modelInfo.contextWindow() - effectiveReserveTokens();
         return budget > 0 ? budget : Integer.MAX_VALUE;
@@ -238,7 +250,7 @@ public final class SessionCompactor {
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, @Nullable String additionalInstructions) {
-        return compact(conversationId, modelLabel, force, Integer.MAX_VALUE,
+        return compact(conversationId, () -> modelLabel, force, Integer.MAX_VALUE,
                 plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)));
     }
 
@@ -251,7 +263,8 @@ public final class SessionCompactor {
      * may set one. A reply that calls a tool is retried once on the transcript without tools, and so is a
      * call that fails, since the turn's prompt, tools and {@code max_tokens} can overflow a small window the
      * transcript fits; no tool is ever run. When the turn's list no longer lines up with the stored rows,
-     * the transcript is sent instead, as it is for rows the turn did not load.
+     * the transcript is sent instead, as it is for rows the turn did not load and for a request the summary
+     * model's window does not take ({@link ModelCall#fits}).
      *
      * @param turn the request the turn is about to send
      * @param call the model call, made outside any transaction
@@ -264,17 +277,18 @@ public final class SessionCompactor {
      * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} relaxes the
      * too-few-turns guard as the transcript form's does, and {@code additionalInstructions} follows the instruction,
      * in the transcript retries too. {@code callTokens} bounds the rows of each summary call the turn's own request
-     * cannot carry ({@link #summaryCallTokens}).
+     * cannot carry ({@link #summaryCallTokens}). Each stored summary names {@link ModelCall#answeredBy}, else
+     * {@code modelLabel}.
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call,
                                            boolean force, @Nullable String additionalInstructions, int callTokens) {
-        return compact(conversationId, modelLabel, force, callTokens,
-                plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions));
+        return compact(conversationId, () -> Objects.requireNonNullElse(call.answeredBy(), modelLabel), force,
+                callTokens, plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions));
     }
 
     /** One summary call after another, oldest rows first, until a plan reaches the kept tail (JF-159). */
-    private static CompactionResult compact(Long conversationId, String modelLabel, boolean force, int callTokens,
-                                            SummaryStep step) {
+    private static CompactionResult compact(Long conversationId, Supplier<String> modelLabel, boolean force,
+                                            int callTokens, SummaryStep step) {
         int turnsCompacted = 0;
         int summaryChars = 0;
         for (int call = 0; call < MAX_SUMMARY_CALLS; call++) {
@@ -298,8 +312,8 @@ public final class SessionCompactor {
         return CompactionResult.success(turnsCompacted, summaryChars);
     }
 
-    private static CompactionResult summarizeAndStore(Long conversationId, String modelLabel, CompactionPlan plan,
-                                                      SummaryStep step) {
+    private static CompactionResult summarizeAndStore(Long conversationId, Supplier<String> modelLabel,
+                                                      CompactionPlan plan, SummaryStep step) {
         String summary;
         try {
             summary = step.summarize(plan);
@@ -318,6 +332,7 @@ public final class SessionCompactor {
         final var finalSummary = summary.strip();
         final var summaryTokens = Math.max(1, finalSummary.length() / 4);
         final var turnsCompacted = plan.toSummarize().size();
+        final var label = modelLabel.get();
 
         Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(conversationId);
@@ -326,7 +341,7 @@ public final class SessionCompactor {
             sc.conversation = conv;
             sc.turnCount = turnsCompacted;
             sc.summaryTokens = summaryTokens;
-            sc.model = modelLabel != null && !modelLabel.isBlank() ? modelLabel : "unknown";
+            sc.model = label != null && !label.isBlank() ? label : "unknown";
             sc.summary = finalSummary;
             sc.save();
             conv.compactionSince = plan.firstKept().createdAt();
@@ -480,9 +495,15 @@ public final class SessionCompactor {
                     + "the turn's messages no longer match the stored rows").formatted(conversationId));
             return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
         }
+        var request = turnRequest(plan, turn.messages(), additionalInstructions);
+        if (!call.fits(request, turn.tools())) {
+            EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
+                    + "the turn's request does not fit the summary model's window").formatted(conversationId));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+        }
         ChatResponse reply;
         try {
-            reply = call.call(turnRequest(plan, turn.messages(), additionalInstructions), turn.tools());
+            reply = call.call(request, turn.tools());
         } catch (Exception e) {
             EventLogger.warn("compaction", null, null, ("Compaction on the turn's request failed for conversation %d "
                     + "(%s); retrying on the transcript").formatted(conversationId, e.getMessage()));

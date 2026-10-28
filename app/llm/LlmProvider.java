@@ -1006,6 +1006,17 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                                                  @Nullable Integer maxTokens,
                                                  @Nullable String thinkingMode,
                                                  @Nullable String channel) {
+        return chatWithFailover(primary, fallback, model, messages, tools, maxTokens, thinkingMode, channel, () -> {});
+    }
+
+    /** {@link #chatWithFailover} that runs {@code onFailover} just before the fallback is called. */
+    @SuppressWarnings("java:S107") // chatWithFailover's call surface plus the hook
+    public static ChatResponse chatWithFailover(LlmProvider primary, @Nullable Fallback fallback,
+                                                 String model, List<ChatMessage> messages,
+                                                 @Nullable List<ToolDef> tools,
+                                                 @Nullable Integer maxTokens,
+                                                 @Nullable String thinkingMode,
+                                                 @Nullable String channel, Runnable onFailover) {
         // Retrying a 180 s timeout on the same provider spent up to 12 minutes per call before the fallback ran.
         boolean canFailOver = fallback != null && fallback.coversFor(primary);
         try {
@@ -1017,6 +1028,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             if (fallback != null && fallback.coversFor(primary)) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
                         .formatted(primary.config().name(), fallback.describe(), e.getMessage()));
+                onFailover.run();
                 return fallback.provider().chat(fallback.modelId(), messages, tools, maxTokens, thinkingMode, channel);
             }
             throw e;

@@ -68,10 +68,18 @@ public final class ModelOverrideResolver {
         if (routed != null) return routed.active().provider();
         var substituted = FallbackTurn.current(conversation);
         if (substituted != null) return substituted.provider();
+        return configured(conversation, agent).provider();
+    }
+
+    /**
+     * The pair the operator chose: the conversation's override, else the agent's default, without the routed or
+     * fallback model a turn may be running on.
+     */
+    public static Resolved configured(@Nullable Conversation conversation, @Nullable Agent agent) {
         if (conversation != null && hasOverride(conversation)) {
-            return conversation.modelProviderOverride;
+            return new Resolved(conversation.modelProviderOverride, conversation.modelIdOverride);
         }
-        return agent != null ? agent.modelProvider : null;
+        return agent != null ? new Resolved(agent.modelProvider, agent.modelId) : new Resolved(null, null);
     }
 
     /**
@@ -98,10 +106,7 @@ public final class ModelOverrideResolver {
         if (routed != null) return routed.active().modelId();
         var substituted = FallbackTurn.current(conversation);
         if (substituted != null) return substituted.modelId();
-        if (conversation != null && hasOverride(conversation)) {
-            return conversation.modelIdOverride;
-        }
-        return agent != null ? agent.modelId : null;
+        return configured(conversation, agent).modelId();
     }
 
     /**
