@@ -4,6 +4,7 @@ import services.EventLogger;
 import tools.CheckListTool;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * JCLAW-976: strips text that would forge a prompt-section boundary out of content JClaw
@@ -57,22 +58,43 @@ public final class PromptFenceScrubber {
             CurrentTimeInjector.HEADING,
             CheckListTool.REMINDER_HEADING);
 
+    private static final List<String> FENCES = Stream.concat(MARKERS.stream(), HEADINGS.stream()).toList();
+
     /**
-     * Remove every fence from {@code text} before it is injected into the prompt.
-     * A scrub is logged, never silent — a stripped fence is a signal worth seeing.
+     * Remove every fence from {@code text} before it is injected into the prompt, including one that forms
+     * only once a fence inside it is gone ({@code "## Your ## Your checklistchecklist"}, or a marker split
+     * around a heading). A scrub is logged, never silent — a stripped fence is a signal worth seeing.
      *
      * @param source what is being scrubbed, for the log line (e.g. {@code "core memory 42"})
      */
     public static String scrubForInjection(String text, String source) {
         if (text == null || text.isEmpty()) return text;
-        var out = text;
-        for (var fence : MARKERS) out = out.replace(fence, "");
-        for (var heading : HEADINGS) out = out.replace(heading, "");
-        if (!out.equals(text)) {
+        // One scan that drops a fence as its last character arrives: what is kept never holds one, and the work
+        // stays linear in text an agent writes, where a replace-until-unchanged loop costs a pass per nesting level.
+        var out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            out.append(text.charAt(i));
+            for (var fence : FENCES) {
+                if (endsWith(out, fence)) {
+                    out.setLength(out.length() - fence.length());
+                    break;
+                }
+            }
+        }
+        if (out.length() != text.length()) {
             EventLogger.warn("memory", null, null,
                     ("Stripped a forged prompt-section fence from %s — stored text imitated JClaw's "
                             + "own memory framing").formatted(source));
         }
-        return out;
+        return out.toString();
+    }
+
+    private static boolean endsWith(StringBuilder sb, String suffix) {
+        int offset = sb.length() - suffix.length();
+        if (offset < 0) return false;
+        for (int i = suffix.length() - 1; i >= 0; i--) {
+            if (sb.charAt(offset + i) != suffix.charAt(i)) return false;
+        }
+        return true;
     }
 }
