@@ -51,16 +51,23 @@ const { data, refresh, status } = useFetch<CompressionResponse>('/api/metrics/co
   query: { since },
   default: () => ({ since: '', rows: [] }),
 })
-const { data: costData, refresh: refreshCost } = useFetch<{ since: string, rows: FleetCostRow[] }>('/api/metrics/cost', {
+const { data: costData, refresh: refreshCost, status: costStatus } = useFetch<{ since: string, rows: FleetCostRow[] }>('/api/metrics/cost', {
   query: { since },
   default: () => ({ since: '', rows: [] }),
 })
 defineExpose({ refresh: () => Promise.all([refresh(), refreshCost()]) })
 
+// The tiles wait for both row sets: either alone reads the other's empty default as zeros.
+// A refresh keeps the prior data, so only the first load needs it.
+const settled = (s: string) => s === 'success' || s === 'error'
+const hasLoadedOnce = ref(false)
+watchEffect(() => {
+  if (settled(status.value) && settled(costStatus.value)) hasLoadedOnce.value = true
+})
+
 // Reserve the height this panel had last visit so the tiles landing don't move
 // the page. 349px is the measured natural body height on a populated install.
-const { reservedHeight: bodyHeight, el: bodyEl }
-  = useStableHeight('compression', 349, computed(() => status.value === 'success' || status.value === 'error'))
+const { reservedHeight: bodyHeight, el: bodyEl } = useStableHeight('compression', 349, hasLoadedOnce)
 
 const rows = computed<Row[]>(() => data.value?.rows ?? [])
 const costRows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
@@ -323,7 +330,13 @@ function fmt(n: number) {
       :style="{ minHeight: bodyHeight }"
     >
       <div
-        v-if="!agg.hasData && !cache.turns"
+        v-if="!hasLoadedOnce"
+        class="px-4 py-4 text-xs text-fg-muted"
+      >
+        Loading compression data…
+      </div>
+      <div
+        v-else-if="!agg.hasData && !cache.turns"
         class="px-4 py-4 text-xs text-fg-muted"
       >
         No compression activity in this window.

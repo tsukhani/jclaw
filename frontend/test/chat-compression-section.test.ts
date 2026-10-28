@@ -74,6 +74,31 @@ describe('ChatCompressionSection', () => {
     expect(tile()).toEqual(['—', 'no turns'])
   })
 
+  it('says it is loading, not zero, while the compression rows are still on their way', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registerEndpoint('/api/metrics/compression', async () => {
+      await held
+      return payload()
+    })
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [{ timestamp: '2026-06-01T12:00:00Z', agentId: 1, channelType: 'web',
+        usageJson: costUsage({ prompt: 1000, cached: 400, firstPrompt: 1000, firstCached: 400 }) }],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Loading compression data…')
+    expect(wrapper.text()).not.toContain('Tokens saved')
+
+    release()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('1 / 2 hits'))
+    expect(wrapper.text()).not.toContain('Loading compression data…')
+  })
+
   it('shows the tiles for a window with turns but no compression', async () => {
     registerEndpoint('/api/metrics/compression', () => ({ since: '', rows: [] }))
     registerEndpoint('/api/metrics/cost', () => ({
