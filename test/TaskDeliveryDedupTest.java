@@ -80,6 +80,26 @@ class TaskDeliveryDedupTest extends UnitTest {
         answer.save();
     }
 
+    /** As {@link #messageCall}, but made through {@code tool_invoke}, as an agent with many tools makes it (JF-153). */
+    private void invokedMessageCall(TaskRun run, String callId, String action, String result) {
+        var call = new TaskRunMessage();
+        call.taskRun = run;
+        call.turnIndex = turn++;
+        call.role = MessageRole.ASSISTANT;
+        call.toolCalls = ("{\"id\":\"%s\",\"type\":\"function\",\"function\":{\"name\":\"tool_invoke\","
+                + "\"arguments\":\"{\\\"tool\\\":\\\"message\\\",\\\"args\\\":{\\\"action\\\":\\\"%s\\\"}}\"}}")
+                .formatted(callId, action);
+        call.save();
+
+        var answer = new TaskRunMessage();
+        answer.taskRun = run;
+        answer.turnIndex = turn++;
+        answer.role = MessageRole.TOOL;
+        answer.toolResults = callId;
+        answer.content = result;
+        answer.save();
+    }
+
     private static final String FAILED =
             "Error: Slack rejected delivery to 'UA6PAPH8U': channel_not_found.";
     private static final String SENT =
@@ -144,6 +164,21 @@ class TaskDeliveryDedupTest extends UnitTest {
         call.toolCalls = "{\"id\":\"functions.message:5\",\"type\":\"function\",\"function\":"
                 + "{\"name\":\"message\",\"arguments\":\"{\\\"action\\\":\\\"send\\\"}\"}}";
         call.save();
+        assertFalse(TaskExecutor.deliveredViaMessageTool(run.id));
+    }
+
+    @Test
+    void aSendMadeThroughTheToolHandleIsDeduped() {
+        var run = newRun();
+        invokedMessageCall(run, "call_1", "send", SENT);
+        assertTrue(TaskExecutor.deliveredViaMessageTool(run.id),
+                "the send reached Slack through tool_invoke, so auto-delivery would duplicate it");
+    }
+
+    @Test
+    void aReactionMadeThroughTheToolHandleDoesNotSuppressDelivery() {
+        var run = newRun();
+        invokedMessageCall(run, "call_2", "react", "{\"action\":\"react\",\"ok\":true}");
         assertFalse(TaskExecutor.deliveredViaMessageTool(run.id));
     }
 

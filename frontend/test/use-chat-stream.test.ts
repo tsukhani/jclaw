@@ -262,6 +262,27 @@ describe('useChatStream', () => {
     expect(assistant!.toolCalls![0]!.name).toBe('generate_image')
   })
 
+  it('starts image-gen progress polling for a generate_image call made through tool_invoke, not for another tool', async () => {
+    const frame = (o: object) => `data: ${JSON.stringify(o)}\n`
+    const invoke = (tool: string) => [
+      frame({ type: 'init', conversationId: 42 }),
+      frame({ type: 'tool_call', id: 'tc1', name: 'tool_invoke', arguments: JSON.stringify({ tool, args: { prompt: 'a cat' } }) }),
+      frame({ type: 'complete', content: 'done' }),
+    ]
+
+    const image = makeDeps({ input: ref('draw a cat') })
+    streamWith(invoke('generate_image'))
+    await (await mountStream(image)).api.sendMessage()
+    await flushPromises()
+    expect(image.startImageProgressPolling).toHaveBeenCalledTimes(1)
+
+    const other = makeDeps({ input: ref('count things') })
+    streamWith(invoke('generate_video'))
+    await (await mountStream(other)).api.sendMessage()
+    await flushPromises()
+    expect(other.startImageProgressPolling).not.toHaveBeenCalled()
+  })
+
   it('draws the view a live tool_call frame carries', async () => {
     const deps = makeDeps({ input: ref('a search table please') })
     const frame = (o: object) => `data: ${JSON.stringify(o)}\n`

@@ -4,6 +4,7 @@ import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
 import type { ChatQuote, ChecklistItem, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
 import { checklistFromCall } from '~/utils/checklist'
+import { effectiveToolName } from '~/utils/tool-calls'
 import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
@@ -392,7 +393,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // step loop, so start polling now — keyed to the invoking assistant
     // message's _key — rather than on every streaming turn. This is what stops
     // a concurrent generation's load phase from leaking onto an unrelated turn.
-    if (event.name === 'generate_image') {
+    if (effectiveToolName(event) === 'generate_image') {
       imageGenTurnKey.value = m._key ?? null
       startImageProgressPolling()
     }

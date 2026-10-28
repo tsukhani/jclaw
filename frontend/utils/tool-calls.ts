@@ -233,3 +233,15 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
     attachLeftoverPending(msgs, pending.calls, pending.attachments)
   }
 }
+
+/** JF-153: the tool a call ran. An agent with many tools runs most of them through `tool_invoke`, which names one in `tool`. */
+export function effectiveToolName(call: { name: string, arguments?: string | null }): string {
+  if (call.name !== 'tool_invoke') return call.name
+  try {
+    const tool: unknown = JSON.parse(call.arguments ?? '')?.tool
+    return typeof tool === 'string' ? tool : call.name
+  }
+  catch {
+    return call.name
+  }
+}

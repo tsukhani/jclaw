@@ -24,6 +24,7 @@ import services.LoadTestRunner;
 import services.OperatorAlerts;
 import services.PersonaFileApprovals;
 import services.WorkspaceFiles;
+import tools.ToolInvokeTool;
 import utils.AppClock;
 import utils.ChannelOriginTrust;
 import utils.GsonHolder;
@@ -257,7 +258,7 @@ public class SystemPromptAssembler {
         // counted as input tokens by every provider, so the breakdown surfaces them
         // alongside the prompt sections for a realistic total-token picture.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
-        var toolDefs = ToolRegistry.getToolDefsForAgent(agent, Set.<String>of());
+        var toolDefs = ToolRegistry.deferCold(agent, ToolRegistry.getToolDefsForAgent(agent, Set.<String>of()));
         for (var tool : toolDefs) {
             var json = TOOL_GSON.toJson(tool);
             toolEntries.add(new PromptBreakdown.Entry(
@@ -302,6 +303,17 @@ public class SystemPromptAssembler {
      */
     private static int approxTokens(int chars) {
         return (int) Math.round(chars / 4.0);
+    }
+
+    /** JF-153: the catalog names deferred tools too, so it says how they are called. */
+    public static final String DEFERRED_TOOLS_NOTE = "\nTools in this table that your request does not list are reached "
+            + "through `" + ToolInvokeTool.NAME + "`: call it with `{\"describe\": [\"<tool>\", ...]}` for their input "
+            + "schemas, then with `{\"tool\": \"<tool>\", \"args\": {...}}` to run one.\n";
+
+    /** Whether a turn whose catalog leaves out {@code disabled} sends {@code tool_invoke}, as {@link ToolRegistry#deferCold} decides. */
+    private static boolean reachesDeferredTools(Agent agent, Set<String> disabled) {
+        return ToolRegistry.listTools().stream().anyMatch(t -> t.group() == null && !disabled.contains(t.name())
+                && !ToolRegistry.CORE_TOOLS.contains(t.name())) && ToolRegistry.defersTools(agent);
     }
 
     /**
@@ -381,6 +393,7 @@ public class SystemPromptAssembler {
                 b.sb.append("\n## Tool Catalog\n");
                 b.sb.append("The tools available to you. When a skill declares its tools (`jclaw-tools` in its frontmatter), it MUST use names from this table:\n\n");
                 b.sb.append(catalog);
+                if (reachesDeferredTools(agent, effectiveDisabled)) b.sb.append(DEFERRED_TOOLS_NOTE);
                 b.sb.append("\n");
             }
         }

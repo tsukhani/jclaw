@@ -141,8 +141,8 @@ final class AgentPromptPreparer {
 
             // Conversation-aware overload: native tools and each MCP
             // server's handle always ship.
-            var tools = ToolRegistry.forTurn(TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name), ownerReadsAlone);
+            var tools = ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name)), ownerReadsAlone);
 
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
@@ -248,8 +248,8 @@ final class AgentPromptPreparer {
             var hydration = MessageHydrator.buildMessages(sysPrompt, convo);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit.
-            var toolDefs = ToolRegistry.forTurn(TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name), ownerReadsAlone);
+            var toolDefs = ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name)), ownerReadsAlone);
             return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });

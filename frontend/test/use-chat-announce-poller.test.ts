@@ -112,6 +112,26 @@ describe('useChatAnnouncePoller', () => {
     expect(stale.api.hasRecentTaskCreate()).toBe(false)
   })
 
+  it('keeps polling after a task_manager call made through tool_invoke, and not after another tool there', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const invoke = (tool: string) => msg({ id: 1, role: 'assistant', toolCalls: [{ id: 't', name: 'tool_invoke', icon: 'wrench',
+      arguments: JSON.stringify({ tool, args: { action: 'createTask' } }) }] } as Partial<Message>)
+
+    const task = await mountPoller({ messages: shallowRef([invoke('task_manager')]), selectedConvoId: ref(5) })
+    expect(task.api.hasRecentTaskCreate()).toBe(true)
+    vi.advanceTimersByTime(5000)
+    await settle()
+    expect(messageReads).toBe(1)
+    task.wrapper.unmount()
+
+    messageReads = 0
+    const other = await mountPoller({ messages: shallowRef([invoke('message')]), selectedConvoId: ref(5) })
+    expect(other.api.hasRecentTaskCreate()).toBe(false)
+    vi.advanceTimersByTime(5000)
+    await settle()
+    expect(messageReads).toBe(0)
+  })
+
   it('pollForAnnounce appends newly-arrived rows by id and re-runs the collapse init', async () => {
     const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'hi' })])
     const initSubagentCollapsedState = vi.fn()

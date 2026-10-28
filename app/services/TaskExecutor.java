@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import tools.MessageTool;
+import tools.ToolInvokeTool;
 import utils.AppClock;
 import utils.GsonHolder;
 
@@ -579,8 +580,11 @@ public final class TaskExecutor {
         for (var m : rows) {
             var call = rawToolCall(m.toolCalls);
             if (call == null || call.id() == null || call.function() == null) continue;
-            if (MessageTool.TOOL_NAME.equals(call.function().name())
-                    && MessageTool.isDeliveringCall(call.function().arguments())) {
+            // JF-153: an agent with many tools reaches `message` through tool_invoke.
+            var invoked = ToolInvokeTool.invokedThrough(call.function().name(), call.function().arguments());
+            var name = invoked != null ? invoked.name() : call.function().name();
+            var args = invoked != null ? invoked.args() : call.function().arguments();
+            if (MessageTool.TOOL_NAME.equals(name) && MessageTool.isDeliveringCall(args)) {
                 deliveringCallIds.add(call.id());
             }
         }

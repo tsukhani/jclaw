@@ -10,9 +10,12 @@ import org.jspecify.annotations.Nullable;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import services.ConfigService;
 import services.LoadTestRunner;
 import services.Tx;
+import tools.ToolInvokeTool;
 import utils.ErrorTemplate;
+import utils.GsonHolder;
 import utils.ToolErrorTemplates;
 
 import java.time.Duration;
@@ -342,7 +345,15 @@ public class ToolRegistry {
      *  carries the allowlist gate + audit trail. Returns {@code null} when
      *  no tool with that name is registered. */
     public static @Nullable Tool lookupTool(@Nullable String name) {
-        return tools.get(name);
+        return find(name);
+    }
+
+    /** JF-153: part of the registry rather than a tool an agent is granted, so no list or catalog names it. */
+    private static final ToolInvokeTool INVOKE_HANDLE = new ToolInvokeTool();
+
+    /** A registered tool or the invoke handle by name. */
+    private static @Nullable Tool find(@Nullable String name) {
+        return ToolInvokeTool.NAME.equals(name) ? INVOKE_HANDLE : tools.get(name);
     }
 
     /** Native (compile-time) tools published via {@link #publish(List)} from
@@ -435,7 +446,7 @@ public class ToolRegistry {
      *  and similar future cases. For unknown tools we fall back to the tool
      *  name as the group key so a typo can't accidentally unlock parallelism. */
     public static @Nullable String serializationGroupFor(@Nullable String toolName) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         if (tool == null) return toolName;
         return tool.serializationGroup();
     }
@@ -445,7 +456,7 @@ public class ToolRegistry {
      *  {@link DangerousActionGate} to decide whether a dispatch needs an
      *  interactive approve/deny gate. */
     public static boolean isDangerous(@Nullable String toolName) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         return tool != null && tool.dangerous();
     }
 
@@ -454,13 +465,13 @@ public class ToolRegistry {
      *  classifies per call. Defaults to {@code false} for unknown names, matching
      *  {@link #isDangerous(String)}. */
     public static boolean isDangerous(@Nullable String toolName, String argsJson) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         return tool != null && tool.dangerous(argsJson);
     }
 
     /** JF-136: {@link Tool#readsOutsideContent} by name; {@code true} for a name no tool has, the safe side. */
     public static boolean readsOutsideContent(@Nullable String toolName, String argsJson, Agent agent) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         return tool == null || tool.readsOutsideContent(argsJson, agent);
     }
 
@@ -469,14 +480,14 @@ public class ToolRegistry {
      *  unknown/unregistered names. Used by the agent loop to stamp every
      *  {@code tool_call} SSE frame with the icon hint the UI renders. */
     public static String iconFor(@Nullable String toolName) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         return tool != null ? tool.icon() : "wrench";
     }
 
     /**
      * JCLAW-883: refuse a call for a tool this turn did not offer the model.
      *
-     * <p>{@code offered} is the name set from {@link #getToolDefsForAgent}, computed
+     * <p>{@code offered} is the name set from {@link #offeredNames}, computed
      * once in the turn's prologue where a transaction exists and threaded down to
      * the dispatch point. It is NOT recomputed here: tool calls run on their own
      * virtual threads with no JPA transaction open — "no JDBC connection is held
@@ -509,7 +520,7 @@ public class ToolRegistry {
 
     /** The refusal {@link #executeRich} gives a registered tool the turn did not offer, or null when it was offered. */
     public static @Nullable ToolResult notOfferedRefusal(@Nullable String toolName, @Nullable Set<String> offered) {
-        if (!tools.containsKey(toolName) || !notOffered(toolName, offered)) return null;
+        if (find(toolName) == null || !notOffered(toolName, offered)) return null;
         return ToolResult.refused(notEnabledError(toolName), ToolResult.Outcome.NOT_ENABLED);
     }
 
@@ -534,7 +545,7 @@ public class ToolRegistry {
      */
     public static ToolResult executeRich(@Nullable String toolName, String argsJson, Agent agent,
                                          @Nullable Set<String> offered) {
-        var tool = tools.get(toolName);
+        var tool = find(toolName);
         if (tool == null) {
             return ToolResult.refused("Error: Unknown tool '%s'".formatted(toolName),
                     ToolResult.Outcome.UNKNOWN_TOOL);
@@ -570,7 +581,8 @@ public class ToolRegistry {
                     ToolResult.Outcome.INVALID_ARGS);
         }
         try {
-            return tool.executeRich(argsJson, agent);
+            // The handle lists and describes what this turn offered, so it is the one tool that needs the set.
+            return tool == INVOKE_HANDLE ? INVOKE_HANDLE.invoke(argsJson, agent, offered) : tool.executeRich(argsJson, agent);
         } catch (Exception e) {
             return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage()));
         }
@@ -645,8 +657,8 @@ public class ToolRegistry {
     /**
      * Get tool definitions filtered by agent config.
      *
-     * <p>Native tools (group=null) ship every turn — they're predictable
-     * workhorses with bounded count. MCP servers (group=server name) ship
+     * <p>Native tools (group=null) are all returned — {@link #deferCold} decides
+     * which ship whole (JF-153). MCP servers (group=server name) ship
      * exactly one parameterized entry each via {@link mcp.McpServerTool}; the
      * per-action {@code McpToolAdapter} wrappers stay in the registry for
      * the execution path but are hidden from these defs (JCLAW-281).
@@ -703,6 +715,85 @@ public class ToolRegistry {
                 .filter(t -> t.group() == null || t.isServerLevel())
                 .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
                 .toList();
+    }
+
+    /**
+     * JF-153: whether {@code agent}'s enabled native schemas exceed {@link #DEFERRAL_THRESHOLD_TOKENS}, estimated as the
+     * prompt breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} not {@code false}. Read off the agent's
+     * configuration alone, never the turn, so a conversation sends the same schemas every turn and the provider's
+     * prefix cache holds.
+     */
+    public static boolean defersTools(Agent agent) {
+        if (!ConfigService.getBoolean(TOOL_DEFERRAL_KEY, true)) return false;
+        long chars = 0;
+        for (var def : getToolDefsForAgent(agent)) {
+            if (isNative(def.function().name())) chars += GsonHolder.GSON.toJson(def).length();
+        }
+        return Math.round(chars / 4.0) > DEFERRAL_THRESHOLD_TOKENS;
+    }
+
+    /**
+     * JF-153: {@code defs} as sent to the model. For an agent that {@link #defersTools}, the native tools outside
+     * {@link #CORE_TOOLS} leave the list and one {@code tool_invoke} definition takes their place after the core ones,
+     * its {@code tool} enumerating them in their order; MCP handles stay. Otherwise, or with nothing to defer,
+     * {@code defs} unchanged. Applied after a task fence, so the handle reaches only what the fence lets through.
+     */
+    public static List<ToolDef> deferCold(Agent agent, List<ToolDef> defs) {
+        if (!defersTools(agent)) return defs;
+        var direct = new ArrayList<ToolDef>();
+        var others = new ArrayList<ToolDef>();
+        var deferred = new ArrayList<String>();
+        for (var def : defs) {
+            var name = def.function().name();
+            if (!isNative(name)) others.add(def);
+            else if (CORE_TOOLS.contains(name)) direct.add(def);
+            else deferred.add(name);
+        }
+        if (deferred.isEmpty()) return defs;
+        direct.add(ToolDef.of(ToolInvokeTool.NAME, INVOKE_HANDLE.description(), ToolInvokeTool.parameters(deferred)));
+        direct.addAll(others);
+        return List.copyOf(direct);
+    }
+
+    /** The names a turn that sent {@code defs} may call: each definition's, and each the {@code tool_invoke} one reaches. */
+    public static Set<String> offeredNames(@Nullable List<ToolDef> defs) {
+        if (defs == null) return Set.of();
+        var names = new HashSet<String>();
+        for (var def : defs) {
+            names.add(def.function().name());
+            if (ToolInvokeTool.NAME.equals(def.function().name())) names.addAll(ToolInvokeTool.namesIn(def));
+        }
+        return names;
+    }
+
+    /**
+     * JF-153: the call a dispatch runs in place of a {@code tool_invoke} call, the named tool's own, so every check
+     * after it is the direct call's. Null leaves the call with the handle: not a {@code tool_invoke} run, a turn not
+     * offered the handle, or naming no registered tool or one the turn offers directly. A tool the turn did not offer
+     * is passed on to meet the refusal a direct call meets.
+     */
+    public static ToolInvokeTool.@Nullable Invocation unwrapInvocation(@Nullable String toolName, @Nullable String argsJson,
+                                                                       @Nullable Set<String> offered) {
+        var invocation = ToolInvokeTool.invokedThrough(toolName, argsJson);
+        if (invocation == null || notOffered(ToolInvokeTool.NAME, offered)) return null;
+        var inner = find(invocation.name());
+        if (inner == null || inner == INVOKE_HANDLE) return null;
+        var direct = CORE_TOOLS.contains(invocation.name()) || inner.group() != null;
+        return direct && !notOffered(invocation.name(), offered) ? null : invocation;
+    }
+
+    /** The native tools {@code tool_invoke} reaches on a turn that offered {@code offered}; null, those {@code agent} has enabled. */
+    public static List<Tool> deferredTools(Agent agent, @Nullable Set<String> offered) {
+        var disabled = offered == null ? loadDisabledTools(agent) : Set.<String>of();
+        return tools.values().stream()
+                .filter(t -> t.group() == null && !CORE_TOOLS.contains(t.name()))
+                .filter(t -> offered != null ? offered.contains(t.name()) : !disabled.contains(t.name()))
+                .toList();
+    }
+
+    private static boolean isNative(String name) {
+        var tool = tools.get(name);
+        return tool != null && tool.group() == null;
     }
 
     /**
@@ -786,6 +877,24 @@ public class ToolRegistry {
      * approval, so a guest's message could otherwise drive its reads, and a group would read the result.
      */
     private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL);
+
+    /** JF-153: {@code false} sends every enabled native schema whole; absent means deferral is on. */
+    public static final String TOOL_DEFERRAL_KEY = "chat.toolDeferral";
+
+    /** Anthropic advises deferring schemas past about 10,000 tokens. */
+    public static final int DEFERRAL_THRESHOLD_TOKENS = 10_000;
+
+    /**
+     * JF-153: the native tools whose schemas an agent that {@link #defersTools} still sends whole. The first six made
+     * 84% of main's calls over 30 days (measured 2026-10-28); each other one is named as a tool to call by text JClaw
+     * itself shows the model: the skill instructions, the checklist reminder, {@code subagent_spawn}'s result, the
+     * memory section, the default persona, {@code filesystem}'s description, and the workspace-path notes
+     * {@link VisionAudioAssembler} adds to a user turn carrying an image or audio. Holds {@link #OPERATOR_TURN_ONLY},
+     * so {@link #forTurn} never changes the handle.
+     */
+    public static final Set<String> CORE_TOOLS = Set.of("exec", "filesystem", "ccr_retrieve", "web_search",
+            JCLAW_API_TOOL, "web_fetch", SKILL_READ_TOOL, "checklist", "subagent_yield", MEMORY_TOOL, "datetime",
+            "documents", PRINTER_TOOL, "diarize_audio");
 
     /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
      *  with the other cross-turn-reach tools rather than defaulting on. */

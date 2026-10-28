@@ -588,8 +588,8 @@ public class AgentRunner {
         var prelude = Tx.run(() -> new Prelude(
                 SystemPromptAssembler.assemble(agent, userPrompt,
                         ToolRegistry.turnDisabled(agent, allowedTools, ownerTools), null),
-                ToolRegistry.forTurn(TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
-                        allowedTools, taskName, agent.name), ownerTools)));
+                ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrict(
+                        ToolRegistry.getToolDefsForAgent(agent), allowedTools, taskName, agent.name)), ownerTools)));
         var assembled = prelude.assembled();
         var tools = prelude.tools();
 
