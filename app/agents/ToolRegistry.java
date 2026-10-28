@@ -283,7 +283,8 @@ public class ToolRegistry {
         default boolean verbatimResult(String argsJson) { return false; }
 
         /** Whether this call's result is a standing instruction the model follows for the rest of the
-         *  conversation (a skill's SKILL.md): {@link ToolResultPruner} never stubs it. */
+         *  conversation (a skill's SKILL.md): {@link CompressionPipeline} never compresses it, and
+         *  {@link ToolResultPruner} keeps it within the skill cap. */
         default boolean keepsResultInContext(String argsJson) { return false; }
 
         /** JF-136: whether this call brings text from outside the operator and the agent's own state into the

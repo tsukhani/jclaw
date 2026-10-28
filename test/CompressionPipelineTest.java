@@ -220,6 +220,34 @@ class CompressionPipelineTest extends UnitTest {
         }
     }
 
+    /** About 6,500 tokens of instructions: paragraphs over the text compressor's 200-word block length. */
+    private static String skillProse() {
+        var sb = new StringBuilder();
+        for (int p = 0; p < 20; p++) {
+            for (int r = 0; r < 25; r++) {
+                sb.append("Rule ").append(p).append('.').append(r)
+                        .append(": always confirm the argument named in step ").append(r).append(" before replying. ");
+            }
+            sb.append("\n\n");
+        }
+        return sb.toString();
+    }
+
+    @Test
+    void aSkillMdReadThroughFilesystemIsNeverCompressedButAnotherReadIs() throws Exception {
+        var skill = ChatMessage.toolResult("c1", "filesystem", skillProse());
+        var notes = ChatMessage.toolResult("c2", "filesystem", skillProse());
+        var msgs = List.of(call("c1", "filesystem", "{\"action\":\"readFile\",\"path\":\"skills/abundent-api/SKILL.md\"}"),
+                skill, call("c2", "filesystem", "{\"action\":\"readFile\",\"path\":\"notes/guide.md\"}"), notes,
+                ChatMessage.assistant("done"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var out = CompressionPipeline.compressMessages(msgs, MODEL, 250, FIRST_VIEW_CAP);
+            assertSame(skill, out.get(1), "a skill's instructions are sent whole in every round");
+            assertNotSame(notes, out.get(3), "any other file read is compressed once seen");
+        });
+    }
+
     @Test
     void returnsSameListWhenNothingCompressed() {
         var msgs = List.of(ChatMessage.user("hello"), ChatMessage.assistant("hi"));

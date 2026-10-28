@@ -164,9 +164,9 @@ public final class CompressionPipeline {
         return -1;
     }
 
-    private static boolean declaredVerbatim(@Nullable String toolName, String argsJson) {
+    private static boolean declaredWhole(@Nullable String toolName, String argsJson) {
         var tool = ToolRegistry.lookupTool(toolName);
-        return tool != null && tool.verbatimResult(argsJson);
+        return tool != null && (tool.verbatimResult(argsJson) || tool.keepsResultInContext(argsJson));
     }
 
     private static ChatMessage maybeCompress(ChatMessage msg, String modelId, int minTokens, int wholeUpToTokens,
@@ -179,8 +179,9 @@ public final class CompressionPipeline {
         // view it called the tool to escape — a retrieval loop. Pass it through.
         if (CCR_RETRIEVE_TOOL.equals(msg.toolName())) return msg;
         if (!(msg.content() instanceof String content) || content.isBlank()) return msg;
-        // A catalog compressed to its first entries is fetched back whole, and then sent twice.
-        if (callArgs != null && declaredVerbatim(msg.toolName(), callArgs)) return msg;
+        // A catalog compressed to its first entries is fetched back whole, and then sent twice;
+        // a skill's instructions compressed lose the rules the model has not used yet.
+        if (callArgs != null && declaredWhole(msg.toolName(), callArgs)) return msg;
 
         var before = TokenUsageEstimator.estimateMessage(modelId, msg).tokens();
         if (before < minTokens) return msg; // below the floor — not worth the work
