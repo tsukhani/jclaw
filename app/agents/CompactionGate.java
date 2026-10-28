@@ -21,10 +21,10 @@ import java.util.Set;
  * JCLAW-38 / JCLAW-268 compaction trigger. Extracted from
  * {@link AgentRunner} as part of JCLAW-299. The single entry point
  * {@link #maybeCompactAndRebuild} runs between the prep Tx and the
- * LLM call, deciding whether the assembled message list has reached
- * {@code chat.compaction.triggerTokens}, when set, or crossed the per-model window
- * budget; if so it invokes {@link SessionCompactor#compact} on the turn's
- * own request and re-hydrates the message list with the freshly stored
+ * LLM call, deciding whether the conversation's rows since its floor have passed
+ * the history limit, or the assembled message list has reached the token trigger or
+ * crossed the per-model window budget; if so it invokes {@link SessionCompactor#compact}
+ * on the turn's own request and re-hydrates the message list with the freshly stored
  * summary injected.
  *
  * <p>The decision is intentionally side-effect-free outside the
@@ -47,7 +47,7 @@ public final class CompactionGate {
     }
 
     private record CompactionDecision(@Nullable ModelInfo modelInfo, @Nullable String modelId,
-                                      @Nullable String channelType) {
+                                      @Nullable String channelType, boolean pastHistoryLimit) {
     }
 
     /**
@@ -101,17 +101,17 @@ public final class CompactionGate {
             Agent agent, Long conversationId,
             @Nullable Set<String> disabledTools, LlmProvider primary,
             MessageHydrator.Hydration current, List<ToolDef> tools, int reservedTokens) {
-        // Cheap snapshot: model info + effective model id + channel type.
-        // resolveModelInfo reads only in-memory provider config, so this
-        // Tx is bounded by one findById.
+        // Cheap snapshot: model info + effective model id + channel type, and one COUNT of the rows since the floor.
+        // resolveModelInfo reads only in-memory provider config.
         var snapshot = Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return null;
             var mi = ModelResolver.resolveModelInfo(agent, conv, primary).orElse(null);
             var modelId = ModelResolver.effectiveModelId(agent, conv);
-            return new CompactionDecision(mi, modelId, conv.channelType);
+            return new CompactionDecision(mi, modelId, conv.channelType, SessionCompactor.pastHistoryLimit(conv));
         });
-        if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
+        // A model missing from the provider's list has no known window, so the token cap and the row limit still apply.
+        if (snapshot == null || snapshot.modelId() == null) return current;
         // No-op when the caller has no provider wired up — without one we
         // can't even make the summarization LLM call. Bail out instead of
         // letting providerName/modelLabel construction NPE later.
@@ -120,7 +120,9 @@ public final class CompactionGate {
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current.messages(), tools);
         int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate)
                 + reservedTokens;
-        if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
+        if (!snapshot.pastHistoryLimit() && !SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) {
+            return current;
+        }
 
         final var modelId = snapshot.modelId();
         final var compactionChannel = snapshot.channelType();
@@ -130,10 +132,11 @@ public final class CompactionGate {
         SessionCompactor.ModelCall call = (messages, defs) ->
                 primary.chat(modelId, messages, defs, maxOutput, null, compactionChannel);
         var result = SessionCompactor.compact(conversationId, modelLabel,
-                new SessionCompactor.TurnRequest(current.messages(), tools), call);
+                new SessionCompactor.TurnRequest(current.messages(), tools), call, false, null,
+                SessionCompactor.summaryCallTokens(snapshot.modelInfo()));
         if (!result.compacted()) {
-            // Under the token trigger alone the window is far off and this would repeat every turn of a long chat.
-            if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0)) {
+            // Under the token trigger or the row limit alone the window is far off, and this would repeat every turn.
+            if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
                 EventLogger.info("compaction", agent.name, snapshot.channelType(),
                         "Compaction skipped (%s); the context-window trim is left to fit the prompt"
                                 .formatted(result.skipReason()));

@@ -515,7 +515,10 @@ public final class Commands {
                 Objects.requireNonNull(capturedModelId, "no model configured for compaction"),
                 messages, tools, maxOutput, null, null);
 
-        var result = SessionCompactor.compact(current.id, modelLabel, turn, call, /*force*/ true, args);
+        var modelInfo = primary.config().models().stream().filter(m -> m.id().equals(capturedModelId)).findFirst()
+                .orElse(null);
+        var result = SessionCompactor.compact(current.id, modelLabel, turn, call, /*force*/ true, args,
+                SessionCompactor.summaryCallTokens(modelInfo));
         var responseText = buildCompactResponseText(result, args);
         persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())

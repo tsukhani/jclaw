@@ -562,6 +562,18 @@ public class ConversationService {
         return Message.findRecent(conversation, maxMessages, floor).reversed();
     }
 
+    /** The rows {@link #loadRecentMessages} chooses from, every one since the floor, counted rather than loaded (JF-159). */
+    public static long countSinceFloor(Conversation conversation) {
+        var floor = latestOf(conversation.contextSince, conversation.compactionSince);
+        return floor == null ? Message.count("conversation = ?1", conversation)
+                : Message.count("conversation = ?1 AND createdAt >= ?2", conversation, floor);
+    }
+
+    /** The oldest {@code limit} rows since the floor, in chronological order: where a compaction starts (JF-159). */
+    public static List<Message> loadOldestMessages(Conversation conversation, int limit) {
+        return Message.findOldest(conversation, limit, latestOf(conversation.contextSince, conversation.compactionSince));
+    }
+
     /**
      * Append the stop marker under the newest user request when no reply or marker follows it,
      * in its own transaction when none is active. The one write both stop paths use.
@@ -604,21 +616,21 @@ public class ConversationService {
     }
 
     /** Global history-limit fallback, also the default for the per-type key. */
-    static final String KEY_GLOBAL_MAX = "chat.maxContextMessages";
+    public static final String KEY_GLOBAL_MAX = "chat.maxContextMessages";
     /**
      * Rows loaded when {@code chat.maxContextMessages} is unset, and what a fresh install seeds.
      * Each tool call and tool result is a row, so the cap must hold many busy turns.
      */
     public static final int DEFAULT_HISTORY_LIMIT = 1000;
     /** Per-type override for GROUP-chat conversations (JCLAW-387 B4). */
-    static final String KEY_GROUP_LIMIT = "groupChat.historyLimit";
+    public static final String KEY_GROUP_LIMIT = "groupChat.historyLimit";
     /**
      * Per-type override for DM / private conversations (JCLAW-387 B4). Now
      * reachable: the persisted {@link Conversation#chatType} distinguishes a
      * plain DM from a plain group, which the composite {@code peerId} alone
      * could not.
      */
-    static final String KEY_DM_LIMIT = "dmHistoryLimit";
+    public static final String KEY_DM_LIMIT = "dmHistoryLimit";
 
     /** Telegram {@code chat.type} for a one-on-one DM. */
     private static final String CHAT_TYPE_PRIVATE = "private";

@@ -101,7 +101,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About maxContextMessages"
               content-class="w-64 font-mono"
             >
-              How many recent messages are sent with each LLM request. Each tool call and each tool result counts as one message. Older messages are dropped when the limit is reached to stay within the context window.
+              How many recent messages are sent with each LLM request. Each tool call and each tool result counts as one message. Once a chat has more, its oldest messages are summarized, or dropped if "Summarize instead of dropping messages" is off. A low limit summarizes often.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'maxContextMessages'">
@@ -162,13 +162,31 @@ async function saveChatField(configKey: string, value: string) {
       </div>
       <div class="divide-y divide-border">
         <SettingsConfigField
-          config-key="chat.compaction.triggerTokens"
-          label="Summarize long chats at (tokens)"
+          config-key="chat.compaction.triggerPercent"
+          label="Summarize long chats at (% of window)"
           kind="number"
-          fallback="0"
+          fallback="50"
           :min="0"
-          label-width="w-72"
-          tip="Summarizes the older part of a chat once a request reaches this many tokens, however large the model's limit. 0 keeps today's behavior, summarizing only near the model's limit. Recommended: 150000."
+          :max="100"
+          label-width="w-80"
+          tip="Summarizes the older part of a chat once a request fills this share of the model's context window. 0 turns this limit off. Default: 50."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.triggerTokens"
+          label="…but no later than (tokens)"
+          kind="number"
+          fallback="150000"
+          :min="0"
+          label-width="w-80"
+          tip="Summarizes at this many tokens if that comes first, because answers get worse long before a large window fills. 0 turns this limit off. With both at 0, chats are summarized only near the model's limit. Default: 150000."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.onRowLimit"
+          label="Summarize instead of dropping messages"
+          kind="boolean"
+          fallback="true"
+          label-width="w-80"
+          tip="When a chat has more messages than maxContextMessages, its oldest messages are summarized. Off, they are dropped and the agent no longer sees them. Default: on."
         />
         <SettingsConfigField
           config-key="chat.pruneToolResultsEveryTurns"
@@ -176,7 +194,7 @@ async function saveChatField(configKey: string, value: string) {
           kind="number"
           fallback="1"
           :min="1"
-          label-width="w-72"
+          label-width="w-80"
           tip="Long tool results from earlier turns are shortened to a note the agent can open again. 1 shortens them each turn. Recommended: 5 once your provider's cache holds across turns."
         />
       </div>
@@ -214,7 +232,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About compactionReserveTokens"
               content-class="w-72 font-mono"
             >
-              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches "Summarize long chats at" if that is above 0, whichever comes first. Larger reserve = compaction fires sooner.
+              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches the "Summarize long chats at" limits, whichever comes first. Larger reserve = compaction fires sooner.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'compactionReserveTokens'">

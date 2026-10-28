@@ -389,6 +389,90 @@ class ConversationServiceTest extends UnitTest {
         assertEquals("50", ConfigService.get("chat.maxContextMessages"));
     }
 
+    // The keys an upgrade raises to a floor of 1,000 (JF-159), once per install.
+    private static final List<String> HISTORY_LIMIT_KEYS =
+            List.of("chat.maxContextMessages", "dmHistoryLimit", "groupChat.historyLimit");
+
+    private static void runHistoryLimitFloor() throws Exception {
+        var floor = DefaultConfigJob.class.getDeclaredMethod("raiseHistoryLimitsOnce");
+        floor.setAccessible(true);
+        floor.invoke(new DefaultConfigJob());
+    }
+
+    private static List<String> historyLimits() {
+        return HISTORY_LIMIT_KEYS.stream().map(ConfigService::get).toList();
+    }
+
+    @Test
+    void theUpgradeRaisesEverySavedHistoryLimitBelowAThousandToAThousandAndWritesItsMarker() throws Exception {
+        CompactionTriggerSync.acquire();
+        try {
+            for (var low : List.of("50", "999")) {
+                ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+                for (var key : HISTORY_LIMIT_KEYS) ConfigService.set(key, low);
+
+                runHistoryLimitFloor();
+
+                assertEquals(List.of("1000", "1000", "1000"), historyLimits(), () -> "saved " + low);
+                assertEquals("1000", ConfigService.get(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY));
+            }
+        } finally {
+            ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+            CompactionTriggerSync.release();
+        }
+    }
+
+    @Test
+    void theUpgradeLeavesALimitOfAThousandOrMoreOrNotANumberAsItIs() throws Exception {
+        CompactionTriggerSync.acquire();
+        try {
+            for (var kept : List.of("1000", "2000", "lots")) {
+                ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+                for (var key : HISTORY_LIMIT_KEYS) ConfigService.set(key, kept);
+
+                runHistoryLimitFloor();
+
+                assertEquals(List.of(kept, kept, kept), historyLimits());
+            }
+        } finally {
+            ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+            CompactionTriggerSync.release();
+        }
+    }
+
+    @Test
+    void aLimitLoweredAfterTheUpgradeStaysAcrossLaterStarts() throws Exception {
+        CompactionTriggerSync.acquire();
+        try {
+            runHistoryLimitFloor();
+            for (var key : HISTORY_LIMIT_KEYS) ConfigService.set(key, "200");
+
+            runHistoryLimitFloor();
+            runHistoryLimitFloor();
+
+            assertEquals(List.of("200", "200", "200"), historyLimits());
+        } finally {
+            ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+            CompactionTriggerSync.release();
+        }
+    }
+
+    @Test
+    void aFreshConfigGetsTheMarkerAndNoHistoryLimitRows() throws Exception {
+        CompactionTriggerSync.acquire();
+        try {
+            ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+
+            runHistoryLimitFloor();
+
+            assertEquals(java.util.Arrays.asList(null, null, null), historyLimits());
+            assertEquals("1000", ConfigService.get(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY));
+        } finally {
+            ConfigService.delete(DefaultConfigJob.HISTORY_LIMIT_FLOOR_KEY);
+            CompactionTriggerSync.release();
+        }
+    }
+
     @Test
     void effectiveHistoryLimitWebUsesGlobalMax() {
         var agent = newAgent("conv-hist-web-global");

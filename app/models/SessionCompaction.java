@@ -75,6 +75,6 @@ public class SessionCompaction extends Model {
      */
     public static SessionCompaction findLatest(Conversation conversation) {
         return SessionCompaction.find(
-                "conversation = ?1 ORDER BY compactedAt DESC", conversation).first();
+                "conversation = ?1 ORDER BY compactedAt DESC, id DESC", conversation).first();
     }
 }

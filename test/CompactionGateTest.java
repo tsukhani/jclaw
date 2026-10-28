@@ -23,6 +23,7 @@ import utils.CircuitBreakers;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Unit tests for {@link CompactionGate} (JCLAW-309).
@@ -374,8 +375,8 @@ class CompactionGateTest extends UnitTest {
 
     @Test
     void tokensReservedForTheTurnsRecallCountTowardTheTrigger() throws Exception {
-        // The recommended 150,000-token trigger fires here, not the window rule: no reserve another class sets brings
-        // it near on a 1,000,000-token window.
+        // The 150,000-token cap fires here, not the window rule: no reserve another class sets brings it near on a
+        // 1,000,000-token window.
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         startLlmServer(simpleResponse("RESERVE SUMMARY"));
         var provider = ownProvider(1_000_000);
@@ -426,6 +427,50 @@ class CompactionGateTest extends UnitTest {
             assertEquals(List.of(), compactionLines(triggerOnly));
             assertEquals(List.of("Compaction skipped (no safe boundary or below min-turns); "
                     + "the context-window trim is left to fit the prompt"), compactionLines(pastTheWindow));
+        } finally {
+            removeProvider(provider);
+        }
+    }
+
+    // ─── Rows since the floor past the history limit (JF-159) ──────────
+
+    @Test
+    void theRowTriggerFiresOnceTheRowsPassTheHistoryLimitAndNotAtIt() throws Exception {
+        ConfigService.set("chat.maxContextMessages", "40");
+        var requests = new AtomicInteger();
+        var summary = simpleResponse("ROW SUMMARY");
+        startLlmServer(exchange -> {
+            requests.incrementAndGet();
+            summary.handle(exchange);
+        });
+        var provider = ownProvider(1_000_000);
+        try {
+            var conv = ConversationService.create(agent, "web", "user1");
+            for (int i = 0; i < 40; i++) {
+                ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                        "turn " + i, null, null, null);
+            }
+            commitAndReopen();
+            var primary = llm.ProviderRegistry.get(provider);
+            var current = new MessageHydrator.Hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi")),
+                    List.of(), List.of(), List.of());
+
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), 0), "40 rows sit at the limit");
+            ConversationService.appendMessage(Conversation.findById(conv.id), MessageRole.USER, "turn 40", null, null,
+                    null);
+            commitAndReopen();
+            ConfigService.set(SessionCompactor.ON_ROW_LIMIT_KEY, "false");
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), 0), "switched off, the 41st row leaves the oldest out of the load instead");
+            assertEquals(0, requests.get());
+
+            ConfigService.delete(SessionCompactor.ON_ROW_LIMIT_KEY);
+            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current, List.of(), 0);
+
+            assertEquals(1, requests.get());
+            assertTrue(((String) rebuilt.messages().getFirst().content())
+                    .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nROW SUMMARY"), "on by default past the limit");
         } finally {
             removeProvider(provider);
         }

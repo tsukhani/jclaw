@@ -222,14 +222,35 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
-    void theSummarizeThresholdMustBeAWholeNumberOfZeroOrMore() {
-        var expected = "chat.compaction.triggerTokens must be a whole number of tokens; 0 turns the token trigger off.";
-        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "-1");
-        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "150k");
-        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "1.5");
-        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "");
+    void theSummarizeTokenCapMustBeAWholeNumberOfZeroOrMore() {
+        var expected = "chat.compaction.triggerTokens must be a whole number of tokens; 0 turns the token cap off.";
+        for (var value : List.of("-1", "150k", "1.5", "")) {
+            assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, value);
+        }
         assertAccepted(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
         assertAccepted(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
+    }
+
+    @Test
+    void theSummarizeShareOfTheWindowMustBeAWholePercentFromZeroToAHundred() {
+        var expected = "chat.compaction.triggerPercent must be a whole number from 0 to 100; 0 turns the window share off.";
+        for (var value : List.of("-1", "101", "50.5", "half", "")) {
+            assertRefused(expected, SessionCompactor.TRIGGER_PERCENT_KEY, value);
+        }
+        for (var value : List.of("0", "50", "100")) {
+            assertAccepted(SessionCompactor.TRIGGER_PERCENT_KEY, value);
+        }
+    }
+
+    @Test
+    void theSummarizeAtTheRowLimitSwitchMustBeTrueOrFalse() {
+        var expected = "chat.compaction.onRowLimit must be 'true' or 'false'.";
+        for (var value : List.of("yes", "1", "")) {
+            assertRefused(expected, SessionCompactor.ON_ROW_LIMIT_KEY, value);
+        }
+        for (var value : List.of("true", "false", "TRUE")) {
+            assertAccepted(SessionCompactor.ON_ROW_LIMIT_KEY, value);
+        }
     }
 
     @Test

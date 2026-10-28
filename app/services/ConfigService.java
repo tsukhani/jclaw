@@ -398,8 +398,12 @@ public class ConfigService {
             // A zero timeout expires an approval prompt before anyone can answer it.
             atLeast(DangerousActionGate.APPROVAL_TIMEOUT_KEY, 1, " must be a whole number of seconds, at least 1."),
             atLeast(TokenCoalescer.CONFIG_KEY, 0, " must be a whole number of characters; 0 sends every token at once."),
-            // These two ship off and read a bad value as off, so a typo would leave the feature off without a word.
-            atLeast(SessionCompactor.TRIGGER_TOKENS_KEY, 0, " must be a whole number of tokens; 0 turns the token trigger off."),
+            // A typo would read as the default, or as off for the switch, without a word.
+            atLeast(SessionCompactor.TRIGGER_TOKENS_KEY, 0, " must be a whole number of tokens; 0 turns the token cap off."),
+            (key, value) -> key.equals(SessionCompactor.TRIGGER_PERCENT_KEY) && !isIntBetween(value, 0, 100)
+                    ? key + " must be a whole number from 0 to 100; 0 turns the window share off." : null,
+            (key, value) -> key.equals(SessionCompactor.ON_ROW_LIMIT_KEY) && !"true".equalsIgnoreCase(value.trim())
+                    && !"false".equalsIgnoreCase(value.trim()) ? key + " must be 'true' or 'false'." : null,
             atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
@@ -654,6 +658,10 @@ public class ConfigService {
         } catch (NumberFormatException _) {
             return false;
         }
+    }
+
+    private static boolean isIntBetween(String value, int min, int max) {
+        return isIntAtLeast(value, min) && !isIntAtLeast(value, max + 1);
     }
 
     /** A cosine similarity: finite and within [-1.0, 1.0]. Rejects the NaN and Infinity

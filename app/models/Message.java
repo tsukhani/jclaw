@@ -213,4 +213,13 @@ public class Message extends Model {
                 "conversation = ?1 AND createdAt >= ?2 ORDER BY createdAt DESC",
                 conversation, since).fetch(limit);
     }
+
+    /** The oldest {@code limit} messages for {@code conversation} at or after {@code since} (all when null), oldest first. */
+    public static List<Message> findOldest(Conversation conversation, int limit, Instant since) {
+        if (since == null) {
+            return Message.find("conversation = ?1 ORDER BY createdAt ASC, id ASC", conversation).fetch(limit);
+        }
+        return Message.find("conversation = ?1 AND createdAt >= ?2 ORDER BY createdAt ASC, id ASC",
+                conversation, since).fetch(limit);
+    }
 }

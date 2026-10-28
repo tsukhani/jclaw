@@ -22,31 +22,36 @@ import services.ConversationService;
 import services.SessionCompactor;
 import services.Tx;
 import slash.Commands;
+import utils.AppClock;
 import utils.CircuitBreakers;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
 
 /**
- * JF-154 end to end: a chat compacts once its prompt reaches {@code chat.compaction.triggerTokens}, however
- * large the window, and the summary call reuses the agent's own request — its system prompt, history and tools —
- * with the instruction last, and never runs a tool; {@code /compact} sends the same request. The trigger ships
- * off, so a test that needs it sets the recommended 150,000 and seeds the history past it, rather than lowering the
- * key, under {@link CompactionTriggerSync}.
+ * JF-154 end to end: a chat compacts once its prompt reaches the token trigger, however large the window, and the
+ * summary call reuses the agent's own request — its system prompt, history and tools — with the instruction last,
+ * and never runs a tool; {@code /compact} sends the same request. On the 1,000,000-token window here the trigger's
+ * default (JF-159) is its 150,000-token cap, which the long seeded histories pass; the keys are held absent under
+ * {@link CompactionTriggerSync}.
  */
 class CompactionSummaryRequestTest extends UnitTest {
 
     private static final String PROVIDER = "jf154-compaction";
     private static final String MODEL = "jf154-model";
     private static final String TOOL = "counter_bump";
-    private static final String TRIGGER_KEY = SessionCompactor.TRIGGER_TOKENS_KEY;
     private static final List<String> SECTIONS = List.of("Goals and constraints", "Decisions",
             "Identifiers and facts", "Open questions and errors", "Next steps");
 
@@ -74,12 +79,8 @@ class CompactionSummaryRequestTest extends UnitTest {
     }
 
     @Test
-    void theTokenTriggerIsOffUntilSetAndThenFiresAtExactlyItsValue() {
+    void theTokenTriggerIsOnByDefaultAtItsCapOnThisWindow() {
         var window = new ModelInfo(MODEL, MODEL, 1_000_000, 4096, false);
-        assertFalse(SessionCompactor.shouldCompact(150_000, window), "absent, the trigger is off");
-        assertFalse(SessionCompactor.shouldCompact(900_000, window), "and only the window rule compacts");
-
-        recommendedTrigger();
         assertTrue(SessionCompactor.shouldCompact(150_000, window));
         assertFalse(SessionCompactor.shouldCompact(149_999, window));
     }
@@ -90,7 +91,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-prefix");
         seed(convo, 4, 40);
-        recommendedTrigger();
+        commit();
 
         ToolRegistrySync.withTools(List.of(countingTool()), () -> {
             run(agent, convo, "First question");
@@ -140,7 +141,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-retry");
         seed(convo, 24, 32_000);
-        recommendedTrigger();
+        commit();
 
         var result = new AtomicReference<AgentRunner.RunResult>();
         ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(run(agent, convo, "Next?")));
@@ -160,18 +161,19 @@ class CompactionSummaryRequestTest extends UnitTest {
     }
 
     @Test
-    void anAbsentZeroOrNegativeTriggerLeavesALongChatUncompactedOnALargeWindow() throws Exception {
+    void bothHalvesOfTheTriggerAtZeroOrBelowLeaveALongChatUncompactedOnALargeWindow() throws Exception {
         startProvider(n -> text("Reply " + n));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-off");
         seed(convo, 24, 32_000);
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "0");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
         commit();
 
         run(agent, convo, "Next?");
-        ConfigService.set(TRIGGER_KEY, "0");
-        commit();
         run(agent, convo, "And then?");
-        ConfigService.set(TRIGGER_KEY, "-1");
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "-1");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "-1");
         commit();
         run(agent, convo, "And after that?");
 
@@ -247,6 +249,41 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertEquals(0, toolRuns.get());
         assertEquals("SUMMARY-SLASH-RETRY", latestCompaction(convo.id).summary);
         assertTrue(result.get().responseText().startsWith("> Conversation Compacted"), result.get().responseText());
+    }
+
+    @Test
+    void slashCompactOnAChatPastTheHistoryLimitSummarizesItsOldestRowsFirstInChunks() throws Exception {
+        startProvider(n -> text("SUMMARY " + n));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf159-slash");
+        // A millisecond apart, so no chunk's floor can share a timestamp with the row before it.
+        var tick = new AtomicLong(Instant.now().minusSeconds(60).toEpochMilli());
+        AppClock.runWith(new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.incrementAndGet()); }
+        }, () -> seed(convo, 30, 40));
+        ConfigService.set("chat.maxContextMessages", "12");
+        commit();
+
+        var result = new AtomicReference<Commands.Result>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(slashCompact(agent, convo, null)));
+
+        // /compact keeps 4: chunks of rows 0-11 and 12-23 past the limit, then 24-25 ahead of the kept 26-29.
+        assertEquals(3, requests.size());
+        var rows = storedContents(convo.id);
+        var inputs = new ArrayList<String>();
+        for (var request : requests) {
+            assertFalse(request.has("tools"), "rows the turn never loaded go as the transcript");
+            inputs.add(content(request.getAsJsonArray("messages").get(1)));
+        }
+        assertTrue(inputs.get(0).startsWith("[USER] " + rows.get(0)), inputs.get(0));
+        assertTrue(inputs.get(1).startsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY 1\n\n"
+                + "[Turns since that summary]\n\n[USER] " + rows.get(12)), inputs.get(1));
+        assertTrue(inputs.get(2).startsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY 2\n\n"
+                + "[Turns since that summary]\n\n[USER] " + rows.get(24)), inputs.get(2));
+        assertEquals("SUMMARY 3", latestCompaction(convo.id).summary);
+        assertTrue(result.get().responseText().contains("Summarized 26 earlier turns"), result.get().responseText());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────
@@ -345,12 +382,6 @@ class CompactionSummaryRequestTest extends UnitTest {
         JPA.em().getTransaction().begin();
     }
 
-    /** The value Settings recommends, which the seeded long histories pass. */
-    private static void recommendedTrigger() {
-        ConfigService.set(TRIGGER_KEY, "150000");
-        commit();
-    }
-
     private static AgentRunner.RunResult run(Agent agent, Conversation convo, String message) throws Exception {
         var result = new AtomicReference<AgentRunner.RunResult>();
         var error = new AtomicReference<Exception>();
@@ -374,6 +405,18 @@ class CompactionSummaryRequestTest extends UnitTest {
         var latest = Tx.run(() -> SessionCompaction.findLatest(Conversation.findById(conversationId)));
         assertNotNull(latest, "a summary was stored");
         return latest;
+    }
+
+    /** Every stored row's content, oldest first. */
+    private static List<String> storedContents(Long conversationId) {
+        JPA.em().clear();
+        return Tx.run(() -> {
+            var out = new ArrayList<String>();
+            for (Object o : Message.find("conversation.id = ?1 ORDER BY createdAt, id", conversationId).fetch()) {
+                out.add(((Message) o).content);
+            }
+            return out;
+        });
     }
 
     private static List<String> storedRows(Long conversationId) {

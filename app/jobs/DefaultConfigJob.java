@@ -52,6 +52,8 @@ public class DefaultConfigJob extends Job<Void> {
     private static final String EVENT_CATEGORY_AGENT = "agent";
     private static final String EVENT_CATEGORY_SYSTEM = "system";
     private static final String CONFIG_VALUE_FALSE = "false";
+    /** Written once the history-limit floor has run, so a limit an operator lowers afterwards survives restarts. */
+    public static final String HISTORY_LIMIT_FLOOR_KEY = "chat.historyLimitFloorApplied";
 
     @Override
     public void doJob() {
@@ -507,6 +509,8 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-1575: exec's timeouts rose to Claude Code's 120 s and 600 s; a seeded row still at the old default follows.
         raiseIfStillDefault("shell.defaultTimeoutSeconds", "30", "120");
         raiseIfStillDefault("shell.maxTimeoutSeconds", "300", "600");
+
+        raiseHistoryLimitsOnce();
     }
 
     /** One-shot: a seeded row still holding {@code oldDefault} takes {@code newDefault}; an operator's own value stays. */
@@ -515,6 +519,33 @@ public class DefaultConfigJob extends Job<Void> {
             ConfigService.set(key, newDefault);
             EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config default raised: %s %s → %s".formatted(key, oldDefault, newDefault));
         }
+    }
+
+    /**
+     * JF-159: a chat past its history limit is now summarized, so a limit saved low, the old seeded 50 among them,
+     * would summarize after nearly every busy turn. Once per install, each saved limit below the default rises to it.
+     */
+    private void raiseHistoryLimitsOnce() {
+        if (ConfigService.get(HISTORY_LIMIT_FLOOR_KEY) != null) return;
+        int floor = ConversationService.DEFAULT_HISTORY_LIMIT;
+        for (var key : List.of(ConversationService.KEY_GLOBAL_MAX, ConversationService.KEY_DM_LIMIT,
+                ConversationService.KEY_GROUP_LIMIT)) {
+            raiseToAtLeast(key, floor);
+        }
+        ConfigService.set(HISTORY_LIMIT_FLOOR_KEY, String.valueOf(floor));
+    }
+
+    /** A saved whole number below {@code floor} takes {@code floor}; a higher, absent or non-numeric value stays. */
+    private void raiseToAtLeast(String key, int floor) {
+        var saved = ConfigService.get(key);
+        if (saved == null) return;
+        try {
+            if (Integer.parseInt(saved.trim()) >= floor) return;
+        } catch (NumberFormatException _) {
+            return;
+        }
+        ConfigService.set(key, String.valueOf(floor));
+        EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config value raised: %s %s → %d".formatted(key, saved, floor));
     }
 
     /**

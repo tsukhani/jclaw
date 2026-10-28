@@ -30,11 +30,15 @@ import java.util.Optional;
  * intact for sidebar / scrollback; only the LLM-facing view is
  * truncated.
  *
- * <p>Trigger: whichever comes first of {@code estimatedTokens >= chat.compaction.triggerTokens}
- * (off unless set above 0; 150,000 is the recommended value), since quality falls well before today's
- * windows fill (JF-154), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The reserve carves out
- * headroom for the completion itself plus a safety margin, following OpenClaw's approach — tuned via
- * {@code chat.compactionReserveTokens} (default 15000, floor 9000).
+ * <p>Trigger: whichever comes first of the token trigger, the smaller of {@code chat.compaction.triggerPercent} of
+ * the model's window and {@code chat.compaction.triggerTokens} (defaults 50 and 150,000), since quality falls well
+ * before today's windows fill (JF-154, JF-159), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The
+ * reserve carves out headroom for the completion itself plus a safety margin, following OpenClaw's approach — tuned
+ * via {@code chat.compactionReserveTokens} (default 15000, floor 9000). Separately, the gate compacts a chat whose
+ * rows since its floor pass the history limit ({@link #pastHistoryLimit}), which would otherwise drop them unread.
+ *
+ * <p>A compaction summarizes the oldest rows since the floor, in chunks when they exceed what one summary call
+ * takes, each folding in the summary before it (JF-159).
  *
  * <p>Boundary selection: we anchor cuts at user-message boundaries so
  * we never split an assistant's tool_calls from its tool_result
@@ -96,25 +100,79 @@ public final class SessionCompactor {
 
     // ─── Decision ───────────────────────────────────────────────────────
 
-    /** JF-154: absent, the token trigger is off and only the window rule compacts. */
+    /** JF-154: the token trigger's cap; 0 or less turns this half off. */
     public static final String TRIGGER_TOKENS_KEY = "chat.compaction.triggerTokens";
+    public static final int DEFAULT_TRIGGER_TOKENS = 150_000;
+    /** JF-159: the token trigger's share of the model's window, in percent; 0 or less turns this half off. */
+    public static final String TRIGGER_PERCENT_KEY = "chat.compaction.triggerPercent";
+    public static final int DEFAULT_TRIGGER_PERCENT = 50;
+    /** JF-159: false leaves a chat past its history limit to the newest-rows load, dropping the oldest unread. */
+    public static final String ON_ROW_LIMIT_KEY = "chat.compaction.onRowLimit";
+    /** The most summary calls one compaction makes; a catch-up that needs more continues on the next turn. */
+    public static final int MAX_SUMMARY_CALLS = 8;
 
     /**
-     * True when the current message list reaches {@code chat.compaction.triggerTokens} or exceeds the
+     * True when the current message list reaches the token trigger ({@link #triggerThreshold}) or exceeds the
      * model's window budget. Callers should compute {@code estimatedTokens} with
      * {@code ContextWindowManager.adjustedPromptTokens} so thresholds compare apples to apples.
      */
     public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo) {
-        return shouldCompact(estimatedTokens, modelInfo, ConfigService.getInt(TRIGGER_TOKENS_KEY, 0));
+        return shouldCompact(estimatedTokens, modelInfo, triggerPercent(), triggerTokens());
     }
 
-    /** {@link #shouldCompact(int, ModelInfo)} with the token trigger given; 0 or less leaves only the window rule. */
-    public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo, int triggerTokens) {
-        if (modelInfo == null) return false;
-        if (triggerTokens > 0 && estimatedTokens >= triggerTokens) return true;
-        if (modelInfo.contextWindow() <= 0) return false;
+    /** {@link #shouldCompact(int, ModelInfo)} with the token trigger's two halves given; both off leaves the window rule. */
+    public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo, int triggerPercent,
+                                        int triggerTokens) {
+        return estimatedTokens >= triggerThreshold(modelInfo, triggerPercent, triggerTokens)
+                || estimatedTokens > windowBudget(modelInfo);
+    }
+
+    /**
+     * The prompt size at which the token trigger fires: the smaller of {@code triggerPercent} of the model's window
+     * and {@code triggerTokens}. A half at 0 or less is off, as is the share when the window is unknown, so a model
+     * with no known window uses the cap alone; {@link Integer#MAX_VALUE}, never reached, when both are off.
+     */
+    public static int triggerThreshold(@Nullable ModelInfo modelInfo, int triggerPercent, int triggerTokens) {
+        long threshold = Integer.MAX_VALUE;
+        int window = modelInfo != null ? modelInfo.contextWindow() : 0;
+        if (triggerPercent > 0 && window > 0) {
+            threshold = Math.max(1, (long) window * Math.min(triggerPercent, 100) / 100);
+        }
+        if (triggerTokens > 0) threshold = Math.min(threshold, triggerTokens);
+        return (int) threshold;
+    }
+
+    /**
+     * The most tokens one summary call's rows may carry for {@code modelInfo}: the token trigger's threshold, the size
+     * at which a turn's own prompt is summarized, else the window budget; unbounded when neither is known.
+     */
+    public static int summaryCallTokens(@Nullable ModelInfo modelInfo) {
+        int threshold = triggerThreshold(modelInfo, triggerPercent(), triggerTokens());
+        return threshold != Integer.MAX_VALUE ? threshold : windowBudget(modelInfo);
+    }
+
+    /**
+     * JF-159: whether {@code conversation}'s rows since its floor pass its history limit, so the newest-rows load would
+     * leave the oldest out unsummarized. False when {@code chat.compaction.onRowLimit} is false. Call inside a Tx.
+     */
+    public static boolean pastHistoryLimit(Conversation conversation) {
+        return ConfigService.getBoolean(ON_ROW_LIMIT_KEY, true)
+                && ConversationService.countSinceFloor(conversation) > ConversationService.effectiveHistoryLimit(conversation);
+    }
+
+    private static int triggerPercent() {
+        return ConfigService.getInt(TRIGGER_PERCENT_KEY, DEFAULT_TRIGGER_PERCENT);
+    }
+
+    private static int triggerTokens() {
+        return ConfigService.getInt(TRIGGER_TOKENS_KEY, DEFAULT_TRIGGER_TOKENS);
+    }
+
+    /** The model's window less the reserve; {@link Integer#MAX_VALUE}, never passed, when that leaves nothing. */
+    private static int windowBudget(@Nullable ModelInfo modelInfo) {
+        if (modelInfo == null || modelInfo.contextWindow() <= 0) return Integer.MAX_VALUE;
         int budget = modelInfo.contextWindow() - effectiveReserveTokens();
-        return budget > 0 && estimatedTokens > budget;
+        return budget > 0 ? budget : Integer.MAX_VALUE;
     }
 
     /** The reserve carved out of the context window for completion + safety margin. */
@@ -161,7 +219,7 @@ public final class SessionCompactor {
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, @Nullable String additionalInstructions) {
-        return compact(conversationId, modelLabel, force,
+        return compact(conversationId, modelLabel, force, Integer.MAX_VALUE,
                 plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)));
     }
 
@@ -174,31 +232,55 @@ public final class SessionCompactor {
      * may set one. A reply that calls a tool is retried once on the transcript without tools, and so is a
      * call that fails, since the turn's prompt, tools and {@code max_tokens} can overflow a small window the
      * transcript fits; no tool is ever run. When the turn's list no longer lines up with the stored rows,
-     * the transcript is sent instead.
+     * the transcript is sent instead, as it is for rows the turn did not load.
      *
      * @param turn the request the turn is about to send
      * @param call the model call, made outside any transaction
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call) {
-        return compact(conversationId, modelLabel, turn, call, false, null);
+        return compact(conversationId, modelLabel, turn, call, false, null, Integer.MAX_VALUE);
     }
 
     /**
      * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} relaxes the
      * too-few-turns guard as the transcript form's does, and {@code additionalInstructions} follows the instruction,
-     * in the transcript retries too.
+     * in the transcript retries too. {@code callTokens} bounds the rows of each summary call the turn's own request
+     * cannot carry ({@link #summaryCallTokens}).
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call,
-                                           boolean force, @Nullable String additionalInstructions) {
-        return compact(conversationId, modelLabel, force,
+                                           boolean force, @Nullable String additionalInstructions, int callTokens) {
+        return compact(conversationId, modelLabel, force, callTokens,
                 plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions));
     }
 
-    private static CompactionResult compact(Long conversationId, String modelLabel, boolean force, SummaryStep step) {
-        var planOpt = Tx.run(() -> buildPlan(conversationId, force));
-        if (planOpt.isEmpty()) return CompactionResult.skipped("no safe boundary or below min-turns");
-        var plan = planOpt.get();
+    /** One summary call after another, oldest rows first, until a plan reaches the kept tail (JF-159). */
+    private static CompactionResult compact(Long conversationId, String modelLabel, boolean force, int callTokens,
+                                            SummaryStep step) {
+        int turnsCompacted = 0;
+        int summaryChars = 0;
+        for (int call = 0; call < MAX_SUMMARY_CALLS; call++) {
+            final boolean first = call == 0;
+            var planOpt = Tx.run(() -> buildPlan(conversationId, force, callTokens, first));
+            if (planOpt.isEmpty()) {
+                return first ? CompactionResult.skipped("no safe boundary or below min-turns")
+                        : CompactionResult.success(turnsCompacted, summaryChars);
+            }
+            var plan = planOpt.get();
+            var stored = summarizeAndStore(conversationId, modelLabel, plan, step);
+            // A later call that fails keeps the summaries already stored, and the next turn starts after them.
+            if (!stored.compacted()) return first ? stored : CompactionResult.success(turnsCompacted, summaryChars);
+            turnsCompacted += stored.turnsCompacted();
+            summaryChars = stored.summaryChars();
+            if (plan.last()) return CompactionResult.success(turnsCompacted, summaryChars);
+        }
+        EventLogger.info("compaction", null, null,
+                "Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
+                        .formatted(conversationId, MAX_SUMMARY_CALLS));
+        return CompactionResult.success(turnsCompacted, summaryChars);
+    }
 
+    private static CompactionResult summarizeAndStore(Long conversationId, String modelLabel, CompactionPlan plan,
+                                                      SummaryStep step) {
         String summary;
         try {
             summary = step.summarize(plan);
@@ -286,19 +368,68 @@ public final class SessionCompactor {
      * @param createdAt   creation timestamp
      */
     public record MessageSnapshot(String role, String content, String toolCalls, String toolResults, Instant createdAt) {}
-    record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, @Nullable String priorSummary) {}
+    /**
+     * One summary call's rows. {@code turnsOwnHistory} when they are the head of the history the turn loaded, so the
+     * turn's own request can carry them; {@code last} when {@code firstKept} starts the conversation's kept tail
+     * rather than the next chunk.
+     */
+    record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, @Nullable String priorSummary,
+                          boolean turnsOwnHistory, boolean last) {}
 
-    private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force) {
+    /**
+     * The next summary call's rows (JF-159): the oldest since the floor, ending on a user row that leaves at least the
+     * kept tail, at most the history limit and, past the turn's own history, at most {@code callTokens}. When no user
+     * row ends such a chunk in a chat past its limit, today's plan on the newest rows, with one line saying what it
+     * leaves out.
+     */
+    private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force, int callTokens,
+                                                      boolean firstCall) {
         var conv = Conversation.<Conversation>findById(conversationId);
         if (conv == null) return Optional.empty();
+        int keep = keepMessages(force);
+        int min = minTurns(force);
+        int limit = ConversationService.effectiveHistoryLimit(conv);
+        long total = ConversationService.countSinceFloor(conv);
+        if (firstCall && total <= limit) {
+            var recent = ConversationService.loadRecentMessages(conv);
+            return planAt(recent, findSafeBoundary(recent, keep, min), conv, true, true);
+        }
+        var oldest = ConversationService.loadOldestMessages(conv, (int) Math.min(total, limit + 1L));
+        int reach = (int) Math.min(limit, total - keep);
+        int fit = rowsWithin(oldest, callTokens);
+        int boundary = latestUserRow(oldest, min, Math.min(reach, fit));
+        if (boundary > 0) return planAt(oldest, boundary, conv, false, reach == total - keep && fit >= reach);
+        // One chunk over the budget beats none: the call may still fit, and one that fails only stops the catch-up.
+        boundary = earliestUserRow(oldest, Math.max(min, fit + 1), reach);
+        if (boundary > 0) return planAt(oldest, boundary, conv, false, false);
+        if (total <= limit) return Optional.empty();
+        EventLogger.info("compaction", null, null, ("Compaction for conversation %d found no user message to end a "
+                + "summary on among its oldest rows; the %d rows before its newest %d are not summarized")
+                .formatted(conversationId, total - limit, limit));
         var recent = ConversationService.loadRecentMessages(conv);
-        int boundary = force ? findSafeBoundaryForced(recent) : findSafeBoundary(recent);
+        return planAt(recent, findSafeBoundary(recent, keep, min), conv, firstCall, true);
+    }
+
+    private static Optional<CompactionPlan> planAt(List<Message> rows, int boundary, Conversation conv,
+                                                   boolean turnsOwnHistory, boolean last) {
         if (boundary <= 0) return Optional.empty();
         var snaps = new ArrayList<MessageSnapshot>(boundary);
         for (int i = 0; i < boundary; i++) {
-            snaps.add(snapshot(recent.get(i)));
+            snaps.add(snapshot(rows.get(i)));
         }
-        return Optional.of(new CompactionPlan(snaps, snapshot(recent.get(boundary)), currentSummary(conv)));
+        return Optional.of(new CompactionPlan(snaps, snapshot(rows.get(boundary)), currentSummary(conv),
+                turnsOwnHistory, last));
+    }
+
+    /** How many of {@code rows}, from the first, fit in {@code tokens} at four characters a token as a summary renders them. */
+    private static int rowsWithin(List<Message> rows, int tokens) {
+        if (tokens == Integer.MAX_VALUE) return rows.size();
+        long used = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            used += renderTurns(List.of(snapshot(rows.get(i)))).length() / 4;
+            if (used > tokens) return i;
+        }
+        return rows.size();
     }
 
     private static MessageSnapshot snapshot(Message m) {
@@ -322,6 +453,9 @@ public final class SessionCompactor {
     private static @Nullable String summarizeOnTurn(Long conversationId, CompactionPlan plan, TurnRequest turn,
                                                     ModelCall call, @Nullable String additionalInstructions)
             throws Exception {
+        if (!plan.turnsOwnHistory()) {
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+        }
         if (!alignsWith(plan, turn.messages())) {
             EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
                     + "the turn's messages no longer match the stored rows").formatted(conversationId));
@@ -402,9 +536,7 @@ public final class SessionCompactor {
      * short, or no user message in the eligible range).
      */
     public static int findSafeBoundary(List<Message> messages) {
-        return findSafeBoundary(messages,
-                Math.max(1, ConfigService.getInt("chat.compactionKeepMessages", 10)),
-                Math.max(1, ConfigService.getInt("chat.compactionMinTurns", 10)));
+        return findSafeBoundary(messages, keepMessages(false), minTurns(false));
     }
 
     /**
@@ -414,19 +546,35 @@ public final class SessionCompactor {
      * user message so tool-call cycles stay intact.
      */
     public static int findSafeBoundaryForced(List<Message> messages) {
-        return findSafeBoundary(messages,
-                Math.max(1, ConfigService.getInt("chat.compactionForcedKeepMessages", 4)),
-                Math.max(1, ConfigService.getInt("chat.compactionForcedMinTurns", 2)));
+        return findSafeBoundary(messages, keepMessages(true), minTurns(true));
     }
 
     public static int findSafeBoundary(List<Message> messages, int keepMin, int minCompactable) {
-        int total = messages.size();
-        int maxBoundary = total - keepMin;
-        if (maxBoundary < minCompactable) return -1;
-        for (int i = maxBoundary; i >= minCompactable; i--) {
-            if (MessageRole.USER.value.equals(messages.get(i).role)) {
-                return i;
-            }
+        return latestUserRow(messages, minCompactable, messages.size() - keepMin);
+    }
+
+    private static int keepMessages(boolean force) {
+        return force ? Math.max(1, ConfigService.getInt("chat.compactionForcedKeepMessages", 4))
+                : Math.max(1, ConfigService.getInt("chat.compactionKeepMessages", 10));
+    }
+
+    private static int minTurns(boolean force) {
+        return force ? Math.max(1, ConfigService.getInt("chat.compactionForcedMinTurns", 2))
+                : Math.max(1, ConfigService.getInt("chat.compactionMinTurns", 10));
+    }
+
+    /** The last user row at an index from {@code from} to {@code to}, or -1. */
+    private static int latestUserRow(List<Message> rows, int from, int to) {
+        for (int i = Math.min(to, rows.size() - 1); i >= from; i--) {
+            if (MessageRole.USER.value.equals(rows.get(i).role)) return i;
+        }
+        return -1;
+    }
+
+    /** The first user row at an index from {@code from} to {@code to}, or -1. */
+    private static int earliestUserRow(List<Message> rows, int from, int to) {
+        for (int i = from; i <= Math.min(to, rows.size() - 1); i++) {
+            if (MessageRole.USER.value.equals(rows.get(i).role)) return i;
         }
         return -1;
     }

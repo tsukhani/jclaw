@@ -12,6 +12,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SessionCompaction;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
@@ -19,15 +20,21 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.SessionCompactor;
 import services.SessionCompactor.MessageSnapshot;
 import services.SessionCompactor.TurnRequest;
 import services.Tx;
+import utils.AppClock;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -45,6 +52,7 @@ class SessionCompactorTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        CompactionTriggerSync.acquire();
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         agent = new Agent();
@@ -52,6 +60,11 @@ class SessionCompactorTest extends UnitTest {
         agent.modelProvider = "openrouter";
         agent.modelId = "test-model";
         agent.save();
+    }
+
+    @AfterEach
+    void teardown() {
+        CompactionTriggerSync.release();
     }
 
     // ─── findSafeBoundary ────────────────────────────────────────────────
@@ -100,21 +113,21 @@ class SessionCompactorTest extends UnitTest {
     // ─── shouldCompact ──────────────────────────────────────────────────
 
     @Test
-    void shouldCompact_false_whenModelInfoNull() {
-        assertFalse(SessionCompactor.shouldCompact(999_999, null));
-    }
-
-    @Test
-    void shouldCompact_false_whenContextWindowZero() {
-        var mi = new ModelInfo("m", "M", 0, 0, false);
-        assertFalse(SessionCompactor.shouldCompact(10_000, mi));
+    void aModelWithNoKnownWindowUsesTheTokenCapAlone() {
+        var noWindow = new ModelInfo("m", "M", 0, 0, false);
+        for (var mi : java.util.Arrays.asList(noWindow, null)) {
+            assertEquals(150_000, SessionCompactor.triggerThreshold(mi, 50, 150_000));
+            assertTrue(SessionCompactor.shouldCompact(150_000, mi, 50, 150_000));
+            assertFalse(SessionCompactor.shouldCompact(149_999, mi, 50, 150_000));
+            assertFalse(SessionCompactor.shouldCompact(5_000_000, mi, 50, 0), "with the cap off nothing is left to fire");
+        }
     }
 
     @Test
     void shouldCompact_false_whenUnderBudget() {
-        // contextWindow=200k, reserve=15k (default) → budget=185k. 100k is safely under.
+        // contextWindow=200k, reserve=15k (default) → budget=185k. 100k is safely under the window rule.
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
-        assertFalse(SessionCompactor.shouldCompact(100_000, mi));
+        assertFalse(SessionCompactor.shouldCompact(100_000, mi, 0, 0));
     }
 
     @Test
@@ -123,8 +136,8 @@ class SessionCompactorTest extends UnitTest {
         // reserve is read rather than assumed 15k, because other classes set it while this one runs.
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
         int budget = 200_000 - SessionCompactor.effectiveReserveTokens();
-        assertTrue(SessionCompactor.shouldCompact(budget + 1, mi, 0));
-        assertFalse(SessionCompactor.shouldCompact(budget, mi, 0));
+        assertTrue(SessionCompactor.shouldCompact(budget + 1, mi, 0, 0));
+        assertFalse(SessionCompactor.shouldCompact(budget, mi, 0, 0));
     }
 
     @Test
@@ -133,32 +146,63 @@ class SessionCompactorTest extends UnitTest {
         ConfigService.set("chat.compactionReserveTokens", "1000");
         // budget = 20000 - max(1000, 9000) = 11000. 12000 triggers.
         var mi = new ModelInfo("m", "M", 20_000, 4096, false);
-        assertTrue(SessionCompactor.shouldCompact(12_000, mi));
-        assertFalse(SessionCompactor.shouldCompact(10_000, mi));
+        assertTrue(SessionCompactor.shouldCompact(12_000, mi, 0, 0));
+        assertFalse(SessionCompactor.shouldCompact(10_000, mi, 0, 0));
     }
 
-    // ─── shouldCompact: token trigger (JF-154) ───────────────────────────
+    // ─── shouldCompact: token trigger (JF-154, JF-159) ──────────────────
 
     @Test
-    void theTokenTriggerFiresAtItsValueAndNotOneTokenBelow() {
-        var huge = new ModelInfo("m", "M", 2_000_000, 8192, false);
-        assertTrue(SessionCompactor.shouldCompact(1_000, huge, 1_000));
-        assertFalse(SessionCompactor.shouldCompact(999, huge, 1_000));
+    void theTokenTriggerFiresAtTheSmallerOfHalfTheWindowAndTheCapAndNotOneTokenBelow() {
+        // 32k: half the window comes first; 128k: still half; 1M: the 150,000 cap comes first.
+        var thresholds = Map.of(32_768, 16_384, 128_000, 64_000, 1_000_000, 150_000);
+        thresholds.forEach((window, threshold) -> {
+            var mi = new ModelInfo("m", "M", window, 8192, false);
+            assertEquals(threshold, SessionCompactor.triggerThreshold(mi, 50, 150_000), () -> "window " + window);
+            assertTrue(SessionCompactor.shouldCompact(threshold, mi, 50, 150_000), () -> "window " + window);
+            assertFalse(SessionCompactor.shouldCompact(threshold - 1, mi, 50, 150_000), () -> "window " + window);
+        });
+    }
+
+    @Test
+    void theDefaultsAreHalfTheWindowAndAHundredAndFiftyThousandTokensWithEveryKeyAbsent() {
+        var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
+        var mid = new ModelInfo("m", "M", 128_000, 8192, false);
+        assertTrue(SessionCompactor.shouldCompact(150_000, large));
+        assertFalse(SessionCompactor.shouldCompact(149_999, large));
+        assertTrue(SessionCompactor.shouldCompact(64_000, mid));
+        assertFalse(SessionCompactor.shouldCompact(63_999, mid));
+    }
+
+    @Test
+    void theStoredHalvesAreRead() {
+        var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "10");
+        assertTrue(SessionCompactor.shouldCompact(100_000, large));
+        assertFalse(SessionCompactor.shouldCompact(99_999, large));
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "40000");
+        assertTrue(SessionCompactor.shouldCompact(40_000, large));
+        assertFalse(SessionCompactor.shouldCompact(39_999, large));
+    }
+
+    @Test
+    void zeroTurnsEitherHalfOffAndBothLeaveOnlyTheWindowRule() {
+        var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
+        assertEquals(150_000, SessionCompactor.triggerThreshold(large, 0, 150_000), "percent off: the cap alone");
+        assertEquals(500_000, SessionCompactor.triggerThreshold(large, 50, 0), "cap off: half the window alone");
+        assertEquals(500_000, SessionCompactor.triggerThreshold(large, 50, -1), "a negative cap is off too");
+        assertFalse(SessionCompactor.shouldCompact(499_999, large, 50, 0));
+        assertTrue(SessionCompactor.shouldCompact(500_000, large, 50, 0));
+        int budget = 1_000_000 - SessionCompactor.effectiveReserveTokens();
+        assertFalse(SessionCompactor.shouldCompact(budget, large, 0, 0), "both off: the window rule alone");
+        assertTrue(SessionCompactor.shouldCompact(budget + 1, large, 0, 0));
     }
 
     @Test
     void theWindowRuleStillFiresWhenItComesFirst() {
         var small = new ModelInfo("m", "M", 20_000, 4096, false);
-        assertTrue(SessionCompactor.shouldCompact(19_999, small, 150_000));
-        assertTrue(SessionCompactor.shouldCompact(19_999, small, 0));
-    }
-
-    @Test
-    void zeroOrANegativeTriggerLeavesOnlyTheWindowRule() {
-        var huge = new ModelInfo("m", "M", 2_000_000, 8192, false);
-        assertTrue(SessionCompactor.shouldCompact(1_000_000, huge, 1));
-        assertFalse(SessionCompactor.shouldCompact(1_000_000, huge, 0));
-        assertFalse(SessionCompactor.shouldCompact(1_000_000, huge, -1));
+        assertTrue(SessionCompactor.shouldCompact(19_999, small, 0, 150_000));
+        assertTrue(SessionCompactor.shouldCompact(19_999, small, 0, 0));
     }
 
     // ─── compact() on the turn's own request (JF-154) ──────────────────
@@ -549,6 +593,101 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(before, after, "Compaction must not delete Message rows");
     }
 
+    // ─── Catching up a chat past its history limit (JF-159) ─────────────
+
+    @Test
+    void aChatAtTwoAndAHalfTimesTheLimitIsSummarizedInChunksOldestFirst() {
+        ConfigService.set("chat.maxContextMessages", "40");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedRows(conv, 100, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 0);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    return reply("SUMMARY " + calls.size());
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(List.of(), List.of(), List.of()), toolLists, "rows the turn never loaded go as the transcript");
+        assertTranscript(rows.subList(0, 40), null, calls.get(0));
+        assertTranscript(rows.subList(40, 80), "SUMMARY 1", calls.get(1));
+        assertTranscript(rows.subList(80, 90), "SUMMARY 2", calls.get(2));
+        assertEquals(90, result.turnsCompacted());
+        commitAndReopen();
+        var reloaded = Conversation.<Conversation>findById(conv.id);
+        assertEquals(contents(rows.subList(90, 100)), ConversationService.loadRecentMessages(reloaded).stream()
+                .map(m -> m.content).toList());
+        assertEquals("SUMMARY 3", SessionCompaction.findLatest(reloaded).summary);
+    }
+
+    @Test
+    void eachChunkFitsTheTokensOneCallTakesAndTheNextCompactionResumesWhereTheCallLimitStopped() {
+        ConfigService.set("chat.maxContextMessages", "40");
+        int max = SessionCompactor.MAX_SUMMARY_CALLS;
+        var conv = ConversationService.create(agent, "web", "user1");
+        // Each row renders to 400 characters, 100 tokens, so 1,000 tokens hold 10 rows.
+        seedRows(conv, 10 * max + 20, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 400);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+        SessionCompactor.ModelCall call = (msgs, defs) -> {
+            calls.add(msgs);
+            return reply("SUMMARY " + calls.size());
+        };
+
+        var events = EventLogger.captureForTest(() -> assertEquals(10 * max, SessionCompactor.compact(conv.id,
+                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000)
+                .turnsCompacted()));
+
+        assertEquals(max, calls.size());
+        for (int k = 0; k < max; k++) {
+            assertTranscript(rows.subList(10 * k, 10 * k + 10), k == 0 ? null : "SUMMARY " + k, calls.get(k));
+        }
+        assertEquals(List.of("Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
+                .formatted(conv.id, max)), events.stream().filter(e -> "compaction".equals(e.category()))
+                .map(EventLogger.Captured::message).toList());
+
+        calls.clear();
+        var resumed = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000);
+
+        assertEquals(10, resumed.turnsCompacted(), "the 20 rows left fit the limit: one call, keeping 10");
+        assertEquals(1, calls.size());
+        assertEquals(ChatMessage.system("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY " + max),
+                calls.getFirst().getFirst(), "the turn's own request, carrying the summary the stopped compaction left");
+        assertEquals(ChatMessage.user(rows.get(10 * max).content()), calls.getFirst().get(1));
+    }
+
+    @Test
+    void oldestRowsWithNoUserMessageToSplitOnFallBackToTheNewestRowsAndSaySo() {
+        ConfigService.set("chat.maxContextMessages", "40");
+        var conv = ConversationService.create(agent, "web", "user1");
+        // One user row, then 59 rows of a single tool loop, then 40 rows of ordinary turns.
+        seedRows(conv, 100, i -> i == 0 || i >= 60 && i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 0);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var inputs = new ArrayList<List<ChatMessage>>();
+
+        var events = EventLogger.captureForTest(() -> assertTrue(SessionCompactor.compact(conv.id,
+                "openrouter/test-model", msgs -> {
+                    inputs.add(msgs);
+                    return "NEWEST SUMMARY";
+                }).compacted()));
+
+        assertEquals(1, inputs.size());
+        assertTranscript(rows.subList(60, 90), null, inputs.getFirst());
+        assertEquals(List.of(("Compaction for conversation %d found no user message to end a summary on among its "
+                + "oldest rows; the 60 rows before its newest 40 are not summarized").formatted(conv.id)),
+                events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList());
+        commitAndReopen();
+        assertEquals(rows.get(90).createdAt(), Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
     // ─── appendSummaryToPrompt ───────────────────────────────────────────
 
     @Test
@@ -691,10 +830,58 @@ class SessionCompactorTest extends UnitTest {
 
     /** {@code request} is the transcript shape: the instruction as the system prompt, then the summarized rows. */
     private static void assertTranscript(List<MessageSnapshot> summarized, List<ChatMessage> request) {
+        assertTranscript(summarized, null, request);
+    }
+
+    /** As {@link #assertTranscript(List, List)}, with {@code prior} folded in ahead of the rows when not null. */
+    private static void assertTranscript(List<MessageSnapshot> summarized, String prior, List<ChatMessage> request) {
         assertEquals(2, request.size());
         assertEquals("system", request.getFirst().role());
         assertEquals(SECTIONS, headings(request.getFirst().content()));
-        assertEquals(ChatMessage.user(SessionCompactor.renderTurns(summarized)), request.get(1));
+        var turns = SessionCompactor.renderTurns(summarized);
+        assertEquals(ChatMessage.user(prior == null ? turns : SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + prior
+                + "\n\n[Turns since that summary]\n\n" + turns), request.get(1));
+    }
+
+    /** Every stored row of the conversation, oldest first, whatever its floor or history limit. */
+    private static List<MessageSnapshot> allRows(Long conversationId) {
+        return Tx.run(() -> {
+            var out = new ArrayList<MessageSnapshot>();
+            for (Object o : Message.find("conversation.id = ?1 ORDER BY createdAt, id", conversationId).fetch()) {
+                var m = (Message) o;
+                out.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
+            }
+            return out;
+        });
+    }
+
+    private static List<String> contents(List<MessageSnapshot> rows) {
+        return rows.stream().map(MessageSnapshot::content).toList();
+    }
+
+    /**
+     * {@code count} rows a millisecond apart, so no two share a timestamp a floor could split. With {@code rendered}
+     * above 0, each row's content is padded so the row renders to exactly that many characters for a summary.
+     */
+    private static void seedRows(Conversation conv, int count, java.util.function.IntFunction<MessageRole> roleAt,
+                                 int rendered) {
+        var tick = new AtomicLong(Instant.now().minusSeconds(3_600).toEpochMilli());
+        var ticking = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.incrementAndGet()); }
+        };
+        AppClock.runWith(ticking, () -> {
+            for (int i = 0; i < count; i++) {
+                var role = roleAt.apply(i);
+                var content = "Row " + i;
+                if (rendered > 0) {
+                    int overhead = ("[" + role.value.toUpperCase() + "] ").length() + 2;
+                    content = (content + " " + "x".repeat(rendered)).substring(0, rendered - overhead);
+                }
+                ConversationService.appendMessage(conv, role, content, null, null, null);
+            }
+        });
     }
 
     private static List<String> headings(Object instruction) {

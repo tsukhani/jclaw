@@ -98,11 +98,16 @@ describe('Settings page — Chat', () => {
   })
 })
 
-/** The two context savings ship off (JF-154, JF-155); each row's fallback is the backend's shipped value. */
+/** Each Context savings row's fallback is the backend's shipped value (JF-154, JF-155, JF-159). */
 describe('Settings page — Chat context savings', () => {
   beforeEach(() => {
     clearNuxtData()
   })
+
+  const PERCENT = 'chat.compaction.triggerPercent'
+  const TOKENS = 'chat.compaction.triggerTokens'
+  const ON_ROW_LIMIT = 'chat.compaction.onRowLimit'
+  const STEP = 'chat.pruneToolResultsEveryTurns'
 
   function row(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
     return component.find(`[data-testid="config-field-${key}"]`)
@@ -116,73 +121,102 @@ describe('Settings page — Chat context savings', () => {
     return row(component, key).find('span.truncate').text()
   }
 
+  function switchedOn(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
+    return row(component, key).find('button[aria-pressed]').attributes('aria-pressed')
+  }
+
+  async function saveTyped(component: Awaited<ReturnType<typeof mountChat>>, key: string, typed: string) {
+    const field = row(component, key)
+    await field.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    const input = field.find('input')
+    const start = { value: (input.element as HTMLInputElement).value, min: input.attributes('min'), max: input.attributes('max') }
+    await input.setValue(typed)
+    await field.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    return start
+  }
+
   it('shows each control at the backend default when its key is unset', async () => {
     baseEndpoints()
     const component = await mountChat()
 
-    expect(label(component, 'chat.compaction.triggerTokens')).toBe('Summarize long chats at (tokens)')
-    expect(shown(component, 'chat.compaction.triggerTokens')).toBe('0')
-    expect(label(component, 'chat.pruneToolResultsEveryTurns')).toBe('Trim tool results every (turns)')
-    expect(shown(component, 'chat.pruneToolResultsEveryTurns')).toBe('1')
+    expect(label(component, PERCENT)).toBe('Summarize long chats at (% of window)')
+    expect(shown(component, PERCENT)).toBe('50')
+    expect(label(component, TOKENS)).toBe('…but no later than (tokens)')
+    expect(shown(component, TOKENS)).toBe('150000')
+    expect(label(component, ON_ROW_LIMIT)).toBe('Summarize instead of dropping messages')
+    expect(switchedOn(component, ON_ROW_LIMIT)).toBe('true')
+    expect(label(component, STEP)).toBe('Trim tool results every (turns)')
+    expect(shown(component, STEP)).toBe('1')
   })
 
   it('shows the stored values when the keys are set', async () => {
     baseEndpoints([
-      { key: 'chat.compaction.triggerTokens', value: '150000' },
-      { key: 'chat.pruneToolResultsEveryTurns', value: '5' },
+      { key: PERCENT, value: '30' },
+      { key: TOKENS, value: '0' },
+      { key: ON_ROW_LIMIT, value: 'false' },
+      { key: STEP, value: '5' },
     ])
     const component = await mountChat()
 
-    expect(shown(component, 'chat.compaction.triggerTokens')).toBe('150000')
-    expect(shown(component, 'chat.pruneToolResultsEveryTurns')).toBe('5')
+    expect(shown(component, PERCENT)).toBe('30')
+    expect(shown(component, TOKENS)).toBe('0')
+    expect(switchedOn(component, ON_ROW_LIMIT)).toBe('false')
+    expect(shown(component, STEP)).toBe('5')
   })
 
-  it('saves the summarize threshold typed into its editor, which starts from 0 and goes no lower', async () => {
+  it('saves the share of the window typed into its editor, which starts from 50 and stays within 0 to 100', async () => {
     baseEndpoints()
     const component = await mountChat()
-    const trigger = row(component, 'chat.compaction.triggerTokens')
 
-    await trigger.find('button[title="Edit"]').trigger('click')
-    await flushPromises()
-    const input = trigger.find('input')
-    expect((input.element as HTMLInputElement).value).toBe('0')
-    expect(input.attributes('min')).toBe('0')
-    await input.setValue('150000')
-    await trigger.find('button[title="Save"]').trigger('click')
-    await flushPromises()
+    expect(await saveTyped(component, PERCENT, '40')).toEqual({ value: '50', min: '0', max: '100' })
+    expect(posted).toEqual([{ key: PERCENT, value: '40' }])
+  })
 
-    expect(posted).toEqual([{ key: 'chat.compaction.triggerTokens', value: '150000' }])
+  it('saves the token cap typed into its editor, which starts from 150000 and goes no lower than 0', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+
+    expect(await saveTyped(component, TOKENS, '100000')).toEqual({ value: '150000', min: '0', max: undefined })
+    expect(posted).toEqual([{ key: TOKENS, value: '100000' }])
+  })
+
+  it('switching summarizing at the history limit off saves false, and on again saves true', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+    await row(component, ON_ROW_LIMIT).find('button[aria-pressed]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: ON_ROW_LIMIT, value: 'false' }])
+
+    clearNuxtData()
+    baseEndpoints([{ key: ON_ROW_LIMIT, value: 'false' }])
+    const off = await mountChat()
+    await row(off, ON_ROW_LIMIT).find('button[aria-pressed]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: ON_ROW_LIMIT, value: 'true' }])
   })
 
   it('saves the shortening step typed into its editor, which starts from 1 and goes no lower', async () => {
     baseEndpoints()
     const component = await mountChat()
-    const step = row(component, 'chat.pruneToolResultsEveryTurns')
 
-    await step.find('button[title="Edit"]').trigger('click')
-    await flushPromises()
-    const input = step.find('input')
-    expect((input.element as HTMLInputElement).value).toBe('1')
-    expect(input.attributes('min')).toBe('1')
-    await input.setValue('5')
-    await step.find('button[title="Save"]').trigger('click')
-    await flushPromises()
-
-    expect(posted).toEqual([{ key: 'chat.pruneToolResultsEveryTurns', value: '5' }])
+    expect(await saveTyped(component, STEP, '5')).toEqual({ value: '1', min: '1', max: undefined })
+    expect(posted).toEqual([{ key: STEP, value: '5' }])
   })
 
   it('cancelling an edit saves nothing', async () => {
     baseEndpoints()
     const component = await mountChat()
-    const trigger = row(component, 'chat.compaction.triggerTokens')
+    const trigger = row(component, PERCENT)
 
     await trigger.find('button[title="Edit"]').trigger('click')
     await flushPromises()
-    await trigger.find('input').setValue('150000')
+    await trigger.find('input').setValue('10')
     await trigger.find('button[title="Cancel"]').trigger('click')
     await flushPromises()
 
     expect(posted).toEqual([])
-    expect(shown(component, 'chat.compaction.triggerTokens')).toBe('0')
+    expect(shown(component, PERCENT)).toBe('50')
   })
 })
