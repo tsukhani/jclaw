@@ -31,8 +31,8 @@ import java.util.Optional;
  * truncated.
  *
  * <p>Trigger: whichever comes first of {@code estimatedTokens >= chat.compaction.triggerTokens}
- * (default 150,000; 0 or less turns it off), since quality falls well before today's windows fill
- * (JF-154), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The reserve carves out
+ * (off unless set above 0; 150,000 is the recommended value), since quality falls well before today's
+ * windows fill (JF-154), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The reserve carves out
  * headroom for the completion itself plus a safety margin, following OpenClaw's approach — tuned via
  * {@code chat.compactionReserveTokens} (default 15000, floor 9000).
  *
@@ -96,13 +96,16 @@ public final class SessionCompactor {
 
     // ─── Decision ───────────────────────────────────────────────────────
 
+    /** JF-154: absent, the token trigger is off and only the window rule compacts. */
+    public static final String TRIGGER_TOKENS_KEY = "chat.compaction.triggerTokens";
+
     /**
      * True when the current message list reaches {@code chat.compaction.triggerTokens} or exceeds the
      * model's window budget. Callers should compute {@code estimatedTokens} with
      * {@code ContextWindowManager.adjustedPromptTokens} so thresholds compare apples to apples.
      */
     public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo) {
-        return shouldCompact(estimatedTokens, modelInfo, ConfigService.getInt("chat.compaction.triggerTokens", 150_000));
+        return shouldCompact(estimatedTokens, modelInfo, ConfigService.getInt(TRIGGER_TOKENS_KEY, 0));
     }
 
     /** {@link #shouldCompact(int, ModelInfo)} with the token trigger given; 0 or less leaves only the window rule. */

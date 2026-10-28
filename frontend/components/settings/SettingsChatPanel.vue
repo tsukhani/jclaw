@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CheckIcon, ChevronUpIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import SettingsConfigField from './SettingsConfigField.vue'
 
 const { configValue, saveField } = useSettingsConfig()
 
@@ -154,6 +155,41 @@ async function saveChatField(configKey: string, value: string) {
       />
     </div>
 
+    <!-- Fallbacks are the backend's shipped values: ToolRegistry, SessionCompactor, ToolResultPruner. -->
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 text-xs text-fg-muted border-b border-border">
+        <span class="font-medium">Context savings</span>
+      </div>
+      <div class="divide-y divide-border">
+        <SettingsConfigField
+          config-key="chat.toolDeferral"
+          label="Hide rarely used tools"
+          kind="boolean"
+          fallback="false"
+          label-width="w-72"
+          tip="Sends full instructions only for everyday tools and lists the rest behind one tool, so each request is smaller. Applies to agents whose tool instructions pass about 10,000 tokens. Recommended on for agents with many tools."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.triggerTokens"
+          label="Summarize long chats at (tokens)"
+          kind="number"
+          fallback="0"
+          :min="0"
+          label-width="w-72"
+          tip="Summarizes the older part of a chat once a request reaches this many tokens, however large the model's limit. 0 keeps today's behavior, summarizing only near the model's limit. Recommended: 150000."
+        />
+        <SettingsConfigField
+          config-key="chat.pruneToolResultsEveryTurns"
+          label="Shorten old tool results every (turns)"
+          kind="number"
+          fallback="1"
+          :min="1"
+          label-width="w-72"
+          tip="Long tool results from earlier turns are shortened to a note the agent can open again. 1 shortens them each turn. Recommended: 5 once your provider's cache holds across turns."
+        />
+      </div>
+    </div>
+
     <!-- Advanced — context window & compaction. Collapsed by default; these
          knobs trade off conversational continuity against context-budget
          safety, and the defaults are deliberately conservative. Surface them
@@ -186,7 +222,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About compactionReserveTokens"
               content-class="w-72 font-mono"
             >
-              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches chat.compaction.triggerTokens (default 150,000), whichever comes first. Larger reserve = compaction fires sooner.
+              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches "Summarize long chats at" if that is above 0, whichever comes first. Larger reserve = compaction fires sooner.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'compactionReserveTokens'">

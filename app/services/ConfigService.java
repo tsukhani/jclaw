@@ -1,6 +1,8 @@
 package services;
 
 import agents.DangerousActionGate;
+import agents.ToolRegistry;
+import agents.ToolResultPruner;
 import channels.TelegramSettings;
 import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
@@ -397,6 +399,11 @@ public class ConfigService {
             // A zero timeout expires an approval prompt before anyone can answer it.
             atLeast(DangerousActionGate.APPROVAL_TIMEOUT_KEY, 1, " must be a whole number of seconds, at least 1."),
             atLeast(TokenCoalescer.CONFIG_KEY, 0, " must be a whole number of characters; 0 sends every token at once."),
+            // These three ship off and read a bad value as off, so a typo would leave the feature off without a word.
+            (key, value) -> key.equals(ToolRegistry.TOOL_DEFERRAL_KEY) && !"true".equalsIgnoreCase(value.trim())
+                    && !"false".equalsIgnoreCase(value.trim()) ? key + " must be 'true' or 'false'." : null,
+            atLeast(SessionCompactor.TRIGGER_TOKENS_KEY, 0, " must be a whole number of tokens; 0 turns the token trigger off."),
+            atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
             under(LlmResilience.BREAKER_KEY_PREFIX, LlmResilience::rejectionFor),

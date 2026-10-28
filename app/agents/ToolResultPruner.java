@@ -31,10 +31,11 @@ public final class ToolResultPruner {
     static final String ENABLED_KEY = "chat.pruneToolResults";
     static final String MIN_CHARS_KEY = "chat.pruneToolResultsMinChars";
     static final String PROTECT_RECENT_KEY = "chat.pruneToolResultsProtectRecent";
-    static final String EVERY_TURNS_KEY = "chat.pruneToolResultsEveryTurns";
+    public static final String EVERY_TURNS_KEY = "chat.pruneToolResultsEveryTurns";
     static final int DEFAULT_MIN_CHARS = 4_000;
     static final int DEFAULT_PROTECT_RECENT = 12;
-    static final int DEFAULT_EVERY_TURNS = 5;
+    /** Per turn, as before JF-155; 5 is the recommended step once a provider's cache holds across turns. */
+    static final int DEFAULT_EVERY_TURNS = 1;
     /** The most of one skill's text a conversation keeps, as Claude Code keeps its first 5,000 tokens. */
     public static final int SKILL_KEEP_CHARS = 20_000;
     /** The most skill text a conversation keeps in all, newest skill first. */

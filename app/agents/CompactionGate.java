@@ -22,7 +22,7 @@ import java.util.Set;
  * {@link AgentRunner} as part of JCLAW-299. The single entry point
  * {@link #maybeCompactAndRebuild} runs between the prep Tx and the
  * LLM call, deciding whether the assembled message list has reached
- * {@code chat.compaction.triggerTokens} or crossed the per-model window
+ * {@code chat.compaction.triggerTokens}, when set, or crossed the per-model window
  * budget; if so it invokes {@link SessionCompactor#compact} on the turn's
  * own request and re-hydrates the message list with the freshly stored
  * summary injected.

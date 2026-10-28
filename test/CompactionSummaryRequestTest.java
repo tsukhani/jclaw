@@ -37,16 +37,16 @@ import java.util.function.IntFunction;
 /**
  * JF-154 end to end: a chat compacts once its prompt reaches {@code chat.compaction.triggerTokens}, however
  * large the window, and the summary call reuses the agent's own request — its system prompt, history and tools —
- * with the instruction last, and never runs a tool; {@code /compact} sends the same request. The history is seeded
- * past the 150,000-token default rather than the key lowered, so no other class running alongside ever sees a
- * lowered trigger.
+ * with the instruction last, and never runs a tool; {@code /compact} sends the same request. The trigger ships
+ * off, so a test that needs it sets the recommended 150,000 and seeds the history past it, rather than lowering the
+ * key, under {@link CompactionTriggerSync}.
  */
 class CompactionSummaryRequestTest extends UnitTest {
 
     private static final String PROVIDER = "jf154-compaction";
     private static final String MODEL = "jf154-model";
     private static final String TOOL = "counter_bump";
-    private static final String TRIGGER_KEY = "chat.compaction.triggerTokens";
+    private static final String TRIGGER_KEY = SessionCompactor.TRIGGER_TOKENS_KEY;
     private static final List<String> SECTIONS = List.of("Goals and constraints", "Decisions",
             "Identifiers and facts", "Open questions and errors", "Next steps");
 
@@ -56,22 +56,30 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        CompactionTriggerSync.acquire();
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
     }
 
     @AfterEach
     void teardown() {
-        if (llmServer != null) llmServer.stop(0);
-        for (var key : List.of("baseUrl", "apiKey", "models")) ConfigService.delete("provider." + PROVIDER + "." + key);
-        ConfigService.delete(TRIGGER_KEY);
-        llm.ProviderRegistry.refresh();
-        CircuitBreakers.remove(PROVIDER);
+        try {
+            if (llmServer != null) llmServer.stop(0);
+            for (var key : List.of("baseUrl", "apiKey", "models")) ConfigService.delete("provider." + PROVIDER + "." + key);
+            llm.ProviderRegistry.refresh();
+            CircuitBreakers.remove(PROVIDER);
+        } finally {
+            CompactionTriggerSync.release();
+        }
     }
 
     @Test
-    void theTokenTriggerDefaultsTo150000AndFiresAtExactlyThatCount() {
+    void theTokenTriggerIsOffUntilSetAndThenFiresAtExactlyItsValue() {
         var window = new ModelInfo(MODEL, MODEL, 1_000_000, 4096, false);
+        assertFalse(SessionCompactor.shouldCompact(150_000, window), "absent, the trigger is off");
+        assertFalse(SessionCompactor.shouldCompact(900_000, window), "and only the window rule compacts");
+
+        recommendedTrigger();
         assertTrue(SessionCompactor.shouldCompact(150_000, window));
         assertFalse(SessionCompactor.shouldCompact(149_999, window));
     }
@@ -82,7 +90,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-prefix");
         seed(convo, 4, 40);
-        commit();
+        recommendedTrigger();
 
         ToolRegistrySync.withTools(List.of(countingTool()), () -> {
             run(agent, convo, "First question");
@@ -132,7 +140,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-retry");
         seed(convo, 24, 32_000);
-        commit();
+        recommendedTrigger();
 
         var result = new AtomicReference<AgentRunner.RunResult>();
         ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(run(agent, convo, "Next?")));
@@ -152,21 +160,22 @@ class CompactionSummaryRequestTest extends UnitTest {
     }
 
     @Test
-    void zeroOrANegativeTriggerLeavesALongChatUncompactedOnALargeWindow() throws Exception {
+    void anAbsentZeroOrNegativeTriggerLeavesALongChatUncompactedOnALargeWindow() throws Exception {
         startProvider(n -> text("Reply " + n));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-off");
         seed(convo, 24, 32_000);
         commit();
 
+        run(agent, convo, "Next?");
         ConfigService.set(TRIGGER_KEY, "0");
         commit();
-        run(agent, convo, "Next?");
+        run(agent, convo, "And then?");
         ConfigService.set(TRIGGER_KEY, "-1");
         commit();
-        run(agent, convo, "And then?");
+        run(agent, convo, "And after that?");
 
-        assertEquals(2, requests.size(), "one call a turn, no summary call");
+        assertEquals(3, requests.size(), "one call a turn, no summary call");
         assertNull(Tx.run(() -> SessionCompaction.findLatest(Conversation.findById(convo.id))));
     }
 
@@ -334,6 +343,12 @@ class CompactionSummaryRequestTest extends UnitTest {
     private static void commit() {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
+    }
+
+    /** The value Settings recommends, which the seeded long histories pass. */
+    private static void recommendedTrigger() {
+        ConfigService.set(TRIGGER_KEY, "150000");
+        commit();
     }
 
     private static AgentRunner.RunResult run(Agent agent, Conversation convo, String message) throws Exception {

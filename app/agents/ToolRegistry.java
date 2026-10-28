@@ -732,10 +732,10 @@ public class ToolRegistry {
 
     /**
      * Whether the native schemas in {@code defs} exceed {@link #DEFERRAL_THRESHOLD_TOKENS}, estimated as the prompt
-     * breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} not {@code false}.
+     * breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} set to {@code true}.
      */
     private static boolean defersTools(List<ToolDef> defs) {
-        if (!ConfigService.getBoolean(TOOL_DEFERRAL_KEY, true)) return false;
+        if (!ConfigService.getBoolean(TOOL_DEFERRAL_KEY, false)) return false;
         long chars = 0;
         for (var def : defs) {
             if (isNative(def.function().name())) chars += GsonHolder.GSON.toJson(def).length();
@@ -892,7 +892,7 @@ public class ToolRegistry {
      */
     private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL);
 
-    /** JF-153: {@code false} sends every enabled native schema whole; absent means deferral is on. */
+    /** JF-153: {@code true} turns deferral on; absent or {@code false} sends every enabled native schema whole. */
     public static final String TOOL_DEFERRAL_KEY = "chat.toolDeferral";
 
     /** Anthropic advises deferring schemas past about 10,000 tokens. */

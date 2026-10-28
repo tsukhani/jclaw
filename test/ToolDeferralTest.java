@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
+import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.TaskToolPolicy;
@@ -44,7 +45,8 @@ import java.util.regex.Pattern;
  * call through the handle meets every check a direct call meets. Drives {@link ParallelToolExecutor} with the names
  * the request offered, over stub tools whose sizes and results the assertions can state exactly.
  *
- * <p>Holds {@link ToolRegistrySync}: the native registry is replaced for the length of each test.
+ * <p>Holds {@link ToolRegistrySync}: the native registry is replaced for the length of each test, and
+ * {@code chat.toolDeferral}, which ships off, is on for it.
  */
 class ToolDeferralTest extends UnitTest {
 
@@ -68,13 +70,18 @@ class ToolDeferralTest extends UnitTest {
                 stub("cold_b", "Counts things.", "Counts things.\nSecond line.", false),
                 stub("cold_danger", "Deletes things.", "Deletes things.", true),
                 new JClawApiTool()));
+        deferral("true");
         agent = commitInFreshTx(() -> AgentService.create(uniqueName(), "openrouter", "gpt-4.1"));
         conversationId = commitInFreshTx(() -> ConversationService.create(Agent.findById(agent.id), "web", null).id);
     }
 
     @AfterEach
     void teardown() {
-        ToolRegistrySync.release();
+        try {
+            deferral(null);
+        } finally {
+            ToolRegistrySync.release();
+        }
     }
 
     @Test
@@ -90,6 +97,24 @@ class ToolDeferralTest extends UnitTest {
         assertEquals(List.of("cold_a", "cold_b", "cold_danger"), ToolInvokeTool.namesIn(sent.get(1)));
         assertEquals(Set.of("exec", ToolInvokeTool.NAME, "mcp_zz", "cold_a", "cold_b", "cold_danger"),
                 ToolRegistry.offeredNames(sent));
+    }
+
+    @Test
+    void anAgentOverTheThresholdIsSentEverySchemaWholeUnlessTheKeyIsTrue() {
+        var defs = ToolRegistry.getToolDefsForAgent(agent);
+        assertTrue(ToolRegistry.defersTools(agent), "control: with the key true the agent defers");
+
+        for (var value : new String[] {null, "false"}) {
+            deferral(value);
+            var sent = ToolRegistry.deferCold(agent, defs);
+
+            assertEquals(List.of("exec", "cold_a", "cold_b", "cold_danger"), names(sent), "key " + value);
+            assertEquals(defs, sent, "key " + value);
+            assertFalse(ToolRegistry.defersTools(agent), "key " + value);
+            assertEquals(NOT_ENABLED.formatted(ToolInvokeTool.NAME),
+                    dispatch(sent, ToolInvokeTool.NAME, "{\"tool\":\"cold_b\",\"args\":{\"n\":3}}"), "key " + value);
+        }
+        assertEquals(List.of(), ran);
     }
 
     @Test
@@ -321,6 +346,15 @@ class ToolDeferralTest extends UnitTest {
             Thread.sleep(10);
         }
         throw new AssertionError("no approval prompt arrived for " + name);
+    }
+
+    /** {@code chat.toolDeferral} set to {@code value}, or deleted for null, committed so a turn's thread reads it. */
+    private static void deferral(String value) {
+        commitInFreshTx(() -> {
+            if (value == null) ConfigService.delete(ToolRegistry.TOOL_DEFERRAL_KEY);
+            else ConfigService.set(ToolRegistry.TOOL_DEFERRAL_KEY, value);
+            return null;
+        });
     }
 
     private List<ToolDef> sentDefs() {

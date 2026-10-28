@@ -6,6 +6,7 @@ import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.Conversation;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -30,6 +31,11 @@ class ToolResultPrunerTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
+    }
+
+    @AfterEach
+    void teardown() {
+        ConfigService.delete(ToolResultPruner.EVERY_TURNS_KEY);
     }
 
     private static ChatMessage tool(String id, String name, String body) {
@@ -224,7 +230,21 @@ class ToolResultPrunerTest extends UnitTest {
     }
 
     @Test
-    void byDefaultTheSeventhTurnStubsTheFirstFiveTurnsAndTurnsTwoToSixSendWhatTheyWereSent() {
+    void byDefaultEachCallStubsEveryEarlierResultOutsideTheNewestMessages() {
+        Agent agent = AgentService.create("prune-default-agent", "openrouter", "gpt-4.1");
+        var history = historyOfTurns(9, 3);
+        history.add(ChatMessage.user("ask 10"));
+        var perCall = new ArrayList<>(resultsOf(1, 7, 3));
+        perCall.addAll(List.of("t8c0", "t8c1"));
+
+        assertEquals(perCall, stubbedCallIds(ToolResultPruner.prune(history, agent, null)));
+        assertEquals(resultsOf(1, 5, 3), stubbedCallIds(ToolResultPruner.prune(history, 4_000, 12, 5, NO_CAP, null, null)),
+                "control: a step of five holds back the turns since the fifth");
+    }
+
+    @Test
+    void withTheStepSetToFiveTheSeventhTurnStubsTheFirstFiveTurnsAndTurnsTwoToSixSendWhatTheyWereSent() {
+        ConfigService.set(ToolResultPruner.EVERY_TURNS_KEY, "5");
         Agent agent = AgentService.create("prune-step-agent", "openrouter", "gpt-4.1");
         var history = new ArrayList<ChatMessage>(List.of(ChatMessage.system("sys")));
         List<ChatMessage> previous = null;
@@ -315,6 +335,7 @@ class ToolResultPrunerTest extends UnitTest {
 
     @Test
     void theConfigEntryTakesTheCapFromTheConversation() {
+        ConfigService.set(ToolResultPruner.EVERY_TURNS_KEY, "5");
         Agent agent = AgentService.create("prune-cap-agent", "openrouter", "gpt-4.1");
         var conversation = new Conversation();
         conversation.channelType = "web";

@@ -53,6 +53,7 @@ class CompactionGateTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        CompactionTriggerSync.acquire();
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -66,17 +67,21 @@ class CompactionGateTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        if (llmServer != null) {
-            llmServer.stop(0);
-            llmServer = null;
+        try {
+            if (llmServer != null) {
+                llmServer.stop(0);
+                llmServer = null;
+            }
+            // Reset tight compaction budgets a few tests in this class set, so
+            // sibling test classes in the same JVM (e.g. AgentRunnerCompactionTest)
+            // don't inherit them. Mirrors AgentRunnerCompactionTest's own teardown.
+            ConfigService.set("chat.compactionReserveTokens", "15000");
+            ConfigService.set("chat.compactionReserveTokensFloor", "9000");
+            ConfigService.set("chat.compactionMinTurns", "10");
+            ConfigService.set("chat.compactionKeepMessages", "10");
+        } finally {
+            CompactionTriggerSync.release();
         }
-        // Reset tight compaction budgets a few tests in this class set, so
-        // sibling test classes in the same JVM (e.g. AgentRunnerCompactionTest)
-        // don't inherit them. Mirrors AgentRunnerCompactionTest's own teardown.
-        ConfigService.set("chat.compactionReserveTokens", "15000");
-        ConfigService.set("chat.compactionReserveTokensFloor", "9000");
-        ConfigService.set("chat.compactionMinTurns", "10");
-        ConfigService.set("chat.compactionKeepMessages", "10");
     }
 
     // ─── No-op paths ─────────────────────────────────────────────────────
@@ -369,8 +374,9 @@ class CompactionGateTest extends UnitTest {
 
     @Test
     void tokensReservedForTheTurnsRecallCountTowardTheTrigger() throws Exception {
-        // The 150,000-token trigger fires here, not the window rule: no reserve another class sets brings it near
-        // on a 1,000,000-token window.
+        // The recommended 150,000-token trigger fires here, not the window rule: no reserve another class sets brings
+        // it near on a 1,000,000-token window.
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         startLlmServer(simpleResponse("RESERVE SUMMARY"));
         var provider = ownProvider(1_000_000);
         try {
@@ -403,6 +409,7 @@ class CompactionGateTest extends UnitTest {
     @Test
     void aSkipUnderTheTokenTriggerAloneLogsNothingButOneWithTheWindowRuleDoes() {
         // No history rows, so every attempt skips for want of a boundary before any model call.
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         var provider = ownProvider(1_000_000);
         try {
             var conv = ConversationService.create(agent, "web", "user1");

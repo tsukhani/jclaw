@@ -1,3 +1,5 @@
+import agents.ToolRegistry;
+import agents.ToolResultPruner;
 import channels.TelegramSettings;
 import llm.LlmResilience;
 import llm.routing.RouterPolicy;
@@ -8,6 +10,7 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.OperatorAlerts;
 import services.PrivilegedConfig;
+import services.SessionCompactor;
 import services.database.DatabaseService;
 import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
@@ -217,6 +220,38 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     void aNegativeTokenCoalesceSizeIsRefused() {
         assertRefused("chat.stream.token_coalesce_chars must be a whole number of characters; 0 sends every "
                 + "token at once.", utils.TokenCoalescer.CONFIG_KEY, "-1");
+    }
+
+    @Test
+    void toolHidingTakesOnlyTrueOrFalse() {
+        var expected = "chat.toolDeferral must be 'true' or 'false'.";
+        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "yes");
+        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "1");
+        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "");
+        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, "true");
+        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, "false");
+        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, " TRUE ");
+    }
+
+    @Test
+    void theSummarizeThresholdMustBeAWholeNumberOfZeroOrMore() {
+        var expected = "chat.compaction.triggerTokens must be a whole number of tokens; 0 turns the token trigger off.";
+        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "-1");
+        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "150k");
+        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "1.5");
+        assertRefused(expected, SessionCompactor.TRIGGER_TOKENS_KEY, "");
+        assertAccepted(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        assertAccepted(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
+    }
+
+    @Test
+    void theShorteningStepMustBeAWholeNumberOfAtLeastOne() {
+        var expected = "chat.pruneToolResultsEveryTurns must be a whole number of turns, at least 1.";
+        assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "0");
+        assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "five");
+        assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "");
+        assertAccepted(ToolResultPruner.EVERY_TURNS_KEY, "1");
+        assertAccepted(ToolResultPruner.EVERY_TURNS_KEY, "5");
     }
 
     @Test

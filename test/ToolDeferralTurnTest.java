@@ -36,11 +36,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JF-153, read off the request the model is sent: an agent whose native schemas pass the threshold gets the core ones
- * and {@code tool_invoke}; one under it, or any with {@code chat.toolDeferral=false}, gets every schema as before; and
- * a call the model makes through the handle runs the named tool in the tool loop.
+ * JF-153, read off the request the model is sent: with {@code chat.toolDeferral=true}, an agent whose native schemas
+ * pass the threshold gets the core ones and {@code tool_invoke}; one under it, or any while the key is absent or
+ * {@code false}, gets every schema as before; and a call the model makes through the handle runs the named tool in
+ * the tool loop.
  *
- * <p>Holds {@link ToolRegistrySync}: what is checked is what the canonical native registry offers.
+ * <p>Holds {@link ToolRegistrySync}: what is checked is what the canonical native registry offers, and the key, which
+ * ships off, is on for each test unless the test says otherwise.
  */
 class ToolDeferralTurnTest extends UnitTest {
 
@@ -78,6 +80,7 @@ class ToolDeferralTurnTest extends UnitTest {
                 "[{\"id\":\"agent-model\",\"name\":\"Agent\",\"contextWindow\":200000,\"maxTokens\":4096}]");
         ProviderRegistry.refresh();
         ToolRegistrySync.canonicalForTest();
+        ConfigService.set(ToolRegistry.TOOL_DEFERRAL_KEY, "true");
 
         var agent = AgentService.create(provider + "-agent", provider, "agent-model");
         agent.enabled = true;
@@ -148,6 +151,21 @@ class ToolDeferralTurnTest extends UnitTest {
         turn();
 
         assertEquals(List.of("task_manager", "datetime", "web_fetch", "web_search", "message"), requestTools(0));
+    }
+
+    @Test
+    void anAbsentKeySendsAnAgentOverTheThresholdEverySchemaAsBefore() throws Exception {
+        ConfigService.delete(ToolRegistry.TOOL_DEFERRAL_KEY);
+        commit();
+
+        turn();
+
+        var defs = ToolRegistry.getToolDefsForAgent(agent());
+        assertTrue(defs.stream().mapToInt(d -> GsonHolder.GSON.toJson(d).length()).sum() > 40_001,
+                "control: the agent's schemas pass the threshold");
+        assertEquals(names(defs), requestTools(0));
+        assertFalse(requestTools(0).contains(ToolInvokeTool.NAME));
+        assertFalse(systemPrompt(0).contains(SystemPromptAssembler.DEFERRED_TOOLS_NOTE));
     }
 
     @Test
