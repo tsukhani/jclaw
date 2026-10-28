@@ -56,6 +56,19 @@ class ConversationServiceTest extends UnitTest {
         assertFalse(ConversationService.hasReadOutsideContent(untouched.id));
     }
 
+    @Test
+    void aLaterSaveOfTheLoadedConversationKeepsTheMark() {
+        // The sync chat route marks the conversation, then saves the copy it loaded earlier when it stores a message.
+        var conversation = ConversationService.create(newAgent("outside-save"), "web", "u-save");
+
+        ConversationService.markReadOutsideContent(conversation.id);
+        conversation.messageCount++;
+        conversation.save();
+        JPA.em().flush();
+
+        assertTrue(storedReadOutsideContent(conversation.id));
+    }
+
     private static boolean storedReadOutsideContent(Long conversationId) {
         return JPA.em().createQuery("SELECT c.readOutsideContent FROM Conversation c WHERE c.id = :id", Boolean.class)
                 .setParameter("id", conversationId).getSingleResult();

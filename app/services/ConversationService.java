@@ -29,8 +29,6 @@ public class ConversationService {
 
     /** JF-136: conversations marked as having read outside text since boot; never pruned, since an id is never reused. */
     private static final Set<Long> READ_OUTSIDE = ConcurrentHashMap.newKeySet();
-    /** The subset whose mark has been written to the database. */
-    private static final Set<Long> READ_OUTSIDE_WRITTEN = ConcurrentHashMap.newKeySet();
 
     private ConversationService() {}
 
@@ -201,13 +199,15 @@ public class ConversationService {
         READ_OUTSIDE.add(conversationId);
     }
 
-    /** Writes a mark {@link #noteReadOutsideContent} recorded and not yet written; call it on the turn's own thread. */
+    /**
+     * Writes a mark {@link #noteReadOutsideContent} recorded; call it on the turn's own thread. Repeated on purpose,
+     * so a mark whose transaction rolled back is written again by the next batch.
+     */
     public static void persistReadOutsideContent(Long conversationId) {
-        if (!READ_OUTSIDE.contains(conversationId) || READ_OUTSIDE_WRITTEN.contains(conversationId)) return;
+        if (!READ_OUTSIDE.contains(conversationId)) return;
         Tx.run(() -> JPA.em().createQuery("UPDATE Conversation c SET c.readOutsideContent = true"
                         + " WHERE c.id = :id AND c.readOutsideContent = false")
                 .setParameter("id", conversationId).executeUpdate());
-        READ_OUTSIDE_WRITTEN.add(conversationId);
     }
 
     /** Whether the conversation has read outside text: a mark counts here at once, before its transaction commits. */

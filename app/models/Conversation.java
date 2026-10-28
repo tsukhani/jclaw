@@ -75,9 +75,10 @@ public class Conversation extends TimestampedModel {
 
     /**
      * JF-136: set once a tool brought outside content into this conversation, and never cleared: the model reads
-     * the whole conversation, so an agent edit to a persona file from here on waits for the operator.
+     * the whole conversation, so an agent edit to a persona file from here on waits for the operator. Not updatable:
+     * only {@code ConversationService}'s update sets it, so saving a copy loaded earlier cannot write false back.
      */
-    @Column(name = "read_outside_content", nullable = false)
+    @Column(name = "read_outside_content", nullable = false, updatable = false)
     @ColumnDefault("false")
     public boolean readOutsideContent = false;
 
