@@ -13,8 +13,10 @@ import services.ConversationService;
 import services.EventLogger;
 import services.FetchSidecarManager;
 import services.InternalApiTokenService;
+import services.SessionCompactor;
 import services.SkillPromotionService;
 import services.StealthSidecarManager;
+import services.Tx;
 import services.UvProbe;
 import services.decision.DecisionSettings;
 import services.scanners.ScannerRegistry;
@@ -54,6 +56,8 @@ public class DefaultConfigJob extends Job<Void> {
     private static final String CONFIG_VALUE_FALSE = "false";
     /** Written once the history-limit floor has run, so a limit an operator lowers afterwards survives restarts. */
     public static final String HISTORY_LIMIT_FLOOR_KEY = "chat.historyLimitFloorApplied";
+    /** Written once the rolling summaries have become segments, so a later start never reads segments as a chain. */
+    public static final String SUMMARY_SEGMENTS_KEY = "chat.summarySegmentsApplied";
 
     @Override
     public void doJob() {
@@ -511,6 +515,7 @@ public class DefaultConfigJob extends Job<Void> {
         raiseIfStillDefault("shell.maxTimeoutSeconds", "300", "600");
 
         raiseHistoryLimitsOnce();
+        adoptRollingSummariesOnce();
     }
 
     /** One-shot: a seeded row still holding {@code oldDefault} takes {@code newDefault}; an operator's own value stays. */
@@ -533,6 +538,20 @@ public class DefaultConfigJob extends Job<Void> {
             raiseToAtLeast(key, floor);
         }
         ConfigService.set(HISTORY_LIMIT_FLOOR_KEY, String.valueOf(floor));
+    }
+
+    /**
+     * JF-161: summaries are now appended as segments, and each one written before was a rewrite holding the earlier
+     * ones in its conversation, so once per install each conversation keeps its latest as its first segment.
+     */
+    private void adoptRollingSummariesOnce() {
+        if (ConfigService.get(SUMMARY_SEGMENTS_KEY) != null) return;
+        int adopted = Tx.run(SessionCompactor::adoptRollingSummaries);
+        ConfigService.set(SUMMARY_SEGMENTS_KEY, "true");
+        if (adopted > 0) {
+            EventLogger.info(EVENT_CATEGORY_SYSTEM,
+                    "The latest summary of %d conversations became each one's first summary segment".formatted(adopted));
+        }
     }
 
     /** A saved whole number below {@code floor} takes {@code floor}; a higher, absent or non-numeric value stays. */

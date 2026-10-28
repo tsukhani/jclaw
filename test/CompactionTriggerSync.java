@@ -6,8 +6,9 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Serializes the classes that set the keys deciding when a chat compacts across play1's concurrent lanes: the token
- * trigger's two halves, the row-limit switch and the history limits the row trigger counts against (JF-154, JF-159).
+ * Serializes the classes that set the keys deciding when and how a chat compacts across play1's concurrent lanes: the
+ * token trigger's two halves, the row-limit switch, the history limits the row trigger counts against (JF-154,
+ * JF-159), the summary budget past which segments merge and the tool-result length a transcript carries (JF-161).
  * Sibling of {@link ShellSandboxSync}: the keys are process-global Config-DB state read on every turn, so one class
  * lowering a limit would compact another class's chat that expects the shipped defaults, and one class deleting a
  * key would change what another's chat does.
@@ -20,7 +21,8 @@ public final class CompactionTriggerSync {
 
     private static final List<String> KEYS = List.of(SessionCompactor.TRIGGER_TOKENS_KEY,
             SessionCompactor.TRIGGER_PERCENT_KEY, SessionCompactor.ON_ROW_LIMIT_KEY, ConversationService.KEY_GLOBAL_MAX,
-            ConversationService.KEY_DM_LIMIT, ConversationService.KEY_GROUP_LIMIT);
+            ConversationService.KEY_DM_LIMIT, ConversationService.KEY_GROUP_LIMIT, SessionCompactor.SUMMARY_BUDGET_KEY,
+            SessionCompactor.TOOL_RESULT_CHARS_KEY);
 
     private CompactionTriggerSync() {}
 

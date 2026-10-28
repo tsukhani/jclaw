@@ -1330,18 +1330,46 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("some other reason"), "got: " + text);
     }
 
+    private static final String SHIPPED_NOTE = " Older messages remain in history and will stop being shipped to the "
+            + "model starting next turn.";
+
     @Test
     void buildCompactResponseTextSuccessNoHint() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.success(3, 800);
+        var result = services.SessionCompactor.CompactionResult.success(3, 800, 2, 0, 0);
         var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("Conversation Compacted"), "got: " + text);
-        assertTrue(text.contains("Summarized 3 earlier turns"), "got: " + text);
-        assertFalse(text.contains("guidance:"), "no hint with null args: " + text);
+        assertEquals("> Conversation Compacted\n\nSummarized 3 earlier messages in 2 summary calls; the summaries the "
+                + "agent reads in their place come to ~200 tokens." + SHIPPED_NOTE, text);
+    }
+
+    @Test
+    void aCompactThatMadeOneCallSaysCallInTheSingular() throws Exception {
+        var text = callBuildCompactResponseText(services.SessionCompactor.CompactionResult.success(4, 40, 1, 0, 0), null);
+        assertEquals("> Conversation Compacted\n\nSummarized 4 earlier messages in 1 summary call; the summaries the "
+                + "agent reads in their place come to ~10 tokens." + SHIPPED_NOTE, text);
+    }
+
+    @Test
+    void aCompactThatStoppedShortSaysHowManyMessagesItCouldNotSummarize() throws Exception {
+        var text = callBuildCompactResponseText(services.SessionCompactor.CompactionResult.success(24, 400, 3, 12, 0),
+                null);
+        assertEquals("> Conversation Compacted\n\nSummarized 24 earlier messages in 3 summary calls; the summaries the "
+                + "agent reads in their place come to ~100 tokens." + SHIPPED_NOTE
+                + "\n\n12 earlier messages could not be summarized this time; /compact again continues from them.", text);
+    }
+
+    @Test
+    void aCompactThatLeftTheOldestOutSaysHowMany() throws Exception {
+        var text = callBuildCompactResponseText(services.SessionCompactor.CompactionResult.success(30, 400, 1, 0, 60),
+                null);
+        assertEquals("> Conversation Compacted\n\nSummarized 30 earlier messages in 1 summary call; the summaries the "
+                + "agent reads in their place come to ~100 tokens." + SHIPPED_NOTE
+                + "\n\n60 of the oldest messages could not be summarized and are left out: they hold no message from "
+                + "you to end a summary on.", text);
     }
 
     @Test
     void buildCompactResponseTextSuccessBlankArgsNoHint() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.success(2, 400);
+        var result = services.SessionCompactor.CompactionResult.success(2, 400, 1, 0, 0);
         var text = callBuildCompactResponseText(result, "   ");
         assertFalse(text.contains("guidance:"),
                 "blank args must not surface guidance: " + text);
@@ -1349,7 +1377,7 @@ class SlashCommandsTest extends UnitTest {
 
     @Test
     void buildCompactResponseTextSuccessWithHintEchoesArgs() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.success(5, 1200);
+        var result = services.SessionCompactor.CompactionResult.success(5, 1200, 1, 0, 0);
         var text = callBuildCompactResponseText(result, "focus on code review notes");
         assertTrue(text.contains("(guidance: focus on code review notes)"),
                 "guidance must echo args verbatim: " + text);

@@ -193,7 +193,9 @@ class RecalledMemoryPlacementTest extends UnitTest {
         assertEquals(1, chatRequests.size(), "one chat call after the summarizer's");
         var messages = chatRequests.getFirst();
         var system = systemOf(messages);
-        assertTrue(system.contains(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + SUMMARY),
+        var segment = Tx.run(() -> models.SessionCompaction.findLatest(ConversationService.findById(conversationId)));
+        assertTrue(system.contains(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + SessionCompactor.segmentLabel(segment)
+                        + "\n\n" + SUMMARY),
                 "control: the call carries the rebuilt prompt: " + system.substring(Math.max(0, system.length() - 400)));
         assertFalse(system.contains(KAYAK), "the rebuilt system message carries no recalled memory");
         assertEquals(clock() + recalled("[fact] " + KAYAK), trailingOf(messages));

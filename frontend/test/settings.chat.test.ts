@@ -98,7 +98,7 @@ describe('Settings page — Chat', () => {
   })
 })
 
-/** Each Context savings row's fallback is the backend's shipped value (JF-154, JF-155, JF-159). */
+/** Each Context savings row's fallback is the backend's shipped value (JF-154, JF-155, JF-159, JF-161). */
 describe('Settings page — Chat context savings', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -108,6 +108,8 @@ describe('Settings page — Chat context savings', () => {
   const TOKENS = 'chat.compaction.triggerTokens'
   const ON_ROW_LIMIT = 'chat.compaction.onRowLimit'
   const STEP = 'chat.pruneToolResultsEveryTurns'
+  const BUDGET = 'chat.compaction.summaryBudgetTokens'
+  const TOOL_CHARS = 'chat.compaction.toolResultChars'
 
   function row(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
     return component.find(`[data-testid="config-field-${key}"]`)
@@ -149,6 +151,10 @@ describe('Settings page — Chat context savings', () => {
     expect(switchedOn(component, ON_ROW_LIMIT)).toBe('true')
     expect(label(component, STEP)).toBe('Trim tool results every (turns)')
     expect(shown(component, STEP)).toBe('1')
+    expect(label(component, BUDGET)).toBe('Merge summaries past (tokens)')
+    expect(shown(component, BUDGET)).toBe('20000')
+    expect(label(component, TOOL_CHARS)).toBe('Tool results in a catch-up (characters)')
+    expect(shown(component, TOOL_CHARS)).toBe('600')
   })
 
   it('shows the stored values when the keys are set', async () => {
@@ -157,6 +163,8 @@ describe('Settings page — Chat context savings', () => {
       { key: TOKENS, value: '0' },
       { key: ON_ROW_LIMIT, value: 'false' },
       { key: STEP, value: '5' },
+      { key: BUDGET, value: '40000' },
+      { key: TOOL_CHARS, value: '0' },
     ])
     const component = await mountChat()
 
@@ -164,6 +172,8 @@ describe('Settings page — Chat context savings', () => {
     expect(shown(component, TOKENS)).toBe('0')
     expect(switchedOn(component, ON_ROW_LIMIT)).toBe('false')
     expect(shown(component, STEP)).toBe('5')
+    expect(shown(component, BUDGET)).toBe('40000')
+    expect(shown(component, TOOL_CHARS)).toBe('0')
   })
 
   it('saves the share of the window typed into its editor, which starts from 50 and stays within 0 to 100', async () => {
@@ -203,6 +213,22 @@ describe('Settings page — Chat context savings', () => {
 
     expect(await saveTyped(component, STEP, '5')).toEqual({ value: '1', min: '1', max: undefined })
     expect(posted).toEqual([{ key: STEP, value: '5' }])
+  })
+
+  it('saves the summary budget typed into its editor, which starts from 20000 and goes no lower than 1000', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+
+    expect(await saveTyped(component, BUDGET, '30000')).toEqual({ value: '20000', min: '1000', max: undefined })
+    expect(posted).toEqual([{ key: BUDGET, value: '30000' }])
+  })
+
+  it('saves the catch-up tool result length typed into its editor, which starts from 600 and goes no lower than 0', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+
+    expect(await saveTyped(component, TOOL_CHARS, '1200')).toEqual({ value: '600', min: '0', max: undefined })
+    expect(posted).toEqual([{ key: TOOL_CHARS, value: '1200' }])
   })
 
   it('cancelling an edit saves nothing', async () => {

@@ -400,7 +400,8 @@ class CompactionGateTest extends UnitTest {
             var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
                     List.of(), below);
             assertTrue(((String) rebuilt.messages().getFirst().content())
-                            .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nRESERVE SUMMARY"),
+                            .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + latestLabel(conv.id)
+                                    + "\n\nRESERVE SUMMARY"),
                     "the reserve reached the trigger, so the rebuilt prompt carries the summary");
         } finally {
             removeProvider(provider);
@@ -460,8 +461,8 @@ class CompactionGateTest extends UnitTest {
                     List.of(), threshold - sent - 1), "one token short of the share of the room left");
             var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
                     List.of(), threshold - sent);
-            assertTrue(((String) rebuilt.messages().getFirst().content())
-                    .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nROOM SUMMARY"), "at the threshold it compacts");
+            assertTrue(((String) rebuilt.messages().getFirst().content()).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
+                    + "\n\n" + latestLabel(conv.id) + "\n\nROOM SUMMARY"), "at the threshold it compacts");
         } finally {
             ConfigService.delete(SessionCompactor.TRIGGER_PERCENT_KEY);
             ConfigService.delete(SessionCompactor.TRIGGER_TOKENS_KEY);
@@ -506,14 +507,19 @@ class CompactionGateTest extends UnitTest {
             var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current, List.of(), 0);
 
             assertEquals(1, requests.get());
-            assertTrue(((String) rebuilt.messages().getFirst().content())
-                    .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nROW SUMMARY"), "on by default past the limit");
+            assertTrue(((String) rebuilt.messages().getFirst().content()).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
+                    + "\n\n" + latestLabel(conv.id) + "\n\nROW SUMMARY"), "on by default past the limit");
         } finally {
             removeProvider(provider);
         }
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    /** The label of the segment the gate just stored, which the rebuilt prompt carries above it (JF-161). */
+    private static String latestLabel(Long conversationId) {
+        return SessionCompactor.segmentLabel(models.SessionCompaction.findLatest(Conversation.findById(conversationId)));
+    }
 
     private static List<String> compactionLines(List<EventLogger.Captured> events) {
         return events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList();

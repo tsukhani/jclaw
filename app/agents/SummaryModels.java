@@ -11,7 +11,6 @@ import llm.routing.ModelRouter;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
-import services.ConfigService;
 import services.ModelOverrideResolver;
 import services.SessionCompactor;
 
@@ -48,7 +47,7 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
     private SummaryModels(List<Choice> choices, boolean routed, @Nullable String channel) {
         this.choices = choices;
         this.routed = routed;
-        this.maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
+        this.maxOutput = SessionCompactor.summaryMaxTokens();
         this.channel = channel;
     }
 

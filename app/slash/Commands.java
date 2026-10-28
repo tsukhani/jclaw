@@ -453,9 +453,11 @@ public final class Commands {
      * migration work}).
      *
      * <p>Cycle-safety is preserved — boundaries still anchor at user
-     * messages, so tool_call/tool_result pairs are never split. The
-     * response is a canned acknowledgment with turn-count and rough
-     * token size of the summary; the summary itself is in the DB
+     * messages, so tool_call/tool_result pairs are never split. Unlike the
+     * automatic trigger it is not bound by {@code MAX_SUMMARY_CALLS}: it
+     * summarizes until the kept tail (JF-161). The response states the rows
+     * summarized, the calls made, the rough size of the summaries and any rows
+     * left unsummarized; the segments are in the DB
      * ({@link models.SessionCompaction}) and re-injected into the next
      * turn's system prompt by {@link services.SessionCompactor#appendSummaryToPrompt}.
      *
@@ -493,7 +495,7 @@ public final class Commands {
             return new Result(null, "No active conversation to compact.", Command.COMPACT);
         }
         var result = SessionCompactor.compact(current.id, summary.first().label(), turn, summary, /*force*/ true, args,
-                summary.callTokens());
+                summary.callTokens(), Integer.MAX_VALUE);
         var responseText = buildCompactResponseText(result, args);
         persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())
@@ -532,11 +534,21 @@ public final class Commands {
         }
         var approxTokens = Math.max(1, result.summaryChars() / 4);
         var hintNote = (args != null && !args.isBlank()) ? " (guidance: " + args.strip() + ")" : "";
-        return """
+        var text = new StringBuilder("""
                 > Conversation Compacted%s
 
-                Summarized %d earlier turns into ~%d tokens. Older messages remain in history and will stop being shipped to the model starting next turn."""
-                .formatted(hintNote, result.turnsCompacted(), approxTokens);
+                Summarized %d earlier messages in %d summary %s; the summaries the agent reads in their place come to ~%d tokens. Older messages remain in history and will stop being shipped to the model starting next turn."""
+                .formatted(hintNote, result.turnsCompacted(), result.calls(), result.calls() == 1 ? "call" : "calls",
+                        approxTokens));
+        if (result.rowsLeft() > 0) {
+            text.append("\n\n%d earlier messages could not be summarized this time; /compact again continues from them."
+                    .formatted(result.rowsLeft()));
+        }
+        if (result.rowsSkipped() > 0) {
+            text.append(("\n\n%d of the oldest messages could not be summarized and are left out: they hold no "
+                    + "message from you to end a summary on.").formatted(result.rowsSkipped()));
+        }
+        return text.toString();
     }
 
     private static void persistCompactAckAndLog(Agent agent, String channelType,

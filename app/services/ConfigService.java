@@ -404,6 +404,10 @@ public class ConfigService {
                     ? key + " must be a whole number from 0 to 100; 0 turns the window share off." : null,
             (key, value) -> key.equals(SessionCompactor.ON_ROW_LIMIT_KEY) && !"true".equalsIgnoreCase(value.trim())
                     && !"false".equalsIgnoreCase(value.trim()) ? key + " must be 'true' or 'false'." : null,
+            atLeast(SessionCompactor.SUMMARY_BUDGET_KEY, SessionCompactor.MIN_SUMMARY_BUDGET,
+                    " must be a whole number of tokens, at least " + SessionCompactor.MIN_SUMMARY_BUDGET + "."),
+            atLeast(SessionCompactor.TOOL_RESULT_CHARS_KEY, 0,
+                    " must be a whole number of characters; 0 keeps only the length."),
             atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.

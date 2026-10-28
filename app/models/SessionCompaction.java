@@ -13,6 +13,9 @@ import play.db.jpa.Model;
 import utils.AppClock;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * LLM-generated summary of a prefix of a conversation's history (JCLAW-38).
@@ -23,10 +26,9 @@ import java.time.Instant;
  * stops being shipped to the LLM on subsequent turns, while the original
  * {@code Message} rows stay intact for the sidebar / scrollback.
  *
- * <p>There may be multiple rows per conversation — each additional
- * compaction summarizes the prior summary plus the turns that accumulated
- * since. The "current" summary is always the most recent row by
- * {@link #compactedAt}.
+ * <p>Each row is one segment: a summary of the rows from {@link #coversFrom} to {@link #coversTo}, written once and
+ * never rewritten (JF-161). The prompt carries every live segment, oldest first; a merge of the oldest replaces them
+ * with one new row and marks them with {@link #mergedIntoId}, keeping them in the table.
  */
 @Entity
 @Table(name = "session_compaction", indexes = {
@@ -61,6 +63,18 @@ public class SessionCompaction extends Model {
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
+    /** When the first summarized row was written; null on a summary written before JF-161 the upgrade could not date. */
+    @Column(name = "covers_from")
+    public Instant coversFrom;
+
+    /** When the last summarized row was written; null as {@link #coversFrom} is. */
+    @Column(name = "covers_to")
+    public Instant coversTo;
+
+    /** The segment this one was merged into; null while it is live. No FK, so a bulk delete needs no row order. */
+    @Column(name = "merged_into_id")
+    public Long mergedIntoId;
+
     @PrePersist
     void onCreate() {
         var now = AppClock.now();
@@ -68,13 +82,30 @@ public class SessionCompaction extends Model {
         if (compactedAt == null) compactedAt = now;
     }
 
-    /**
-     * Most recent compaction for {@code conversation}, or {@code null} if
-     * none exist yet. Used by {@code SessionCompactor} to append the summary to
-     * the system prompt on every subsequent turn.
-     */
+    /** Most recent row for {@code conversation}, merged or not, or {@code null} if none exist yet. */
     public static SessionCompaction findLatest(Conversation conversation) {
         return SessionCompaction.find(
                 "conversation = ?1 ORDER BY compactedAt DESC, id DESC", conversation).first();
+    }
+
+    // A merge result is written after the segments it follows, so neither its id nor its compactedAt orders it.
+    private static final Comparator<SessionCompaction> OLDEST_FIRST = Comparator
+            .comparing((SessionCompaction s) -> s.coversFrom, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(s -> s.coversTo, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(s -> s.id);
+
+    /**
+     * The segments the prompt carries for {@code conversation}, oldest first: those not merged and written after its
+     * last {@code /reset} or {@code /new} ({@link Conversation#contextSince}).
+     */
+    public static List<SessionCompaction> findLive(Conversation conversation) {
+        List<SessionCompaction> rows = conversation.contextSince == null
+                ? find("conversation = ?1 AND mergedIntoId IS NULL", conversation).fetch()
+                : find("conversation = ?1 AND mergedIntoId IS NULL AND compactedAt > ?2", conversation,
+                        conversation.contextSince).fetch();
+        var live = new ArrayList<SessionCompaction>(rows.size());
+        for (Object row : rows) live.add((SessionCompaction) row);
+        live.sort(OLDEST_FIRST);
+        return live;
     }
 }

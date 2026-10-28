@@ -197,6 +197,24 @@ async function saveChatField(configKey: string, value: string) {
           label-width="w-80"
           tip="Long tool results from earlier turns are shortened to a note the agent can open again. 1 shortens them each turn. Recommended: 5 once your provider's cache holds across turns."
         />
+        <SettingsConfigField
+          config-key="chat.compaction.summaryBudgetTokens"
+          label="Merge summaries past (tokens)"
+          kind="number"
+          fallback="20000"
+          :min="1000"
+          label-width="w-80"
+          tip="Each summary is kept as written, and the agent reads them all, oldest first. When together they pass this many tokens, the oldest are merged into one that keeps their names, file paths, links, commits and numbers. At least 1000. Default: 20000."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.toolResultChars"
+          label="Tool results in a catch-up (characters)"
+          kind="number"
+          fallback="600"
+          :min="0"
+          label-width="w-80"
+          tip="When older messages are summarized from a copy of the chat, as a long catch-up is, each tool result in the copy is cut to this many characters with its full length noted, and long tool-call arguments are cut the same way. Your messages and the agent's replies are sent whole. 0 sends only the length. Default: 600."
+        />
       </div>
     </div>
 

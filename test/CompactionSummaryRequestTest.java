@@ -124,9 +124,9 @@ class CompactionSummaryRequestTest extends UnitTest {
         for (var m : kept) sent.add(roleAndContent(m));
         assertEquals(storedRows(convo.id), sent);
 
-        assertEquals(content(summary.get(0)) + "\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY-JF154",
-                content(turnTwo.get(0)));
         var stored = latestCompaction(convo.id);
+        assertEquals(content(summary.get(0)) + "\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
+                + SessionCompactor.segmentLabel(stored) + "\n\nSUMMARY-JF154", content(turnTwo.get(0)));
         assertEquals("SUMMARY-JF154", stored.summary);
         assertEquals(summarized.size(), stored.turnCount);
     }
@@ -277,13 +277,49 @@ class CompactionSummaryRequestTest extends UnitTest {
             assertFalse(request.has("tools"), "rows the turn never loaded go as the transcript");
             inputs.add(content(request.getAsJsonArray("messages").get(1)));
         }
+        // Each chunk goes alone, with no earlier summary folded in (JF-161).
         assertTrue(inputs.get(0).startsWith("[USER] " + rows.get(0)), inputs.get(0));
-        assertTrue(inputs.get(1).startsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY 1\n\n"
-                + "[Turns since that summary]\n\n[USER] " + rows.get(12)), inputs.get(1));
-        assertTrue(inputs.get(2).startsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY 2\n\n"
-                + "[Turns since that summary]\n\n[USER] " + rows.get(24)), inputs.get(2));
-        assertEquals("SUMMARY 3", latestCompaction(convo.id).summary);
-        assertTrue(result.get().responseText().contains("Summarized 26 earlier turns"), result.get().responseText());
+        assertTrue(inputs.get(1).startsWith("[USER] " + rows.get(12)), inputs.get(1));
+        assertTrue(inputs.get(2).startsWith("[USER] " + rows.get(24)), inputs.get(2));
+        assertEquals(3L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
+        assertEquals("""
+                > Conversation Compacted
+
+                Summarized 26 earlier messages in 3 summary calls; the summaries the agent reads in their place \
+                come to ~6 tokens. Older messages remain in history and will stop being shipped to the model \
+                starting next turn.""", result.get().responseText());
+    }
+
+    @Test
+    void slashCompactOnAChatNeedingMoreThanEightCallsFinishesAndSaysHowManyItMade() throws Exception {
+        startProvider(n -> text("SUMMARY " + n));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf161-slash");
+        var tick = new AtomicLong(Instant.now().minusSeconds(60).toEpochMilli());
+        AppClock.runWith(new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.incrementAndGet()); }
+        }, () -> seed(convo, 120, 40));
+        ConfigService.set("chat.maxContextMessages", "12");
+        commit();
+
+        var result = new AtomicReference<Commands.Result>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(slashCompact(agent, convo, null)));
+
+        // /compact keeps 4: nine chunks of 12 rows past the limit, then rows 108-115 ahead of the kept 116-119.
+        assertEquals(10, requests.size());
+        var rows = storedContents(convo.id);
+        var last = content(requests.getLast().getAsJsonArray("messages").get(1));
+        assertTrue(last.startsWith("[USER] " + rows.get(108)), last);
+        assertEquals(10L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
+        // "SUMMARY 1" to "SUMMARY 9" and "SUMMARY 10": 91 characters, 22 tokens at four a token.
+        assertEquals("""
+                > Conversation Compacted
+
+                Summarized 116 earlier messages in 10 summary calls; the summaries the agent reads in their place \
+                come to ~22 tokens. Older messages remain in history and will stop being shipped to the model \
+                starting next turn.""", result.get().responseText());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────

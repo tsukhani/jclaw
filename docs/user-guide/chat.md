@@ -95,7 +95,7 @@ On an external channel, `/subagent`, `/prompt`, and the `/model` forms that chan
 | `/prompt` | Search your [Prompts Library](/guide#prompts): `/prompt code review`. In the web composer the prompt's text drops straight into the box; on other channels JClaw replies with it so you can copy and edit it (for the binding's owner only). `/prompt` on its own lists what you have saved. |
 
 :::tip /compact when context fills up
-`/usage` shows how much of the context window a conversation is using. When it is near full, `/compact` summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. Pass a focus hint when you only care about a specific subtopic. The summarizer keeps that thread tight.
+`/usage` shows how much of the context window a conversation is using. When it is near full, `/compact` summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. It keeps going until every older message is summarized, however many summary calls that takes, and its reply says how many messages it summarized, how many calls it made, and any messages it could not summarize. Pass a focus hint when you only care about a specific subtopic. The summarizer keeps that thread tight.
 :::
 
 ## Tool calls and reasoning

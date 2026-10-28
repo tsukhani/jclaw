@@ -135,7 +135,7 @@ public final class CompactionGate {
         var summary = SummaryModels.resolve(agent, snapshot.conversation(), () -> turnModel, snapshot.channelType());
         var result = SessionCompactor.compact(conversationId, summary.first().label(),
                 new SessionCompactor.TurnRequest(current.messages(), tools), summary, false, null,
-                summary.callTokens());
+                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
         if (!result.compacted()) {
             // Under the token trigger or the row limit alone the window is far off, and this would repeat every turn.
             if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
@@ -150,7 +150,7 @@ public final class CompactionGate {
                         Objects.requireNonNullElse(summary.answeredBy(), summary.first().label())));
 
         // Rebuild messages: fresh read picks up the bumped compactionSince,
-        // appendSummaryToPrompt re-injects the (now stored) summary. No user message, so recall
+        // appendSummaryToPrompt re-injects the (now stored) segments. No user message, so recall
         // does not run again: the caller's trailing message carries the prologue's (JF-152).
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);

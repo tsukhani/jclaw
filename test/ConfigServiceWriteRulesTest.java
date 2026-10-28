@@ -254,6 +254,28 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theSummaryBudgetMustBeAWholeNumberOfAtLeastAThousandTokens() {
+        var key = "chat.compaction.summaryBudgetTokens";
+        var expected = key + " must be a whole number of tokens, at least 1000.";
+        for (var value : List.of("999", "0", "-1", "20k", "1.5", "")) {
+            assertRefused(expected, key, value);
+        }
+        assertAccepted(key, "1000");
+        assertAccepted(key, "20000");
+    }
+
+    @Test
+    void theToolResultLengthInACatchUpMustBeAWholeNumberOfZeroOrMore() {
+        var key = "chat.compaction.toolResultChars";
+        var expected = key + " must be a whole number of characters; 0 keeps only the length.";
+        for (var value : List.of("-1", "600 chars", "1.5", "")) {
+            assertRefused(expected, key, value);
+        }
+        assertAccepted(key, "0");
+        assertAccepted(key, "600");
+    }
+
+    @Test
     void theShorteningStepMustBeAWholeNumberOfAtLeastOne() {
         var expected = "chat.pruneToolResultsEveryTurns must be a whole number of turns, at least 1.";
         assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "0");

@@ -226,7 +226,8 @@ class SessionCompactorTest extends UnitTest {
     @Test
     void aSummaryOnTheTurnSendsItsPrefixAndToolsWithTheInstructionLast() {
         var conv = ConversationService.create(agent, "web", "user1");
-        saveSummary(conv, "FIRST SUMMARY", Instant.now().minusSeconds(600));
+        var written = Instant.now().minusSeconds(600);
+        saveSummary(conv, "FIRST SUMMARY", written);
         seedMessages(conv, 25);
         commitAndReopen();
         var turn = turnMessages(conv.id);
@@ -247,8 +248,8 @@ class SessionCompactorTest extends UnitTest {
         var request = calls.getFirst();
         assertEquals(summarized + 2, request.size());
         assertEquals(turn.subList(0, summarized + 1), request.subList(0, summarized + 1));
-        assertEquals(ChatMessage.system("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nFIRST SUMMARY"),
-                request.getFirst());
+        assertEquals(ChatMessage.system("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + labelUpTo(written)
+                + "\n\nFIRST SUMMARY"), request.getFirst());
         assertEquals("user", request.getLast().role());
         assertEquals(SECTIONS, headings(request.getLast().content()));
         commitAndReopen();
@@ -552,29 +553,6 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_secondCompactionCarriesTheFirstSummary() {
-        var conv = ConversationService.create(agent, "web", "user1");
-        seedMessages(conv, 25, "Early turn");
-        commitAndReopen();
-        assertTrue(SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "FIRST SUMMARY").compacted());
-
-        seedMessages(Conversation.findById(conv.id), 25, "Later turn");
-        commitAndReopen();
-        var input = new AtomicReference<String>();
-        var second = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
-            input.set((String) msgs.get(1).content());
-            return "SECOND SUMMARY";
-        });
-
-        assertTrue(second.compacted(), "reason=" + second.skipReason());
-        assertTrue(input.get().contains("FIRST SUMMARY"), "summarizer input: " + input.get());
-        assertTrue(input.get().contains("Later turn"), "summarizer input: " + input.get());
-        commitAndReopen();
-        var prompt = SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id));
-        assertTrue(prompt.endsWith("SECOND SUMMARY"), "prompt: " + prompt);
-    }
-
-    @Test
     void compact_leavesOutASummaryThatAResetCleared() {
         var conv = ConversationService.create(agent, "web", "user1");
         saveSummary(conv, "PRE-RESET SUMMARY", Instant.now().minusSeconds(600));
@@ -630,15 +608,17 @@ class SessionCompactorTest extends UnitTest {
 
         assertTrue(result.compacted(), "reason=" + result.skipReason());
         assertEquals(List.of(List.of(), List.of(), List.of()), toolLists, "rows the turn never loaded go as the transcript");
-        assertTranscript(rows.subList(0, 40), null, calls.get(0));
-        assertTranscript(rows.subList(40, 80), "SUMMARY 1", calls.get(1));
-        assertTranscript(rows.subList(80, 90), "SUMMARY 2", calls.get(2));
+        assertTranscript(rows.subList(0, 40), calls.get(0));
+        assertTranscript(rows.subList(40, 80), calls.get(1));
+        assertTranscript(rows.subList(80, 90), calls.get(2));
         assertEquals(90, result.turnsCompacted());
+        assertEquals(3, result.calls());
+        assertEquals(0, result.rowsLeft());
         commitAndReopen();
         var reloaded = Conversation.<Conversation>findById(conv.id);
         assertEquals(contents(rows.subList(90, 100)), ConversationService.loadRecentMessages(reloaded).stream()
                 .map(m -> m.content).toList());
-        assertEquals("SUMMARY 3", SessionCompaction.findLatest(reloaded).summary);
+        assertEquals(List.of("SUMMARY 1", "SUMMARY 2", "SUMMARY 3"), storedSummaries(conv.id), "one segment a chunk");
     }
 
     @Test
@@ -656,13 +636,20 @@ class SessionCompactorTest extends UnitTest {
             return reply("SUMMARY " + calls.size());
         };
 
-        var events = EventLogger.captureForTest(() -> assertEquals(10 * max, SessionCompactor.compact(conv.id,
-                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000)
-                .turnsCompacted()));
+        var stopped = new AtomicReference<SessionCompactor.CompactionResult>();
+        var events = EventLogger.captureForTest(() -> stopped.set(SessionCompactor.compact(conv.id,
+                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000,
+                max)));
 
+        assertEquals(10 * max, stopped.get().turnsCompacted());
+        assertEquals(max, stopped.get().calls());
+        assertEquals(10, stopped.get().rowsLeft(), "the 20 rows left, less the 10 a compaction keeps");
         assertEquals(max, calls.size());
+        var expectedPrompt = new StringBuilder("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER);
         for (int k = 0; k < max; k++) {
-            assertTranscript(rows.subList(10 * k, 10 * k + 10), k == 0 ? null : "SUMMARY " + k, calls.get(k));
+            assertTranscript(rows.subList(10 * k, 10 * k + 10), calls.get(k));
+            expectedPrompt.append("\n\n").append(label(rows.get(10 * k).createdAt(), rows.get(10 * k + 9).createdAt()))
+                    .append("\n\nSUMMARY ").append(k + 1);
         }
         assertEquals(List.of("Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
                 .formatted(conv.id, max)), events.stream().filter(e -> "compaction".equals(e.category()))
@@ -670,12 +657,12 @@ class SessionCompactorTest extends UnitTest {
 
         calls.clear();
         var resumed = SessionCompactor.compact(conv.id, "openrouter/test-model",
-                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000);
+                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000, max);
 
         assertEquals(10, resumed.turnsCompacted(), "the 20 rows left fit the limit: one call, keeping 10");
         assertEquals(1, calls.size());
-        assertEquals(ChatMessage.system("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY " + max),
-                calls.getFirst().getFirst(), "the turn's own request, carrying the summary the stopped compaction left");
+        assertEquals(ChatMessage.system(expectedPrompt.toString()), calls.getFirst().getFirst(),
+                "the turn's own request, carrying every segment the stopped compaction left");
         assertEquals(ChatMessage.user(rows.get(10 * max).content()), calls.getFirst().get(1));
     }
 
@@ -696,12 +683,244 @@ class SessionCompactorTest extends UnitTest {
                 }).compacted()));
 
         assertEquals(1, inputs.size());
-        assertTranscript(rows.subList(60, 90), null, inputs.getFirst());
+        assertTranscript(rows.subList(60, 90), inputs.getFirst());
         assertEquals(List.of(("Compaction for conversation %d found no user message to end a summary on among its "
                 + "oldest rows; the 60 rows before its newest 40 are not summarized").formatted(conv.id)),
                 events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList());
         commitAndReopen();
         assertEquals(rows.get(90).createdAt(), Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    // ─── Summary segments (JF-161) ──────────────────────────────────────
+
+    @Test
+    void aThirdCompactionAddsASegmentAndLeavesTheFirstTwoAsTheyWere() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        var inputs = new ArrayList<String>();
+        var counts = new ArrayList<Integer>();
+        var names = List.of("SEGMENT ONE", "SEGMENT TWO", "SEGMENT THREE");
+        for (int b = 0; b < names.size(); b++) {
+            var name = names.get(b);
+            seedMinutes(Conversation.findById(conv.id), BASE.plusSeconds(b * 3_600L), 25, "Batch " + b);
+            commitAndReopen();
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+                inputs.add((String) msgs.get(1).content());
+                return name;
+            });
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            counts.add(result.turnsCompacted());
+            commitAndReopen();
+        }
+
+        var rows = allRows(conv.id);
+        var expected = new StringBuilder("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER);
+        int start = 0;
+        for (int k = 0; k < names.size(); k++) {
+            var covered = rows.subList(start, start + counts.get(k));
+            assertEquals(SessionCompactor.renderTurns(covered), inputs.get(k), "each call sends its own rows alone");
+            expected.append("\n\n").append(label(covered.getFirst().createdAt(), covered.getLast().createdAt()))
+                    .append("\n\n").append(names.get(k));
+            start += counts.get(k);
+        }
+        assertEquals(names, storedSummaries(conv.id));
+        assertEquals(expected.toString(), SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
+    @Test
+    void pastTheBudgetExactlyTheOldestSegmentsMergeIntoOneThatKeepsTheCommitHashTheyName() {
+        // Defaults: a 20,000-token budget and an 8,192-token output limit. Five 5,000-token segments pass the budget,
+        // and the oldest three, merged into at most 8,192 tokens, are the fewest whose merge fits.
+        var conv = ConversationService.create(agent, "web", "user1");
+        var texts = new ArrayList<String>();
+        for (int k = 0; k < 5; k++) {
+            var head = k == 0 ? "LeaveFlow: pushed commit 76781a2 to the repo." : "Segment " + (k + 1) + ".";
+            texts.add((head + " " + "x".repeat(20_000)).substring(0, 20_000));
+        }
+        var segmentInputs = new ArrayList<List<ChatMessage>>();
+        var mergeInputs = new ArrayList<List<ChatMessage>>();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                mergeInputs.add(msgs);
+                return "MERGED: LeaveFlow commit " + (((String) msgs.get(1).content()).contains("76781a2") ? "76781a2" : "?");
+            }
+            segmentInputs.add(msgs);
+            return texts.get(segmentInputs.size() - 1);
+        };
+        var counts = new ArrayList<Integer>();
+        for (int b = 0; b < 5; b++) {
+            seedMinutes(Conversation.findById(conv.id), BASE.plusSeconds(b * 3_600L), 25, "Batch " + b);
+            commitAndReopen();
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model", summarizer);
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            counts.add(result.turnsCompacted());
+            commitAndReopen();
+            if (b == 3) assertEquals(List.of(), mergeInputs, "four segments sit exactly at the budget");
+        }
+
+        var rows = allRows(conv.id);
+        var labels = new ArrayList<String>();
+        int start = 0;
+        for (int count : counts) {
+            labels.add(label(rows.get(start).createdAt(), rows.get(start + count - 1).createdAt()));
+            start += count;
+        }
+        assertEquals(1, mergeInputs.size());
+        var merge = mergeInputs.getFirst();
+        assertEquals(SECTIONS, headings(merge.getFirst().content()));
+        assertTrue(((String) merge.getFirst().content()).lines().toList().contains(CARRY_FORWARD),
+                () -> "merge instruction: " + merge.getFirst().content());
+        assertEquals(ChatMessage.user(labels.get(0) + "\n\n" + texts.get(0) + "\n\n" + labels.get(1) + "\n\n"
+                + texts.get(1) + "\n\n" + labels.get(2) + "\n\n" + texts.get(2)), merge.get(1));
+        int mergedEnd = counts.get(0) + counts.get(1) + counts.get(2) - 1;
+        assertEquals("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER
+                        + "\n\n" + label(rows.getFirst().createdAt(), rows.get(mergedEnd).createdAt())
+                        + "\n\nMERGED: LeaveFlow commit 76781a2"
+                        + "\n\n" + labels.get(3) + "\n\n" + texts.get(3) + "\n\n" + labels.get(4) + "\n\n" + texts.get(4),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+        var stored = storedSummaries(conv.id);
+        assertEquals(6, stored.size(), "the merged segments stay in the table");
+        assertEquals(texts, stored.subList(0, 5));
+        var segments = storedSegments(conv.id);
+        var result = segments.getLast();
+        assertEquals(java.util.Arrays.asList(result.id, result.id, result.id, null, null, null),
+                segments.stream().map(sc -> sc.mergedIntoId).toList(), "exactly the oldest three are marked merged");
+        assertEquals(rows.getFirst().createdAt(), result.coversFrom);
+        assertEquals(rows.get(mergedEnd).createdAt(), result.coversTo);
+        assertEquals(counts.get(0) + counts.get(1) + counts.get(2), result.turnCount);
+    }
+
+    @Test
+    void aTranscriptCarriesEachToolResultCutToSixHundredCharactersWithItsLengthAndTheTurnsTextWhole() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        var ask = "Fetch the LeaveFlow docs. " + "u".repeat(3_000);
+        var reply = "Here is what the docs say. " + "a".repeat(3_000);
+        var longArgs = "{\"url\":\"https://example.com/" + "p".repeat(2_000) + "\"}";
+        var huge = "r".repeat(50_000);
+        var exact = "s".repeat(600);
+        var over = "t".repeat(601);
+        ConversationService.appendMessage(conv, MessageRole.USER, ask, null, null, null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null, toolCall("call_1", longArgs), null, null);
+        ConversationService.appendMessage(conv, MessageRole.TOOL, huge, null, "call_1", null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null, toolCall("call_2", "{}"), null, null);
+        ConversationService.appendMessage(conv, MessageRole.TOOL, exact, null, "call_2", null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null, toolCall("call_3", "{}"), null, null);
+        ConversationService.appendMessage(conv, MessageRole.TOOL, over, null, "call_3", null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, reply, null, null, null);
+        var tail = List.of("next", "ok", "more", "fine", "last", "done");
+        for (int i = 0; i < tail.size(); i++) {
+            ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, tail.get(i),
+                    null, null, null);
+        }
+        commitAndReopen();
+        var input = new AtomicReference<String>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            input.set((String) msgs.get(1).content());
+            return "TRIMMED SUMMARY";
+        }, true, null);
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(10, result.turnsCompacted(), "/compact keeps 4, from the user row 'more'");
+        var shortArgs = longArgs.substring(0, 600) + "… [first 600 of " + longArgs.length() + " characters]";
+        assertEquals("[USER] " + ask + "\n\n"
+                + "[ASSISTANT]\n[TOOL_CALLS] " + toolCall("call_1", shortArgs) + "\n\n"
+                + "[TOOL] " + "r".repeat(600) + "… [first 600 of 50000 characters]\n[TOOL_RESULT_ID] call_1\n\n"
+                + "[ASSISTANT]\n[TOOL_CALLS] " + toolCall("call_2", "{}") + "\n\n"
+                + "[TOOL] " + exact + "\n[TOOL_RESULT_ID] call_2\n\n"
+                + "[ASSISTANT]\n[TOOL_CALLS] " + toolCall("call_3", "{}") + "\n\n"
+                + "[TOOL] " + "t".repeat(600) + "… [first 600 of 601 characters]\n[TOOL_RESULT_ID] call_3\n\n"
+                + "[ASSISTANT] " + reply + "\n\n"
+                + "[USER] next\n\n"
+                + "[ASSISTANT] ok\n\n", input.get());
+    }
+
+    @Test
+    void theStoredToolResultLengthIsRead() {
+        ConfigService.set(SessionCompactor.TOOL_RESULT_CHARS_KEY, "100");
+        var conv = ConversationService.create(agent, "web", "user1");
+        ConversationService.appendMessage(conv, MessageRole.USER, "fetch it", null, null, null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null, toolCall("call_1", "{}"), null, null);
+        ConversationService.appendMessage(conv, MessageRole.TOOL, "r".repeat(5_000), null, "call_1", null);
+        var tail = List.of("ok", "next", "fine", "last", "done");
+        for (int i = 0; i < tail.size(); i++) {
+            ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.ASSISTANT : MessageRole.USER, tail.get(i),
+                    null, null, null);
+        }
+        commitAndReopen();
+        var input = new AtomicReference<String>();
+
+        assertTrue(SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            input.set((String) msgs.get(1).content());
+            return "S";
+        }, true, null).compacted());
+
+        assertTrue(input.get().contains("[TOOL] " + "r".repeat(100) + "… [first 100 of 5000 characters]\n"), input.get());
+    }
+
+    @Test
+    void aRollingSummaryChainBecomesOneSegmentTheLatestAndTheUpgradeRunsOnce() throws Exception {
+        var conv = ConversationService.create(agent, "web", "user1");
+        var seeded = seedMinutes(conv, BASE, 30, "Turn");
+        // Three cumulative rewrites as the code before JF-161 stored them; the last left rows 20 on.
+        saveSummary(conv, "SUMMARY v1", BASE.plusSeconds(3_600));
+        saveSummary(conv, "SUMMARY v1 v2", BASE.plusSeconds(7_200));
+        saveSummary(conv, "SUMMARY v1 v2 v3", BASE.plusSeconds(10_800));
+        conv.compactionSince = seeded.get(20).createdAt();
+        conv.save();
+        commitAndReopen();
+        try {
+            ConfigService.delete(jobs.DefaultConfigJob.SUMMARY_SEGMENTS_KEY);
+            runSegmentUpgrade();
+            commitAndReopen();
+
+            assertEquals("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
+                            + label(seeded.getFirst().createdAt(), seeded.get(19).createdAt()) + "\n\nSUMMARY v1 v2 v3",
+                    SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+            assertEquals(List.of("SUMMARY v1", "SUMMARY v1 v2", "SUMMARY v1 v2 v3"), storedSummaries(conv.id));
+            var chain = storedSegments(conv.id);
+            var latest = chain.getLast();
+            assertEquals(java.util.Arrays.asList(latest.id, latest.id, null),
+                    chain.stream().map(sc -> sc.mergedIntoId).toList());
+            assertEquals(seeded.getFirst().createdAt(), latest.coversFrom);
+            assertEquals(seeded.get(19).createdAt(), latest.coversTo);
+            assertEquals("true", ConfigService.get(jobs.DefaultConfigJob.SUMMARY_SEGMENTS_KEY));
+
+            // A chain written after the marker stays as it is, which only a step that did not run again leaves.
+            var later = ConversationService.create(agent, "web", "user2");
+            saveSummary(later, "LATER v1", BASE.plusSeconds(3_600));
+            saveSummary(later, "LATER v1 v2", BASE.plusSeconds(7_200));
+            commitAndReopen();
+            runSegmentUpgrade();
+            commitAndReopen();
+            assertEquals(java.util.Arrays.asList(null, null),
+                    storedSegments(later.id).stream().map(sc -> sc.mergedIntoId).toList());
+        } finally {
+            ConfigService.set(jobs.DefaultConfigJob.SUMMARY_SEGMENTS_KEY, "true");
+        }
+    }
+
+    @Test
+    void segmentsBeforeAResetStayOutOfThePromptAndTheOnesAfterItAreShown() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMinutes(conv, BASE, 25, "Before");
+        commitAndReopen();
+        assertTrue(SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "PRE-RESET SEGMENT").compacted());
+        commitAndReopen();
+        var reset = Conversation.<Conversation>findById(conv.id);
+        reset.contextSince = AppClock.now();
+        reset.save();
+        commitAndReopen();
+        var after = seedMinutes(Conversation.findById(conv.id), Instant.now().plusSeconds(60), 25, "After");
+        commitAndReopen();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "POST-RESET SEGMENT");
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        commitAndReopen();
+        var covered = after.subList(0, result.turnsCompacted());
+        assertEquals("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
+                        + label(covered.getFirst().createdAt(), covered.getLast().createdAt()) + "\n\nPOST-RESET SEGMENT",
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
     }
 
     // ─── appendSummaryToPrompt ───────────────────────────────────────────
@@ -737,31 +956,16 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void appendSummaryToPrompt_picksMostRecentWhenMultiple() {
+    void aMergedSegmentStaysOutOfThePrompt() {
         var conv = ConversationService.create(agent, "web", "user1");
-        var older = new SessionCompaction();
-        older.conversation = conv;
-        older.turnCount = 10;
-        older.summaryTokens = 50;
-        older.model = "openrouter/test-model";
-        older.summary = "OLDER SUMMARY";
-        older.compactedAt = Instant.now().minusSeconds(600);
-        older.save();
-
-        var newer = new SessionCompaction();
-        newer.conversation = conv;
-        newer.turnCount = 15;
-        newer.summaryTokens = 80;
-        newer.model = "openrouter/test-model";
-        newer.summary = "NEWER SUMMARY";
-        newer.compactedAt = Instant.now();
-        newer.save();
+        var merged = saveSummary(conv, "MERGED AWAY", Instant.now().minusSeconds(600));
+        var kept = saveSummary(conv, "STILL LIVE", Instant.now().minusSeconds(300));
+        merged.mergedIntoId = kept.id;
+        merged.save();
         commitAndReopen();
 
-        var reloaded = Conversation.<Conversation>findById(conv.id);
-        var result = SessionCompactor.appendSummaryToPrompt("SYS", reloaded);
-        assertTrue(result.contains("NEWER SUMMARY"));
-        assertFalse(result.contains("OLDER SUMMARY"));
+        assertEquals("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + labelUpTo(kept.compactedAt)
+                + "\n\nSTILL LIVE", SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
     }
 
     @Test
@@ -832,6 +1036,83 @@ class SessionCompactorTest extends UnitTest {
     private static final List<String> SECTIONS = List.of("Goals and constraints", "Decisions",
             "Identifiers and facts", "Open questions and errors", "Next steps");
 
+    private static final String CARRY_FORWARD = "Keep every file path, URL, commit hash, name, number and open item "
+            + "they record, copied exactly as written, unless a later summary supersedes it. Finished work may shrink "
+            + "to one line, but keep its identifiers.";
+
+    /** Rows seeded at a fixed past instant, so a segment's label names minutes this test chose. */
+    private static final Instant BASE = Instant.parse("2026-10-20T08:00:00Z");
+
+    private static final java.time.format.DateTimeFormatter LABEL_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    /** The label of a segment whose rows are undated: the time it was written, in the operator's zone. */
+    private static String labelUpTo(Instant compactedAt) {
+        var zone = services.TimezoneResolver.appZone();
+        return "[Turns up to " + LABEL_TIME.format(compactedAt.atZone(zone)) + ", " + zone.getId() + "]";
+    }
+
+    /** The label a segment covering {@code from} to {@code to} carries, in the operator's zone. */
+    private static String label(Instant from, Instant to) {
+        var zone = services.TimezoneResolver.appZone();
+        return "[Turns from " + LABEL_TIME.format(from.atZone(zone)) + " to " + LABEL_TIME.format(to.atZone(zone))
+                + ", " + zone.getId() + "]";
+    }
+
+    /** Every stored summary of the conversation, merged or not, in the order they were written. */
+    private static List<String> storedSummaries(Long conversationId) {
+        var out = new ArrayList<String>();
+        for (Object o : SessionCompaction.find("conversation.id = ?1 ORDER BY id", conversationId).fetch()) {
+            out.add(((SessionCompaction) o).summary);
+        }
+        return out;
+    }
+
+    private static List<SessionCompaction> storedSegments(Long conversationId) {
+        var out = new ArrayList<SessionCompaction>();
+        for (Object o : SessionCompaction.find("conversation.id = ?1 ORDER BY id", conversationId).fetch()) {
+            out.add((SessionCompaction) o);
+        }
+        return out;
+    }
+
+    private static void runSegmentUpgrade() throws Exception {
+        var step = jobs.DefaultConfigJob.class.getDeclaredMethod("adoptRollingSummariesOnce");
+        step.setAccessible(true);
+        step.invoke(new jobs.DefaultConfigJob());
+    }
+
+    /** One stored tool call as {@code Message.toolCalls} holds it. */
+    private static String toolCall(String id, String arguments) {
+        var function = new com.google.gson.JsonObject();
+        function.addProperty("name", "web_fetch");
+        function.addProperty("arguments", arguments);
+        var call = new com.google.gson.JsonObject();
+        call.addProperty("id", id);
+        call.addProperty("type", "function");
+        call.add("function", function);
+        return call.toString();
+    }
+
+    /** {@code count} alternating user and assistant rows {@code label i}, at least a minute apart from {@code from}. */
+    private static List<MessageSnapshot> seedMinutes(Conversation conv, Instant from, int count, String label) {
+        var tick = new AtomicLong(from.toEpochMilli() - 60_000);
+        var ticking = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.addAndGet(60_000)); }
+        };
+        var out = new ArrayList<MessageSnapshot>();
+        AppClock.runWith(ticking, () -> {
+            for (int i = 0; i < count; i++) {
+                var m = ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                        label + " " + i, null, null, null);
+                out.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
+            }
+        });
+        return out;
+    }
+
     /** The list a turn builds from {@code conversationId}'s rows, under a system prompt carrying any summary. */
     private static List<ChatMessage> turnMessages(Long conversationId) {
         return Tx.run(() -> {
@@ -844,19 +1125,15 @@ class SessionCompactorTest extends UnitTest {
         return Tx.run(() -> SessionCompactor.snapshotParentMessages(Conversation.findById(conversationId)));
     }
 
-    /** {@code request} is the transcript shape: the instruction as the system prompt, then the summarized rows. */
+    /**
+     * {@code request} is the transcript shape: the instruction as the system prompt, then the summarized rows and no
+     * earlier summary (JF-161).
+     */
     private static void assertTranscript(List<MessageSnapshot> summarized, List<ChatMessage> request) {
-        assertTranscript(summarized, null, request);
-    }
-
-    /** As {@link #assertTranscript(List, List)}, with {@code prior} folded in ahead of the rows when not null. */
-    private static void assertTranscript(List<MessageSnapshot> summarized, String prior, List<ChatMessage> request) {
         assertEquals(2, request.size());
         assertEquals("system", request.getFirst().role());
         assertEquals(SECTIONS, headings(request.getFirst().content()));
-        var turns = SessionCompactor.renderTurns(summarized);
-        assertEquals(ChatMessage.user(prior == null ? turns : SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + prior
-                + "\n\n[Turns since that summary]\n\n" + turns), request.get(1));
+        assertEquals(ChatMessage.user(SessionCompactor.renderTurns(summarized)), request.get(1));
     }
 
     /** Every stored row of the conversation, oldest first, whatever its floor or history limit. */
@@ -938,7 +1215,8 @@ class SessionCompactorTest extends UnitTest {
         }
     }
 
-    private static void saveSummary(Conversation conv, String summary, Instant compactedAt) {
+    /** A summary as the code before JF-161 stored it: no dates for the rows it covers. */
+    private static SessionCompaction saveSummary(Conversation conv, String summary, Instant compactedAt) {
         var sc = new SessionCompaction();
         sc.conversation = conv;
         sc.turnCount = 10;
@@ -947,6 +1225,7 @@ class SessionCompactorTest extends UnitTest {
         sc.summary = summary;
         sc.compactedAt = compactedAt;
         sc.save();
+        return sc;
     }
 
     private static void commitAndReopen() {

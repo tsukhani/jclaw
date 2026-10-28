@@ -1,5 +1,9 @@
 package services;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.ModelInfo;
@@ -9,8 +13,10 @@ import models.Message;
 import models.MessageRole;
 import models.SessionCompaction;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
 
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,8 +26,8 @@ import java.util.function.Supplier;
 
 /**
  * Session compaction: when a conversation's active context approaches the
- * model's input window, roll the oldest non-essential turns into a single
- * LLM-generated summary (JCLAW-38).
+ * model's input window, roll the oldest non-essential turns into
+ * LLM-generated summary segments (JCLAW-38, JF-161).
  *
  * <p>Storage layout — all metadata lives in the DB (no filesystem
  * coupling, matching JClaw's "framework state stays in the schema"
@@ -41,13 +47,14 @@ import java.util.function.Supplier;
  * rows since its floor pass the history limit ({@link #pastHistoryLimit}), which would otherwise drop them unread.
  *
  * <p>A compaction summarizes the oldest rows since the floor, in chunks when they exceed what one summary call
- * takes, each folding in the summary before it (JF-159).
+ * takes (JF-159). Each call stores its own segment and no earlier summary is folded in; once the live segments pass
+ * {@code chat.compaction.summaryBudgetTokens}, the oldest are merged into one (JF-161).
  *
  * <p>Boundary selection: we anchor cuts at user-message boundaries so
  * we never split an assistant's tool_calls from its tool_result
  * companions. Providers reject contexts with orphaned tool calls.
  *
- * <p>Re-injection: the summary is appended to the system prompt as a
+ * <p>Re-injection: the segments are appended to the system prompt as a
  * "[Prior conversation summary]" section by the caller (not here). That
  * keeps SessionCompactor free of ChatMessage-list manipulation and
  * stays provider-agnostic.
@@ -97,17 +104,26 @@ public final class SessionCompactor {
         @Nullable String summarize(CompactionPlan plan) throws Exception;
     }
 
+    /**
+     * @param summaryChars the characters of every segment the prompt carries after it
+     * @param calls        the summary calls it made, merges included
+     * @param rowsLeft     rows still before the kept tail when it stopped short: a call failed or the call cap was hit
+     * @param rowsSkipped  rows the newest-rows fallback left behind the floor unsummarized
+     */
     public record CompactionResult(
             boolean compacted,
             int turnsCompacted,
             int summaryChars,
-            @Nullable String skipReason
+            @Nullable String skipReason,
+            int calls,
+            int rowsLeft,
+            int rowsSkipped
     ) {
         public static CompactionResult skipped(String reason) {
-            return new CompactionResult(false, 0, 0, reason);
+            return new CompactionResult(false, 0, 0, reason, 0, 0, 0);
         }
-        public static CompactionResult success(int turns, int chars) {
-            return new CompactionResult(true, turns, chars, null);
+        public static CompactionResult success(int turns, int chars, int calls, int rowsLeft, int rowsSkipped) {
+            return new CompactionResult(true, turns, chars, null, calls, rowsLeft, rowsSkipped);
         }
     }
 
@@ -121,8 +137,18 @@ public final class SessionCompactor {
     public static final int DEFAULT_TRIGGER_PERCENT = 50;
     /** JF-159: false leaves a chat past its history limit to the newest-rows load, dropping the oldest unread. */
     public static final String ON_ROW_LIMIT_KEY = "chat.compaction.onRowLimit";
-    /** The most summary calls one compaction makes; a catch-up that needs more continues on the next turn. */
+    /** The most summary calls one automatic compaction makes; a catch-up that needs more continues on the next turn. */
     public static final int MAX_SUMMARY_CALLS = 8;
+    /** JF-161: the live segments' total, in tokens, past which the oldest are merged. */
+    public static final String SUMMARY_BUDGET_KEY = "chat.compaction.summaryBudgetTokens";
+    public static final int DEFAULT_SUMMARY_BUDGET = 20_000;
+    public static final int MIN_SUMMARY_BUDGET = 1_000;
+    /** JF-161: how many characters of each tool result, and of long tool-call arguments, a transcript carries. */
+    public static final String TOOL_RESULT_CHARS_KEY = "chat.compaction.toolResultChars";
+    public static final int DEFAULT_TOOL_RESULT_CHARS = 600;
+    /** The output limit of every summary call, a merge's included. */
+    public static final String MAX_TOKENS_KEY = "chat.compactionMaxTokens";
+    public static final int DEFAULT_MAX_TOKENS = 8192;
 
     /**
      * True when the current message list reaches the token trigger ({@link #triggerThreshold}) or exceeds the
@@ -199,6 +225,20 @@ public final class SessionCompactor {
         return ConfigService.getInt(TRIGGER_TOKENS_KEY, DEFAULT_TRIGGER_TOKENS);
     }
 
+    /** {@value #MAX_TOKENS_KEY}, the most tokens a summary call may write. */
+    public static int summaryMaxTokens() {
+        return ConfigService.getInt(MAX_TOKENS_KEY, DEFAULT_MAX_TOKENS);
+    }
+
+    // A value written around the validation reads as its floor.
+    private static int summaryBudgetTokens() {
+        return Math.max(MIN_SUMMARY_BUDGET, ConfigService.getInt(SUMMARY_BUDGET_KEY, DEFAULT_SUMMARY_BUDGET));
+    }
+
+    private static int toolResultChars() {
+        return Math.max(0, ConfigService.getInt(TOOL_RESULT_CHARS_KEY, DEFAULT_TOOL_RESULT_CHARS));
+    }
+
     /** The model's window less the reserve; {@link Integer#MAX_VALUE}, never passed, when that leaves nothing. */
     public static int windowBudget(@Nullable ModelInfo modelInfo) {
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return Integer.MAX_VALUE;
@@ -227,6 +267,7 @@ public final class SessionCompactor {
      *   <li>Tx: insert {@link SessionCompaction} row and bump
      *       {@link Conversation#compactionSince}.</li>
      * </ol>
+     * Then the oldest segments are merged while the live ones pass the budget.
      *
      * @param conversationId id of the conversation to compact
      * @param modelLabel {@code "provider/modelId"} identifying the
@@ -250,8 +291,8 @@ public final class SessionCompactor {
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, @Nullable String additionalInstructions) {
-        return compact(conversationId, () -> modelLabel, force, Integer.MAX_VALUE,
-                plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)));
+        return compact(conversationId, () -> modelLabel, force, Integer.MAX_VALUE, MAX_SUMMARY_CALLS,
+                plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)), summarizer);
     }
 
     /**
@@ -270,46 +311,76 @@ public final class SessionCompactor {
      * @param call the model call, made outside any transaction
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call) {
-        return compact(conversationId, modelLabel, turn, call, false, null, Integer.MAX_VALUE);
+        return compact(conversationId, modelLabel, turn, call, false, null, Integer.MAX_VALUE, MAX_SUMMARY_CALLS);
     }
 
     /**
      * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} relaxes the
      * too-few-turns guard as the transcript form's does, and {@code additionalInstructions} follows the instruction,
      * in the transcript retries too. {@code callTokens} bounds the rows of each summary call the turn's own request
-     * cannot carry ({@link #summaryCallTokens}). Each stored summary names {@link ModelCall#answeredBy}, else
-     * {@code modelLabel}.
+     * cannot carry ({@link #summaryCallTokens}), and {@code maxCalls} the summary calls, merges included: automatic
+     * compaction passes {@link #MAX_SUMMARY_CALLS}, {@code /compact} no bound, so it reaches the kept tail. Each
+     * stored summary names {@link ModelCall#answeredBy}, else {@code modelLabel}.
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call,
-                                           boolean force, @Nullable String additionalInstructions, int callTokens) {
+                                           boolean force, @Nullable String additionalInstructions, int callTokens,
+                                           int maxCalls) {
         return compact(conversationId, () -> Objects.requireNonNullElse(call.answeredBy(), modelLabel), force,
-                callTokens, plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions));
+                callTokens, maxCalls, plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions),
+                messages -> firstChoiceText(call.call(messages, List.of())));
     }
 
-    /** One summary call after another, oldest rows first, until a plan reaches the kept tail (JF-159). */
+    /**
+     * One summary call after another, oldest rows first, each storing its own segment, until a plan reaches the kept
+     * tail or {@code maxCalls} are made (JF-159); then the oldest segments are merged while the live ones pass the
+     * budget (JF-161).
+     */
     private static CompactionResult compact(Long conversationId, Supplier<String> modelLabel, boolean force,
-                                            int callTokens, SummaryStep step) {
+                                            int callTokens, int maxCalls, SummaryStep step, Summarizer merger) {
         int turnsCompacted = 0;
-        int summaryChars = 0;
-        for (int call = 0; call < MAX_SUMMARY_CALLS; call++) {
-            final boolean first = call == 0;
+        int rowsSkipped = 0;
+        int calls = 0;
+        boolean reachedTail = false;
+        @Nullable Instant floor = null;
+        while (calls < maxCalls) {
+            final boolean first = calls == 0;
             var planOpt = Tx.run(() -> buildPlan(conversationId, force, callTokens, first));
             if (planOpt.isEmpty()) {
-                return first ? CompactionResult.skipped("no safe boundary or below min-turns")
-                        : CompactionResult.success(turnsCompacted, summaryChars);
+                if (first) return CompactionResult.skipped("no safe boundary or below min-turns");
+                reachedTail = true;
+                break;
             }
             var plan = planOpt.get();
+            if (floor != null && !plan.firstKept().createdAt().isAfter(floor)) {
+                // Rows sharing the floor's timestamp would be planned again on every call without the floor moving.
+                EventLogger.info("compaction", null, null, ("Compaction for conversation %d stopped: its next rows "
+                        + "share the timestamp the last summary ended on").formatted(conversationId));
+                break;
+            }
+            calls++;
             var stored = summarizeAndStore(conversationId, modelLabel, plan, step);
-            // A later call that fails keeps the summaries already stored, and the next turn starts after them.
-            if (!stored.compacted()) return first ? stored : CompactionResult.success(turnsCompacted, summaryChars);
+            // A later call that fails keeps the segments already stored, and the next compaction starts after them.
+            if (!stored.compacted()) {
+                if (first) return stored;
+                break;
+            }
             turnsCompacted += stored.turnsCompacted();
-            summaryChars = stored.summaryChars();
-            if (plan.last()) return CompactionResult.success(turnsCompacted, summaryChars);
+            rowsSkipped += plan.skipped();
+            floor = plan.firstKept().createdAt();
+            if (plan.last()) {
+                reachedTail = true;
+                break;
+            }
         }
-        EventLogger.info("compaction", null, null,
-                "Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
-                        .formatted(conversationId, MAX_SUMMARY_CALLS));
-        return CompactionResult.success(turnsCompacted, summaryChars);
+        if (!reachedTail && calls >= maxCalls) {
+            EventLogger.info("compaction", null, null,
+                    "Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
+                            .formatted(conversationId, maxCalls));
+        }
+        calls += mergeOverBudget(conversationId, modelLabel, merger, maxCalls - calls);
+        int rowsLeft = reachedTail ? 0 : Tx.run(() -> rowsBeforeTail(conversationId, force));
+        int summaryChars = Tx.run(() -> liveChars(conversationId));
+        return CompactionResult.success(turnsCompacted, summaryChars, calls, rowsLeft, rowsSkipped);
     }
 
     private static CompactionResult summarizeAndStore(Long conversationId, Supplier<String> modelLabel,
@@ -330,48 +401,242 @@ public final class SessionCompactor {
         }
 
         final var finalSummary = summary.strip();
-        final var summaryTokens = Math.max(1, finalSummary.length() / 4);
         final var turnsCompacted = plan.toSummarize().size();
         final var label = modelLabel.get();
 
         Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(conversationId);
             if (conv == null) return; // conversation deleted between phases
-            var sc = new SessionCompaction();
-            sc.conversation = conv;
-            sc.turnCount = turnsCompacted;
-            sc.summaryTokens = summaryTokens;
-            sc.model = label != null && !label.isBlank() ? label : "unknown";
-            sc.summary = finalSummary;
-            sc.save();
+            segment(conv, finalSummary, label, turnsCompacted, plan.toSummarize().getFirst().createdAt(),
+                    plan.toSummarize().getLast().createdAt()).save();
             conv.compactionSince = plan.firstKept().createdAt();
             conv.save();
         });
 
-        return CompactionResult.success(turnsCompacted, finalSummary.length());
+        return CompactionResult.success(turnsCompacted, finalSummary.length(), 1, 0, 0);
+    }
+
+    private static SessionCompaction segment(Conversation conv, String summary, @Nullable String label, int turnCount,
+                                             @Nullable Instant coversFrom, @Nullable Instant coversTo) {
+        var sc = new SessionCompaction();
+        sc.conversation = conv;
+        sc.turnCount = turnCount;
+        sc.summaryTokens = Math.max(1, summary.length() / 4);
+        sc.model = label != null && !label.isBlank() ? label : "unknown";
+        sc.summary = summary;
+        sc.coversFrom = coversFrom;
+        sc.coversTo = coversTo;
+        return sc;
+    }
+
+    // ─── Merging the oldest segments (JF-161) ───────────────────────────
+
+    /** The oldest live segments one merge call takes: their ids, their text as the call reads it, and what they cover. */
+    private record MergePlan(List<Long> ids, String segments, @Nullable Instant coversFrom,
+                             @Nullable Instant coversTo, int turnCount) {}
+
+    /** Merges the oldest live segments, one call at a time, while they pass the budget; returns the calls it made. */
+    private static int mergeOverBudget(Long conversationId, Supplier<String> modelLabel, Summarizer merger,
+                                       int callsLeft) {
+        int budget = summaryBudgetTokens();
+        int maxOut = summaryMaxTokens();
+        int calls = 0;
+        while (calls < callsLeft) {
+            var plan = Tx.run(() -> oldestToMerge(conversationId, budget, maxOut));
+            if (plan.isEmpty()) break;
+            calls++;
+            if (!mergeAndStore(conversationId, modelLabel, plan.get(), merger)) break;
+        }
+        return calls;
+    }
+
+    /**
+     * The fewest oldest live segments, two or more, whose merge brings the stack within {@code budget}, counting the
+     * merge at its input's size up to {@code maxOut}, which it cannot write past; every one when none fewer would.
+     * Empty when the stack fits or holds one segment.
+     */
+    private static Optional<MergePlan> oldestToMerge(Long conversationId, int budget, int maxOut) {
+        var conv = Conversation.<Conversation>findById(conversationId);
+        if (conv == null) return Optional.empty();
+        var live = SessionCompaction.findLive(conv);
+        long total = 0;
+        for (var s : live) total += tokens(s);
+        if (total <= budget || live.size() < 2) return Optional.empty();
+        int take = live.size();
+        long head = tokens(live.getFirst());
+        for (int k = 2; k < live.size(); k++) {
+            head += tokens(live.get(k - 1));
+            if (total - head + Math.min(head, maxOut) <= budget) {
+                take = k;
+                break;
+            }
+        }
+        var oldest = live.subList(0, take);
+        var ids = new ArrayList<Long>(take);
+        @Nullable Instant coversTo = null;
+        int turnCount = 0;
+        for (var s : oldest) {
+            ids.add(s.id);
+            if (s.coversTo != null && (coversTo == null || s.coversTo.isAfter(coversTo))) coversTo = s.coversTo;
+            turnCount += s.turnCount;
+        }
+        return Optional.of(new MergePlan(ids, renderSegments(oldest), oldest.getFirst().coversFrom, coversTo,
+                turnCount));
+    }
+
+    private static int tokens(SessionCompaction segment) {
+        return segment.summary == null ? 0 : segment.summary.strip().length() / 4;
+    }
+
+    private static boolean mergeAndStore(Long conversationId, Supplier<String> modelLabel, MergePlan plan,
+                                         Summarizer merger) {
+        String merged;
+        try {
+            merged = merger.summarize(List.of(ChatMessage.system(MERGE_INSTRUCTIONS), ChatMessage.user(plan.segments())));
+        } catch (Exception e) {
+            EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d failed: %s"
+                    .formatted(plan.ids().size(), conversationId, e.getMessage()));
+            return false;
+        }
+        if (merged == null || merged.isBlank()) {
+            EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d returned an empty summary"
+                    .formatted(plan.ids().size(), conversationId));
+            return false;
+        }
+        final var text = merged.strip();
+        final var label = modelLabel.get();
+        boolean stored = Tx.run(() -> {
+            var conv = Conversation.<Conversation>findById(conversationId);
+            if (conv == null) return false;
+            var sources = new ArrayList<SessionCompaction>(plan.ids().size());
+            for (var id : plan.ids()) {
+                SessionCompaction source = SessionCompaction.findById(id);
+                // Another compaction of this conversation merged it first.
+                if (source == null || source.mergedIntoId != null) return false;
+                sources.add(source);
+            }
+            var result = segment(conv, text, label, plan.turnCount(), plan.coversFrom(), plan.coversTo());
+            result.save();
+            for (var source : sources) {
+                source.mergedIntoId = result.id;
+                source.save();
+            }
+            return true;
+        });
+        if (stored) {
+            EventLogger.info("compaction", null, null, "Merged the oldest %d summaries of conversation %d into one"
+                    .formatted(plan.ids().size(), conversationId));
+        }
+        return stored;
+    }
+
+    /** The characters of every segment the prompt carries for the conversation. */
+    private static int liveChars(Long conversationId) {
+        var conv = Conversation.<Conversation>findById(conversationId);
+        if (conv == null) return 0;
+        int chars = 0;
+        for (var s : SessionCompaction.findLive(conv)) chars += s.summary == null ? 0 : s.summary.strip().length();
+        return chars;
+    }
+
+    /** Rows since the floor ahead of where a compaction would keep the tail: what one that stopped short leaves. */
+    private static int rowsBeforeTail(Long conversationId, boolean force) {
+        var conv = Conversation.<Conversation>findById(conversationId);
+        if (conv == null) return 0;
+        long total = ConversationService.countSinceFloor(conv);
+        var recent = ConversationService.loadRecentMessages(conv);
+        int boundary = findSafeBoundary(recent, keepMessages(force), minTurns(force));
+        return (int) Math.max(0, total - recent.size() + Math.max(0, boundary));
+    }
+
+    // ─── Summaries written before JF-161 ────────────────────────────────
+
+    /**
+     * Before JF-161 each summary rewrote the one before it, so a conversation's latest summary already holds its
+     * earlier ones. Each earlier row is marked merged into the latest, which becomes the conversation's first segment,
+     * its text unchanged and dated from the rows it covered. Only undated rows are read. Call inside a Tx.
+     *
+     * @return how many conversations had summaries to adopt
+     */
+    public static int adoptRollingSummaries() {
+        var conversationIds = JPA.em().createQuery("SELECT DISTINCT s.conversation.id FROM SessionCompaction s"
+                + " WHERE s.mergedIntoId IS NULL AND s.coversFrom IS NULL AND s.coversTo IS NULL", Long.class)
+                .getResultList();
+        int adopted = 0;
+        for (var conversationId : conversationIds) {
+            var conv = Conversation.<Conversation>findById(conversationId);
+            if (conv == null) continue;
+            List<SessionCompaction> chain = new ArrayList<>();
+            for (Object row : SessionCompaction.find("conversation = ?1 AND mergedIntoId IS NULL AND coversFrom IS NULL"
+                    + " AND coversTo IS NULL ORDER BY compactedAt DESC, id DESC", conv).fetch()) {
+                chain.add((SessionCompaction) row);
+            }
+            if (chain.isEmpty()) continue;
+            var latest = chain.getFirst();
+            for (var earlier : chain.subList(1, chain.size())) {
+                earlier.mergedIntoId = latest.id;
+                earlier.save();
+            }
+            dateRollingSummary(conv, latest);
+            latest.save();
+            adopted++;
+        }
+        return adopted;
+    }
+
+    // Its rows end before the conversation's compactionSince and start at a /reset that came before it, else at the first row.
+    private static void dateRollingSummary(Conversation conv, SessionCompaction latest) {
+        var end = conv.compactionSince != null ? conv.compactionSince : latest.compactedAt;
+        var start = conv.contextSince != null && conv.contextSince.isBefore(latest.compactedAt) ? conv.contextSince : null;
+        latest.coversFrom = rowTime("MIN", conv, start, end);
+        latest.coversTo = rowTime("MAX", conv, start, end);
+    }
+
+    private static @Nullable Instant rowTime(String aggregate, Conversation conv, @Nullable Instant start, Instant end) {
+        var query = JPA.em().createQuery("SELECT " + aggregate + "(m.createdAt) FROM Message m WHERE m.conversation = :c"
+                + " AND m.createdAt < :end" + (start != null ? " AND m.createdAt >= :start" : ""), Instant.class);
+        query.setParameter("c", conv).setParameter("end", end);
+        if (start != null) query.setParameter("start", start);
+        return query.getSingleResult();
     }
 
     // ─── Summary → system-prompt injection helper ────────────────────────
 
     /**
-     * Append the conversation's current compaction summary to {@code basePrompt}
-     * as a labeled section. Returns {@code basePrompt} unchanged when there is
-     * none: never compacted, or {@code /reset} since the last compaction. Call
-     * this inside the prep Tx where {@code Conversation} is already managed.
+     * Append the conversation's live summary segments to {@code basePrompt} as a labeled section, oldest first, each
+     * under the dates it covers (JF-161). Returns {@code basePrompt} unchanged when there is none: never compacted, or
+     * {@code /reset} since the last compaction. Call this inside the prep Tx where {@code Conversation} is already
+     * managed.
      */
     public static String appendSummaryToPrompt(String basePrompt, Conversation conversation) {
         if (conversation == null) return basePrompt;
-        var summary = currentSummary(conversation);
-        if (summary == null) return basePrompt;
-        return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + summary;
+        var segments = renderSegments(SessionCompaction.findLive(conversation));
+        if (segments.isEmpty()) return basePrompt;
+        return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + segments;
     }
 
-    /** The latest summary, unless a {@code /reset} after it cleared the turns it covers. */
-    private static @Nullable String currentSummary(Conversation conversation) {
-        var latest = SessionCompaction.findLatest(conversation);
-        if (latest == null || latest.summary == null || latest.summary.isBlank()) return null;
-        if (conversation.contextSince != null && !latest.compactedAt.isAfter(conversation.contextSince)) return null;
-        return latest.summary;
+    /** Each segment under its {@link #segmentLabel}, in the order given: the prompt's section and a merge's input. */
+    private static String renderSegments(List<SessionCompaction> segments) {
+        var parts = new ArrayList<String>(segments.size());
+        for (var s : segments) {
+            if (s.summary == null || s.summary.isBlank()) continue;
+            parts.add(segmentLabel(s) + "\n\n" + s.summary.strip());
+        }
+        return String.join("\n\n", parts);
+    }
+
+    private static final DateTimeFormatter LABEL_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    /**
+     * The line above a segment: the dates of the first and last rows it covers, in the operator's zone. A summary from
+     * before JF-161 whose rows could not be dated is labelled with the time it was written.
+     */
+    public static String segmentLabel(SessionCompaction segment) {
+        var zone = TimezoneResolver.appZone();
+        var to = LABEL_TIME.format(Objects.requireNonNullElse(segment.coversTo, segment.compactedAt).atZone(zone));
+        if (segment.coversFrom == null) return "[Turns up to " + to + ", " + zone.getId() + "]";
+        return "[Turns from " + LABEL_TIME.format(segment.coversFrom.atZone(zone)) + " to " + to + ", "
+                + zone.getId() + "]";
     }
 
     /**
@@ -405,10 +670,10 @@ public final class SessionCompactor {
     /**
      * One summary call's rows. {@code turnsOwnHistory} when they are the head of the history the turn loaded, so the
      * turn's own request can carry them; {@code last} when {@code firstKept} starts the conversation's kept tail
-     * rather than the next chunk.
+     * rather than the next chunk; {@code skipped}, the rows the newest-rows fallback leaves behind it unsummarized.
      */
-    record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, @Nullable String priorSummary,
-                          boolean turnsOwnHistory, boolean last) {}
+    record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, boolean turnsOwnHistory,
+                          boolean last, int skipped) {}
 
     /**
      * The next summary call's rows (JF-159): the oldest since the floor, ending on a user row that leaves at least the
@@ -426,41 +691,41 @@ public final class SessionCompactor {
         long total = ConversationService.countSinceFloor(conv);
         if (firstCall && total <= limit) {
             var recent = ConversationService.loadRecentMessages(conv);
-            return planAt(recent, findSafeBoundary(recent, keep, min), conv, true, true);
+            return planAt(recent, findSafeBoundary(recent, keep, min), true, true, 0);
         }
         var oldest = ConversationService.loadOldestMessages(conv, (int) Math.min(total, limit + 1L));
         int reach = (int) Math.min(limit, total - keep);
         int fit = rowsWithin(oldest, callTokens);
         int boundary = latestUserRow(oldest, min, Math.min(reach, fit));
-        if (boundary > 0) return planAt(oldest, boundary, conv, false, reach == total - keep && fit >= reach);
+        if (boundary > 0) return planAt(oldest, boundary, false, reach == total - keep && fit >= reach, 0);
         // One chunk over the budget beats none: the call may still fit, and one that fails only stops the catch-up.
         boundary = earliestUserRow(oldest, Math.max(min, fit + 1), reach);
-        if (boundary > 0) return planAt(oldest, boundary, conv, false, false);
+        if (boundary > 0) return planAt(oldest, boundary, false, false, 0);
         if (total <= limit) return Optional.empty();
         EventLogger.info("compaction", null, null, ("Compaction for conversation %d found no user message to end a "
                 + "summary on among its oldest rows; the %d rows before its newest %d are not summarized")
                 .formatted(conversationId, total - limit, limit));
         var recent = ConversationService.loadRecentMessages(conv);
-        return planAt(recent, findSafeBoundary(recent, keep, min), conv, firstCall, true);
+        return planAt(recent, findSafeBoundary(recent, keep, min), firstCall, true, (int) (total - limit));
     }
 
-    private static Optional<CompactionPlan> planAt(List<Message> rows, int boundary, Conversation conv,
-                                                   boolean turnsOwnHistory, boolean last) {
+    private static Optional<CompactionPlan> planAt(List<Message> rows, int boundary, boolean turnsOwnHistory,
+                                                   boolean last, int skipped) {
         if (boundary <= 0) return Optional.empty();
         var snaps = new ArrayList<MessageSnapshot>(boundary);
         for (int i = 0; i < boundary; i++) {
             snaps.add(snapshot(rows.get(i)));
         }
-        return Optional.of(new CompactionPlan(snaps, snapshot(rows.get(boundary)), currentSummary(conv),
-                turnsOwnHistory, last));
+        return Optional.of(new CompactionPlan(snaps, snapshot(rows.get(boundary)), turnsOwnHistory, last, skipped));
     }
 
-    /** How many of {@code rows}, from the first, fit in {@code tokens} at four characters a token as a summary renders them. */
+    /** How many of {@code rows}, from the first, fit in {@code tokens} at four characters a token as a transcript renders them. */
     private static int rowsWithin(List<Message> rows, int tokens) {
         if (tokens == Integer.MAX_VALUE) return rows.size();
+        int toolChars = toolResultChars();
         long used = 0;
         for (int i = 0; i < rows.size(); i++) {
-            used += renderTurns(List.of(snapshot(rows.get(i)))).length() / 4;
+            used += renderTurns(List.of(snapshot(rows.get(i))), toolChars).length() / 4;
             if (used > tokens) return i;
         }
         return rows.size();
@@ -470,13 +735,10 @@ public final class SessionCompactor {
         return new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt);
     }
 
-    /** Today's request shape: the instruction as the system prompt and the turns as one transcript. */
+    /** The instruction as the system prompt and the turns as one transcript, tool output shortened (JF-161). */
     private static List<ChatMessage> transcriptRequest(CompactionPlan plan, @Nullable String additionalInstructions) {
-        var turns = renderTurns(plan.toSummarize());
-        var prior = plan.priorSummary();
-        var input = prior == null ? turns
-                : PRIOR_SUMMARY_HEADER + "\n\n" + prior + "\n\n[Turns since that summary]\n\n" + turns;
-        return List.of(ChatMessage.system(instructions(additionalInstructions)), ChatMessage.user(input));
+        return List.of(ChatMessage.system(instructions(additionalInstructions)),
+                ChatMessage.user(renderTurns(plan.toSummarize(), toolResultChars())));
     }
 
     private static String instructions(@Nullable String additionalInstructions) {
@@ -626,15 +888,24 @@ public final class SessionCompactor {
      * summarizer knows what actions the agent took and what came back.
      */
     public static String renderTurns(List<MessageSnapshot> snaps) {
+        return renderTurns(snaps, Integer.MAX_VALUE);
+    }
+
+    /**
+     * {@link #renderTurns(List)} with each tool result, and each tool call's arguments, longer than {@code toolChars}
+     * cut to that many characters with the full length noted; user and assistant text stays whole.
+     */
+    public static String renderTurns(List<MessageSnapshot> snaps, int toolChars) {
         var sb = new StringBuilder(snaps.size() * 200);
         for (var s : snaps) {
             var role = s.role() == null ? "unknown" : s.role().toUpperCase();
             sb.append("[").append(role).append("]");
             if (s.content() != null && !s.content().isBlank()) {
-                sb.append(' ').append(s.content().strip());
+                var text = s.content().strip();
+                sb.append(' ').append(MessageRole.TOOL.value.equals(s.role()) ? shortened(text, toolChars) : text);
             }
             if (s.toolCalls() != null && !s.toolCalls().isBlank()) {
-                sb.append("\n[TOOL_CALLS] ").append(s.toolCalls().strip());
+                sb.append("\n[TOOL_CALLS] ").append(withShortenedArguments(s.toolCalls().strip(), toolChars));
             }
             if (s.toolResults() != null && !s.toolResults().isBlank()) {
                 sb.append("\n[TOOL_RESULT_ID] ").append(s.toolResults().strip());
@@ -642,6 +913,35 @@ public final class SessionCompactor {
             sb.append("\n\n");
         }
         return sb.toString();
+    }
+
+    /** {@code text} cut to its first {@code limit} characters with its length noted, or whole when it fits. */
+    private static String shortened(String text, int limit) {
+        if (text.length() <= limit) return text;
+        int end = limit > 0 && Character.isHighSurrogate(text.charAt(limit - 1)) ? limit - 1 : limit;
+        return text.substring(0, end) + "… [first " + end + " of " + text.length() + " characters]";
+    }
+
+    // Message.toolCalls holds one call object as MessageHydrator.parseToolCalls reads it; an array is shortened alike.
+    private static String withShortenedArguments(String toolCalls, int limit) {
+        if (toolCalls.length() <= limit) return toolCalls;
+        JsonElement parsed;
+        try {
+            parsed = JsonParser.parseString(toolCalls);
+        } catch (RuntimeException _) {
+            return shortened(toolCalls, limit);
+        }
+        if (!parsed.isJsonObject() && !parsed.isJsonArray()) return shortened(toolCalls, limit);
+        boolean changed = false;
+        for (var call : parsed.isJsonArray() ? parsed.getAsJsonArray() : List.of(parsed)) {
+            if (call instanceof JsonObject c && c.get("function") instanceof JsonObject function
+                    && function.get("arguments") instanceof JsonPrimitive arguments && arguments.isString()
+                    && arguments.getAsString().length() > limit) {
+                function.addProperty("arguments", shortened(arguments.getAsString(), limit));
+                changed = true;
+            }
+        }
+        return changed ? parsed.toString() : toolCalls;
     }
 
     /**
@@ -669,12 +969,8 @@ public final class SessionCompactor {
 
     // Fixed sections (JF-154), so every summary records the same kinds of facts; level-3 headings nest
     // under the system prompt's own sections once the summary is appended to it.
-    private static final String SUMMARIZATION_INSTRUCTIONS = """
-            The conversation so far is being compacted: its older turns will be dropped, and the summary you write now is what the agent will read in their place when the work continues. Do not answer the user and do not call a tool; reply with the summary alone.
-
-            An earlier compaction may have left a [Prior conversation summary …]. Your summary replaces it, so carry forward everything in it that still matters.
-
-            Write these five sections, in this order, each under its heading as short bullet points, with "None." under a heading that has nothing to record:
+    private static final String SECTIONS = """
+            Write these five sections, in this order, each under its heading as bullet points, with "None." under a heading that has nothing to record:
 
             ### Goals and constraints
             What the user wants, and every constraint, preference and requirement they set.
@@ -683,15 +979,34 @@ public final class SessionCompactor {
             What the user or the agent decided, with the reason when one was given.
 
             ### Identifiers and facts
-            The names, ids, paths, URLs, numbers and other values the work relies on, copied exactly as written: never shorten, round or reconstruct one.
+            The names, ids, file paths, URLs, commit hashes, numbers and other values the work relies on, copied exactly as written: never shorten, round or reconstruct one.
 
             ### Open questions and errors
             Questions still unanswered, errors not yet resolved, and choices still waiting on the user.
 
             ### Next steps
             What remains to do, starting with the user's latest request and the step in progress.
+            """;
 
-            Where turns disagree, the latest update wins. Mark anything that no tool result or user message confirmed as (unverified). Leave out greetings, small talk and finished work with no follow-up. No preface and no sign-off.
+    // JF-161: a segment covers its own turns; finished work is kept short rather than left out, which a long chat needs later.
+    private static final String SUMMARIZATION_INSTRUCTIONS = """
+            The conversation so far is being compacted: its older turns will be dropped, and the summary you write now is what the agent will read in their place when the work continues. Do not answer the user and do not call a tool; reply with the summary alone.
+
+            Summarize only the turns of this conversation. Summaries of earlier turns, under [Prior conversation summary …], stay as they are and the agent reads yours after them, so do not repeat what they say.
+
+            """ + SECTIONS + """
+
+            Keep every file path, URL, commit hash, name, number and open item the turns name, unless a later turn supersedes it. Finished work may shrink to one line, but keep its identifiers. Where turns disagree, the latest update wins. Mark anything that no tool result or user message confirmed as (unverified). Leave out greetings and small talk. Write as much as the turns need. No preface and no sign-off.
+            """;
+
+    private static final String MERGE_INSTRUCTIONS = """
+            Several summaries of one conversation are being merged into one. Each covers the turns between the dates above it, oldest first, and the summary you write now is what the agent will read in their place. Do not answer the user and do not call a tool; reply with the summary alone.
+
+            Keep every file path, URL, commit hash, name, number and open item they record, copied exactly as written, unless a later summary supersedes it. Finished work may shrink to one line, but keep its identifiers.
+
+            """ + SECTIONS + """
+
+            Where the summaries disagree, the later one wins. Keep each (unverified) mark. Write as much as the summaries need. No preface and no sign-off.
             """;
 
     public static final String PRIOR_SUMMARY_HEADER =
