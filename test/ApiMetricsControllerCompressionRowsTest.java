@@ -175,6 +175,41 @@ class ApiMetricsControllerCompressionRowsTest extends FunctionalTest {
     }
 
     @Test
+    void compressionCarriesTheToolAndResultHashOfACompressionAndAHit() {
+        login();
+        var channel = "verifycmp-hash";
+        commitInFreshTx(() -> {
+            var c = new CompressionMetric();
+            c.kind = CompressionMetric.Kind.COMPRESSION;
+            c.agentId = "36";
+            c.channel = channel;
+            c.contentType = "JSON";
+            c.algorithm = "json-smartcrush";
+            c.tokensBefore = 900;
+            c.tokensAfter = 100;
+            c.toolName = "exec";
+            c.resultHash = "0123456789abcdef";
+            c.createdAt = Instant.now();
+            c.save();
+            var r = new CompressionMetric();
+            r.kind = CompressionMetric.Kind.CCR_RETRIEVAL;
+            r.agentId = "36";
+            r.channel = channel;
+            r.algorithm = "ccr";
+            r.ccrHit = true;
+            r.toolName = "exec";
+            r.resultHash = "0123456789abcdef";
+            r.createdAt = Instant.now().minusSeconds(1);
+            r.save();
+        });
+
+        var mine = rowsForChannel(getContent(GET("/api/metrics/compression")), channel);
+        assertEquals(List.of("COMPRESSION exec 0123456789abcdef", "CCR_RETRIEVAL exec 0123456789abcdef"),
+                mine.stream().map(o -> o.get("kind").getAsString() + " " + o.get("toolName").getAsString()
+                        + " " + o.get("resultHash").getAsString()).toList());
+    }
+
+    @Test
     void compressionHonorsSinceWindow() {
         login();
         var channel = "verifycmp-window";

@@ -197,9 +197,9 @@ public final class CompressionPipeline {
         // JCLAW-462 (CCR): leave a retrieval handle so the LLM can pull the
         // full original via ccr_retrieve. The handle is the hash of the ORIGINAL
         // content, which ccr_retrieve recomputes over the durable Message row.
+        var handle = ContentHash.handle(content);
         var hinted = result.content()
-                + "\n[compressed — call ccr_retrieve(\"" + ContentHash.handle(content)
-                + "\") for the full original]";
+                + "\n[compressed — call ccr_retrieve(\"" + handle + "\") for the full original]";
         var candidate = new ChatMessage(msg.role(), hinted, msg.toolCalls(),
                 msg.toolCallId(), msg.toolName());
         var after = TokenUsageEstimator.estimateMessage(modelId, candidate).tokens();
@@ -213,7 +213,8 @@ public final class CompressionPipeline {
         Logger.debug("[compress] %s/%s%s %d->%d tokens (-%d)",
                 type, result.algorithm(), result.degraded() ? " (degraded)" : "",
                 before, after, before - after);
-        CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), modelId, type.name(), result.algorithm(), before, after);
+        CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), msg.toolName(), handle, modelId,
+                type.name(), result.algorithm(), before, after);
         return candidate;
     }
 }

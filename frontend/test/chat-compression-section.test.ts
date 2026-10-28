@@ -149,57 +149,75 @@ describe('ChatCompressionSection', () => {
     expect(text).not.toContain('compression ratio is very low')
   })
 
-  it('lists fetch-backs per tool for the agent in view, whatever the channel', async () => {
-    const ccr = (agentId: string, toolName: string | null, ccrHit: boolean) => ({
-      timestamp: '2026-06-01T00:00:00Z', agentId, channel: null, contentType: null, algorithm: 'ccr',
-      tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit, toolName,
-    })
+  // A compression or a fetch-back of one result, named by its tool and content handle.
+  const compressed = (agentId: string, channel: string, toolName: string | null, resultHash: string | null) => ({
+    timestamp: '2026-06-01T00:00:00Z', agentId, channel, contentType: 'JSON', algorithm: 'json-smartcrush',
+    tokensBefore: 1000, tokensAfter: 100, kind: 'COMPRESSION', ccrHit: null, toolName, resultHash,
+  })
+  const fetchedBack = (agentId: string, toolName: string | null, resultHash: string | null) => ({
+    timestamp: '2026-06-01T00:00:00Z', agentId, channel: null, contentType: null, algorithm: 'ccr',
+    tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true, toolName, resultHash,
+  })
+
+  it('rates each tool by the share of its compressed results fetched back, counting a result once', async () => {
     registerEndpoint('/api/metrics/compression', () => ({
       since: '2026-01-01T00:00:00Z',
       rows: [
-        { timestamp: '2026-06-01T00:00:00Z', agentId: '1', channel: 'web', contentType: 'JSON', algorithm: 'json-smartcrush', tokensBefore: 1000, tokensAfter: 600, kind: 'COMPRESSION', ccrHit: null, toolName: null },
-        ccr('1', 'web_fetch', true),
-        ccr('1', 'exec', true),
-        ccr('1', 'web_fetch', true),
-        ccr('2', 'web_fetch', true),
-        ccr('1', null, false),
+        // exec: h1 recompressed on three rounds and fetched back twice; h2 never fetched back.
+        compressed('1', 'web', 'exec', 'h1'), compressed('1', 'web', 'exec', 'h1'), compressed('1', 'web', 'exec', 'h1'),
+        compressed('1', 'web', 'exec', 'h2'),
+        fetchedBack('1', 'exec', 'h1'), fetchedBack('1', 'exec', 'h1'),
+        // web_fetch: one of three fetched back, one of them on telegram.
+        compressed('1', 'web', 'web_fetch', 'h3'), compressed('1', 'web', 'web_fetch', 'h4'),
+        compressed('1', 'telegram', 'web_fetch', 'h5'),
+        fetchedBack('1', 'web_fetch', 'h5'),
+        // jclaw_api, agent 2's: compressed and never fetched back.
+        compressed('2', 'web', 'jclaw_api', 'h6'),
       ],
     }))
     const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
     await flushPromises()
+    const bars = () => wrapper.findAll('[data-testid="fetch-backs-by-tool"] .flex.items-center')
+      .map(row => [row.find('span').text(), row.find('[style]').attributes('style'), row.findAll('span').at(-1)!.text()])
+
+    expect(bars()).toEqual([
+      ['exec', 'width: 50%;', '1 of 2 · 50%'],
+      ['web_fetch', 'width: 33.33333333333333%;', '1 of 3 · 33%'],
+      ['jclaw_api', 'width: 0%;', '0 of 1 · 0%'],
+    ])
+
     await wrapper.find('button[title="Table view"]').trigger('click')
-    const perTool = () => wrapper.findAll('[data-testid="fetch-backs-by-tool"] tbody tr')
+    const table = () => wrapper.findAll('[data-testid="fetch-backs-by-tool"] tbody tr')
       .map(tr => tr.findAll('td').map(td => td.text()))
-
-    expect(perTool()).toEqual([['web_fetch', '3'], ['exec', '1']])
-    expect(wrapper.text()).toContain('4 / 5 hits')
-
-    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
-    expect(perTool()).toEqual([['web_fetch', '2'], ['exec', '1']])
-    expect(wrapper.text()).toContain('3 / 4 hits')
-
-    await wrapper.find('select[aria-label="Filter by channel"]').setValue('web')
-    expect(perTool()).toEqual([['web_fetch', '2'], ['exec', '1']])
+    expect(table()).toEqual([
+      ['exec', '2', '1', '50%'],
+      ['web_fetch', '3', '1', '33%'],
+      ['jclaw_api', '1', '0', '0%'],
+    ])
 
     await wrapper.find('select[aria-label="Filter by agent"]').setValue('2')
-    expect(perTool()).toEqual([['web_fetch', '1']])
+    expect(table()).toEqual([['jclaw_api', '1', '0', '0%']])
+
+    // Fetch-backs carry no channel; they follow the channel through the compressions they match.
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
+    await wrapper.find('select[aria-label="Filter by channel"]').setValue('telegram')
+    expect(table()).toEqual([['web_fetch', '1', '1', '100%']])
   })
 
-  it('labels fetch-backs saved without their tool "not recorded"', async () => {
-    const hit = (toolName: string | null) => ({
-      timestamp: '2026-06-01T00:00:00Z', agentId: '1', channel: null, contentType: null, algorithm: 'ccr',
-      tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true, toolName,
-    })
+  it('leaves out compressions and fetch-backs saved without their tool or result', async () => {
     registerEndpoint('/api/metrics/compression', () => ({
       since: '2026-01-01T00:00:00Z',
-      rows: [hit(null), hit(null), hit('exec')],
+      rows: [
+        compressed('1', 'web', null, null),
+        fetchedBack('1', null, null),
+        fetchedBack('1', 'exec', null),
+      ],
     }))
     const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
     await flushPromises()
-    await wrapper.find('button[title="Table view"]').trigger('click')
 
-    expect(wrapper.findAll('[data-testid="fetch-backs-by-tool"] tbody tr')
-      .map(tr => tr.findAll('td').map(td => td.text()))).toEqual([['not recorded', '2'], ['exec', '1']])
+    expect(wrapper.text()).toContain('2 / 2 hits')
+    expect(wrapper.find('[data-testid="fetch-backs-by-tool"]').exists()).toBe(false)
   })
 
   it('shows an empty state when there is no activity', async () => {

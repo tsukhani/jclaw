@@ -118,8 +118,10 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
         // conversation is not a lookup.
         var agentId = agent.id != null ? String.valueOf(agent.id) : null;
         switch (lookup) {
-            case Found found -> CompressionMetrics.recordCcrRetrieval(agentId, found.toolName(), true);
-            case NotFound _ -> CompressionMetrics.recordCcrRetrieval(agentId, null, false);
+            // The model may pass a shorter prefix; the full handle is what the compression recorded.
+            case Found found -> CompressionMetrics.recordCcrRetrieval(agentId, found.toolName(),
+                    ContentHash.handle(found.text()), true);
+            case NotFound _ -> CompressionMetrics.recordCcrRetrieval(agentId, null, null, false);
             case Failed _ -> { }
         }
         return lookup.text();

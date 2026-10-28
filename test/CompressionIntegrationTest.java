@@ -2,6 +2,7 @@ import agents.CompressionPipeline;
 import agents.ToolContext;
 import llm.LlmTypes.ChatMessage;
 import models.Agent;
+import models.CompressionMetric;
 import models.Conversation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,24 @@ class CompressionIntegrationTest extends UnitTest {
         var unseen = List.of(ChatMessage.user("find it"), ChatMessage.assistant("searching"), result);
         assertSame(unseen, CompressionPipeline.compress(unseen, on, conv),
                 "the round after the call delivers the result whole");
+    }
+
+    @Test
+    void eachRoundACompressionRecordsTheToolAndTheSameResultHash() {
+        var json = bigJsonArray();
+        var on = AgentService.create("integ-hash", "openrouter", "gpt-4o");
+        on.compressionEnabled = true;
+        on.save();
+        var seen = List.of(ChatMessage.user("find it"), ChatMessage.assistant("searching"),
+                ChatMessage.toolResult("c1", "web_search", json), ChatMessage.assistant("found it"));
+
+        CompressionPipeline.compress(seen, on, conv);
+        CompressionPipeline.compress(seen, on, conv);
+
+        List<CompressionMetric> rows = CompressionMetric.find("kind = ?1 AND agentId = ?2",
+                CompressionMetric.Kind.COMPRESSION, String.valueOf(on.id)).fetch();
+        assertEquals(List.of("web_search:" + ContentHash.handle(json), "web_search:" + ContentHash.handle(json)),
+                rows.stream().map(r -> r.toolName + ":" + r.resultHash).toList());
     }
 
     @Test

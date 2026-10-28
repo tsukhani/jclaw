@@ -4,7 +4,7 @@
  * raw-rows fetch per time window from GET /api/metrics/compression, then all
  * aggregation + agent/channel filtering happens client-side so filter switches
  * are instant. Table/chart view toggle for the by-type, per-algorithm and
- * per-tool fetch-back breakdowns, and a reset (trash) that clears the recorded metrics.
+ * per-tool fetch-back-rate breakdowns, and a reset (trash) that clears the recorded metrics.
  * The first-call cache tile reads the turn rows of GET /api/metrics/cost under the same filters.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
@@ -24,6 +24,7 @@ interface Row {
   kind: string
   ccrHit: boolean | null
   toolName: string | null
+  resultHash: string | null
 }
 interface CompressionResponse { since: string, rows: Row[] }
 type WindowKey = '7d' | '30d' | 'all'
@@ -146,16 +147,22 @@ const agg = computed(() => {
   const ccrHits = ccrRows.filter(r => r.ccrHit).length
   const ccrHitRate = ccrTotal ? ccrHits / ccrTotal : 0
 
-  const toolMap = new Map<string, number>()
-  for (const r of ccrRows) {
-    if (!r.ccrHit) continue
-    // Fetch-backs saved before JF-155 carry no tool name.
-    const t = r.toolName ?? 'not recorded'
-    toolMap.set(t, (toolMap.get(t) ?? 0) + 1)
+  // Each round recompresses a result, so a tool's rate counts distinct results; rows saved before they
+  // named their tool and result are left out. Matching a fetch-back to its compression applies the channel.
+  const compressedByTool = new Map<string, Set<string>>()
+  for (const r of comp) {
+    if (!r.toolName || !r.resultHash) continue
+    const hashes = compressedByTool.get(r.toolName) ?? new Set<string>()
+    hashes.add(r.resultHash)
+    compressedByTool.set(r.toolName, hashes)
   }
-  const byTool = [...toolMap.entries()]
-    .map(([tool, count]) => ({ tool, count }))
-    .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
+  const fetchedBack = new Set(ccrRows.flatMap(r => (r.ccrHit && r.resultHash ? [r.resultHash] : [])))
+  const byTool = [...compressedByTool.entries()]
+    .map(([tool, hashes]) => {
+      const fetched = [...hashes].filter(h => fetchedBack.has(h)).length
+      return { tool, compressed: hashes.size, fetched, rate: fetched / hashes.size }
+    })
+    .sort((a, b) => b.rate - a.rate || b.compressed - a.compressed || a.tool.localeCompare(b.tool))
 
   const alerts: string[] = []
   // A very low kept-ratio is the *designed* outcome for json-smartcrush /
@@ -200,7 +207,6 @@ const cache = computed(() => {
 
 const maxTypeSaved = computed(() => Math.max(1, ...agg.value.byType.map(t => t.saved)))
 const maxAlgoCount = computed(() => Math.max(1, ...agg.value.byAlgo.map(a => a.count)))
-const maxToolCount = computed(() => Math.max(1, ...agg.value.byTool.map(t => t.count)))
 const windowLabel = computed(() => WINDOWS.find(w => w.key === selectedWindow.value)?.label ?? '')
 
 const { saveError: resetError, attempt } = useSaveAttempt()
@@ -540,13 +546,13 @@ function fmt(n: number) {
           </div>
         </div>
 
-        <!-- ccr_retrieve hits by the tool whose result was fetched back -->
+        <!-- Each tool's compressed results, and the share ccr_retrieve fetched back whole -->
         <div
           v-if="agg.byTool.length"
           data-testid="fetch-backs-by-tool"
         >
           <div class="text-[11px] uppercase tracking-wide text-fg-muted mb-2">
-            Fetch-backs by tool
+            Fetch-back rate by tool
           </div>
           <div
             v-if="view === 'chart'"
@@ -561,10 +567,10 @@ function fmt(n: number) {
               <div class="flex-1 h-2 bg-surface rounded-full overflow-hidden">
                 <div
                   class="h-full bg-violet-500 rounded-full transition-[width] duration-500"
-                  :style="{ width: (t.count / maxToolCount * 100) + '%' }"
+                  :style="{ width: (t.rate * 100) + '%' }"
                 />
               </div>
-              <span class="text-xs text-fg-muted tabular-nums w-12 text-right shrink-0">{{ t.count }}</span>
+              <span class="text-xs text-fg-muted tabular-nums w-32 text-right shrink-0">{{ t.fetched }} of {{ t.compressed }} · {{ pct(t.rate) }}%</span>
             </div>
           </div>
           <div
@@ -578,7 +584,13 @@ function fmt(n: number) {
                     Tool
                   </th>
                   <th class="font-normal py-1 text-right">
-                    Fetch-backs
+                    Compressed
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Fetched back
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Rate
                   </th>
                 </tr>
               </thead>
@@ -592,7 +604,13 @@ function fmt(n: number) {
                     {{ t.tool }}
                   </td>
                   <td class="py-1 text-right text-fg-strong tabular-nums">
-                    {{ t.count }}
+                    {{ t.compressed }}
+                  </td>
+                  <td class="py-1 text-right text-fg-strong tabular-nums">
+                    {{ t.fetched }}
+                  </td>
+                  <td class="py-1 text-right text-fg-muted tabular-nums">
+                    {{ pct(t.rate) }}%
                   </td>
                 </tr>
               </tbody>

@@ -114,6 +114,18 @@ class CcrRetrieveToolTest extends UnitTest {
         var row = onlyCcrRowOfThisAgent();
         assertEquals(Boolean.TRUE, row.ccrHit);
         assertEquals("web_fetch", row.toolName);
+        assertEquals(ContentHash.handle(content), row.resultHash);
+    }
+
+    @Test
+    void aFetchByAShorterPrefixRecordsTheResultsFullHandle() {
+        var content = "v".repeat(5_000);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_1", "exec"));
+        ConversationService.appendToolResult(conv, "call_1", content);
+
+        assertEquals(content, retrieve(ContentHash.handle(content).substring(0, 8)));
+
+        assertEquals(ContentHash.handle(content), onlyCcrRowOfThisAgent().resultHash);
     }
 
     @Test
@@ -128,6 +140,7 @@ class CcrRetrieveToolTest extends UnitTest {
         var row = onlyCcrRowOfThisAgent();
         assertEquals(Boolean.FALSE, row.ccrHit);
         assertNull(row.toolName);
+        assertNull(row.resultHash);
     }
 
     @Test

@@ -16,13 +16,16 @@ public final class CompressionMetrics {
 
     private CompressionMetrics() {}
 
-    public static void recordCompression(@Nullable String agentId, @Nullable String channel, String modelId, String contentType,
-                                         String algorithm, int tokensBefore, int tokensAfter) {
+    public static void recordCompression(@Nullable String agentId, @Nullable String channel, @Nullable String toolName,
+                                         String resultHash, String modelId, String contentType, String algorithm,
+                                         int tokensBefore, int tokensAfter) {
         if (agentId == null) return; // agent-less (test seam) — nothing to attribute
         var m = new CompressionMetric();
         m.kind = Kind.COMPRESSION;
         m.agentId = agentId;
         m.channel = channel;
+        m.toolName = toolName;
+        m.resultHash = resultHash;
         m.modelId = modelId;
         m.contentType = contentType;
         m.algorithm = algorithm;
@@ -45,14 +48,16 @@ public final class CompressionMetrics {
         persist(m);
     }
 
-    /** One {@code ccr_retrieve} lookup: the calling agent and, on a hit, the tool whose result came back. */
-    public static void recordCcrRetrieval(@Nullable String agentId, @Nullable String toolName, boolean hit) {
+    /** One {@code ccr_retrieve} lookup: the calling agent and, on a hit, the tool and result that came back. */
+    public static void recordCcrRetrieval(@Nullable String agentId, @Nullable String toolName,
+                                          @Nullable String resultHash, boolean hit) {
         var m = new CompressionMetric();
         m.kind = Kind.CCR_RETRIEVAL;
         m.agentId = agentId;
-        m.algorithm = "ccr"; // the hash isn't stored — only the hit/miss matters for the rate
+        m.algorithm = "ccr";
         m.ccrHit = hit;
         m.toolName = hit ? toolName : null;
+        m.resultHash = hit ? resultHash : null;
         persist(m);
     }
 

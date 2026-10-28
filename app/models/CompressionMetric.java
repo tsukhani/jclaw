@@ -61,9 +61,13 @@ public class CompressionMetric extends Model {
     @Column(name = "ccr_hit")
     public Boolean ccrHit;
 
-    /** CCR_RETRIEVAL only: the tool whose result was fetched back; null on a miss. */
+    /** COMPRESSION and CCR_RETRIEVAL: the tool whose result was compressed or fetched back; null on a miss. */
     @Column(name = "tool_name", length = 255)
     public String toolName;
+
+    /** COMPRESSION and a CCR_RETRIEVAL hit: the original's content handle, so a result recompressed every round counts once. */
+    @Column(name = "result_hash", length = 16)
+    public String resultHash;
 
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
