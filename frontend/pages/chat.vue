@@ -1029,9 +1029,9 @@ function exportConversation() {
               <img
                 src="/clawdia-micro.webp"
                 alt=""
-                width="24"
-                height="24"
-                class="h-6 w-6 shrink-0 select-none"
+                width="16"
+                height="16"
+                class="h-4 w-4 shrink-0 select-none"
               >
               <span
                 class="animate-pulse"
