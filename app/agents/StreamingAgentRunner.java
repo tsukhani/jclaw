@@ -446,12 +446,9 @@ final class StreamingAgentRunner {
         }
 
         // A second cut-off in the turn (max tokens hit mid-tool-call): the call is not run.
-        if (ToolCallLoopRunner.isCutOffToolCall(accumulator)) {
-            persistAndCompleteTruncatedToolCall(accumulator.content(), agent, channelType, trace, sink, cb);
-            return;
-        }
-
-        var post = runPostAccumulatorToolLoop(accumulator, turn, messages);
+        var post = ToolCallLoopRunner.isCutOffToolCall(accumulator)
+                ? new StreamingPostAccumulator(cutOffReply(accumulator.content(), agent, channelType, cb), true)
+                : runPostAccumulatorToolLoop(accumulator, turn, messages);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -664,7 +661,8 @@ final class StreamingAgentRunner {
         }
 
         if (!accumulator.toolCalls().isEmpty()) {
-            content = ToolCallLoopRunner.handleToolCallsStreaming(turn, messages, accumulator.toolCalls(), content, 0);
+            var outcome = ToolCallLoopRunner.handleToolCallsStreaming(turn, messages, accumulator.toolCalls(), content, 0);
+            return new StreamingPostAccumulator(outcome.content(), outcome.truncated());
         }
         return new StreamingPostAccumulator(content, replyTruncated);
     }
@@ -713,26 +711,18 @@ final class StreamingAgentRunner {
     }
 
     /**
-     * Streaming-side truncated-tool-call handler, for a first round cut off again after its resend:
-     * emit a truncation marker, persist the truncated content, and fire the terminal complete
-     * callback. Persist BEFORE the terminal frame so the assistant
-     * message is committed by the time the SSE closes / HTTP response
-     * completes.
+     * The reply to a first round cut off again after its resend, its marker already sent to the reader. The
+     * turn then ends through {@link #finalizeStreamingTurn} like any other, so the row is flagged truncated
+     * and carries the turn's usage.
      */
-    private static void persistAndCompleteTruncatedToolCall(String content, Agent agent, String channelType,
-                                                            LatencyTrace trace, AgentExecutionSink sink,
-                                                            AgentRunner.StreamingCallbacks cb) {
+    private static String cutOffReply(String content, Agent agent, String channelType,
+                                      AgentRunner.StreamingCallbacks cb) {
         EventLogger.warn("llm", agent.name, channelType,
                 "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
-        var truncMsg = content.isEmpty()
+        var reply = content.isEmpty()
                 ? "I tried to use a tool but my response was too long and got cut off, so the tool call was not run."
                 : content;
-        cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — the incomplete tool call was not run.]*");
-        trace.mark(LatencyTrace.STREAM_BODY_END);
-        var finalContent = truncMsg;
-        long truncPersistStartNs = System.nanoTime();
-        sink.commit(() -> sink.appendAssistantMessage(finalContent, null));
-        trace.recordPersist((System.nanoTime() - truncPersistStartNs) / 1_000_000L);
-        cb.onComplete().accept(finalContent);
+        cb.onToken().accept(reply.equals(content) ? "" : "\n\n*[Response was truncated — the incomplete tool call was not run.]*");
+        return reply;
     }
 }

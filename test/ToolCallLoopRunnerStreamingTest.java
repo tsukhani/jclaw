@@ -875,8 +875,8 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
         var errorRef = new AtomicReference<Exception>();
         var t = Thread.ofVirtual().start(() -> {
             try {
-                resultRef.set((String) m.invoke(null,
-                        ctx, messages, toolCalls, priorContent, round));
+                resultRef.set(((ToolCallLoopRunner.LoopOutcome) m.invoke(null,
+                        ctx, messages, toolCalls, priorContent, round)).content());
             } catch (Exception e) {
                 errorRef.set(e);
             }

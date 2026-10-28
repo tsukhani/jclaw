@@ -706,7 +706,8 @@ class ContextOverflowRecoveryTest extends UnitTest {
         Method m = ToolCallLoopRunner.class.getDeclaredMethod("handleToolCallsStreaming",
                 ToolCallLoopRunner.StreamingTurnContext.class, List.class, List.class, String.class, int.class);
         m.setAccessible(true);
-        return onVirtualThread(() -> (String) m.invoke(null, ctx, history(), List.of(call("tc1")), "", 0));
+        return onVirtualThread(() ->
+                ((ToolCallLoopRunner.LoopOutcome) m.invoke(null, ctx, history(), List.of(call("tc1")), "", 0)).content());
     }
 
     private interface Invocation<T> {

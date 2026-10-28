@@ -755,17 +755,15 @@ public final class ToolCallLoopRunner {
         }
     }
 
-    static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
-                                           List<ToolCall> toolCalls, String priorContent, int round) {
+    static LoopOutcome handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                                List<ToolCall> toolCalls, String priorContent, int round) {
         return handleToolCallsStreaming(ctx, messages, toolCalls, priorContent, round, AgentRunner.maxToolRounds());
     }
 
     /** {@link #handleToolCallsStreaming} with the round cap passed in, so a test need not change the shared config key. */
-    static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
-                                           List<ToolCall> toolCalls, String priorContent, int round, int maxRounds) {
-        if (ctx.isCancelled().get()) {
-            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-        }
+    static LoopOutcome handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                                List<ToolCall> toolCalls, String priorContent, int round, int maxRounds) {
+        if (ctx.isCancelled().get()) return cancelled(ctx, priorContent, round);
         if (round >= maxRounds) return closeStreamAtRoundCap(ctx, messages, priorContent, round);
         EventLogger.info("tool", ctx.agent().name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
@@ -780,7 +778,7 @@ public final class ToolCallLoopRunner {
                 offeredToolNames(ctx.tools()));
         ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
-        if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+        if (ctx.isCancelled().get()) return cancelled(ctx, priorContent, round);
 
         // JCLAW-291: cooperative-cancel checkpoint between the tool round
         // and the LLM continuation. Subagent-driven streaming runs aren't
@@ -798,7 +796,7 @@ public final class ToolCallLoopRunner {
             EventLogger.info("tool", ctx.agent().name, null,
                     "Streaming round %d: subagent_yield invoked — suspending parent turn"
                             .formatted(round + 1));
-            return AgentRunner.YIELDED_RESPONSE;
+            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
         }
 
         ctx.cb().onStatus().accept("Processing results (round %d)...".formatted(round + 1));
@@ -813,12 +811,12 @@ public final class ToolCallLoopRunner {
             Thread.currentThread().interrupt();
             accumulator = null;
         }
-        if (accumulator == null) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+        if (accumulator == null) return cancelled(ctx, priorContent, round);
 
         // A second cut-off in the turn: the tool arguments are an incomplete JSON fragment, so the call is
         // not run and the reader is told why.
         if (isCutOffToolCall(accumulator)) {
-            return handleTruncatedToolCallAccumulator(accumulator, ctx.agent(), ctx.cb(), round);
+            return new LoopOutcome(handleTruncatedToolCallAccumulator(accumulator, ctx.agent(), ctx.cb(), round), true);
         }
 
         // Recursively handle if more tool calls. JCLAW-104: pass the SAME
@@ -838,9 +836,17 @@ public final class ToolCallLoopRunner {
             return retryEmptyContinuation(ctx, round, currentMessages, priorContent, accumulator);
         }
 
-        return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
-                + accumulator.content()
-                + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), accumulator.content(), ctx.channelType());
+        boolean truncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason());
+        if (truncated) {
+            TruncationDiagnostics.logEmptyToolCallsTruncation("handleToolCallsStreaming", ctx.agent(), ctx.conversation(),
+                    ctx.provider(), ctx.channelType(), accumulator.finishReason(), currentMessages, ctx.tools());
+        }
+        return new LoopOutcome(withImages(ctx, accumulator.content()), truncated);
+    }
+
+    private static LoopOutcome cancelled(StreamingTurnContext ctx, String priorContent, int round) {
+        return new LoopOutcome(CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(),
+                ctx.channelType(), ctx.cb(), ctx.agent(), round));
     }
 
     /**
@@ -1046,16 +1052,16 @@ public final class ToolCallLoopRunner {
      * emit a labeled diagnostic. The usual shape is a reasoning-capable model spending its
      * whole output budget thinking and stopping mid-thought before any content.
      */
-    private static String retryEmptyContinuation(StreamingTurnContext ctx, int round,
-                                                 ArrayList<ChatMessage> currentMessages, String priorContent,
-                                                 LlmProvider.StreamAccumulator empty) {
+    private static LoopOutcome retryEmptyContinuation(StreamingTurnContext ctx, int round,
+                                                      ArrayList<ChatMessage> currentMessages, String priorContent,
+                                                      LlmProvider.StreamAccumulator empty) {
         EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
                         .formatted(round + 1, describeEmpty(empty)));
         var recovery = retrySynthesis(ctx, withinBudget(ctx, currentMessages), ctx.tools(), SYNTHESIS_NUDGE,
                 SYNTHESIS_STATUS, priorContent, round);
-        if (recovery.cancelled() != null) return recovery.cancelled();
-        if (recovery.content() != null) return withImages(ctx, recovery.content());
+        if (recovery.cancelled() != null) return new LoopOutcome(recovery.cancelled());
+        if (recovery.content() != null) return new LoopOutcome(withImages(ctx, recovery.content()), recovery.truncated());
 
         // No LLM content to dedupe against — prepend every collected image unchanged.
         var fallbackPrefix = ctx.collectedImages().isEmpty() ? ""
@@ -1068,7 +1074,7 @@ public final class ToolCallLoopRunner {
                 + ". Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
                 + fallbackSuffix;
         ctx.cb().onToken().accept(fallbackText);
-        return fallbackText;
+        return new LoopOutcome(fallbackText);
     }
 
     /**
@@ -1076,16 +1082,16 @@ public final class ToolCallLoopRunner {
      * more call offered no tools, else {@link #ROUND_CAP_REPLY}. {@code messages} ends with the last
      * results; the tool calls that reached the cap are neither run nor sent.
      */
-    private static String closeStreamAtRoundCap(StreamingTurnContext ctx, List<ChatMessage> messages,
-                                                String priorContent, int round) {
+    private static LoopOutcome closeStreamAtRoundCap(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                                     String priorContent, int round) {
         logRoundCap(ctx.agent(), ctx.channelType(), round);
         var view = sendView(messages, ctx.agent(), ctx.conversation(), ctx.provider(), null, ctx.overflow());
         var recovery = retrySynthesis(ctx, view, null, CLOSING_NUDGE,
                 "Writing a closing answer (tool-round limit reached)...", priorContent, round);
-        if (recovery.cancelled() != null) return recovery.cancelled();
-        if (recovery.content() == null) return ROUND_CAP_REPLY;
+        if (recovery.cancelled() != null) return new LoopOutcome(recovery.cancelled());
+        if (recovery.content() == null) return new LoopOutcome(ROUND_CAP_REPLY);
         ctx.cb().onToken().accept(ROUND_CAP_NOTE);
-        return withImages(ctx, recovery.content() + ROUND_CAP_NOTE);
+        return new LoopOutcome(withImages(ctx, recovery.content() + ROUND_CAP_NOTE), recovery.truncated());
     }
 
     /**

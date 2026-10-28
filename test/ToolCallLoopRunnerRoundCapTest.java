@@ -145,7 +145,8 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
 
         var result = runContinuation(provider(llm), tokens, new AtomicBoolean(false), 0, 1);
 
-        assertEquals(CLOSING + NOTE, result);
+        assertEquals(CLOSING + NOTE, result.content());
+        assertFalse(result.truncated());
         assertEquals(CLOSING + NOTE, tokens.toString(), "the reader sees what is stored");
         assertEquals(2, llm.bodies().size(), "the continuation, then the closing call");
         assertTrue(offersTools(llm.bodies().get(0)));
@@ -155,12 +156,22 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
     }
 
     @Test
+    void aStreamedClosingAnswerCutOffAtTheOutputLimitIsFlaggedTruncated() throws Exception {
+        var llm = serve(toolCall("r2"), text(CLOSING, "length"));
+
+        var result = runContinuation(provider(llm), new StringBuffer(), new AtomicBoolean(false), 0, 1);
+
+        assertEquals(CLOSING + NOTE, result.content());
+        assertTrue(result.truncated(), "flagged as the sync loop flags it");
+    }
+
+    @Test
     void aStreamedContinuationThatAnswersBeforeTheCapMakesNoClosingCall() throws Exception {
         var llm = serve(text("Finished."));
 
         var result = runContinuation(provider(llm), new StringBuffer(), new AtomicBoolean(false), 0, 1);
 
-        assertEquals("Finished.", result);
+        assertEquals("Finished.", result.content());
         assertEquals(1, llm.bodies().size());
     }
 
@@ -170,7 +181,7 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
 
         var result = runContinuation(provider(llm), new StringBuffer(), new AtomicBoolean(false), 0, 1);
 
-        assertEquals(FIXED_REPLY, result);
+        assertEquals(FIXED_REPLY, result.content());
         assertEquals(2, llm.bodies().size());
     }
 
@@ -180,7 +191,7 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
 
         var result = runContinuation(provider(llm), new StringBuffer(), new AtomicBoolean(false), 0, 1);
 
-        assertEquals(FIXED_REPLY, result);
+        assertEquals(FIXED_REPLY, result.content());
         assertEquals(2, llm.bodies().size(), "no fallback is configured, so one closing call");
     }
 
@@ -190,7 +201,7 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
 
         var result = runContinuation(provider(llm), new StringBuffer(), new AtomicBoolean(true), 1, 1);
 
-        assertEquals("prior content", result);
+        assertEquals("prior content", result.content());
         assertEquals(0, llm.bodies().size());
     }
 
@@ -199,9 +210,13 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
     private record Reply(int status, String body) {}
 
     private static Reply text(String content) {
+        return text(content, "stop");
+    }
+
+    private static Reply text(String content, String finishReason) {
         return new Reply(200, """
-                {"choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],
-                 "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(content));
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"%s"}],
+                 "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(content, finishReason));
     }
 
     private static Reply toolCall(String id) {
@@ -315,8 +330,9 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
     }
 
     /** One streamed tool round for call {@code r1}, then whatever the scripted model answers. */
-    private String runContinuation(LlmProvider primary, StringBuffer tokens, AtomicBoolean cancelled, int round,
-                                   int maxRounds) throws Exception {
+    private ToolCallLoopRunner.LoopOutcome runContinuation(LlmProvider primary, StringBuffer tokens,
+                                                           AtomicBoolean cancelled, int round, int maxRounds)
+            throws Exception {
         var convo = conversation(primary);
         AgentRunner.StreamingCallbacks cb = new AgentRunner.StreamingCallbacks(
                 _ -> {}, tokens::append, _ -> {}, _ -> {}, _ -> {}, _ -> {}, _ -> {}, () -> {});
@@ -328,7 +344,7 @@ class ToolCallLoopRunnerRoundCapTest extends UnitTest {
                 int.class);
         m.setAccessible(true);
         var priorContent = cancelled.get() ? "prior content" : "";
-        return onVirtualThread(() -> (String) m.invoke(null, ctx, history(),
+        return onVirtualThread(() -> (ToolCallLoopRunner.LoopOutcome) m.invoke(null, ctx, history(),
                 List.of(new ToolCall("r1", "function", new FunctionCall(TOOL, "{}"))), priorContent, round,
                 maxRounds));
     }

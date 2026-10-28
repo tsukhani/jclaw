@@ -39,7 +39,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * A response that stops at the output limit while it is writing a tool call: the call is not run and
  * stays out of the history, and the turn sends once more with a note asking the model to split the
- * content. A second cut-off in the same turn ends it with the cut-off reply, as before.
+ * content. A second cut-off in the same turn ends it with the cut-off reply, as before. A streamed reply cut
+ * off at the limit is stored flagged truncated, as a sync one is.
  */
 class ToolCallLoopRunnerCutOffTest extends UnitTest {
 
@@ -292,7 +293,12 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals(CUT_OFF_REPLY, turn.completed.get());
         assertEquals(2, bodies.size());
         assertEquals(List.of("user:" + QUESTION, "assistant:" + CUT_OFF_REPLY), stored(convo));
-        assertFalse(lastAssistant(convo).truncated, "the streamed path stores this reply unflagged, as before");
+        var reply = lastAssistant(convo);
+        assertTrue(reply.truncated, "flagged as the sync path flags it");
+        assertNotNull(reply.usageJson, "the turn's usage is saved with the reply");
+        var usage = JsonParser.parseString(reply.usageJson).getAsJsonObject();
+        assertEquals(20, usage.get("prompt").getAsInt(), "both calls count: " + reply.usageJson);
+        assertEquals(10, usage.get("completion").getAsInt(), reply.usageJson);
         assertFalse(Files.exists(workspacePath()));
     }
 
@@ -307,6 +313,7 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertEquals(3, bodies.size());
         assertEquals(List.of("user:" + QUESTION, "assistant->w1", "tool<-w1",
                 "assistant:" + STREAMED_CONTINUATION_CUT_OFF_REPLY), stored(convo));
+        assertTrue(lastAssistant(convo).truncated);
         assertEquals("Part one.\n", workspaceFile());
     }
 
@@ -319,7 +326,32 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         assertNull(turn.error.get());
         assertEquals(STREAMED_CONTINUATION_CUT_OFF_REPLY, turn.completed.get());
         assertEquals(3, bodies.size());
+        assertTrue(lastAssistant(convo).truncated);
         assertEquals("Part one.\n", workspaceFile());
+    }
+
+    @Test
+    void aStreamedReplyThatStopsAtTheOutputLimitAfterToolResultsIsFlaggedTruncated() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", "Part one.\n"), text(PARTIAL, "length"));
+
+        var turn = runStreamed(convo);
+
+        assertNull(turn.error.get());
+        assertEquals(PARTIAL, turn.completed.get());
+        assertEquals(List.of("user:" + QUESTION, "assistant->w1", "tool<-w1", "assistant:" + PARTIAL), stored(convo));
+        assertTrue(lastAssistant(convo).truncated, "flagged as the sync path flags it");
+    }
+
+    @Test
+    void aStreamedEmptyReplyAfterToolResultsWhoseRetryStopsAtTheOutputLimitIsFlaggedTruncated() throws Exception {
+        var convo = turnScriptedAs(write("w1", "writeFile", "Part one.\n"), text(""), text(PARTIAL, "length"));
+
+        var turn = runStreamed(convo);
+
+        assertNull(turn.error.get());
+        assertEquals(PARTIAL, turn.completed.get());
+        assertEquals(3, bodies.size(), "the empty continuation is retried once");
+        assertTrue(lastAssistant(convo).truncated);
     }
 
     // ─── replies ─────────────────────────────────────────────────────────────
@@ -353,11 +385,18 @@ class ToolCallLoopRunnerCutOffTest extends UnitTest {
         return toolCall(id, args.toString(), "tool_calls");
     }
 
+    /** A reply that ends partway through, as an output limit leaves it. */
+    private static final String PARTIAL = "The report covers the first quarter, its revenue and";
+
     private static String text(String content) {
+        return text(content, "stop");
+    }
+
+    private static String text(String content, String finishReason) {
         var message = new JsonObject();
         message.addProperty("role", "assistant");
         message.addProperty("content", content);
-        return completion(message, "stop");
+        return completion(message, finishReason);
     }
 
     private static String write(String id, String action, String content) {
