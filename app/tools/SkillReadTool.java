@@ -61,6 +61,11 @@ public class SkillReadTool implements ToolRegistry.Tool {
     }
 
     @Override
+    public boolean keepsResultInContext(String argsJson) {
+        return true;
+    }
+
+    @Override
     public String shortDescription() {
         return "Read the instructions of a skill attached to the agent, for an agent without the filesystem tool.";
     }

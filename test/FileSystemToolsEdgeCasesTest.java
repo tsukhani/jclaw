@@ -265,6 +265,34 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 Files.readString(workspace.resolve("skills/some-skill/docs/SKILL.md")));
     }
 
+    @Test
+    void aSkillMdOverTheLimitIsSavedWithAWarningToSplitIt() throws Exception {
+        var result = tool.execute(skillWrite("big-skill", 21_000), agent);
+
+        int saved = Files.readString(workspace.resolve("skills/big-skill/SKILL.md")).length();
+        assertEquals("File written successfully: SKILL.md (new skill at version 1.0.0)" + String.format(java.util.Locale.ROOT,
+                " Warning: SKILL.md is now %,d characters, over the 20,000-character limit, and a long conversation keeps "
+                        + "only its first 20,000. Split it: keep the workflow and the rules that always apply in SKILL.md, and "
+                        + "move detailed material into references/ (see skill-creator's SKILL.md size limit).", saved), result);
+    }
+
+    @Test
+    void aSkillMdUnderTheLimitIsSavedWithoutAWarning() throws Exception {
+        var result = tool.execute(skillWrite("fit-skill", 19_000), agent);
+
+        assertEquals("File written successfully: SKILL.md (new skill at version 1.0.0)", result);
+    }
+
+    /** writeFile args for a SKILL.md whose body is {@code bodyChars} characters. */
+    private static String skillWrite(String name, int bodyChars) {
+        var args = new com.google.gson.JsonObject();
+        args.addProperty("action", "writeFile");
+        args.addProperty("path", "skills/" + name + "/SKILL.md");
+        args.addProperty("content", "---\nname: " + name + "\ndescription: >-\n  A test skill.\nmetadata:\n  author: test\n"
+                + "  jclaw-tools: \"\"\n  jclaw-commands: \"\"\n---\n" + "x".repeat(bodyChars));
+        return args.toString();
+    }
+
     // ==================== editFile error paths & diagnostics ====================
 
     @Test

@@ -1,6 +1,8 @@
 import agents.ToolContext;
 import agents.ToolResultPruner;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.Conversation;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,6 +102,111 @@ class ToolResultPrunerTest extends UnitTest {
         var pruned = ToolResultPruner.prune(older, 4_000, 3, null, null);
         assertTrue(((String) pruned.get(1).content()).startsWith(ToolResultPruner.STUB_MARKER));
         assertEquals(BIG, pruned.get(3).content(), "inside the protected tail");
+    }
+
+    @Test
+    void aSkillsInstructionsStayWholeWhileAnotherEarlierResultIsStubbed() throws Exception {
+        // A skill is a standing instruction: the agent needs its rules (enrollment, wording) for the whole chat.
+        var messages = List.of(
+                ChatMessage.user("first ask"),
+                call("s1", "skill_read", "{\"name\":\"abundent-api\"}"),
+                tool("s1", "skill_read", BIG),
+                call("w1", "web_fetch", "{\"url\":\"https://example.com\"}"),
+                tool("w1", "web_fetch", BIG),
+                ChatMessage.assistant("answered"),
+                ChatMessage.user("second ask"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+            assertSame(BIG, pruned.get(2).content(), "the skill's text is sent whole");
+            assertTrue(((String) pruned.get(4).content()).startsWith(ToolResultPruner.STUB_MARKER),
+                    pruned.get(4).content().toString());
+        });
+    }
+
+    @Test
+    void aFilesystemReadOfASkillMdStaysWholeButAnyOtherReadIsStubbed() throws Exception {
+        var messages = List.of(
+                ChatMessage.user("first ask"),
+                call("f1", "filesystem", "{\"action\":\"readFile\",\"path\":\"skills/abundent-api/SKILL.md\"}"),
+                tool("f1", "filesystem", BIG),
+                call("f2", "filesystem", "{\"action\":\"readFile\",\"path\":\"notes/SKILL.md.bak\"}"),
+                tool("f2", "filesystem", BIG),
+                ChatMessage.assistant("answered"),
+                ChatMessage.user("second ask"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+            assertSame(BIG, pruned.get(2).content(), "a skill read through filesystem is sent whole");
+            assertTrue(((String) pruned.get(4).content()).startsWith(ToolResultPruner.STUB_MARKER),
+                    pruned.get(4).content().toString());
+        });
+    }
+
+    @Test
+    void aSkillOverTheCapKeepsItsFirst20000CharactersAndPointsToTheRest() throws Exception {
+        var body = "s".repeat(25_000);
+        var messages = List.of(
+                ChatMessage.user("first ask"),
+                call("s1", "skill_read", "{\"name\":\"big\"}"),
+                tool("s1", "skill_read", body),
+                ChatMessage.assistant("answered"),
+                ChatMessage.user("second ask"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+            assertEquals("s".repeat(20_000) + "\n[skill text cut at 20,000 of 25,000 characters; call ccr_retrieve(\""
+                    + ContentHash.handle(body) + "\") for the full text]", pruned.get(2).content());
+        });
+    }
+
+    @Test
+    void theNewestSkillsFillTheBudgetAndAnOlderOneIsStubbed() throws Exception {
+        var messages = new java.util.ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("first ask"));
+        for (int i = 0; i < 6; i++) {
+            messages.add(call("s" + i, "skill_read", "{\"name\":\"skill-" + i + "\"}"));
+            messages.add(tool("s" + i, "skill_read", Character.toString('a' + i).repeat(19_000)));
+        }
+        messages.add(ChatMessage.assistant("answered"));
+        messages.add(ChatMessage.user("second ask"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+            assertTrue(((String) pruned.get(2).content()).startsWith(ToolResultPruner.STUB_MARKER),
+                    "six 19,000-char skills pass the 100,000-char budget, so the oldest is stubbed");
+            for (int i = 1; i < 6; i++) {
+                assertSame(messages.get(2 + 2 * i).content(), pruned.get(2 + 2 * i).content(), "skill " + i + " stays whole");
+            }
+        });
+    }
+
+    @Test
+    void anOlderCopyOfASkillReadAgainLaterIsStubbed() throws Exception {
+        var messages = List.of(
+                ChatMessage.user("first ask"),
+                call("s1", "skill_read", "{\"name\":\"abundent-api\"}"),
+                tool("s1", "skill_read", BIG),
+                call("s2", "skill_read", "{\"name\":\"abundent-api\"}"),
+                tool("s2", "skill_read", BIG),
+                ChatMessage.assistant("answered"),
+                ChatMessage.user("second ask"));
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+            assertTrue(((String) pruned.get(2).content()).startsWith(ToolResultPruner.STUB_MARKER),
+                    "the newer copy carries the same text");
+            assertSame(BIG, pruned.get(4).content());
+        });
+    }
+
+    private static ChatMessage call(String id, String name, String argsJson) {
+        return ChatMessage.assistant("", List.of(new ToolCall(id, "function", new FunctionCall(name, argsJson))));
     }
 
     @Test

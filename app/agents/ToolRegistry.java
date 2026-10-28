@@ -282,6 +282,10 @@ public class ToolRegistry {
          *  time: {@link CompressionPipeline} would cut such a list to its first entries. */
         default boolean verbatimResult(String argsJson) { return false; }
 
+        /** Whether this call's result is a standing instruction the model follows for the rest of the
+         *  conversation (a skill's SKILL.md): {@link ToolResultPruner} never stubs it. */
+        default boolean keepsResultInContext(String argsJson) { return false; }
+
         /** JF-136: whether this call brings text from outside the operator and the agent's own state into the
          *  conversation: a page, a command's output, a server's or another agent's reply. Once one has, an agent
          *  edit to a persona file in that conversation waits for the operator. Defaults to {@code true}, so a new

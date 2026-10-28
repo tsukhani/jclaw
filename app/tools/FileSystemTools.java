@@ -4,6 +4,7 @@ import agents.PersonaFileEdits;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
@@ -39,6 +40,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
     // === Argument keys (JSON field names on tool calls) ===
     private static final String ARG_ACTION = "action";
+    private static final String SKILL_MD = "SKILL.md";
     static final String ARG_CONTENT = "content";
     private static final String ARG_EDITS = "edits";
     private static final String ARG_OPERATIONS = "operations";
@@ -237,6 +239,23 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var owner = WorkspaceFiles.workspaceOwner(agent);
         var approved = PersonaFileApprovals.approved(owner, name.toString());
         return approved == null || !approved.content().equals(PersonaFileApprovals.textOnDisk(owner, name.toString()));
+    }
+
+    /** A skill's SKILL.md holds the agent's instructions for the rest of the conversation, not one turn's data. */
+    @Override
+    public boolean keepsResultInContext(String argsJson) {
+        try {
+            var parsed = JsonParser.parseString(argsJson);
+            if (!parsed.isJsonObject()) return false;
+            var args = parsed.getAsJsonObject();
+            if (!args.has(ARG_ACTION) || !ACTION_READ_FILE.equals(args.get(ARG_ACTION).getAsString())) return false;
+            var path = args.get("path");
+            if (path == null || !path.isJsonPrimitive()) return false;
+            var normalized = path.getAsString().replace('\\', '/');
+            return normalized.equals(SKILL_MD) || normalized.endsWith("/" + SKILL_MD);
+        } catch (JsonParseException | IllegalStateException | UnsupportedOperationException _) {
+            return false;
+        }
     }
 
     private FsOutcome dispatchAction(String action, JsonObject args, Agent agent, Path target) {

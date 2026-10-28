@@ -1,6 +1,7 @@
 package tools;
 
 import agents.SkillLoader;
+import agents.ToolResultPruner;
 import tools.FsSupport.FsOutcome;
 import utils.ToolErrorTemplates;
 
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Locale;
 
 /**
  * Write/create family for {@link FileSystemTools}: {@code writeFile} (the single sink through
@@ -43,6 +45,7 @@ final class FsWriter {
                         versionNote = " (no material change; version " + newInfo.version() + " preserved)";
                     }
                 }
+                versionNote += sizeWarning(finalContent);
             }
 
             Files.writeString(path, finalContent);
@@ -51,6 +54,15 @@ final class FsWriter {
             return FsOutcome.fail(ToolErrorTemplates.fsIoFailure(
                     "Writing the file failed: %s".formatted(e.getMessage())));
         }
+    }
+
+    /** Every agent edit to a skill lands here, skill-creator's or not, so this is where the size limit is told. */
+    private static String sizeWarning(String skillMd) {
+        if (skillMd.length() <= ToolResultPruner.SKILL_KEEP_CHARS) return "";
+        return String.format(Locale.ROOT, " Warning: SKILL.md is now %,d characters, over the %,d-character limit, and a long "
+                        + "conversation keeps only its first %,d. Split it: keep the workflow and the rules that always apply in "
+                        + "SKILL.md, and move detailed material into references/ (see skill-creator's SKILL.md size limit).",
+                skillMd.length(), ToolResultPruner.SKILL_KEEP_CHARS, ToolResultPruner.SKILL_KEEP_CHARS);
     }
 
     /**
