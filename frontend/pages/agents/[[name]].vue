@@ -3640,10 +3640,10 @@ const agentKinds = [
             </div>
             <div
               class="bg-muted border border-border px-3 py-2"
-              title="Bytes after the cache boundary, which a provider never caches"
+              title="Bytes after the cache boundary, which carry no cache breakpoint of their own. In a conversation the compaction summary and a subagent's parent context go here; this preview has neither."
             >
               <div class="text-[10px] text-fg-muted uppercase tracking-wide">
-                Variable suffix
+                After boundary
               </div>
               <div class="text-sm font-mono text-rose-700 dark:text-rose-400">
                 {{ formatChars(promptBreakdownData.variableSuffixChars) }}

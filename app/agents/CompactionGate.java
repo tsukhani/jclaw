@@ -84,7 +84,7 @@ public final class CompactionGate {
             @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current, List<ToolDef> tools) {
         return maybeCompactAndRebuild(agent, conversationId, disabledTools, primary,
-                new MessageHydrator.Hydration(current, List.of(), List.of(), List.of()), tools).messages();
+                new MessageHydrator.Hydration(current, List.of(), List.of(), List.of()), tools, 0).messages();
     }
 
     /**
@@ -93,11 +93,14 @@ public final class CompactionGate {
      * rebuild's own bearers beside its messages so the capability rewrites downstream write into
      * the list they were actually computed against (JCLAW-1232). When no compaction fires,
      * {@code current} is returned unchanged.
+     *
+     * @param reservedTokens tokens the turn sends after this list, counted toward the trigger: its
+     *                       recalled memories ({@link ContextWindowManager#reservedTokens})
      */
     public static MessageHydrator.Hydration maybeCompactAndRebuild(
             Agent agent, Long conversationId,
             @Nullable Set<String> disabledTools, LlmProvider primary,
-            MessageHydrator.Hydration current, List<ToolDef> tools) {
+            MessageHydrator.Hydration current, List<ToolDef> tools, int reservedTokens) {
         // Cheap snapshot: model info + effective model id + channel type.
         // resolveModelInfo reads only in-memory provider config, so this
         // Tx is bounded by one findById.
@@ -115,7 +118,8 @@ public final class CompactionGate {
         if (primary == null || primary.config() == null) return current;
         final var providerName = primary.config().name();
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current.messages(), tools);
-        int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate);
+        int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate)
+                + reservedTokens;
         if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();

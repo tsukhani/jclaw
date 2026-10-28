@@ -1,9 +1,12 @@
 import agents.AgentRunner;
+import agents.ContextWindowManager;
 import agents.CurrentTimeInjector;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
+import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import org.junit.jupiter.api.AfterEach;
@@ -20,6 +23,7 @@ import utils.CircuitBreakers;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -50,6 +54,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
     // Own provider name: breakers and the provider cache are process-global, keyed by name.
     private final String provider = "recall-place-" + UUID.randomUUID().toString().substring(0, 8);
     private final List<JsonArray> chatRequests = new CopyOnWriteArrayList<>();
+    private final List<Integer> maxTokensSent = new CopyOnWriteArrayList<>();
     private final AtomicBoolean toolCallFirst = new AtomicBoolean(false);
     private HttpServer llmServer;
     private Long agentId;
@@ -71,6 +76,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
                 return;
             }
             chatRequests.add(messages);
+            maxTokensSent.add(body.has("max_tokens") ? body.get("max_tokens").getAsInt() : -1);
             LlmReplyFixture.send(exchange, chatRequests.size() == 1 && toolCallFirst.get() ? TOOL_CALL_REPLY : REPLY);
         });
         llmServer.start();
@@ -101,6 +107,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
         for (var suffix : new String[] {"baseUrl", "apiKey", "models"}) {
             ConfigService.delete("provider." + provider + "." + suffix);
         }
+        ConfigService.delete(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider);
         ProviderRegistry.refresh();
     }
 
@@ -208,7 +215,94 @@ class RecalledMemoryPlacementTest extends UnitTest {
                 "a memory resting on a guest's words reached the model, so the conversation is marked");
     }
 
+    @Test
+    void aSyncTurnTrimsItsHistoryToLeaveRoomForALargeRecall() throws Exception {
+        assertTheTrimLeavesRoomForTheRecall(this::syncTurn);
+    }
+
+    @Test
+    void aStreamedTurnTrimsItsHistoryToLeaveRoomForALargeRecall() throws Exception {
+        assertTheTrimLeavesRoomForTheRecall((id, text) -> streamedTurn(id, "web", null, text));
+    }
+
     // ── helpers ──
+
+    /**
+     * A history half a large recall under the trim target: counted, the recall makes the trim drop the oldest row,
+     * so what is sent fits; uncounted, nothing is dropped and the recall eats the reply's reservation.
+     */
+    private void assertTheTrimLeavesRoomForTheRecall(Turn turn) throws Exception {
+        int window = 60_000;
+        // max_tokens capped at the window leaves the clamp to report the prompt: window - margin - prompt.
+        ConfigService.set("provider." + provider + ".models", "[{\"id\":\"agent-model\",\"name\":\"Agent\","
+                + "\"contextWindow\":" + window + ",\"maxTokens\":" + window + "}]");
+        // Other classes set the global multiplier; this provider's own key outranks it.
+        ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider, "1.0");
+        ProviderRegistry.refresh();
+        int margin = intConst("OUTPUT_SAFETY_MARGIN_TOKENS");
+        int target = window - intConst("RESERVED_OUTPUT_TOKENS");
+        int recallTokens = 8_000;
+        memory.MemoryStoreFactory.get().store(String.valueOf(agentId), "MARKER_BIG kayak" + words(recallTokens),
+                "fact", 0.6);
+        commit();
+
+        // No tools, so another class republishing the registry cannot change the prompt between the two turns.
+        ToolRegistrySync.withTools(List.of(), () -> {
+            turn.run(conversation("web", null), "hello there");
+            int base = window - margin - maxTokensSent.getFirst() - clockTokens();
+            int rowTokens = (target - recallTokens / 2 - base) / 2;
+            assertTrue(rowTokens > recallTokens, "precondition: one row outweighs the recall; base=" + base);
+            var conversationId = conversation("web", null);
+            Tx.run(() -> {
+                var conversation = ConversationService.findById(conversationId);
+                ConversationService.appendUserMessage(conversation, "u0" + words(rowTokens));
+                ConversationService.appendAssistantMessage(conversation, "a0" + words(rowTokens), null);
+            });
+            commit();
+
+            turn.run(conversationId, "kayak");
+        });
+
+        assertEquals(2, chatRequests.size());
+        var messages = chatRequests.get(1);
+        assertTrue(trailingOf(messages).contains("MARKER_BIG"), "control: the large memory was recalled");
+        assertEquals(List.of("assistant a0", "user kayak"), historyOf(messages), "the oldest row made room");
+        int sent = window - margin - maxTokensSent.get(1);
+        assertTrue(sent - clockTokens() <= target,
+                "the history and its recall fit the trim target: " + (sent - clockTokens()) + " > " + target);
+    }
+
+    @FunctionalInterface
+    private interface Turn {
+        void run(Long conversationId, String text) throws Exception;
+    }
+
+    /** Words that tokenize one by one, repeated to about {@code tokens} tokens. */
+    private static String words(int tokens) {
+        var unit = " alpha bravo charlie delta echo foxtrot golf hotel india juliet";
+        return unit.repeat(tokens / TokenUsageEstimator.estimateText("agent-model", unit).tokens());
+    }
+
+    /** The clock message's own cost, which the trim never counted. */
+    private static int clockTokens() {
+        return TokenUsageEstimator.estimateMessage("agent-model", ChatMessage.user(CurrentTimeInjector.block())).tokens();
+    }
+
+    /** Each message between the system message and the trailing one: its role and its first word. */
+    private static List<String> historyOf(JsonArray messages) {
+        var out = new ArrayList<String>();
+        for (int i = 1; i < messages.size() - 1; i++) {
+            var m = messages.get(i).getAsJsonObject();
+            out.add(m.get("role").getAsString() + " " + m.get("content").getAsString().split(" ", 2)[0]);
+        }
+        return out;
+    }
+
+    private static int intConst(String name) throws Exception {
+        var f = ContextWindowManager.class.getDeclaredField(name);
+        f.setAccessible(true);
+        return f.getInt(null);
+    }
 
     private static String recalled(String... lines) {
         var block = new StringBuilder("\n## Relevant Memories\n"
@@ -222,9 +316,9 @@ class RecalledMemoryPlacementTest extends UnitTest {
         return normalized(CurrentTimeInjector.block());
     }
 
-    // The minute is the only part of the trailing message a test cannot pin across threads.
+    // The minute, and the zone other classes set in app.timezone while this one runs, cannot be pinned across threads.
     private static String normalized(String text) {
-        return text.replaceAll("(?m)^- Now: .*$", "- Now: <now>");
+        return text.replaceAll("(?m)^- Now: .*$", "- Now: <now>").replaceAll("(?m)^- Timezone: .*$", "- Timezone: <zone>");
     }
 
     private static String contentOf(JsonArray messages, int index) {

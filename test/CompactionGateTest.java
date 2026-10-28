@@ -1,8 +1,10 @@
 import agents.CompactionGate;
 import agents.ContextWindowManager;
+import agents.MessageHydrator;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
@@ -14,9 +16,12 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.SessionCompactor;
+import utils.CircuitBreakers;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Unit tests for {@link CompactionGate} (JCLAW-309).
@@ -359,7 +364,67 @@ class CompactionGateTest extends UnitTest {
                 "successful compaction must bump compactionSince watermark");
     }
 
+    // ─── Tokens sent after the list (JF-152) ────────────────────────────
+
+    @Test
+    void tokensReservedForTheTurnsRecallCountTowardTheTrigger() throws Exception {
+        // The 150,000-token trigger fires here, not the window rule: no reserve another class sets brings it near
+        // on a 1,000,000-token window.
+        startLlmServer(simpleResponse("RESERVE SUMMARY"));
+        var provider = ownProvider(1_000_000);
+        try {
+            var conv = ConversationService.create(agent, "web", "user1");
+            for (int i = 0; i < 25; i++) {
+                ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                        "turn " + i, null, null, null);
+            }
+            commitAndReopen();
+            var primary = llm.ProviderRegistry.get(provider);
+            var unit = " alpha bravo charlie delta echo foxtrot golf hotel india juliet";
+            var big = unit.repeat(140_000 / TokenUsageEstimator.estimateText("gate-model", unit).tokens());
+            var current = new MessageHydrator.Hydration(List.of(ChatMessage.system("SP"), ChatMessage.user(big)),
+                    List.of(), List.of(), List.of());
+            int below = 150_000 - TokenUsageEstimator.estimateChatRequest("gate-model", current.messages(), List.of())
+                    .promptTokens();
+
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), below - 1), "one token short of the trigger");
+            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), below);
+            assertTrue(((String) rebuilt.messages().getFirst().content())
+                            .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nRESERVE SUMMARY"),
+                    "the reserve reached the trigger, so the rebuilt prompt carries the summary");
+        } finally {
+            removeProvider(provider);
+        }
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Points {@link #agent} at a provider no other class names, with one model, {@code gate-model}, and the token
+     * multiplier pinned at 1.0, which another class's global setting cannot reach. Undo with {@link #removeProvider}.
+     */
+    private String ownProvider(int contextWindow) {
+        var provider = "gate-" + UUID.randomUUID().toString().substring(0, 8);
+        ConfigService.set("provider." + provider + ".baseUrl", port == 0 ? "http://127.0.0.1:1" : "http://127.0.0.1:" + port);
+        ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+        ConfigService.set("provider." + provider + ".models",
+                "[{\"id\":\"gate-model\",\"name\":\"Gate\",\"contextWindow\":" + contextWindow + ",\"maxTokens\":4096}]");
+        ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider, "1.0");
+        llm.ProviderRegistry.refresh();
+        agent.modelProvider = provider;
+        agent.modelId = "gate-model";
+        agent.save();
+        return provider;
+    }
+
+    private static void removeProvider(String provider) {
+        for (var key : List.of("baseUrl", "apiKey", "models")) ConfigService.delete("provider." + provider + "." + key);
+        ConfigService.delete(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider);
+        llm.ProviderRegistry.refresh();
+        CircuitBreakers.remove(provider);
+    }
 
     private void configureProviderWithModel(String modelId, int contextWindow, int maxTokens) {
         ConfigService.set("provider.test-provider.baseUrl",

@@ -4,7 +4,11 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.TimezoneResolver;
+import utils.AppClock;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -141,10 +145,13 @@ class CurrentTimeInjectorTest extends UnitTest {
     void anEmptyRecallAddsNothing() {
         var input = List.of(ChatMessage.user("hi"));
 
-        assertEquals(CurrentTimeInjector.inject(input, (String) null).get(1).content(),
-                CurrentTimeInjector.inject(input, "", null).get(1).content());
-        assertEquals(CurrentTimeInjector.inject(input, "\nextra\n").get(1).content(),
-                CurrentTimeInjector.inject(input, "", "\nextra\n").get(1).content());
+        // One instant for every call, so a minute turning over between them cannot fail the comparison.
+        AppClock.runWith(Clock.fixed(Instant.parse("2026-10-28T09:15:30Z"), ZoneOffset.UTC), () -> {
+            assertEquals(CurrentTimeInjector.inject(input, (String) null).get(1).content(),
+                    CurrentTimeInjector.inject(input, "", null).get(1).content());
+            assertEquals(CurrentTimeInjector.inject(input, "\nextra\n").get(1).content(),
+                    CurrentTimeInjector.inject(input, "", "\nextra\n").get(1).content());
+        });
     }
 
     @Test

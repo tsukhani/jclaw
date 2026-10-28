@@ -275,19 +275,33 @@ public final class ContextWindowManager {
 
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv,
                                                  LlmProvider provider, @Nullable List<ToolDef> tools) {
-        return trim(messages, agent, conv, provider, tools).messages();
+        return trim(messages, agent, conv, provider, tools, 0).messages();
     }
 
     /**
      * Bearer-aware overload: drop-oldest shifts every surviving position down, so the media
      * bearers that address the list have to move with it or they rewrite the wrong slot
      * (JCLAW-1232).
+     *
+     * @param reservedTokens tokens sent after the trim, which the target leaves room for: the
+     *                       turn's recalled memories ({@link #reservedTokens})
      */
     static MessageHydrator.Hydration trimToContextWindow(MessageHydrator.Hydration hydration, Agent agent,
                                                          Conversation conv, LlmProvider provider,
-                                                         @Nullable List<ToolDef> tools) {
-        var trimmed = trim(hydration.messages(), agent, conv, provider, tools);
+                                                         @Nullable List<ToolDef> tools, int reservedTokens) {
+        var trimmed = trim(hydration.messages(), agent, conv, provider, tools, reservedTokens);
         return hydration.afterDroppingOldest(trimmed.messages(), trimmed.droppedOldest());
+    }
+
+    /**
+     * What {@code text} costs the prompt, scaled as the trim scales a message. The turn's recalled
+     * memories join the list after compaction and the trim, so both reserve this for them (JF-152).
+     */
+    static int reservedTokens(String text, Agent agent, Conversation conv, LlmProvider provider) {
+        if (text.isEmpty()) return 0;
+        var modelId = modelIdFor(agent, conv, provider);
+        var count = TokenUsageEstimator.estimateText(modelId, text);
+        return adjustedMessageTokens(count.tokens(), count.modelMatched(), providerNameFor(provider), modelId);
     }
 
     /** The trimmed list plus how many oldest messages went, which is what a position re-base needs. */
@@ -295,7 +309,7 @@ public final class ContextWindowManager {
     }
 
     private static Trimmed trim(List<ChatMessage> messages, Agent agent, Conversation conv,
-                                LlmProvider provider, @Nullable List<ToolDef> tools) {
+                                LlmProvider provider, @Nullable List<ToolDef> tools, int reservedTokens) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return new Trimmed(messages, 0);
 
@@ -311,7 +325,7 @@ public final class ContextWindowManager {
         // Reservation is capped at half the window so tiny-context models don't
         // get trimmed to nothing.
         int reservation = reservationFor(contextWindow);
-        int trimTarget = contextWindow - reservation;
+        int trimTarget = contextWindow - reservation - reservedTokens;
 
         if (estimatedTokens <= trimTarget) return new Trimmed(messages, 0);
 
@@ -348,8 +362,8 @@ public final class ContextWindowManager {
         }
         if (dropCount > 0) {
             EventLogger.warn("llm", agent.name, null,
-                    "Trimmed %d messages to fit context window (window=%d, reservation=%d, target=%d, estimated=%d, post-trim=%d)"
-                            .formatted(dropCount, contextWindow, reservation, trimTarget, estimatedTokens, total));
+                    "Trimmed %d messages to fit context window (window=%d, reservation=%d, recall=%d, target=%d, estimated=%d, post-trim=%d)"
+                            .formatted(dropCount, contextWindow, reservation, reservedTokens, trimTarget, estimatedTokens, total));
             // Build result: system message + surviving history (skip dropped range)
             var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
             trimmed.add(messages.getFirst());

@@ -63,10 +63,10 @@ import java.util.stream.Collectors;
 public class SystemPromptAssembler {
 
     /**
-     * Sentinel comment that separates the cacheable prefix from the uncached tail of the
-     * system prompt. Any byte above this line must be identical between two calls with the
-     * same agent state; below it go only the conversation's compaction summary and a
-     * subagent's parent context, which {@code SessionCompactor} appends.
+     * Sentinel comment that separates the cacheable prefix from the tail of the system prompt.
+     * Any byte above this line must be identical between two calls with the same agent state;
+     * below it go only the conversation's compaction summary and a subagent's parent context,
+     * which {@code SessionCompactor} appends. The tail carries no cache breakpoint of its own.
      */
     public static final String CACHE_BOUNDARY_MARKER = "<!-- JCLAW_CACHE_BOUNDARY -->";
 
@@ -113,7 +113,7 @@ public class SystemPromptAssembler {
      * @param totalTokenEstimate   approximate total token count
      * @param cacheBoundaryMarker  the literal marker string the providers use
      *                             to split the cache-stable prefix from the
-     *                             per-turn variable suffix
+     *                             tail after it
      * @param cacheablePrefixChars characters before the cache-boundary marker
      *                             (stable across turns)
      * @param staticPrefixChars    characters before the core-memory boundary — the
@@ -123,7 +123,10 @@ public class SystemPromptAssembler {
      *                             core memories and the prompt splits in two.
      * @param coreMemoryChars      characters between the two markers: the core-memory
      *                             block, cached but re-prefilled when it changes
-     * @param variableSuffixChars  characters after the marker, which no provider caches
+     * @param variableSuffixChars  characters after the marker, which carry no cache breakpoint
+     *                             of their own. In a conversation the compaction summary and
+     *                             a subagent's parent context go here; a breakdown has neither,
+     *                             so it counts only the marker's line end
      * @param recallPlacement      {@link #RECALL_PLACEMENT}: recalled memories are counted
      *                             nowhere here because they are not in the system prompt
      * @param sections             per-section size breakdown (one entry per

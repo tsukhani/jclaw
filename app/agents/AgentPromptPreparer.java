@@ -172,6 +172,9 @@ final class AgentPromptPreparer {
         // rebuilds from originals; trimToContextWindow below stays the net.
         var compressedMessages = CompressionPipeline.compress(
                 ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
+        // Recall joins the list after compaction and the trim, so both count it here (JF-152).
+        int recallTokens = ContextWindowManager.reservedTokens(prepared.recalledMemories(), agent, conversation,
+                prepared.primary());
         // JCLAW-1232: the bearers travel WITH the list. Compaction rebuilds it and the trim drops
         // its head, so the hydration-time positions the media rewrites below address are only
         // valid if each step hands back the bearers that match the list it produced.
@@ -179,9 +182,9 @@ final class AgentPromptPreparer {
                 agent, conversationId, null, prepared.primary(),
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
-                prepared.tools());
+                prepared.tools(), recallTokens);
         var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
-                prepared.primary(), prepared.tools());
+                prepared.primary(), prepared.tools(), recallTokens);
         var finalMessages = hydration.messages();
         // JCLAW-165: when the active model lacks supportsAudio, await
         // any in-flight transcription futures and rewrite the user
@@ -275,15 +278,18 @@ final class AgentPromptPreparer {
         // JCLAW-465: same content-aware compression hook on the streaming path.
         var compressedMessages = CompressionPipeline.compress(
                 ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
+        // Recall joins the list after compaction and the trim, so both count it here (JF-152).
+        int recallTokens = ContextWindowManager.reservedTokens(prepared.assembled().recalledMemories(), agent,
+                conversation, primary);
         // JCLAW-1232: bearers travel with the list through the rebuild and the trim — see the
         // sibling comment in rewriteSyncMedia.
         var compacted = CompactionGate.maybeCompactAndRebuild(
                 agent, conversation.id, prepared.disabledTools(), primary,
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
-                prepared.tools());
+                prepared.tools(), recallTokens);
         var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
-                primary, prepared.tools());
+                primary, prepared.tools(), recallTokens);
         var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(hydration.messages(),
                 hydration.audioBearers(), supportsAudioForStream);
         // JCLAW-215: caption image attachments for non-vision models, mirroring

@@ -1,6 +1,7 @@
 package agents;
 
 import services.EventLogger;
+import tools.CheckListTool;
 
 import java.util.List;
 
@@ -27,7 +28,9 @@ import java.util.List;
  *       {@code applyCacheDirectives}, so the split has already happened.</li>
  *   <li>The section headings are read by the model rather than parsed, so forging one is a
  *       weaker attack — but it is still a claim of stored-fact authority made from inside
- *       the block that tells the model those lines are authoritative.</li>
+ *       the block that tells the model those lines are authoritative. Four: the two memory
+ *       headings, and {@link CurrentTimeInjector#HEADING} and {@link CheckListTool#REMINDER_HEADING},
+ *       the clock and the checklist reminder that share the trailing message with recall.</li>
  * </ul>
  *
  * <p>Deliberately NOT applied to inbound user messages. All four providers send
@@ -50,7 +53,9 @@ public final class PromptFenceScrubber {
     /** Headings the model is told to treat as authoritative section boundaries. */
     private static final List<String> HEADINGS = List.of(
             SystemPromptAssembler.CORE_MEMORY_HEADING,
-            SystemPromptAssembler.RECALL_HEADING);
+            SystemPromptAssembler.RECALL_HEADING,
+            CurrentTimeInjector.HEADING,
+            CheckListTool.REMINDER_HEADING);
 
     /**
      * Remove every fence from {@code text} before it is injected into the prompt.
