@@ -432,6 +432,43 @@ class CompactionGateTest extends UnitTest {
         }
     }
 
+    @Test
+    void theShareIsTakenOfTheWindowLeftAfterTheSystemPromptAndTools() throws Exception {
+        // A 100,000-token window whose system prompt alone is ~40,000: half the window would fire at 50,000 on every
+        // turn, since a summary cannot shrink the prompt below 40,000; the share of the room after it fires at ~70,000.
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "50");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        startLlmServer(simpleResponse("ROOM SUMMARY"));
+        var provider = ownProvider(100_000);
+        try {
+            var conv = ConversationService.create(agent, "web", "user1");
+            for (int i = 0; i < 25; i++) {
+                ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                        "turn " + i, null, null, null);
+            }
+            commitAndReopen();
+            var primary = llm.ProviderRegistry.get(provider);
+            var unit = " alpha bravo charlie delta echo foxtrot golf hotel india juliet";
+            var system = ChatMessage.system(unit.repeat(40_000 / TokenUsageEstimator.estimateText("gate-model", unit).tokens()));
+            var current = new MessageHydrator.Hydration(List.of(system, ChatMessage.user("hi")), List.of(), List.of(), List.of());
+            int fixed = TokenUsageEstimator.estimateChatRequest("gate-model", List.of(system), List.of()).promptTokens();
+            int sent = TokenUsageEstimator.estimateChatRequest("gate-model", current.messages(), List.of()).promptTokens();
+            int threshold = fixed + (100_000 - fixed) / 2;
+            assertTrue(threshold - 1 >= 50_000, "control: one token short of it is already past half the window");
+
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), threshold - sent - 1), "one token short of the share of the room left");
+            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), threshold - sent);
+            assertTrue(((String) rebuilt.messages().getFirst().content())
+                    .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nROOM SUMMARY"), "at the threshold it compacts");
+        } finally {
+            ConfigService.delete(SessionCompactor.TRIGGER_PERCENT_KEY);
+            ConfigService.delete(SessionCompactor.TRIGGER_TOKENS_KEY);
+            removeProvider(provider);
+        }
+    }
+
     // ─── Rows since the floor past the history limit (JF-159) ──────────
 
     @Test

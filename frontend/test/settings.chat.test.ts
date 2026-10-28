@@ -141,7 +141,7 @@ describe('Settings page — Chat context savings', () => {
     baseEndpoints()
     const component = await mountChat()
 
-    expect(label(component, PERCENT)).toBe('Summarize long chats at (% of window)')
+    expect(label(component, PERCENT)).toBe('Summarize at (% of free context)')
     expect(shown(component, PERCENT)).toBe('50')
     expect(label(component, TOKENS)).toBe('…but no later than (tokens)')
     expect(shown(component, TOKENS)).toBe('150000')

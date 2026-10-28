@@ -7,6 +7,7 @@ import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
+import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ConversationService;
@@ -120,7 +121,11 @@ public final class CompactionGate {
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current.messages(), tools);
         int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate)
                 + reservedTokens;
-        if (!snapshot.pastHistoryLimit() && !SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) {
+        var system = current.messages().stream().takeWhile(m -> MessageRole.SYSTEM.value.equals(m.role())).toList();
+        int fixedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(),
+                TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), system, tools));
+        if (!snapshot.pastHistoryLimit()
+                && !SessionCompactor.shouldCompact(estimatedTokens, fixedTokens, snapshot.modelInfo())) {
             return current;
         }
 

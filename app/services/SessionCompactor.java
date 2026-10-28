@@ -31,8 +31,9 @@ import java.util.Optional;
  * truncated.
  *
  * <p>Trigger: whichever comes first of the token trigger, the smaller of {@code chat.compaction.triggerPercent} of
- * the model's window and {@code chat.compaction.triggerTokens} (defaults 50 and 150,000), since quality falls well
- * before today's windows fill (JF-154, JF-159), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The
+ * the model's window left after the system prompt and tools and {@code chat.compaction.triggerTokens} (defaults 50
+ * and 150,000), since quality falls well before today's windows fill (JF-154, JF-159), and
+ * {@code estimatedTokens > (contextWindow - reserveTokens)}. The
  * reserve carves out headroom for the completion itself plus a safety margin, following OpenClaw's approach — tuned
  * via {@code chat.compactionReserveTokens} (default 15000, floor 9000). Separately, the gate compacts a chat whose
  * rows since its floor pass the history limit ({@link #pastHistoryLimit}), which would otherwise drop them unread.
@@ -103,7 +104,7 @@ public final class SessionCompactor {
     /** JF-154: the token trigger's cap; 0 or less turns this half off. */
     public static final String TRIGGER_TOKENS_KEY = "chat.compaction.triggerTokens";
     public static final int DEFAULT_TRIGGER_TOKENS = 150_000;
-    /** JF-159: the token trigger's share of the model's window, in percent; 0 or less turns this half off. */
+    /** JF-159: the token trigger's share, in percent, of the window left after the system prompt and tools; 0 or less turns this half off. */
     public static final String TRIGGER_PERCENT_KEY = "chat.compaction.triggerPercent";
     public static final int DEFAULT_TRIGGER_PERCENT = 50;
     /** JF-159: false leaves a chat past its history limit to the newest-rows load, dropping the oldest unread. */
@@ -117,7 +118,16 @@ public final class SessionCompactor {
      * {@code ContextWindowManager.adjustedPromptTokens} so thresholds compare apples to apples.
      */
     public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo) {
-        return shouldCompact(estimatedTokens, modelInfo, triggerPercent(), triggerTokens());
+        return shouldCompact(estimatedTokens, 0, modelInfo);
+    }
+
+    /**
+     * {@link #shouldCompact(int, ModelInfo)} with the share taken of the window left after {@code fixedTokens}, the
+     * system prompt and tools a summary cannot shrink, so a prompt that small never re-fires the trigger.
+     */
+    public static boolean shouldCompact(int estimatedTokens, int fixedTokens, @Nullable ModelInfo modelInfo) {
+        return estimatedTokens >= triggerThreshold(modelInfo, triggerPercent(), triggerTokens(), fixedTokens)
+                || estimatedTokens > windowBudget(modelInfo);
     }
 
     /** {@link #shouldCompact(int, ModelInfo)} with the token trigger's two halves given; both off leaves the window rule. */
@@ -127,16 +137,25 @@ public final class SessionCompactor {
                 || estimatedTokens > windowBudget(modelInfo);
     }
 
-    /**
-     * The prompt size at which the token trigger fires: the smaller of {@code triggerPercent} of the model's window
-     * and {@code triggerTokens}. A half at 0 or less is off, as is the share when the window is unknown, so a model
-     * with no known window uses the cap alone; {@link Integer#MAX_VALUE}, never reached, when both are off.
-     */
+    /** {@link #triggerThreshold(ModelInfo, int, int, int)} with nothing fixed. */
     public static int triggerThreshold(@Nullable ModelInfo modelInfo, int triggerPercent, int triggerTokens) {
+        return triggerThreshold(modelInfo, triggerPercent, triggerTokens, 0);
+    }
+
+    /**
+     * The prompt size at which the token trigger fires: {@code fixedTokens} plus {@code triggerPercent} of the window
+     * left after them, or {@code triggerTokens} if smaller. A half at 0 or less is off, as is the share when the window
+     * is unknown or the fixed part fills it, leaving the cap alone; {@link Integer#MAX_VALUE}, never reached, when both
+     * are off.
+     */
+    public static int triggerThreshold(@Nullable ModelInfo modelInfo, int triggerPercent, int triggerTokens,
+                                       int fixedTokens) {
         long threshold = Integer.MAX_VALUE;
         int window = modelInfo != null ? modelInfo.contextWindow() : 0;
-        if (triggerPercent > 0 && window > 0) {
-            threshold = Math.max(1, (long) window * Math.min(triggerPercent, 100) / 100);
+        long fixed = Math.max(0, fixedTokens);
+        long room = window - fixed;
+        if (triggerPercent > 0 && window > 0 && room > 0) {
+            threshold = Math.max(1, fixed + room * Math.min(triggerPercent, 100) / 100);
         }
         if (triggerTokens > 0) threshold = Math.min(threshold, triggerTokens);
         return (int) threshold;

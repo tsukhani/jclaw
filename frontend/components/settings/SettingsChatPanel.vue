@@ -163,13 +163,13 @@ async function saveChatField(configKey: string, value: string) {
       <div class="divide-y divide-border">
         <SettingsConfigField
           config-key="chat.compaction.triggerPercent"
-          label="Summarize long chats at (% of window)"
+          label="Summarize at (% of free context)"
           kind="number"
           fallback="50"
           :min="0"
           :max="100"
           label-width="w-80"
-          tip="Summarizes the older part of a chat once a request fills this share of the model's context window. 0 turns this limit off. Default: 50."
+          tip="Summarizes the older part of a chat once its history fills this share of the context left after the agent's instructions and tool descriptions. 0 turns this limit off. Default: 50."
         />
         <SettingsConfigField
           config-key="chat.compaction.triggerTokens"
@@ -232,7 +232,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About compactionReserveTokens"
               content-class="w-72 font-mono"
             >
-              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches the "Summarize long chats at" limits, whichever comes first. Larger reserve = compaction fires sooner.
+              Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed contextWindow minus this reserve, or when it reaches the "Summarize at" or "…but no later than" limit, whichever comes first. Larger reserve = compaction fires sooner.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'compactionReserveTokens'">

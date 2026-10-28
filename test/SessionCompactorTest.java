@@ -165,6 +165,22 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void theShareIsTakenOfTheRoomLeftAfterTheFixedPartAndTheCapStillComesFirstOnALargeWindow() {
+        // main sends ~39,000 tokens of system prompt and tools; the customer agent ~5,000 (measured 2026-10-28).
+        record Case(int window, int fixed, int threshold) {}
+        for (var c : List.of(new Case(64_000, 39_000, 51_500), new Case(128_000, 39_000, 83_500),
+                new Case(256_000, 39_000, 147_500), new Case(1_000_000, 39_000, 150_000),
+                new Case(32_768, 5_000, 18_884))) {
+            var mi = new ModelInfo("m", "M", c.window(), 8192, false);
+            assertEquals(c.threshold(), SessionCompactor.triggerThreshold(mi, 50, 150_000, c.fixed()), () -> c.toString());
+        }
+        var small = new ModelInfo("m", "M", 32_768, 8192, false);
+        assertEquals(150_000, SessionCompactor.triggerThreshold(small, 50, 150_000, 39_000),
+                "a fixed part that fills the window leaves the cap, so the window rule decides");
+        assertEquals(Integer.MAX_VALUE, SessionCompactor.triggerThreshold(small, 50, 0, 39_000));
+    }
+
+    @Test
     void theDefaultsAreHalfTheWindowAndAHundredAndFiftyThousandTokensWithEveryKeyAbsent() {
         var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
         var mid = new ModelInfo("m", "M", 128_000, 8192, false);
