@@ -1009,8 +1009,11 @@ public final class SessionCompactor {
             Where the summaries disagree, the later one wins. Keep each (unverified) mark. Write as much as the summaries need. No preface and no sign-off.
             """;
 
+    // Segments are never rewritten, so an earlier one still lists the next steps of its own time.
     public static final String PRIOR_SUMMARY_HEADER =
-            "[Prior conversation summary — earlier turns were compacted to fit the context window]";
+            "[Prior conversation summary — earlier turns were compacted to fit the context window. Segments run oldest "
+                    + "first; where they differ, a later segment wins, and the messages after the summary win over all of "
+                    + "them: an open item or next step in an earlier segment may already be settled.]";
 
     /**
      * Header used by {@link #appendParentContextToPrompt} when a subagent was

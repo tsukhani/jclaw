@@ -956,6 +956,22 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void theStackTellsTheModelThatLaterSegmentsAndTheMessagesAfterThemWin() {
+        // Each segment keeps the next steps of its own time, so an earlier one can still say to wait for work since done.
+        var conv = ConversationService.create(agent, "web", "user1");
+        var older = saveSummary(conv, "Next steps: wait for scrape job 702.", Instant.now().minusSeconds(600));
+        var newer = saveSummary(conv, "Job 702 finished and its folder was deleted.", Instant.now().minusSeconds(300));
+        commitAndReopen();
+
+        assertEquals("SYS\n\n[Prior conversation summary — earlier turns were compacted to fit the context window. Segments "
+                + "run oldest first; where they differ, a later segment wins, and the messages after the summary win over all "
+                + "of them: an open item or next step in an earlier segment may already be settled.]\n\n"
+                + labelUpTo(older.compactedAt) + "\n\nNext steps: wait for scrape job 702.\n\n"
+                + labelUpTo(newer.compactedAt) + "\n\nJob 702 finished and its folder was deleted.",
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
+    @Test
     void aMergedSegmentStaysOutOfThePrompt() {
         var conv = ConversationService.create(agent, "web", "user1");
         var merged = saveSummary(conv, "MERGED AWAY", Instant.now().minusSeconds(600));
