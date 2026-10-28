@@ -1,6 +1,6 @@
 import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
 import { fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages'
-import { effectiveToolName, hydrateToolCalls } from '~/utils/tool-calls'
+import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
 import { useEventBus } from '~/composables/useEventBus'
@@ -224,7 +224,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
       // When the message has no createdAt (optimistic), treat as "now" so
       // we don't skip a just-issued create that races the timestamp write.
       if (Number.isFinite(messageAge) && messageAge < cutoff) continue
-      if (m.toolCalls?.some(tc => effectiveToolName(tc) === TASK_MANAGER_TOOL_NAME)) return true
+      if (m.toolCalls?.some(tc => tc.name === TASK_MANAGER_TOOL_NAME)) return true
     }
     return false
   }

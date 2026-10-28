@@ -155,20 +155,12 @@ async function saveChatField(configKey: string, value: string) {
       />
     </div>
 
-    <!-- Fallbacks are the backend's shipped values: ToolRegistry, SessionCompactor, ToolResultPruner. -->
+    <!-- Fallbacks are the backend's shipped values: SessionCompactor, ToolResultPruner. -->
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 text-xs text-fg-muted border-b border-border">
         <span class="font-medium">Context savings</span>
       </div>
       <div class="divide-y divide-border">
-        <SettingsConfigField
-          config-key="chat.toolDeferral"
-          label="Hide rarely used tools"
-          kind="boolean"
-          fallback="false"
-          label-width="w-72"
-          tip="Sends full instructions only for everyday tools and lists the rest behind one tool, so each request is smaller. Applies to agents whose tool instructions pass about 10,000 tokens. Recommended on for agents with many tools."
-        />
         <SettingsConfigField
           config-key="chat.compaction.triggerTokens"
           label="Summarize long chats at (tokens)"

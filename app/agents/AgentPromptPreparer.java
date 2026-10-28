@@ -306,11 +306,11 @@ final class AgentPromptPreparer {
 
     /**
      * The tool definitions a turn on {@code conv} sends: native tools and each MCP server's handle, inside the
-     * conversation's fence, cold ones deferred, the operator-only ones withheld unless {@code ownerReadsAlone}.
+     * conversation's fence, the operator-only ones withheld unless {@code ownerReadsAlone}.
      */
     static List<ToolDef> turnTools(Agent agent, Conversation conv, boolean ownerReadsAlone) {
-        return ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
-                ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name)), ownerReadsAlone);
+        return ToolRegistry.forTurn(TaskToolPolicy.restrictSubagent(
+                ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name), ownerReadsAlone);
     }
 
     /**

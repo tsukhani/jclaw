@@ -1,4 +1,3 @@
-import agents.ToolRegistry;
 import agents.ToolResultPruner;
 import channels.TelegramSettings;
 import llm.LlmResilience;
@@ -220,17 +219,6 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     void aNegativeTokenCoalesceSizeIsRefused() {
         assertRefused("chat.stream.token_coalesce_chars must be a whole number of characters; 0 sends every "
                 + "token at once.", utils.TokenCoalescer.CONFIG_KEY, "-1");
-    }
-
-    @Test
-    void toolHidingTakesOnlyTrueOrFalse() {
-        var expected = "chat.toolDeferral must be 'true' or 'false'.";
-        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "yes");
-        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "1");
-        assertRefused(expected, ToolRegistry.TOOL_DEFERRAL_KEY, "");
-        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, "true");
-        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, "false");
-        assertAccepted(ToolRegistry.TOOL_DEFERRAL_KEY, " TRUE ");
     }
 
     @Test

@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Per-LLM-round tool-call orchestrators. Extracted from
@@ -92,7 +93,8 @@ public final class ToolCallLoopRunner {
      * hold no JPA transaction, and recomputing per-agent config there throws.
      */
     private static Set<String> offeredToolNames(@Nullable List<ToolDef> tools) {
-        return ToolRegistry.offeredNames(tools);
+        if (tools == null) return Set.of();
+        return tools.stream().map(t -> t.function().name()).collect(Collectors.toSet());
     }
 
     /**

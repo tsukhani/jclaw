@@ -724,11 +724,10 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
 | `maxContextMessages`   | 1000    | How many recent messages get sent with each LLM request. Each tool call and each tool result counts as one message. Older messages are dropped to stay in the context window. |
 
-The **Context savings** box holds three ways to make each request smaller. All three are off at first, so an install keeps working as it did until you switch one on:
+The **Context savings** box holds two ways to make each request smaller. Both are off at first, so an install keeps working as it did until you switch one on:
 
 | Setting | Key | Default | Meaning |
 |---------|-----|---------|---------|
-| **Hide rarely used tools** | `chat.toolDeferral` | off | Sends the full instructions only for everyday tools, and lists the rest behind one tool, `tool_invoke`, that the agent uses to read their instructions or call them. It changes only agents whose tool instructions come to more than about 10,000 tokens. Recommended on for agents with many tools. |
 | **Summarize long chats at (tokens)** | `chat.compaction.triggerTokens` | 0 | Auto-compaction also triggers when the next prompt reaches this many tokens, however large the model's context window is, because answers get worse long before a large window fills. Whichever of this and `compactionReserveTokens` comes first applies. 0 keeps only the `compactionReserveTokens` rule. Recommended: 150000. |
 | **Trim tool results every (turns)** | `chat.pruneToolResultsEveryTurns` | 1 | Earlier results are stubbed in steps of this many user turns, so the history the provider has cached stays the same between steps. 1 stubs them as each turn passes, and so does a chat that has reached `maxContextMessages`. Recommended: 5, once your provider's cache holds from one turn to the next. |
 

@@ -98,7 +98,7 @@ describe('Settings page — Chat', () => {
   })
 })
 
-/** The three context savings ship off (JF-153, JF-154, JF-155); each row's fallback is the backend's shipped value. */
+/** The two context savings ship off (JF-154, JF-155); each row's fallback is the backend's shipped value. */
 describe('Settings page — Chat context savings', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -120,9 +120,6 @@ describe('Settings page — Chat context savings', () => {
     baseEndpoints()
     const component = await mountChat()
 
-    expect(label(component, 'chat.toolDeferral')).toBe('Hide rarely used tools')
-    expect(row(component, 'chat.toolDeferral').find('button[aria-pressed]').attributes('aria-pressed')).toBe('false')
-    expect(row(component, 'chat.toolDeferral').find('span.ml-auto').text()).toBe('off')
     expect(label(component, 'chat.compaction.triggerTokens')).toBe('Summarize long chats at (tokens)')
     expect(shown(component, 'chat.compaction.triggerTokens')).toBe('0')
     expect(label(component, 'chat.pruneToolResultsEveryTurns')).toBe('Trim tool results every (turns)')
@@ -131,36 +128,13 @@ describe('Settings page — Chat context savings', () => {
 
   it('shows the stored values when the keys are set', async () => {
     baseEndpoints([
-      { key: 'chat.toolDeferral', value: 'true' },
       { key: 'chat.compaction.triggerTokens', value: '150000' },
       { key: 'chat.pruneToolResultsEveryTurns', value: '5' },
     ])
     const component = await mountChat()
 
-    expect(row(component, 'chat.toolDeferral').find('button[aria-pressed]').attributes('aria-pressed')).toBe('true')
-    expect(row(component, 'chat.toolDeferral').find('span.ml-auto').text()).toBe('on')
     expect(shown(component, 'chat.compaction.triggerTokens')).toBe('150000')
     expect(shown(component, 'chat.pruneToolResultsEveryTurns')).toBe('5')
-  })
-
-  it('turns hiding rarely used tools on with one click', async () => {
-    baseEndpoints()
-    const component = await mountChat()
-
-    await row(component, 'chat.toolDeferral').find('button[aria-pressed]').trigger('click')
-    await flushPromises()
-
-    expect(posted).toEqual([{ key: 'chat.toolDeferral', value: 'true' }])
-  })
-
-  it('turns hiding rarely used tools off again when it is on', async () => {
-    baseEndpoints([{ key: 'chat.toolDeferral', value: 'true' }])
-    const component = await mountChat()
-
-    await row(component, 'chat.toolDeferral').find('button[aria-pressed]').trigger('click')
-    await flushPromises()
-
-    expect(posted).toEqual([{ key: 'chat.toolDeferral', value: 'false' }])
   })
 
   it('saves the summarize threshold typed into its editor, which starts from 0 and goes no lower', async () => {

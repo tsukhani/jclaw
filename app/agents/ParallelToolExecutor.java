@@ -82,10 +82,8 @@ public final class ParallelToolExecutor {
                                                @Nullable AtomicBoolean turnCancel,
                                                @Nullable Consumer<String> onStatus,
                                                @Nullable Set<String> offeredTools) {
-        // JF-153: a tool_invoke run is the named tool's own call from here on: offered, gated, logged and run as it.
-        var invoked = ToolRegistry.unwrapInvocation(toolCall.function().name(), toolCall.function().arguments(), offeredTools);
-        var rawName = invoked != null ? invoked.name() : toolCall.function().name();
-        var rawArgs = invoked != null ? invoked.args() : toolCall.function().arguments();
+        var rawName = toolCall.function().name();
+        var rawArgs = toolCall.function().arguments();
         // JCLAW-281: when the model invokes a server-level mcp_<server> handle
         // with {tool, args}, expand the log line to the underlying action
         // form so operators see mcp_jira-confluence_create_issue <args> in
@@ -111,8 +109,8 @@ public final class ParallelToolExecutor {
         }
         // JCLAW-382: gate sensitive/irreversible actions through
         // DangerousActionGate. No-op for non-dangerous tools — it returns
-        // PROCEED before any I/O. Uses the registered name, not the expanded
-        // display one, so the gate's dangerous() lookup matches the registered tool.
+        // PROCEED before any I/O. Uses the raw (wire-format) name so the
+        // gate's dangerous() lookup matches the registered tool.
         if (DangerousActionGate.guard(agent, conversationId, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
             return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
         }
@@ -267,10 +265,8 @@ public final class ParallelToolExecutor {
         var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
         var safeCalls = new ArrayList<Integer>();
         for (int i = 0; i < toolCalls.size(); i++) {
-            var call = toolCalls.get(i).function();
-            // A subagent_spawn run through tool_invoke still queues behind or ahead of a direct subagent_yield.
-            var invoked = ToolRegistry.unwrapInvocation(call.name(), call.arguments(), offeredTools);
-            var groupKey = ToolRegistry.serializationGroupFor(invoked != null ? invoked.name() : call.name());
+            var name = toolCalls.get(i).function().name();
+            var groupKey = ToolRegistry.serializationGroupFor(name);
             if (groupKey == null) {
                 safeCalls.add(i);
             } else {
