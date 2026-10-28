@@ -140,6 +140,11 @@ public final class HarnessSandbox {
                 DangerousActionGate.effectiveOrigin(ToolContext.conversationId()));
     }
 
+    /** Whether {@link #wrap(List, File, List, String, boolean)} confines a run under {@code configKey} with this origin trust. */
+    public static boolean confines(String configKey, boolean trustedOrigin) {
+        return appliesTo(configKey, trustedOrigin);
+    }
+
     /** Whether {@code configKey}'s {@link #scope(String)} confines a run with this origin trust. */
     private static boolean appliesTo(String configKey, boolean trustedOrigin) {
         return switch (scope(configKey)) {

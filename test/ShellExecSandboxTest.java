@@ -169,6 +169,36 @@ class ShellExecSandboxTest extends UnitTest {
                 "the file must exist on disk, not just echo back; got: " + result);
     }
 
+    /** uv, npm and pip keep caches under the home folder, which a confined run cannot write; its caches go to its workspace. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void aConfinedRunKeepsToolCachesInItsWorkspace() {
+        ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+        var cache = AgentService.workspacePath(AGENT).toAbsolutePath().normalize().resolve(".cache");
+        var result = JsonParser.parseString(tool.execute("""
+                {"command": "echo \\"$XDG_CACHE_HOME|$UV_CACHE_DIR|$npm_config_cache|$PIP_CACHE_DIR\\"; mkdir -p \\"$UV_CACHE_DIR\\" && echo cached > \\"$UV_CACHE_DIR/probe\\""}
+                """, agent)).getAsJsonObject();
+
+        assertEquals("%s|%s|%s|%s".formatted(cache, cache.resolve("uv"), cache.resolve("npm"), cache.resolve("pip")),
+                result.get("output").getAsString(), result.toString());
+        assertTrue(Files.exists(cache.resolve("uv").resolve("probe")),
+                "a write to the uv cache must land in the workspace; got: " + result);
+    }
+
+    /** An unconfined run keeps the host's cache locations, so it shares the caches it always used. */
+    @Test
+    void anUnconfinedRunKeepsTheHostCacheLocations() {
+        var result = JsonParser.parseString(tool.execute("""
+                {"command": "echo \\"$XDG_CACHE_HOME|$UV_CACHE_DIR|$npm_config_cache|$PIP_CACHE_DIR\\""}
+                """, agent)).getAsJsonObject();
+
+        var host = System.getenv();
+        assertEquals("%s|%s|%s|%s".formatted(host.getOrDefault("XDG_CACHE_HOME", ""),
+                        host.getOrDefault("UV_CACHE_DIR", ""), host.getOrDefault("npm_config_cache", ""),
+                        host.getOrDefault("PIP_CACHE_DIR", "")),
+                result.get("output").getAsString(), result.toString());
+    }
+
     /**
      * JCLAW-1452 AC1: a confined {@code exec} cannot read the app root's data/, certs/ or logs/ —
      * the real directories, not the temp tree. Sentinels of the test's own stand in for the H2

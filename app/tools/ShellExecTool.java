@@ -675,15 +675,33 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // whatever they did with their own output.
         var script = "exec 3>&1 " + BackgroundProcesses.HELD_FD + "<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV
                 + "\" 2>&1\n" + command;
+        var trustedOrigin = HarnessSandbox.nativeToolTrustedOrigin();
         var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), workspace.toFile(),
-                List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
+                List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
         var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();
         pb.environment().putAll(env);
+        if (HarnessSandbox.confines(HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin)) {
+            pb.environment().putAll(confinedCaches(workspace));
+        }
         pb.environment().put(OUTPUT_ENV, output.toString());
         return pb.start();
+    }
+
+    /**
+     * Package caches for a confined run. The sandbox refuses writes to {@code ~/.cache} and
+     * {@code ~/.npm}, and bwrap gives {@code /tmp} a fresh tmpfs per run, so the workspace is the
+     * one writable place a cache outlives the run.
+     */
+    private static Map<String, String> confinedCaches(Path workspace) {
+        var cache = workspace.resolve(".cache");
+        return Map.of(
+                "XDG_CACHE_HOME", cache.toString(),
+                "UV_CACHE_DIR", cache.resolve("uv").toString(),
+                "npm_config_cache", cache.resolve("npm").toString(),
+                "PIP_CACHE_DIR", cache.resolve("pip").toString());
     }
 
     /**
