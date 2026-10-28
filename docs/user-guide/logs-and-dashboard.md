@@ -37,8 +37,6 @@ When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, an
 
 A subscription costs $0.00 per token, so its dollar figures do not show how much you use it. To see how many requests your Ollama Cloud account made, open **Cloud usage** on the Ollama Cloud card in [Settings → LLM Providers](/settings?section=providers).
 
-At the top of the panel, a **Cache reads** line shows how much of the prompt the provider read from its cache instead of processing it again. It covers the turns in view: the window, agent and channel filters change it, and the provider chips do not. **All calls** counts every model call in those turns. **First call of each turn** counts only the first one. A turn can make several calls, for example when it uses tools, and each call can reuse what the call before it cached. Only the first call can reuse what the previous turn left in the cache, so this figure shows how well the cache carries over from one turn to the next. Older turns that did not record their first call are left out of it. A dash (—) means there is nothing to measure yet.
-
 ### Circuit Breakers
 
 The panel has three groups, in order: **LLM providers**, then **MCP servers**, then **Decision providers**. It shows one row per breaker that is not serving. Each row shows the state the breaker is in, why it is there, and how many of its recent calls failed. Open breakers sit above probing ones. A breaker that is serving is not listed here. It shows beside what it guards: on the provider's card in [Settings → LLM Providers](/settings?section=providers), beneath the server on the [MCP Servers](/mcp-servers) page, and on JEV's card in [Settings → Decision Providers](/settings?section=decision-providers). Each name here links to that place. The panel is absent while every breaker is serving. Breakers are created the first time a subsystem is called.
@@ -98,12 +96,13 @@ Watch **LLM calls / turn** when you change agent configuration. It tells you whe
 
 ### Chat Compression
 
-This panel shows token savings from [Content Compression](/guide#agents) of large tool results. It has the same **7d / 30d / All** window (default 30d), agent select, and channel select as Chat Performance. Four tiles head the panel:
+This panel shows token savings from [Content Compression](/guide#agents) of large tool results. It has the same **7d / 30d / All** window (default 30d), agent select, and channel select as Chat Performance. The selects list every agent and channel that ran a turn or compressed a result in the window. Five tiles head the panel:
 
 - **Tokens saved**: tokens before minus after, over the window.
 - **Reduction**: the saved share, with the before → after totals.
 - **CCR hit rate**: how many `ccr_retrieve` calls found the original they asked for. Retrievals carry an agent but no channel, so this tile follows the agent select and ignores the channel select.
 - **Inflation guards**: compressions discarded because the result was not fewer tokens than the original, beside the count of compressions kept.
+- **First-call cache**: how much of the prompt the provider read from its cache instead of processing it again, counting only the first model call of each turn. The share over all calls is beneath it. A turn can make several calls, for example when it uses tools, and each call can reuse what the call before it cached. Only the first call can reuse what the previous turn left in the cache, so this figure shows how well the cache carries over from one turn to the next. It is measured from the turns in the window, not from compressions, so it shows for an agent that never compresses, and the trash icon does not clear it. Older turns that did not record their first call are left out. A dash (—) means there is nothing to measure yet, and **no turns** means no turn matches the filters.
 
 Below them are **Saved by content type**, **Algorithm usage**, and **Fetch-backs by tool**. Fetch-backs by tool counts the `ccr_retrieve` calls that found their original, by the tool that first returned it, so a tool near the top is one whose results the agent often needs again in full. A tool shown as — is one that could not be named. Like the CCR hit rate tile, this list follows the agent select and ignores the channel select. The table and chart icons in the header switch all three between bar charts (the default) and tables. The table columns are *Type / Saved / Reduction*, *Algorithm / Events / Saved*, and *Tool / Fetch-backs*. Warnings appear at the foot when inflation guards exceed 5% of attempts, when the CCR hit rate falls below 50%, or when a content type keeps under 10% of its tokens while the hit rate is below 90%.
 

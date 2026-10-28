@@ -5,9 +5,11 @@
  * aggregation + agent/channel filtering happens client-side so filter switches
  * are instant. Table/chart view toggle for the by-type, per-algorithm and
  * per-tool fetch-back breakdowns, and a reset (trash) that clears the recorded metrics.
+ * The first-call cache tile reads the turn rows of GET /api/metrics/cost under the same filters.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
+import { cacheShare, computeFleetCost, formatShare, type FleetCostRow } from '~/utils/usage-cost'
 
 const props = defineProps<{ agents: Agent[] | null | undefined }>()
 
@@ -49,7 +51,11 @@ const { data, refresh, status } = useFetch<CompressionResponse>('/api/metrics/co
   query: { since },
   default: () => ({ since: '', rows: [] }),
 })
-defineExpose({ refresh })
+const { data: costData, refresh: refreshCost } = useFetch<{ since: string, rows: FleetCostRow[] }>('/api/metrics/cost', {
+  query: { since },
+  default: () => ({ since: '', rows: [] }),
+})
+defineExpose({ refresh: () => Promise.all([refresh(), refreshCost()]) })
 
 // Reserve the height this panel had last visit so the tiles landing don't move
 // the page. 349px is the measured natural body height on a populated install.
@@ -57,15 +63,18 @@ const { reservedHeight: bodyHeight, el: bodyEl }
   = useStableHeight('compression', 349, computed(() => status.value === 'success' || status.value === 'error'))
 
 const rows = computed<Row[]>(() => data.value?.rows ?? [])
+const costRows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
 
 const agentNameById = computed(() => {
   const m = new Map<string, string>()
   for (const a of props.agents ?? []) m.set(String(a.id), a.name)
   return m
 })
+// Built from both row sets: an agent that never compresses still has a first-call cache share.
 const availableAgents = computed(() => {
   const ids = new Set<string>()
   for (const r of rows.value) if (r.agentId) ids.add(r.agentId)
+  for (const r of costRows.value) ids.add(String(r.agentId))
   return [...ids]
     .map(id => ({ id, name: agentNameById.value.get(id) ?? `agent #${id}` }))
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -73,6 +82,7 @@ const availableAgents = computed(() => {
 const availableChannels = computed(() => {
   const s = new Set<string>()
   for (const r of rows.value) if (r.channel) s.add(r.channel)
+  for (const r of costRows.value) s.add(r.channelType)
   return [...s].sort()
 })
 
@@ -164,6 +174,19 @@ const agg = computed(() => {
     tokensBefore, tokensAfter, tokensSaved, reduction, events,
     byType, byAlgo, byTool, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
     hasData: comp.length > 0 || ccrTotal > 0 || guards > 0,
+  }
+})
+
+// JF-151: only a turn's first call can reuse what the turn before it cached, so its share is the headline.
+const cache = computed(() => {
+  const b = computeFleetCost(costRows.value, {
+    agentId: selectedAgentId.value === null ? null : Number(selectedAgentId.value),
+    channelType: selectedChannel.value,
+  })
+  return {
+    turns: b.turnCount,
+    firstCall: cacheShare(b.firstCached, b.firstPrompt),
+    allCalls: cacheShare(b.cached, b.prompt),
   }
 })
 
@@ -300,7 +323,7 @@ function fmt(n: number) {
       :style="{ minHeight: bodyHeight }"
     >
       <div
-        v-if="!agg.hasData"
+        v-if="!agg.hasData && !cache.turns"
         class="px-4 py-4 text-xs text-fg-muted"
       >
         No compression activity in this window.
@@ -310,7 +333,7 @@ function fmt(n: number) {
         class="p-4 space-y-5"
       >
         <!-- KPI tiles: every scalar metric in one scannable row. -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
           <div class="bg-surface border border-border p-3">
             <div class="text-[11px] uppercase tracking-wide text-fg-muted">
               Tokens saved
@@ -353,6 +376,23 @@ function fmt(n: number) {
             </div>
             <div class="mt-1.5 text-xs text-fg-muted tabular-nums">
               {{ agg.events }} compressions
+            </div>
+          </div>
+          <div class="bg-surface border border-border p-3">
+            <div class="text-[11px] uppercase tracking-wide text-fg-muted">
+              First-call cache
+            </div>
+            <div
+              class="mt-1 text-2xl font-semibold leading-none tabular-nums text-fg-strong"
+              data-testid="cache-share-first-call"
+            >
+              {{ formatShare(cache.firstCall) }}
+            </div>
+            <div
+              class="mt-1.5 text-xs text-fg-muted tabular-nums"
+              data-testid="cache-share-all"
+            >
+              {{ cache.turns ? formatShare(cache.allCalls) + ' over all calls' : 'no turns' }}
             </div>
           </div>
         </div>

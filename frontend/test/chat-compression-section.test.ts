@@ -24,8 +24,70 @@ function payload() {
   }
 }
 
+function costUsage(fields: Record<string, number>) {
+  return JSON.stringify({
+    completion: 20, total: 0, reasoning: 0, durationMs: 100, promptPrice: 0.5, completionPrice: 1,
+    modelId: 'gpt-4.1', modelProvider: 'openai', ...fields,
+  })
+}
+
 describe('ChatCompressionSection', () => {
-  beforeEach(() => clearNuxtData())
+  beforeEach(() => {
+    clearNuxtData()
+    registerEndpoint('/api/metrics/cost', () => ({ since: '', rows: [] }))
+  })
+
+  it('shows the first-call cache share over the all-calls share, leaving out rows saved without it (JF-151)', async () => {
+    registerEndpoint('/api/metrics/compression', () => payload())
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [
+        // Three calls; the first read 250 of its 1,000 prompt tokens from the cache.
+        { timestamp: '2026-06-01T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: costUsage({ prompt: 4000, cached: 3000, firstPrompt: 1000, firstCached: 250 }) },
+        // One call, so its first call is the whole turn.
+        { timestamp: '2026-06-01T13:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: costUsage({ prompt: 1000, cached: 50, firstPrompt: 1000, firstCached: 50 }) },
+        // Saved before turns recorded their first call; agent 2 never compressed anything.
+        { timestamp: '2026-06-01T14:00:00Z', agentId: 2, channelType: 'telegram',
+          usageJson: costUsage({ prompt: 2000, cached: 1800 }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+    const tile = () => [
+      wrapper.find('[data-testid="cache-share-first-call"]').text(),
+      wrapper.find('[data-testid="cache-share-all"]').text(),
+    ]
+
+    // All calls: 4,850 of 7,000. First call: 300 of 2,000, with the older row left out.
+    expect(tile()).toEqual(['15%', '69% over all calls'])
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('2')
+    expect(tile()).toEqual(['—', '90% over all calls'])
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
+    expect(tile()).toEqual(['15%', '61% over all calls'])
+
+    // Agent 1 compressed on telegram but ran no turn there.
+    await wrapper.find('select[aria-label="Filter by channel"]').setValue('telegram')
+    expect(tile()).toEqual(['—', 'no turns'])
+  })
+
+  it('shows the tiles for a window with turns but no compression', async () => {
+    registerEndpoint('/api/metrics/compression', () => ({ since: '', rows: [] }))
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [{ timestamp: '2026-06-01T12:00:00Z', agentId: 1, channelType: 'web',
+        usageJson: costUsage({ prompt: 1000, cached: 400, firstPrompt: 1000, firstCached: 400 }) }],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('No compression activity')
+    expect(wrapper.find('[data-testid="cache-share-first-call"]').text()).toBe('40%')
+    expect(wrapper.find('[data-testid="cache-share-all"]').text()).toBe('40% over all calls')
+  })
 
   it('aggregates rows into breakdowns, CCR rate and alerts', async () => {
     registerEndpoint('/api/metrics/compression', () => payload())
