@@ -605,6 +605,11 @@ public class ConversationService {
 
     /** Global history-limit fallback, also the default for the per-type key. */
     static final String KEY_GLOBAL_MAX = "chat.maxContextMessages";
+    /**
+     * Rows loaded when {@code chat.maxContextMessages} is unset, and what a fresh install seeds.
+     * Each tool call and tool result is a row, so the cap must hold many busy turns.
+     */
+    public static final int DEFAULT_HISTORY_LIMIT = 1000;
     /** Per-type override for GROUP-chat conversations (JCLAW-387 B4). */
     static final String KEY_GROUP_LIMIT = "groupChat.historyLimit";
     /**
@@ -624,7 +629,7 @@ public class ConversationService {
     /**
      * Resolve the effective history-load cap for {@code conversation} (JCLAW-387 B4).
      *
-     * <p>The global {@code chat.maxContextMessages} (default 50) is the baseline.
+     * <p>The global {@code chat.maxContextMessages} (default {@value #DEFAULT_HISTORY_LIMIT}) is the baseline.
      * A GROUP-chat conversation may override it via {@code groupChat.historyLimit};
      * a DM / private conversation via {@code dmHistoryLimit}. Each per-type key
      * defaults to the resolved global value when its own key isn't set.
@@ -655,7 +660,7 @@ public class ConversationService {
      * @return the effective max number of recent messages to load
      */
     public static int effectiveHistoryLimit(Conversation conversation) {
-        var globalMax = ConfigService.getInt(KEY_GLOBAL_MAX, 50);
+        var globalMax = ConfigService.getInt(KEY_GLOBAL_MAX, DEFAULT_HISTORY_LIMIT);
         var perTypeKey = perTypeHistoryKey(conversation);
         if (perTypeKey == null) return globalMax;
         return ConfigService.getInt(perTypeKey, globalMax);

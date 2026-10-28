@@ -722,7 +722,7 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | Key                    | Default | Meaning                                                                                          |
 |------------------------|---------|--------------------------------------------------------------------------------------------------|
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
-| `maxContextMessages`   | 50      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
+| `maxContextMessages`   | 1000    | How many recent messages get sent with each LLM request. Each tool call and each tool result counts as one message. Older messages are dropped to stay in the context window. |
 
 An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys and `compression.firstViewMaxTokens` below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`, `chat.compression.firstViewMaxTokens`) have no row in the panel; set them with `POST /api/config`.
 

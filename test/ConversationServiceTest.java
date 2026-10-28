@@ -1,3 +1,4 @@
+import jobs.DefaultConfigJob;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -13,9 +14,14 @@ import services.AgentService;
 import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
+import utils.AppClock;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Service-layer tests for {@link ConversationService}: CRUD, message-append
@@ -350,11 +356,37 @@ class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    void effectiveHistoryLimitDefaultsToFiftyWhenNothingSet() {
+    void effectiveHistoryLimitDefaultsToOneThousandWhenNothingSet() {
         var agent = newAgent("conv-hist-default");
         var conv = ConversationService.create(agent, "web", "u");
-        assertEquals(50, ConversationService.effectiveHistoryLimit(conv),
-                "with no keys set, the global default (50) applies");
+        assertEquals(1000, ConversationService.effectiveHistoryLimit(conv),
+                "with no keys set, the global default (1000) applies");
+    }
+
+    @Test
+    void thePerTypeHistoryLimitsFollowTheGlobalDefaultWhenNothingIsSet() {
+        var agent = newAgent("conv-hist-per-type-default");
+        var dm = ConversationService.create(agent, "telegram", "42", "private");
+        var group = ConversationService.create(agent, "telegram", "-100", "group");
+        var supergroup = ConversationService.create(agent, "telegram", "-200", "supergroup");
+        var topic = ConversationService.create(agent, "telegram", "-300:topic:1");
+        assertEquals(1000, ConversationService.effectiveHistoryLimit(dm), "dmHistoryLimit unset");
+        assertEquals(1000, ConversationService.effectiveHistoryLimit(group), "groupChat.historyLimit unset");
+        assertEquals(1000, ConversationService.effectiveHistoryLimit(supergroup), "groupChat.historyLimit unset");
+        assertEquals(1000, ConversationService.effectiveHistoryLimit(topic), "groupChat.historyLimit unset");
+    }
+
+    @Test
+    void aFreshInstallSeedsAThousandAndAnInstallThatHasTheKeyKeepsIt() throws Exception {
+        var seed = DefaultConfigJob.class.getDeclaredMethod("seedHistoryLimit");
+        seed.setAccessible(true);
+
+        seed.invoke(new DefaultConfigJob());
+        assertEquals("1000", ConfigService.get("chat.maxContextMessages"));
+
+        ConfigService.set("chat.maxContextMessages", "50");
+        seed.invoke(new DefaultConfigJob());
+        assertEquals("50", ConfigService.get("chat.maxContextMessages"));
     }
 
     @Test
@@ -493,6 +525,107 @@ class ConversationServiceTest extends UnitTest {
                 "group history limit (2) must cap loadRecentMessages to the 2 most recent");
         assertEquals("two", loaded.get(0).content);
         assertEquals("three", loaded.get(1).content);
+    }
+
+    @Test
+    void aFreshConfigurationLoadsTheNewestThousandRowsOfALongConversation() {
+        var conv = ConversationService.create(newAgent("conv-load-1200"), "web", "u");
+        appendRows(conv, 1200);
+
+        var loaded = ConversationService.loadRecentMessages(conv);
+
+        assertEquals(1000, loaded.size());
+        assertEquals("row 201", loaded.getFirst().content, "row 200 is the 1,001st newest and stays out");
+        assertEquals("row 1200", loaded.getLast().content);
+    }
+
+    @Test
+    void aConversationOfExactlyTheDefaultLoadsEveryRowWithItsAttachments() {
+        var conv = ConversationService.create(newAgent("conv-load-1000"), "web", "u");
+        appendRows(conv, 1000);
+        attach(conv, "row 1", "first.png");
+        attach(conv, "row 1000", "last.png");
+        JPA.em().flush();
+        JPA.em().clear();
+
+        var loaded = ConversationService.loadRecentMessages(ConversationService.findById(conv.id));
+
+        assertEquals(1000, loaded.size());
+        assertEquals("row 1", loaded.getFirst().content);
+        assertEquals("row 1000", loaded.getLast().content);
+        // One batch spans the whole window, so every bag in it must still load.
+        assertEquals(List.of("first.png"), filenames(loaded.getFirst()));
+        assertEquals(List.of("last.png"), filenames(loaded.getLast()));
+        assertEquals(List.of(), filenames(loaded.get(1)));
+    }
+
+    @Test
+    void anExplicitLowerHistoryLimitStillCaps() {
+        var conv = ConversationService.create(newAgent("conv-load-explicit"), "web", "u");
+        appendRows(conv, 100);
+        ConfigService.set("chat.maxContextMessages", "40");
+
+        var loaded = ConversationService.loadRecentMessages(conv);
+
+        assertEquals(40, loaded.size());
+        assertEquals("row 61", loaded.getFirst().content);
+        assertEquals("row 100", loaded.getLast().content);
+    }
+
+    /** Persists tool rows {@code "row 1"} to {@code "row <count>"}, one millisecond apart. */
+    private static void appendRows(Conversation conv, int count) {
+        AppClock.runWith(new TickingClock(Instant.parse("2026-01-01T00:00:00Z")), () -> {
+            for (int i = 1; i <= count; i++) {
+                var msg = new Message();
+                msg.conversation = conv;
+                msg.role = MessageRole.TOOL.value;
+                msg.content = "row " + i;
+                JPA.em().persist(msg);
+            }
+            JPA.em().flush();
+        });
+    }
+
+    private static void attach(Conversation conv, String content, String filename) {
+        var att = new MessageAttachment();
+        att.message = Message.find("conversation.id = ?1 AND content = ?2", conv.id, content).first();
+        att.uuid = UUID.randomUUID().toString();
+        att.originalFilename = filename;
+        att.storagePath = "test-agent/attachments/" + conv.id + "/" + filename;
+        att.mimeType = "image/png";
+        att.sizeBytes = 1024;
+        att.kind = MessageAttachment.KIND_IMAGE;
+        att.save();
+    }
+
+    private static List<String> filenames(Message msg) {
+        return msg.attachments.stream().map(a -> a.originalFilename).toList();
+    }
+
+    /** Advances one millisecond on every read, so each persisted row gets its own createdAt. */
+    private static final class TickingClock extends Clock {
+        private Instant next;
+
+        TickingClock(Instant start) {
+            next = start;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            var now = next;
+            next = next.plusMillis(1);
+            return now;
+        }
     }
 
     // =====================

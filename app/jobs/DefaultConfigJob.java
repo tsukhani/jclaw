@@ -9,6 +9,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.ConfigService;
+import services.ConversationService;
 import services.EventLogger;
 import services.FetchSidecarManager;
 import services.InternalApiTokenService;
@@ -273,7 +274,7 @@ public class DefaultConfigJob extends Job<Void> {
         // story asks for, empty until a check is shown to misfire on some tool.
         seedIfAbsent(ToolResultVerifier.CFG_ENABLED, "true");
         seedIfAbsent(ToolResultVerifier.CFG_SKIP_TOOLS, "");
-        seedIfAbsent("chat.maxContextMessages", "50");
+        seedHistoryLimit();
 
         renameMovedKeys();
 
@@ -371,6 +372,10 @@ public class DefaultConfigJob extends Job<Void> {
                 String.valueOf(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS));
         seedIfAbsent(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY,
                 String.valueOf(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS));
+    }
+
+    private void seedHistoryLimit() {
+        seedIfAbsent("chat.maxContextMessages", String.valueOf(ConversationService.DEFAULT_HISTORY_LIMIT));
     }
 
     private void seedDefaultAgent() {

@@ -5,7 +5,7 @@ const { configValue, saveField } = useSettingsConfig()
 
 // Chat config
 const chatMaxToolRounds = computed(() => configValue('chat.maxToolRounds', '100'))
-const chatMaxContextMessages = computed(() => configValue('chat.maxContextMessages', '50'))
+const chatMaxContextMessages = computed(() => configValue('chat.maxContextMessages', '1000'))
 
 // Advanced context-management knobs — collapsed by default in the Chat panel.
 // All four are runtime-tunable via ConfigService side-effects (no restart).
@@ -100,7 +100,7 @@ async function saveChatField(configKey: string, value: string) {
               label="About maxContextMessages"
               content-class="w-64 font-mono"
             >
-              How many recent messages are sent with each LLM request. Older messages are dropped when the limit is reached to stay within the context window.
+              How many recent messages are sent with each LLM request. Each tool call and each tool result counts as one message. Older messages are dropped when the limit is reached to stay within the context window.
             </InfoTip>
           </span>
           <template v-if="editingChatField === 'maxContextMessages'">
@@ -108,7 +108,7 @@ async function saveChatField(configKey: string, value: string) {
               v-model="chatFieldEdit"
               type="number"
               min="1"
-              max="500"
+              max="5000"
               aria-label="Max context messages"
               class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >

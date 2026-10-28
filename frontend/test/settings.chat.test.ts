@@ -14,6 +14,9 @@ import Settings from '~/pages/settings.vue'
 /** Mirrors AgentRunner.DEFAULT_MAX_TOOL_ROUNDS, which DefaultConfigJob seeds. */
 const BACKEND_MAX_TOOL_ROUNDS = 100
 
+/** Mirrors ConversationService.DEFAULT_HISTORY_LIMIT, which DefaultConfigJob seeds. */
+const BACKEND_MAX_CONTEXT_MESSAGES = 1000
+
 function baseEndpoints(entries: Array<{ key: string, value: string }> = []) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
@@ -63,5 +66,29 @@ describe('Settings page — Chat', () => {
     await flushPromises()
     const input = component.find('input[aria-label="Max tool rounds"]')
     expect(Number(input.attributes('max'))).toBeGreaterThanOrEqual(BACKEND_MAX_TOOL_ROUNDS)
+  })
+
+  it('falls back to the backend default for max context messages when the key is unset', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+    expect(component.text()).toContain(`${BACKEND_MAX_CONTEXT_MESSAGES} messages`)
+  })
+
+  it('shows the stored max context messages when the key is set', async () => {
+    baseEndpoints([{ key: 'chat.maxContextMessages', value: '50' }])
+    const component = await mountChat()
+    expect(component.text()).toContain('50 messages')
+    expect(component.text()).not.toContain(`${BACKEND_MAX_CONTEXT_MESSAGES} messages`)
+  })
+
+  it('lets the editor enter the default context messages: the input ceiling is above it', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+    const edit = component.findAll('button[title="Edit"]').at(1)
+    await edit!.trigger('click')
+    await flushPromises()
+    const input = component.find('input[aria-label="Max context messages"]')
+    expect((input.element as HTMLInputElement).value).toBe(String(BACKEND_MAX_CONTEXT_MESSAGES))
+    expect(Number(input.attributes('max'))).toBeGreaterThanOrEqual(BACKEND_MAX_CONTEXT_MESSAGES)
   })
 })
