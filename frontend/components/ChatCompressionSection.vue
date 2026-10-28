@@ -149,7 +149,8 @@ const agg = computed(() => {
   const toolMap = new Map<string, number>()
   for (const r of ccrRows) {
     if (!r.ccrHit) continue
-    const t = r.toolName ?? '—'
+    // Fetch-backs saved before JF-155 carry no tool name.
+    const t = r.toolName ?? 'not recorded'
     toolMap.set(t, (toolMap.get(t) ?? 0) + 1)
   }
   const byTool = [...toolMap.entries()]

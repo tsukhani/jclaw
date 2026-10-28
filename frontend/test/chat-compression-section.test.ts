@@ -185,6 +185,23 @@ describe('ChatCompressionSection', () => {
     expect(perTool()).toEqual([['web_fetch', '1']])
   })
 
+  it('labels fetch-backs saved without their tool "not recorded"', async () => {
+    const hit = (toolName: string | null) => ({
+      timestamp: '2026-06-01T00:00:00Z', agentId: '1', channel: null, contentType: null, algorithm: 'ccr',
+      tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true, toolName,
+    })
+    registerEndpoint('/api/metrics/compression', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [hit(null), hit(null), hit('exec')],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+    await wrapper.find('button[title="Table view"]').trigger('click')
+
+    expect(wrapper.findAll('[data-testid="fetch-backs-by-tool"] tbody tr')
+      .map(tr => tr.findAll('td').map(td => td.text()))).toEqual([['not recorded', '2'], ['exec', '1']])
+  })
+
   it('shows an empty state when there is no activity', async () => {
     registerEndpoint('/api/metrics/compression', () => ({ since: '', rows: [] }))
     const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: [] } })
