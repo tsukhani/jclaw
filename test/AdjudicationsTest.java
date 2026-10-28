@@ -2,12 +2,12 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Adjudications;
 import services.grapheval.Adjudications.Verdict;
-import services.grapheval.GraphEvalHarness;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.GateRecord;
 import services.grapheval.GraphEvalScorer.GateTally;
 import services.grapheval.MemoryBounds;
 import services.grapheval.RecordBounds;
+import services.grapheval.V2Scoring;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -95,7 +95,7 @@ class AdjudicationsTest extends UnitTest {
 
         var wrongAgreed = new Adjudications.Book(List.of(blind(sampled.getFirst(), Adjudications.WRONG)), GUIDE, SEED,
                 0.2, 0.2);
-        assertEquals(5, RecordBounds.k(GraphEvalHarness.evaluation(configured(agreed(100, "uses")), wrongAgreed)
+        assertEquals(5, RecordBounds.k(V2Scoring.evaluation(configured(agreed(100, "uses")), wrongAgreed)
                 .gates().get("uses").writing()), "a blind wrong on a sampled agreed record weighs as an explicit one");
     }
 
@@ -140,10 +140,10 @@ class AdjudicationsTest extends UnitTest {
         assertFalse(sampled.isEmpty());
         var wrong = verdict(sampled.getFirst(), Adjudications.WRONG, Adjudications.OPERATOR, null);
         var book = new Adjudications.Book(List.of(wrong), GUIDE, SEED, 0.2, 0.2);
-        var gate = GraphEvalHarness.evaluation(configured(records), book).gates().get("uses");
+        var gate = V2Scoring.evaluation(configured(records), book).gates().get("uses");
         assertEquals(100, RecordBounds.n(gate.writing()));
         assertEquals(5, RecordBounds.k(gate.writing()));
-        var pooled = GraphEvalHarness.evaluation(configured(records), book).written();
+        var pooled = V2Scoring.evaluation(configured(records), book).written();
         assertEquals(100, RecordBounds.n(pooled));
         assertEquals(5, RecordBounds.k(pooled), "G_written carries the agreed sample's weighted wrong too");
         assertEquals(100, MemoryBounds.n(gate.writing()), "one memory per record: as many memories as records");
@@ -152,10 +152,10 @@ class AdjudicationsTest extends UnitTest {
 
         var outside = verdict(unsampled.getFirst(), Adjudications.WRONG, Adjudications.OPERATOR, null);
         var ignored = new Adjudications.Book(List.of(outside), GUIDE, SEED, 0.2, 0.2);
-        assertEquals(0, RecordBounds.k(GraphEvalHarness.evaluation(configured(records), ignored).gates().get("uses")
+        assertEquals(0, RecordBounds.k(V2Scoring.evaluation(configured(records), ignored).gates().get("uses")
                 .writing()), "an unsampled agreed record adds nothing");
         var right = verdict(sampled.getFirst(), Adjudications.RIGHT, Adjudications.OPERATOR, null);
-        assertEquals(0, RecordBounds.k(GraphEvalHarness.evaluation(configured(records),
+        assertEquals(0, RecordBounds.k(V2Scoring.evaluation(configured(records),
                 new Adjudications.Book(List.of(right), GUIDE, SEED, 0.2, 0.2)).gates().get("uses").writing()));
     }
 

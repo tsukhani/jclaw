@@ -10,7 +10,6 @@ import services.grapheval.Certifier.Walk;
 import services.grapheval.Configuration;
 import services.grapheval.GateBounds;
 import services.grapheval.GateBounds.MemoryCounts;
-import services.grapheval.GraphEvalHarness;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.ClassTally;
 import services.grapheval.GraphEvalScorer.Point;
@@ -18,6 +17,7 @@ import services.grapheval.GraphEvalScorer.WrongRecord;
 import services.grapheval.MemoryBounds;
 import services.grapheval.RecordBounds;
 import services.grapheval.SequenceScorer;
+import services.grapheval.V2Scoring;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -783,7 +783,7 @@ class CertifierTest extends UnitTest {
                 Map.of("status", clustered), clustered, clustered);
         var b = new Evaluation(Map.of(Certifier.TERMS, new GateCounts(spread, List.of())),
                 Map.of("status", spread), spread, spread);
-        var worst = GraphEvalHarness.worst(List.of(a, b), MemoryBounds.INSTANCE);
+        var worst = V2Scoring.worst(List.of(a, b), MemoryBounds.INSTANCE);
         assertEquals(clustered, worst.gates().get(Certifier.TERMS).writing(), "1 of 1 memories beats 1 of 20");
         assertEquals(clustered, worst.written());
         assertEquals(spread, worst.trap(), "1 of 20 records beats 1 of 50");

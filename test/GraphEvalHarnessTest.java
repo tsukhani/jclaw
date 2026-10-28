@@ -17,7 +17,10 @@ import services.Tx;
 import services.grapheval.Adjudications;
 import services.grapheval.Agreement;
 import services.grapheval.CandidateGenerator;
+import services.grapheval.CaseMeasurement;
+import services.grapheval.CaseMeasurement.DecisionModel;
 import services.grapheval.CertificateDocument;
+import services.grapheval.CertificationRun;
 import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
 import services.grapheval.CompetencyQuestions;
@@ -30,7 +33,6 @@ import services.grapheval.GateBounds;
 import services.grapheval.GraphCases;
 import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphEvalHarness;
-import services.grapheval.GraphEvalHarness.DecisionModel;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.WrongRecord;
 import services.grapheval.HeldOut;
@@ -39,6 +41,7 @@ import services.grapheval.Sequences;
 import services.grapheval.SplitUses;
 import services.grapheval.StageScorer;
 import services.grapheval.StoredRun;
+import services.grapheval.V2Scoring;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -493,11 +496,11 @@ class GraphEvalHarnessTest extends UnitTest {
     void theCaseVoiceIsTheGuestsOnAGuestCaseAndAHeldCaseKeepsItsOwn() {
         var owner = new Case("v1", List.of("plain"), "Avery Lin uses Kestrel CI.", List.of(), List.of(), List.of());
         var guest = new Case("v2", List.of("guest"), "A guest uses Kestrel CI.", List.of(), List.of(), List.of());
-        assertEquals(MemoryAuthorType.HUMAN_TURN, GraphEvalHarness.inputs(owner, null, false, null).authorType());
-        assertEquals(MemoryAuthorType.GUEST_TURN, GraphEvalHarness.inputs(guest, null, false, null).authorType());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, CaseMeasurement.inputs(owner, null, false, null).authorType());
+        assertEquals(MemoryAuthorType.GUEST_TURN, CaseMeasurement.inputs(guest, null, false, null).authorType());
         for (var author : Arrays.asList(MemoryAuthorType.GUEST_TURN, null)) {
             var held = new HeldOut.HeldCase(42L, owner, author);
-            assertEquals(author, GraphEvalHarness.inputs(owner, null, false, held).authorType());
+            assertEquals(author, CaseMeasurement.inputs(owner, null, false, held).authorType());
         }
     }
 
@@ -612,7 +615,7 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(1, model.runs().size());
         var spot = model.spotCheck();
         assertNotNull(spot, "a single run carries its spot-check");
-        int stride = GraphEvalHarness.SPOT_CHECK_STRIDE;
+        int stride = CaseMeasurement.SPOT_CHECK_STRIDE;
         assertEquals((cases.size() + stride - 1) / stride, spot.cases());
         assertTrue(spot.decisions() > 0);
         assertEquals(0, spot.differing());
@@ -719,7 +722,7 @@ class GraphEvalHarnessTest extends UnitTest {
                     List.of("Organization", "System"), "uses", null));
             var report = GraphEvalHarness.runHeldOut(loaded, null, SCHEMA, List.of(new DecisionModel("tev1", beating)),
                     2, Certifier.DEFAULT_RECALL_FLOOR, 1, progress, false, List.of(),
-                    GraphEvalHarness.DevOptions.NONE, questions);
+                    V2Scoring.DevOptions.NONE, questions);
 
             assertTrue(events.stream().anyMatch(e -> e.get("event").getAsString().equals(EvalProgress.HEARTBEAT)),
                     events.toString());
@@ -746,7 +749,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var held = loaded.cases().getFirst();
             var c = held.labels();
             var caseRun = ExtractionPipeline.run(SCHEMA, c.id(), c.text(), CandidateGenerator.generate(c.text()), "tev1",
-                    golden, GraphEvalHarness.inputs(c, null, false, held));
+                    golden, CaseMeasurement.inputs(c, null, false, held));
             assertEquals(Long.parseLong(memoryId), caseRun.memoryId(), "the held-out run passes the memory id");
         } finally {
             Files.deleteIfExists(file);
@@ -801,18 +804,18 @@ class GraphEvalHarnessTest extends UnitTest {
                 "the guide".getBytes(StandardCharsets.UTF_8), SCHEMA);
     }
 
-    private GraphEvalHarness.CertifyRequest request(Path root, CertificationSplit split,
+    private CertificationRun.CertifyRequest request(Path root, CertificationSplit split,
                                                     CertificationSplit.Source source, Sequences sequences,
                                                     Decider decider, int runs, List<Case> second,
                                                     List<Adjudications.Verdict> verdicts) {
         return request(root, split, source, sequences, decider, runs, second, verdicts, Certifier.DEFAULT_RECALL_FLOOR);
     }
 
-    private GraphEvalHarness.CertifyRequest request(Path root, CertificationSplit split,
+    private CertificationRun.CertifyRequest request(Path root, CertificationSplit split,
                                                     CertificationSplit.Source source, Sequences sequences,
                                                     Decider decider, int runs, List<Case> second,
                                                     List<Adjudications.Verdict> verdicts, double recallFloor) {
-        return new GraphEvalHarness.CertifyRequest(root, split, source, SCHEMA, agentId, owner(), Map.of(), sequences,
+        return new CertificationRun.CertifyRequest(root, split, source, SCHEMA, agentId, owner(), Map.of(), sequences,
                 List.of(new DecisionModel("tev1", decider)), Map.of("tev1", DIGEST), runs, 1356, 0.2, 0.2,
                 recallFloor, 1, second, null, verdicts);
     }
@@ -844,7 +847,7 @@ class GraphEvalHarnessTest extends UnitTest {
                 calls.incrementAndGet();
                 return golden.decide(request);
             };
-            var report = GraphEvalHarness.certify(request(root, split, source, sequences, counted, 1, splitCases,
+            var report = CertificationRun.certify(request(root, split, source, sequences, counted, 1, splitCases,
                     List.of()), EvalProgress.none());
             int asked = calls.get();
 
@@ -884,7 +887,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(SplitUses.USED, SplitUses.latest(root, "cert-t", "tev1", DIGEST).state());
             assertTrue(Files.exists(StoredRun.path(root, "cert-t", "tev1")));
 
-            var sheetFile = GraphEvalHarness.sheetPath(root, "cert-t", "tev1");
+            var sheetFile = CertificationRun.sheetPath(root, "cert-t", "tev1");
             var sheet = JsonParser.parseString(Files.readString(sheetFile)).getAsJsonObject();
             assertFalse(sheet.toString().contains("tev1"), "the sheet never names the model");
             var verdicts = new ArrayList<Adjudications.Verdict>();
@@ -904,16 +907,16 @@ class GraphEvalHarnessTest extends UnitTest {
                         null, null, ""));
             }
 
-            var reuse = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(request(root, split,
+            var reuse = assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(request(root, split,
                     source, sequences, both(cases, sequences, new ArrayList<>()), 1, splitCases, List.of())));
             assertTrue(reuse.getMessage().contains(SplitUses.FILE), reuse.getMessage());
 
             assertTrue(listed.contains("c015 \"term:Larchmere House:Organization\""), listed.toString());
-            var same = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null,
+            var same = CertificationRun.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null,
                     List.of());
             assertEquals(GSON.toJson(report), GSON.toJson(same), "a re-score gives the full run's report");
 
-            var judged = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
+            var judged = CertificationRun.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
                     null, verdicts).models().getFirst();
             assertEquals(Certifier.NOT_CERTIFIED, judged.verdict().status(), judged.verdict().reasons().toString());
             assertNull(judged.certificate());
@@ -929,13 +932,13 @@ class GraphEvalHarnessTest extends UnitTest {
             var certificate = CertificateDocument.path(root, "tev1");
             Files.createDirectories(certificate.getParent());
             Files.writeString(certificate, "{\"split\":\"cert-t\"}");
-            GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
+            CertificationRun.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
             assertEquals("no certificate for tev1", CertificateDocument.read(root, "tev1", SCHEMA.fingerprint(),
                     ExtractionPipeline.fingerprint(SCHEMA), DIGEST).reason(), "this split's stale certificate is gone");
             var other = new JsonObject();
             other.addProperty("split", "cert-other");
             Files.writeString(certificate, other.toString());
-            GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
+            CertificationRun.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
             assertTrue(Files.exists(CertificateDocument.path(root, "tev1")), "another split's certificate is left alone");
         } finally {
             delete(root);
@@ -960,7 +963,7 @@ class GraphEvalHarnessTest extends UnitTest {
                 return golden.decide(request);
             };
             var request = request(root, split, source, sequences, failing, 1, List.of(), List.of());
-            var model = GraphEvalHarness.certify(request, EvalProgress.none()).models().getFirst();
+            var model = CertificationRun.certify(request, EvalProgress.none()).models().getFirst();
             assertTrue(model.failedDecisions() > 0);
             assertNull(model.sequencing(), "no gate result");
             assertNull(model.sequences());
@@ -970,18 +973,18 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(3, tallies.memories());
             assertEquals(1, tallies.failedMemories());
             assertNotNull(tallies.questionsPerMemory());
-            assertEquals(3, tallies.byQuestions().stream().mapToInt(GraphEvalHarness.FailureShare::memories).sum());
+            assertEquals(3, tallies.byQuestions().stream().mapToInt(V2Scoring.FailureShare::memories).sum());
             assertEquals(SplitUses.VOID, SplitUses.latest(root, "cert-v", "tev1", DIGEST).state());
-            GraphEvalHarness.admit(request);
+            CertificationRun.admit(request);
 
             var stored = StoredRun.path(root, "cert-v", "tev1");
             var json = Files.readString(stored);
             Files.writeString(stored, json.replace(SCHEMA.fingerprint(), "v0@000000000000"));
-            var schema = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split, source,
+            var schema = assertThrows(IllegalArgumentException.class, () -> CertificationRun.rescore(root, split, source,
                     SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertTrue(schema.getMessage().contains("schema"), schema.getMessage());
             Files.writeString(stored, json.replace(ExtractionPipeline.fingerprint(SCHEMA), "x@000000000000"));
-            var extraction = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split,
+            var extraction = assertThrows(IllegalArgumentException.class, () -> CertificationRun.rescore(root, split,
                     source, SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertTrue(extraction.getMessage().contains("extraction"), extraction.getMessage());
             Files.writeString(stored, json);
@@ -992,15 +995,15 @@ class GraphEvalHarnessTest extends UnitTest {
             items.put("c002", edited);
             var drifted = new CertificationSplit.Source("cases", items, source.cases(), source.sequences(),
                     source.guide(), source.schema());
-            var drift = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split,
+            var drift = assertThrows(IllegalArgumentException.class, () -> CertificationRun.rescore(root, split,
                     drifted, SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertEquals("case c002 changed since split 'cert-v' was frozen", drift.getMessage());
-            var refused = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(
+            var refused = assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(
                     request(root, split, drifted, sequences, golden, 1, List.of(), List.of())));
             assertEquals(drift.getMessage(), refused.getMessage());
             var reordered = new CertificationSplit.Source("cases", source.items(), source.cases(),
                     "sequences@000000000000", source.guide(), source.schema());
-            var seq = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(
+            var seq = assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(
                     request(root, split, reordered, sequences, golden, 1, List.of(), List.of())));
             assertTrue(seq.getMessage().startsWith("sequences changed"), seq.getMessage());
         } finally {
@@ -1032,20 +1035,20 @@ class GraphEvalHarnessTest extends UnitTest {
                 }
                 return response;
             };
-            var once = GraphEvalHarness.certify(request(root, split, source, sequences, drifting, 1, List.of(),
+            var once = CertificationRun.certify(request(root, split, source, sequences, drifting, 1, List.of(),
                     List.of()), EvalProgress.none()).models().getFirst();
             assertTrue(once.spotCheck().differing() > 0, once.spotCheck().toString());
             assertEquals(Certifier.NEEDS_SECOND_RUN, once.verdict().reasons().getFirst());
             assertEquals(SplitUses.NEEDS_SECOND_RUN, SplitUses.latest(root, "cert-s", "tev1", DIGEST).state());
-            assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(request(root, split, source,
+            assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(request(root, split, source,
                     sequences, golden, 1, List.of(), List.of())));
 
-            var twice = GraphEvalHarness.certify(request(root, split, source, sequences, golden, 2, List.of(),
+            var twice = CertificationRun.certify(request(root, split, source, sequences, golden, 2, List.of(),
                     List.of()), EvalProgress.none()).models().getFirst();
             assertEquals(2, twice.runs());
             assertNull(twice.spotCheck());
             assertEquals(SplitUses.USED, SplitUses.latest(root, "cert-s", "tev1", DIGEST).state());
-            assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(request(root, split, source,
+            assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(request(root, split, source,
                     sequences, golden, 2, List.of(), List.of())));
         } finally {
             delete(root);
@@ -1059,7 +1062,7 @@ class GraphEvalHarnessTest extends UnitTest {
         var golden = gold(cases);
         var runs = cases.stream().map(c -> ExtractionPipeline.run(SCHEMA, c.id(), c.text(),
                 CandidateGenerator.generate(c.text(), owner() == null ? List.of() : List.of(owner())), "tev1", golden,
-                GraphEvalHarness.inputs(c, owner(), false, null))).toList();
+                CaseMeasurement.inputs(c, owner(), false, null))).toList();
         var classes = new java.util.TreeMap<String, Configuration.ClassSetting>();
         for (var name : Certifier.V2_CLASSES) classes.put(name, new Configuration.ClassSetting(Certifier.PROVISIONAL, 0.5));
         var all = new java.util.TreeMap<String, Double>();
@@ -1090,7 +1093,7 @@ class GraphEvalHarnessTest extends UnitTest {
         var cases = committed().subList(0, 6);
         var report = GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", gold(cases))),
                 1, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of(), EvalProgress.none(), false, null,
-                new GraphEvalHarness.DevOptions("guide@000000000000", 1356, 0.2, 0.2, 5));
+                new V2Scoring.DevOptions("guide@000000000000", 1356, 0.2, 0.2, 5));
         assertEquals(5, report.excludedSplitIds());
         var v2 = report.models().getFirst().v2();
         assertEquals(0.95, v2.startingThreshold());
@@ -1121,10 +1124,10 @@ class GraphEvalHarnessTest extends UnitTest {
                 oneOf150, List.of());
         var b = new Certifier.Evaluation(Map.of("uses", new Certifier.GateCounts(noneOf100, List.of())), Map.of(),
                 noneOf100, List.of());
-        var worst = GraphEvalHarness.worst(List.of(a, b), MemoryBounds.INSTANCE);
+        var worst = V2Scoring.worst(List.of(a, b), MemoryBounds.INSTANCE);
         assertEquals(noneOf100, worst.gates().get("uses").writing(), "a relation gate is read at its corrected tail");
         assertEquals(oneOf150, worst.written(), "G_written at 0.05");
-        assertEquals(worst, GraphEvalHarness.worst(List.of(b, a), MemoryBounds.INSTANCE));
+        assertEquals(worst, V2Scoring.worst(List.of(b, a), MemoryBounds.INSTANCE));
     }
 
     private static List<GateBounds.MemoryCounts> spread(int n, int wrong) {
@@ -1168,7 +1171,7 @@ class GraphEvalHarnessTest extends UnitTest {
                 }
                 return response;
             };
-            var model = GraphEvalHarness.certify(request(root, split, source, sequences, erring, 2, splitCases,
+            var model = CertificationRun.certify(request(root, split, source, sequences, erring, 2, splitCases,
                     List.of(), 0.6), EvalProgress.none()).models().getFirst();
             assertTrue(secondPass.get(), "the second pass was asked");
             assertEquals(2, model.runs());
@@ -1179,7 +1182,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertFalse(sequencing.passed());
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
 
-            var rescored = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
+            var rescored = CertificationRun.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
                     null, List.of());
             assertEquals(0.6, rescored.recallFloor(), "a re-score keeps the run's own recall floor");
             assertEquals(0.6, StoredRun.read(root, "cert-w", "tev1", SCHEMA).recallFloor());
@@ -1247,11 +1250,11 @@ class GraphEvalHarnessTest extends UnitTest {
             var held = new HashMap<String, HeldOut.HeldCase>();
             loaded.cases().forEach(h -> held.put(String.valueOf(h.memoryId()), h));
             var labels = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
-            var request = new GraphEvalHarness.CertifyRequest(root, split, source, SCHEMA, null, null, held, sequences,
+            var request = new CertificationRun.CertifyRequest(root, split, source, SCHEMA, null, null, held, sequences,
                     List.of(new DecisionModel("tev1", both(labels, sequences, new ArrayList<>()))),
                     Map.of("tev1", DIGEST), 1, 1, 0.2, 0.2, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), null,
                     List.of());
-            var report = GraphEvalHarness.certify(request, EvalProgress.none(), LENIENT);
+            var report = CertificationRun.certify(request, EvalProgress.none(), LENIENT);
             var model = report.models().getFirst();
             assertEquals("heldout", report.set());
             assertEquals(0, model.memoriesChanged());

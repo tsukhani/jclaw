@@ -17,6 +17,8 @@ import services.decision.JevApi;
 import services.decision.OllamaDecision;
 import services.grapheval.Adjudications;
 import services.grapheval.Agreement;
+import services.grapheval.CaseMeasurement.DecisionModel;
+import services.grapheval.CertificationRun;
 import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
 import services.grapheval.CompetencyQuestions;
@@ -26,10 +28,10 @@ import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.GraphCases;
 import services.grapheval.GraphEvalHarness;
-import services.grapheval.GraphEvalHarness.DecisionModel;
 import services.grapheval.HeldOut;
 import services.grapheval.SequenceHarness;
 import services.grapheval.Sequences;
+import services.grapheval.V2Scoring;
 import utils.ApiResponses;
 
 import java.io.IOException;
@@ -119,7 +121,7 @@ public class ApiGraphEvalController extends Controller {
         if (body.has("recallFloor")) recallFloor = share(body, "recallFloor", true);
         double floor = recallFloor;
         double agreedShare = body.has("agreedShare") ? share(body, "agreedShare", false) : Adjudications.DEFAULT_SHARE;
-        long defaultSeed = split != null ? split.seed() : GraphEvalHarness.DEFAULT_AGREED_SEED;
+        long defaultSeed = split != null ? split.seed() : V2Scoring.DEFAULT_AGREED_SEED;
         long agreedSeed = body.has("agreedSeed") ? readLong(body, "agreedSeed") : defaultSeed;
         boolean pairFilter = false;
         if (body.has("pairFilter")) {
@@ -156,16 +158,16 @@ public class ApiGraphEvalController extends Controller {
             }
             var inputs = setInputs(set, schema);
             var agentId = set.equals("cases") ? agentId(body) : null;
-            var request = new GraphEvalHarness.CertifyRequest(root(), split, inputs.source(), schema, agentId,
+            var request = new CertificationRun.CertifyRequest(root(), split, inputs.source(), schema, agentId,
                     inputs.ownerName(), inputs.held(), sequences(schema), models, digests, runs, agreedSeed,
                     agreedShare, Adjudications.DEFAULT_CHECK_SHARE, floor, concurrency, inputs.secondLabels(),
                     inputs.secondLabelsReason(), inputs.verdicts());
             try {
-                GraphEvalHarness.admit(request);
+                CertificationRun.admit(request);
             } catch (IllegalArgumentException e) {
                 throw invalid(String.valueOf(e.getMessage()));
             }
-            stream(progress -> GraphEvalHarness.certify(request, progress), set.equals("heldout"));
+            stream(progress -> CertificationRun.certify(request, progress), set.equals("heldout"));
             return;
         }
 
@@ -184,7 +186,7 @@ public class ApiGraphEvalController extends Controller {
             var frozen = frozenIds("heldout");
             var kept = loaded.cases().stream().filter(h -> !frozen.contains(String.valueOf(h.memoryId()))).toList();
             var unsplit = new HeldOut.Loaded(kept, loaded.unlabeled());
-            var options = new GraphEvalHarness.DevOptions(guide(), agreedSeed, agreedShare,
+            var options = new V2Scoring.DevOptions(guide(), agreedSeed, agreedShare,
                     Adjudications.DEFAULT_CHECK_SHARE, loaded.cases().size() - kept.size());
             var verdicts = verdicts(root().resolve(Adjudications.HELDOUT_FILE));
             var questions = questions(schema);
@@ -221,7 +223,7 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | IllegalArgumentException e) {
             throw invalid("could not read the frozen splits: " + e.getMessage());
         }
-        var options = new GraphEvalHarness.DevOptions(inputs.source().guide(), agreedSeed, agreedShare,
+        var options = new V2Scoring.DevOptions(inputs.source().guide(), agreedSeed, agreedShare,
                 Adjudications.DEFAULT_CHECK_SHARE, outside.excluded());
         stream(progress -> GraphEvalHarness.run(agentId, outside.kept(), inputs.ownerName(), schema, models, runs,
                 floor, concurrency, inputs.secondLabels(), inputs.verdicts(), progress, filter,
@@ -356,7 +358,7 @@ public class ApiGraphEvalController extends Controller {
         List<String> ids = body.has("ids") ? strings(body, "ids") : null;
         long seed = body.has("seed") ? readLong(body, "seed") : DEFAULT_SEED;
         double start = body.has("startingThreshold") ? share(body, "startingThreshold", true)
-                : GraphEvalHarness.DEVELOPMENT_START;
+                : V2Scoring.DEVELOPMENT_START;
         List<String> order = body.has("relationOrder") ? strings(body, "relationOrder") : null;
         var schema = schema();
         var inputs = setInputs(set, schema);
@@ -388,9 +390,9 @@ public class ApiGraphEvalController extends Controller {
                 : Adjudications.DEFAULT_CHECK_SHARE;
         var schema = schema();
         var inputs = setInputs(split.set(), schema);
-        GraphEvalHarness.CertificationReport report;
+        CertificationRun.CertificationReport report;
         try {
-            report = GraphEvalHarness.rescore(root(), split, inputs.source(), schema, model, sequences(schema),
+            report = CertificationRun.rescore(root(), split, inputs.source(), schema, model, sequences(schema),
                     checkShare, inputs.secondLabels(), inputs.secondLabelsReason(),
                     inputs.verdicts());
         } catch (IllegalArgumentException e) {
