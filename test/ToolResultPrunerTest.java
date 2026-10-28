@@ -355,6 +355,26 @@ class ToolResultPrunerTest extends UnitTest {
     }
 
     @Test
+    void aStepOneMessagePastTheBoundaryWaitsWithOrWithoutTheClockAndOneAtItIsTaken() {
+        var history = historyOfTurns(11, 1);
+        history.add(ChatMessage.user("ask 12"));
+        addRounds(history, "t12", 2);
+        history.add(ChatMessage.assistant("answer 12"));
+        history.add(ChatMessage.user("ask 13"));
+        var withClock = CurrentTimeInjector.inject(history);
+        var firstFive = resultsOf(1, 5, 1);
+        var firstTen = resultsOf(1, 10, 1);
+
+        // Ask 13 sits at 51 and ask 11, the next step, at 41: one past 51 + 1 - 12 and exactly at 51 + 1 - 11.
+        assertEquals("ask 11", history.get(41).content());
+        assertEquals(firstFive, stubbedCallIds(ToolResultPruner.prune(history, 4_000, 12, 5, NO_CAP, null, null)));
+        assertEquals(firstFive, stubbedCallIds(ToolResultPruner.prune(withClock, 4_000, 12, 5, NO_CAP, null, null)),
+                "the clock the round prunes carry does not move the boundary the prologue's prune drew");
+        assertEquals(firstTen, stubbedCallIds(ToolResultPruner.prune(history, 4_000, 11, 5, NO_CAP, null, null)));
+        assertEquals(firstTen, stubbedCallIds(ToolResultPruner.prune(withClock, 4_000, 11, 5, NO_CAP, null, null)));
+    }
+
+    @Test
     void theNewestTwelveMessagesStayWholeWhenAStepIsReached() {
         var seventhTurn = historyOfTurns(6, 1);
         seventhTurn.add(ChatMessage.user("ask 7"));
