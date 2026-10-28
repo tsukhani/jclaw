@@ -116,6 +116,11 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      *  loop without persisting a final assistant reply. */
     public static final String YIELD_SENTINEL_PREFIX = "{\"action\":\"yielded\"";
 
+    /** An all=true with nothing left to collect: a bare empty result reads as "not yet", and a model polls it. */
+    static final String NOTHING_TO_COLLECT = "{\"results\":[],\"count\":0,\"note\":\"Nothing to collect: "
+            + "no async subagent spawned in this conversation or task is waiting to be collected. "
+            + "Calling subagent_yield again will not change that.\"}";
+
     @Override
     public String name() { return TOOL_NAME; }
 
@@ -164,13 +169,14 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         props.put(PARAM_RUN_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
                 SchemaKeys.DESCRIPTION,
-                "BATCH COLLECT: the run_ids from a subagent_spawn batch (tasks[]). Block-awaits "
-                        + "ALL of them and returns {results:[...]} inline. Use instead of runId to "
-                        + "collect a whole fan-out in one call."));
+                "BATCH COLLECT: run_ids from subagent_spawn calls with tasks[] or async=true. "
+                        + "Block-awaits ALL of them and returns {results:[...]} inline, each with its "
+                        + "whole reply. Use instead of runId to collect a whole fan-out in one call."));
         props.put("all", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
-                "BATCH COLLECT: when true, block-await EVERY outstanding async child you spawned "
-                        + "in this turn/task and return them all — no need to list run_ids."));
+                "BATCH COLLECT: when true, block-await EVERY async child (tasks[] or async=true) "
+                        + "spawned in this conversation or task that is not yet collected, and return "
+                        + "them all — no need to list run_ids."));
         props.put(PARAM_CONVERSATION_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Child conversation id returned by the prior subagent_spawn call. "
@@ -214,6 +220,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // inline. Works in chat and task fires; no YIELDED sentinel.
         var batchRunIds = collectBatchRunIds(args);
         if (batchRunIds != null) {
+            if (batchRunIds.isEmpty()) return NOTHING_TO_COLLECT;
             return SubagentSpawnTool.awaitAsyncOutcomes(batchRunIds);
         }
 

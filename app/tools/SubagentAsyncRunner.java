@@ -35,11 +35,10 @@ import java.util.concurrent.TimeoutException;
  */
 final class SubagentAsyncRunner {
 
-    /** JCLAW-497/498: detached async subagent OUTCOMES, keyed by runId, handed off
-     *  from a spawn (single async-in-task or a batch fan-out) to the inline
-     *  block-await in subagent_yield. These children have no persistent
-     *  conversation to resume into, so the chat announce/resume path doesn't
-     *  apply; the parent collects results via a blocking yield.
+    /** JCLAW-497/498: async subagent OUTCOMES, keyed by runId, handed off from a
+     *  spawn (single async, or a batch fan-out) to the inline block-await in
+     *  subagent_yield. An entry's scope is what subagent_yield all=true collects
+     *  by, so expiry and the size cap also bound that registry.
      *
      *  <p>Bounded so an uncollected outcome can't pin its future — and the full
      *  reply string it holds — for the JVM lifetime. subagent_yield removes an
@@ -53,17 +52,17 @@ final class SubagentAsyncRunner {
      *  still retrieves any live outcome, and an expired/evicted one reads back as
      *  an already-collected miss instead of hanging. Mirrors the Caffeine memo in
      *  {@link llm.TokenUsageEstimator}. */
-    private static final Cache<Long, CompletableFuture<SyncRunOutcome>> ASYNC_OUTCOMES =
+    private static final Cache<Long, Pending> ASYNC_OUTCOMES =
             Caffeine.newBuilder()
                     .expireAfterWrite(Duration.ofHours(2))
                     .maximumSize(4_096)
                     .build();
 
-    /** JCLAW-498: outstanding async-child runIds grouped by the spawning parent's
-     *  scope ({@code task:<id>} or {@code conv:<id>}), so subagent_yield all=true
-     *  can collect every child this parent fanned out without re-listing run ids. */
-    private static final ConcurrentHashMap<String, Set<Long>>
-            OUTSTANDING_BY_SCOPE = new ConcurrentHashMap<>();
+    /** An uncollected outcome and the spawning parent's scope ({@code task:<id>} or {@code conv:<id>}). */
+    private record Pending(@Nullable String scopeKey, CompletableFuture<SyncRunOutcome> outcome) {}
+
+    /** Runs a subagent_yield is block-awaiting; a chat child among them posts no announce, the yield returning its whole reply. */
+    private static final Set<Long> AWAITED = ConcurrentHashMap.newKeySet();
 
     private SubagentAsyncRunner() {}
 
@@ -72,10 +71,11 @@ final class SubagentAsyncRunner {
     static String launchAsyncSpawn(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                    Long parentConvId, String parentAgentName,
                                    SubagentSpawnArgs parsed, String runIdStr) {
+        var outcome = track(runId, currentScopeKey());
         Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
                 runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId,
                         parentAgentName, parsed.mode(), parsed.context(), parsed.label(),
-                        parsed.timeoutSeconds(), parsed.resolvedTask()));
+                        parsed.timeoutSeconds(), parsed.resolvedTask(), outcome));
         var asyncPayload = new LinkedHashMap<String, Object>();
         asyncPayload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         asyncPayload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
@@ -97,18 +97,18 @@ final class SubagentAsyncRunner {
     static List<Long> outstandingForCurrentScope() {
         var key = currentScopeKey();
         if (key == null) return List.of();
-        var set = OUTSTANDING_BY_SCOPE.get(key);
-        return set == null ? List.of() : new ArrayList<>(set);
+        return ASYNC_OUTCOMES.asMap().entrySet().stream()
+                .filter(e -> key.equals(e.getValue().scopeKey()))
+                .map(Map.Entry::getKey)
+                .sorted()
+                .toList();
     }
 
-    private static void forgetOutstanding(Long runId) {
-        // Remove the runId from every scope, and drop any scope whose set is now
-        // empty. Without the prune, each distinct conv:/task: scope would leave a
-        // permanent empty Set entry once its fan-out was collected (JCLAW-498 leak).
-        OUTSTANDING_BY_SCOPE.values().removeIf(set -> {
-            set.remove(runId);
-            return set.isEmpty();
-        });
+    /** Stash a future for {@code runId}'s terminal outcome, collectable by a subagent_yield in {@code scopeKey}. */
+    private static CompletableFuture<SyncRunOutcome> track(Long runId, @Nullable String scopeKey) {
+        var outcome = new CompletableFuture<SyncRunOutcome>();
+        ASYNC_OUTCOMES.put(runId, new Pending(scopeKey, outcome));
+        return outcome;
     }
 
     /**
@@ -120,12 +120,7 @@ final class SubagentAsyncRunner {
     static void dispatchDetachedAsync(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                       String parentAgentName, @Nullable String mode, @Nullable String context,
                                       int timeoutSeconds, String task, @Nullable String scopeKey) {
-        var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
-        ASYNC_OUTCOMES.put(runId, outcomeFuture);
-        if (scopeKey != null) {
-            OUTSTANDING_BY_SCOPE.computeIfAbsent(scopeKey, _ -> ConcurrentHashMap.newKeySet())
-                    .add(runId);
-        }
+        var outcomeFuture = track(runId, scopeKey);
         Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
                 runAsyncDetached(runId, childAgentId, childConvId, parentAgentName,
                         mode, context, timeoutSeconds, task, outcomeFuture));
@@ -201,15 +196,14 @@ final class SubagentAsyncRunner {
      * single runId) and return it as the same JSON a synchronous spawn returns.
      */
     static String awaitAsyncOutcome(Long runId) {
-        var f = ASYNC_OUTCOMES.asMap().remove(runId);
-        forgetOutstanding(runId);
-        if (f == null) {
+        var pending = ASYNC_OUTCOMES.asMap().remove(runId);
+        if (pending == null) {
             return "Error: no pending async subagent for runId " + runId
                     + " (already collected, or not an async spawn).";
         }
         var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try (var _ = SubagentRegistry.waitingOn(List.of(runId))) {
-            return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
+            return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(pending.outcome())), Map.class);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
@@ -229,11 +223,17 @@ final class SubagentAsyncRunner {
      */
     static String awaitAsyncOutcomes(List<Long> runIds) {
         var results = new ArrayList<Object>();
+        var claimed = new LinkedHashMap<Long, CompletableFuture<SyncRunOutcome>>();
+        for (var runId : runIds) {
+            // Marked before the claim, so a child that ends in between still finds this yield waiting.
+            AWAITED.add(runId);
+            var pending = ASYNC_OUTCOMES.asMap().remove(runId);
+            if (pending != null) claimed.put(runId, pending.outcome());
+        }
         var relay = SubagentChatBridge.relayActivity(runIds, SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try (var _ = SubagentRegistry.waitingOn(runIds)) {
             for (var runId : runIds) {
-                var f = ASYNC_OUTCOMES.asMap().remove(runId);
-                forgetOutstanding(runId);
+                var f = claimed.remove(runId);
                 if (f == null) {
                     var miss = new LinkedHashMap<String, Object>();
                     miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
@@ -260,6 +260,7 @@ final class SubagentAsyncRunner {
                 }
             }
         } finally {
+            AWAITED.removeAll(runIds);
             relay.cancel(false);
         }
         var payload = new LinkedHashMap<String, Object>();
@@ -302,11 +303,22 @@ final class SubagentAsyncRunner {
      * @param task            the user-prompt-equivalent string the child
      *                        agent processes
      */
-    @SuppressWarnings("java:S1181")
     static void runAsyncAndAnnounce(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                     Long parentConvId, String parentAgentName,
                                     @Nullable String mode, @Nullable String context, @Nullable String label,
                                     int timeoutSeconds, String task) {
+        runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId, parentAgentName,
+                mode, context, label, timeoutSeconds, task, null);
+    }
+
+    /** {@link #runAsyncAndAnnounce(Long, Long, Long, Long, String, String, String, String, int, String)}
+     *  that also completes {@code collected}, the outcome a subagent_yield runIds/all collects. */
+    @SuppressWarnings("java:S1181")
+    private static void runAsyncAndAnnounce(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
+                                            Long parentConvId, String parentAgentName,
+                                            @Nullable String mode, @Nullable String context, @Nullable String label,
+                                            int timeoutSeconds, String task,
+                                            @Nullable CompletableFuture<SyncRunOutcome> collected) {
         var future = startAsyncChild(runId, childAgentId, childConvId, task);
         SyncRunOutcome outcome;
         try {
@@ -317,41 +329,49 @@ final class SubagentAsyncRunner {
             SubagentRegistry.unregister(runId);
         }
 
-        // JCLAW-291: kill primitive owns the terminal state on this path —
-        // skip every downstream side effect (audit write, announce post,
-        // lifecycle event, yield resume). The operator's slash-command
-        // response is the user-visible kill confirmation.
-        if (outcome.killedByOperator()) {
-            EventLogger.flush();
-            return;
-        }
-
-        // JCLAW-271: persistAsyncTerminalRun skips the write when /subagent kill already
-        // stamped KILLED — the operator's reason is the source of truth, and overwriting
-        // it would replace "Killed by operator" with the TIMEOUT / FAILED message we
-        // synthesized when the canceled Future threw.
-        SubagentRunStore.persistAsyncTerminalRun(runId, outcome);
-
-        var yieldedFlag = SubagentResponses.postAnnounceAndReadYieldFlag(runId, childConvId, parentConvId,
-                label, outcome);
-
-        SubagentResponses.emitTerminalEvent(parentAgentName, SubagentRunStore.lookupAgentName(childAgentId),
-                String.valueOf(runId), mode, context, outcome.terminalStatus(), outcome.errorReason());
-        EventLogger.flush();
-
-        // JCLAW-273: resume the parent agent's logical turn for a yielded
-        // caller. The announce Message we just posted is the parent's next
-        // user input; calling AgentRunner.resumeAndDeliver kicks off a fresh turn that
-        // picks up the announce via ConversationService.loadRecentMessages and
-        // produces a final assistant reply.
-        if (Boolean.TRUE.equals(yieldedFlag)) {
-            try {
-                SubagentResponses.resumeParentAfterYield(parentConvId, runId);
-            } catch (Throwable t) {
-                EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL,
-                        "Failed to resume parent for yielded run " + runId
-                                + ": " + t.getMessage());
+        try {
+            // JCLAW-291: kill primitive owns the terminal state on this path —
+            // skip every downstream side effect (audit write, announce post,
+            // lifecycle event, yield resume). The operator's slash-command
+            // response is the user-visible kill confirmation.
+            if (outcome.killedByOperator()) {
+                EventLogger.flush();
+                return;
             }
+
+            // JCLAW-271: persistAsyncTerminalRun skips the write when /subagent kill already
+            // stamped KILLED — the operator's reason is the source of truth, and overwriting
+            // it would replace "Killed by operator" with the TIMEOUT / FAILED message we
+            // synthesized when the canceled Future threw.
+            SubagentRunStore.persistAsyncTerminalRun(runId, outcome);
+
+            // Checked before collected completes: the yield it wakes unmarks the run.
+            var yieldedFlag = AWAITED.contains(runId) ? Boolean.FALSE
+                    : SubagentResponses.postAnnounceAndReadYieldFlag(runId, childConvId, parentConvId,
+                            label, outcome);
+
+            SubagentResponses.emitTerminalEvent(parentAgentName, SubagentRunStore.lookupAgentName(childAgentId),
+                    String.valueOf(runId), mode, context, outcome.terminalStatus(), outcome.errorReason());
+            EventLogger.flush();
+            if (collected != null) collected.complete(outcome);
+
+            // JCLAW-273: resume the parent agent's logical turn for a yielded
+            // caller. The announce Message we just posted is the parent's next
+            // user input; calling AgentRunner.resumeAndDeliver kicks off a fresh turn that
+            // picks up the announce via ConversationService.loadRecentMessages and
+            // produces a final assistant reply.
+            if (Boolean.TRUE.equals(yieldedFlag)) {
+                try {
+                    SubagentResponses.resumeParentAfterYield(parentConvId, runId);
+                } catch (Throwable t) {
+                    EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL,
+                            "Failed to resume parent for yielded run " + runId
+                                    + ": " + t.getMessage());
+                }
+            }
+        } finally {
+            // A kill or a throw above still ends a yield waiting on this run.
+            if (collected != null) collected.complete(outcome);
         }
     }
 

@@ -332,6 +332,131 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void yieldAllCollectsAChatsAsyncSpawnsWholeAndPostsNoAnnounceForThem() throws Exception {
+        // The children answer only once the yield waits on them, so the yield is what delivers them.
+        var answer = new java.util.concurrent.CountDownLatch(1);
+        startLlmServer(exchange -> {
+            try {
+                answer.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            LlmReplyFixture.send(exchange, simpleResponse("CHAT_ASYNC_OK"));
+        });
+        configureProvider();
+        var parent = createAgent("p-chat-async-all", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "web", "u-chat-async-all");
+        commitAndReopen();
+
+        var runIds = new CopyOnWriteArrayList<String>();
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                resultRef.set(agents.ToolContext.withConversation(conv.id, () -> {
+                    for (var task : java.util.List.of("do A", "do B", "do C")) {
+                        var spawned = new SubagentSpawnTool().execute("{\"task\":\"" + task + "\",\"async\":true}", p);
+                        runIds.add(JsonParser.parseString(spawned).getAsJsonObject().get("run_id").getAsString());
+                    }
+                    return new tools.SubagentYieldTool().execute("{\"all\":true}", p);
+                }));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        try {
+            awaitParkedAfter(thread, runIds, 3, 10_000);
+        } finally {
+            answer.countDown();
+        }
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "the spawns and the yield must complete within 60s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var results = JsonParser.parseString(resultRef.get()).getAsJsonObject().get("results").getAsJsonArray();
+        assertEquals(java.util.List.copyOf(runIds),
+                results.asList().stream().map(r -> r.getAsJsonObject().get("run_id").getAsString()).toList(),
+                "yield all returns every async child the chat spawned, in spawn order: " + resultRef.get());
+        for (var r : results) {
+            assertEquals("COMPLETED", r.getAsJsonObject().get("status").getAsString());
+            assertEquals("CHAT_ASYNC_OK", r.getAsJsonObject().get("reply").getAsString());
+        }
+        JPA.em().clear();
+        assertEquals(0, Message.count("conversation.id = ?1 AND messageKind = ?2",
+                conv.id, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE),
+                "a child the yield returned whole posts no announce repeating its first 4,000 characters");
+    }
+
+    @Test
+    void aChatAsyncChildThatEndedBeforeTheYieldPostsItsAnnounceAndIsStillCollectedOnce() throws Exception {
+        startLlmServer(simpleResponse("ENDED_FIRST"));
+        configureProvider();
+        var parent = createAgent("p-chat-async-late", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "web", "u-chat-async-late");
+        commitAndReopen();
+
+        var runId = JsonParser.parseString(invokeOnVirtualThreadInConversation(parent.id, conv.id,
+                "{\"task\":\"go\",\"async\":true}")).getAsJsonObject().get("run_id").getAsString();
+        awaitTerminalStatus(Long.parseLong(runId), SubagentRun.Status.COMPLETED, 10_000);
+        assertEquals(1, awaitAnnounces(conv.id, 1, 5_000).size(), "nothing was waiting, so the announce posts");
+
+        var results = JsonParser.parseString(yieldInConversation(parent.id, conv.id, "{\"all\":true}"))
+                .getAsJsonObject().get("results").getAsJsonArray();
+        assertEquals(1, results.size(), results.toString());
+        assertEquals(runId, results.get(0).getAsJsonObject().get("run_id").getAsString());
+        assertEquals("ENDED_FIRST", results.get(0).getAsJsonObject().get("reply").getAsString());
+        assertEquals(NOTHING_TO_COLLECT, yieldInConversation(parent.id, conv.id, "{\"all\":true}"),
+                "a collected child is not returned twice");
+    }
+
+    @Test
+    void yieldAllWithNothingToCollectSaysSoInsteadOfAnEmptySuccess() throws Exception {
+        var parent = createAgent("p-yield-none", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "web", "u-yield-none");
+        commitAndReopen();
+
+        assertEquals(NOTHING_TO_COLLECT, yieldInConversation(parent.id, conv.id, "{\"all\":true}"));
+    }
+
+    private static final String NOTHING_TO_COLLECT = "{\"results\":[],\"count\":0,\"note\":\"Nothing to collect: "
+            + "no async subagent spawned in this conversation or task is waiting to be collected. "
+            + "Calling subagent_yield again will not change that.\"}";
+
+    /** Waits until {@code spawner} has recorded {@code n} run ids and then parked, which is the yield after them waiting. */
+    private static void awaitParkedAfter(Thread spawner, java.util.List<?> runIds, int n, long timeoutMillis)
+            throws InterruptedException {
+        var deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            var state = spawner.getState();
+            if (!spawner.isAlive() || runIds.size() == n
+                    && (state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING)) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        fail("the spawner neither spawned " + n + " runs and parked nor ended within " + timeoutMillis + "ms");
+    }
+
+    private String yieldInConversation(Long parentAgentId, Long conversationId, String argsJson) throws Exception {
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
+                resultRef.set(agents.ToolContext.withConversation(conversationId,
+                        () -> new tools.SubagentYieldTool().execute(argsJson, parent)));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "subagent_yield must complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
+    }
+
+    @Test
     void batchChildrenCarryTheTopLevelModelOverride() throws Exception {
         // JCLAW-1231: executeBatch built each child's args by hand with null for the model
         // override, so modelProvider/modelId were honoured on a single spawn and dropped

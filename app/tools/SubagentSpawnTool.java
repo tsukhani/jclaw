@@ -361,8 +361,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
                 "When true (default false), return the child's run id immediately so you can "
-                        + "spawn more or do other work, then collect with subagent_yield. In a chat only "
-                        + "its owner reads (web chat, or the owner's private chat), a completion card is posted "
+                        + "spawn more or do other work, then collect with subagent_yield (runIds or all=true "
+                        + "returns each child's whole reply). In a chat only "
+                        + "its owner reads (web chat, or the owner's private chat), a child no yield is waiting on "
+                        + "when it ends posts a completion card "
                         + "to your conversation and the result is also sent to the chat's channel; in a group or "
                         + "a guest's chat the child runs in the foreground and you relay its result (a tasks[] batch "
                         + "still runs in parallel there). In a task "
