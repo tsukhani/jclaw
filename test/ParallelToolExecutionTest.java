@@ -621,6 +621,29 @@ class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
+    void aParallelBatchThatReadsOutsideTextWaitsOnNoLockTheTurnHolds() throws Exception {
+        // The sync chat route runs the turn inside the request's transaction, which saved the conversation row
+        // when it stored a message; each parallel call runs on its own thread, outside that transaction.
+        var ids = new AtomicReference<long[]>();
+        var seeder = Thread.ofPlatform().start(() -> ids.set(seedAgentAndConversation("outside-lock-" + System.nanoTime())));
+        seeder.join();
+        Agent agent = Tx.run(() -> Agent.findById(ids.get()[0]));
+        Conversation conv = Tx.run(() -> ConversationService.findById(ids.get()[1]));
+        conv.messageCount++;
+        conv.save();
+        JPA.em().flush();
+        var messages = new ArrayList<ChatMessage>();
+
+        invokeParallel(List.of(
+                        new ToolCall("a", "function", new FunctionCall("safe_x", "{}")),
+                        new ToolCall("b", "function", new FunctionCall("safe_y", "{}"))),
+                agent, conv.id, messages, new AtomicBoolean(false), new ConversationSink(conv));
+
+        assertEquals(List.of("ok-from-safe_x", "ok-from-safe_y"), messages.stream().map(ChatMessage::content).toList());
+        assertTrue(ConversationService.hasReadOutsideContent(conv.id));
+    }
+
+    @Test
     void generatedAttachmentFramesCarryTheSameShapeAsAConversationReload() throws Exception {
         // JCLAW-1231: the live tool_call frame and the reload response each built the
         // per-attachment JSON themselves, and the frame's copy had lost `deleted`.

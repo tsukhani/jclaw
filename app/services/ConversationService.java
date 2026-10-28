@@ -17,13 +17,20 @@ import utils.JpqlFilter;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 public class ConversationService {
 
     /** Ceiling on simultaneously-pinned conversations. See {@link #pin}. */
     public static final int MAX_PINNED = 10;
+
+    /** JF-136: conversations marked as having read outside text since boot; never pruned, since an id is never reused. */
+    private static final Set<Long> READ_OUTSIDE = ConcurrentHashMap.newKeySet();
+    /** The subset whose mark has been written to the database. */
+    private static final Set<Long> READ_OUTSIDE_WRITTEN = ConcurrentHashMap.newKeySet();
 
     private ConversationService() {}
 
@@ -182,13 +189,30 @@ public class ConversationService {
      * operator.
      */
     public static void markReadOutsideContent(Long conversationId) {
+        noteReadOutsideContent(conversationId);
+        persistReadOutsideContent(conversationId);
+    }
+
+    /**
+     * Records the mark in memory only, for a tool call running on its own thread: its transaction would wait on the
+     * conversation row the turn's transaction holds. The turn then writes it with {@link #persistReadOutsideContent}.
+     */
+    public static void noteReadOutsideContent(Long conversationId) {
+        READ_OUTSIDE.add(conversationId);
+    }
+
+    /** Writes a mark {@link #noteReadOutsideContent} recorded and not yet written; call it on the turn's own thread. */
+    public static void persistReadOutsideContent(Long conversationId) {
+        if (!READ_OUTSIDE.contains(conversationId) || READ_OUTSIDE_WRITTEN.contains(conversationId)) return;
         Tx.run(() -> JPA.em().createQuery("UPDATE Conversation c SET c.readOutsideContent = true"
                         + " WHERE c.id = :id AND c.readOutsideContent = false")
                 .setParameter("id", conversationId).executeUpdate());
+        READ_OUTSIDE_WRITTEN.add(conversationId);
     }
 
-    /** Whether the conversation has read outside text, from the database rather than a cached entity. */
+    /** Whether the conversation has read outside text: a mark counts here at once, before its transaction commits. */
     public static boolean hasReadOutsideContent(Long conversationId) {
+        if (READ_OUTSIDE.contains(conversationId)) return true;
         return Tx.run(() -> {
             var flags = JPA.em().createQuery("SELECT c.readOutsideContent FROM Conversation c WHERE c.id = :id",
                     Boolean.class).setParameter("id", conversationId).getResultList();

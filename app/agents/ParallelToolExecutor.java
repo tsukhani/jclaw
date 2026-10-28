@@ -115,8 +115,9 @@ public final class ParallelToolExecutor {
             return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
         }
         // JF-136: the model reads the whole conversation, so once outside text is in it, persona-file edits wait.
+        // Only noted here: this may be a call's own thread, whose write would wait on the row the turn holds.
         if (conversationId != null && ToolRegistry.readsOutsideContent(rawName, rawArgs, agent)) {
-            ConversationService.markReadOutsideContent(conversationId);
+            ConversationService.noteReadOutsideContent(conversationId);
         }
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich
@@ -228,6 +229,9 @@ public final class ParallelToolExecutor {
         } else {
             dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, turnCancel,
                     cancelled, offeredTools);
+        }
+        if (conversationId != null) {
+            ConversationService.persistReadOutsideContent(conversationId);
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);

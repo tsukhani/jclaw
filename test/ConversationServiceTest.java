@@ -36,6 +36,32 @@ class ConversationServiceTest extends UnitTest {
     }
 
     // =====================
+    // read outside content (JF-136)
+    // =====================
+
+    @Test
+    void aNotedReadOfOutsideTextCountsAtOnceAndIsWrittenOnlyWhenPersisted() {
+        var agent = newAgent("outside-note");
+        var noted = ConversationService.create(agent, "web", "u-noted");
+        var untouched = ConversationService.create(agent, "web", "u-untouched");
+
+        ConversationService.noteReadOutsideContent(noted.id);
+
+        assertTrue(ConversationService.hasReadOutsideContent(noted.id));
+        assertFalse(storedReadOutsideContent(noted.id), "a note alone writes nothing");
+        ConversationService.persistReadOutsideContent(noted.id);
+        ConversationService.persistReadOutsideContent(untouched.id);
+        assertTrue(storedReadOutsideContent(noted.id));
+        assertFalse(storedReadOutsideContent(untouched.id), "nothing was noted for it");
+        assertFalse(ConversationService.hasReadOutsideContent(untouched.id));
+    }
+
+    private static boolean storedReadOutsideContent(Long conversationId) {
+        return JPA.em().createQuery("SELECT c.readOutsideContent FROM Conversation c WHERE c.id = :id", Boolean.class)
+                .setParameter("id", conversationId).getSingleResult();
+    }
+
+    // =====================
     // findOrCreate / create
     // =====================
 
