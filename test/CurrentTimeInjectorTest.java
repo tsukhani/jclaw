@@ -107,6 +107,46 @@ class CurrentTimeInjectorTest extends UnitTest {
         assertFalse(CurrentTimeInjector.isClockBlock(List.of("not a string")));
     }
 
+    // ── JF-152: the turn's recalled memories ride the same trailing message ──
+
+    private static final String RECALL = "\n## Relevant Memories\nRecalled from long-term memory.\n- a fact\n\n";
+
+    @Test
+    void recalledMemoriesFollowTheClockAheadOfOtherContext() {
+        var input = List.of(ChatMessage.system("sys"), ChatMessage.user("hi"));
+
+        var out = CurrentTimeInjector.inject(input, RECALL, "\n## Open checklist\n- [pending] x\n");
+
+        assertEquals(3, out.size(), "recall adds no message of its own");
+        assertEquals("sys", out.getFirst().content());
+        assertEquals("hi", out.get(1).content());
+        assertEquals("user", out.get(2).role());
+        var trailing = (String) out.get(2).content();
+        var clockEnd = trailing.indexOf(RECALL);
+        assertTrue(clockEnd > 0, trailing);
+        assertTrue(CurrentTimeInjector.isClockBlock(trailing.substring(0, clockEnd)), trailing);
+        assertEquals(RECALL + "\n## Open checklist\n- [pending] x\n", trailing.substring(clockEnd));
+    }
+
+    @Test
+    void recalledMemoriesAloneFollowTheClock() {
+        var out = CurrentTimeInjector.inject(List.of(ChatMessage.user("hi")), RECALL, null);
+
+        var trailing = (String) out.get(1).content();
+        assertEquals(RECALL, trailing.substring(trailing.indexOf(RECALL)));
+        assertTrue(trailing.indexOf(RECALL) > 0, "the clock comes first: " + trailing);
+    }
+
+    @Test
+    void anEmptyRecallAddsNothing() {
+        var input = List.of(ChatMessage.user("hi"));
+
+        assertEquals(CurrentTimeInjector.inject(input, (String) null).get(1).content(),
+                CurrentTimeInjector.inject(input, "", null).get(1).content());
+        assertEquals(CurrentTimeInjector.inject(input, "\nextra\n").get(1).content(),
+                CurrentTimeInjector.inject(input, "", "\nextra\n").get(1).content());
+    }
+
     @Test
     void doesNotMutateTheInputList() {
         var input = List.of(ChatMessage.system("sys"), ChatMessage.user("hi"));

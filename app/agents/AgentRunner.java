@@ -596,9 +596,9 @@ public class AgentRunner {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(assembled.systemPrompt()));
         messages.add(ChatMessage.user(userPrompt));
-        // Task fires reuse the same clock placement as the streaming path: as
+        // Task fires reuse the same clock and recall placement as the streaming path: as
         // a trailing message, not in the system prompt (see CurrentTimeInjector).
-        messages = new ArrayList<>(CurrentTimeInjector.inject(messages));
+        messages = new ArrayList<>(CurrentTimeInjector.inject(messages, assembled.recalledMemories(), null));
 
         var providerName = ModelResolver.effectiveModelProvider(agent, stubConv);
         var primary = providerName != null ? ProviderRegistry.get(providerName) : null;
@@ -752,7 +752,7 @@ public class AgentRunner {
 
         // Compression → compaction → context-window trim → audio/vision/video
         // capability rewrite, all outside the prologue Tx (LLM calls inside).
-        prepared = AgentPromptPreparer.rewriteSyncMedia(prepared, agent, conversation, conversationId, userMessage);
+        prepared = AgentPromptPreparer.rewriteSyncMedia(prepared, agent, conversation, conversationId);
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
         trace.mark(LatencyTrace.PROLOGUE_DONE);

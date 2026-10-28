@@ -338,7 +338,7 @@ final class StreamingAgentRunner {
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
         var supportsVisionForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsVision();
-        prepared = AgentPromptPreparer.applyMediaRewrite(agent, conversation, userMessage, primary, prepared,
+        prepared = AgentPromptPreparer.applyMediaRewrite(agent, conversation, primary, prepared,
                 supportsAudioForStream, supportsVisionForStream);
         var messages = prepared.messages();
 

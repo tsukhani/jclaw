@@ -108,7 +108,7 @@ public class Memory extends Model {
 
     /**
      * JCLAW-526: when this memory last surfaced in recall (injected into a
-     * system prompt). Recency anchor for retrieval decay — a recently-accessed
+     * turn's prompt). Recency anchor for retrieval decay — a recently-accessed
      * memory decays more slowly. Written by {@link #touchAccessed} via bulk
      * JPQL, deliberately bypassing entity callbacks: a recall touch must not
      * bump {@code updatedAt} (which means "content changed") nor re-index the

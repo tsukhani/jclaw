@@ -238,9 +238,8 @@ public class ApiAgentsController extends Controller {
 
     /**
      * Return a per-section breakdown of the system prompt this agent would receive
-     * on its next turn. Feeds the Settings UI introspection dialog. Memory recall is
-     * skipped (null user message) so the breakdown is deterministic for a given
-     * agent state and doesn't depend on a hypothetical user query.
+     * on its next turn. Feeds the Settings UI introspection dialog. Recalled memories
+     * are not in the system prompt (JF-152); the breakdown says where they go instead.
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
@@ -259,9 +258,8 @@ public class ApiAgentsController extends Controller {
      * the text runs to tens of kilobytes and the breakdown dialog opens far more often
      * than the operator asks to read the prompt.
      *
-     * <p>Memory recall is skipped (null user message) for the same reason as the
-     * breakdown: a deterministic snapshot of the agent's standing prompt, not one
-     * conditioned on a hypothetical query.
+     * <p>{@code recallPlacement} says where recalled memories go, since they are not in
+     * this text (JF-152).
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
@@ -269,7 +267,8 @@ public class ApiAgentsController extends Controller {
     public static void promptText(Long id) {
         var agent = requireAgent(id);
         var assembled = SystemPromptAssembler.assemble(agent, null, null, requireBreakdownChannel());
-        renderJSON(gson.toJson(Map.of("text", assembled.systemPrompt())));
+        renderJSON(gson.toJson(Map.of("text", assembled.systemPrompt(),
+                "recallPlacement", SystemPromptAssembler.RECALL_PLACEMENT)));
     }
 
     /**

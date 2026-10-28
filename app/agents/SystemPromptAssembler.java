@@ -54,17 +54,18 @@ import java.util.stream.Collectors;
  * memories alone rather than dragging workspace files, skills and the tool catalog
  * with them — they changed on roughly 1 turn in 15 on a measured deployment.
  *
- * <p>So a new per-turn-variable section goes after {@link #appendCacheBoundary};
- * a section that changes occasionally and is worth its own breakpoint goes between
- * the two markers. Nothing else may vary above the cache boundary.
+ * <p>So a section that changes occasionally and is worth its own breakpoint goes between
+ * the two markers, and nothing else may vary above the cache boundary. Per-turn context
+ * goes in no section at all: the system message sits ahead of the whole history, so it
+ * rides {@link CurrentTimeInjector}'s trailing message instead (JF-152).
  */
 public class SystemPromptAssembler {
 
     /**
-     * Sentinel comment that separates the cacheable prefix from the per-turn-variable
-     * tail of the system prompt. Any byte above this line must be identical between
-     * two calls with the same agent state; per-turn-variable content (memories, etc.)
-     * must be appended below.
+     * Sentinel comment that separates the cacheable prefix from the uncached tail of the
+     * system prompt. Any byte above this line must be identical between two calls with the
+     * same agent state; below it go only the conversation's compaction summary and a
+     * subagent's parent context, which {@code SessionCompactor} appends.
      */
     public static final String CACHE_BOUNDARY_MARKER = "<!-- JCLAW_CACHE_BOUNDARY -->";
 
@@ -90,7 +91,16 @@ public class SystemPromptAssembler {
      */
     private static final String UNKNOWN = "unknown";
 
-    public record AssembledPrompt(String systemPrompt, List<SkillLoader.SkillInfo> skills) {}
+    /**
+     * @param recalledMemories the turn's {@value #RECALL_HEADING} block, or empty when nothing was recalled. Not
+     *                         part of {@code systemPrompt}: callers send it in {@link CurrentTimeInjector}'s
+     *                         trailing message, where a recall that changes per turn misses no history (JF-152).
+     */
+    public record AssembledPrompt(String systemPrompt, List<SkillLoader.SkillInfo> skills, String recalledMemories) {}
+
+    /** Where recalled memories go instead of the system prompt, as the prompt introspection endpoints report it. */
+    public static final String RECALL_PLACEMENT = "Recalled memories are not part of the system prompt. Each turn "
+            + "sends them, with the current date and time, in a message after the latest user message.";
 
     /**
      * Introspection snapshot returned by {@link #breakdown} for the Settings UI
@@ -112,7 +122,9 @@ public class SystemPromptAssembler {
      *                             core memories and the prompt splits in two.
      * @param coreMemoryChars      characters between the two markers: the core-memory
      *                             block, cached but re-prefilled when it changes
-     * @param variableSuffixChars  characters after the marker (vary per turn)
+     * @param variableSuffixChars  characters after the marker, which no provider caches
+     * @param recallPlacement      {@link #RECALL_PLACEMENT}: recalled memories are counted
+     *                             nowhere here because they are not in the system prompt
      * @param sections             per-section size breakdown (one entry per
      *                             named prompt section)
      * @param skills               per-skill size breakdown
@@ -126,6 +138,7 @@ public class SystemPromptAssembler {
             int staticPrefixChars,
             int coreMemoryChars,
             int variableSuffixChars,
+            String recallPlacement,
             List<Entry> sections,
             List<Entry> skills,
             List<Entry> tools
@@ -205,8 +218,8 @@ public class SystemPromptAssembler {
                                             float @Nullable [] queryEmbedding,
                                             @Nullable Conversation conversation) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding, conversation);
-        return new AssembledPrompt(builder.sb.toString(), skills);
+        var built = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding, conversation);
+        return new AssembledPrompt(builder.sb.toString(), built.skills(), built.recalledMemories());
     }
 
     /**
@@ -224,7 +237,7 @@ public class SystemPromptAssembler {
     public static PromptBreakdown breakdown(Agent agent, @Nullable String userMessage, String channelType) {
         var builder = new SectionedBuilder();
         var disabledTools = ToolRegistry.loadDisabledTools(agent);
-        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType);
+        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType).skills();
         var sectionEntries = builder.finish().stream()
                 .map(s -> new PromptBreakdown.Entry(s.name, s.chars, approxTokens(s.chars)))
                 .toList();
@@ -275,6 +288,7 @@ public class SystemPromptAssembler {
                 staticPrefix,
                 coreMemory,
                 variableSuffix,
+                RECALL_PLACEMENT,
                 sectionEntries,
                 skillEntries,
                 toolEntries);
@@ -295,17 +309,20 @@ public class SystemPromptAssembler {
      * canonical description of the prompt's composition lives here so the two public
      * entry points cannot drift.
      */
-    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
-                                                           @Nullable Set<String> disabledTools,
-                                                           @Nullable String channelType) {
+    private static Built buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
+                                     @Nullable Set<String> disabledTools,
+                                     @Nullable String channelType) {
         return buildPrompt(agent, userMessage, b, disabledTools, channelType, null, null);
     }
 
-    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
-                                                           @Nullable Set<String> disabledTools,
-                                                           @Nullable String channelType,
-                                                           float @Nullable [] queryEmbedding,
-                                                           @Nullable Conversation conversation) {
+    /** What {@link #buildPrompt} produces beside the system prompt text it writes into its builder. */
+    private record Built(List<SkillLoader.SkillInfo> skills, String recalledMemories) {}
+
+    private static Built buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
+                                     @Nullable Set<String> disabledTools,
+                                     @Nullable String channelType,
+                                     float @Nullable [] queryEmbedding,
+                                     @Nullable Conversation conversation) {
         // Loadtest agent: emit only the static behavioral sections (safety,
         // execution bias, channel guidance) so cross-provider tokens-per-sec
         // measurements aren't dragged down by prompt-prefill costs that
@@ -321,7 +338,7 @@ public class SystemPromptAssembler {
             b.startSection("Execution Bias");
             appendExecutionBiasSection(b.sb, agent, channelType);
             appendChannelGuidance(b, channelType);
-            return List.of();
+            return new Built(List.of(), "");
         }
 
         // 0. Role & operating contract — what this agent is (a JClaw agent), who it
@@ -470,8 +487,8 @@ public class SystemPromptAssembler {
 
         // === CACHE BOUNDARY ===
         // Everything above this line is deterministic for a given agent-day and
-        // can be served from the LLM provider's prompt cache. Everything below
-        // this line varies per turn and is never expected to hit the cache.
+        // can be served from the LLM provider's prompt cache. Nothing below it is
+        // cached; buildPrompt itself writes nothing there.
         b.startSection("Cache Boundary");
         appendCacheBoundary(b.sb);
 
@@ -483,17 +500,17 @@ public class SystemPromptAssembler {
         // breakpoint caches instead; see that class for the cost measurements. The
         // cacheable Environment block still omits the clock.
 
-        // 11. Recalled memories — per-turn-variable, placed past the cache
-        // boundary so updating it never invalidates the cacheable prefix.
-        b.startSection("Relevant Memories");
-        boolean recalledFromOthers = appendMemories(b.sb, agent, userMessage, coreMemoryIds, queryEmbedding,
+        // 11. Recalled memories are returned beside the prompt, not written into it (JF-152): even past the cache
+        // boundary they sat ahead of the whole history, which missed the cache whenever the recalled set changed.
+        var recall = new StringBuilder();
+        boolean recalledFromOthers = appendMemories(recall, agent, userMessage, coreMemoryIds, queryEmbedding,
                 MemoryScope.of(conversation));
         // JF-136: a memory resting on someone else's words reaches the model as surely as a page a tool fetched.
         if (conversation != null && conversation.id != null && (coreBlock.fromOthers() || recalledFromOthers)) {
             ConversationService.markReadOutsideContent(conversation.id);
         }
 
-        return skills;
+        return new Built(skills, recall.toString());
     }
 
     private static void appendRoleSection(StringBuilder sb) {
@@ -1026,7 +1043,7 @@ public class SystemPromptAssembler {
 
     /**
      * Appends the memories recalled for this turn; whether any of them rests on someone other than the operator.
-     * Fails closed: once any recalled text is in the prompt, a failure counts as such a memory.
+     * Fails closed: once any recalled text is in the block, a failure counts as such a memory.
      */
     private static boolean appendMemories(StringBuilder sb, Agent agent, @Nullable String userMessage,
                                           Set<String> excludeIds, float @Nullable [] queryEmbedding,

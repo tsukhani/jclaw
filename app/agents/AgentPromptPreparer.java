@@ -51,10 +51,12 @@ final class AgentPromptPreparer {
     /**
      * Read-only prologue data computed for the synchronous path in a single
      * JPA transaction. Threads the resolved provider pair and the media bearers
-     * through to the capability-rewrite step and the tool loop.
+     * through to the capability-rewrite step and the tool loop, and the turn's
+     * recalled memories through to the trailing message.
      */
     record PreparedData(
         List<ChatMessage> messages,
+        String recalledMemories,
         LlmProvider primary,
         LlmProvider.@Nullable Fallback fallback,
         List<ToolDef> tools,
@@ -145,7 +147,7 @@ final class AgentPromptPreparer {
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-            return Optional.of(new PreparedData(hydration.messages(), primary, fallback, tools,
+            return Optional.of(new PreparedData(hydration.messages(), assembled.recalledMemories(), primary, fallback, tools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers()));
         });
     }
@@ -158,7 +160,7 @@ final class AgentPromptPreparer {
      * message list; every other field is threaded through unchanged.
      */
     static PreparedData rewriteSyncMedia(PreparedData prepared, Agent agent, Conversation conversation,
-                                         Long conversationId, String userMessage) {
+                                         Long conversationId) {
         // JCLAW-38: if the just-built context exceeds the compaction
         // budget, summarize older turns (LLM call, outside Tx) and
         // rebuild. trimToContextWindow below stays as a drop-oldest
@@ -174,7 +176,7 @@ final class AgentPromptPreparer {
         // its head, so the hydration-time positions the media rewrites below address are only
         // valid if each step hands back the bearers that match the list it produced.
         var compacted = CompactionGate.maybeCompactAndRebuild(
-                agent, conversationId, userMessage, null, prepared.primary(),
+                agent, conversationId, null, prepared.primary(),
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
                 prepared.tools());
@@ -198,11 +200,13 @@ final class AgentPromptPreparer {
         // multi-image / text-summary) and splice the content parts in. supportsVision/Audio
         // are threaded so a co-attached downgraded image / voice note survives the rebuild.
         finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, hydration.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
-        // Clock rides a trailing message rather than the system prompt (see
+        // Clock and recall ride a trailing message rather than the system prompt (see
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
-        finalMessages = CurrentTimeInjector.inject(finalMessages, CheckListTool.reminder(conversation, finalMessages));
-        return new PreparedData(finalMessages, prepared.primary(), prepared.fallback(), prepared.tools(),
+        finalMessages = CurrentTimeInjector.inject(finalMessages, prepared.recalledMemories(),
+                CheckListTool.reminder(conversation, finalMessages));
+        return new PreparedData(finalMessages, prepared.recalledMemories(), prepared.primary(), prepared.fallback(),
+                prepared.tools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
 
@@ -260,8 +264,7 @@ final class AgentPromptPreparer {
      * round-1 audio-format retry downstream addresses the list it is actually re-sending
      * (JCLAW-1232). Every other field is threaded through unchanged.
      */
-    static PreparedPrologue applyMediaRewrite(Agent agent, Conversation conversation,
-                                              String userMessage, LlmProvider primary,
+    static PreparedPrologue applyMediaRewrite(Agent agent, Conversation conversation, LlmProvider primary,
                                               PreparedPrologue prepared,
                                               boolean supportsAudioForStream,
                                               boolean supportsVisionForStream) {
@@ -275,7 +278,7 @@ final class AgentPromptPreparer {
         // JCLAW-1232: bearers travel with the list through the rebuild and the trim — see the
         // sibling comment in rewriteSyncMedia.
         var compacted = CompactionGate.maybeCompactAndRebuild(
-                agent, conversation.id, userMessage, prepared.disabledTools(), primary,
+                agent, conversation.id, prepared.disabledTools(), primary,
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
                 prepared.tools());
@@ -290,12 +293,13 @@ final class AgentPromptPreparer {
         // JCLAW-224: route video attachments through the dispatcher on the streaming path too.
         var finalMessages = VisionAudioAssembler.applyVideoForCapability(captioned, hydration.videoBearers(), agent,
                 supportsAudioForStream, supportsVisionForStream);
-        // The clock rides a trailing message instead of the system prompt so
+        // The clock and recall ride a trailing message instead of the system prompt so
         // the cacheable prefix — and the whole history sitting behind it — stays
         // byte-stable across turns. Injected last, after compaction/trim/media
         // rewrites, so nothing downstream rebuilds the list and drops it.
         return new PreparedPrologue(prepared.assembled(),
-                CurrentTimeInjector.inject(finalMessages, CheckListTool.reminder(conversation, finalMessages)),
+                CurrentTimeInjector.inject(finalMessages, prepared.assembled().recalledMemories(),
+                        CheckListTool.reminder(conversation, finalMessages)),
                 prepared.tools(), prepared.disabledTools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }

@@ -26,9 +26,9 @@ import java.util.Set;
  * <p>Coverage breakdown:
  * <ul>
  *   <li>Workspace file order — SOUL → IDENTITY → USER → BOOTSTRAP → AGENT.</li>
- *   <li>Cache boundary marker — present once, sits between the stable prefix
- *       and the per-turn memories section, and {@code breakdown()} reports
- *       prefix/suffix sizes consistent with that placement.</li>
+ *   <li>Cache boundary marker — present once, follows the stable prefix, and
+ *       {@code breakdown()} reports prefix/suffix sizes consistent with that
+ *       placement and says where recalled memories go instead (JF-152).</li>
  *   <li>Skills XML — emitted when the agent has at least one skill on disk,
  *       absent otherwise.</li>
  *   <li>Channel guidance — Web, Telegram, and Voice sections render their
@@ -169,14 +169,10 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    void cacheBoundarySitsBetweenEnvironmentAndMemoriesSections() {
-        // Environment is the last section in the cacheable prefix; memories are
-        // the only section after the boundary. This pin enforces the JCLAW-128
-        // ordering invariant the prompt cache relies on.
+    void cacheBoundaryFollowsTheEnvironmentSection() {
+        // Environment is the last section in the cacheable prefix. This pin enforces
+        // the JCLAW-128 ordering invariant the prompt cache relies on.
         var agent = newAgent("spa-boundary-sandwich");
-        // Force a memory recall by passing a user message — even with no memory
-        // store seeded, the section header path is taken and we can verify
-        // ordering against environment.
         var prompt = SystemPromptAssembler.assemble(agent, "tell me about cats", null, "web").systemPrompt();
 
         int env = prompt.indexOf("## Environment");
@@ -243,8 +239,6 @@ class SystemPromptAssemblerTest extends UnitTest {
     void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
         var agent = newAgent("spa-breakdown-split");
         var bd = SystemPromptAssembler.breakdown(agent, null, "web");
-        // Without a user message the memories section is empty, but the marker
-        // still bisects the prompt and breakdown reports the split.
         assertTrue(bd.cacheablePrefixChars() > 0,
                 "non-empty cacheable prefix expected");
         assertTrue(bd.cacheablePrefixChars() < bd.totalChars(),
@@ -252,6 +246,18 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertEquals(SystemPromptAssembler.CACHE_BOUNDARY_MARKER,
                 bd.cacheBoundaryMarker(),
                 "breakdown must echo the canonical marker constant");
+    }
+
+    @Test
+    void theBreakdownSaysWhereRecalledMemoriesGoAndCountsNoSectionForThem() {
+        // JF-152: recall is not in the system prompt, so a section for it would describe bytes that are not there.
+        var bd = SystemPromptAssembler.breakdown(newAgent("spa-breakdown-recall"), null, "web");
+
+        assertEquals("Recalled memories are not part of the system prompt. Each turn sends them, with the current "
+                + "date and time, in a message after the latest user message.", bd.recallPlacement());
+        assertEquals("Cache Boundary", bd.sections().getLast().name(), "the boundary is the prompt's last section");
+        assertEquals(List.of(), bd.sections().stream().filter(s -> s.name().contains("Memories")).toList());
+        assertEquals(1, bd.variableSuffixChars(), "only the marker's line end follows the boundary");
     }
 
     // =====================
@@ -733,6 +739,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         // you" — prose about the section, not the section (JCLAW-942).
         assertFalse(prompt.contains(SystemPromptAssembler.RECALL_HEADING),
                 "Loadtest path must NOT include the recalled-memories section");
+        assertEquals("", assembled.recalledMemories(), "nor recall any for the trailing message");
 
         assertTrue(assembled.skills().isEmpty(),
                 "Loadtest path must return zero skills (regardless of whether disk has any)");

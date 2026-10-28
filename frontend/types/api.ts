@@ -865,6 +865,8 @@ export interface PromptBreakdown {
   /** Bytes of the core-memory block: cached, but re-prefilled when it changes. */
   coreMemoryChars: number
   variableSuffixChars: number
+  /** Where recalled memories go: not in the system prompt, so no section counts them (JF-152). */
+  recallPlacement: string
   sections: PromptBreakdownEntry[]
   skills: PromptBreakdownEntry[]
   tools: PromptBreakdownEntry[]

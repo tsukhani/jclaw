@@ -55,6 +55,13 @@ import java.util.List;
  * boundary. Both llama.cpp and MLX were separately confirmed to reuse a stable
  * prefix incrementally, which is the engine behavior this relies on.
  *
+ * <h2>JF-152: recalled memories ride the same message</h2>
+ * <p>The turn's recalled memories ({@link SystemPromptAssembler.AssembledPrompt#recalledMemories})
+ * left the system prompt for the same reason the clock did: recall runs on every user
+ * message, so a recalled set that changed between turns missed the cache for every history
+ * token behind the system message. The message is built once per turn, so it is identical
+ * on every model round of that turn.
+ *
  * <h2>Call-site contract</h2>
  * <p>Every path that finalizes a message list for an LLM call MUST end with
  * {@link #inject}, or that path's model sees no clock at all. There are three,
@@ -134,6 +141,16 @@ public final class CurrentTimeInjector {
         var out = new ArrayList<>(messages);
         out.add(ChatMessage.user(extra == null ? block() : block() + extra));
         return out;
+    }
+
+    /**
+     * {@link #inject(List, String)} with the turn's recalled memories ahead of {@code extra}, so they reach the
+     * model beside the user's turn rather than in the system prompt (JF-152). An empty recall adds nothing.
+     */
+    public static List<ChatMessage> inject(List<ChatMessage> messages, String recalledMemories,
+                                           @Nullable String extra) {
+        var tail = extra == null ? recalledMemories : recalledMemories + extra;
+        return inject(messages, tail.isEmpty() ? null : tail);
     }
 
     /**

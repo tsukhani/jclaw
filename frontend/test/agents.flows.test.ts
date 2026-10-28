@@ -897,6 +897,40 @@ describe('Agents page — Inspect prompt dialog', () => {
     expect(component.findAll('table').length).toBeGreaterThan(0)
   })
 
+  it('says where recalled memories go, beside the numbers and beside the full text', async () => {
+    const placement = 'Recalled memories are not part of the system prompt. Each turn sends them, with the '
+      + 'current date and time, in a message after the latest user message.'
+    registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
+      totalChars: 100,
+      totalTokenEstimate: 25,
+      cacheBoundaryMarker: '',
+      cacheablePrefixChars: 80,
+      staticPrefixChars: 80,
+      coreMemoryChars: 0,
+      variableSuffixChars: 1,
+      recallPlacement: placement,
+      sections: [{ name: 'Identity', chars: 100, tokens: 25 }],
+      skills: [],
+      tools: [],
+    }))
+    registerEndpoint('/api/agents/2/prompt-text', () => ({
+      text: '## Your Role\nYou are a helpful agent.',
+      recallPlacement: placement,
+    }))
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+    await component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')!.trigger('click')
+    await flushPromises()
+    expect(component.find('[data-testid="prompt-recall-placement"]').text()).toBe(placement)
+
+    await component.find('[data-testid="view-full-prompt"]').trigger('click')
+    await flushPromises()
+    expect(component.find('[data-testid="prompt-text-recall-placement"]').text()).toBe(placement)
+  })
+
   it('View Full shows raw and rendered markdown panes, and toggles between them', async () => {
     registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
       totalChars: 100,

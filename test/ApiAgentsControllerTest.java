@@ -721,6 +721,23 @@ class ApiAgentsControllerTest extends FunctionalTest {
                 "breakdown prefix length must match where the marker sits in the returned text");
     }
 
+    @Test
+    void bothPromptEndpointsSayWhereRecalledMemoriesGo() {
+        // JF-152: recall is not in the system prompt either endpoint describes, so each names where it goes.
+        login();
+        var id = createAgent("prompt-recall-placement");
+        var expected = "Recalled memories are not part of the system prompt. Each turn sends them, with the "
+                + "current date and time, in a message after the latest user message.";
+        var text = JsonParser.parseString(getContent(GET("/api/agents/" + id + "/prompt-text?channelType=web")))
+                .getAsJsonObject();
+        var breakdown = JsonParser.parseString(getContent(GET("/api/agents/" + id + "/prompt-breakdown?channelType=web")))
+                .getAsJsonObject();
+
+        assertEquals(expected, text.get("recallPlacement").getAsString());
+        assertEquals(expected, breakdown.get("recallPlacement").getAsString());
+        assertFalse(text.get("text").getAsString().contains("## Relevant Memories"));
+    }
+
 // =====================
     // Main-agent invariants
     // =====================

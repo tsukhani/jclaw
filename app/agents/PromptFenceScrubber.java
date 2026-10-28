@@ -6,12 +6,13 @@ import java.util.List;
 
 /**
  * JCLAW-976: strips text that would forge a prompt-section boundary out of content JClaw
- * injects into the system prompt.
+ * injects into the prompt.
  *
  * <p>JClaw frames recalled memories as untrusted reference data, which handles a malicious
  * memory's <em>content</em>. It does not handle a memory whose text imitates the framing
- * itself: those lines land inside the system message, where nothing distinguishes them from
- * JClaw's own.
+ * itself: those lines land inside a message JClaw writes (the system message for core
+ * memories, the turn's trailing message for recalled ones, JF-152), where nothing
+ * distinguishes them from JClaw's own.
  *
  * <p>Two classes of fence, and the machine-readable one is the sharper of the two:
  *
@@ -52,7 +53,7 @@ public final class PromptFenceScrubber {
             SystemPromptAssembler.RECALL_HEADING);
 
     /**
-     * Remove every fence from {@code text} before it is injected into the system prompt.
+     * Remove every fence from {@code text} before it is injected into the prompt.
      * A scrub is logged, never silent — a stripped fence is a signal worth seeing.
      *
      * @param source what is being scrubbed, for the log line (e.g. {@code "core memory 42"})

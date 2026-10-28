@@ -729,6 +729,7 @@ const promptChartEntries = computed<PromptBreakdownEntry[]>(() => {
 // opened to read numbers far more often than to read the prompt.
 const promptTextOpen = ref(false)
 const promptText = ref('')
+const promptTextRecallPlacement = ref('')
 const promptTextLoading = ref(false)
 const promptTextError = ref('')
 
@@ -762,10 +763,13 @@ async function openPromptText() {
   promptTextError.value = ''
   promptTextLoading.value = true
   try {
-    const res = await $fetch<{ text: string }>(
+    const res = await $fetch<{ text: string, recallPlacement: string }>(
       `/api/agents/${promptBreakdownAgent.value.id}/prompt-text?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
     )
-    if (promptLoads.isCurrent(request)) promptText.value = res.text
+    if (promptLoads.isCurrent(request)) {
+      promptText.value = res.text
+      promptTextRecallPlacement.value = res.recallPlacement
+    }
   }
   catch (e: unknown) {
     if (promptLoads.isCurrent(request)) promptTextError.value = e instanceof Error ? e.message : 'Failed to load system prompt'
@@ -3544,6 +3548,7 @@ const agentKinds = [
               The exact system prompt string for
               <span class="font-mono">{{ promptBreakdownChannel }}</span>, as the model
               receives it. Tool schemas travel separately and are not part of this text.
+              <span data-testid="prompt-text-recall-placement">{{ promptTextRecallPlacement }}</span>
             </p>
             <!-- Panes scroll independently: the raw string and its rendered form
                  have very different heights, so a shared scroller would strand
@@ -3635,7 +3640,7 @@ const agentKinds = [
             </div>
             <div
               class="bg-muted border border-border px-3 py-2"
-              title="Bytes after the cache boundary — per-turn-variable content (memories) that never hits the cache"
+              title="Bytes after the cache boundary, which a provider never caches"
             >
               <div class="text-[10px] text-fg-muted uppercase tracking-wide">
                 Variable suffix
@@ -3648,6 +3653,12 @@ const agentKinds = [
               </div>
             </div>
           </div>
+          <p
+            class="text-xs text-fg-muted"
+            data-testid="prompt-recall-placement"
+          >
+            {{ promptBreakdownData.recallPlacement }}
+          </p>
 
           <!--
             Chart view: ONE pie over both series. Sections and tool schemas are

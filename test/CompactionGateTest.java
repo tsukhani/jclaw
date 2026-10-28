@@ -85,7 +85,7 @@ class CompactionGateTest extends UnitTest {
 
         var current = List.of(ChatMessage.system("SP"), ChatMessage.user("hi"));
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, 999_999_999L, "hi", Set.of(), primary, current);
+                agent, 999_999_999L, Set.of(), primary, current);
 
         assertSame(current, result,
                 "missing conversation → snapshot=null → return current unchanged (same instance)");
@@ -103,7 +103,7 @@ class CompactionGateTest extends UnitTest {
 
         var current = List.of(ChatMessage.system("SP"), ChatMessage.user("hi"));
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
 
         assertSame(current, result,
                 "modelInfo null → return current unchanged");
@@ -119,7 +119,7 @@ class CompactionGateTest extends UnitTest {
 
         var current = List.<ChatMessage>of();
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
 
         assertSame(current, result, "empty list must not trigger compaction");
     }
@@ -138,7 +138,7 @@ class CompactionGateTest extends UnitTest {
                 ChatMessage.user("hello world"),
                 ChatMessage.assistant("hi back!"));
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
 
         assertSame(current, result, "under-threshold → return current unchanged");
     }
@@ -183,7 +183,7 @@ class CompactionGateTest extends UnitTest {
             commitAndReopen();
 
             var result = CompactionGate.maybeCompactAndRebuild(
-                    agent, conv.id, "hi", Set.of(), primary, current);
+                    agent, conv.id, Set.of(), primary, current);
             assertSame(current, result,
                     "200k-window model %s must keep the small list unchanged".formatted(modelId));
         }
@@ -206,7 +206,7 @@ class CompactionGateTest extends UnitTest {
         // model. We verify model-specific resolution via the no-op-but-distinct
         // branch by checking that adding more messages CHANGES behaviour.
         var resultGemini = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
         // result is still `current` because compact() skipped (no safe boundary),
         // but we've validated the path executed against the gemini window.
         assertSame(current, resultGemini,
@@ -245,7 +245,7 @@ class CompactionGateTest extends UnitTest {
 
         // Gate triggers shouldCompact=true; compact() bails at boundary; result == current.
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, listWithFatTool);
+                agent, conv.id, Set.of(), primary, listWithFatTool);
         assertSame(listWithFatTool, result,
                 "compact() skipped on no-safe-boundary, but the shouldCompact branch ran (tool-call tokens counted toward budget)");
 
@@ -259,7 +259,7 @@ class CompactionGateTest extends UnitTest {
         assertTrue(tokensNoTool < 300,
                 "sanity: without tool-call, estimate must be under budget; got " + tokensNoTool);
         var resultNoTool = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "hi", Set.of(), primary, listWithoutTool);
+                agent, conv.id, Set.of(), primary, listWithoutTool);
         assertSame(listWithoutTool, resultNoTool, "under-budget early-return branch");
     }
 
@@ -292,7 +292,7 @@ class CompactionGateTest extends UnitTest {
                 ChatMessage.system("SP"),
                 ChatMessage.user("a".repeat(8000)));
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "next user", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
 
         assertSame(current, result,
                 "summarizer returned empty → compact() skip-reason='empty summary' → gate falls back to current");
@@ -336,7 +336,7 @@ class CompactionGateTest extends UnitTest {
                 ChatMessage.system("SP"),
                 ChatMessage.user(bigContent));
         var result = CompactionGate.maybeCompactAndRebuild(
-                agent, conv.id, "next user", Set.of(), primary, current);
+                agent, conv.id, Set.of(), primary, current);
 
         assertNotSame(current, result,
                 "successful compaction must return a freshly rebuilt list (not the input)");

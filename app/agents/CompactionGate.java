@@ -62,10 +62,10 @@ public final class CompactionGate {
      * connection.
      */
     public static List<ChatMessage> maybeCompactAndRebuild(
-            Agent agent, Long conversationId, String userMessage,
+            Agent agent, Long conversationId,
             @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current) {
-        return maybeCompactAndRebuild(agent, conversationId, userMessage, disabledTools,
+        return maybeCompactAndRebuild(agent, conversationId, disabledTools,
                 primary, current, List.of());
     }
 
@@ -78,10 +78,10 @@ public final class CompactionGate {
      * by the trim drop-oldest fallback instead of summarized.
      */
     public static List<ChatMessage> maybeCompactAndRebuild(
-            Agent agent, Long conversationId, String userMessage,
+            Agent agent, Long conversationId,
             @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current, List<ToolDef> tools) {
-        return maybeCompactAndRebuild(agent, conversationId, userMessage, disabledTools, primary,
+        return maybeCompactAndRebuild(agent, conversationId, disabledTools, primary,
                 new MessageHydrator.Hydration(current, List.of(), List.of(), List.of()), tools).messages();
     }
 
@@ -93,7 +93,7 @@ public final class CompactionGate {
      * {@code current} is returned unchanged.
      */
     public static MessageHydrator.Hydration maybeCompactAndRebuild(
-            Agent agent, Long conversationId, String userMessage,
+            Agent agent, Long conversationId,
             @Nullable Set<String> disabledTools, LlmProvider primary,
             MessageHydrator.Hydration current, List<ToolDef> tools) {
         // Cheap snapshot: model info + effective model id + channel type.
@@ -137,14 +137,15 @@ public final class CompactionGate {
                         result.turnsCompacted(), result.summaryChars(), modelLabel));
 
         // Rebuild messages: fresh read picks up the bumped compactionSince,
-        // appendSummaryToPrompt re-injects the (now stored) summary.
+        // appendSummaryToPrompt re-injects the (now stored) summary. No user message, so recall
+        // does not run again: the caller's trailing message carries the prologue's (JF-152).
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return current;
             var promptDisabled = disabledTools != null ? disabledTools
                     : ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames),
                             DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId));
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, promptDisabled, conv.channelType, null, conv);
+            var assembled = SystemPromptAssembler.assemble(agent, null, promptDisabled, conv.channelType, null, conv);
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);

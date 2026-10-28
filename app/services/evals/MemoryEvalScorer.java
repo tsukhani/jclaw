@@ -8,7 +8,7 @@ import java.util.List;
  *
  * <p>Pure: the caller supplies each case's ranked retrieval, so scoring is deterministic
  * and testable without a store, an index or a model. The retrieval itself comes from
- * {@code SystemPromptAssembler.recall} (JCLAW-937), which is the same pipeline the system
+ * {@code SystemPromptAssembler.recall} (JCLAW-937), which is the same pipeline a turn's
  * prompt uses — so a score describes production, not a reimplementation of it.
  *
  * <p>Two metrics, because they answer different questions. <b>Recall</b> asks whether the

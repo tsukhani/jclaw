@@ -435,7 +435,7 @@ public class ApiMemoryController extends Controller {
      * POST /api/memories/evals/run — score a generated suite against live recall.
      *
      * <p>Each case is retrieved through {@link SystemPromptAssembler#recall}, the same
-     * pipeline the system prompt uses, so a score describes production rather than a
+     * pipeline a turn's prompt uses, so a score describes production rather than a
      * reimplementation of it. Candidates are read in scored order rather than only the
      * selected ones, so recall at 10 measures retrieval instead of the recall limit.
      */
@@ -541,9 +541,9 @@ public class ApiMemoryController extends Controller {
     /**
      * POST /api/memories/recall — what recall would inject for a query, and why (JCLAW-937).
      *
-     * <p>Recall is assembled per turn straight into the system prompt, and nothing else
-     * exposes it: {@code prompt-breakdown} passes a null user message, so the block never
-     * appears there. Every recall change to date has been verified against fixtures or an
+     * <p>Recall is assembled per turn straight into the turn's trailing message, and nothing
+     * else exposes it: {@code prompt-breakdown} describes the system prompt, which never
+     * carries the block. Every recall change to date has been verified against fixtures or an
      * offline sweep rather than the live pipeline.
      *
      * <p>Runs {@link SystemPromptAssembler#recall}, the same method the prompt uses, so

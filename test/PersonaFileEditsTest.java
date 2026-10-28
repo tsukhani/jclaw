@@ -174,9 +174,9 @@ class PersonaFileEditsTest extends UnitTest {
         memoryBy(agent, "A task run noted the rooftop pool hours.", "fact", models.MemoryAuthorType.AGENT_SYNTHESIZED);
 
         var c = (Conversation) Tx.run(() -> ConversationService.findById(conversation));
-        var prompt = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "web", null, c).systemPrompt();
+        var recalled = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "web", null, c).recalledMemories();
 
-        assertTrue(prompt.contains("A task run noted the rooftop pool hours."), prompt);
+        assertTrue(recalled.contains("A task run noted the rooftop pool hours."), recalled);
         assertTrue(ConversationService.hasReadOutsideContent(conversation));
     }
 
@@ -189,9 +189,10 @@ class PersonaFileEditsTest extends UnitTest {
                         models.MemoryAuthorType.GUEST_TURN, List.of()));
 
         var c = (Conversation) Tx.run(() -> ConversationService.findById(conversation));
-        var prompt = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "telegram", null, c).systemPrompt();
+        var recalled = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "telegram", null, c)
+                .recalledMemories();
 
-        assertTrue(prompt.contains("A guest asked about the rooftop pool hours."), prompt);
+        assertTrue(recalled.contains("A guest asked about the rooftop pool hours."), recalled);
         assertTrue(ConversationService.hasReadOutsideContent(conversation));
     }
 

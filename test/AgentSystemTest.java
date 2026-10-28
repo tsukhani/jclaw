@@ -941,8 +941,8 @@ class AgentSystemTest extends UnitTest {
      * variance (timestamps, UUIDs, non-deterministic tool/skill ordering, etc.) causes
      * every turn to miss the cache. This test is the guardrail — it fails the build if
      * anyone accidentally re-introduces dynamic content into the cacheable region of
-     * the system prompt. Recalled memories legitimately vary per turn and sit at the
-     * tail, so we check stability with the same user message across both calls.
+     * the system prompt. Recalled memories vary per turn, which is why they ride the
+     * turn's trailing message rather than this prompt (JF-152).
      */
     @Test
     void assembleIsStableAcrossCallsWithSameInputs() {
@@ -1157,10 +1157,9 @@ class AgentSystemTest extends UnitTest {
     }
 
     /**
-     * The cache-boundary marker separates the byte-stable prefix from the per-turn-variable
-     * tail. This test asserts (1) the marker is present, (2) nothing above it varies even
-     * when the *user message* changes (which triggers different memory recall results), and
-     * (3) the memories section sits below the marker, not above.
+     * The cache-boundary marker separates the byte-stable prefix from the uncached tail.
+     * This test asserts (1) the marker is present and (2) nothing above it varies when the
+     * <em>user message</em> changes.
      */
     @Test
     void assembleCacheBoundaryKeepsPrefixStable() {
