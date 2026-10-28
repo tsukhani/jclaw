@@ -25,10 +25,11 @@ final class SubagentRunStore {
 
     private SubagentRunStore() {}
 
-    /** Insert the SubagentRun audit row in its own short Tx and return the
-     *  generated id. JCLAW-326: persist the spawn-time {@code label} on the
-     *  row so {@code conversation_list} can filter / display without re-parsing
-     *  per-run announce-message metadata JSON. */
+    /** Insert the SubagentRun audit row and return the generated id. The caller must hold no
+     *  transaction (SubagentSpawnTool refuses one that does): {@link Tx#run} would join it,
+     *  and the child's thread could not read the row before it commits (JF-163). JCLAW-326: persist
+     *  the spawn-time {@code label} on the row so {@code conversation_list} can filter / display
+     *  without re-parsing per-run announce-message metadata JSON. */
     static Long insertSubagentRun(Long parentAgentId, @Nullable Long childAgentId,
                                   @Nullable Long parentConvId, @Nullable Long parentTaskRunId,
                                   @Nullable Long childConvId, @Nullable String label, boolean codingHarness) {

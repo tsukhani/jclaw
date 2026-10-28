@@ -158,7 +158,7 @@ public class ApiChatController extends Controller {
         }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
-        // JCLAW-199: streamChat is @NoTransaction so Play does not wrap the
+        // JCLAW-199: both chat routes are @NoTransaction so Play does not wrap the
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
@@ -286,8 +286,12 @@ public class ApiChatController extends Controller {
 
     /**
      * POST /api/chat/send — Send a message and get a synchronous response.
+     *
+     * <p>{@code @NoTransaction}, as {@link #streamChat}: the turn's rows commit as it writes them, so a
+     * subagent it starts on another thread can read its own run (JF-163).
      */
     @SuppressWarnings("java:S2259")
+    @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "an agent calling chat drives another turn -- unbounded recursion")
     public static void send() {
@@ -298,18 +302,7 @@ public class ApiChatController extends Controller {
         // (/reset). Unknown slash-prefixed input falls through as normal text.
         var slashCmd = Commands.parse(ctx.message());
         if (slashCmd.isPresent()) {
-            Conversation current;
-            if (slashCmd.get() == Commands.Command.NEW) {
-                current = null;
-            } else if (ctx.conversationId() != null) {
-                current = ConversationService.findById(ctx.conversationId());
-                if (current == null) {
-                    notFound();
-                    throw ApiResponses.unreachable();
-                }
-            } else {
-                current = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
-            }
+            var current = resolveSlashConversation(slashCmd.get(), ctx.agent(), ctx.conversationId(), ctx.username());
             // JCLAW-111: thread the user's typed arguments through the
             // args-aware execute overload so /model status, /model reset,
             // and /model NAME don't silently fall through to the no-args
@@ -330,8 +323,9 @@ public class ApiChatController extends Controller {
         }
 
         Conversation conversation;
-        if (ctx.conversationId() != null) {
-            conversation = ConversationService.findById(ctx.conversationId());
+        final Long requestedConversationId = ctx.conversationId();
+        if (requestedConversationId != null) {
+            conversation = Tx.run(() -> ConversationService.findById(requestedConversationId));
             if (conversation == null) {
                 notFound();
                 throw ApiResponses.unreachable();
@@ -339,7 +333,7 @@ public class ApiChatController extends Controller {
         } else if (ctx.overrides() != null) {
             conversation = createWithOverrides(ctx.agent(), ctx.username(), ctx.overrides());
         } else {
-            conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
+            conversation = Tx.run(() -> ConversationService.findOrCreate(ctx.agent(), "web", ctx.username()));
         }
 
         var result = AgentRunner.run(ctx.agent(), conversation, ctx.message(), ctx.attachments());
@@ -511,7 +505,7 @@ public class ApiChatController extends Controller {
                                                           @Nullable Long conversationId, String username) {
         if (cmd == Commands.Command.NEW) return null;
         if (conversationId != null) {
-            // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
+            // JCLAW-199: both chat routes are @NoTransaction; explicit Tx.run for
             // the lookup since ConversationService.findById assumes its
             // caller owns the tx.
             final Long capturedConvId = conversationId;

@@ -567,6 +567,39 @@ class ApiChatControllerTest extends FunctionalTest {
                 "/new must echo agent identity: " + content);
     }
 
+    @Test
+    void sendSlashNewThenResetAnswerExactlyAndCommitTheirWrites() {
+        // send runs with no request transaction (JF-163): each command must commit its own writes.
+        login();
+        var id = Long.parseLong(createAgent("send-slash-new-reset"));
+        var created = com.google.gson.JsonParser.parseString(getContent(POST("/api/chat/send", "application/json",
+                "{\"agentId\":%d,\"message\":\"/new\"}".formatted(id)))).getAsJsonObject();
+        var convId = created.get("conversationId").getAsLong();
+        assertEquals(java.util.Map.of("conversationId", convId, "response", slash.Commands.NEW_TEXT,
+                "agentId", id, "agentName", "send-slash-new-reset"), flat(created));
+
+        var reset = com.google.gson.JsonParser.parseString(getContent(POST("/api/chat/send", "application/json",
+                "{\"agentId\":%d,\"message\":\"/reset\",\"conversationId\":%d}".formatted(id, convId))))
+                .getAsJsonObject();
+        assertEquals(java.util.Map.of("conversationId", convId, "response", slash.Commands.RESET_TEXT,
+                "agentId", id, "agentName", "send-slash-new-reset"), flat(reset));
+
+        var row = commitInFreshTx(() -> {
+            models.Conversation c = models.Conversation.findById(convId);
+            return java.util.List.of(c.messageCount, c.contextSince != null);
+        });
+        assertEquals(java.util.List.of(1, true), row, "/new saved its greeting and /reset stamped the context cut");
+    }
+
+    private static java.util.Map<String, Object> flat(com.google.gson.JsonObject body) {
+        var out = new java.util.HashMap<String, Object>();
+        for (var e : body.entrySet()) {
+            var v = e.getValue().getAsJsonPrimitive();
+            out.put(e.getKey(), v.isNumber() ? (Object) v.getAsLong() : v.getAsString());
+        }
+        return out;
+    }
+
     // =====================
     // JCLAW-324: upload edge cases
     // =====================
@@ -754,8 +787,8 @@ class ApiChatControllerTest extends FunctionalTest {
     @Test
     void sendSlashCommandWithUnknownConversationIdReturns404() {
         // /reset (a non-/new slash) pinned to a conversationId that doesn't exist
-        // hits the notFound() inside send()'s slash branch — the sync-send mirror
-        // of streamSlashCommandWithUnknownConversationIdReturns404.
+        // hits the notFound() in resolveSlashConversation, which send() now shares
+        // with streamChat — the sync-send mirror of streamSlashCommandWithUnknownConversationIdReturns404.
         login();
         var id = createAgent("send-slash-unknown-conv");
         var body = """

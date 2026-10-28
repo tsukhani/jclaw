@@ -515,11 +515,11 @@ class SubagentYieldToolTest extends UnitTest {
         var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
         assertEquals("FAILED", payload.get("status").getAsString());
 
-        // Parent received its resume turn (assistant message produced).
+        // Parent received its resume turn: the child never reached the model, so this is the only reply.
         java.util.List<Message> parentAssistants = Message.find(
                 "conversation = ?1 AND role = ?2",
                 Conversation.findById(parentConvId), MessageRole.ASSISTANT.value).fetch();
-        assertFalse(parentAssistants.isEmpty(),
+        assertEquals(java.util.List.of("Resumed after failure"), parentAssistants.stream().map(m -> m.content).toList(),
                 "yield resume must fire even when the child failed");
     }
 

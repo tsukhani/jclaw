@@ -11,6 +11,7 @@ import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
 import services.ConfigService;
 import services.EventLogger;
 import services.SubagentRegistry;
@@ -105,6 +106,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String CONTEXT_FRESH = "fresh";
     static final String CONTEXT_INHERIT = "inherit";
     static final String STOPPED_BEFORE_START = "Error: The turn was stopped before the subagent started; no subagent ran.";
+    static final String INSIDE_TRANSACTION = "Error: The subagent cannot start from this turn: the turn runs inside an "
+            + "uncommitted database transaction, so the subagent could not read its own records. This is a JClaw "
+            + "defect, not a problem with the request; no subagent ran.";
     static final Set<String> ALLOWED_CONTEXTS = Set.of(CONTEXT_FRESH, CONTEXT_INHERIT);
 
     /** Channel value stamped on subagent conversations. Not a real transport —
@@ -431,6 +435,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
             return "Subagent spawn refused: " + refusal;
         }
+        if (insideTransaction(parentAgent)) return INSIDE_TRANSACTION;
 
         // Resolve the parent conversation: the calling turn's own, else the
         // agent's most recent (DeliveryResolver.operatingConversation);
@@ -456,9 +461,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var childConvId = bootstrap.childConvId();
         var childAgentName = bootstrap.childAgentName();
 
-        // Step 3: insert the SubagentRun audit row (RUNNING + startedAt) in
-        // its own short Tx so the row commits and is visible from any thread
-        // we hand the run to.
+        // Step 3: insert the SubagentRun audit row (RUNNING + startedAt). It commits at once, and is
+        // visible to the thread we hand the run to, only because insideTransaction refused a caller
+        // holding a transaction: its Tx.run would join that one.
         var runId = SubagentRunStore.insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal,
                 parentTaskRunId, childConvId, parsed.label(), SubagentAcpRunner.isAcpRuntime(args));
         var runIdStr = String.valueOf(runId);
@@ -636,6 +641,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
             return "Subagent spawn refused: " + refusal;
         }
+        if (insideTransaction(parentAgent)) return INSIDE_TRANSACTION;
 
         final var parentAgentId = parentAgent.id;
         final var parentTaskRunId = ToolContext.taskRunId();
@@ -695,6 +701,16 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         payload.put("hint", "children run in parallel; collect them all with one subagent_yield using runIds (or all=true)");
         return GsonHolder.GSON.toJson(payload, Map.class);
+    }
+
+    /** True, with a warning, when the calling thread holds a transaction: the spawn's rows would join it, and
+     *  the child's thread cannot read them before it commits (JF-163). */
+    private static boolean insideTransaction(Agent parentAgent) {
+        if (!JPA.isInsideTransaction()) return false;
+        EventLogger.warn(SUBAGENT_CHANNEL, parentAgent.name, null,
+                "Refused subagent_spawn: this turn runs inside an uncommitted database transaction, which a subagent "
+                        + "on another thread cannot read. Whatever runs the turn must not hold a transaction across it.");
+        return true;
     }
 
     /** JCLAW-498: one entry of a batch fan-out. */

@@ -422,6 +422,37 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(NOTHING_TO_COLLECT, yieldInConversation(parent.id, conv.id, "{\"all\":true}"));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{\"task\":\"go\"}",
+            "{\"task\":\"go\",\"async\":true}",
+            "{\"task\":\"go\",\"mode\":\"inline\"}",
+            "{\"tasks\":[\"go\",\"again\"]}"})
+    void aSpawnInsideAnOpenTransactionIsRefusedAndWritesNothing(String spawnArgs) throws Exception {
+        var parent = createAgent("p-open-tx", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "web", "u-open-tx");
+        commitAndReopen();
+
+        // The test thread's transaction stands in for a turn run inside one, as /api/chat/send's was before JF-163.
+        var events = captureFor(parent.name, live -> assertEquals(IN_TRANSACTION_REFUSAL,
+                agents.ToolContext.withConversation(conv.id, () -> new SubagentSpawnTool().execute(spawnArgs, parent))));
+
+        JPA.em().flush();
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count("parentAgent.id = ?1", parent.id), "no run row");
+        assertEquals(0, Agent.count("name LIKE ?1", "p-open-tx-sub-%"), "no child agent");
+        assertEquals(0, Conversation.count("parentConversation.id = ?1", conv.id), "no child conversation");
+        assertEquals(java.util.List.of("WARN subagent: Refused subagent_spawn: this turn runs inside an uncommitted "
+                        + "database transaction, which a subagent on another thread cannot read. Whatever runs the turn "
+                        + "must not hold a transaction across it."),
+                events.stream().map(e -> e.level() + " " + e.category() + ": " + e.message()).toList(),
+                "the warning is the only event: nothing was spawned");
+    }
+
+    private static final String IN_TRANSACTION_REFUSAL = "Error: The subagent cannot start from this turn: the turn "
+            + "runs inside an uncommitted database transaction, so the subagent could not read its own records. "
+            + "This is a JClaw defect, not a problem with the request; no subagent ran.";
+
     private static final String NOTHING_TO_COLLECT = "{\"results\":[],\"count\":0,\"note\":\"Nothing to collect: "
             + "no async subagent spawned in this conversation or task is waiting to be collected. "
             + "Calling subagent_yield again will not change that.\"}";
@@ -3095,7 +3126,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() {
+    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() throws Exception {
         var parent = createAgent("p-inline-stopped", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inline-stopped");
         JPA.em().getTransaction().commit();
@@ -3104,8 +3135,8 @@ class SubagentSpawnToolTest extends UnitTest {
         ConversationQueue.tryAcquireOwnership(parentConv.id,
                 new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-stopped", parent), turn);
         try {
-            var result = agents.ToolContext.withScope(parentConv.id, null, turn::get, turn,
-                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+            var result = spawnOffTransaction(parent.id, p -> agents.ToolContext.withScope(parentConv.id, null, turn::get, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", p)));
 
             assertTrue(result.contains("stopped before the subagent started"), result);
             JPA.em().clear();
@@ -3117,7 +3148,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() {
+    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() throws Exception {
         var parent = createAgent("p-inline-race", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inline-race");
         JPA.em().getTransaction().commit();
@@ -3127,8 +3158,8 @@ class SubagentSpawnToolTest extends UnitTest {
                 new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-race", parent), turn);
         try {
             // The stop lands after the spawn's cancel check, so only the fenced marker write sees it.
-            var result = agents.ToolContext.withScope(parentConv.id, null, () -> false, turn,
-                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+            var result = spawnOffTransaction(parent.id, p -> agents.ToolContext.withScope(parentConv.id, null, () -> false, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", p)));
 
             assertTrue(result.contains("stopped before the subagent started"), result);
             JPA.em().clear();
@@ -3139,5 +3170,23 @@ class SubagentSpawnToolTest extends UnitTest {
         } finally {
             ConversationQueue.releaseOwnership(parentConv.id);
         }
+    }
+
+    /** Runs {@code spawn} on a thread holding no transaction, as every route that runs a turn does (JF-163). */
+    private static String spawnOffTransaction(Long parentAgentId, java.util.function.Function<Agent, String> spawn)
+            throws Exception {
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<RuntimeException>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                resultRef.set(spawn.apply(Tx.run(() -> (Agent) Agent.findById(parentAgentId))));
+            } catch (RuntimeException e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "subagent_spawn must return within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
     }
 }
