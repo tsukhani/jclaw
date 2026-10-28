@@ -1026,6 +1026,13 @@ function exportConversation() {
               class="flex items-center gap-2 text-base text-fg-muted"
               data-testid="stream-progress"
             >
+              <img
+                src="/clawdia-micro.webp"
+                alt=""
+                width="24"
+                height="24"
+                class="h-6 w-6 shrink-0 select-none"
+              >
               <span
                 class="animate-pulse"
                 role="status"

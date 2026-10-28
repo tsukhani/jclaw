@@ -80,6 +80,47 @@ describe('Chat page — streaming state machine', () => {
   })
 })
 
+describe('Chat page — stream progress line', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('leads the progress line with Clawdia while the turn streams, and drops both when it ends', async () => {
+    setupBaseChatApi()
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+    const encoder = new TextEncoder()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          stream = controller
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":970}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"token","content":"Hel"}\n'))
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
+    await component.find('form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(true))
+
+    const progress = component.find('[data-testid="stream-progress"]')
+    const sprite = progress.find('img')
+    expect(progress.element.firstElementChild).toBe(sprite.element)
+    expect(sprite.attributes('src')).toBe('/clawdia-micro.webp')
+    // Decorative: the status span alone is announced.
+    expect(sprite.attributes('alt')).toBe('')
+    expect(progress.find('[role="status"]').text()).toBe('Generating…')
+
+    stream!.enqueue(encoder.encode('data: {"type":"complete","content":"Hello"}\n'))
+    stream!.close()
+    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
+    expect(component.find('img[src="/clawdia-micro.webp"]').exists()).toBe(false)
+  })
+})
+
 describe('Chat page — tool call rendering', () => {
   function setupToolCallConversation() {
     setupBaseChatApi()
