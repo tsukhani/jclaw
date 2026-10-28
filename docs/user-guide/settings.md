@@ -724,13 +724,14 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
 | `maxContextMessages`   | 1000    | How many recent messages get sent with each LLM request. Each tool call and each tool result counts as one message. Older messages are dropped to stay in the context window. |
 
-An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys and `compression.firstViewMaxTokens` below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`, `chat.compression.firstViewMaxTokens`) have no row in the panel; set them with `POST /api/config`.
+An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. `compaction.triggerTokens`, the three `pruneToolResults*` keys and `compression.firstViewMaxTokens` below (stored as `chat.compaction.triggerTokens`, `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`, `chat.compression.firstViewMaxTokens`) have no row in the panel; set them with `POST /api/config`.
 
 | Key                          | Default | Meaning                                                                                                 |
 |------------------------------|---------|---------------------------------------------------------------------------------------------------------|
 | `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
 | `compactionMinTurns`         | 10      | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
 | `compactionKeepMessages`     | 10      | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
+| `compaction.triggerTokens`   | 150000  | Auto-compaction also triggers when the next prompt reaches this many tokens, however large the model's context window is, because answers get worse long before a large window fills. Whichever of this and `compactionReserveTokens` comes first applies. Set 0 to keep only the `compactionReserveTokens` rule. |
 | `pruneToolResults`           | true    | Replace tool results from *earlier* turns that exceed `pruneToolResultsMinChars` with a one-line stub carrying a `ccr_retrieve` handle, regardless of how full the context window is. The agent can fetch the full text back with that handle; stored history is untouched. |
 | `pruneToolResultsMinChars`   | 4000    | Only tool results at least this long are stubbed. |
 | `pruneToolResultsProtectRecent` | 12   | The newest messages are never stubbed, in addition to the whole current turn. |

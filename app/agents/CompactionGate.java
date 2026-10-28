@@ -21,10 +21,11 @@ import java.util.Set;
  * JCLAW-38 / JCLAW-268 compaction trigger. Extracted from
  * {@link AgentRunner} as part of JCLAW-299. The single entry point
  * {@link #maybeCompactAndRebuild} runs between the prep Tx and the
- * LLM call, deciding whether the assembled message list has crossed
- * the per-model compaction budget; if so it invokes
- * {@link SessionCompactor#compact} and re-hydrates the message list
- * with the freshly stored summary injected.
+ * LLM call, deciding whether the assembled message list has reached
+ * {@code chat.compaction.triggerTokens} or crossed the per-model window
+ * budget; if so it invokes {@link SessionCompactor#compact} on the turn's
+ * own request and re-hydrates the message list with the freshly stored
+ * summary injected.
  *
  * <p>The decision is intentionally side-effect-free outside the
  * compactor: a snapshot read in a bounded Tx, a token-count check
@@ -75,7 +76,8 @@ public final class CompactionGate {
      * sees — tool JSON contributes to the provider's prompt_tokens count and
      * was previously absent from the chars/4 estimate, letting large
      * tool-heavy turns slip past the compaction threshold and get truncated
-     * by the trim drop-oldest fallback instead of summarized.
+     * by the trim drop-oldest fallback instead of summarized. The summary
+     * request sends the same schemas, so its prefix matches the turn's.
      */
     public static List<ChatMessage> maybeCompactAndRebuild(
             Agent agent, Long conversationId,
@@ -121,12 +123,10 @@ public final class CompactionGate {
         final var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
         final var modelLabel = providerName + "/" + modelId;
 
-        SessionCompactor.Summarizer summarizer = sumMsgs -> {
-            var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null, compactionChannel);
-            return SessionCompactor.firstChoiceText(resp);
-        };
-
-        var result = SessionCompactor.compact(conversationId, modelLabel, summarizer);
+        SessionCompactor.ModelCall call = (messages, defs) ->
+                primary.chat(modelId, messages, defs, maxOutput, null, compactionChannel);
+        var result = SessionCompactor.compact(conversationId, modelLabel,
+                new SessionCompactor.TurnRequest(current.messages(), tools), call);
         if (!result.compacted()) {
             EventLogger.info("compaction", agent.name, snapshot.channelType(),
                     "Compaction skipped (%s); falling back to drop-oldest".formatted(result.skipReason()));

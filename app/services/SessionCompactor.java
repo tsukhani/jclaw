@@ -3,6 +3,7 @@ package services;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.ModelInfo;
+import llm.LlmTypes.ToolDef;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
@@ -29,9 +30,10 @@ import java.util.Optional;
  * intact for sidebar / scrollback; only the LLM-facing view is
  * truncated.
  *
- * <p>Trigger: {@code estimatedTokens > (contextWindow - reserveTokens)}.
- * The reserve carves out headroom for the completion itself plus a
- * safety margin, following OpenClaw's approach — tuned via
+ * <p>Trigger: whichever comes first of {@code estimatedTokens >= chat.compaction.triggerTokens}
+ * (default 150,000; 0 or less turns it off), since quality falls well before today's windows fill
+ * (JF-154), and {@code estimatedTokens > (contextWindow - reserveTokens)}. The reserve carves out
+ * headroom for the completion itself plus a safety margin, following OpenClaw's approach — tuned via
  * {@code chat.compactionReserveTokens} (default 15000, floor 9000).
  *
  * <p>Boundary selection: we anchor cuts at user-message boundaries so
@@ -59,6 +61,25 @@ public final class SessionCompactor {
         @Nullable String summarize(List<ChatMessage> messages) throws Exception;
     }
 
+    /**
+     * A turn's request as it goes to the provider: its messages, system prompt first, after pruning and
+     * compression, and its tool definitions.
+     */
+    public record TurnRequest(List<ChatMessage> messages, List<ToolDef> tools) {}
+
+    /** One model call on a message list and tool list; production wraps {@code LlmProvider.chat}. */
+    @FunctionalInterface
+    public interface ModelCall {
+        @SuppressWarnings("java:S112") // as Summarizer.summarize: keeps provider exception types out of the seam
+        ChatResponse call(List<ChatMessage> messages, List<ToolDef> tools) throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface SummaryStep {
+        @SuppressWarnings("java:S112")
+        @Nullable String summarize(CompactionPlan plan) throws Exception;
+    }
+
     public record CompactionResult(
             boolean compacted,
             int turnsCompacted,
@@ -76,17 +97,21 @@ public final class SessionCompactor {
     // ─── Decision ───────────────────────────────────────────────────────
 
     /**
-     * True when the current message list exceeds the compaction budget.
-     * Callers should compute {@code estimatedTokens} with
-     * {@code ContextWindowManager.adjustedPromptTokens} so thresholds
-     * compare apples to apples.
+     * True when the current message list reaches {@code chat.compaction.triggerTokens} or exceeds the
+     * model's window budget. Callers should compute {@code estimatedTokens} with
+     * {@code ContextWindowManager.adjustedPromptTokens} so thresholds compare apples to apples.
      */
-    public static boolean shouldCompact(int estimatedTokens, ModelInfo modelInfo) {
-        if (modelInfo == null || modelInfo.contextWindow() <= 0) return false;
-        int reserve = effectiveReserveTokens();
-        int budget = modelInfo.contextWindow() - reserve;
-        if (budget <= 0) return false;
-        return estimatedTokens > budget;
+    public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo) {
+        return shouldCompact(estimatedTokens, modelInfo, ConfigService.getInt("chat.compaction.triggerTokens", 150_000));
+    }
+
+    /** {@link #shouldCompact(int, ModelInfo)} with the token trigger given; 0 or less leaves only the window rule. */
+    public static boolean shouldCompact(int estimatedTokens, @Nullable ModelInfo modelInfo, int triggerTokens) {
+        if (modelInfo == null) return false;
+        if (triggerTokens > 0 && estimatedTokens >= triggerTokens) return true;
+        if (modelInfo.contextWindow() <= 0) return false;
+        int budget = modelInfo.contextWindow() - effectiveReserveTokens();
+        return budget > 0 && estimatedTokens > budget;
     }
 
     /** The reserve carved out of the context window for completion + safety margin. */
@@ -133,26 +158,32 @@ public final class SessionCompactor {
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, @Nullable String additionalInstructions) {
+        return compact(conversationId, modelLabel, force,
+                plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)));
+    }
+
+    /**
+     * Automatic compaction on the turn's own prefix (JF-154): the request sends the turn's system prompt,
+     * the summarized messages as the turn sent them and its tools, with the instruction last as a user
+     * message, so the provider bills that prefix at its cached rate. A reply that calls a tool is retried
+     * once on the transcript without tools; no tool is ever run. When the turn's list no longer lines up
+     * with the stored rows, the transcript is sent instead.
+     *
+     * @param turn the request the turn is about to send
+     * @param call the model call, made outside any transaction
+     */
+    public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call) {
+        return compact(conversationId, modelLabel, false, plan -> summarizeOnTurn(conversationId, plan, turn, call));
+    }
+
+    private static CompactionResult compact(Long conversationId, String modelLabel, boolean force, SummaryStep step) {
         var planOpt = Tx.run(() -> buildPlan(conversationId, force));
         if (planOpt.isEmpty()) return CompactionResult.skipped("no safe boundary or below min-turns");
         var plan = planOpt.get();
 
-        var systemPrompt = SUMMARIZATION_INSTRUCTIONS;
-        if (additionalInstructions != null && !additionalInstructions.isBlank()) {
-            systemPrompt += "\n\nAdditional user guidance for this summary: " + additionalInstructions.strip();
-        }
-        var turns = renderTurns(plan.toSummarize());
-        var prior = plan.priorSummary();
-        var input = prior == null ? turns
-                : PRIOR_SUMMARY_HEADER + "\n\n" + prior + "\n\n[Turns since that summary]\n\n" + turns;
-        var sumMessages = List.<ChatMessage>of(
-                ChatMessage.system(systemPrompt),
-                ChatMessage.user(input)
-        );
-
         String summary;
         try {
-            summary = summarizer.summarize(sumMessages);
+            summary = step.summarize(plan);
         } catch (Exception e) {
             EventLogger.warn("compaction", null, null,
                     "Compaction LLM call failed for conversation %d: %s"
@@ -179,7 +210,7 @@ public final class SessionCompactor {
             sc.model = modelLabel != null && !modelLabel.isBlank() ? modelLabel : "unknown";
             sc.summary = finalSummary;
             sc.save();
-            conv.compactionSince = plan.firstKeptAt();
+            conv.compactionSince = plan.firstKept().createdAt();
             conv.save();
         });
 
@@ -237,7 +268,7 @@ public final class SessionCompactor {
      * @param createdAt   creation timestamp
      */
     public record MessageSnapshot(String role, String content, String toolCalls, String toolResults, Instant createdAt) {}
-    record CompactionPlan(List<MessageSnapshot> toSummarize, Instant firstKeptAt, @Nullable String priorSummary) {}
+    record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, @Nullable String priorSummary) {}
 
     private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force) {
         var conv = Conversation.<Conversation>findById(conversationId);
@@ -247,10 +278,77 @@ public final class SessionCompactor {
         if (boundary <= 0) return Optional.empty();
         var snaps = new ArrayList<MessageSnapshot>(boundary);
         for (int i = 0; i < boundary; i++) {
-            var m = recent.get(i);
-            snaps.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
+            snaps.add(snapshot(recent.get(i)));
         }
-        return Optional.of(new CompactionPlan(snaps, recent.get(boundary).createdAt, currentSummary(conv)));
+        return Optional.of(new CompactionPlan(snaps, snapshot(recent.get(boundary)), currentSummary(conv)));
+    }
+
+    private static MessageSnapshot snapshot(Message m) {
+        return new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt);
+    }
+
+    /** Today's request shape: the instruction as the system prompt and the turns as one transcript. */
+    private static List<ChatMessage> transcriptRequest(CompactionPlan plan, @Nullable String additionalInstructions) {
+        var instructions = SUMMARIZATION_INSTRUCTIONS;
+        if (additionalInstructions != null && !additionalInstructions.isBlank()) {
+            instructions += "\n\nAdditional user guidance for this summary: " + additionalInstructions.strip();
+        }
+        var turns = renderTurns(plan.toSummarize());
+        var prior = plan.priorSummary();
+        var input = prior == null ? turns
+                : PRIOR_SUMMARY_HEADER + "\n\n" + prior + "\n\n[Turns since that summary]\n\n" + turns;
+        return List.of(ChatMessage.system(instructions), ChatMessage.user(input));
+    }
+
+    private static @Nullable String summarizeOnTurn(Long conversationId, CompactionPlan plan, TurnRequest turn,
+                                                    ModelCall call) throws Exception {
+        if (!alignsWith(plan, turn.messages())) {
+            EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
+                    + "the turn's messages no longer match the stored rows").formatted(conversationId));
+            return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+        }
+        var reply = call.call(turnRequest(plan, turn.messages()), turn.tools());
+        if (!callsATool(reply)) return firstChoiceText(reply);
+        EventLogger.info("compaction", null, null,
+                "Compaction reply for conversation %d called a tool; retrying without tools".formatted(conversationId));
+        // The transcript, not this history minus tools: tool-call blocks sent with no tool definitions risk a refusal.
+        return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+    }
+
+    /** The turn's list is its system prompt then one message per stored row, so row {@code i} sits at {@code i + 1}. */
+    private static boolean alignsWith(CompactionPlan plan, List<ChatMessage> turn) {
+        int firstKept = plan.toSummarize().size() + 1;
+        if (turn.size() <= firstKept) return false;
+        var kept = turn.get(firstKept);
+        return MessageRole.USER.value.equals(kept.role())
+                && (!(kept.content() instanceof String text) || text.equals(plan.firstKept().content()));
+    }
+
+    private static List<ChatMessage> turnRequest(CompactionPlan plan, List<ChatMessage> turn) {
+        var prefix = turn.subList(0, plan.toSummarize().size() + 1);
+        var request = new ArrayList<ChatMessage>(prefix.size() + 1);
+        for (var m : prefix) request.add(withoutMedia(m));
+        request.add(ChatMessage.user(SUMMARIZATION_INSTRUCTIONS));
+        return request;
+    }
+
+    // Compaction runs before the media rewrites, so a part the model cannot take would fail the call.
+    private static ChatMessage withoutMedia(ChatMessage m) {
+        if (!(m.content() instanceof List<?> parts)) return m;
+        var text = new StringBuilder();
+        for (var part : parts) {
+            if (part instanceof Map<?, ?> p && "text".equals(p.get("type")) && p.get("text") instanceof String t) {
+                text.append(t);
+            }
+        }
+        return new ChatMessage(m.role(), text.isEmpty() ? "[attachment]" : text.toString(),
+                m.toolCalls(), m.toolCallId(), m.toolName());
+    }
+
+    private static boolean callsATool(ChatResponse reply) {
+        if (reply.choices().isEmpty()) return false;
+        var calls = reply.choices().getFirst().message().toolCalls();
+        return calls != null && !calls.isEmpty();
     }
 
     /**
@@ -348,29 +446,33 @@ public final class SessionCompactor {
         return null;
     }
 
-    // ─── Summarization prompt (ported from OpenClaw, adapted) ────────────
-    //
-    // Port source: packages/openclaw/src/agents/compaction.ts (DEFAULT
-    // identifier policy) and pi-embedded-runner/compact.ts
-    // (DEFAULT_COMPACTION_INSTRUCTIONS). Adapted: dropped the
-    // SESSION_CONTEXT.md reference since JClaw stores the summary in
-    // the DB, not the workspace (see ADR discussion on JCLAW-38).
+    // ─── Summarization prompt ────────────────────────────────────────────
 
+    // Fixed sections (JF-154), so every summary records the same kinds of facts; level-3 headings nest
+    // under the system prompt's own sections once the summary is appended to it.
     private static final String SUMMARIZATION_INSTRUCTIONS = """
-            You are compressing a conversation between a user and an AI agent so the agent can continue work after older turns are dropped. Produce a single prose summary — no preamble, no meta-commentary — that a future instance of the agent will read in place of the original turns.
+            The conversation so far is being compacted: its older turns will be dropped, and the summary you write now is what the agent will read in their place when the work continues. Do not answer the user and do not call a tool; reply with the summary alone.
 
-            The input may open with the summary an earlier compaction wrote. Your summary replaces it, so carry forward everything it records that still matters.
+            An earlier compaction may have left a [Prior conversation summary …]. Your summary replaces it, so carry forward everything in it that still matters.
 
-            When summarizing, prioritize in this order:
-            1. Active or in-progress tasks: task name, current step, what's been done, what remains, and any pending user decisions.
-            2. Key decisions the user or agent made and the rationale behind them.
-            3. Exact values needed to resume work: names, URLs, file paths, configuration values, row numbers, IDs. Preserve all opaque identifiers exactly as written — no shortening or reconstruction — including UUIDs, hashes, tokens, API keys, hostnames, IPs, ports, and file names.
-            4. What the user was last working on and their most recent request.
-            5. Tool state: any browser sessions, file operations, API calls, or background jobs in flight.
+            Write these five sections, in this order, each under its heading as short bullet points, with "None." under a heading that has nothing to record:
 
-            De-prioritize casual conversation, greetings, completed tasks with no follow-up, and resolved errors. Do not invent facts. If a detail is ambiguous in the source, summarize it as ambiguous rather than guessing.
+            ### Goals and constraints
+            What the user wants, and every constraint, preference and requirement they set.
 
-            Output only the summary itself — no "Here is the summary:" preface, no markdown headers, no sign-off.
+            ### Decisions
+            What the user or the agent decided, with the reason when one was given.
+
+            ### Identifiers and facts
+            The names, ids, paths, URLs, numbers and other values the work relies on, copied exactly as written: never shorten, round or reconstruct one.
+
+            ### Open questions and errors
+            Questions still unanswered, errors not yet resolved, and choices still waiting on the user.
+
+            ### Next steps
+            What remains to do, starting with the user's latest request and the step in progress.
+
+            Where turns disagree, the latest update wins. Mark anything that no tool result or user message confirmed as (unverified). Leave out greetings, small talk and finished work with no follow-up. No preface and no sign-off.
             """;
 
     public static final String PRIOR_SUMMARY_HEADER =

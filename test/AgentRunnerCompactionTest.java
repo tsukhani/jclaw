@@ -291,7 +291,7 @@ class AgentRunnerCompactionTest extends UnitTest {
         var chatPrompts = new java.util.concurrent.CopyOnWriteArrayList<String>();
         startLlmServer(exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            var summarizing = body.contains("You are compressing a conversation");
+            var summarizing = body.contains("### Goals and constraints");
             if (!summarizing) {
                 chatPrompts.add(com.google.gson.JsonParser.parseString(body).getAsJsonObject()
                         .getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString());

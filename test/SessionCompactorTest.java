@@ -1,7 +1,11 @@
+import agents.MessageHydrator;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.Choice;
+import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ModelInfo;
+import llm.LlmTypes.ToolCall;
+import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import models.Agent;
 import models.Conversation;
@@ -17,10 +21,13 @@ import services.ConfigService;
 import services.ConversationService;
 import services.SessionCompactor;
 import services.SessionCompactor.MessageSnapshot;
+import services.SessionCompactor.TurnRequest;
+import services.Tx;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -125,6 +132,155 @@ class SessionCompactorTest extends UnitTest {
         var mi = new ModelInfo("m", "M", 20_000, 4096, false);
         assertTrue(SessionCompactor.shouldCompact(12_000, mi));
         assertFalse(SessionCompactor.shouldCompact(10_000, mi));
+    }
+
+    // ─── shouldCompact: token trigger (JF-154) ───────────────────────────
+
+    @Test
+    void theTokenTriggerFiresAtItsValueAndNotOneTokenBelow() {
+        var huge = new ModelInfo("m", "M", 2_000_000, 8192, false);
+        assertTrue(SessionCompactor.shouldCompact(1_000, huge, 1_000));
+        assertFalse(SessionCompactor.shouldCompact(999, huge, 1_000));
+    }
+
+    @Test
+    void theWindowRuleStillFiresWhenItComesFirst() {
+        var small = new ModelInfo("m", "M", 20_000, 4096, false);
+        assertTrue(SessionCompactor.shouldCompact(19_999, small, 150_000));
+        assertTrue(SessionCompactor.shouldCompact(19_999, small, 0));
+    }
+
+    @Test
+    void zeroOrANegativeTriggerLeavesOnlyTheWindowRule() {
+        var huge = new ModelInfo("m", "M", 2_000_000, 8192, false);
+        assertTrue(SessionCompactor.shouldCompact(1_000_000, huge, 1));
+        assertFalse(SessionCompactor.shouldCompact(1_000_000, huge, 0));
+        assertFalse(SessionCompactor.shouldCompact(1_000_000, huge, -1));
+    }
+
+    // ─── compact() on the turn's own request (JF-154) ──────────────────
+
+    @Test
+    void aSummaryOnTheTurnSendsItsPrefixAndToolsWithTheInstructionLast() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        saveSummary(conv, "FIRST SUMMARY", Instant.now().minusSeconds(600));
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var turn = turnMessages(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(turn, TOOLS),
+                (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    return reply("TURN SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        int summarized = result.turnsCompacted();
+        assertEquals(1, calls.size());
+        assertEquals(List.of(TOOLS), toolLists);
+        var request = calls.getFirst();
+        assertEquals(summarized + 2, request.size());
+        assertEquals(turn.subList(0, summarized + 1), request.subList(0, summarized + 1));
+        assertEquals(ChatMessage.system("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nFIRST SUMMARY"),
+                request.getFirst());
+        assertEquals("user", request.getLast().role());
+        assertEquals(SECTIONS, headings(request.getLast().content()));
+        commitAndReopen();
+        assertEquals("TURN SUMMARY", SessionCompaction.findLatest(Conversation.findById(conv.id)).summary);
+    }
+
+    @Test
+    void aToolCallReplyIsRetriedOnceOnTheTranscriptWithoutTools() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var rows = rowsOf(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    return calls.size() == 1 ? toolCallReply() : reply("RETRIED SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(TOOLS, List.of()), toolLists);
+        assertTranscript(rows.subList(0, result.turnsCompacted()), calls.get(1));
+        commitAndReopen();
+        assertEquals("RETRIED SUMMARY", SessionCompaction.findLatest(Conversation.findById(conv.id)).summary);
+    }
+
+    @Test
+    void aReplyThatCallsAToolAgainAfterTheRetryStoresNoSummary() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.incrementAndGet();
+                    return toolCallReply();
+                });
+
+        assertEquals(2, calls.get());
+        assertFalse(result.compacted());
+        assertEquals("empty summary", result.skipReason());
+        commitAndReopen();
+        assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    @Test
+    void aTurnListThatNoLongerMatchesTheRowsSendsTheTranscript() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var rows = rowsOf(conv.id);
+        var shifted = new ArrayList<>(turnMessages(conv.id));
+        shifted.remove(1);
+        var calls = new ArrayList<List<ChatMessage>>();
+        var toolLists = new ArrayList<List<ToolDef>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(shifted, TOOLS),
+                (msgs, defs) -> {
+                    calls.add(msgs);
+                    toolLists.add(defs);
+                    return reply("TRANSCRIPT SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(List.of()), toolLists);
+        assertEquals(1, calls.size());
+        assertTranscript(rows.subList(0, result.turnsCompacted()), calls.getFirst());
+    }
+
+    @Test
+    void mediaInTheSummarizedTurnsReachesTheSummaryAsItsText() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var turn = new ArrayList<>(turnMessages(conv.id));
+        var image = Map.<String, Object>of("type", "image_url", "image_url", Map.of("url", "data:image/png;base64,AA=="));
+        turn.set(1, new ChatMessage("user", List.of(Map.of("type", "text", "text", "Turn 0 with a photo"), image),
+                null, null, null));
+        turn.set(3, new ChatMessage("user", List.of(image), null, null, null));
+        var request = new AtomicReference<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(turn, TOOLS),
+                (msgs, defs) -> {
+                    request.set(msgs);
+                    return reply("MEDIA SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(ChatMessage.user("Turn 0 with a photo"), request.get().get(1));
+        assertEquals(ChatMessage.user("[attachment]"), request.get().get(3));
+        assertEquals(turn.get(2), request.get().get(2));
     }
 
     // ─── compact() end-to-end ──────────────────────────────────────────
@@ -420,6 +576,46 @@ class SessionCompactorTest extends UnitTest {
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    private static final List<ToolDef> TOOLS = List.of(ToolDef.of("counter_bump", "Counts its runs",
+            Map.of("type", "object", "properties", Map.of())));
+
+    private static final List<String> SECTIONS = List.of("Goals and constraints", "Decisions",
+            "Identifiers and facts", "Open questions and errors", "Next steps");
+
+    /** The list a turn builds from {@code conversationId}'s rows, under a system prompt carrying any summary. */
+    private static List<ChatMessage> turnMessages(Long conversationId) {
+        return Tx.run(() -> {
+            var conv = Conversation.<Conversation>findById(conversationId);
+            return MessageHydrator.buildMessages(SessionCompactor.appendSummaryToPrompt("SYS", conv), conv).messages();
+        });
+    }
+
+    private static List<MessageSnapshot> rowsOf(Long conversationId) {
+        return Tx.run(() -> SessionCompactor.snapshotParentMessages(Conversation.findById(conversationId)));
+    }
+
+    /** {@code request} is the transcript shape: the instruction as the system prompt, then the summarized rows. */
+    private static void assertTranscript(List<MessageSnapshot> summarized, List<ChatMessage> request) {
+        assertEquals(2, request.size());
+        assertEquals("system", request.getFirst().role());
+        assertEquals(SECTIONS, headings(request.getFirst().content()));
+        assertEquals(ChatMessage.user(SessionCompactor.renderTurns(summarized)), request.get(1));
+    }
+
+    private static List<String> headings(Object instruction) {
+        return ((String) instruction).lines().filter(l -> l.startsWith("### ")).map(l -> l.substring(4)).toList();
+    }
+
+    private static ChatResponse reply(String text) {
+        return new ChatResponse("r", "m", List.of(new Choice(0, ChatMessage.assistant(text), "stop")), null);
+    }
+
+    private static ChatResponse toolCallReply() {
+        var call = new ToolCall("call_1", "function", new FunctionCall("counter_bump", "{}"));
+        return new ChatResponse("r", "m",
+                List.of(new Choice(0, new ChatMessage("assistant", null, List.of(call), null, null), "tool_calls")), null);
+    }
 
     private static List<Message> buildFakeHistory(int total, java.util.function.IntFunction<MessageRole> roleAt) {
         var out = new ArrayList<Message>(total);

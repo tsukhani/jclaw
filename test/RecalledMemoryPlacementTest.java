@@ -65,8 +65,8 @@ class RecalledMemoryPlacementTest extends UnitTest {
             var body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),
                     StandardCharsets.UTF_8)).getAsJsonObject();
             var messages = body.getAsJsonArray("messages");
-            var system = messages.get(0).getAsJsonObject().get("content").getAsString();
-            if (system.contains("You are compressing a conversation")) {
+            var last = messages.get(messages.size() - 1).getAsJsonObject().get("content");
+            if (last.isJsonPrimitive() && last.getAsString().contains("### Goals and constraints")) {
                 LlmReplyFixture.send(exchange, REPLY.replace("\"done\"", "\"" + SUMMARY + "\""));
                 return;
             }

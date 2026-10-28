@@ -1,0 +1,318 @@
+import agents.AgentRunner;
+import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpServer;
+import llm.LlmTypes.ModelInfo;
+import models.Agent;
+import models.Conversation;
+import models.Message;
+import models.MessageRole;
+import models.SessionCompaction;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
+import play.test.Fixtures;
+import play.test.UnitTest;
+import services.ConfigService;
+import services.ConversationService;
+import services.SessionCompactor;
+import services.Tx;
+import utils.CircuitBreakers;
+
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntFunction;
+
+/**
+ * JF-154 end to end: a chat compacts once its prompt reaches {@code chat.compaction.triggerTokens}, however
+ * large the window, and the summary call reuses the agent's own request — its system prompt, history and tools —
+ * with the instruction last, and never runs a tool. The history is seeded past the 150,000-token default rather
+ * than the key lowered, so no other class running alongside ever sees a lowered trigger.
+ */
+class CompactionSummaryRequestTest extends UnitTest {
+
+    private static final String PROVIDER = "jf154-compaction";
+    private static final String MODEL = "jf154-model";
+    private static final String TOOL = "counter_bump";
+    private static final String TRIGGER_KEY = "chat.compaction.triggerTokens";
+    private static final List<String> SECTIONS = List.of("Goals and constraints", "Decisions",
+            "Identifiers and facts", "Open questions and errors", "Next steps");
+
+    private HttpServer llmServer;
+    private final List<JsonObject> requests = new CopyOnWriteArrayList<>();
+    private final AtomicInteger toolRuns = new AtomicInteger();
+
+    @BeforeEach
+    void setup() {
+        Fixtures.deleteDatabase();
+        ConfigService.clearCache();
+    }
+
+    @AfterEach
+    void teardown() {
+        if (llmServer != null) llmServer.stop(0);
+        for (var key : List.of("baseUrl", "apiKey", "models")) ConfigService.delete("provider." + PROVIDER + "." + key);
+        ConfigService.delete(TRIGGER_KEY);
+        llm.ProviderRegistry.refresh();
+        CircuitBreakers.remove(PROVIDER);
+    }
+
+    @Test
+    void theTokenTriggerDefaultsTo150000AndFiresAtExactlyThatCount() {
+        var window = new ModelInfo(MODEL, MODEL, 1_000_000, 4096, false);
+        assertTrue(SessionCompactor.shouldCompact(150_000, window));
+        assertFalse(SessionCompactor.shouldCompact(149_999, window));
+    }
+
+    @Test
+    void theSummaryCallSendsTheAgentsOwnPrefixAndToolsWithTheInstructionLast() throws Exception {
+        startProvider(n -> text(n == 2 ? "SUMMARY-JF154" : "Reply " + n));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-prefix");
+        seed(convo, 4, 40);
+        commit();
+
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> {
+            run(agent, convo, "First question");
+            seed(convo, 24, 32_000);
+            commit();
+            run(agent, convo, "Second question");
+        });
+
+        assertEquals(3, requests.size(), "turn one, the summary, then turn two");
+        var turnOne = requests.get(0).getAsJsonArray("messages");
+        var summary = requests.get(1).getAsJsonArray("messages");
+        var turnTwo = requests.get(2).getAsJsonArray("messages");
+
+        // Everything turn one sent but its trailing clock message is the summary call's prefix.
+        int shared = turnOne.size() - 1;
+        assertEquals(slice(turnOne, 0, shared), slice(summary, 0, shared));
+        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
+        assertEquals(requests.get(0).get("tools"), requests.get(1).get("tools"));
+        var instruction = summary.get(summary.size() - 1).getAsJsonObject();
+        assertEquals("user", instruction.get("role").getAsString());
+        assertEquals(SECTIONS, headings(instruction.get("content").getAsString()));
+
+        // The summarized turns and the turns kept verbatim are the stored rows, split on a user row.
+        var summarized = slice(summary, 1, summary.size() - 1);
+        var kept = slice(turnTwo, 1, turnTwo.size() - 1);
+        assertEquals("user", kept.getFirst().getAsJsonObject().get("role").getAsString());
+        var sent = new ArrayList<String>();
+        for (var m : summarized) sent.add(roleAndContent(m));
+        for (var m : kept) sent.add(roleAndContent(m));
+        assertEquals(storedRows(convo.id), sent);
+
+        assertEquals(content(summary.get(0)) + "\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\nSUMMARY-JF154",
+                content(turnTwo.get(0)));
+        var stored = latestCompaction(convo.id);
+        assertEquals("SUMMARY-JF154", stored.summary);
+        assertEquals(summarized.size(), stored.turnCount);
+    }
+
+    @Test
+    void aToolCallReplyIsRetriedOnceWithoutToolsAndItsToolNeverRuns() throws Exception {
+        startProvider(n -> switch (n) {
+            case 1 -> toolCall();
+            case 2 -> text("SUMMARY-AFTER-RETRY");
+            default -> text("Reply after compaction.");
+        });
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-retry");
+        seed(convo, 24, 32_000);
+        commit();
+
+        var result = new AtomicReference<AgentRunner.RunResult>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(run(agent, convo, "Next?")));
+
+        assertEquals(3, requests.size(), "the summary, its retry, then the turn");
+        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
+        var retry = requests.get(1);
+        assertFalse(retry.has("tools"), "the retry carries no tools");
+        var retryMessages = retry.getAsJsonArray("messages");
+        assertEquals(List.of("system", "user"), roles(retryMessages));
+        assertEquals(SECTIONS, headings(content(retryMessages.get(0))));
+        assertEquals(0, toolRuns.get());
+        assertEquals("SUMMARY-AFTER-RETRY", latestCompaction(convo.id).summary);
+        assertEquals("Reply after compaction.", result.get().response());
+        assertEquals(0L, (long) Tx.run(() -> Message.count("conversation.id = ?1 AND role = ?2",
+                convo.id, MessageRole.TOOL.value)));
+    }
+
+    @Test
+    void zeroOrANegativeTriggerLeavesALongChatUncompactedOnALargeWindow() throws Exception {
+        startProvider(n -> text("Reply " + n));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-off");
+        seed(convo, 24, 32_000);
+        commit();
+
+        ConfigService.set(TRIGGER_KEY, "0");
+        commit();
+        run(agent, convo, "Next?");
+        ConfigService.set(TRIGGER_KEY, "-1");
+        commit();
+        run(agent, convo, "And then?");
+
+        assertEquals(2, requests.size(), "one call a turn, no summary call");
+        assertNull(Tx.run(() -> SessionCompaction.findLatest(Conversation.findById(convo.id))));
+    }
+
+    // ─── Helpers ────────────────────────────────────────────────────────
+
+    private Agent createAgent() {
+        var agent = new Agent();
+        agent.name = "jf154-agent";
+        agent.modelProvider = PROVIDER;
+        agent.modelId = MODEL;
+        agent.enabled = true;
+        agent.save();
+        return agent;
+    }
+
+    private void startProvider(IntFunction<String> replyForCall) throws Exception {
+        var calls = new AtomicInteger();
+        llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", exchange -> {
+            var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(JsonParser.parseString(body).getAsJsonObject());
+            LlmReplyFixture.send(exchange, replyForCall.apply(calls.incrementAndGet()));
+        });
+        llmServer.start();
+        ConfigService.set("provider." + PROVIDER + ".baseUrl", "http://127.0.0.1:" + llmServer.getAddress().getPort());
+        ConfigService.set("provider." + PROVIDER + ".apiKey", "sk-test");
+        ConfigService.set("provider." + PROVIDER + ".models",
+                "[{\"id\":\"" + MODEL + "\",\"name\":\"JF-154\",\"contextWindow\":1000000,\"maxTokens\":4096}]");
+        llm.ProviderRegistry.refresh();
+    }
+
+    private static String text(String content) {
+        return """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],
+                 "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(content);
+    }
+
+    private static String toolCall() {
+        return """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[
+                  {"id":"call_1","type":"function","function":{"name":"%s","arguments":"{}"}}]},
+                  "finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(TOOL);
+    }
+
+    private ToolRegistry.Tool countingTool() {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return TOOL; }
+            @Override public String description() { return "Counts its runs"; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                toolRuns.incrementAndGet();
+                return "counted";
+            }
+        };
+    }
+
+    /** Alternating user and assistant rows of {@code chars} characters of ledger prose, which tokenizes near 4 characters a token. */
+    private static void seed(Conversation convo, int rows, int chars) {
+        Tx.run(() -> {
+            var managed = (Conversation) Conversation.findById(convo.id);
+            for (int r = 0; r < rows; r++) {
+                var sb = new StringBuilder(chars + 120);
+                sb.append("Row ").append(r).append(' ').append(convo.peerId).append('.');
+                for (int i = 0; sb.length() < chars; i++) {
+                    sb.append(" Note ").append(i).append(": the ledger for account ").append(r * 10_000 + i)
+                            .append(" lists invoices, refunds and adjustments in order.");
+                }
+                if (r % 2 == 0) ConversationService.appendUserMessage(managed, sb.toString());
+                else ConversationService.appendAssistantMessage(managed, sb.toString(), null);
+            }
+        });
+    }
+
+    private static void commit() {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+    }
+
+    private static AgentRunner.RunResult run(Agent agent, Conversation convo, String message) throws Exception {
+        var result = new AtomicReference<AgentRunner.RunResult>();
+        var error = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var a = Tx.run(() -> (Agent) Agent.findById(agent.id));
+                var c = Tx.run(() -> (Conversation) Conversation.findById(convo.id));
+                result.set(AgentRunner.run(a, c, message));
+            } catch (Exception e) {
+                error.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "the turn must finish within 60 s");
+        if (error.get() != null) throw error.get();
+        return result.get();
+    }
+
+    private static SessionCompaction latestCompaction(Long conversationId) {
+        JPA.em().clear();
+        var latest = Tx.run(() -> SessionCompaction.findLatest(Conversation.findById(conversationId)));
+        assertNotNull(latest, "a summary was stored");
+        return latest;
+    }
+
+    private static List<String> storedRows(Long conversationId) {
+        JPA.em().clear();
+        return Tx.run(() -> {
+            var out = new ArrayList<String>();
+            for (Object o : Message.find("conversation.id = ?1 ORDER BY createdAt, id", conversationId).fetch()) {
+                var m = (Message) o;
+                out.add(m.role + ": " + m.content);
+            }
+            // The turn's own reply is stored after the call that the comparison reads.
+            out.removeLast();
+            return out;
+        });
+    }
+
+    private static List<JsonElement> slice(JsonArray array, int from, int to) {
+        var out = new ArrayList<JsonElement>();
+        for (int i = from; i < to; i++) out.add(array.get(i));
+        return out;
+    }
+
+    private static String content(JsonElement message) {
+        return message.getAsJsonObject().get("content").getAsString();
+    }
+
+    private static String roleAndContent(JsonElement message) {
+        return message.getAsJsonObject().get("role").getAsString() + ": " + content(message);
+    }
+
+    private static List<String> roles(JsonArray messages) {
+        var out = new ArrayList<String>();
+        for (var m : messages) out.add(m.getAsJsonObject().get("role").getAsString());
+        return out;
+    }
+
+    private static List<String> toolNames(JsonObject request) {
+        var out = new ArrayList<String>();
+        if (!request.has("tools")) return out;
+        for (var t : request.getAsJsonArray("tools")) {
+            out.add(t.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
+        }
+        return out;
+    }
+
+    private static List<String> headings(String instruction) {
+        return instruction.lines().filter(l -> l.startsWith("### ")).map(l -> l.substring(4)).toList();
+    }
+}
