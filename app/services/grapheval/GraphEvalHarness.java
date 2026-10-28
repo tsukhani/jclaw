@@ -171,7 +171,8 @@ public final class GraphEvalHarness {
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                              List<Case> secondLabels, List<Adjudications.Verdict> adjudications, EvalProgress progress,
                              boolean pairFilter, @Nullable String secondLabelsReason, DevOptions options) {
-        var stored = CaseMeasurement.measureStored(agentId, cases, ownerName, schema, models, runs, concurrency, progress, pairFilter);
+        var stored = CaseMeasurement.measureStored(agentId, cases, ownerName, schema, models, runs, concurrency,
+                progress, pairFilter);
         var measured = stored.measured();
         var spotChecks = stored.spotChecks();
         var integrity = stored.integrity();
@@ -251,8 +252,8 @@ public final class GraphEvalHarness {
         });
         var before = CaseMeasurement.snapshot(memoryIds);
         var known = ownerName == null ? List.<String>of() : List.of(ownerName);
-        var measured = CaseMeasurement.measure(cases, schema, models, runs, concurrency, known, ownerName, progress, pairFilter,
-                held);
+        var measured = CaseMeasurement.measure(cases, schema, models, runs, concurrency, known, ownerName, progress,
+                pairFilter, held);
         var after = CaseMeasurement.snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
