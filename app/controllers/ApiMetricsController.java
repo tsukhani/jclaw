@@ -100,7 +100,8 @@ public class ApiMetricsController extends Controller {
     public record CostResponse(String since, List<CostRow> rows) {}
 
     public record CompressionRow(String timestamp, String agentId, String channel, String contentType,
-                                 String algorithm, int tokensBefore, int tokensAfter, String kind, Boolean ccrHit) {}
+                                 String algorithm, int tokensBefore, int tokensAfter, String kind, Boolean ccrHit,
+                                 String toolName) {}
 
     public record CompressionResponse(String since, List<CompressionRow> rows) {}
 
@@ -303,7 +304,7 @@ public class ApiMetricsController extends Controller {
      * GET /api/metrics/compression — raw compression-metric rows since a
      * timestamp, for client-side aggregation in the Chat Compression dashboard
      * (mirrors {@link #cost()}). The frontend filters by agent/channel and rolls
-     * up savings, ratios, algorithm usage, CCR hit rate, and alerts over the rows.
+     * up savings, ratios, algorithm usage, CCR hit rate, fetch-backs per tool, and alerts over the rows.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
     @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
@@ -316,7 +317,7 @@ public class ApiMetricsController extends Controller {
         for (var m : events) {
             rows.add(new CompressionRow(
                     m.createdAt.toString(), m.agentId, m.channel, m.contentType, m.algorithm,
-                    m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit));
+                    m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit, m.toolName));
         }
         renderJSON(GSON.toJson(new CompressionResponse(since.toString(), rows)));
     }

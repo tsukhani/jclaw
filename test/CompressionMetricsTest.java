@@ -37,18 +37,35 @@ class CompressionMetricsTest extends UnitTest {
     }
 
     @Test
-    void ccrRetrievalRecordsHitAndMiss() {
-        CompressionMetrics.recordCcrRetrieval(true);
-        CompressionMetrics.recordCcrRetrieval(false);
+    void ccrRetrievalRecordsHitAndMissWithTheAgentAndTheFetchedTool() {
+        CompressionMetrics.recordCcrRetrieval(AGENT, "web_fetch", true);
+        CompressionMetrics.recordCcrRetrieval(AGENT, null, false);
 
-        assertEquals(2L, CompressionMetric.count("kind = ?1", Kind.CCR_RETRIEVAL));
-        assertEquals(1L, CompressionMetric.count("kind = ?1 and ccrHit = ?2", Kind.CCR_RETRIEVAL, true));
+        assertEquals(2L, CompressionMetric.count("kind = ?1 and agentId = ?2", Kind.CCR_RETRIEVAL, AGENT));
+        CompressionMetric hit = ccrRow(true);
+        assertEquals("web_fetch", hit.toolName);
+        assertNull(ccrRow(false).toolName);
+    }
+
+    @Test
+    void aMissNeverCarriesATool() {
+        CompressionMetrics.recordCcrRetrieval(AGENT, "web_fetch", false);
+
+        assertNull(ccrRow(false).toolName);
+    }
+
+    /** Concurrent classes record retrievals for their own agents, so rows are read by this class's agent id. */
+    private static final String AGENT = "compression-metrics-test";
+
+    private static CompressionMetric ccrRow(boolean hit) {
+        return CompressionMetric.find("kind = ?1 and agentId = ?2 and ccrHit = ?3", Kind.CCR_RETRIEVAL, AGENT, hit)
+                .first();
     }
 
     @Test
     void resetClearsAllMetrics() {
         CompressionMetrics.recordCompression("1", "web", "m", "JSON", "json-smartcrush", 1000, 100);
-        CompressionMetrics.recordCcrRetrieval(true);
+        CompressionMetrics.recordCcrRetrieval("1", "exec", true);
         assertEquals(2L, CompressionMetric.count());
 
         assertEquals(2L, CompressionMetrics.reset());

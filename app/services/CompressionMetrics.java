@@ -45,11 +45,14 @@ public final class CompressionMetrics {
         persist(m);
     }
 
-    public static void recordCcrRetrieval(boolean hit) {
+    /** One {@code ccr_retrieve} lookup: the calling agent and, on a hit, the tool whose result came back. */
+    public static void recordCcrRetrieval(@Nullable String agentId, @Nullable String toolName, boolean hit) {
         var m = new CompressionMetric();
         m.kind = Kind.CCR_RETRIEVAL;
+        m.agentId = agentId;
         m.algorithm = "ccr"; // the hash isn't stored — only the hit/miss matters for the rate
         m.ccrHit = hit;
+        m.toolName = hit ? toolName : null;
         persist(m);
     }
 

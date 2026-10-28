@@ -102,10 +102,10 @@ This panel shows token savings from [Content Compression](/guide#agents) of larg
 
 - **Tokens saved**: tokens before minus after, over the window.
 - **Reduction**: the saved share, with the before → after totals.
-- **CCR hit rate**: how many `ccr_retrieve` calls found the original they asked for. Retrievals carry no agent or channel, so this tile ignores those filters.
+- **CCR hit rate**: how many `ccr_retrieve` calls found the original they asked for. Retrievals carry an agent but no channel, so this tile follows the agent select and ignores the channel select.
 - **Inflation guards**: compressions discarded because the result was not fewer tokens than the original, beside the count of compressions kept.
 
-Below them are **Saved by content type** and **Algorithm usage**. The table and chart icons in the header switch both between bar charts (the default) and tables. The table columns are *Type / Saved / Reduction* and *Algorithm / Events / Saved*. Warnings appear at the foot when inflation guards exceed 5% of attempts, when the CCR hit rate falls below 50%, or when a content type keeps under 10% of its tokens while the hit rate is below 90%.
+Below them are **Saved by content type**, **Algorithm usage**, and **Fetch-backs by tool**. Fetch-backs by tool counts the `ccr_retrieve` calls that found their original, by the tool that first returned it, so a tool near the top is one whose results the agent often needs again in full. A tool shown as — is one that could not be named. Like the CCR hit rate tile, this list follows the agent select and ignores the channel select. The table and chart icons in the header switch all three between bar charts (the default) and tables. The table columns are *Type / Saved / Reduction*, *Algorithm / Events / Saved*, and *Tool / Fetch-backs*. Warnings appear at the foot when inflation guards exceed 5% of attempts, when the CCR hit rate falls below 50%, or when a content type keeps under 10% of its tokens while the hit rate is below 90%.
 
 The trash icon (**Reset compression metrics**) deletes every recorded compression event, not just the current window, without confirmation.
 

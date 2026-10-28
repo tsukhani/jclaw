@@ -1,6 +1,7 @@
 import agents.ToolContext;
 import agents.ToolRegistry;
 import models.Agent;
+import models.CompressionMetric;
 import models.Conversation;
 import models.MessageRole;
 import models.Task;
@@ -17,6 +18,7 @@ import services.compression.ContentHash;
 import tools.CcrRetrieveTool;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * JCLAW-462: ccr_retrieve tool. Verifies it re-finds the original tool-result
@@ -98,6 +100,125 @@ class CcrRetrieveToolTest extends UnitTest {
         msg.content = content;
         msg.save();
         return run;
+    }
+
+    @Test
+    void aFetchRecordsTheCallingAgentAndTheToolWhoseResultCameBack() {
+        var content = "x".repeat(5_000);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_1", "web_fetch"));
+        ConversationService.appendToolResult(conv, "call_1", content);
+
+        var result = retrieve(ContentHash.handle(content));
+
+        assertEquals(content, result);
+        var row = onlyCcrRowOfThisAgent();
+        assertEquals(Boolean.TRUE, row.ccrHit);
+        assertEquals("web_fetch", row.toolName);
+    }
+
+    @Test
+    void aMissRecordsTheAgentAndNoTool() {
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_1", "web_fetch"));
+        ConversationService.appendToolResult(conv, "call_1", "{\"a\":1}");
+
+        var result = retrieve("deadbeefdeadbeef");
+
+        assertEquals("No original found for hash \"deadbeefdeadbeef\" in this conversation"
+                + " (it may have been trimmed from history).", result);
+        var row = onlyCcrRowOfThisAgent();
+        assertEquals(Boolean.FALSE, row.ccrHit);
+        assertNull(row.toolName);
+    }
+
+    @Test
+    void aCallIdReusedByALaterResponseNamesTheCallNearestBeforeTheResult() {
+        // Providers that number calls per response (call_0, call_1, ...) reuse ids across turns.
+        var content = "y".repeat(5_000);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_0", "exec"));
+        ConversationService.appendToolResult(conv, "call_0", content);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_0", "web_search"));
+        ConversationService.appendToolResult(conv, "call_0", "later result");
+
+        retrieve(ContentHash.handle(content));
+
+        assertEquals("exec", onlyCcrRowOfThisAgent().toolName);
+    }
+
+    @Test
+    void fetchingBackAFetchedCopyNamesTheToolThatFirstProducedIt() {
+        var content = "z".repeat(5_000);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_1", "documents"));
+        ConversationService.appendToolResult(conv, "call_1", content);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_2", CcrRetrieveTool.TOOL_NAME));
+        ConversationService.appendToolResult(conv, "call_2", content);
+
+        assertEquals(content, retrieve(ContentHash.handle(content)));
+
+        assertEquals("documents", onlyCcrRowOfThisAgent().toolName);
+    }
+
+    @Test
+    void aResultWithNoCallRowIsAHitWithNoTool() {
+        var content = "w".repeat(5_000);
+        ConversationService.appendToolResult(conv, "call_9", content);
+
+        assertEquals(content, retrieve(ContentHash.handle(content)));
+
+        var row = onlyCcrRowOfThisAgent();
+        assertEquals(Boolean.TRUE, row.ccrHit);
+        assertNull(row.toolName);
+    }
+
+    @Test
+    void aTaskRunFetchRecordsTheToolWhoseResultCameBack() {
+        var content = "[{\"id\":1,\"name\":\"alpha\"},{\"id\":2,\"name\":\"beta\"}]";
+        var run = seedTaskRunWithToolResult(content);
+        var call = new TaskRunMessage();
+        call.taskRun = run;
+        call.turnIndex = 0;
+        call.role = MessageRole.ASSISTANT;
+        call.toolCalls = toolCallJson("call_t", "web_search");
+        call.save();
+        var result = new TaskRunMessage();
+        result.taskRun = run;
+        result.turnIndex = 0;
+        result.role = MessageRole.TOOL;
+        result.toolResults = "call_t";
+        result.content = "t".repeat(5_000);
+        result.save();
+
+        ToolContext.withScope(null, run.id, () -> new CcrRetrieveTool().execute(
+                "{\"hash\":\"" + ContentHash.handle(result.content) + "\"}", agent));
+
+        assertEquals("web_search", onlyCcrRowOfThisAgent().toolName);
+    }
+
+    @Test
+    void aMissingConversationRecordsNoRetrieval() {
+        var result = ToolContext.withConversation(Long.MAX_VALUE,
+                () -> new CcrRetrieveTool().execute("{\"hash\":\"abc123\"}", agent));
+
+        assertEquals("Error: conversation not found.", result);
+        assertEquals(0L, CompressionMetric.count("kind = ?1 AND agentId = ?2",
+                CompressionMetric.Kind.CCR_RETRIEVAL, String.valueOf(agent.id)));
+    }
+
+    private String retrieve(String handle) {
+        return ToolContext.withConversation(conv.id,
+                () -> new CcrRetrieveTool().execute("{\"hash\":\"" + handle + "\"}", agent));
+    }
+
+    private static String toolCallJson(String id, String name) {
+        return "{\"id\":\"" + id + "\",\"type\":\"function\",\"function\":{\"name\":\"" + name
+                + "\",\"arguments\":\"{}\"}}";
+    }
+
+    /** The retrieval row this test's agent recorded; concurrent classes record their own agents' rows. */
+    private CompressionMetric onlyCcrRowOfThisAgent() {
+        List<CompressionMetric> rows = CompressionMetric.find("kind = ?1 AND agentId = ?2",
+                CompressionMetric.Kind.CCR_RETRIEVAL, String.valueOf(agent.id)).fetch();
+        assertEquals(1, rows.size(), "one retrieval row for agent " + agent.id);
+        return rows.getFirst();
     }
 
     @Test

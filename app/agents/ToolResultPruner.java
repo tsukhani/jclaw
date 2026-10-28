@@ -6,6 +6,7 @@ import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import services.ConversationService;
 import services.EventLogger;
 import services.compression.ContentHash;
 
@@ -30,8 +31,10 @@ public final class ToolResultPruner {
     static final String ENABLED_KEY = "chat.pruneToolResults";
     static final String MIN_CHARS_KEY = "chat.pruneToolResultsMinChars";
     static final String PROTECT_RECENT_KEY = "chat.pruneToolResultsProtectRecent";
+    static final String EVERY_TURNS_KEY = "chat.pruneToolResultsEveryTurns";
     static final int DEFAULT_MIN_CHARS = 4_000;
     static final int DEFAULT_PROTECT_RECENT = 12;
+    static final int DEFAULT_EVERY_TURNS = 5;
     /** The most of one skill's text a conversation keeps, as Claude Code keeps its first 5,000 tokens. */
     public static final int SKILL_KEEP_CHARS = 20_000;
     /** The most skill text a conversation keeps in all, newest skill first. */
@@ -43,7 +46,10 @@ public final class ToolResultPruner {
     public static List<ChatMessage> prune(List<ChatMessage> messages, Agent agent, @Nullable Conversation conversation) {
         if (messages == null || messages.isEmpty() || !ConfigService.getBoolean(ENABLED_KEY, true)) return messages;
         return prune(messages, ConfigService.getInt(MIN_CHARS_KEY, DEFAULT_MIN_CHARS),
-                ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT), agent, conversation);
+                ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT),
+                ConfigService.getInt(EVERY_TURNS_KEY, DEFAULT_EVERY_TURNS),
+                conversation != null ? ConversationService.effectiveHistoryLimit(conversation) : Integer.MAX_VALUE,
+                agent, conversation);
     }
 
     /**
@@ -52,11 +58,19 @@ public final class ToolResultPruner {
      * {@code minChars} that is not already a stub. That includes {@code ccr_retrieve}'s own
      * output: exempt, a fetched copy stayed in every later call of the conversation. A result whose tool
      * declares it a standing instruction ({@link ToolRegistry.Tool#keepsResultInContext}, a skill's text)
-     * follows {@link #skillDecisions} instead.
+     * follows {@link #skillDecisions} instead. An {@code everyTurns} above 1 holds the boundary still
+     * between steps ({@link #stepCutoff}) while the history is shorter than {@code historyLimit}, the rows
+     * {@link ConversationService#loadRecentMessages} loads at most; 1 or less, or a history at that cap, moves
+     * it on every call.
      */
-    public static List<ChatMessage> prune(List<ChatMessage> messages, int minChars, int protectRecent,
-                                          @Nullable Agent agent, @Nullable Conversation conversation) {
-        int cutoff = Math.clamp((long) messages.size() - protectRecent, 0, lastUserIndex(messages));
+    public static List<ChatMessage> prune(List<ChatMessage> messages, int minChars, int protectRecent, int everyTurns,
+                                          int historyLimit, @Nullable Agent agent, @Nullable Conversation conversation) {
+        int turn = turnUserIndex(messages);
+        // Position 0 is the system prompt, so the turn's ask at index n is the nth row loaded. A load that hit the
+        // cap slides its head every turn, so the cached history changes anyway and holding stubs back saves nothing.
+        int cutoff = everyTurns > 1 && turn < historyLimit
+                ? stepCutoff(messages, turn, protectRecent, everyTurns)
+                : Math.clamp((long) messages.size() - protectRecent, 0, lastUserIndex(messages));
         var skills = skillDecisions(messages, minChars);
         List<ChatMessage> out = null;
         int stubbed = 0;
@@ -142,9 +156,42 @@ public final class ToolResultPruner {
 
     private static int lastUserIndex(List<ChatMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
-            if (MessageRole.USER.value.equals(messages.get(i).role())) return i;
+            if (isUser(messages.get(i))) return i;
         }
         return messages.size();
+    }
+
+    /**
+     * Stubbing in steps, so the history a provider cached stays the same between them (JF-155): the newest user
+     * message with a multiple of {@code everyTurns} user messages before it, at or before the per-call boundary as
+     * it stood when the turn began. The history starts at the conversation's floor ({@code /reset} or compaction),
+     * so the count is the conversation's. Counted from the turn's own user message ({@code turn}), never from the
+     * rounds or the clock message after it, so the boundary holds still for the whole turn. 0, stubbing nothing,
+     * before the first step.
+     */
+    private static int stepCutoff(List<ChatMessage> messages, int turn, int protectRecent, int everyTurns) {
+        int limit = Math.clamp((long) turn + 1 - protectRecent, 0, turn);
+        int cutoff = 0;
+        int usersBefore = 0;
+        for (int i = 0; i <= limit && i < messages.size(); i++) {
+            if (!isUser(messages.get(i))) continue;
+            if (usersBefore % everyTurns == 0) cutoff = i;
+            usersBefore++;
+        }
+        return cutoff;
+    }
+
+    /** The current turn's user message: the last one that is not the clock {@link CurrentTimeInjector} appends. */
+    private static int turnUserIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            var m = messages.get(i);
+            if (isUser(m) && !(m.content() instanceof String body && CurrentTimeInjector.isClockBlock(body))) return i;
+        }
+        return messages.size();
+    }
+
+    private static boolean isUser(ChatMessage m) {
+        return MessageRole.USER.value.equals(m.role());
     }
 
     static String stub(@Nullable String toolName, String body) {

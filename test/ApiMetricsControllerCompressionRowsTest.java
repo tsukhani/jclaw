@@ -134,6 +134,7 @@ class ApiMetricsControllerCompressionRowsTest extends FunctionalTest {
         assertEquals("verify-ccr", newest.get("algorithm").getAsString());
         assertEquals("TEXT", newest.get("contentType").getAsString());
         assertEquals("32", newest.get("agentId").getAsString());
+        assertTrue(newest.get("toolName").isJsonNull(), "only a retrieval names a tool");
         assertEquals(now.toEpochMilli(),
                 Instant.parse(newest.get("timestamp").getAsString()).toEpochMilli());
 
@@ -149,18 +150,28 @@ class ApiMetricsControllerCompressionRowsTest extends FunctionalTest {
     }
 
     @Test
-    void compressionCarriesCcrHitFlag() {
+    void compressionCarriesARetrievalsHitFlagAgentAndFetchedTool() {
         login();
         var channel = "verifycmp-ccr";
-        seedCompression(CompressionMetric.Kind.CCR_RETRIEVAL, null, channel, null,
-                "ccr", 0, 0, true, Instant.now());
+        commitInFreshTx(() -> {
+            var m = new CompressionMetric();
+            m.kind = CompressionMetric.Kind.CCR_RETRIEVAL;
+            m.agentId = "35";
+            m.channel = channel;
+            m.algorithm = "ccr";
+            m.ccrHit = true;
+            m.toolName = "web_fetch";
+            m.createdAt = Instant.now();
+            m.save();
+        });
 
         var mine = rowsForChannel(getContent(GET("/api/metrics/compression")), channel);
         assertEquals(1, mine.size());
         var row = mine.get(0);
         assertEquals("CCR_RETRIEVAL", row.get("kind").getAsString());
         assertTrue(row.get("ccrHit").getAsBoolean());
-        assertTrue(row.get("agentId").isJsonNull(), "CCR retrieval is agent-less");
+        assertEquals("35", row.get("agentId").getAsString());
+        assertEquals("web_fetch", row.get("toolName").getAsString());
     }
 
     @Test

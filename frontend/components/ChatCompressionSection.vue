@@ -3,8 +3,8 @@
  * JCLAW-467: Chat Compression dashboard section. Mirrors Chat Cost — a single
  * raw-rows fetch per time window from GET /api/metrics/compression, then all
  * aggregation + agent/channel filtering happens client-side so filter switches
- * are instant. Table/chart view toggle for the by-type and per-algorithm
- * breakdowns, and a reset (trash) that clears the recorded metrics.
+ * are instant. Table/chart view toggle for the by-type, per-algorithm and
+ * per-tool fetch-back breakdowns, and a reset (trash) that clears the recorded metrics.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
@@ -21,6 +21,7 @@ interface Row {
   tokensAfter: number
   kind: string
   ccrHit: boolean | null
+  toolName: string | null
 }
 interface CompressionResponse { since: string, rows: Row[] }
 type WindowKey = '7d' | '30d' | 'all'
@@ -121,11 +122,22 @@ const agg = computed(() => {
 
   const guards = filtered.value.filter(r => r.kind === 'INFLATION_GUARD').length
 
-  // CCR retrievals are recorded agent-less, so the hit rate is global (unfiltered).
-  const ccrRows = rows.value.filter(r => r.kind === 'CCR_RETRIEVAL')
+  // A retrieval carries its agent but no channel, so it follows the agent select alone.
+  const ccrRows = rows.value.filter(r => r.kind === 'CCR_RETRIEVAL'
+    && (selectedAgentId.value === null || r.agentId === selectedAgentId.value))
   const ccrTotal = ccrRows.length
   const ccrHits = ccrRows.filter(r => r.ccrHit).length
   const ccrHitRate = ccrTotal ? ccrHits / ccrTotal : 0
+
+  const toolMap = new Map<string, number>()
+  for (const r of ccrRows) {
+    if (!r.ccrHit) continue
+    const t = r.toolName ?? '—'
+    toolMap.set(t, (toolMap.get(t) ?? 0) + 1)
+  }
+  const byTool = [...toolMap.entries()]
+    .map(([tool, count]) => ({ tool, count }))
+    .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
 
   const alerts: string[] = []
   // A very low kept-ratio is the *designed* outcome for json-smartcrush /
@@ -150,13 +162,14 @@ const agg = computed(() => {
 
   return {
     tokensBefore, tokensAfter, tokensSaved, reduction, events,
-    byType, byAlgo, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
+    byType, byAlgo, byTool, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
     hasData: comp.length > 0 || ccrTotal > 0 || guards > 0,
   }
 })
 
 const maxTypeSaved = computed(() => Math.max(1, ...agg.value.byType.map(t => t.saved)))
 const maxAlgoCount = computed(() => Math.max(1, ...agg.value.byAlgo.map(a => a.count)))
+const maxToolCount = computed(() => Math.max(1, ...agg.value.byTool.map(t => t.count)))
 const windowLabel = computed(() => WINDOWS.find(w => w.key === selectedWindow.value)?.label ?? '')
 
 const { saveError: resetError, attempt } = useSaveAttempt()
@@ -466,6 +479,66 @@ function fmt(n: number) {
                   </td>
                   <td class="py-1 text-right text-fg-muted tabular-nums">
                     {{ fmt(a.saved) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ccr_retrieve hits by the tool whose result was fetched back -->
+        <div
+          v-if="agg.byTool.length"
+          data-testid="fetch-backs-by-tool"
+        >
+          <div class="text-[11px] uppercase tracking-wide text-fg-muted mb-2">
+            Fetch-backs by tool
+          </div>
+          <div
+            v-if="view === 'chart'"
+            class="space-y-2.5"
+          >
+            <div
+              v-for="t in agg.byTool"
+              :key="t.tool"
+              class="flex items-center gap-3"
+            >
+              <span class="text-xs font-medium text-fg-strong w-32 shrink-0 truncate">{{ t.tool }}</span>
+              <div class="flex-1 h-2 bg-surface rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-violet-500 rounded-full transition-[width] duration-500"
+                  :style="{ width: (t.count / maxToolCount * 100) + '%' }"
+                />
+              </div>
+              <span class="text-xs text-fg-muted tabular-nums w-12 text-right shrink-0">{{ t.count }}</span>
+            </div>
+          </div>
+          <div
+            v-else
+            class="overflow-x-auto"
+          >
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-fg-muted text-left">
+                  <th class="font-normal py-1">
+                    Tool
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Fetch-backs
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="t in agg.byTool"
+                  :key="t.tool"
+                  class="border-t border-border"
+                >
+                  <td class="py-1 text-fg-strong">
+                    {{ t.tool }}
+                  </td>
+                  <td class="py-1 text-right text-fg-strong tabular-nums">
+                    {{ t.count }}
                   </td>
                 </tr>
               </tbody>

@@ -33,7 +33,7 @@ public class CompressionMetric extends Model {
     @Column(nullable = false, length = 20)
     public Kind kind;
 
-    /** Owning agent id (as a string); null for agent-less events such as CCR retrieval. */
+    /** Owning agent id (as a string); null for agent-less events and for CCR retrievals recorded before JF-155. */
     @Column(name = "agent_id", length = 255)
     public String agentId;
 
@@ -60,6 +60,10 @@ public class CompressionMetric extends Model {
     /** CCR_RETRIEVAL only: whether the hash resolved to a stored original. */
     @Column(name = "ccr_hit")
     public Boolean ccrHit;
+
+    /** CCR_RETRIEVAL only: the tool whose result was fetched back; null on a miss. */
+    @Column(name = "tool_name", length = 255)
+    public String toolName;
 
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;

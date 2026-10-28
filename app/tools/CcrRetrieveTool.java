@@ -1,10 +1,12 @@
 package tools;
 
+import agents.MessageHydrator;
 import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.TaskRunMessage;
@@ -16,6 +18,7 @@ import services.compression.ContentHash;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -37,6 +40,8 @@ import java.util.function.Function;
 public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "ccr_retrieve";
+    /** Assistant rows a LIKE on one call id may match: providers that number calls per response reuse ids. */
+    private static final int CALL_ROW_CANDIDATES = 20;
 
     @Override
     public List<ToolAction> actions() {
@@ -108,51 +113,110 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
             return "Error: ccr_retrieve has no active conversation or task-run context.";
         }
 
-        var result = Tx.run(() -> findOriginal(conversationId, taskRunId, handle));
-        // JCLAW-467: record the hit/miss for the CCR cache-hit-rate metric. System
-        // errors (no context / conversation not found) aren't a retrieval outcome.
-        if (!result.startsWith("Error:")) {
-            CompressionMetrics.recordCcrRetrieval(!result.startsWith("No original found"));
+        var lookup = Tx.run(() -> findOriginal(conversationId, taskRunId, handle));
+        // JCLAW-467, JF-155: each lookup is a metric row naming the agent and the tool fetched back; a missing
+        // conversation is not a lookup.
+        var agentId = agent.id != null ? String.valueOf(agent.id) : null;
+        switch (lookup) {
+            case Found found -> CompressionMetrics.recordCcrRetrieval(agentId, found.toolName(), true);
+            case NotFound _ -> CompressionMetrics.recordCcrRetrieval(agentId, null, false);
+            case Failed _ -> { }
         }
-        return result;
+        return lookup.text();
     }
+
+    private sealed interface Lookup {
+        String text();
+    }
+
+    /** The original, and the tool that produced it when a call row names it. */
+    private record Found(String text, @Nullable String toolName) implements Lookup {}
+
+    private record NotFound(String text) implements Lookup {}
+
+    private record Failed(String text) implements Lookup {}
 
     /**
      * Locate the original tool-output whose content hash starts with {@code handle},
      * scanning newest-first — chat {@link Message} rows when in a conversation, or
-     * {@link TaskRunMessage} rows (JCLAW-462) when in a task fire. Returns the content,
-     * or an explanatory "Error:"/"No original found" string.
+     * {@link TaskRunMessage} rows (JCLAW-462) when in a task fire.
      */
-    private static String findOriginal(@Nullable Long conversationId, @Nullable Long taskRunId, String handle) {
+    private static Lookup findOriginal(@Nullable Long conversationId, @Nullable Long taskRunId, String handle) {
         // Newest-first: a just-compressed result is usually the one wanted.
+        Found hit;
         if (conversationId != null) {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) {
-                return "Error: conversation not found.";
+                return new Failed("Error: conversation not found.");
             }
             List<Message> rows = Message.<Message>find(
                     "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
-            var hit = matchByHash(rows, m -> m.content, handle);
-            if (hit != null) return hit;
+            hit = matchByHash(rows, m -> m.content, handle, m -> conversationToolName(conv, m));
         } else {
             // JCLAW-462: task fires persist tool turns to task_run_message,
             // not the chat Message/Conversation tables — scan those instead.
             List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
                     "taskRun.id = ?1 AND role = ?2 ORDER BY id DESC", taskRunId, MessageRole.TOOL).fetch();
-            var hit = matchByHash(rows, m -> m.content, handle);
-            if (hit != null) return hit;
+            hit = matchByHash(rows, m -> m.content, handle, m -> taskRunToolName(taskRunId, m));
         }
-        return "No original found for hash \"" + handle + "\" in this "
+        if (hit != null) return hit;
+        return new NotFound("No original found for hash \"" + handle + "\" in this "
                 + (conversationId != null ? "conversation" : "task run")
-                + " (it may have been trimmed from history).";
+                + " (it may have been trimmed from history).");
     }
 
-    /** First row (in iteration order) whose content SHA-256 starts with {@code handle}, or null. */
-    private static <T> @Nullable String matchByHash(List<T> rows, Function<T, String> content, String handle) {
+    /**
+     * The newest row whose content SHA-256 starts with {@code handle}, named for the tool that first produced
+     * it: a row {@code ccr_retrieve} itself returned is a copy, so an older match that names another tool wins.
+     */
+    private static <T> @Nullable Found matchByHash(List<T> rows, Function<T, String> content, String handle,
+                                                   Function<T, @Nullable String> toolName) {
+        Found copy = null;
         for (var r : rows) {
             var c = content.apply(r);
-            if (c != null && ContentHash.sha256Hex(c).startsWith(handle)) {
-                return c;
+            if (c == null || !ContentHash.sha256Hex(c).startsWith(handle)) continue;
+            var name = toolName.apply(r);
+            if (!TOOL_NAME.equals(name)) return new Found(c, name);
+            if (copy == null) copy = new Found(c, name);
+        }
+        return copy;
+    }
+
+    private static @Nullable String conversationToolName(Conversation conv, Message toolRow) {
+        if (toolRow.toolResults == null) return null;
+        List<Message> calls = Message.<Message>find(
+                "conversation = ?1 AND role = ?2 AND id < ?3 AND toolCalls LIKE ?4 ORDER BY id DESC",
+                conv, MessageRole.ASSISTANT.value, toolRow.id, callIdPattern(toolRow.toolResults))
+                .fetch(CALL_ROW_CANDIDATES);
+        return nameOfCall(calls, m -> m.toolCalls, toolRow.toolResults);
+    }
+
+    private static @Nullable String taskRunToolName(@Nullable Long taskRunId, TaskRunMessage toolRow) {
+        if (toolRow.toolResults == null) return null;
+        List<TaskRunMessage> calls = TaskRunMessage.<TaskRunMessage>find(
+                "taskRun.id = ?1 AND role = ?2 AND id < ?3 AND toolCalls LIKE ?4 ORDER BY id DESC",
+                taskRunId, MessageRole.ASSISTANT, toolRow.id, callIdPattern(toolRow.toolResults))
+                .fetch(CALL_ROW_CANDIDATES);
+        return nameOfCall(calls, m -> m.toolCalls, toolRow.toolResults);
+    }
+
+    /** A LIKE prefilter only: {@code _} in an id matches any character, so {@link #nameOfCall} confirms the id. */
+    private static String callIdPattern(String callId) {
+        return "%\"" + callId + "\"%";
+    }
+
+    /**
+     * The tool named by the newest of {@code rows} whose call carries {@code callId}, paired the way
+     * {@link MessageHydrator} pairs a result with its call; each persisted assistant row holds one call.
+     */
+    private static <T> @Nullable String nameOfCall(List<T> rows, Function<T, @Nullable String> toolCalls,
+                                                   String callId) {
+        var wanted = MessageHydrator.sanitizeToolCallId(callId);
+        for (var r : rows) {
+            var json = toolCalls.apply(r);
+            if (json == null) continue;
+            for (var call : MessageHydrator.parseToolCalls(json)) {
+                if (Objects.equals(wanted, call.id()) && call.function() != null) return call.function().name();
             }
         }
         return null;

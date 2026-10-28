@@ -62,6 +62,42 @@ describe('ChatCompressionSection', () => {
     expect(text).not.toContain('compression ratio is very low')
   })
 
+  it('lists fetch-backs per tool for the agent in view, whatever the channel', async () => {
+    const ccr = (agentId: string, toolName: string | null, ccrHit: boolean) => ({
+      timestamp: '2026-06-01T00:00:00Z', agentId, channel: null, contentType: null, algorithm: 'ccr',
+      tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit, toolName,
+    })
+    registerEndpoint('/api/metrics/compression', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [
+        { timestamp: '2026-06-01T00:00:00Z', agentId: '1', channel: 'web', contentType: 'JSON', algorithm: 'json-smartcrush', tokensBefore: 1000, tokensAfter: 600, kind: 'COMPRESSION', ccrHit: null, toolName: null },
+        ccr('1', 'web_fetch', true),
+        ccr('1', 'exec', true),
+        ccr('1', 'web_fetch', true),
+        ccr('2', 'web_fetch', true),
+        ccr('1', null, false),
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+    await wrapper.find('button[title="Table view"]').trigger('click')
+    const perTool = () => wrapper.findAll('[data-testid="fetch-backs-by-tool"] tbody tr')
+      .map(tr => tr.findAll('td').map(td => td.text()))
+
+    expect(perTool()).toEqual([['web_fetch', '3'], ['exec', '1']])
+    expect(wrapper.text()).toContain('4 / 5 hits')
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
+    expect(perTool()).toEqual([['web_fetch', '2'], ['exec', '1']])
+    expect(wrapper.text()).toContain('3 / 4 hits')
+
+    await wrapper.find('select[aria-label="Filter by channel"]').setValue('web')
+    expect(perTool()).toEqual([['web_fetch', '2'], ['exec', '1']])
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('2')
+    expect(perTool()).toEqual([['web_fetch', '1']])
+  })
+
   it('shows an empty state when there is no activity', async () => {
     registerEndpoint('/api/metrics/compression', () => ({ since: '', rows: [] }))
     const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: [] } })
