@@ -174,6 +174,9 @@ class ToolDeferralTurnTest extends UnitTest {
         assertTrue(natives.containsAll(fence), "control: the agent holds every fenced tool: " + natives);
         assertEquals(natives.stream().filter(fence::contains).toList(), requestTools(0));
         assertEquals(unfenced, requestTools(1), "a fire with no task the owner reads alone is not offered jclaw_api");
+        assertFalse(systemPrompt(0).contains(SystemPromptAssembler.DEFERRED_TOOLS_NOTE),
+                "a fire sent no tool_invoke is not told to call it");
+        assertTrue(systemPrompt(1).contains(SystemPromptAssembler.DEFERRED_TOOLS_NOTE));
     }
 
     @Test

@@ -313,10 +313,10 @@ public class SystemPromptAssembler {
             + "through `" + ToolInvokeTool.NAME + "`: call it with `{\"describe\": [\"<tool>\", ...]}` for their input "
             + "schemas, then with `{\"tool\": \"<tool>\", \"args\": {...}}` to run one.\n";
 
-    /** Whether a turn whose catalog leaves out {@code disabled} sends {@code tool_invoke}, as {@link ToolRegistry#deferCold} decides. */
+    /** Whether a turn whose catalog leaves out {@code disabled} is sure to send {@code tool_invoke}: a fenced fire may not. */
     private static boolean reachesDeferredTools(Agent agent, Set<String> disabled) {
         return ToolRegistry.listTools().stream().anyMatch(t -> t.group() == null && !disabled.contains(t.name())
-                && !ToolRegistry.CORE_TOOLS.contains(t.name())) && ToolRegistry.defersTools(agent);
+                && !ToolRegistry.CORE_TOOLS.contains(t.name())) && ToolRegistry.defersTools(agent, disabled);
     }
 
     /**

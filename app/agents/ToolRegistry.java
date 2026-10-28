@@ -723,6 +723,14 @@ public class ToolRegistry {
     }
 
     /**
+     * Whether the tools a prompt assembled with {@code disabled} offers pass the threshold. They are a subset of what
+     * {@link #deferCold} weighs, which still counts a tool {@link #forTurn} withholds, so true means the request defers.
+     */
+    public static boolean defersTools(Agent agent, Set<String> disabled) {
+        return defersTools(getToolDefsForAgent(agent).stream().filter(d -> !disabled.contains(d.function().name())).toList());
+    }
+
+    /**
      * Whether the native schemas in {@code defs} exceed {@link #DEFERRAL_THRESHOLD_TOKENS}, estimated as the prompt
      * breakdown estimates them, with {@value #TOOL_DEFERRAL_KEY} not {@code false}.
      */
