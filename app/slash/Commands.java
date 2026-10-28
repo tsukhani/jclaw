@@ -1,5 +1,6 @@
 package slash;
 
+import agents.CompactionGate;
 import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
@@ -495,23 +496,26 @@ public final class Commands {
             return new Result(current, msg, Command.COMPACT);
         }
 
+        // The request automatic compaction sends (JF-154), so one /compact summary shows what the trigger would write.
+        var turn = CompactionGate.nextTurnRequest(agent, current.id);
+        if (turn == null) {
+            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                    "/compact on conversation %d, which is gone".formatted(current.id));
+            return new Result(null, "No active conversation to compact.", Command.COMPACT);
+        }
         var modelLabel = primary.config().name() + "/" + modelId;
         var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
 
         final var capturedPrimary = primary;
         final var capturedModelId = modelId;
-        SessionCompactor.Summarizer summarizer = sumMsgs -> {
-            // Slash-command-triggered compaction has no inbound chat-channel
-            // context (it runs on a programmatic invocation), so dispatcher_wait
-            // for this call records under "unknown".
-            var resp = capturedPrimary.chat(
-                    Objects.requireNonNull(capturedModelId, "no model configured for compaction"),
-                    sumMsgs, List.of(), maxOutput, null, null);
-            return SessionCompactor.firstChoiceText(resp);
-        };
+        // Slash-command-triggered compaction has no inbound chat-channel
+        // context (it runs on a programmatic invocation), so dispatcher_wait
+        // for this call records under "unknown".
+        SessionCompactor.ModelCall call = (messages, tools) -> capturedPrimary.chat(
+                Objects.requireNonNull(capturedModelId, "no model configured for compaction"),
+                messages, tools, maxOutput, null, null);
 
-        var result = SessionCompactor.compact(current.id, modelLabel, summarizer,
-                /*force*/ true, args);
+        var result = SessionCompactor.compact(current.id, modelLabel, turn, call, /*force*/ true, args);
         var responseText = buildCompactResponseText(result, args);
         persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())

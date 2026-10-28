@@ -21,6 +21,7 @@ import services.ConfigService;
 import services.ConversationService;
 import services.SessionCompactor;
 import services.Tx;
+import slash.Commands;
 import utils.CircuitBreakers;
 
 import java.net.InetSocketAddress;
@@ -36,8 +37,9 @@ import java.util.function.IntFunction;
 /**
  * JF-154 end to end: a chat compacts once its prompt reaches {@code chat.compaction.triggerTokens}, however
  * large the window, and the summary call reuses the agent's own request — its system prompt, history and tools —
- * with the instruction last, and never runs a tool. The history is seeded past the 150,000-token default rather
- * than the key lowered, so no other class running alongside ever sees a lowered trigger.
+ * with the instruction last, and never runs a tool; {@code /compact} sends the same request. The history is seeded
+ * past the 150,000-token default rather than the key lowered, so no other class running alongside ever sees a
+ * lowered trigger.
  */
 class CompactionSummaryRequestTest extends UnitTest {
 
@@ -168,7 +170,96 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertNull(Tx.run(() -> SessionCompaction.findLatest(Conversation.findById(convo.id))));
     }
 
+    @Test
+    void slashCompactSendsTheRequestATurnSendsWithTheInstructionLast() throws Exception {
+        startProvider(n -> text(n == 2 ? "SUMMARY-SLASH" : "Reply " + n));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-slash");
+        seed(convo, 12, 400);
+        commit();
+
+        var result = new AtomicReference<Commands.Result>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> {
+            run(agent, convo, "First question");
+            result.set(slashCompact(agent, convo, null));
+        });
+
+        assertEquals(2, requests.size(), "the turn, then the /compact summary");
+        var turn = requests.get(0).getAsJsonArray("messages");
+        var summary = requests.get(1).getAsJsonArray("messages");
+        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
+        assertEquals(requests.get(0).get("tools"), requests.get(1).get("tools"));
+        // The summarized rows follow the turn's own system message, as the turn sent them.
+        int shared = summary.size() - 1;
+        assertEquals(slice(turn, 0, shared), slice(summary, 0, shared));
+        var instruction = summary.get(shared).getAsJsonObject();
+        assertEquals("user", instruction.get("role").getAsString());
+        assertEquals(SECTIONS, headings(instruction.get("content").getAsString()));
+        assertEquals("SUMMARY-SLASH", latestCompaction(convo.id).summary);
+        assertTrue(result.get().responseText().startsWith("> Conversation Compacted"), result.get().responseText());
+    }
+
+    @Test
+    void aSlashCompactHintFollowsTheInstruction() throws Exception {
+        startProvider(n -> text("SUMMARY-HINTED"));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-hint");
+        seed(convo, 12, 400);
+        commit();
+
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> slashCompact(agent, convo, "focus on the ledger"));
+
+        assertEquals(1, requests.size());
+        assertEquals(List.of(TOOL), toolNames(requests.getFirst()));
+        var messages = requests.getFirst().getAsJsonArray("messages");
+        var instruction = content(messages.get(messages.size() - 1));
+        assertEquals(SECTIONS, headings(instruction));
+        assertTrue(instruction.endsWith("\n\nAdditional user guidance for this summary: focus on the ledger"), instruction);
+    }
+
+    @Test
+    void aToolCallReplyToSlashCompactIsRetriedWithoutToolsAndItsToolNeverRuns() throws Exception {
+        startProvider(n -> n == 1 ? toolCall() : text("SUMMARY-SLASH-RETRY"));
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf154-slash-retry");
+        seed(convo, 12, 400);
+        commit();
+
+        var result = new AtomicReference<Commands.Result>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(slashCompact(agent, convo, null)));
+
+        assertEquals(2, requests.size(), "the summary, then its retry");
+        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
+        var retry = requests.get(1);
+        assertFalse(retry.has("tools"), "the retry carries no tools");
+        var retryMessages = retry.getAsJsonArray("messages");
+        assertEquals(List.of("system", "user"), roles(retryMessages));
+        assertEquals(SECTIONS, headings(content(retryMessages.get(0))));
+        assertEquals(0, toolRuns.get());
+        assertEquals("SUMMARY-SLASH-RETRY", latestCompaction(convo.id).summary);
+        assertTrue(result.get().responseText().startsWith("> Conversation Compacted"), result.get().responseText());
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    /** {@code /compact} as web chat runs it, on a thread with no transaction of its own. */
+    private static Commands.Result slashCompact(Agent agent, Conversation convo, String hint) throws Exception {
+        var result = new AtomicReference<Commands.Result>();
+        var error = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var a = Tx.run(() -> (Agent) Agent.findById(agent.id));
+                var c = Tx.run(() -> (Conversation) Conversation.findById(convo.id));
+                result.set(Commands.execute(Commands.Command.COMPACT, a, "web", c.peerId, c, hint, true));
+            } catch (Exception e) {
+                error.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "/compact must finish within 60 s");
+        if (error.get() != null) throw error.get();
+        return result.get();
+    }
 
     private Agent createAgent() {
         var agent = new Agent();

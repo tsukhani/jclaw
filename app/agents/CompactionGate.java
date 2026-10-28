@@ -6,12 +6,12 @@ import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
 import models.Agent;
+import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
-import services.TaskToolPolicy;
 import services.Tx;
 
 import java.util.List;
@@ -150,14 +150,36 @@ public final class CompactionGate {
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return current;
-            var promptDisabled = disabledTools != null ? disabledTools
-                    : ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames),
-                            DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId));
+            var promptDisabled = disabledTools != null ? disabledTools : AgentPromptPreparer.turnDisabled(agent, conv,
+                    DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId));
             var assembled = SystemPromptAssembler.assemble(agent, null, promptDisabled, conv.channelType, null, conv);
-            var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
-            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
-            sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            return MessageHydrator.buildMessages(sysPrompt, conv);
+            return MessageHydrator.buildMessages(AgentPromptPreparer.turnSystemPrompt(assembled.systemPrompt(), conv), conv);
         });
+    }
+
+    /**
+     * What {@code conversationId}'s next turn would send ahead of its own message, as the turn builds it: the system
+     * prompt and tools for the conversation's channel and fence, and the history pruned and compressed. {@code /compact}
+     * summarizes on it, so its request is the one this gate sends. The next turn's own message, and so its recall and
+     * clock, do not exist yet and are absent here as they are from the list the gate is handed. Null when the
+     * conversation is gone.
+     */
+    public static SessionCompactor.@Nullable TurnRequest nextTurnRequest(Agent agent, Long conversationId) {
+        var built = Tx.run(() -> {
+            var conv = ConversationService.findById(conversationId);
+            if (conv == null) return null;
+            var ownerReadsAlone = DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId);
+            var assembled = SystemPromptAssembler.assemble(agent, null,
+                    AgentPromptPreparer.turnDisabled(agent, conv, ownerReadsAlone), conv.channelType, null, conv);
+            var messages = MessageHydrator.buildMessages(
+                    AgentPromptPreparer.turnSystemPrompt(assembled.systemPrompt(), conv), conv).messages();
+            return new NextTurn(conv, messages, AgentPromptPreparer.turnTools(agent, conv, ownerReadsAlone));
+        });
+        if (built == null) return null;
+        return new SessionCompactor.TurnRequest(
+                AgentPromptPreparer.prunedAndCompressed(built.messages(), agent, built.conversation()), built.tools());
+    }
+
+    private record NextTurn(Conversation conversation, List<ChatMessage> messages, List<ToolDef> tools) {
     }
 }

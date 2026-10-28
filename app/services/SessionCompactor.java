@@ -177,7 +177,18 @@ public final class SessionCompactor {
      * @param call the model call, made outside any transaction
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call) {
-        return compact(conversationId, modelLabel, false, plan -> summarizeOnTurn(conversationId, plan, turn, call));
+        return compact(conversationId, modelLabel, turn, call, false, null);
+    }
+
+    /**
+     * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} relaxes the
+     * too-few-turns guard as the transcript form's does, and {@code additionalInstructions} follows the instruction,
+     * in the transcript retries too.
+     */
+    public static CompactionResult compact(Long conversationId, String modelLabel, TurnRequest turn, ModelCall call,
+                                           boolean force, @Nullable String additionalInstructions) {
+        return compact(conversationId, modelLabel, force,
+                plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions));
     }
 
     private static CompactionResult compact(Long conversationId, String modelLabel, boolean force, SummaryStep step) {
@@ -293,37 +304,39 @@ public final class SessionCompactor {
 
     /** Today's request shape: the instruction as the system prompt and the turns as one transcript. */
     private static List<ChatMessage> transcriptRequest(CompactionPlan plan, @Nullable String additionalInstructions) {
-        var instructions = SUMMARIZATION_INSTRUCTIONS;
-        if (additionalInstructions != null && !additionalInstructions.isBlank()) {
-            instructions += "\n\nAdditional user guidance for this summary: " + additionalInstructions.strip();
-        }
         var turns = renderTurns(plan.toSummarize());
         var prior = plan.priorSummary();
         var input = prior == null ? turns
                 : PRIOR_SUMMARY_HEADER + "\n\n" + prior + "\n\n[Turns since that summary]\n\n" + turns;
-        return List.of(ChatMessage.system(instructions), ChatMessage.user(input));
+        return List.of(ChatMessage.system(instructions(additionalInstructions)), ChatMessage.user(input));
+    }
+
+    private static String instructions(@Nullable String additionalInstructions) {
+        if (additionalInstructions == null || additionalInstructions.isBlank()) return SUMMARIZATION_INSTRUCTIONS;
+        return SUMMARIZATION_INSTRUCTIONS + "\n\nAdditional user guidance for this summary: " + additionalInstructions.strip();
     }
 
     private static @Nullable String summarizeOnTurn(Long conversationId, CompactionPlan plan, TurnRequest turn,
-                                                    ModelCall call) throws Exception {
+                                                    ModelCall call, @Nullable String additionalInstructions)
+            throws Exception {
         if (!alignsWith(plan, turn.messages())) {
             EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
                     + "the turn's messages no longer match the stored rows").formatted(conversationId));
-            return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
         }
         ChatResponse reply;
         try {
-            reply = call.call(turnRequest(plan, turn.messages()), turn.tools());
+            reply = call.call(turnRequest(plan, turn.messages(), additionalInstructions), turn.tools());
         } catch (Exception e) {
             EventLogger.warn("compaction", null, null, ("Compaction on the turn's request failed for conversation %d "
                     + "(%s); retrying on the transcript").formatted(conversationId, e.getMessage()));
-            return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
         }
         if (!callsATool(reply)) return firstChoiceText(reply);
         EventLogger.info("compaction", null, null,
                 "Compaction reply for conversation %d called a tool; retrying without tools".formatted(conversationId));
         // The transcript, not this history minus tools: tool-call blocks sent with no tool definitions risk a refusal.
-        return firstChoiceText(call.call(transcriptRequest(plan, null), List.of()));
+        return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
     }
 
     /** The turn's list is its system prompt then the loaded rows, so the slot after the summarized rows holds the first kept row. */
@@ -335,11 +348,12 @@ public final class SessionCompactor {
                 && (!(kept.content() instanceof String text) || text.equals(plan.firstKept().content()));
     }
 
-    private static List<ChatMessage> turnRequest(CompactionPlan plan, List<ChatMessage> turn) {
+    private static List<ChatMessage> turnRequest(CompactionPlan plan, List<ChatMessage> turn,
+                                                 @Nullable String additionalInstructions) {
         var prefix = turn.subList(0, plan.toSummarize().size() + 1);
         var request = new ArrayList<ChatMessage>(prefix.size() + 1);
         for (var m : prefix) request.add(withoutMedia(m));
-        request.add(ChatMessage.user(SUMMARIZATION_INSTRUCTIONS));
+        request.add(ChatMessage.user(instructions(additionalInstructions)));
         return request;
     }
 

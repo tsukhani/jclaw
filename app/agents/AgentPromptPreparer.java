@@ -112,18 +112,9 @@ final class AgentPromptPreparer {
             trace.agentId(AgentRunner.agentIdOf(agent));
 
             var ownerReadsAlone = DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId);
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage,
-                    ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames), ownerReadsAlone),
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage, turnDisabled(agent, conv, ownerReadsAlone),
                     conv.channelType, queryEmbedding, conv);
-            // JCLAW-38: re-inject the latest compaction summary (if any)
-            // into the system prompt so the LLM keeps continuity with
-            // turns that have since been dropped from the raw history.
-            var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
-            // JCLAW-268: re-inject the spawn-time parent-conversation context
-            // for inherit-mode subagents. No-op for fresh-mode and non-subagent
-            // conversations (parentContext is null).
-            sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            var hydration = MessageHydrator.buildMessages(sysPrompt, conv);
+            var hydration = MessageHydrator.buildMessages(turnSystemPrompt(assembled.systemPrompt(), conv), conv);
 
             // JCLAW-108: resolve the provider from the effective provider name
             // (conversation override when set, agent default otherwise), not
@@ -139,10 +130,7 @@ final class AgentPromptPreparer {
             }
             var fallback = ModelResolver.fallbackFor(agent, conv);
 
-            // Conversation-aware overload: native tools and each MCP
-            // server's handle always ship.
-            var tools = ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name)), ownerReadsAlone);
+            var tools = turnTools(agent, conv, ownerReadsAlone);
 
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
@@ -170,8 +158,7 @@ final class AgentPromptPreparer {
         // compaction so the budget check sees the smaller payload. No-op
         // unless the agent's compression is on. When compaction fires it
         // rebuilds from originals; trimToContextWindow below stays the net.
-        var compressedMessages = CompressionPipeline.compress(
-                ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
+        var compressedMessages = prunedAndCompressed(prepared.messages(), agent, conversation);
         // Recall joins the list after compaction and the trim, so both count it here (JF-152).
         int recallTokens = ContextWindowManager.reservedTokens(prepared.recalledMemories(), agent, conversation,
                 prepared.primary());
@@ -238,21 +225,13 @@ final class AgentPromptPreparer {
                     "conversation disappeared mid-turn");
             // A conversation that carries a tool list is described by it, in the prompt as in the request.
             var ownerReadsAlone = DangerousActionGate.ownerReadsAlone(convo.id, convo.channelType, convo.peerId);
-            var turnDisabled = ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(convo.enabledToolNames),
-                    ownerReadsAlone);
+            var turnDisabled = turnDisabled(agent, convo, ownerReadsAlone);
             var disabledTools = turnDisabled != null ? turnDisabled : ToolRegistry.loadDisabledTools(agent);
             var promptChannel = channelType != null ? channelType : convo.channelType;
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
                     queryEmbedding, convo);
-            // JCLAW-38: re-inject latest compaction summary (if any)
-            var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
-            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
-            sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
-            var hydration = MessageHydrator.buildMessages(sysPrompt, convo);
-            // Conversation-aware overload: applies the loadtest-agent
-            // short-circuit.
-            var toolDefs = ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name)), ownerReadsAlone);
+            var hydration = MessageHydrator.buildMessages(turnSystemPrompt(assembled0.systemPrompt(), convo), convo);
+            var toolDefs = turnTools(agent, convo, ownerReadsAlone);
             return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });
@@ -276,8 +255,7 @@ final class AgentPromptPreparer {
         // trimToContextWindow below stays as a drop-oldest fallback for
         // when compaction is skipped or fails.
         // JCLAW-465: same content-aware compression hook on the streaming path.
-        var compressedMessages = CompressionPipeline.compress(
-                ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
+        var compressedMessages = prunedAndCompressed(prepared.messages(), agent, conversation);
         // Recall joins the list after compaction and the trim, so both count it here (JF-152).
         int recallTokens = ContextWindowManager.reservedTokens(prepared.assembled().recalledMemories(), agent,
                 conversation, primary);
@@ -308,5 +286,38 @@ final class AgentPromptPreparer {
                         CheckListTool.reminder(conversation, finalMessages)),
                 prepared.tools(), prepared.disabledTools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
+    }
+
+    // ─── What every turn on a conversation shares, and /compact with it (JF-154) ───
+
+    /** The disabled set a turn on {@code conv} assembles its prompt with: the conversation's tool fence, widened for a guest. */
+    static @Nullable Set<String> turnDisabled(Agent agent, Conversation conv, boolean ownerReadsAlone) {
+        return ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames), ownerReadsAlone);
+    }
+
+    /**
+     * {@code assembled} plus what the conversation carries past the cache boundary: its latest compaction summary
+     * (JCLAW-38), for the turns since dropped from the history, and an inherit-mode subagent's spawn-time parent
+     * context (JCLAW-268).
+     */
+    static String turnSystemPrompt(String assembled, Conversation conv) {
+        return SessionCompactor.appendParentContextToPrompt(SessionCompactor.appendSummaryToPrompt(assembled, conv), conv);
+    }
+
+    /**
+     * The tool definitions a turn on {@code conv} sends: native tools and each MCP server's handle, inside the
+     * conversation's fence, cold ones deferred, the operator-only ones withheld unless {@code ownerReadsAlone}.
+     */
+    static List<ToolDef> turnTools(Agent agent, Conversation conv, boolean ownerReadsAlone) {
+        return ToolRegistry.forTurn(ToolRegistry.deferCold(agent, TaskToolPolicy.restrictSubagent(
+                ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name)), ownerReadsAlone);
+    }
+
+    /**
+     * {@code messages} as a turn measures and sends them: earlier large tool results stubbed (JF-155), then
+     * content-aware compression of tool output (JCLAW-465), before compaction so its check sees the smaller payload.
+     */
+    static List<ChatMessage> prunedAndCompressed(List<ChatMessage> messages, Agent agent, Conversation conv) {
+        return CompressionPipeline.compress(ToolResultPruner.prune(messages, agent, conv), agent, conv);
     }
 }
