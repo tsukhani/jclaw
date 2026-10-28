@@ -180,7 +180,7 @@ async function saveChatField(configKey: string, value: string) {
         />
         <SettingsConfigField
           config-key="chat.pruneToolResultsEveryTurns"
-          label="Shorten old tool results every (turns)"
+          label="Trim tool results every (turns)"
           kind="number"
           fallback="1"
           :min="1"

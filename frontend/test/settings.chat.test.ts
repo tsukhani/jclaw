@@ -125,7 +125,7 @@ describe('Settings page — Chat context savings', () => {
     expect(row(component, 'chat.toolDeferral').find('span.ml-auto').text()).toBe('off')
     expect(label(component, 'chat.compaction.triggerTokens')).toBe('Summarize long chats at (tokens)')
     expect(shown(component, 'chat.compaction.triggerTokens')).toBe('0')
-    expect(label(component, 'chat.pruneToolResultsEveryTurns')).toBe('Shorten old tool results every (turns)')
+    expect(label(component, 'chat.pruneToolResultsEveryTurns')).toBe('Trim tool results every (turns)')
     expect(shown(component, 'chat.pruneToolResultsEveryTurns')).toBe('1')
   })
 
