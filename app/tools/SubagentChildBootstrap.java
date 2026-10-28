@@ -21,6 +21,7 @@ import tools.SubagentSpawnTool.SubagentModel;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.TreeSet;
 
 /**
  * JCLAW-677: materialize the child {@link Agent} + child {@link Conversation}
@@ -215,26 +216,33 @@ final class SubagentChildBootstrap {
      * acp). Enforces child_capabilities ⊆ parent_capabilities:
      * <ul>
      *   <li>every tool the parent has disabled must also be disabled on the
-     *       named child (so child_enabled ⊆ parent_enabled);</li>
-     *   <li>the child may use the acp runtime only if the parent may.</li>
+     *       named child (so child_enabled ⊆ parent_enabled), except {@code skill_read}
+     *       when the parent has {@code filesystem};</li>
+     *   <li>the child may use the acp runtime only if the parent may;</li>
+     *   <li>only the main agent may name the main agent: its shell privileges (global
+     *       paths, allowlist bypass) follow {@code isMain}, not any tool grant.</li>
      * </ul>
-     * Shell privileges (global paths / allowlist bypass) are main-only, so an
-     * {@code isMain} mismatch is already caught by the tool-subset check — the
-     * main agent disables nothing a restricted parent does. Self-reuse and
-     * equal-or-narrower agents pass. Returns an error string on escalation, or
-     * null when the named agent is within bounds.
+     * Self-reuse and equal-or-narrower agents pass. Returns an error string on
+     * escalation, or null when the named agent is within bounds.
      */
     private static @Nullable String capabilityEscalationError(Agent spawningAgent, Agent named) {
         if (named.id != null && named.id.equals(spawningAgent.id)) {
             return null; // self-reuse is always within bounds
         }
+        if (named.isMain() && !spawningAgent.isMain()) {
+            return "Error: agentId %d ('%s') is the main agent, which only the main agent may run as a subagent."
+                    .formatted(named.id, named.name);
+        }
         var parentDisabled = ToolRegistry.loadDisabledTools(spawningAgent);
-        var childDisabled = ToolRegistry.loadDisabledTools(named);
-        if (!childDisabled.containsAll(parentDisabled)) {
+        var exceeded = new TreeSet<>(parentDisabled);
+        exceeded.removeAll(ToolRegistry.loadDisabledTools(named));
+        // JF-162: a parent with filesystem may name a child that has it, and a child's filesystem reaches every skill its skill_read would.
+        if (!parentDisabled.contains("filesystem")) exceeded.remove("skill_read");
+        if (!exceeded.isEmpty()) {
             return ("Error: agentId %d ('%s') is more capable than the spawning agent '%s' "
-                    + "(it enables tools the spawning agent has disabled); a subagent may not "
+                    + "(it enables tools the spawning agent has disabled: %s); a subagent may not "
                     + "exceed its parent's tool capabilities.")
-                    .formatted(named.id, named.name, spawningAgent.name);
+                    .formatted(named.id, named.name, spawningAgent.name, String.join(", ", exceeded));
         }
         boolean parentAcp = spawningAgent.isMain() || spawningAgent.acpAllowed;
         boolean childAcp = named.isMain() || named.acpAllowed;

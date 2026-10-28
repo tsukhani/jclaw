@@ -3,6 +3,7 @@ import agents.DangerousActionGate;
 import agents.MessageHydrator;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
+import llm.LlmResilience;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
@@ -25,6 +26,7 @@ import services.SessionCompactor;
 import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool;
+import utils.CircuitBreakers;
 
 import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
@@ -63,6 +65,7 @@ class SubagentSpawnToolTest extends UnitTest {
             llmServer.stop(0);
             llmServer = null;
         }
+        CircuitBreakers.remove(LlmResilience.breakerName("spawn-provider"));
         EventLogger.clear();
     }
 
@@ -854,8 +857,114 @@ class SubagentSpawnToolTest extends UnitTest {
 
         var result = invokeOnVirtualThread(parent.id,
                 "{\"task\":\"x\",\"agentId\":" + target.id + "}");
-        assertTrue(result.contains("more capable"),
-                "reusing a more-capable agentId must be refused: " + result);
+        assertEquals(capabilityRefusal(target, parent, "exec"), result);
+    }
+
+    // ── JF-162: skill_read does not count against a parent that has filesystem ──
+
+    @Test
+    void aParentWithFilesystemCanNameAnAgentKeptOffFilesystemThatHasSkillRead() throws Exception {
+        startLlmServer(simpleResponse("done."));
+        configureProvider();
+        var parent = createAgent("p-fs", "spawn-provider", "test-model");
+        var target = createAgent("a-skill-reader", "spawn-provider", "test-model");
+        setTool(target, "filesystem", false);
+        setTool(target, "skill_read", true);
+        ConversationService.create(parent, "web", "u-fs");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        var result = invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}");
+        assertEquals("done.", result.startsWith("{")
+                ? JsonParser.parseString(result).getAsJsonObject().get("reply").getAsString() : result);
+    }
+
+    @Test
+    void aParentWithoutFilesystemIsStillRefusedAnAgentThatHasSkillRead() throws Exception {
+        var parent = createAgent("p-nofs", "spawn-provider", "test-model");
+        setTool(parent, "filesystem", false);
+        var target = createAgent("a-skill-reader-2", "spawn-provider", "test-model");
+        setTool(target, "filesystem", false);
+        setTool(target, "skill_read", true);
+        ConversationService.create(parent, "web", "u-nofs");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        assertEquals(capabilityRefusal(target, parent, "skill_read"),
+                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
+    }
+
+    @Test
+    void anotherToolTheParentLacksIsNamedAloneBesideAnExemptSkillRead() throws Exception {
+        var parent = createAgent("p-noexec", "spawn-provider", "test-model");
+        setTool(parent, "exec", false);
+        var target = createAgent("a-exec-skill", "spawn-provider", "test-model");
+        setTool(target, "skill_read", true);
+        ConversationService.create(parent, "web", "u-noexec");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        assertEquals(capabilityRefusal(target, parent, "exec"),
+                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
+    }
+
+    @Test
+    void aDefaultOffToolTheNamedAgentHoldsStillRefuses() throws Exception {
+        var parent = createAgent("p-plain", "spawn-provider", "test-model");
+        var target = createAgent("a-image", "spawn-provider", "test-model");
+        setTool(target, "generate_image", true);
+        ConversationService.create(parent, "web", "u-plain");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        assertEquals(capabilityRefusal(target, parent, "generate_image"),
+                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
+    }
+
+    @Test
+    void everyToolThatTripsTheGuardIsNamedAlphabetically() throws Exception {
+        var parent = createAgent("p-narrow2", "spawn-provider", "test-model");
+        setTool(parent, "exec", false);
+        var target = createAgent("a-wide2", "spawn-provider", "test-model");
+        setTool(target, "generate_image", true);
+        ConversationService.create(parent, "web", "u-narrow2");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        assertEquals(capabilityRefusal(target, parent, "exec, generate_image"),
+                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
+    }
+
+    @Test
+    void anAgentOtherThanMainCannotNameTheMainAgent() throws Exception {
+        var parent = createAgent("p-not-main", "spawn-provider", "test-model");
+        var main = createAgent("main", "spawn-provider", "test-model");
+        ConversationService.create(parent, "web", "u-not-main");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(main);
+
+        assertEquals("Error: agentId " + main.id + " ('main') is the main agent, which only the main agent may run as a subagent.",
+                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + main.id + "}"));
+    }
+
+    private static String capabilityRefusal(Agent named, Agent parent, String tools) {
+        return "Error: agentId " + named.id + " ('" + named.name + "') is more capable than the spawning agent '"
+                + parent.name + "' (it enables tools the spawning agent has disabled: " + tools
+                + "); a subagent may not exceed its parent's tool capabilities.";
+    }
+
+    private static void setTool(Agent agent, String tool, boolean enabled) {
+        var row = new AgentToolConfig();
+        row.agent = agent;
+        row.toolName = tool;
+        row.enabled = enabled;
+        row.save();
     }
 
     // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────
