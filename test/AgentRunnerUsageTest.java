@@ -542,6 +542,82 @@ class AgentRunnerUsageTest extends UnitTest {
                 "an explicit null must normalise rather than propagate");
     }
 
+    // --- the turn's first call (JF-151) ---
+
+    @Test
+    void theUsageRecordKeepsTheFirstCallsPromptAndCacheReadsBesideTheLast() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(1_000, 10, 1_010, 0, 220, 0)));
+        turn.addRound(roundWithUsage(new Usage(1_400, 20, 1_420, 0, 1_300, 0)));
+        turn.addRound(roundWithUsage(new Usage(1_800, 30, 1_830, 0, 1_700, 0)));
+
+        var obj = usageOf(turn);
+
+        assertEquals(1_000, obj.get("firstPrompt").getAsInt());
+        assertEquals(220, obj.get("firstCached").getAsInt());
+        assertEquals(1_800, obj.get("lastPrompt").getAsInt());
+        assertEquals(1_700, obj.get("lastCached").getAsInt());
+        assertEquals(4_200, obj.get("prompt").getAsInt());
+        assertEquals(3_220, obj.get("cached").getAsInt());
+    }
+
+    @Test
+    void aSingleCallTurnRecordsItsCallAsBothFirstAndLast() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(500, 300, 800, 0, 120, 0)));
+
+        var obj = usageOf(turn);
+
+        assertEquals(500, obj.get("firstPrompt").getAsInt());
+        assertEquals(120, obj.get("firstCached").getAsInt());
+        assertEquals(500, obj.get("lastPrompt").getAsInt());
+        assertEquals(120, obj.get("lastCached").getAsInt());
+    }
+
+    @Test
+    void aProviderThatReportsNoCacheReadsRecordsFirstCachedAsZero() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(600, 10, 610, 0, 0, 0)));
+        turn.addRound(roundWithUsage(new Usage(650, 10, 660, 0, 0, 0)));
+
+        var obj = usageOf(turn);
+
+        assertEquals(600, obj.get("firstPrompt").getAsInt());
+        assertEquals(0, obj.get("firstCached").getAsInt());
+        assertEquals(0, obj.get("cached").getAsInt());
+    }
+
+    @Test
+    void anEstimatedTurnTakesItsFirstPromptFromTheFirstCallsEstimate() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(LlmProvider.StreamAccumulator.builder()
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(20, 4, 24, "cl100k_base", false))
+                .build());
+        turn.addRound(LlmProvider.StreamAccumulator.builder()
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(36, 4, 40, "cl100k_base", false))
+                .build());
+
+        var obj = usageOf(turn);
+
+        assertEquals(24, obj.get("firstPrompt").getAsInt());
+        assertEquals(0, obj.get("firstCached").getAsInt());
+        assertEquals(40, obj.get("lastPrompt").getAsInt());
+    }
+
+    @Test
+    void aFirstCallThatReportedNoUsageIsNotStoodInForByTheSecond() {
+        // The second call reads what the first just cached, so standing it in would overstate reuse across turns.
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(null));
+        turn.addRound(roundWithUsage(new Usage(900, 10, 910, 0, 850, 0)));
+
+        var obj = usageOf(turn);
+
+        assertEquals(0, obj.get("firstPrompt").getAsInt());
+        assertEquals(0, obj.get("firstCached").getAsInt());
+        assertEquals(900, obj.get("lastPrompt").getAsInt());
+    }
+
     // --- per-round context frame ---
 
     @Test
@@ -579,6 +655,11 @@ class AgentRunnerUsageTest extends UnitTest {
 
     private static LlmProvider.StreamAccumulator roundWithUsage(Usage u) {
         return LlmProvider.StreamAccumulator.builder().usage(u).build();
+    }
+
+    private static com.google.gson.JsonObject usageOf(LlmProvider.TurnUsage turn) {
+        return JsonParser.parseString(
+                UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null)).getAsJsonObject();
     }
 
     private static AgentRunner.StreamingCallbacks statusSink(List<String> statuses) {

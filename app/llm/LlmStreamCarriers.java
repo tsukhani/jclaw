@@ -276,6 +276,11 @@ interface LlmStreamCarriers {
         int lastJtokkitReasoningTokens;
         int lastReasoningChars;
         int lastCachedTokens;
+        /** The first round's prompt and cache reads (JF-151): only that call can reuse what the previous turn cached. */
+        int firstPromptTokens;
+        int firstJtokkitPromptTokens;
+        int firstCachedTokens;
+        private boolean anyRoundFolded;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
         @Nullable String jtokkitEncoding;
@@ -307,6 +312,13 @@ interface LlmStreamCarriers {
         public synchronized void addRound(StreamAccumulator acc) {
             if (acc == null) return;
             var u = acc.usage;
+            // A first round that reported nothing stays 0: the second round reads what the first just cached.
+            if (!anyRoundFolded) {
+                anyRoundFolded = true;
+                firstPromptTokens = u != null ? u.promptTokens() : 0;
+                firstCachedTokens = u != null ? u.cachedTokens() : 0;
+                firstJtokkitPromptTokens = acc.promptTokenEstimate != null ? acc.promptTokenEstimate.promptTokens() : 0;
+            }
             if (u != null) {
                 hasProviderUsage = true;
                 promptTokens += u.promptTokens();
@@ -399,6 +411,9 @@ interface LlmStreamCarriers {
         public int lastJtokkitReasoningTokens() { return lastJtokkitReasoningTokens; }
         public int lastReasoningChars() { return lastReasoningChars; }
         public int lastCachedTokens() { return lastCachedTokens; }
+        public int firstPromptTokens() { return firstPromptTokens; }
+        public int firstJtokkitPromptTokens() { return firstJtokkitPromptTokens; }
+        public int firstCachedTokens() { return firstCachedTokens; }
         public int completionTokens() { return completionTokens; }
         public int totalTokens() { return totalTokens; }
         public int reasoningTokens() { return reasoningTokens; }

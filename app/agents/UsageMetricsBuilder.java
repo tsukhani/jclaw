@@ -133,6 +133,9 @@ public final class UsageMetricsBuilder {
         usageMap.addProperty("lastCompletion", providerUsage ? turnUsage.lastCompletionTokens() : turnUsage.lastJtokkitCompletionTokens());
         usageMap.addProperty("lastReasoning", lastReasoningTokens(turnUsage));
         usageMap.addProperty("lastCached", providerUsage ? turnUsage.lastCachedTokens() : 0);
+        // JF-151: only the first call can read what the previous turn left in the provider's cache.
+        usageMap.addProperty("firstPrompt", providerUsage ? turnUsage.firstPromptTokens() : turnUsage.firstJtokkitPromptTokens());
+        usageMap.addProperty("firstCached", providerUsage ? turnUsage.firstCachedTokens() : 0);
         usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens() : 0);
         // JCLAW-901: only emitted when the provider actually reported a cost. Absent
         // rather than 0 on purpose — a hard 0 cannot be told apart from "this call was

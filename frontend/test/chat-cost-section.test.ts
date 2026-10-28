@@ -155,6 +155,51 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(combined().slice(0, 3)).toEqual(['1', '200', '100'])
   })
 
+  it('shows the first-call cache share beside the all-calls share, leaving out rows saved without it (JF-151)', async () => {
+    const usage = (fields: Record<string, number>) => JSON.stringify({
+      completion: 20, total: 0, reasoning: 0, durationMs: 100, promptPrice: 0.5, completionPrice: 1,
+      modelId: 'gpt-4.1', modelProvider: 'openai', ...fields,
+    })
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        // Three calls; the first read 250 of its 1,000 prompt tokens from the cache.
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: usage({ prompt: 4000, cached: 3000, firstPrompt: 1000, firstCached: 250 }) },
+        // One call, so its first call is the whole turn.
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: usage({ prompt: 1000, cached: 50, firstPrompt: 1000, firstCached: 50 }) },
+        // Saved before turns recorded their first call.
+        { timestamp: '2026-05-09T14:00:00Z', agentId: 2, channelType: 'telegram',
+          usageJson: usage({ prompt: 2000, cached: 1800 }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const shares = () => [
+      wrapper.find('[data-testid="cache-share-all"]').text(),
+      wrapper.find('[data-testid="cache-share-first-call"]').text(),
+    ]
+
+    // All calls: 4,850 of 7,000. First call: 300 of 2,000, with the older row left out.
+    expect(shares()).toEqual(['69%', '15%'])
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('2')
+    await flushPromises()
+    expect(shares()).toEqual(['90%', '—'])
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
+    await flushPromises()
+    expect(shares()).toEqual(['61%', '15%'])
+
+    await wrapper.find('select[aria-label="Filter by channel"]').setValue('telegram')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="cache-shares"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No conversations match the current filter')
+  })
+
   it('renders per-model breakdown table by default', async () => {
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',

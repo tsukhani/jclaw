@@ -23,8 +23,10 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 import {
+  cacheShare,
   computeFleetCost,
   formatCostUsd,
+  formatShare,
   formatStatCurrency,
   listChannelsInRows,
   type FleetCostBreakdown,
@@ -323,6 +325,9 @@ const isSliced = computed(() => selectedAgentId.value !== null || selectedChanne
 const breakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(rows.value, filter.value),
 )
+// JF-151: only a turn's first call can reuse what the turn before it cached, so its share is shown on its own.
+const allCallsCacheShare = computed(() => cacheShare(breakdown.value.cached, breakdown.value.prompt))
+const firstCallCacheShare = computed(() => cacheShare(breakdown.value.firstCached, breakdown.value.firstPrompt))
 
 // Subscription rows narrowed by the chip filter. When no chip is
 // selected this just re-exports subscriptionRows. The unfiltered version
@@ -1149,6 +1154,30 @@ defineExpose({ refresh })
       </div>
 
       <template v-else>
+        <!-- Above the provider chips because they do not narrow it: the window, agent and channel filters do. -->
+        <div
+          v-if="hasData"
+          class="px-4 py-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs"
+          :class="hasPaidData || hasSubscriptionSection ? 'border-b border-border' : ''"
+          data-testid="cache-shares"
+        >
+          <span class="font-medium text-fg-muted uppercase tracking-wide">Cache reads</span>
+          <span class="text-fg-muted">
+            All calls
+            <span
+              class="ml-1 font-mono text-yellow-700 dark:text-yellow-400"
+              data-testid="cache-share-all"
+            >{{ formatShare(allCallsCacheShare) }}</span>
+          </span>
+          <span class="text-fg-muted">
+            First call of each turn
+            <span
+              class="ml-1 font-mono text-yellow-700 dark:text-yellow-400"
+              data-testid="cache-share-first-call"
+            >{{ formatShare(firstCallCacheShare) }}</span>
+          </span>
+        </div>
+
         <!-- JCLAW-280: subscription subsection (rendered first because it
              reflects an already-committed monthly spend, while per-token is
              accruing-as-you-go — operators read the standing commitment

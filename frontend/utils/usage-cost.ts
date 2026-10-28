@@ -24,6 +24,9 @@ export interface MessageUsage {
   lastCompletion?: number
   lastReasoning?: number
   lastCached?: number
+  /** JF-151: the first call's prompt and cache reads, the only call that can reuse what the previous turn cached. Absent on turns saved before it. */
+  firstPrompt?: number
+  firstCached?: number
   completion: number
   total: number
   reasoning: number
@@ -424,6 +427,9 @@ export interface FleetCostBreakdown {
   completion: number
   reasoning: number
   cached: number
+  /** JF-151: summed over only the rows that record their first call, so older rows stay out of the first-call share. */
+  firstPrompt: number
+  firstCached: number
   perAgent: FleetCostPerAgent[]
   perChannel: FleetCostPerChannel[]
   perModel: FleetCostPerModel[]
@@ -548,6 +554,8 @@ export function computeFleetCost(
   const perModel = new Map<string, FleetCostPerModel>()
   const totals: TurnContribution = { turnTotal: 0, prompt: 0, completion: 0, reasoning: 0, cached: 0 }
   let turnCount = 0
+  let firstPrompt = 0
+  let firstCached = 0
 
   for (const row of rows) {
     if (filter.agentId !== null && row.agentId !== filter.agentId) continue
@@ -563,6 +571,10 @@ export function computeFleetCost(
     totals.completion += t.completion
     totals.reasoning += t.reasoning
     totals.cached += t.cached
+    if (typeof usage.firstPrompt === 'number') {
+      firstPrompt += usage.firstPrompt
+      firstCached += usage.firstCached ?? 0
+    }
 
     upsertAggregate(perAgent, row.agentId, t, () => ({ agentId: row.agentId, ...newCounters(t) }))
     upsertAggregate(perChannel, row.channelType, t, () => ({ channelType: row.channelType, ...newCounters(t) }))
@@ -579,12 +591,24 @@ export function computeFleetCost(
     completion: totals.completion,
     reasoning: totals.reasoning,
     cached: totals.cached,
+    firstPrompt,
+    firstCached,
     // Sort all three breakdowns by cost descending so the highest-spend rows
     // surface first in the table view.
     perAgent: Array.from(perAgent.values()).sort((a, b) => b.total - a.total),
     perChannel: Array.from(perChannel.values()).sort((a, b) => b.total - a.total),
     perModel: Array.from(perModel.values()).sort((a, b) => b.total - a.total),
   }
+}
+
+/** `cached` as a share of `prompt`, or null when there were no prompt tokens. */
+export function cacheShare(cached: number, prompt: number): number | null {
+  return prompt > 0 ? cached / prompt : null
+}
+
+/** A share as a whole percent, e.g. `0.15` → "15%"; null → "—". */
+export function formatShare(share: number | null): string {
+  return share === null ? '—' : `${Math.round(share * 100)}%`
 }
 
 /** Distinct channel types present in the row set, sorted alphabetically. */

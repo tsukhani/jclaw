@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  cacheShare,
   computeFleetCost,
   computeUsageCostBreakdown,
   computeConversationCost,
@@ -12,6 +13,7 @@ import {
   listChannelsInRows,
   providerMetricRows,
   formatNanosDuration,
+  formatShare,
   type FleetCostRow,
   type MessageUsage,
 } from '~/utils/usage-cost'
@@ -536,6 +538,37 @@ describe('computeFleetCost (JCLAW-28)', () => {
     ]
     const out = computeFleetCost(rows, { agentId: null, channelType: null })
     expect(out.perModel[0]!.modelId).toBe('(unknown)')
+  })
+})
+
+describe('first-call cache reads (JF-151)', () => {
+  it('sums firstPrompt and firstCached over only the rows that carry them', () => {
+    const rows = [
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 4000, cached: 3000, firstPrompt: 1000, firstCached: 250 } }),
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 1000, cached: 0, firstPrompt: 1000, firstCached: 0 } }),
+      row({ agentId: 2, channelType: 'web', usage: { prompt: 2000, cached: 1800 } }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: null })
+    expect([out.prompt, out.cached, out.firstPrompt, out.firstCached]).toEqual([7000, 4800, 2000, 250])
+    expect(computeFleetCost(rows, { agentId: 2, channelType: null }))
+      .toMatchObject({ prompt: 2000, cached: 1800, firstPrompt: 0, firstCached: 0 })
+  })
+
+  it('cacheShare is null with no prompt tokens and the fraction read from cache otherwise', () => {
+    expect(cacheShare(0, 0)).toBeNull()
+    expect(cacheShare(0, 1)).toBe(0)
+    expect(cacheShare(300, 2000)).toBe(0.15)
+    expect(cacheShare(2000, 2000)).toBe(1)
+  })
+
+  it('formatShare rounds to a whole percent and shows a dash for no share', () => {
+    expect(formatShare(null)).toBe('—')
+    expect(formatShare(0)).toBe('0%')
+    expect(formatShare(0.15)).toBe('15%')
+    expect(formatShare(0.69285)).toBe('69%')
+    expect(formatShare(1)).toBe('100%')
   })
 })
 
