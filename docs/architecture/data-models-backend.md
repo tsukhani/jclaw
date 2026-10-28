@@ -33,7 +33,7 @@ LLM-generated summary of a conversation prefix (JCLAW-38): `conversation_id`, `t
 Indexed on `(status, next_run_at)`. Nested string-backed enums: `Type` (IMMEDIATE/SCHEDULED/INTERVAL/CRON), `Status` (PENDING/ACTIVE/RUNNING/LOST/COMPLETED/FAILED/CANCELLED). Fields include `agent_id` (nullable — run as a prompt when set; `no_agent`/`script` for script-only), `cron_expression`, `interval_seconds`, `scheduled_at`, `timezone` (IANA), `delivery`, `payload_type`, per-task `model_provider`/`model_id`, `enabled_tool_names`, `workdir`, `repeat_limit`, `auto_delete_on_complete` (reminders), retry bookkeeping, `next_run_at`. **Lucene-indexed** (name + description). Execution is owned by **db-scheduler**, not a custom poller.
 
 ### `task_run` — `TaskRun.java`
-One row per fire. Nested enums `Status` (RUNNING/COMPLETED/FAILED/CANCELLED) and `DeliveryStatus`. Fields: `started_at`/`completed_at`, `duration_ms`, `error`, `output_summary`, `usage_json`, `trace_json`, delivery status/target/error. Indexed on `(task_id)`, `(started_at)`, `(status)`.
+One row per fire. Nested enums `Status` (RUNNING/COMPLETED/FAILED/CANCELLED) and `DeliveryStatus`. Fields: `started_at`/`completed_at`, `duration_ms`, `error`, `output_summary`, `trace_json`, delivery status/target/error. Indexed on `(task_id)`, `(started_at)`, `(status)`.
 
 ### `task_run_message` — `TaskRunMessage.java`
 Per-turn transcript of a run (`turn_index`, `role`, `content`, tool calls/results, `usage_json`, `reasoning`). **Lucene-indexed** for transcript search.

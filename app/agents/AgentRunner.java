@@ -615,13 +615,22 @@ public class AgentRunner {
                         primary.config().name(),
                         ModelResolver.effectiveModelId(agent, stubConv)));
 
-        var outcome = ToolCallLoopRunner.callWithToolLoop(
-                agent, stubConv, null, messages, tools, primary, fallback,
-                new ArrayList<>(), new ArrayList<>(), sink, taskRunId); // fires carry no attachments
+        long loopStartNs = System.nanoTime();
+        var turnUsage = new LlmProvider.TurnUsage();
+        var loopMessages = messages;
+        var outcome = LlmProvider.callCountingRounds(turnUsage, () -> ToolCallLoopRunner.callWithToolLoop(
+                agent, stubConv, null, loopMessages, tools, primary, fallback,
+                new ArrayList<>(), new ArrayList<>(), sink, taskRunId)); // fires carry no attachments
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
-        Tx.run(() -> sink.appendAssistantMessage(response, null, null, null, truncated));
+        // A run whose every call failed ends in an error reply that counted no round, so it has no usage to record.
+        final var usageJson = turnUsage.hasProviderUsage() || turnUsage.hasJtokkitUsage()
+                ? UsageMetricsBuilder.buildUsageJson(turnUsage,
+                        ModelResolver.resolveModelInfo(agent, stubConv, primary).orElse(null),
+                        Duration.ofNanos(System.nanoTime() - loopStartNs), agent, stubConv)
+                : null;
+        Tx.run(() -> sink.appendAssistantMessage(response, null, usageJson, null, truncated));
         return outcome;
     }
 

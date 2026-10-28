@@ -71,9 +71,6 @@ public class TaskRun extends Model {
     @Column(name = "output_summary", columnDefinition = "TEXT")
     public String outputSummary;
 
-    @Column(name = "usage_json", columnDefinition = "TEXT")
-    public String usageJson;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "delivery_status")
     public DeliveryStatus deliveryStatus;

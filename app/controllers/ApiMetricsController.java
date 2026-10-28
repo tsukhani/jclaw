@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,6 +35,7 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TreeSet;
@@ -417,6 +419,9 @@ public class ApiMetricsController extends Controller {
      * {@code usageJson} is the original Message column verbatim so the
      * frontend's TS types ({@code MessageUsage}) deserialize without
      * conversion; carries every pricing/token field the cost helpers need.
+     * A scheduled task run's replies (TaskRunMessage) come back too, with
+     * {@code channelType} {@code task} (JF-150); {@code channelType=task}
+     * returns only those.
      *
      * <p>Only rows with non-null {@code usageJson} are returned — user and
      * tool messages have no usage and would just be filtered out client-side
@@ -432,6 +437,23 @@ public class ApiMetricsController extends Controller {
         String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())
                 ? channelTypeParam : null;
 
+        var timed = new ArrayList<TimedCostRow>();
+        if (!TASK_CHANNEL.equals(channelType)) timed.addAll(chatCostRows(since, agentId, channelType));
+        if (channelType == null || TASK_CHANNEL.equals(channelType)) timed.addAll(taskCostRows(since, agentId));
+        // By instant, not by the ISO text: Instant.toString drops a zero fraction, so the text misorders one second.
+        timed.sort(Comparator.comparing(TimedCostRow::at));
+        var rows = timed.stream().map(TimedCostRow::row).toList();
+
+        renderJSON(GSON.toJson(new CostResponse(since.toString(), rows)));
+    }
+
+    /** JF-150: the {@code channelType} a scheduled task run's cost rows carry. */
+    private static final String TASK_CHANNEL = "task";
+
+    private record TimedCostRow(Instant at, CostRow row) {}
+
+    private static List<TimedCostRow> chatCostRows(Instant since, @Nullable Long agentId,
+                                                   @Nullable String channelType) {
         // Build JPQL with positional params. Hibernate's optimizer collapses
         // the JOIN to the existing idx_message_conversation index plus the
         // conversation row lookup; for operator-scale traffic the planner is
@@ -460,26 +482,44 @@ public class ApiMetricsController extends Controller {
             channelParamIdx = paramIdx;
             // paramIdx not incremented — no further branches consume it.
         }
-        jpql.append(" ORDER BY m.createdAt ASC");
 
         var query = JPA.em().createQuery(jpql.toString(), Object[].class);
         query.setParameter(1, since);
         if (agentParamIdx != null) query.setParameter(agentParamIdx, agentId);
         if (channelParamIdx != null) query.setParameter(channelParamIdx, channelType);
 
-        var results = query.getResultList();
-
-        var rows = new ArrayList<CostRow>(results.size());
-        for (var r : results) {
-            rows.add(new CostRow(
-                    ((Instant) r[0]).toString(),
-                    (Long) r[1],
-                    (String) r[2],
-                    (String) r[3],
-                    (String) r[4]));
+        var rows = new ArrayList<TimedCostRow>();
+        for (var r : query.getResultList()) {
+            var at = (Instant) r[0];
+            rows.add(new TimedCostRow(at, new CostRow(at.toString(), (Long) r[1], (String) r[2], (String) r[3],
+                    (String) r[4])));
         }
+        return rows;
+    }
 
-        renderJSON(GSON.toJson(new CostResponse(since.toString(), rows)));
+    /**
+     * JF-150: a task run's replies, attributed to the task's agent. The provider is the one the record names,
+     * the model the fire really ran on, which a task's own model pin can make differ from the agent's.
+     */
+    private static List<TimedCostRow> taskCostRows(Instant since, @Nullable Long agentId) {
+        var jpql = "SELECT m.createdAt, t.agent.id, m.usageJson, t.agent.modelProvider "
+                + "FROM TaskRunMessage m JOIN m.taskRun r JOIN r.task t "
+                + "WHERE m.createdAt >= ?1 AND m.usageJson IS NOT NULL"
+                + (agentId != null ? " AND t.agent.id = ?2" : "");
+        var query = JPA.em().createQuery(jpql, Object[].class);
+        query.setParameter(1, since);
+        if (agentId != null) query.setParameter(2, agentId);
+
+        var rows = new ArrayList<TimedCostRow>();
+        for (var r : query.getResultList()) {
+            var at = (Instant) r[0];
+            var usageJson = (String) r[2];
+            var recorded = JsonParser.parseString(usageJson).getAsJsonObject().get("modelProvider");
+            var modelProvider = recorded != null && recorded.isJsonPrimitive() ? recorded.getAsString() : (String) r[3];
+            rows.add(new TimedCostRow(at, new CostRow(at.toString(), (Long) r[1], TASK_CHANNEL, usageJson,
+                    modelProvider)));
+        }
+        return rows;
     }
 
     /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */

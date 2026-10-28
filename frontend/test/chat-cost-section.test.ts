@@ -128,6 +128,33 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(optionValues).toContain('telegram')
   })
 
+  it('counts a scheduled task run with the chats, under the task channel (JF-150)', async () => {
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 100, completion: 50 }) },
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 1, channelType: 'task',
+          usageJson: makeUsage({ prompt: 200, completion: 100 }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const combined = () => wrapper.findAll('tr').find(r => r.text().includes('Combined total'))!
+      .findAll('td').map(c => c.text().trim())
+
+    // Turns, prompt, completion: the task run's reply counts with the chat's.
+    expect(combined().slice(0, 3)).toEqual(['2', '300', '150'])
+    const channelSelect = wrapper.find<HTMLSelectElement>('select[aria-label="Filter by channel"]')
+    expect(channelSelect.findAll('option').map(o => o.attributes('value'))).toContain('task')
+
+    await channelSelect.setValue('task')
+    await flushPromises()
+    expect(combined().slice(0, 3)).toEqual(['1', '200', '100'])
+  })
+
   it('renders per-model breakdown table by default', async () => {
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',

@@ -27,7 +27,7 @@ The Tasks and Reminders sub-stats, plus three panels, refresh in lockstep on a *
 
 ### Chat Cost
 
-This panel shows persisted token usage and dollar cost, aggregated across your conversations. Header controls:
+This panel shows persisted token usage and dollar cost, aggregated across your conversations and scheduled task runs. A task run's cost shows under the channel `task`. Header controls:
 
 - **Filters**: a **7d / 30d / All** window (default 30d); Agent (**All agents** or one agent); Channel (**All channels**, or any channel that has cost data in the window. The list is built from the data, not fixed).
 - **View**: table or bar chart.
