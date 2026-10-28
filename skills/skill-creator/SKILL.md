@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.2.1"
+  version: "1.3.0"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -21,6 +21,8 @@ Every skill MUST follow this layout:
 ├── SKILL.md                   # Skill definition with YAML frontmatter (required)
 ├── credentials/               # Credential/config files only (optional)
 │   └── *.json, *.txt, *.env   # API keys, tokens, auth configs — TEXT FILES ONLY
+├── references/                # Detailed material SKILL.md points to (optional)
+│   └── *.md                   # Catalogs, templates, examples — TEXT FILES ONLY
 └── tools/                     # Binary tools and their docs (optional)
     ├── {binary}               # Executable/binary files
     └── *.md or *.txt          # Usage documentation for the tools
@@ -30,8 +32,19 @@ Every skill MUST follow this layout:
 
 - **Binaries are ONLY allowed in the `tools/` folder.** No binaries in the root folder or `credentials/` folder.
 - The `credentials/` folder may ONLY contain text files (json, txt, env, yaml, properties).
-- The skill root folder may ONLY contain `SKILL.md` and the two subfolders.
+- The `references/` folder may ONLY contain text files, one level deep: a reference file never points to another reference file.
+- The skill root folder may ONLY contain `SKILL.md` and the three subfolders.
 - Skill names must be kebab-case (e.g., `web-scraper`, `slack-notifier`), at most 64 characters, and the same as the folder name.
+
+## SKILL.md size limit
+
+A SKILL.md MUST stay under 20,000 characters (about 5,000 tokens, or 500 lines). Once an agent reads a skill, JClaw keeps its first 20,000 characters for the rest of the conversation and cuts the rest; Anthropic's Agent Skills guidance sets the same bound. When a SKILL.md would pass 18,000 characters, split it:
+
+1. Keep in SKILL.md the frontmatter, the purpose, the workflow and every rule the agent must always follow (safety rules, required formats, "never do X" lines), near the top.
+2. Move detailed reference material (long catalogs, templates, examples, troubleshooting) word for word into `references/{topic}.md`. Drop nothing and reword nothing.
+3. Where a section moved, leave one line in SKILL.md saying when to read it, e.g. "Before any course operation, read `skills/{skill-name}/references/courses.md` with the filesystem tool's readFile."
+4. A reference file over 100 lines starts with a short table of contents.
+5. A skill with a `references/` folder MUST list `filesystem` in `jclaw-tools`, so it is never offered to an agent that cannot read its references.
 
 ## Frontmatter layout
 
@@ -57,15 +70,7 @@ Every skill MUST declare the exact tools it needs in the `jclaw-tools` entry und
 
 Separate from `jclaw-tools` — which names JClaw **tools** the skill consumes (`exec`, `filesystem`, `browser`, ...) — a skill that ships executable binaries in its `tools/` folder MUST declare them in the `jclaw-commands` entry under `metadata`. `jclaw-commands` drives the per-agent shell allowlist: at promotion time these exact names become the blessed set for this skill in the global registry, and at skill-install time they are snapshotted into the consuming agent's effective shell allowlist so the agent can run them via `exec`.
 
-### Rules for the `jclaw-commands` entry
-
-- Write the names on one line, separated by spaces: `jclaw-commands: wacli wacli-setup`.
-- Each entry is the **basename** of an executable in the skill's `tools/` folder. No paths, no arguments, no wildcards, no spaces inside a name. `./tools/wacli` on disk becomes `wacli` in the list.
-- Use an empty string when the skill ships no binaries: `jclaw-commands: ""`. Prompt-only skills, document generators, and reasoning-only skills all fall here.
-- Omit the key entirely only if the skill predates the declaration system — new skills MUST include it (empty when not applicable) so reviewers can tell "this skill intentionally ships zero binaries" from "this skill is missing its declaration."
-- Every entry must correspond to a file that actually exists under `tools/`.
-- Every executable under `tools/` MUST appear in `jclaw-commands`. Undeclared binaries are dormant — the agent can see them on disk but can't run them because they're not in its shell allowlist.
-- Names are case-sensitive and match the literal filename. `wacli`, not `WACLI` or `wacli.sh`.
+Before writing `jclaw-commands` for a skill that ships binaries in `tools/`, read `skills/skill-creator/references/commands-rules.md` with the filesystem tool's readFile: every executable in `tools/` must be listed by basename, and every listed name must exist there.
 
 ## Author field
 
@@ -102,6 +107,7 @@ Every skill MUST include a `jclaw-icon` entry under `metadata` — a single emoj
    - Example inputs and expected outputs
    - Edge cases and error handling
    - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`{skill-name}/\` at the root of the agent's workspace (e.g., \`my-skill/\`).`
+   - Count the characters: a draft over 18,000 is split into `references/` as the SKILL.md size limit section describes.
    - **Leave the `version` entry out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. **Set an explicit `version` only when the user asks to promote the skill forward** — e.g., "bump to v1.0.0", "promote to 1.1", "this is a breaking change, make it 2.0.0". In that case, add `version: "X.Y.Z"` under `metadata` with your intended target. The value MUST be strictly greater than the next auto-bump target; anything lower or invalid is silently ignored and the system uses its auto-bump instead. Patterns: minor bump (new feature) `1.0.3 → 1.1.0`, major bump (breaking change) `1.2.0 → 2.0.0`, stable promotion from alpha `0.0.6 → 1.0.0`. A version-only promotion (no other content changes) can be done with a single `editFile` that replaces the existing `version: "…"` line.
 5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
@@ -140,6 +146,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
    - Non-kebab-case skill name → rename the folder
    - Missing `jclaw-commands` → add it. Populate from binaries in `tools/` (basenames), or `jclaw-commands: ""` if none.
    - Binaries present under `tools/` that aren't listed in `jclaw-commands` → either add them to the list (if they're intended for execution) or delete them (if they're leftovers). No dormant binaries.
+   - SKILL.md over 20,000 characters → split it into `references/` as the SKILL.md size limit section describes.
    - Missing `author` → add it under `metadata`. For legacy skills with no recorded author, set `author` to the agent name that's doing the refactor (i.e., your own agent name from your Environment section). Do NOT invent a historical author.
 3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
@@ -149,87 +156,11 @@ When asked to refactor or update an existing skill, or when you notice a skill t
 
 ## Example
 
-```
-whatsapp-notifier/
-├── SKILL.md
-├── credentials/
-│   └── api-config.json       # WhatsApp API credentials
-└── tools/
-    ├── wacli                  # WhatsApp CLI binary
-    └── README.md              # Usage docs for the binary
-```
-
-### Example SKILL.md
-
-Note: the `version` entry is omitted from the frontmatter you write — the filesystem tool injects it under `metadata` when the file is saved. The `author` entry uses your own agent name (the example below assumes the `main` agent is creating this skill).
-
-**Output Location:** If this skill generates files (HTML, documents, etc.), store them in `{skill-name}/` at the root of the agent's workspace (e.g., `my-skill/`) so users can easily find and download them.
-
-```markdown
----
-name: whatsapp-notifier
-description: >-
-  Send WhatsApp messages using the wacli tool. Use when the user asks to message someone on WhatsApp.
-metadata:
-  author: main
-  jclaw-icon: "💬"
-  jclaw-tools: exec filesystem
-  jclaw-commands: wacli
----
-
-# WhatsApp Notifier
-
-When asked to send a WhatsApp message:
-
-1. Read credentials from `credentials/api-config.json` using the `filesystem` tool
-2. Use the `exec` tool to run `tools/wacli` to send the message
-3. Confirm delivery status to the user
-```
-
-Compare with a **prompt-only** skill (no binaries, no file I/O):
-
-```markdown
----
-name: sentence-rephraser
-description: >-
-  Rephrase a sentence in a different tone. Use when the user asks to reword something.
-metadata:
-  author: main
-  jclaw-icon: "✍️"
-  jclaw-tools: ""
-  jclaw-commands: ""
----
-
-# Sentence Rephraser
-
-Rephrase the user's sentence in the requested tone. No tool calls needed — reply directly.
-```
+For a worked example of a skill folder and its SKILL.md (one with binaries and one prompt-only), read `skills/skill-creator/references/examples.md` with the filesystem tool's readFile.
 
 ## Output File Locations
 
-Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store output in a directory matching the skill name at the root of the agent's workspace:
-
-```
-{skill-name}/           # e.g., visual-explainer/
-└── {output-files}      # e.g., black-hole-guide.html
-```
-
-### Rules
-
-1. **Destination:** All output files go to `{skill-name}/` at the root of the agent's workspace (e.g., `visual-explainer/`)
-2. **Create if missing:** Use `filesystem` tool to create the directory if it doesn't exist
-3. **Filenames:** Use descriptive, kebab-case filenames (e.g., `black-hole-guide.html`)
-4. **No .agent directory:** Do NOT put skill outputs in `.agent/` or other hidden directories
-5. **Delivery:** After writing the file, provide a markdown link: `[filename](<relative/path>)` so the user can download it
-
-### Example
-
-A visual-explainer skill generating an architecture diagram:
-```markdown
-1. Create directory `visual-explainer/` at the root of the workspace if it doesn't exist
-2. Write the HTML file to `visual-explainer/jclaw-architecture.html`
-3. Report: `[jclaw-architecture.html](visual-explainer/jclaw-architecture.html)`
-```
+Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store output in `{skill-name}/` at the root of the agent's workspace and link each file for download. When writing such a skill, read `skills/skill-creator/references/output-locations.md` with the filesystem tool's readFile for the rules and an example.
 
 ## Guidelines
 

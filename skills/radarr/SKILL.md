@@ -3,7 +3,7 @@ name: radarr
 description: >-
   Download movies via Radarr API with automated download monitoring and import handling.
 metadata:
-  version: "1.3.1"
+  version: "1.4.0"
   author: Tarun Sukhani
   jclaw-icon: "📺"
   jclaw-tools: exec subagent_spawn subagent_yield message filesystem
@@ -41,22 +41,7 @@ User Picks  → MAIN AGENT (single turn, no stopping):
 
 ## Delivery (Automatic — no plumbing needed)
 
-Sub-agents inherit the parent conversation's delivery context automatically (JCLAW-327 AC-5). When the main agent calls `subagent_spawn`, the child Conversation gets the same `channelType` + `peerId` as the parent. The sub-agent then sends progress updates with:
-
-```
-message(action="send", message="⬇ Twisters: 45%")
-```
-
-— with no `channel` or `target`. The `message` tool reads the sub-agent's active conversation, walks up to the user-facing root, and routes via the right path:
-
-| User started the chat in | Where the `message` lands |
-|---|---|
-| Telegram | The Telegram chat (via Bot API) |
-| Slack | The Slack channel (via Web API) |
-| WhatsApp | The WhatsApp thread (via Cloud API) |
-| JClaw web UI | The in-app conversation (chat UI poller picks it up live) |
-
-Skills no longer hand-roll `DELIVERY_CHANNEL` / `DELIVERY_TARGET` plumbing into the sub-agent task string — that was the pre-JCLAW-327 workaround and is no longer needed.
+Call `message` with no `channel` or `target`. For per-channel routing, or when a `message` never arrives, read `skills/radarr/references/background.md` with `readFile`.
 
 ---
 
@@ -125,26 +110,7 @@ NAS_URL=$(jq -r '.synology.url' "$CREDS")
 NAS_USER=$(jq -r '.synology.username' "$CREDS")
 NAS_PASS=$(jq -r '.synology.password' "$CREDS")
 
-# Transmission RPC helper — get a session ID, then make the actual call.
-# Why curl + RPC and not transmission-remote? The transmission-remote
-# binary is not in JClaw's shell allowlist; curl + the RPC HTTP endpoint
-# are. Same workflow, no extra binary needed.
-#
-# Session-ID handshake: any first request to /transmission/rpc returns
-# 409 with an X-Transmission-Session-Id response header. Capture that
-# header and retry the actual request with it set. Wrapper function:
-trpc() {
-  # $1 = JSON body for the actual RPC call (e.g. {"method":"torrent-get","arguments":{...}})
-  local body="$1"
-  local sid
-  sid=$(curl -s -u "$TRANSMISSION_USER:$TRANSMISSION_PASS" -D - \
-    "$TRANSMISSION_URL/transmission/rpc" -d '{}' -o /dev/null \
-    | grep -i '^X-Transmission-Session-Id:' | sed 's/.*: //' | tr -d '\r\n')
-  curl -s -u "$TRANSMISSION_USER:$TRANSMISSION_PASS" \
-    -H "X-Transmission-Session-Id: $sid" \
-    -H "Content-Type: application/json" \
-    "$TRANSMISSION_URL/transmission/rpc" -d "$body"
-}
+# trpc() (curl + RPC; transmission-remote is not allowlisted) is in skills/radarr/references/release-swap.md: read it before a release swap.
 ```
 
 ---
@@ -343,29 +309,7 @@ If user asks to switch to a different release while a download is in progress:
 
 **Main agent handles all of this directly (no sub-agent):**
 
-```bash
-# 1. Cancel the old torrent in Transmission (via RPC + curl, not transmission-remote — see trpc() in Credentials)
-trpc '{"method":"torrent-remove","arguments":{"ids":["'"$OLD_TORRENT_HASH"'"],"delete-local-data":true}}'
-
-# 2. Grab the new release (same as 2a)
-NEW_RELEASE=$(echo "$RELEASES" | jq '.['$NEW_INDEX']')
-GUID=$(echo "$NEW_RELEASE" | jq -r '.guid')
-INDEXER_ID=$(echo "$NEW_RELEASE" | jq '.indexerId')
-curl -s -X POST "$RADARR_URL/api/v3/release" \
-  -H "X-Api-Key: $RADARR_API_KEY" -H "Content-Type: application/json" \
-  -d '{"guid": "'"$GUID"'", "indexerId": '$INDEXER_ID'}'
-
-# 3. Wait for new torrent to appear, then get NEW hash from queue
-#    ⚠️ IMPORTANT: Check QUEUE first (not history) — history still has the old grab!
-sleep 5
-QUEUE=$(curl -s "$RADARR_URL/api/v3/queue" -H "X-Api-Key: $RADARR_API_KEY")
-QUEUE_ITEM=$(echo "$QUEUE" | jq '.records[] | select(.movieId == '$MOVIE_ID')')
-NEW_TORRENT_HASH=$(echo "$QUEUE_ITEM" | jq -r '.downloadId')
-NEW_DOWNLOAD_TITLE=$(echo "$QUEUE_ITEM" | jq -r '.title')
-
-# 4. Spawn a NEW monitor sub-agent with the NEW hash and NEW download title
-#    The old sub-agent will time out naturally (the old torrent no longer exists)
-```
+Read `skills/radarr/references/release-swap.md` with `readFile` first; it holds `trpc()` and the four commented steps.
 
 **Key points:**
 - Always cancel the old torrent BEFORE grabbing the new one
@@ -382,87 +326,11 @@ NEW_DOWNLOAD_TITLE=$(echo "$QUEUE_ITEM" | jq -r '.title')
 
 **This is not a separate user-prompted phase — it executes as steps 2 and 3 inside the Phase 2c turn.** The main agent spawns async so the monitor runs on its own virtual thread, then yields so the parent turn parks until the announce arrives:
 
+In this same turn, read `skills/radarr/references/monitor-task.md` with `readFile`, then pass its `task` verbatim with the placeholders filled:
+
 ```
 subagent_spawn with:
-  task: "🎬 Radarr Download Monitor
-
-TORRENT_HASH: [HASH]
-MOVIE_TITLE: [TITLE]
-MOVIE_YEAR: [YEAR]
-
-Monitor download via Transmission RPC + curl. Loop every 30 seconds.
-
-⚠️ CRITICAL: YOU (the sub-agent) must be the loop controller.
-Do NOT spawn background exec processes or bash loops for monitoring.
-Run each step as a separate, non-background exec call:
-
-CREDENTIALS (load once at start — exec CWD is the workspace root,
-so the credentials path is workspace-relative. Do NOT use
-$BASH_SOURCE; it's empty under `sh -c` and would mis-resolve.
-We use curl + Transmission RPC because transmission-remote is not
-in JClaw's shell allowlist; curl is):
-  CREDS=\"skills/radarr/credentials/radarr.json\"
-  TRANSMISSION_URL=$(jq -r '.torrents.url' \"$CREDS\")
-  TRANSMISSION_USER=$(jq -r '.torrents.username' \"$CREDS\")
-  TRANSMISSION_PASS=$(jq -r '.torrents.password' \"$CREDS\")
-
-  # Session-ID handshake helper. Captures the X-Transmission-Session-Id
-  # header from a sacrificial 409 response, then makes the real call.
-  trpc() {
-    local body=\"$1\"
-    local sid
-    sid=$(curl -s -u \"$TRANSMISSION_USER:$TRANSMISSION_PASS\" -D - \\
-      \"$TRANSMISSION_URL/transmission/rpc\" -d '{}' -o /dev/null \\
-      | grep -i '^X-Transmission-Session-Id:' | sed 's/.*: //' | tr -d '\\r\\n')
-    curl -s -u \"$TRANSMISSION_USER:$TRANSMISSION_PASS\" \\
-      -H \"X-Transmission-Session-Id: $sid\" \\
-      -H 'Content-Type: application/json' \\
-      \"$TRANSMISSION_URL/transmission/rpc\" -d \"$body\"
-  }
-
-LOOP (repeat these steps — agent controls the loop, not bash):
-
-  Step 1 — Fetch torrent status via RPC (exec, non-background). Ask for the
-  exact fields we need so the payload is small:
-    trpc '{\"method\":\"torrent-get\",\"arguments\":{\"ids\":[\"'\"$TORRENT_HASH\"'\"],\"fields\":[\"name\",\"percentDone\",\"status\",\"eta\",\"rateDownload\",\"rateUpload\",\"isFinished\"]}}'
-
-  Step 2 — Parse the JSON response with jq:
-    .arguments.torrents → array; empty array means the torrent is gone.
-    Per-torrent fields:
-      percentDone (0.0..1.0) → multiply by 100 for percent
-      status (int):
-        0=Stopped, 1=Check pending, 2=Checking,
-        3=Download pending, 4=Downloading,
-        5=Seed pending, 6=Seeding
-      eta (seconds; -1 = unknown, -2 = N/A)
-      rateDownload, rateUpload (bytes/sec; divide by 1048576 for MB/s)
-      isFinished (boolean)
-
-  Step 3 — Decide:
-    If .arguments.torrents is empty → Return: TORRENT_CANCELLED (exit silently)
-    If isFinished=true OR status>=5 OR percentDone>=1.0:
-      FIRST emit a final user-visible completion message:
-        message(action=\"send\", message=\"✅ [TITLE] download complete — starting import…\")
-      THEN return DOWNLOAD_COMPLETE.
-    WHY the final message: without it, the user's last visible event is
-    the 99.x% progress line. The main agent's resumed turn does Phase 4
-    silently (sync spawn + import work), so without this bookend the
-    workflow looks stalled mid-download.
-
-  Step 4 — Push progress to the user (no channel/target — inherited from parent):
-    message(action=\"send\", message=\"⬇️ [TITLE]: [percent]% • [state] • ⬇[down] MB/s ⬆[up] MB/s • ETA: [eta]\")
-    Map status int → label: Downloading, Stopped, Checking, Seeding, etc.
-    Format ETA: if eta>0, convert seconds → 'Xm Ys' or 'Xh Ym'; else show '—'.
-
-  Step 5 — Wait 30 seconds (exec, non-background):
-    sleep 30
-
-  Go to Step 1.
-
-WHY THIS MATTERS: If you use 'exec background=true' with a bash loop,
-that process keeps running even after your session ends. This causes
-orphaned processes that send stale/empty progress messages forever.
-By keeping the loop in the agent, it dies when the session ends."
+  task: [the WHOLE task text from monitor-task.md, placeholders filled — never the file name]
 
   async: true
   runTimeoutSeconds: 86400      ← idle budget; subagent.maxWallClockSeconds caps the run
@@ -480,32 +348,7 @@ subagent_yield with:
   timeoutSeconds: 0   ← no yield watchdog; the child's own limits bound it
 ```
 
-**Why `timeoutSeconds: 0`?** The yield default is 300s (5 min), which
-is far shorter than a typical movie download. Without `0`, the yield
-watchdog fires before the download finishes, the parent resumes with a
-TIMEOUT outcome, and Phase 4 never triggers. The monitor sub-agent
-keeps running and may even send the `✅ download complete` message
-afterward, but the parent has already given up on it. Passing `0`
-removes the yield clock entirely; `subagent.maxWallClockSeconds`
-(seeded 1800) still caps the run.
-
-**Why both async + yield?** Async lets the monitor sub-agent run on its
-own virtual thread (independent of the main agent's tool-call carrier),
-so progress `message(action="send", ...)` calls reach the user live
-during the download. Yield then parks the main agent's current LLM
-turn — which exits silently, no final assistant reply — until the
-sub-agent terminates. At that point the announce row is flipped to
-USER-role and `AgentRunner.runYieldResume` re-invokes the main agent's
-loop with the announce visible to the LLM. The next assistant turn
-reads `DOWNLOAD_COMPLETE` (or `TORRENT_CANCELLED`) from the announce
-and proceeds to Phase 4.
-
-⚠️ **What goes wrong without yield**: with `async=true` alone, the
-sub-agent's terminal announce is posted without resuming the main
-agent, so nothing acts on `DOWNLOAD_COMPLETE` until the user writes
-again, with the download done but the import never triggered.
-
-**The `message` tool reaches the user automatically.** No channel/target plumbing needed — the sub-agent's Conversation row inherits the parent's `channelType` + `peerId` at spawn time (JCLAW-327 AC-5), so `message(action="send", ...)` routes to wherever the user is watching (Telegram, Slack, WhatsApp, or the in-app web chat).
+If the yield timed out or the turn never resumed, read `skills/radarr/references/background.md` with `readFile`.
 
 ---
 
@@ -513,81 +356,11 @@ again, with the download done but the import never triggered.
 
 **Main agent spawns the import sub-agent.** Same automatic delivery-context inheritance as Phase 3 — no channel/target plumbing needed:
 
+In this same turn, read `skills/radarr/references/import-task.md` with `readFile`, then pass its `task` verbatim with the placeholders filled:
+
 ```
 subagent_spawn with:
-  task: "🎬 Radarr Import & Cleanup
-
-MOVIE_ID: [ID]
-TORRENT_HASH: [HASH]
-DOWNLOAD_TITLE: [DOWNLOAD_TITLE]
-MOVIE_FOLDER: [FOLDER]
-
-CREDENTIALS (load once at start; CWD is the workspace root, so the path
-is workspace-relative — no $BASH_SOURCE / SCRIPT_DIR dance. We use
-curl + Transmission RPC because transmission-remote is not in JClaw's
-shell allowlist; curl is):
-  CREDS=\"skills/radarr/credentials/radarr.json\"
-  RADARR_URL=$(jq -r '.radarr.url' \"$CREDS\")
-  RADARR_API_KEY=$(jq -r '.radarr.apiKey' \"$CREDS\")
-  TRANSMISSION_URL=$(jq -r '.torrents.url' \"$CREDS\")
-  TRANSMISSION_USER=$(jq -r '.torrents.username' \"$CREDS\")
-  TRANSMISSION_PASS=$(jq -r '.torrents.password' \"$CREDS\")
-
-  trpc() {
-    local body=\"$1\"
-    local sid
-    sid=$(curl -s -u \"$TRANSMISSION_USER:$TRANSMISSION_PASS\" -D - \\
-      \"$TRANSMISSION_URL/transmission/rpc\" -d '{}' -o /dev/null \\
-      | grep -i '^X-Transmission-Session-Id:' | sed 's/.*: //' | tr -d '\\r\\n')
-    curl -s -u \"$TRANSMISSION_USER:$TRANSMISSION_PASS\" \\
-      -H \"X-Transmission-Session-Id: $sid\" \\
-      -H 'Content-Type: application/json' \\
-      \"$TRANSMISSION_URL/transmission/rpc\" -d \"$body\"
-  }
-
-⚠️ CRITICAL: The download folder on disk uses the TORRENT name (DOWNLOAD_TITLE),
-NOT the clean movie folder name. Radarr handles the rename/move during import.
-
-1. Trigger Radarr scan on the DOWNLOAD folder (using DOWNLOAD_TITLE as folder name):
-   curl -s -X POST \"$RADARR_URL/api/v3/command\" -H \"X-Api-Key: $RADARR_API_KEY\" -H \"Content-Type: application/json\" -d '{\"name\":\"DownloadedMoviesScan\",\"path\":\"/volume1/downloads/complete/'$DOWNLOAD_TITLE'\"}'
-
-   ⚠️ Use DOWNLOAD_TITLE here, NOT MOVIE_FOLDER!
-   The download path is: /volume1/downloads/complete/<DOWNLOAD_TITLE>
-   Radarr will automatically move/rename to: /volume1/video/Movies/<MOVIE_FOLDER>
-
-2. Wait 5-10s, then verify hasFile=true:
-   curl -s \"$RADARR_URL/api/v3/movie/$MOVIE_ID\" -H \"X-Api-Key: $RADARR_API_KEY\" | jq '.hasFile'
-
-   If hasFile is still false after 10s, retry the scan once more and wait another 10s.
-
-   ⚠️ Do NOT proceed to Step 3 until hasFile=true. Removing the torrent
-   before Radarr has imported the file would orphan the download.
-
-3. Cleanup torrent — REQUIRED, do not skip:
-   trpc '{\"method\":\"torrent-remove\",\"arguments\":{\"ids\":[\"'\"$TORRENT_HASH\"'\"],\"delete-local-data\":true}}'
-
-   This removes the torrent from Transmission AND deletes the seeding
-   files from the download cache. Radarr already moved the imported
-   file to the movie library in Step 1, so the download-cache copy
-   is now redundant — leaving it behind wastes disk and keeps the
-   torrent seeding indefinitely. Expected response: {\"result\":\"success\"}.
-
-   Verify the removal succeeded by re-querying the torrent:
-   trpc '{\"method\":\"torrent-get\",\"arguments\":{\"ids\":[\"'\"$TORRENT_HASH\"'\"],\"fields\":[\"name\"]}}'
-   Expected: .arguments.torrents == [] (empty array; the torrent is gone).
-   If the torrent still shows, re-run torrent-remove once more.
-
-4. Get final movie details (quality, size, resolution, runtime, audio, path):
-   curl -s \"$RADARR_URL/api/v3/movie/$MOVIE_ID\" -H \"X-Api-Key: $RADARR_API_KEY\" | jq '{
-     quality: .movieFile.quality.quality.name,
-     size_gb: ((.movieFile.size / 1073741824 * 100 | round) / 100),
-     audio: .movieFile.mediaInfo.audioCodec,
-     runtime: .movieFile.mediaInfo.runTime,
-     path: .path
-   }'
-
-Return: IMPORT_COMPLETE|<quality>|<size_gb>|<runtime>|<audio>|<path>
-Or: IMPORT_FAILED|<reason>"
+  task: [the WHOLE task text from import-task.md, placeholders filled — never the file name]
 
   runTimeoutSeconds: 180
 ```
@@ -614,14 +387,7 @@ message(action="send", message="🍿 **<Title>** (<Year>) is ready to watch!
 Enjoy the movie! 🎬")
 ```
 
-**Why the `message` tool here and not assistant text?** Phase 5 runs on
-the same resumed turn as Phase 4 (the sync import spawn). On
-yield-resumed turns, trailing assistant text is not reliably routed to
-the user-facing channel (especially Telegram/Slack/WhatsApp where the
-delivery path goes through `DeliveryDispatcher`, which is only invoked
-by the `message` tool). Calling `message` explicitly walks up the
-sub-agent's parent-conversation chain to the user-facing root and
-routes via the correct channel adapter (JCLAW-327 AC-5).
+If this notice never reached the user, read `skills/radarr/references/background.md` with `readFile`.
 
 **Failure path:** if Phase 4 returns `IMPORT_FAILED|<reason>`, send a
 failure message instead:
@@ -634,75 +400,6 @@ message(action="send", message="⚠️ Import failed for **<Title>**: <reason>. 
 
 ## Summary
 
-| Phase | Who | Task |
-|-------|-----|------|
-| 1. Search & Present | **Main Agent** | Search Radarr, show options to user |
-| 2. Grab | **Main Agent** | Grab release, get torrent hash, tell user "download started" |
-| 3. Monitor | Sub-Agent (async + yielded) | Loop 30s, push progress via `message(action="send", ...)`, return DOWNLOAD_COMPLETE when done; main turn parks via `subagent_yield` so the announce auto-resumes it |
-| 4. Import | Sub-Agent (sync) | Main emits `message("📥 Import starting…")`, then spawns import sub-agent which triggers Radarr scan, cleans up torrent, returns IMPORT_COMPLETE|details |
-| 5. Notify | **Main Agent** | Emit `message("🍿 Ready to watch!…")` with synopsis + file details — **via the `message` tool, not assistant text** |
-
-**Delivery is automatic:** sub-agents inherit the parent conversation's `channelType` + `peerId` at spawn time (JCLAW-327 AC-5), so any call to `message(action="send", message=...)` routes back to wherever the user is watching — Telegram, Slack, WhatsApp, or the in-app web chat — with no channel/target plumbing.
-
----
-
-## Visual Flow
-
-```
-USER: "Download Twisters"
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│           MAIN AGENT                     │
-│  • Search Radarr API                     │
-│  • Present 1080p + 4K options           │
-│  • Wait for user pick                    │
-└─────────────────────────────────────────┘
-         │
-USER: "5"
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│           MAIN AGENT                     │
-│  • Grab release #5                       │
-│  • Get torrent hash                      │
-│  • Say "⬇️ Download started!"           │
-│  • Spawn monitor sub-agent              │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│       MONITOR SUB-AGENT                  │
-│  LOOP every 30s:                         │
-│    • curl Transmission RPC torrent-get  │
-│    • Output: "⬇️ 45% • ⬇2MB/s • ETA 5m" │
-│  When 100%:                              │
-│    • Return DOWNLOAD_COMPLETE           │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│           MAIN AGENT (resumed turn)      │
-│  • Receives DOWNLOAD_COMPLETE           │
-│  • message("📥 Import starting…")       │
-│  • subagent_spawn import (SYNC)          │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│       IMPORT SUB-AGENT (sync)            │
-│  • Trigger Radarr scan                  │
-│  • Verify hasFile=true                   │
-│  • Cleanup torrent via trpc()            │
-│  • Return IMPORT_COMPLETE|details       │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│           MAIN AGENT                     │
-│  • message("🍿 Ready to watch!…")       │
-│  • Include synopsis + file details      │
-└─────────────────────────────────────────┘
-```
+For the phase table and a diagram of the whole run, read `skills/radarr/references/flow.md` with `readFile` when unsure which phase you are in.
 
 **Main agent stays in control. Interactive parts are direct. Only long-running tasks use sub-agents.**
