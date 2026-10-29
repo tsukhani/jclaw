@@ -30,7 +30,7 @@ public final class McpViewTools {
      * reads it, and its conversation without a parent.
      */
     public static boolean webChatTurn(@Nullable Long conversationId) {
-        if (conversationId == null || SubagentRegistry.currentRun() != null || ToolContext.taskRunId() != null) {
+        if (conversationId == null || SubagentRegistry.inSubagentTurn() || ToolContext.taskRunId() != null) {
             return false;
         }
         // One read: the channel, or null when the conversation is gone or a subagent's.

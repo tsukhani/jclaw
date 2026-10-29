@@ -162,6 +162,15 @@ public final class SubagentRegistry {
         return CURRENT_RUN.isBound() ? CURRENT_RUN.get() : null;
     }
 
+    /**
+     * Whether this thread runs a subagent's own turn, its tool calls included ({@code ParallelToolExecutor}
+     * rebinds the run on each work-unit thread). Nothing resumes such a turn: its runner takes the turn's end
+     * as the run's reply, whether the child shares its parent's conversation (inline) or not.
+     */
+    public static boolean inSubagentTurn() {
+        return CURRENT_RUN.isBound();
+    }
+
     /** Run {@code body} as {@code run}'s thread, for work a run hands to a thread of its own; unbound when null. */
     public static void runAs(@Nullable RunScope run, Runnable body) {
         if (run == null) body.run();
@@ -247,7 +256,7 @@ public final class SubagentRegistry {
     /** Disarm the pending yield watchdog for {@code runId}, if any. Never
      *  {@code cancel(true)}: a watchdog already inside its callback is
      *  completing a future, and this class does not interrupt running work. */
-    private static void cancelYieldTimeout(Long runId) {
+    public static void cancelYieldTimeout(Long runId) {
         var timer = YIELD_TIMEOUTS.remove(runId);
         if (timer != null) timer.cancel(false);
     }

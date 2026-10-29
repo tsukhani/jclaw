@@ -123,6 +123,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             "async ran in the foreground: this chat is a group or a guest's, where a background result would "
                     + "reach it unedited. Relay the reply yourself; there is nothing to collect with subagent_yield. "
                     + "To run several children in parallel here, pass them as one tasks[] batch.";
+    static final String ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT =
+            "async ran in the foreground: nobody reads a background result in a subagent's turn. Relay the reply "
+                    + "yourself; there is nothing to collect with subagent_yield. To run several children in parallel "
+                    + "here, pass them as one tasks[] batch.";
 
     static final String FIELD_STATUS = "status";
     static final String FIELD_LABEL = "label";
@@ -371,7 +375,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "when it ends posts a completion card "
                         + "to your conversation and the result is also sent to the chat's channel; in a group or "
                         + "a guest's chat the child runs in the foreground and you relay its result (a tasks[] batch "
-                        + "still runs in parallel there). In a task "
+                        + "still runs in parallel there), and in a subagent's own turn it runs in the foreground "
+                        + "too. In a task "
                         + "fire you block-await the result with subagent_yield. Only with mode=\"session\"."));
         props.put(ARG_RUNTIME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
@@ -513,12 +518,16 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, childAgentId, childConvId,
                         parentAgent.name, parsed, runIdStr);
             }
-            // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
-            if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
+            // JF-168: nothing resumes a subagent's turn, so a background result there would reach no one.
+            if (SubagentRegistry.inSubagentTurn()) {
+                note = ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT;
+            } else if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
+                // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
                 return SubagentAsyncRunner.launchAsyncSpawn(runId, childAgentId, childConvId, parentConv.id,
                         parentAgent.name, parsed, runIdStr);
+            } else {
+                note = ASYNC_RAN_IN_FOREGROUND;
             }
-            note = ASYNC_RAN_IN_FOREGROUND;
         }
 
         return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed,

@@ -38,6 +38,7 @@ import java.util.Map;
  *
  * <p>A run that resumes no turn, a {@code tasks[]} batch child or any run of a
  * task fire, is block-awaited instead and its outcome returned inline (JF-169).
+ * A subagent's own turn never suspends, since nothing resumes it (JF-168).
  *
  * <p>JCLAW-326 adds two parameters:
  * <ul>
@@ -69,6 +70,9 @@ import java.util.Map;
  *       {@link SubagentRun.Status#RUNNING}; yielding into a terminal run
  *       surfaces a structured {@code already_terminal} envelope so the LLM
  *       still gets the recorded outcome.</li>
+ *   <li>In a subagent's own turn a running run is then refused, since
+ *       nothing resumes that turn; the run is left as it was, its announce
+ *       included.</li>
  *   <li>{@code timeoutSeconds} above 3600 is clamped; 0 disables the
  *       watchdog, a negative value takes the default. It applies only to a
  *       yield that suspends the turn.</li>
@@ -166,7 +170,9 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 A `tasks[]` batch child, or any async child in a task fire, is waited for here \
                 instead and its result returned inline, without suspending. Use this when you want \
                 to block your logical turn on a child's result rather than continuing in parallel; \
-                see the parameters for single, batch, and collect-all forms.""";
+                see the parameters for single, batch, and collect-all forms. In a subagent's own \
+                turn nothing suspends: a `tasks[]` batch child is waited for inline, a finished run \
+                returns its result, and any other run is refused.""";
     }
 
     @Override
@@ -180,7 +186,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Run id returned by a prior subagent_spawn call with async=true or tasks[]. "
-                        + "A tasks[] run is waited for and returned inline, without suspending. "
+                        + "A tasks[] run is waited for and returned inline, without suspending; in a "
+                        + "subagent's own turn it is the only run that can be waited for. "
                         + "Provide this OR conversationId (runId wins when both set)."));
         props.put(PARAM_RUN_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
@@ -262,7 +269,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
 
         final var parentAgentId = callingAgent.id;
         var callingConvId = ToolContext.conversationId();
-        var target = Tx.run(() -> installYield(parsed, parentAgentId, callingConvId));
+        var subagentTurn = SubagentRegistry.inSubagentTurn();
+        var target = Tx.run(() -> installYield(parsed, parentAgentId, callingConvId, subagentTurn));
         var answer = target.answer();
         if (answer != null) return answer;
         var runId = target.runId();
@@ -380,9 +388,11 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      * validate parent ownership, then either answer (error /
      * already-terminal envelope), block-await a run that will never resume
      * the turn, or flip {@code yielded=true} + {@code yieldTimeoutSeconds}
-     * to suspend on it. Must be called inside an active Tx.
+     * to suspend on it. A {@code subagentTurn} never suspends. Must be called
+     * inside an active Tx.
      */
-    private static Target installYield(ParsedArgs parsed, Long parentAgentId, @Nullable Long callingConvId) {
+    private static Target installYield(ParsedArgs parsed, Long parentAgentId, @Nullable Long callingConvId,
+                                       boolean subagentTurn) {
         SubagentRun run;
         long resolvedRunId;
         if (parsed.runId() != null) {
@@ -418,6 +428,11 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         }
         if (run.status != SubagentRun.Status.RUNNING) {
             return Target.answering(alreadyTerminalEnvelope(run, resolvedRunId));
+        }
+        if (subagentTurn) {
+            return Target.answering("Error: a subagent cannot wait on run " + resolvedRunId + " from its own turn, "
+                    + "because nothing would resume the turn. In a subagent's turn, subagent_yield waits only "
+                    + "for a tasks[] batch child.");
         }
         run.yielded = true;
         run.yieldTimeoutSeconds = parsed.timeoutSeconds();

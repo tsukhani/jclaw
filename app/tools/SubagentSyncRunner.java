@@ -116,6 +116,12 @@ final class SubagentSyncRunner {
             while (true) {
                 try {
                     var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                    // Nothing resumes a child's turn, so one that suspended anyway has no reply to give (JF-168).
+                    if (result != null && result.yielded()) {
+                        releaseYields(result.yieldedRunIds());
+                        return new SyncRunOutcome("", SubagentRun.Status.FAILED, SUSPENDED_REASON, SUSPENDED_REASON,
+                                false, false);
+                    }
                     var reply = result == null ? "" : result.response();
                     var truncated = result != null && result.truncated();
                     return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
@@ -151,6 +157,22 @@ final class SubagentSyncRunner {
     }
 
     static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
+    static final String SUSPENDED_REASON = "The subagent stopped its turn to wait for another run and gave no reply.";
+
+    /** Undo the yields a dead child turn installed, so no run's end resumes it and delivers to its parent's chat. */
+    private static void releaseYields(List<Long> runIds) {
+        if (runIds.isEmpty()) return;
+        runIds.forEach(SubagentRegistry::cancelYieldTimeout);
+        Tx.run(() -> {
+            for (var id : runIds) {
+                var run = (SubagentRun) SubagentRun.findById(id);
+                if (run != null && run.yielded) {
+                    run.yielded = false;
+                    run.save();
+                }
+            }
+        });
+    }
 
     /**
      * JCLAW-424: on idle/ceiling timeout, flip the cooperative-stop flag and
