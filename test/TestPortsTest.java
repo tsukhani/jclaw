@@ -102,7 +102,8 @@ class TestPortsTest extends UnitTest {
     /** The first port of the host's ephemeral range (Linux procfs, else macOS sysctl), or null when neither says. */
     private static Integer hostEphemeralFirst() throws Exception {
         var linux = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
-        if (Files.isReadable(linux)) return Integer.parseInt(Files.readString(linux).trim().split("\\s+")[0]);
+        // procfs reports size 0, and Files.readString then returns only the first byte (JDK 21 and 25 alike).
+        if (Files.isReadable(linux)) return Integer.parseInt(Files.readAllLines(linux).getFirst().trim().split("\\s+")[0]);
         try {
             var sysctl = new ProcessBuilder("sysctl", "-n", "net.inet.ip.portrange.first").redirectErrorStream(true).start();
             var out = new String(sysctl.getInputStream().readAllBytes()).trim();
