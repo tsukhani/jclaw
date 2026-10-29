@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolContext;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.Conversation;
@@ -14,6 +15,11 @@ import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
 import utils.AppClock;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 
 /**
@@ -106,6 +112,51 @@ final class SubagentRunStore {
                     "Failed to persist terminal SubagentRun update for run " + runId
                             + ": " + t.getMessage());
         }
+    }
+
+    /** How many finished runs a subagent_yield all=true with nothing outstanding names. */
+    private static final int FINISHED_NAMED = 10;
+
+    /** A finished run's result as subagent_yield returns it, read back from its row; null unless it ended in the
+     *  dispatching conversation or task. */
+    static @Nullable Map<String, Object> savedOutcome(Long runId) {
+        var taskRunId = ToolContext.taskRunId();
+        var convId = ToolContext.conversationId();
+        return Tx.run(() -> {
+            var run = (SubagentRun) SubagentRun.findById(runId);
+            if (run == null || run.status == SubagentRun.Status.RUNNING) return null;
+            var inScope = taskRunId != null
+                    ? run.parentTaskRun != null && taskRunId.equals(run.parentTaskRun.id)
+                    : convId != null && run.parentConversation != null && convId.equals(run.parentConversation.id);
+            if (!inScope) return null;
+            var completed = run.status == SubagentRun.Status.COMPLETED;
+            var m = new LinkedHashMap<String, Object>();
+            m.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
+            m.put(SubagentSpawnTool.FIELD_REPLY, completed && run.outcome != null ? run.outcome : "");
+            m.put(SubagentSpawnTool.FIELD_STATUS, run.status.name());
+            if (!completed && run.outcome != null) m.put(SubagentSpawnTool.FIELD_ERROR, run.outcome);
+            return m;
+        });
+    }
+
+    /** The dispatching conversation's or task's newest finished runs, newest first, as {@code {run_id, status}}. */
+    static List<Map<String, Object>> recentFinished() {
+        var taskRunId = ToolContext.taskRunId();
+        var scopeId = taskRunId != null ? taskRunId : ToolContext.conversationId();
+        if (scopeId == null) return List.of();
+        var scope = taskRunId != null ? "parentTaskRun.id" : "parentConversation.id";
+        return Tx.run(() -> {
+            var named = new ArrayList<Map<String, Object>>();
+            for (Object o : SubagentRun.find(scope + " = ?1 AND status <> ?2 ORDER BY id DESC",
+                    scopeId, SubagentRun.Status.RUNNING).fetch(FINISHED_NAMED)) {
+                var run = (SubagentRun) o;
+                var m = new LinkedHashMap<String, Object>();
+                m.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(run.id));
+                m.put(SubagentSpawnTool.FIELD_STATUS, run.status.name());
+                named.add(m);
+            }
+            return named;
+        });
     }
 
     static @Nullable String lookupAgentName(@Nullable Long id) {

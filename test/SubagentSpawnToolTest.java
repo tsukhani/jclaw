@@ -409,8 +409,12 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(1, results.size(), results.toString());
         assertEquals(runId, results.get(0).getAsJsonObject().get("run_id").getAsString());
         assertEquals("ENDED_FIRST", results.get(0).getAsJsonObject().get("reply").getAsString());
-        assertEquals(NOTHING_TO_COLLECT, yieldInConversation(parent.id, conv.id, "{\"all\":true}"),
-                "a collected child is not returned twice");
+        assertEquals("{\"results\":[],\"count\":0,\"finished\":[{\"run_id\":\"" + runId + "\",\"status\":\"COMPLETED\"}],"
+                        + "\"note\":\"Nothing is waiting to be collected. The runs in finished have ended and keep their "
+                        + "reports: pass the ids of any whose report you have not seen as runIds to read it. Calling "
+                        + "subagent_yield with all=true again will not change that.\"}",
+                yieldInConversation(parent.id, conv.id, "{\"all\":true}"),
+                "a collected child is not returned twice, only named");
     }
 
     @Test

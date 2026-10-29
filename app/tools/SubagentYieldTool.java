@@ -121,6 +121,11 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
             + "no async subagent spawned in this conversation or task is waiting to be collected. "
             + "Calling subagent_yield again will not change that.\"}";
 
+    /** An all=true with nothing outstanding but finished runs in scope: their ids, never their reports again. */
+    private static final String FINISHED_NOTE = "Nothing is waiting to be collected. The runs in finished have ended and "
+            + "keep their reports: pass the ids of any whose report you have not seen as runIds to read it. "
+            + "Calling subagent_yield with all=true again will not change that.";
+
     @Override
     public String name() { return TOOL_NAME; }
 
@@ -171,7 +176,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "BATCH COLLECT: run_ids from subagent_spawn calls with tasks[] or async=true. "
                         + "Block-awaits ALL of them and returns {results:[...]} inline, each with its "
-                        + "whole reply. Use instead of runId to collect a whole fan-out in one call."));
+                        + "whole reply. Use instead of runId to collect a whole fan-out in one call. "
+                        + "A run that already finished returns its saved reply again."));
         props.put("all", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
                 "BATCH COLLECT: when true, block-await EVERY async child (tasks[] or async=true) "
@@ -220,7 +226,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // inline. Works in chat and task fires; no YIELDED sentinel.
         var batchRunIds = collectBatchRunIds(args);
         if (batchRunIds != null) {
-            if (batchRunIds.isEmpty()) return NOTHING_TO_COLLECT;
+            if (batchRunIds.isEmpty()) return nothingToCollect();
             return SubagentSpawnTool.awaitAsyncOutcomes(batchRunIds);
         }
 
@@ -269,6 +275,19 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "yielded");
         payload.put(PARAM_RUN_ID, String.valueOf(runId));
+        return GsonHolder.GSON.toJson(payload, Map.class);
+    }
+
+    /** An all=true with nothing outstanding: the scope's finished runs, which a runIds yield reads back,
+     *  or a plain no when there are none. */
+    private static String nothingToCollect() {
+        var finished = SubagentRunStore.recentFinished();
+        if (finished.isEmpty()) return NOTHING_TO_COLLECT;
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("results", List.of());
+        payload.put("count", 0);
+        payload.put("finished", finished);
+        payload.put("note", FINISHED_NOTE);
         return GsonHolder.GSON.toJson(payload, Map.class);
     }
 

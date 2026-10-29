@@ -64,6 +64,10 @@ final class SubagentAsyncRunner {
     /** Runs a subagent_yield is block-awaiting; a chat child among them posts no announce, the yield returning its whole reply. */
     private static final Set<Long> AWAITED = ConcurrentHashMap.newKeySet();
 
+    /** What a batch yield returns once its turn is stopped; the turn persists none of it. */
+    private static final String STOPPED = "{\"results\":[],\"count\":0,\"stopped\":true,"
+            + "\"note\":\"The turn was stopped while waiting; every run stays collectable by the next subagent_yield.\"}";
+
     private SubagentAsyncRunner() {}
 
     /** Launch the async-spawn background VT and return the immediate JSON
@@ -172,12 +176,16 @@ final class SubagentAsyncRunner {
     }
 
     /** Block-await one detached async outcome, bounded a little past the ceiling so
-     *  it can't hang even if completion signaling misbehaves. */
-    private static SyncRunOutcome awaitOutcomeFuture(CompletableFuture<SyncRunOutcome> f)
+     *  it can't hang even if completion signaling misbehaves; null when {@code stop} completes first. */
+    private static @Nullable SyncRunOutcome awaitOutcomeFuture(CompletableFuture<SyncRunOutcome> f,
+                                                               CompletableFuture<?> stop)
             throws InterruptedException, ExecutionException, TimeoutException {
         int ceiling = ConfigService.getInt(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
                 SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS);
-        return ceiling <= 0 ? f.get() : f.get(ceiling + 30L, TimeUnit.SECONDS);
+        var first = CompletableFuture.anyOf(f, stop);
+        if (ceiling <= 0) first.get();
+        else first.get(ceiling + 30L, TimeUnit.SECONDS);
+        return f.isDone() ? f.get() : null;
     }
 
     private static LinkedHashMap<String, Object> outcomeMap(Long runId, SyncRunOutcome outcome) {
@@ -201,9 +209,16 @@ final class SubagentAsyncRunner {
             return "Error: no pending async subagent for runId " + runId
                     + " (already collected, or not an async spawn).";
         }
+        var stop = new CompletableFuture<Void>();
         var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
-        try (var _ = SubagentRegistry.waitingOn(List.of(runId))) {
-            return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(pending.outcome())), Map.class);
+        try (var _ = SubagentRegistry.waitingOn(List.of(runId)); var _ = ToolContext.onCancel(() -> stop.complete(null))) {
+            var outcome = awaitOutcomeFuture(pending.outcome(), stop);
+            if (outcome == null || ToolContext.cancelled()) {
+                ASYNC_OUTCOMES.put(runId, pending);
+                return "Error: the turn was stopped while awaiting async subagent " + runId
+                        + "; it stays collectable by the next subagent_yield.";
+            }
+            return GsonHolder.GSON.toJson(outcomeMap(runId, outcome), Map.class);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
@@ -217,33 +232,38 @@ final class SubagentAsyncRunner {
     /**
      * JCLAW-498: block-await MANY async subagents (subagent_yield runIds[] / all)
      * and return {@code {results:[...], count:n}}. Each entry mirrors a sync spawn's
-     * shape; a missing/already-collected runId is reported in-line rather than
-     * failing the whole batch. The children ran concurrently, so the wall-clock of
-     * this collect ≈ the slowest still-running child.
+     * shape; a run no longer held here returns its saved result when it finished in
+     * this conversation or task, and is otherwise reported in-line rather than failing
+     * the whole batch. The children ran concurrently, so the wall-clock of this
+     * collect ≈ the slowest still-running child. A stopped turn ends the wait and
+     * hands every claimed outcome back, since it persists nothing it returns.
      */
     static String awaitAsyncOutcomes(List<Long> runIds) {
         var results = new ArrayList<Object>();
-        var claimed = new LinkedHashMap<Long, CompletableFuture<SyncRunOutcome>>();
+        var claimed = new LinkedHashMap<Long, Pending>();
         for (var runId : runIds) {
             // Marked before the claim, so a child that ends in between still finds this yield waiting.
             AWAITED.add(runId);
             var pending = ASYNC_OUTCOMES.asMap().remove(runId);
-            if (pending != null) claimed.put(runId, pending.outcome());
+            if (pending != null) claimed.put(runId, pending);
         }
+        var stop = new CompletableFuture<Void>();
+        var stopped = false;
         var relay = SubagentChatBridge.relayActivity(runIds, SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
-        try (var _ = SubagentRegistry.waitingOn(runIds)) {
+        try (var _ = SubagentRegistry.waitingOn(runIds); var _ = ToolContext.onCancel(() -> stop.complete(null))) {
             for (var runId : runIds) {
-                var f = claimed.remove(runId);
-                if (f == null) {
-                    var miss = new LinkedHashMap<String, Object>();
-                    miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
-                    miss.put(SubagentSpawnTool.FIELD_STATUS, "UNKNOWN");
-                    miss.put(SubagentSpawnTool.FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
-                    results.add(miss);
+                var pending = claimed.get(runId);
+                if (pending == null) {
+                    results.add(savedOrMissing(runId));
                     continue;
                 }
                 try {
-                    results.add(outcomeMap(runId, awaitOutcomeFuture(f)));
+                    var outcome = awaitOutcomeFuture(pending.outcome(), stop);
+                    if (outcome == null) {
+                        stopped = true;
+                        break;
+                    }
+                    results.add(outcomeMap(runId, outcome));
                 } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     var err = new LinkedHashMap<String, Object>();
@@ -259,6 +279,10 @@ final class SubagentAsyncRunner {
                     results.add(err);
                 }
             }
+            if (stopped || ToolContext.cancelled()) {
+                claimed.forEach(ASYNC_OUTCOMES::put);
+                return STOPPED;
+            }
         } finally {
             AWAITED.removeAll(runIds);
             relay.cancel(false);
@@ -267,6 +291,17 @@ final class SubagentAsyncRunner {
         payload.put("results", results);
         payload.put("count", results.size());
         return GsonHolder.GSON.toJson(payload, Map.class);
+    }
+
+    /** A run this yield holds no outcome for: its saved result when it finished in this scope, else a miss. */
+    private static Map<String, Object> savedOrMissing(Long runId) {
+        var saved = SubagentRunStore.savedOutcome(runId);
+        if (saved != null) return saved;
+        var miss = new LinkedHashMap<String, Object>();
+        miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
+        miss.put(SubagentSpawnTool.FIELD_STATUS, "UNKNOWN");
+        miss.put(SubagentSpawnTool.FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
+        return miss;
     }
 
     /**
