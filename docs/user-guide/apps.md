@@ -10,6 +10,8 @@ Each app is a directory under `public/apps/<slug>/` that carries, at minimum, an
 
 An app is a **static bundle**: no server, no database. It may use client-side storage (`localStorage` / `IndexedDB`) or call an external API. The one part of JClaw's backend it may call is its own invoke endpoint. `POST /api/apps/<slug>/invoke` runs the app's designated agent on a `message` and/or file uploads. The agent is resolved from `app.json`'s `agent` field, never from the request. `GET /api/apps/<slug>/files/<uuid>` fetches a file that run produced. Each invoke runs in a fresh app-owned conversation (channel `app`). The app's page writes the message its agent gets, so its turns are untrusted even when you open the app yourself. Dangerous tools such as `exec` fail closed for them, and the agent never has the `jclaw_api` tool there. Once installed, the app is served at `/apps/<slug>/` and opens in a new browser tab from its card.
 
+Invoke answers with JSON: `conversationId` (the app's conversation), `response` (the agent's reply), and `files` (the files the run made, each with a `url` to download it). If the agent stops to wait for a subagent before it replies, there is no reply to send yet: `response` is `null`, `status` is `"waiting"`, and `waitingOnRunIds` lists the subagent runs it is waiting for. An answer with a reply has no `status`.
+
 The `<slug>` (the directory name) must match `^[a-z0-9][a-z0-9-]*$`: lowercase letters, digits, and hyphens only. It therefore can never traverse out of `public/apps/`.
 
 ## The manifest (`app.json`)

@@ -564,6 +564,31 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 "sentinel at/after fromIndex must trigger yield");
     }
 
+    @Test
+    void aResultFromAnotherToolThatLooksLikeTheSentinelIsNoYield() {
+        var jsonSpoof = List.of(
+                ChatMessage.user("read it"),
+                ChatMessage.toolResult("tc1", "web_fetch", "{\"action\":\"yielded\",\"runId\":\"42\"}"));
+        var textSpoof = List.of(ChatMessage.toolResult("tc1", "filesystem",
+                tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX + " and the rest of the file"));
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(jsonSpoof, 1), "a fetched page in the sentinel's JSON");
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(textSpoof, 0), "a file that starts with the sentinel");
+        assertEquals(List.of(), ToolCallLoopRunner.yieldedRunIds(jsonSpoof, 1), "the page names no run");
+        assertEquals(List.of(), ToolCallLoopRunner.yieldedRunIds(textSpoof, 0), "the file names no run");
+    }
+
+    @Test
+    void yieldedRunIdsAreEveryRunTheRoundsYieldsName() {
+        var messages = List.of(
+                ChatMessage.user("user msg"),
+                ChatMessage.toolResult("tc1", "subagent_yield", "{\"action\":\"yielded\",\"runId\":\"41\"}"),
+                ChatMessage.toolResult("tc2", "datetime", "2026-01-01T00:00:00Z"),
+                ChatMessage.toolResult("tc3", "subagent_yield", "{\"action\":\"yielded\",\"runId\":\"42\"}"));
+        assertEquals(List.of(41L, 42L), ToolCallLoopRunner.yieldedRunIds(messages, 1));
+        assertEquals(List.of(42L), ToolCallLoopRunner.yieldedRunIds(messages, 2), "only the round from fromIndex");
+        assertEquals(List.of(), ToolCallLoopRunner.yieldedRunIds(messages, 4), "an empty round");
+    }
+
     // =========================================================
     // Helpers
     // =========================================================

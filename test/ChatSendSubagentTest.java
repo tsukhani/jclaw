@@ -102,10 +102,15 @@ class ChatSendSubagentTest extends FunctionalTest {
         login();
         var agentId = seedAgent();
 
-        var body = send(agentId);
-        assertEquals(PARENT_FINAL, body.get("response").getAsString(), "the turn ends on the child's reply: " + body);
-        assertTrue(childAsked.await(0, TimeUnit.SECONDS), "the child never reached the model");
+        var raw = send(agentId);
+        var body = JsonParser.parseString(raw).getAsJsonObject();
         long conversationId = body.get("conversationId").getAsLong();
+        assertEquals(JsonParser.parseString("""
+                {"conversationId": %d, "response": "%s", "agentId": %d, "agentName": "%s"}"""
+                .formatted(conversationId, PARENT_FINAL, agentId, agentName())), body,
+                "a turn that does not yield answers its reply and nothing more");
+        assertFalse(raw.contains(AgentRunner.YIELDED_RESPONSE), raw);
+        assertTrue(childAsked.await(0, TimeUnit.SECONDS), "the child never reached the model");
         SubagentRun run = commitInFreshTx(() -> SubagentRun.find("parentConversation.id = ?1", conversationId).first());
         assertEquals(SubagentRun.Status.COMPLETED, run.status);
         assertEquals(CHILD_REPLY, run.outcome);
@@ -117,11 +122,17 @@ class ChatSendSubagentTest extends FunctionalTest {
         login();
         var agentId = seedAgent();
 
-        var body = send(agentId);
-        assertEquals(AgentRunner.YIELDED_RESPONSE, body.get("response").getAsString(),
-                "the turn suspends on subagent_yield and the request returns: " + body);
+        var raw = send(agentId);
         assertTrue(childAsked.await(0, TimeUnit.SECONDS), "the child never reached the model before the parent yielded");
+        var body = JsonParser.parseString(raw).getAsJsonObject();
         long conversationId = body.get("conversationId").getAsLong();
+        SubagentRun awaited = commitInFreshTx(() -> SubagentRun.find("parentConversation.id = ?1", conversationId).first());
+        assertEquals(JsonParser.parseString("""
+                {"conversationId": %d, "response": null, "agentId": %d, "agentName": "%s",
+                 "status": "waiting", "waitingOnRunIds": [%d]}"""
+                .formatted(conversationId, agentId, agentName(), awaited.id)), body,
+                "the turn suspends on subagent_yield and the request answers that it is waiting on the run");
+        assertFalse(raw.contains(AgentRunner.YIELDED_RESPONSE), raw);
         releaseChild.countDown();
 
         var last = awaitLastMessage(conversationId, PARENT_FINAL, 30_000);
@@ -140,20 +151,24 @@ class ChatSendSubagentTest extends FunctionalTest {
         assertEquals("Subagent completed (report): " + CHILD_REPLY, announce.content);
     }
 
+    private String agentName() {
+        return "send-subagent-" + provider;
+    }
+
     private Long seedAgent() {
         return commitInFreshTx(() -> {
-            var agent = AgentService.create("send-subagent-" + provider, provider, MODEL);
+            var agent = AgentService.create(agentName(), provider, MODEL);
             agent.enabled = true;
             agent.save();
             return agent.id;
         });
     }
 
-    private JsonObject send(Long agentId) {
+    private String send(Long agentId) {
         var sent = POST("/api/chat/send", "application/json",
                 "{\"agentId\": %d, \"message\": \"%s\"}".formatted(agentId, PARENT_ASK));
         assertIsOk(sent);
-        return JsonParser.parseString(getContent(sent)).getAsJsonObject();
+        return getContent(sent);
     }
 
     /** Routes each model call by the messages it carries; the order the turn makes them in is the test. */

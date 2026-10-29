@@ -94,11 +94,24 @@ public class AgentRunner {
      *                     {@code /new} create a fresh one mid-run)
      * @param truncated    true when the final non-tool-call assistant turn
      *                     came back with {@code finish_reason=length}
+     * @param yieldedRunIds the runs a {@link #yielded()} turn waits on; empty otherwise
      */
-    public record RunResult(String response, @Nullable Conversation conversation, boolean truncated) {
+    public record RunResult(String response, @Nullable Conversation conversation, boolean truncated,
+                            List<Long> yieldedRunIds) {
+        public RunResult(String response, @Nullable Conversation conversation, boolean truncated) {
+            this(response, conversation, truncated, List.of());
+        }
+
         /** 2-arg compatibility: legacy paths that don't track truncation. */
         public RunResult(String response, @Nullable Conversation conversation) {
             this(response, conversation, false);
+        }
+
+        /** True when the turn suspended on {@code subagent_yield}: {@link #response} is then
+         *  {@link #YIELDED_RESPONSE}, never a reply to show or send. The turn the run's end
+         *  resumes replies instead. */
+        public boolean yielded() {
+            return YIELDED_RESPONSE.equals(response);
         }
     }
 
@@ -412,7 +425,7 @@ public class AgentRunner {
 
     /** The delivery half of {@link #resumeAndDeliver}, apart so a test can hand it a reply without a model call. */
     static void deliverResumed(Agent agent, Conversation conversation, RunResult result) {
-        if (QUEUED_MESSAGE_RESPONSE.equals(result.response())) return;
+        if (QUEUED_MESSAGE_RESPONSE.equals(result.response()) || result.yielded()) return;
         dispatchToChannel(agent, conversation.channelType, conversation.peerId, result.response());
     }
 
@@ -778,7 +791,7 @@ public class AgentRunner {
             EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
                     "Parent turn suspended via subagent_yield");
             var updatedConv = Tx.run(() -> ConversationService.findById(conversationId));
-            return new RunResult(response, updatedConv);
+            return new RunResult(response, updatedConv, false, outcome.yieldedRunIds());
         }
 
         // A turn whose every call failed ends in an error reply that counted no round, so it has no usage to record.

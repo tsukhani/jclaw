@@ -156,11 +156,15 @@ class ApiChatControllerTest extends FunctionalTest {
         var response = POST("/api/chat/send", "application/json", body);
         assertIsOk(response);
         assertContentType("application/json", response);
-        var content = getContent(response);
-        assertTrue(content.contains("\"agentName\":\"send-slash-help\""),
-                "response must echo the agent name: " + content);
-        assertTrue(content.contains("\"response\""),
-                "response must carry the synthetic slash response: " + content);
+        var answer = com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject();
+        long webChat = commitInFreshTx(() -> {
+            models.Conversation c = models.Conversation.find("agent.id = ?1 AND channelType = ?2 AND peerId = ?3",
+                    Long.parseLong(id), "web", "admin").first();
+            return c.id;
+        });
+        assertEquals(java.util.Map.of("conversationId", webChat,
+                "response", slash.Commands.HELP_TEXT, "agentId", Long.parseLong(id), "agentName", "send-slash-help"),
+                flat(answer), "a slash command answers its text and the agent's web chat, with no status");
     }
 
     @ParameterizedTest(name = "{0}")

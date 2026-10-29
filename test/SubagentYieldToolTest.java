@@ -91,7 +91,7 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + run.id + "\"}");
 
         // Sentinel: AgentRunner scans tool-result text for this exact prefix.
@@ -119,18 +119,18 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, null,
                 "{\"runId\":\"999999999\"}");
         assertTrue(result.startsWith("Error: no SubagentRun found"),
                 "nonexistent runId must surface a clear error, got: " + result);
 
         // Missing both runId and conversationId (JCLAW-326: either-or contract).
-        result = invokeYieldOnVt(parent.id, "{}");
+        result = invokeYieldOnVt(parent.id, null, "{}");
         assertTrue(result.startsWith("Error: one of 'runId' or 'conversationId' is required"),
                 "missing both ids must surface a clear error, got: " + result);
 
         // Non-numeric runId.
-        result = invokeYieldOnVt(parent.id, "{\"runId\":\"not-a-number\"}");
+        result = invokeYieldOnVt(parent.id, null, "{\"runId\":\"not-a-number\"}");
         assertTrue(result.startsWith("Error: 'runId' must be a numeric run id"),
                 "non-numeric runId must surface a parse error, got: " + result);
     }
@@ -146,7 +146,7 @@ class SubagentYieldToolTest extends UnitTest {
         commitAndReopen();
 
         // Intruder tries to yield into owner's run — must be refused.
-        var result = invokeYieldOnVt(intruder.id,
+        var result = invokeYieldOnVt(intruder.id, null,
                 "{\"runId\":\"" + run.id + "\"}");
         assertTrue(result.startsWith("Error: run " + run.id + " is not owned by the calling agent"),
                 "cross-parent yield must be refused, got: " + result);
@@ -155,6 +155,29 @@ class SubagentYieldToolTest extends UnitTest {
         SubagentRun fresh = SubagentRun.findById(run.id);
         assertFalse(fresh.yielded,
                 "refused yield must leave the yielded flag unchanged");
+    }
+
+    @Test
+    void aYieldOnARunAnotherConversationStartedIsRefused() throws Exception {
+        var parent = createAgent("p-yield-elsewhere", "test-provider", "test-model");
+        var webChat = ConversationService.create(parent, "web", "u-yield-elsewhere");
+        var appChat = ConversationService.create(parent, "app", "yield-elsewhere-app");
+        var run = seedRunningSubagentRun(parent, webChat);
+
+        commitAndReopen();
+
+        var refusal = "Error: run " + run.id + " was not started from this conversation; "
+                + "a turn can wait only on a run its own conversation started.";
+        assertEquals(refusal, invokeYieldOnVt(parent.id, appChat.id, "{\"runId\":\"" + run.id + "\"}"));
+        assertEquals(refusal, invokeYieldOnVt(parent.id, appChat.id,
+                "{\"conversationId\":\"" + run.childConversation.id + "\"}"), "found by its child conversation");
+        assertEquals(refusal, invokeYieldOnVt(parent.id, null, "{\"runId\":\"" + run.id + "\"}"),
+                "a call outside any conversation");
+
+        JPA.em().clear();
+        SubagentRun fresh = SubagentRun.findById(run.id);
+        assertFalse(fresh.yielded, "a refused yield leaves the run as it was");
+        assertEquals(SubagentRun.Status.RUNNING, fresh.status);
     }
 
     @Test
@@ -179,7 +202,7 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + run.id + "\"}");
         // Parse the result as JSON and assert each field individually rather
         // than substring-matching — keeps the test resilient to future
@@ -222,7 +245,7 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"conversationId\":\"" + childConvId + "\"}");
         assertTrue(result.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX),
                 "conversationId lookup must succeed, got: " + result);
@@ -249,7 +272,7 @@ class SubagentYieldToolTest extends UnitTest {
 
         // Provide primary's runId BUT other's child conversation id. runId
         // should win and only primary should flip yielded.
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + primary.id + "\","
                         + "\"conversationId\":\"" + other.childConversation.id + "\"}");
         assertTrue(result.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX),
@@ -304,15 +327,15 @@ class SubagentYieldToolTest extends UnitTest {
         commitAndReopen();
 
         // In-range value persists verbatim.
-        invokeYieldOnVt(parent.id,
+        invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + runA.id + "\",\"timeoutSeconds\":42}");
         // Above-max value clamps.
-        invokeYieldOnVt(parent.id,
+        invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + runB.id + "\",\"timeoutSeconds\":99999}");
         // Missing timeoutSeconds falls back to DEFAULT.
-        invokeYieldOnVt(parent.id, "{\"runId\":\"" + runC.id + "\"}");
+        invokeYieldOnVt(parent.id, parentConv.id, "{\"runId\":\"" + runC.id + "\"}");
         // Negative value is nonsense — coerced to DEFAULT (defensive).
-        invokeYieldOnVt(parent.id,
+        invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + runD.id + "\",\"timeoutSeconds\":-5}");
 
         JPA.em().clear();
@@ -347,7 +370,7 @@ class SubagentYieldToolTest extends UnitTest {
         var run = seedNamedSubagentRun(parent, parentConv, "to-zero");
         commitAndReopen();
 
-        invokeYieldOnVt(parent.id,
+        invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + run.id + "\",\"timeoutSeconds\":0}");
 
         JPA.em().clear();
@@ -374,7 +397,7 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var result = invokeYieldOnVt(parent.id,
+        var result = invokeYieldOnVt(parent.id, parentConv.id,
                 "{\"runId\":\"" + run.id + "\"}");
         var parsed = JsonParser.parseString(result).getAsJsonObject();
         assertEquals("already_terminal", parsed.get("action").getAsString());
@@ -1049,14 +1072,16 @@ class SubagentYieldToolTest extends UnitTest {
     /** Invoke SubagentYieldTool.execute on a VT so the body sees committed
      *  rows through a fresh persistence context — matches the
      *  SubagentSpawnToolTest pattern. */
-    private String invokeYieldOnVt(Long parentAgentId, String argsJson) throws Exception {
+    /** Calls the tool as a turn in {@code conversationId} does, on its own thread. */
+    private String invokeYieldOnVt(Long parentAgentId, Long conversationId, String argsJson) throws Exception {
         var resultRef = new AtomicReference<String>();
         var errorRef = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
                 var tool = new SubagentYieldTool();
-                resultRef.set(tool.execute(argsJson, parent));
+                resultRef.set(agents.ToolContext.withConversation(conversationId,
+                        () -> tool.execute(argsJson, parent)));
             } catch (Exception e) {
                 errorRef.set(e);
             }

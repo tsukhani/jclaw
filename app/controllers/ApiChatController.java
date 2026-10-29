@@ -340,7 +340,7 @@ public class ApiChatController extends Controller {
 
         var resp = new HashMap<String, Object>();
         resp.put(KEY_CONVERSATION_ID, conversation.id);
-        resp.put("response", result.response());
+        TurnReply.put(resp, result);
         resp.put(KEY_AGENT_ID, ctx.agent().id);
         resp.put("agentName", ctx.agent().name);
         renderJSON(gson.toJson(resp));

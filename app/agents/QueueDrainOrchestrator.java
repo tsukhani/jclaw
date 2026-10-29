@@ -138,7 +138,9 @@ public final class QueueDrainOrchestrator {
             // use the owned-queue variant to avoid re-acquire.
             var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
                     attachments, skipUserAppend, generation, pendingIds);
-            AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
+            if (!result.yielded()) {
+                AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
+            }
         } catch (Exception e) {
             EventLogger.error("queue", msg.agent().name, msg.channelType(),
                     "Failed to process queued message: %s".formatted(e.getMessage()));

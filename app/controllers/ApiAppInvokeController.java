@@ -108,7 +108,7 @@ public class ApiAppInvokeController extends Controller {
         var result = AgentRunner.run(agent, conversation, message == null ? "" : message, attachments);
         var resp = new HashMap<String, Object>();
         resp.put("conversationId", conversation.id);
-        resp.put("response", result.response());
+        TurnReply.put(resp, result);
         // AD-5 / JCLAW-765: any file the run produced (e.g. a documents-tool PDF) comes
         // back as a slug-scoped download URL the app is permitted to fetch (see file()).
         resp.put("files", Tx.run(() -> producedFiles(slug, conversation.id)));

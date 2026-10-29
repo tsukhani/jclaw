@@ -1,5 +1,6 @@
 package agents;
 
+import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
@@ -28,8 +29,9 @@ import java.util.stream.Collectors;
  * {@link AgentRunner} as part of JCLAW-299. Two sibling entry points:
  * {@link #callWithToolLoop} drives the synchronous (non-streaming)
  * path; {@link #handleToolCallsStreaming} drives the streaming path's
- * tool-call recursion. Both share the {@link #yieldRequestedInLastRound}
- * helper for JCLAW-273 yield detection.
+ * tool-call recursion. Both detect a JCLAW-273 yield in the round's
+ * {@code subagent_yield} results ({@link #yieldedRunIds},
+ * {@link #yieldRequestedInLastRound}).
  *
  * <h2>Why two methods, not one</h2>
  * The sync loop consumes a single {@link ChatResponse} per round and
@@ -61,13 +63,15 @@ import java.util.stream.Collectors;
  * </ul>
  *
  * <h2>The yield handshake (JCLAW-273)</h2>
- * Both loops scan tool-result entries from the just-appended round
- * for {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX}. When
+ * Both loops scan the just-appended round's results from {@code subagent_yield}
+ * itself for {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX}. When
  * the marker appears, the loop returns {@link AgentRunner#YIELDED_RESPONSE}
  * so the caller skips the final-assistant-message persist; the
  * parent's logical turn resumes later via
  * {@code SubagentSpawnTool.runAsyncAndAnnounce} once the child
- * terminates.
+ * terminates. The sync loop also carries out the run ids the sentinels
+ * name, on {@link LoopOutcome#yieldedRunIds}, so a route can answer which
+ * runs the turn waits on (JF-166).
  */
 public final class ToolCallLoopRunner {
 
@@ -108,9 +112,13 @@ public final class ToolCallLoopRunner {
      * @param truncated true when the final non-tool-call assistant turn
      *                  came back with {@code finish_reason = length /
      *                  max_tokens}
+     * @param yieldedRunIds the runs a {@code subagent_yield} suspended the sync
+     *                  loop on, in call order; empty otherwise, and always on the streaming loop
      */
-    public record LoopOutcome(String content, boolean truncated) {
+    public record LoopOutcome(String content, boolean truncated, List<Long> yieldedRunIds) {
         public LoopOutcome(String content) { this(content, false); }
+
+        public LoopOutcome(String content, boolean truncated) { this(content, truncated, List.of()); }
     }
 
     /**
@@ -658,46 +666,56 @@ public final class ToolCallLoopRunner {
         // tools.SubagentSpawnTool#runAsyncAndAnnounce once the child terminates.
         // JCLAW-497: in a task fire subagent_yield block-awaits and returns the
         // child result inline (no sentinel), so this never triggers there.
-        if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
+        var yieldedRunIds = yieldedRunIds(currentMessages, toolResultsAnchor);
+        if (!yieldedRunIds.isEmpty()) {
             EventLogger.info("tool", agent.name, null,
                     "Round %d: subagent_yield invoked — suspending parent turn".formatted(round + 1));
-            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
+            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE, false, yieldedRunIds);
         }
         return null;
     }
 
     /**
-     * JCLAW-273: scan the just-appended tool-result entries (those at
-     * index {@code >= fromIndex}) for the
-     * {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX} marker
-     * that the yield companion tool returns on success. Returns
-     * {@code true} if any tool-result content starts with the marker,
-     * meaning the parent's loop should exit without emitting a final
-     * assistant reply.
-     *
-     * <p>String-prefix scan rather than parsing JSON because the AC
-     * sentinel shape is closed (the tool always returns the same
-     * shape) and a prefix compare is robust against any future field
-     * reordering.
+     * JCLAW-273: whether this round's results (those at index {@code >= fromIndex})
+     * include the {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX} marker that
+     * {@code subagent_yield} returns on success, meaning the loop should exit without
+     * emitting a final assistant reply. Only a result from {@code subagent_yield}
+     * itself counts: a fetched page or a file read can begin with the same text (JF-166).
      *
      * @param currentMessages the per-turn message list, with tool-result
      *                        rows freshly appended
      * @param fromIndex       index into {@code currentMessages} marking the
      *                        start of this round's appended tool-result rows
-     * @return true when any of the just-appended tool-result rows carries
+     * @return true when a {@code subagent_yield} result of this round carries
      *         the yield sentinel prefix
      */
     // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
     public static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {
+        return !yieldSentinels(currentMessages, fromIndex).isEmpty();
+    }
+
+    /**
+     * The run each of this round's yield sentinels names, read from its
+     * {@link SubagentYieldTool#PARAM_RUN_ID}, in call order; empty when the round did not yield.
+     */
+    public static List<Long> yieldedRunIds(List<ChatMessage> currentMessages, int fromIndex) {
+        return yieldSentinels(currentMessages, fromIndex).stream()
+                .map(s -> JsonParser.parseString(s).getAsJsonObject().get(SubagentYieldTool.PARAM_RUN_ID).getAsLong())
+                .toList();
+    }
+
+    private static List<String> yieldSentinels(List<ChatMessage> currentMessages, int fromIndex) {
+        var sentinels = new ArrayList<String>();
         for (int i = fromIndex; i < currentMessages.size(); i++) {
             var m = currentMessages.get(i);
             if (m != null && MessageRole.TOOL.value.equals(m.role())
+                    && SubagentYieldTool.TOOL_NAME.equals(m.toolName())
                     && m.content() instanceof String s
                     && s.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX)) {
-                return true;
+                sentinels.add(s);
             }
         }
-        return false;
+        return sentinels;
     }
 
     /**

@@ -63,6 +63,8 @@ import java.util.Map;
  *   <li>The row's {@code parentAgent} must equal the calling agent — a
  *       parent can only yield into its own running children, not into a
  *       sibling or unrelated agent's run.</li>
+ *   <li>The row's {@code parentConversation} must be the calling turn's
+ *       conversation, the one the run's end resumes.</li>
  *   <li>{@code timeoutSeconds} above 3600 is clamped; 0 disables the
  *       watchdog, a negative value takes the default.</li>
  * </ul>
@@ -81,7 +83,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "subagent_yield";
 
-    private static final String PARAM_RUN_ID = "runId";
+    /** The single-run argument, and the key {@link #YIELD_SENTINEL_PREFIX}'s payload names its run under. */
+    public static final String PARAM_RUN_ID = "runId";
     private static final String PARAM_CONVERSATION_ID = "conversationId";
     private static final String PARAM_TIMEOUT_SECONDS = "timeoutSeconds";
     private static final String PARAM_RUN_IDS = "runIds";
@@ -254,7 +257,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // build below. The resolved run id is returned via the holder so the
         // watchdog scheduling below can use it without re-querying.
         var holder = new long[1];
-        var shortCircuit = Tx.run(() -> installYield(parsed, parentAgentId, holder));
+        var callingConvId = ToolContext.conversationId();
+        var shortCircuit = Tx.run(() -> installYield(parsed, parentAgentId, callingConvId, holder));
         if (shortCircuit != null) return shortCircuit;
         var runId = holder[0];
 
@@ -367,7 +371,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      * receives the resolved run id on success so the caller can arm the
      * watchdog without a re-query. Must be called inside an active Tx.
      */
-    private static @Nullable String installYield(ParsedArgs parsed, Long parentAgentId, long[] runIdOut) {
+    private static @Nullable String installYield(ParsedArgs parsed, Long parentAgentId,
+                                                 @Nullable Long callingConvId, long[] runIdOut) {
         SubagentRun run;
         long resolvedRunId;
         if (parsed.runId() != null) {
@@ -391,6 +396,11 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // semantics.
         if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
             return "Error: run " + resolvedRunId + " is not owned by the calling agent.";
+        }
+        // The run's end resumes the conversation that started it: a yield from any other would hang this turn (JF-166).
+        if (run.parentConversation == null || !run.parentConversation.id.equals(callingConvId)) {
+            return "Error: run " + resolvedRunId + " was not started from this conversation; "
+                    + "a turn can wait only on a run its own conversation started.";
         }
         if (run.status != SubagentRun.Status.RUNNING) {
             return alreadyTerminalEnvelope(run, resolvedRunId);

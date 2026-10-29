@@ -73,7 +73,7 @@ The **config store is the live source for operator settings** — not `conf/appl
 
 | Method | Path | Action |
 |---|---|---|
-| POST | `/api/chat/send` | `ApiChat.send` — synchronous turn → final assistant content |
+| POST | `/api/chat/send` | `ApiChat.send` — synchronous turn → final assistant content, or a waiting status for a yielded turn |
 | POST | `/api/chat/stream` | `ApiChat.streamChat` — SSE stream |
 | POST | `/api/chat/upload` | `ApiChat.uploadChatFiles` — multipart; size caps are per MIME bucket |
 | GET · DELETE | `/api/attachments/{uuid}` | `ApiAttachments.download` / `.deleteAttachment` |
