@@ -138,6 +138,8 @@ class YieldedTurnDeliveryTest extends UnitTest {
                 yieldOn = seedRunningRun(conversationId);
 
                 runQueued(conversationId);
+                // The drain thread sends only after it frees the queue: 500 ms lets a send that was coming arrive.
+                Thread.sleep(500);
 
                 assertEquals(0, telegram.countRequests("sendMessage"));
                 assertTrue(yielded(yieldOn), "the turn suspended on the run");
@@ -153,6 +155,7 @@ class YieldedTurnDeliveryTest extends UnitTest {
             var token = bindTelegram(telegram);
             try {
                 runQueued(conversation("telegram", PEER));
+                awaitRequest(telegram, "sendMessage");
 
                 assertEquals(1, telegram.countRequests("sendMessage"));
                 assertTrue(telegram.requests().getLast().body().contains(REPLY), telegram.requests().getLast().body());
@@ -193,6 +196,12 @@ class YieldedTurnDeliveryTest extends UnitTest {
         var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (ConversationQueue.isBusy(conversationId) && System.nanoTime() < deadline) Thread.sleep(50);
         assertFalse(ConversationQueue.isBusy(conversationId), "the queued turn ended");
+    }
+
+    /** Waits, up to 10 s, for {@code method} to reach the mock: the drain thread sends it after freeing the queue. */
+    private static void awaitRequest(MockTelegramServer telegram, String method) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (telegram.countRequests(method) == 0 && System.nanoTime() < deadline) Thread.sleep(20);
     }
 
     private String bindTelegram(MockTelegramServer telegram) {
