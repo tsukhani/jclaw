@@ -1067,15 +1067,7 @@ public class SystemPromptAssembler {
                 sb.append(renderMemoryLine(mem));
             }
             sb.append("\n");
-            // JCLAW-526: an injected memory was "accessed" — refresh its
-            // decay anchor so referenced memories stay fresh. Its own try, so a
-            // touch failure can neither lose the section nor change the answer.
-            try {
-                Memory.touchAccessed(ids);
-            } catch (Exception e) {
-                EventLogger.warn("agent", "Memory access refresh failed for agent %s (%s: %s)"
-                        .formatted(agent.name, e.getClass().getSimpleName(), e.getMessage()));
-            }
+            touchRecalled(agent, ids);
             return fromOthers;
         } catch (Exception e) {
             // Memory recall failure should not block the agent. JCLAW-960: name the exception
@@ -1085,6 +1077,19 @@ public class SystemPromptAssembler {
                     + "with no memories, which is not the same as having none")
                     .formatted(agent.name, e.getClass().getSimpleName(), e.getMessage()));
             return appended;
+        }
+    }
+
+    /**
+     * JCLAW-526: an injected memory was "accessed", so refresh its decay anchor and referenced memories stay fresh.
+     * Its own try, so a touch failure can neither lose the section nor change the answer.
+     */
+    private static void touchRecalled(Agent agent, List<Long> ids) {
+        try {
+            Memory.touchAccessed(ids);
+        } catch (Exception e) {
+            EventLogger.warn("agent", "Memory access refresh failed for agent %s (%s: %s)"
+                    .formatted(agent.name, e.getClass().getSimpleName(), e.getMessage()));
         }
     }
 

@@ -167,21 +167,6 @@ public class ConversationService {
     }
 
     /**
-     * Run a bound {@code UPDATE Conversation} that must not count as activity,
-     * then re-sync the managed entity.
-     *
-     * <p>Naming, starring, pinning and switching the model are operator
-     * annotations, not activity, but the list renders and sorts by
-     * {@code updatedAt} as "Last Activity". {@code save()} would stamp it through
-     * the inherited {@link models.TimestampedModel} {@code @PreUpdate}; a bulk
-     * JPQL update bypasses that callback.
-     *
-     * <p>The caller must not also assign the field: a dirty managed field is
-     * flushed at commit as a second UPDATE and stamps {@code updatedAt} after
-     * all. The {@code refresh} keeps a same-transaction re-read — {@code /model}'s
-     * handler, the service tests — from seeing the stale pre-write value.
-     */
-    /**
      * JF-136: record that a tool brought outside text into the conversation. A bulk update, so it does not count
      * as activity, and once set it stays: an agent edit to a persona file in this conversation then waits for the
      * operator.
@@ -221,6 +206,21 @@ public class ConversationService {
         });
     }
 
+    /**
+     * Run a bound {@code UPDATE Conversation} that must not count as activity,
+     * then re-sync the managed entity.
+     *
+     * <p>Naming, starring, pinning and switching the model are operator
+     * annotations, not activity, but the list renders and sorts by
+     * {@code updatedAt} as "Last Activity". {@code save()} would stamp it through
+     * the inherited {@link models.TimestampedModel} {@code @PreUpdate}; a bulk
+     * JPQL update bypasses that callback.
+     *
+     * <p>The caller must not also assign the field: a dirty managed field is
+     * flushed at commit as a second UPDATE and stamps {@code updatedAt} after
+     * all. The {@code refresh} keeps a same-transaction re-read — {@code /model}'s
+     * handler, the service tests — from seeing the stale pre-write value.
+     */
     private static void applyWithoutTouchingActivity(Conversation conversation, Query update) {
         update.setParameter("id", conversation.id).executeUpdate();
         JPA.em().refresh(conversation);

@@ -172,7 +172,7 @@ class SessionCompactorTest extends UnitTest {
                 new Case(256_000, 39_000, 147_500), new Case(1_000_000, 39_000, 150_000),
                 new Case(32_768, 5_000, 18_884))) {
             var mi = new ModelInfo("m", "M", c.window(), 8192, false);
-            assertEquals(c.threshold(), SessionCompactor.triggerThreshold(mi, 50, 150_000, c.fixed()), () -> c.toString());
+            assertEquals(c.threshold(), SessionCompactor.triggerThreshold(mi, 50, 150_000, c.fixed()), c::toString);
         }
         var small = new ModelInfo("m", "M", 32_768, 8192, false);
         assertEquals(150_000, SessionCompactor.triggerThreshold(small, 50, 150_000, 39_000),

@@ -107,20 +107,7 @@ public final class ToolResultPruner {
      * past the budget, is stubbed. Every skill result counts toward the budget, the protected recent ones too.
      */
     private static Map<Integer, SkillDecision> skillDecisions(List<ChatMessage> messages, int minChars) {
-        var argsByCallId = new HashMap<String, String>();
-        var skillResults = new ArrayList<SkillResult>();
-        for (int i = 0; i < messages.size(); i++) {
-            var m = messages.get(i);
-            if (m.toolCalls() != null) {
-                for (var call : m.toolCalls()) {
-                    if (call.id() != null) argsByCallId.put(call.id(), call.function().arguments());
-                }
-            }
-            if (!MessageRole.TOOL.value.equals(m.role()) || !(m.content() instanceof String body)
-                    || body.startsWith(STUB_MARKER)) continue;
-            var callArgs = m.toolCallId() == null ? null : argsByCallId.get(m.toolCallId());
-            if (callArgs != null && keepsInContext(m.toolName(), callArgs)) skillResults.add(new SkillResult(i, body));
-        }
+        var skillResults = skillResults(messages);
         var decisions = new HashMap<Integer, SkillDecision>();
         var seen = new HashSet<String>();
         long budget = SKILL_BUDGET_CHARS;
@@ -140,6 +127,25 @@ public final class ToolResultPruner {
             decisions.put(i, body.length() > SKILL_KEEP_CHARS ? SkillDecision.CUT : SkillDecision.KEEP);
         }
         return decisions;
+    }
+
+    /** The unstubbed results of calls whose tool keeps its result in context, oldest first. */
+    private static List<SkillResult> skillResults(List<ChatMessage> messages) {
+        var argsByCallId = new HashMap<String, String>();
+        var skillResults = new ArrayList<SkillResult>();
+        for (int i = 0; i < messages.size(); i++) {
+            var m = messages.get(i);
+            if (m.toolCalls() != null) {
+                for (var call : m.toolCalls()) {
+                    if (call.id() != null) argsByCallId.put(call.id(), call.function().arguments());
+                }
+            }
+            if (!MessageRole.TOOL.value.equals(m.role()) || !(m.content() instanceof String body)
+                    || body.startsWith(STUB_MARKER)) continue;
+            var callArgs = m.toolCallId() == null ? null : argsByCallId.get(m.toolCallId());
+            if (callArgs != null && keepsInContext(m.toolName(), callArgs)) skillResults.add(new SkillResult(i, body));
+        }
+        return skillResults;
     }
 
     /** A skill's first {@link #SKILL_KEEP_CHARS}, never ending between a surrogate pair, and where the rest is. */

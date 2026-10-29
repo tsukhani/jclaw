@@ -104,7 +104,7 @@ public class SessionCompaction extends Model {
                 : find("conversation = ?1 AND mergedIntoId IS NULL AND compactedAt > ?2", conversation,
                         conversation.contextSince).fetch();
         var live = new ArrayList<SessionCompaction>(rows.size());
-        for (Object row : rows) live.add((SessionCompaction) row);
+        for (SessionCompaction row : rows) live.add(row);
         live.sort(OLDEST_FIRST);
         return live;
     }

@@ -115,17 +115,7 @@ final class SubagentSyncRunner {
              var _ = SubagentRegistry.waitingOn(List.of(runId))) {
             while (true) {
                 try {
-                    var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-                    // Nothing resumes a child's turn, so one that suspended anyway has no reply to give (JF-168).
-                    if (result != null && result.yielded()) {
-                        releaseYields(result.yieldedRunIds());
-                        return new SyncRunOutcome("", SubagentRun.Status.FAILED, SUSPENDED_REASON, SUSPENDED_REASON,
-                                false, false);
-                    }
-                    var reply = result == null ? "" : result.response();
-                    var truncated = result != null && result.truncated();
-                    return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
-                            reply, null, false, truncated);
+                    return endedOutcome(future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS));
                 } catch (TimeoutException _) {
                     // Poll tick — the child is still running. Check the two budgets.
                     long idleNanos = SubagentRegistry.nanosSinceActivity(runId);
@@ -158,6 +148,19 @@ final class SubagentSyncRunner {
 
     static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
     static final String SUSPENDED_REASON = "The subagent stopped its turn to wait for another run and gave no reply.";
+
+    private static SyncRunOutcome endedOutcome(AgentRunner.@Nullable RunResult result) {
+        // Nothing resumes a child's turn, so one that suspended anyway has no reply to give (JF-168).
+        if (result != null && result.yielded()) {
+            releaseYields(result.yieldedRunIds());
+            return new SyncRunOutcome("", SubagentRun.Status.FAILED, SUSPENDED_REASON, SUSPENDED_REASON,
+                    false, false);
+        }
+        var reply = result == null ? "" : result.response();
+        var truncated = result != null && result.truncated();
+        return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
+                reply, null, false, truncated);
+    }
 
     /** Undo the yields a dead child turn installed, so no run's end resumes it and delivers to its parent's chat. */
     private static void releaseYields(List<Long> runIds) {

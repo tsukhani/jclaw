@@ -119,8 +119,8 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
         var agentId = agent.id != null ? String.valueOf(agent.id) : null;
         switch (lookup) {
             // The model may pass a shorter prefix; the full handle is what the compression recorded.
-            case Found found -> CompressionMetrics.recordCcrRetrieval(agentId, found.toolName(),
-                    ContentHash.handle(found.text()), true);
+            case Found(var text, var toolName) -> CompressionMetrics.recordCcrRetrieval(agentId, toolName,
+                    ContentHash.handle(text), true);
             case NotFound _ -> CompressionMetrics.recordCcrRetrieval(agentId, null, null, false);
             case Failed _ -> { }
         }

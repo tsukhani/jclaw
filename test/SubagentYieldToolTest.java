@@ -1069,10 +1069,10 @@ class SubagentYieldToolTest extends UnitTest {
         JPA.em().getTransaction().begin();
     }
 
-    /** Invoke SubagentYieldTool.execute on a VT so the body sees committed
-     *  rows through a fresh persistence context — matches the
-     *  SubagentSpawnToolTest pattern. */
-    /** Calls the tool as a turn in {@code conversationId} does, on its own thread. */
+    /**
+     * Calls the tool as a turn in {@code conversationId} does, on its own virtual thread, so the body sees
+     * committed rows through a fresh persistence context, as SubagentSpawnToolTest does.
+     */
     private String invokeYieldOnVt(Long parentAgentId, Long conversationId, String argsJson) throws Exception {
         var resultRef = new AtomicReference<String>();
         var errorRef = new AtomicReference<Exception>();

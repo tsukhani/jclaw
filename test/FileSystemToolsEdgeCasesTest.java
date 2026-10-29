@@ -277,7 +277,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
     }
 
     @Test
-    void aSkillMdUnderTheLimitIsSavedWithoutAWarning() throws Exception {
+    void aSkillMdUnderTheLimitIsSavedWithoutAWarning() {
         var result = tool.execute(skillWrite("fit-skill", 19_000), agent);
 
         assertEquals("File written successfully: SKILL.md (new skill at version 1.0.0)", result);

@@ -235,7 +235,7 @@ class RouterClassifierTest extends UnitTest {
             requests.add(sink.readUtf8());
             try {
                 Thread.sleep(delayMs);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 throw new InterruptedIOException();
             }

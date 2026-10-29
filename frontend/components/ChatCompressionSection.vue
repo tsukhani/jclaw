@@ -106,14 +106,7 @@ const filtered = computed(() => rows.value.filter(r =>
   (selectedAgentId.value === null || r.agentId === selectedAgentId.value)
   && (selectedChannel.value === null || r.channel === selectedChannel.value)))
 
-const agg = computed(() => {
-  const comp = filtered.value.filter(r => r.kind === 'COMPRESSION')
-  const tokensBefore = comp.reduce((s, r) => s + r.tokensBefore, 0)
-  const tokensAfter = comp.reduce((s, r) => s + r.tokensAfter, 0)
-  const tokensSaved = tokensBefore - tokensAfter
-  const reduction = tokensBefore ? tokensSaved / tokensBefore : 0
-  const events = comp.length
-
+function savingsByType(comp: Row[]) {
   const typeMap = new Map<string, { before: number, after: number }>()
   for (const r of comp) {
     const t = r.contentType ?? '—'
@@ -122,10 +115,12 @@ const agg = computed(() => {
     e.after += r.tokensAfter
     typeMap.set(t, e)
   }
-  const byType = [...typeMap.entries()]
+  return [...typeMap.entries()]
     .map(([type, v]) => ({ type, saved: v.before - v.after, ratio: v.before ? v.after / v.before : 0 }))
     .sort((a, b) => b.saved - a.saved)
+}
 
+function countsByAlgorithm(comp: Row[]) {
   const algoMap = new Map<string, { count: number, saved: number }>()
   for (const r of comp) {
     const a = r.algorithm ?? '—'
@@ -134,9 +129,21 @@ const agg = computed(() => {
     e.saved += r.tokensBefore - r.tokensAfter
     algoMap.set(a, e)
   }
-  const byAlgo = [...algoMap.entries()]
+  return [...algoMap.entries()]
     .map(([algorithm, v]) => ({ algorithm, count: v.count, saved: v.saved }))
     .sort((a, b) => b.count - a.count)
+}
+
+const agg = computed(() => {
+  const comp = filtered.value.filter(r => r.kind === 'COMPRESSION')
+  const tokensBefore = comp.reduce((s, r) => s + r.tokensBefore, 0)
+  const tokensAfter = comp.reduce((s, r) => s + r.tokensAfter, 0)
+  const tokensSaved = tokensBefore - tokensAfter
+  const reduction = tokensBefore ? tokensSaved / tokensBefore : 0
+  const events = comp.length
+
+  const byType = savingsByType(comp)
+  const byAlgo = countsByAlgorithm(comp)
 
   const guards = filtered.value.filter(r => r.kind === 'INFLATION_GUARD').length
 

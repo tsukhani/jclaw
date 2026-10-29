@@ -592,6 +592,7 @@ public final class SessionCompactor {
         latest.coversTo = rowTime("MAX", conv, start, end);
     }
 
+    @SuppressWarnings("java:S2077") // aggregate is MIN or MAX from the two calls above; the values are bound
     private static @Nullable Instant rowTime(String aggregate, Conversation conv, @Nullable Instant start, Instant end) {
         var query = JPA.em().createQuery("SELECT " + aggregate + "(m.createdAt) FROM Message m WHERE m.conversation = :c"
                 + " AND m.createdAt < :end" + (start != null ? " AND m.createdAt >= :start" : ""), Instant.class);

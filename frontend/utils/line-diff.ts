@@ -8,6 +8,17 @@ export interface DiffLine {
 // every new one as added rather than spend the memory.
 const MAX_CELLS = 4_000_000
 
+/** common[i][j]: the longest common subsequence of a[i..] and b[j..]. */
+function commonTable(a: string[], b: string[]): Uint32Array[] {
+  const common = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1))
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      common[i]![j] = a[i] === b[j] ? common[i + 1]![j + 1]! + 1 : Math.max(common[i + 1]![j]!, common[i]![j + 1]!)
+    }
+  }
+  return common
+}
+
 /**
  * A line diff of `before` to `after`, by longest common subsequence: each line in order, marked kept,
  * removed or added. A removal comes before the addition that replaces it.
@@ -18,13 +29,7 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   if (a.length * b.length > MAX_CELLS) {
     return [...a.map(text => ({ kind: 'removed' as const, text })), ...b.map(text => ({ kind: 'added' as const, text }))]
   }
-  // common[i][j]: the longest common subsequence of a[i..] and b[j..].
-  const common = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1))
-  for (let i = a.length - 1; i >= 0; i--) {
-    for (let j = b.length - 1; j >= 0; j--) {
-      common[i]![j] = a[i] === b[j] ? common[i + 1]![j + 1]! + 1 : Math.max(common[i + 1]![j]!, common[i]![j + 1]!)
-    }
-  }
+  const common = commonTable(a, b)
   const lines: DiffLine[] = []
   let i = 0
   let j = 0

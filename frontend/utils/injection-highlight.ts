@@ -5,9 +5,9 @@ import { sanitizeRenderedHtml } from '~/utils/chat-markdown'
 export const INVISIBLE_RULE = 'invisible-character'
 
 // Private-use characters carry the marks through the markdown renderer, which passes them as text.
-const OPEN = String.fromCharCode(0xE000)
-const OPEN_HIDDEN = String.fromCharCode(0xE001)
-const CLOSE = String.fromCharCode(0xE002)
+const OPEN = String.fromCodePoint(0xE000)
+const OPEN_HIDDEN = String.fromCodePoint(0xE001)
+const CLOSE = String.fromCodePoint(0xE002)
 const SENTINEL = new RegExp(`[${OPEN}${OPEN_HIDDEN}${CLOSE}]`)
 const SENTINELS = new RegExp(SENTINEL.source, 'g')
 // Same length, so a marker character the file already holds keeps every offset after it.
@@ -118,6 +118,15 @@ function markElement(text: string, hidden: boolean): HTMLElement {
   return mark
 }
 
+/** Drops the sentinels that landed in an attribute; only existing values change, so the live map is safe to walk. */
+function stripAttributeSentinels(root: DocumentFragment) {
+  for (const element of root.querySelectorAll('*')) {
+    for (const attr of element.attributes) {
+      if (SENTINEL.test(attr.value)) element.setAttribute(attr.name, attr.value.replaceAll(SENTINELS, ''))
+    }
+  }
+}
+
 /**
  * Rendered HTML with each sentinel pair turned into a mark. A range the renderer split across elements, such as
  * a match running into bold text, is marked piece by piece. Sentinels that landed in an attribute, such as a
@@ -128,11 +137,7 @@ export function markPreview(html: string): string {
   if (!SENTINEL.test(html)) return html
   const template = document.createElement('template')
   template.innerHTML = html
-  for (const element of template.content.querySelectorAll('*')) {
-    for (const attr of [...element.attributes]) {
-      if (SENTINEL.test(attr.value)) element.setAttribute(attr.name, attr.value.replaceAll(SENTINELS, ''))
-    }
-  }
+  stripAttributeSentinels(template.content)
   const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
   const texts: Text[] = []
   while (walker.nextNode()) texts.push(walker.currentNode as Text)

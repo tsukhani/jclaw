@@ -120,7 +120,7 @@ class CompactionSummaryModelTest extends UnitTest {
     // ─── Mid-chat, through the gate ─────────────────────────────────────
 
     @Test
-    void aRouterAgentsMidChatSummaryGoesToTheSummarizeClassNotTheTurnsModel() throws Exception {
+    void aRouterAgentsMidChatSummaryGoesToTheSummarizeClassNotTheTurnsModel() {
         configure(1_000_000);
         var agent = routerAgent();
         var conv = ConversationService.create(agent, "web", "u-jf160-gate");
@@ -137,7 +137,7 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
-    void aFixedModelAgentSummarizesWithItsOwnModelWhateverTheRouterOffers() throws Exception {
+    void aFixedModelAgentSummarizesWithItsOwnModelWhateverTheRouterOffers() {
         configure(1_000_000);
         var agent = new Agent();
         agent.name = "jf160-fixed-" + UUID.randomUUID().toString().substring(0, 8);
@@ -158,7 +158,7 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
-    void aTurnShapedRequestTooLargeForTheSummaryModelGoesAsTheTranscript() throws Exception {
+    void aTurnShapedRequestTooLargeForTheSummaryModelGoesAsTheTranscript() {
         // b's 40,000-token window takes neither the ~60,000-token system prompt nor its turn-shaped request.
         configure(40_000);
         var agent = routerAgent();
@@ -176,7 +176,7 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
-    void aTurnShapedRequestTheSummaryModelTakesKeepsTheTurnsPrefix() throws Exception {
+    void aTurnShapedRequestTheSummaryModelTakesKeepsTheTurnsPrefix() {
         configure(1_000_000);
         var agent = routerAgent();
         var conv = ConversationService.create(agent, "web", "u-jf160-fits");

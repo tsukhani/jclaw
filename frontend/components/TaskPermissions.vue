@@ -44,7 +44,7 @@ const tools = computed<string[] | null>(() => {
 })
 
 /** web and voice are the operator origins (utils.ChannelOriginTrust); absent reads as UNKNOWN and fails closed. */
-const OPERATOR_ORIGINS = ['web', 'voice']
+const OPERATOR_ORIGINS = new Set(['web', 'voice'])
 
 const origin = computed(() => {
   const o = props.originChannel
@@ -55,7 +55,7 @@ const origin = computed(() => {
       title: 'No recorded origin — classifies as UNKNOWN, so dangerous tools fail closed at fire time.',
     }
   }
-  if (OPERATOR_ORIGINS.includes(o)) {
+  if (OPERATOR_ORIGINS.has(o)) {
     return {
       label: o,
       tone: 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400',
@@ -94,7 +94,7 @@ const model = computed(() => {
         data-testid="task-origin-pill"
       >{{ origin.label }}</span>
       <button
-        v-if="!originChannel || !OPERATOR_ORIGINS.includes(originChannel)"
+        v-if="!originChannel || !OPERATOR_ORIGINS.has(originChannel)"
         type="button"
         class="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-transparent border border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-400 hover:bg-blue-600/10 transition-colors cursor-pointer"
         title="Vouch for this task: record the operator origin, so its fires run dangerous tools under the Tool Approvals policy instead of failing closed."

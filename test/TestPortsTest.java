@@ -92,7 +92,7 @@ class TestPortsTest extends UnitTest {
     }
 
     private static boolean isFree(int port) {
-        try (var probe = new ServerSocket(port)) {
+        try (var _ = new ServerSocket(port)) {
             return true;
         } catch (IOException _) {
             return false;

@@ -463,7 +463,7 @@ class FencedPromptCatalogTest extends UnitTest {
         var agent = Tx.run(() -> (Agent) Agent.findById(agentId));
         long held = ConversationQueue.tryAcquireOwnership(conversationId,
                 new ConversationQueue.QueuedMessage("running turn", "telegram", peerId, agent), null);
-        assertTrue(held != ConversationQueue.NOT_ACQUIRED, "the running turn holds the conversation");
+        assertNotEquals(ConversationQueue.NOT_ACQUIRED, held, "the running turn holds the conversation");
         try {
             for (var owner : senders) {
                 onVirtualThread(() -> DangerousActionGate.withOwnerInitiated(owner, () -> {

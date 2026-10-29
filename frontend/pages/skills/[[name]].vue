@@ -750,9 +750,14 @@ onUnmounted(() => {
 const skillFiles = ref<SkillFile[]>([])
 /** Matches ToolResultPruner.SKILL_KEEP_CHARS: a long conversation keeps only this much of a SKILL.md. */
 const SKILL_MD_LIMIT_CHARS = 20_000
+function skillMdFirst(a: { path: string }, b: { path: string }): number {
+  if (a.path === 'SKILL.md') return -1
+  if (b.path === 'SKILL.md') return 1
+  return a.path.localeCompare(b.path)
+}
 const contextFiles = computed(() => skillFiles.value
   .filter(f => f.chars !== undefined)
-  .sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path))))
+  .sort(skillMdFirst))
 const skillTools = ref<SkillToolRef[]>([])
 // Shell commands this skill contributes to an installing agent's allowlist.
 // Populated from the SKILL.md `jclaw-commands` frontmatter via the files API.

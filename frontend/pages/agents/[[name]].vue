@@ -249,8 +249,9 @@ function reviewDiff(file: PersonaApproval) {
 }
 
 function diffLineText(line: { kind: string, text: string }): string {
-  const mark = line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '
-  return mark + line.text
+  if (line.kind === 'added') return '+ ' + line.text
+  if (line.kind === 'removed') return '- ' + line.text
+  return '  ' + line.text
 }
 
 async function decidePersonaChange(file: PersonaApproval, decision: 'approve' | 'reject' | 'undo') {

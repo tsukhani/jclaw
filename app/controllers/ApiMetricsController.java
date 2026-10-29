@@ -502,6 +502,7 @@ public class ApiMetricsController extends Controller {
      * JF-150: a task run's replies, attributed to the task's agent. The provider is the one the record names,
      * the model the fire really ran on, which a task's own model pin can make differ from the agent's.
      */
+    @SuppressWarnings("java:S2077") // the JPQL is constant fragments; since and agentId are bound
     private static List<TimedCostRow> taskCostRows(Instant since, @Nullable Long agentId) {
         var jpql = "SELECT m.createdAt, t.agent.id, m.usageJson, t.agent.modelProvider "
                 + "FROM TaskRunMessage m JOIN m.taskRun r JOIN r.task t "

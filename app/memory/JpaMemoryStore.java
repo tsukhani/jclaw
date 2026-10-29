@@ -462,6 +462,7 @@ public class JpaMemoryStore implements MemoryStore {
         return ids.stream().filter(alive::contains).toList();
     }
 
+    @SuppressWarnings("java:S2077") // the only fragment is Memory.visibleSql: constants and ?N placeholders whose values are bound
     private List<Long> pgSemanticNeighbors(Long pk, float[] embedding, int limit, double minCosine,
             @Nullable MemoryScope scope) {
         var visible = Memory.visibleSql(scope, 4);
@@ -605,7 +606,8 @@ public class JpaMemoryStore implements MemoryStore {
      * {@code ts_rank}. Single native query (no IDs-then-refetch round trip);
      * shared by {@link #fullTextSearch} and the hybrid fusion.
      */
-    @SuppressWarnings("unchecked")
+    // java:S2077: the only fragment is Memory.visibleSql: constants and ?N placeholders whose values are bound
+    @SuppressWarnings({"unchecked", "java:S2077"})
     private List<Memory> pgFtsRows(Long pk, String query, int limit, @Nullable MemoryScope scope) {
         var visible = Memory.visibleSql(scope, 3);
         var sql = """
@@ -641,6 +643,7 @@ public class JpaMemoryStore implements MemoryStore {
             ORDER BY m.embedding <=> ?2::text::vector
             """;
 
+    @SuppressWarnings("java:S2077") // the only fragment is Memory.visibleSql: constants and ?N placeholders whose values are bound
     private List<Long> pgVectorIds(Long pk, float[] embedding, int limit, @Nullable MemoryScope scope) {
         // JCLAW-940: selects the cosine so the leg can be gated on its best hit in Java,
         // matching the Lucene branch. The ORDER BY stays the bare operator the HNSW index

@@ -1802,7 +1802,7 @@ describe('Agents page — prompt-injection check of the workspace files (JF-130)
       expect(scan.calls.count).toBe(2)
       expect(component.find('[role="status"]').text()).toBe('No prompt-injection matches in these files.')
       expect(component.find('.workspace-backdrop').exists()).toBe(false)
-      expect(component.find('.md-preview').findAll('mark').length).toBe(0)
+      expect(component.find('.md-preview').findAll('mark')).toHaveLength(0)
     }
     finally {
       scan.off()

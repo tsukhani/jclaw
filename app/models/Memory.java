@@ -444,6 +444,7 @@ public class Memory extends Model {
      * The agent's live guest rows {@code scope} must not see, for a search index to exclude before it
      * ranks, so a top-k is a top-k of visible rows. Empty for a null scope.
      */
+    @SuppressWarnings("java:S2077") // the JPQL is constant fragments; every value is bound
     public static List<Long> guestIdsOutside(Long agentPk, @Nullable MemoryScope scope) {
         if (scope == null) return List.of();
         var where = "m.agent.id = :agent AND m.authorType = :guest AND m.supersededAt IS NULL";

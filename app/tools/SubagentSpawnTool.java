@@ -501,37 +501,43 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return STOPPED_BEFORE_START;
         }
 
-        // JCLAW-270: async branch — dispatch the run to a background VT and
-        // return immediately with {run_id, conversation_id, status: RUNNING}.
-        // The VT runs the same AgentRunner.run as the synchronous path and
-        // posts a structured announce Message into the parent conversation
-        // on terminal state (completion / failure / timeout). Async + inline
-        // was already rejected up top so this branch can hard-assume session
-        // mode (inlineMode == false).
-        @Nullable String note = inlineRanAsSession ? INLINE_RAN_AS_SESSION : null;
-        if (parsed.asyncRequested()) {
-            // JCLAW-497: a task fire has no persistent conversation to resume into,
-            // so the announce/resume model can't deliver there. Use a block-await
-            // handoff instead — dispatch the child (parallel) and let subagent_yield
-            // collect its result inline. Chat keeps the announce/resume path.
-            if (parentConv == null) {
-                return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, childAgentId, childConvId,
-                        parentAgent.name, parsed, runIdStr);
-            }
-            // JF-168: nothing resumes a subagent's turn, so a background result there would reach no one.
-            if (SubagentRegistry.inSubagentTurn()) {
-                note = ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT;
-            } else if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
-                // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
-                return SubagentAsyncRunner.launchAsyncSpawn(runId, childAgentId, childConvId, parentConv.id,
-                        parentAgent.name, parsed, runIdStr);
-            } else {
-                note = ASYNC_RAN_IN_FOREGROUND;
-            }
+        boolean acpBridged = SubagentAcpRunner.isAcpRuntime(args);
+        if (!parsed.asyncRequested()) {
+            return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed, acpBridged,
+                    inlineRanAsSession ? INLINE_RAN_AS_SESSION : null);
         }
+        return dispatchAsync(runId, bootstrap, parentConv, parentAgent.name, parsed, acpBridged);
+    }
 
-        return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed,
-                SubagentAcpRunner.isAcpRuntime(args), note);
+    /**
+     * JCLAW-270: an async request dispatches the run to a background VT and returns at once with
+     * {run_id, conversation_id, status: RUNNING}; the VT runs the same AgentRunner.run as the synchronous
+     * path and posts an announce into the parent conversation when it ends. Async + inline was rejected up
+     * top, so this is always session mode, and a request that cannot get a background run runs in the
+     * foreground with a note saying why.
+     */
+    private static String dispatchAsync(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Conversation parentConv,
+                                        String parentAgentName, SubagentSpawnArgs parsed, boolean acpBridged) {
+        var runIdStr = String.valueOf(runId);
+        // JCLAW-497: a task fire has no persistent conversation to resume into,
+        // so the announce/resume model can't deliver there. Use a block-await
+        // handoff instead — dispatch the child (parallel) and let subagent_yield
+        // collect its result inline. Chat keeps the announce/resume path.
+        if (parentConv == null) {
+            return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, child.childAgentId(), child.childConvId(),
+                    parentAgentName, parsed, runIdStr);
+        }
+        // JF-168: nothing resumes a subagent's turn, so a background result there would reach no one.
+        if (SubagentRegistry.inSubagentTurn()) {
+            return runSyncSpawn(runId, child, parentConv.id, parentAgentName, parsed, acpBridged,
+                    ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT);
+        }
+        // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
+        if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
+            return SubagentAsyncRunner.launchAsyncSpawn(runId, child.childAgentId(), child.childConvId(), parentConv.id,
+                    parentAgentName, parsed, runIdStr);
+        }
+        return runSyncSpawn(runId, child, parentConv.id, parentAgentName, parsed, acpBridged, ASYNC_RAN_IN_FOREGROUND);
     }
 
     private static String runSyncSpawn(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Long parentConvId,

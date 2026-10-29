@@ -95,7 +95,7 @@ class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    void workspaceFilesAppearInDeclaredNarrativeOrder() throws Exception {
+    void workspaceFilesAppearInDeclaredNarrativeOrder() {
         var agent = newAgent("spa-order-1");
         // Stamp each workspace file with a distinctive sentinel so we can read
         // their absolute positions back out of the assembled prompt.
@@ -121,7 +121,7 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    void aServiceAgentsPromptLeavesOutOwnerFilesThatAreStillOnDisk() throws Exception {
+    void aServiceAgentsPromptLeavesOutOwnerFilesThatAreStillOnDisk() {
         var agent = AgentService.createServiceAgent("spa-service-leftover", "openrouter", "gpt-4.1", null, null);
         var child = AgentService.create("spa-service-leftover-child", "openrouter", "gpt-4.1", null, null, false, agent);
         // What a delete that failed leaves behind: the agent's type decides, not the directory.
@@ -139,7 +139,7 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    void blankWorkspaceFileIsDroppedSilently() throws Exception {
+    void blankWorkspaceFileIsDroppedSilently() {
         var agent = newAgent("spa-blank-drop");
         writeWorkspaceFile(agent.name, "USER.md", "   \n  \n");
         writeWorkspaceFile(agent.name, "AGENT.md", "MARKER_AGENT_BD");
