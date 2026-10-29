@@ -14,7 +14,6 @@ import utils.RestartNarrator;
 import java.io.File;
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -167,9 +166,7 @@ class RestartProgressScriptTest extends UnitTest {
         Files.createDirectories(home.resolve("certs"));
         Files.writeString(home.resolve("certs/.env"), "PLAY_SECRET=" + SECRET + "\n");
         Files.createDirectories(home.resolve("logs"));
-        try (var socket = new ServerSocket(0)) {
-            port = socket.getLocalPort();
-        }
+        port = TestPorts.freeNonEphemeral();
         oldJvm = new ProcessBuilder("sleep", "60").start();
         Files.writeString(home.resolve("server.pid"), oldJvm.pid() + "\n");
     }

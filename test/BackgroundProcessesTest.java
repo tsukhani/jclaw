@@ -14,8 +14,6 @@ import utils.AppClock;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -303,10 +301,7 @@ class BackgroundProcessesTest extends UnitTest {
 
     @Test
     void aServerIsListedWithTheAddressItListensOn() throws Exception {
-        int port;
-        try (var probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
-            port = probe.getLocalPort();
-        }
+        int port = TestPorts.freeNonEphemeral();
         var text = execIn(1L, "python3 -m http.server %d --bind 127.0.0.1 & echo started".formatted(port));
         org.junit.jupiter.api.Assumptions.assumeTrue(text.contains("started"), "python3 is not on this host: " + text);
         var server = "http.server %d --bind 127.0.0.1".formatted(port);

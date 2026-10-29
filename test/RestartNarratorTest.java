@@ -19,7 +19,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.HttpURLConnection;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -351,7 +350,7 @@ class RestartNarratorTest extends UnitTest {
         var pidFile = tmp.resolve("narrator.pid");
         int port;
         Process narrator;
-        try (var oldJvm = new ServerSocket(0)) {
+        try (var oldJvm = TestPorts.bindNonEphemeral()) {
             port = oldJvm.getLocalPort();
             narrator = launch(status, pidFile, port, ProcessHandle.current().pid());
             waitFor(() -> Files.exists(pidFile), "the pid file");
@@ -370,10 +369,10 @@ class RestartNarratorTest extends UnitTest {
     void itTakesTheHttpsPortOnceTheOldJvmLetsGoOfIt() throws Exception {
         var pem = pemPair("RSA");
         var pidFile = tmp.resolve("narrator.pid");
-        var oldJvm = new ServerSocket(0);
+        var oldJvm = TestPorts.bindNonEphemeral();
         int https = oldJvm.getLocalPort();
         try {
-            launch(writeStatus("{\"state\":\"running\",\"phases\":[]}"), pidFile, freePort(), ProcessHandle.current().pid(),
+            launch(writeStatus("{\"state\":\"running\",\"phases\":[]}"), pidFile, TestPorts.freeNonEphemeral(), ProcessHandle.current().pid(),
                     "--https", Integer.toString(https), "--cert", pem[0].toString(), "--key", pem[1].toString());
             waitFor(() -> lines(pidFile).contains("bound"), "the narrator to bind HTTP");
             Thread.sleep(1500);
@@ -414,7 +413,7 @@ class RestartNarratorTest extends UnitTest {
         var running = writeStatus("{\"state\":\"running\",\"phases\":[]}");
         var shell = new ProcessBuilder("sleep", "60").start();
         processes.add(shell);
-        var narrator = launch(running, pidFile, freePort(), shell.pid());
+        var narrator = launch(running, pidFile, TestPorts.freeNonEphemeral(), shell.pid());
         waitFor(() -> lines(pidFile).contains("bound"), "the narrator to bind");
         shell.destroy();
         assertTrue(narrator.waitFor(10, TimeUnit.SECONDS), "it outlived the jclaw.sh it narrates for");
@@ -423,7 +422,7 @@ class RestartNarratorTest extends UnitTest {
         var failed = Files.writeString(tmp.resolve("failed.json"), "{\"state\":\"failed\",\"reason\":\"JClaw did not start\",\"finishedAt\":%d,\"phases\":[]}".formatted(NOW));
         var exited = new ProcessBuilder("true").start();
         assertTrue(exited.waitFor(10, TimeUnit.SECONDS));
-        var lingering = launch(failed, tmp.resolve("lingering.pid"), freePort(), exited.pid());
+        var lingering = launch(failed, tmp.resolve("lingering.pid"), TestPorts.freeNonEphemeral(), exited.pid());
         waitFor(() -> lines(tmp.resolve("lingering.pid")).contains("bound"), "the narrator to bind");
         Thread.sleep(2000);
         assertTrue(lingering.isAlive(), "a failure is served after jclaw.sh has exited");
@@ -512,12 +511,6 @@ class RestartNarratorTest extends UnitTest {
 
     private static String java() {
         return Path.of(System.getProperty("java.home"), "bin", "java").toString();
-    }
-
-    private static int freePort() throws IOException {
-        try (var socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 
     private static List<String> lines(Path file) {
