@@ -58,8 +58,9 @@ final class SubagentAsyncRunner {
                     .maximumSize(4_096)
                     .build();
 
-    /** An uncollected outcome and the spawning parent's scope ({@code task:<id>} or {@code conv:<id>}). */
-    private record Pending(@Nullable String scopeKey, CompletableFuture<SyncRunOutcome> outcome) {}
+    /** An uncollected outcome and the spawning parent's scope ({@code task:<id>} or {@code conv:<id>}); a
+     *  {@code detached} run posts no announce and resumes no turn, so only a collect ever delivers it. */
+    private record Pending(@Nullable String scopeKey, CompletableFuture<SyncRunOutcome> outcome, boolean detached) {}
 
     /** Runs a subagent_yield is block-awaiting; a chat child among them posts no announce, the yield returning its whole reply. */
     private static final Set<Long> AWAITED = ConcurrentHashMap.newKeySet();
@@ -110,9 +111,19 @@ final class SubagentAsyncRunner {
 
     /** Stash a future for {@code runId}'s terminal outcome, collectable by a subagent_yield in {@code scopeKey}. */
     private static CompletableFuture<SyncRunOutcome> track(Long runId, @Nullable String scopeKey) {
+        return track(runId, scopeKey, false);
+    }
+
+    private static CompletableFuture<SyncRunOutcome> track(Long runId, @Nullable String scopeKey, boolean detached) {
         var outcome = new CompletableFuture<SyncRunOutcome>();
-        ASYNC_OUTCOMES.put(runId, new Pending(scopeKey, outcome));
+        ASYNC_OUTCOMES.put(runId, new Pending(scopeKey, outcome, detached));
         return outcome;
+    }
+
+    /** Whether a single-run subagent_yield block-awaits {@code runId}: a detached run never resumes the turn (JF-169). */
+    static boolean awaitsInline(Long runId) {
+        var pending = ASYNC_OUTCOMES.getIfPresent(runId);
+        return pending != null && pending.detached();
     }
 
     /**
@@ -124,7 +135,7 @@ final class SubagentAsyncRunner {
     static void dispatchDetachedAsync(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                       String parentAgentName, @Nullable String mode, @Nullable String context,
                                       int timeoutSeconds, String task, @Nullable String scopeKey) {
-        var outcomeFuture = track(runId, scopeKey);
+        var outcomeFuture = track(runId, scopeKey, true);
         Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
                 runAsyncDetached(runId, childAgentId, childConvId, parentAgentName,
                         mode, context, timeoutSeconds, task, outcomeFuture));

@@ -36,6 +36,9 @@ import java.util.Map;
  * which announce-shape (SYSTEM-role fire-and-forget vs USER-role resume) to
  * post.
  *
+ * <p>A run that resumes no turn, a {@code tasks[]} batch child or any run of a
+ * task fire, is block-awaited instead and its outcome returned inline (JF-169).
+ *
  * <p>JCLAW-326 adds two parameters:
  * <ul>
  *   <li>{@code conversationId} — alternate lookup key. The most-recent
@@ -51,22 +54,24 @@ import java.util.Map;
  *       {@code runTimeoutSeconds} short without re-issuing the spawn.</li>
  * </ul>
  *
- * <p>Validation:
+ * <p>Validation, in this order:
  * <ul>
  *   <li>Exactly one of {@code runId} / {@code conversationId} must resolve a
  *       run; both blank → error.</li>
- *   <li>The row's {@link SubagentRun#status} must be
- *       {@link SubagentRun.Status#RUNNING}; yielding into a terminal run is
- *       a no-op programming error and surfaces a structured
- *       {@code already_terminal} envelope so the LLM still gets the recorded
- *       outcome.</li>
  *   <li>The row's {@code parentAgent} must equal the calling agent — a
  *       parent can only yield into its own running children, not into a
  *       sibling or unrelated agent's run.</li>
  *   <li>The row's {@code parentConversation} must be the calling turn's
  *       conversation, the one the run's end resumes.</li>
+ *   <li>A {@code tasks[]} child whose outcome is still held is collected
+ *       inline whatever its status, so a finished one is returned once.</li>
+ *   <li>Otherwise the row's {@link SubagentRun#status} must be
+ *       {@link SubagentRun.Status#RUNNING}; yielding into a terminal run
+ *       surfaces a structured {@code already_terminal} envelope so the LLM
+ *       still gets the recorded outcome.</li>
  *   <li>{@code timeoutSeconds} above 3600 is clamped; 0 disables the
- *       watchdog, a negative value takes the default.</li>
+ *       watchdog, a negative value takes the default. It applies only to a
+ *       yield that suspends the turn.</li>
  * </ul>
  * Invalid calls return a descriptive error string and do not mutate any
  * state, matching the {@link SubagentSpawnTool} validation idiom.
@@ -140,31 +145,33 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
 
     @Override
     public String shortDescription() {
-        return "Suspend this turn until an async-spawned subagent completes; its reply lands as your next user message.";
+        return "Wait for an async subagent: suspend this turn until it ends, or get a batch child's result inline.";
     }
 
     @Override
     public List<ToolAction> actions() {
         return List.of(
                 new ToolAction("yield",
-                        "Suspend the current turn and resume when the named subagent terminates."));
+                        "Wait for the named subagent: suspend the turn until it ends, or return a batch "
+                                + "child's result inline."));
     }
 
     @Override
     public String description() {
         return """
-                Suspend this turn until the named async-spawned subagent finishes. When invoked, \
-                your AgentRunner loop exits without emitting a final assistant reply; once the \
-                child terminates (completion, failure, or timeout), its final output is delivered \
-                back as your next user-role message and your loop resumes from there. \
-                Use this after a `subagent_spawn` call with `async=true` when you want to block \
-                your logical turn on the child's result rather than continuing in parallel; \
+                Wait for an async-spawned subagent. With the run id of a chat `subagent_spawn` \
+                with `async=true`, your AgentRunner loop exits without emitting a final assistant \
+                reply; once the child terminates (completion, failure, or timeout), its final output \
+                is delivered back as your next user-role message and your loop resumes from there. \
+                A `tasks[]` batch child, or any async child in a task fire, is waited for here \
+                instead and its result returned inline, without suspending. Use this when you want \
+                to block your logical turn on a child's result rather than continuing in parallel; \
                 see the parameters for single, batch, and collect-all forms.""";
     }
 
     @Override
     public String summary() {
-        return "Suspend this turn until an async subagent completes; its reply becomes your next user message.";
+        return "Wait for an async subagent: suspend until it ends, or get a batch child's result inline.";
     }
 
     @Override
@@ -172,7 +179,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Run id returned by a prior subagent_spawn call with async=true. "
+                "Run id returned by a prior subagent_spawn call with async=true or tasks[]. "
+                        + "A tasks[] run is waited for and returned inline, without suspending. "
                         + "Provide this OR conversationId (runId wins when both set)."));
         props.put(PARAM_RUN_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
@@ -198,7 +206,9 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                         + "). If the child hasn't terminated by then a synthetic TIMEOUT "
                         + "announce resumes your turn. Pass 0 to disable the yield timeout — "
                         + "the parent waits until the child terminates via its own spawn-time "
-                        + "runTimeoutSeconds."));
+                        + "runTimeoutSeconds. Applies only when the yield suspends the turn: an "
+                        + "inline wait (a tasks[] child, a task fire) is bounded by the child's "
+                        + "own run timeout."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props
@@ -251,16 +261,13 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         }
 
         final var parentAgentId = callingAgent.id;
-        // Either an error string (returned verbatim to the LLM) OR an
-        // already-terminal structured JSON envelope (when the child raced
-        // ahead of yield's lookup). Both paths short-circuit the sentinel
-        // build below. The resolved run id is returned via the holder so the
-        // watchdog scheduling below can use it without re-querying.
-        var holder = new long[1];
         var callingConvId = ToolContext.conversationId();
-        var shortCircuit = Tx.run(() -> installYield(parsed, parentAgentId, callingConvId, holder));
-        if (shortCircuit != null) return shortCircuit;
-        var runId = holder[0];
+        var target = Tx.run(() -> installYield(parsed, parentAgentId, callingConvId));
+        var answer = target.answer();
+        if (answer != null) return answer;
+        var runId = target.runId();
+        // Outside the transaction: the wait lasts as long as the child runs.
+        if (target.blockAwait()) return SubagentSpawnTool.awaitAsyncOutcome(runId);
 
         // JCLAW-326: arm the yield-timeout watchdog now that the row is
         // flipped. The watchdog fires a synthetic TimeoutException into the
@@ -363,30 +370,33 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         return ParsedArgs.ok(runId, convId, timeout);
     }
 
+    /** What a single-run yield does: return {@code answer} as it is, or block-await or suspend on {@code runId}. */
+    private record Target(@Nullable String answer, long runId, boolean blockAwait) {
+        static Target answering(String answer) { return new Target(answer, 0, false); }
+    }
+
     /**
      * Look up the run (by runId first, falling back to conversationId),
-     * validate parent ownership, then either short-circuit (error /
-     * already-terminal envelope) or flip {@code yielded=true} +
-     * {@code yieldTimeoutSeconds} and return null. {@code runIdOut[0]}
-     * receives the resolved run id on success so the caller can arm the
-     * watchdog without a re-query. Must be called inside an active Tx.
+     * validate parent ownership, then either answer (error /
+     * already-terminal envelope), block-await a run that will never resume
+     * the turn, or flip {@code yielded=true} + {@code yieldTimeoutSeconds}
+     * to suspend on it. Must be called inside an active Tx.
      */
-    private static @Nullable String installYield(ParsedArgs parsed, Long parentAgentId,
-                                                 @Nullable Long callingConvId, long[] runIdOut) {
+    private static Target installYield(ParsedArgs parsed, Long parentAgentId, @Nullable Long callingConvId) {
         SubagentRun run;
         long resolvedRunId;
         if (parsed.runId() != null) {
             resolvedRunId = parsed.runId();
             run = (SubagentRun) SubagentRun.findById(resolvedRunId);
             if (run == null) {
-                return "Error: no SubagentRun found for runId " + resolvedRunId + ".";
+                return Target.answering("Error: no SubagentRun found for runId " + resolvedRunId + ".");
             }
         } else {
             run = SubagentRun.find(
                     "childConversation.id = ?1 ORDER BY startedAt DESC",
                     parsed.conversationId()).first();
             if (run == null) {
-                return "Error: no SubagentRun found for conversationId " + parsed.conversationId() + ".";
+                return Target.answering("Error: no SubagentRun found for conversationId " + parsed.conversationId() + ".");
             }
             resolvedRunId = run.id;
         }
@@ -395,21 +405,24 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // agent's run would let one parent hijack another's suspension
         // semantics.
         if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
-            return "Error: run " + resolvedRunId + " is not owned by the calling agent.";
+            return Target.answering("Error: run " + resolvedRunId + " is not owned by the calling agent.");
         }
         // The run's end resumes the conversation that started it: a yield from any other would hang this turn (JF-166).
         if (run.parentConversation == null || !run.parentConversation.id.equals(callingConvId)) {
-            return "Error: run " + resolvedRunId + " was not started from this conversation; "
-                    + "a turn can wait only on a run its own conversation started.";
+            return Target.answering("Error: run " + resolvedRunId + " was not started from this conversation; "
+                    + "a turn can wait only on a run its own conversation started.");
+        }
+        // Ahead of the status check, so a finished detached run is collected once, as runIds would collect it.
+        if (SubagentAsyncRunner.awaitsInline(resolvedRunId)) {
+            return new Target(null, resolvedRunId, true);
         }
         if (run.status != SubagentRun.Status.RUNNING) {
-            return alreadyTerminalEnvelope(run, resolvedRunId);
+            return Target.answering(alreadyTerminalEnvelope(run, resolvedRunId));
         }
         run.yielded = true;
         run.yieldTimeoutSeconds = parsed.timeoutSeconds();
         run.save();
-        runIdOut[0] = resolvedRunId;
-        return null;
+        return new Target(null, resolvedRunId, false);
     }
 
     /**

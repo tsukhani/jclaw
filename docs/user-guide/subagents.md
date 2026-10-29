@@ -40,7 +40,7 @@ Inline needs a conversation to fold the child into. A [task fire](/guide#subagen
 
 ### `mode=async`
 
-The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), its row in the chat's **subagent list** (the shade under the chat header) shows the outcome: status, how long ago it ended, and for a failed, timed-out, or killed run, the reason. No announce card lands in your conversation unless the parent waits on the run with `subagent_yield` (see [Async plus yield](/guide#subagents-async-yield)).
+The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), its row in the chat's **subagent list** (the shade under the chat header) shows the outcome: status, how long ago it ended, and for a failed, timed-out, or killed run, the reason. No announce card lands in your conversation unless the parent ends its turn to wait for the run with `subagent_yield` (see [Async plus yield](/guide#subagents-async-yield)).
 
 **Use when:** the child's work will take a while and you want to keep talking to the parent, or you want to fan out multiple children at once.
 
@@ -95,7 +95,7 @@ Without `subagent_yield`, web chat shows the result in the subagent list. On Tel
 
 **Groups and guests.** A background result reaches the chat word for word, before the parent sees it. So `async=true` runs in the background only when the owner reads the chat alone: web chat, or the owner's private chat on a channel. In a group, or in a chat with anyone other than the owner, the child runs in the foreground instead. The parent gets the reply with a `note` and writes the answer itself. A `tasks` batch still runs in parallel there. If a background run fails anywhere except the owner's private chat, the chat gets "A background task did not finish. Ask me if you want the details." instead of the error.
 
-**Batch fan-out.** `tasks` starts one async child per entry in a single call. An entry is a task string, or an object `{task, label, agentId}` that gives that child its own label and agent. Mode, context, runtime, model, and run timeout apply to the whole batch. The call returns `run_ids` at once, plus `skipped` for any child that failed to start. Collect the batch with one `subagent_yield` call: pass `runIds`, or pass `all: true` for every uncollected async child in this conversation, whether it came from `tasks` or from `async=true`. A batch collect does not suspend the turn. It waits for every child and returns `{results: [...]}` inline, with each child's `run_id`, `status`, and whole `reply`. A child it was already waiting for when it ended posts no announce card and sends nothing to the chat. A run id that was already collected returns its saved reply again when the run belongs to this conversation. Any other unknown id comes back as `UNKNOWN` without failing the rest. `all: true` with nothing left to collect says so in a `note`, and lists this conversation's ten newest finished runs under `finished` (id and status only), so the parent can read back a reply that never reached it. If the turn stops while the collect waits (you press Stop, or the chat page closes), the wait ends at once and every child stays collectable by the next `subagent_yield`.
+**Batch fan-out.** `tasks` starts one async child per entry in a single call. An entry is a task string, or an object `{task, label, agentId}` that gives that child its own label and agent. Mode, context, runtime, model, and run timeout apply to the whole batch. The call returns `run_ids` at once, plus `skipped` for any child that failed to start. Collect the batch with one `subagent_yield` call: pass `runIds`, or pass `all: true` for every uncollected async child in this conversation, whether it came from `tasks` or from `async=true`. A batch collect does not suspend the turn. It waits for every child and returns `{results: [...]}` inline, with each child's `run_id`, `status`, and whole `reply`. A child it was already waiting for when it ended posts no announce card and sends nothing to the chat. A run id that was already collected returns its saved reply again when the run belongs to this conversation. Any other unknown id comes back as `UNKNOWN` without failing the rest. `all: true` with nothing left to collect says so in a `note`, and lists this conversation's ten newest finished runs under `finished` (id and status only), so the parent can read back a reply that never reached it. If the turn stops while the collect waits (you press Stop, or the chat page closes), the wait ends at once and every child stays collectable by the next `subagent_yield`. A `subagent_yield` with one batch child's `runId` waits for that child the same way and returns its result inline, without suspending the turn.
 
 **Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too. `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire needs the `runId` and refuses a `conversationId` alone, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
 
@@ -236,7 +236,7 @@ Five surfaces exist, each with its own audience. A coding run has one more, its 
 
 ### 1. The announce card (in [Chat](/chat))
 
-This lands in your conversation when an `async` subagent the parent waited on with `subagent_yield` terminates. A run nobody waited on reports in the chat's subagent list instead (surface 5). The card shows the label, the terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. It includes a "View full →" link. That link opens the child's full transcript in the standard chat viewer, read-only, because the child is no longer accepting input.
+This lands in your conversation when an `async` subagent the parent ended its turn to wait for with `subagent_yield` terminates. A run nobody waited on reports in the chat's subagent list instead (surface 5). The card shows the label, the terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. It includes a "View full →" link. That link opens the child's full transcript in the standard chat viewer, read-only, because the child is no longer accepting input.
 
 If the child's reply was cut off by the model's output budget, the announce card shows a small amber *"Reply was truncated by the model"* marker. That marker tells you the summary is not complete.
 
@@ -296,11 +296,11 @@ subagent_spawn
   runTimeoutSeconds int      idle budget (seconds of inactivity), default subagent.defaultRunTimeoutSeconds (300)
 
 subagent_yield
-  runId             string   the run id from a prior async spawn
+  runId             string   the run id from a prior async spawn; a tasks batch child is waited for inline
   runIds            string[] collect a whole batch — waits for all of them, returns results inline
-  all               bool     collect every uncollected batch child (in a task fire, every async child)
+  all               bool     collect every uncollected async child (tasks or async=true) of this conversation or task
   conversationId    string   alternative to runId — the child conversation id
-  timeoutSeconds    int      resume budget, default subagent.defaultYieldTimeoutSeconds (300); 0 disables
+  timeoutSeconds    int      resume budget when the yield ends the turn, default subagent.defaultYieldTimeoutSeconds (300); 0 disables
 
 conversation_history
   runId             string   required

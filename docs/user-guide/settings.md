@@ -784,7 +784,7 @@ Caps, timeout defaults and the model for [Subagents](/guide#subagents):
 | `subagent.maxDepth`               | 1       | How deep the parent → child → grandchild chain can go (1 = no grandchildren).          |
 | `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children a single parent can have in flight.           |
 | `subagent.defaultRunTimeoutSeconds` | 300   | Idle budget (seconds with no activity) for a `subagent_spawn` call that omits `runTimeoutSeconds`. A call-site value overrides. Must be positive; anything else falls back to 300. |
-| `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. |
+| `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. It applies only when the yield ends the turn to wait: a yield that waits inline (for a `tasks` batch child, or in a task fire) uses the child's own run timeout. |
 | `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it (e.g. a cheaper one for large evaluations). |
 
 Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
