@@ -416,7 +416,8 @@ pipeline {
                     // Release notes come from the release commit body: /deploy
                     // writes a human-authored summary paragraph into every
                     // "Release vX.Y.Z" commit, so we surface that on the
-                    // release page. --generate-notes is only the fallback —
+                    // release page, without its Co-Authored-By and Claude-Session
+                    // trailers. --generate-notes is only the fallback —
                     // it builds notes from merged PRs, and this repo pushes
                     // straight to main with no PRs, so on its own it produces
                     // little more than a "Full Changelog" compare link. The
@@ -442,7 +443,7 @@ pipeline {
 
                             : > release-notes.md
                             if [ "\$(git log -1 --format=%s HEAD)" = "Release ${version}" ]; then
-                                git log -1 --format=%b HEAD | sed '/^Co-Authored-By:/d' > release-notes.md
+                                git log -1 --format=%b HEAD | sed -e '/^Co-Authored-By:/d' -e '/^Claude-Session:/d' > release-notes.md
                             fi
                             if grep -q '[^[:space:]]' release-notes.md; then
                                 NOTES_ARG='--notes-file release-notes.md'
