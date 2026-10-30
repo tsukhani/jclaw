@@ -7,6 +7,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | --- | --- |
 | `diagnostics.mjs` | Build and test failures as one JSON array — see below |
 | `diagnostics.test.mjs` | Its parser tests: `node --test bin/diagnostics.test.mjs` |
+| `select-tests.mjs` | The backend test classes a change can reach, for the pre-push and factory gates — see below |
+| `select-tests.test.mjs` | Its tests: `node --test bin/select-tests.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
@@ -89,3 +91,30 @@ Exit 2 covers the case a green-looking empty array would otherwise hide: a build
 failed without javac printing a diagnostic (a Gradle configuration error, a missing
 framework), or a suite that failed with no report recording a failure. The underlying
 output is echoed to stderr so the cause is visible.
+
+## select-tests.mjs
+
+```bash
+node bin/select-tests.mjs                          # origin/main...HEAD, the -Ptests list on stdout
+node bin/select-tests.mjs --base main --json       # the selection with a reason for each class
+./gradlew playAutotest -Ptests="$(node bin/select-tests.mjs)"
+```
+
+It needs compiled classes (`./gradlew compileJava compileTestJava`): it reads the class graph with `jdeps`, which
+takes about a second. It prints one of three things:
+
+- **`NONE`**: nothing in the change reaches a backend test. Examples are frontend, docs, `.sandcastle/` and root
+  `*.md` files, or an `application.conf` edit to the version line or comments only.
+- **`ALL`**: the change touches something no class graph can follow: `conf/` other than `application.conf`, the
+  build files, `.play-version`, `lib/`, or a non-Java file under `app/`.
+- **A comma-separated class list**, made of:
+  - every test class within `--depth` hops (default 2) above a changed `app/` or `test/` class;
+  - for a changed controller, the tests that call its `conf/routes` paths over HTTP;
+  - for any other changed file, the tests whose source names it;
+  - the rule checks: `ArchitectureTest`, `CapabilityRulesTest`, `WallClockDisciplineTest` and every
+    `*ConformanceTest`.
+
+A deleted class selects nothing by itself, because the compile catches whatever still referred to it. The full
+suite is Jenkins' job: anything further than the selected depth is caught there.
+
+Exit 0 printed a selection; exit 2 means there were no compiled classes, or git or jdeps failed.
