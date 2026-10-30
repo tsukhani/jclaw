@@ -44,6 +44,8 @@ export interface Tracker {
   merged(key: string): Promise<void>;
   // The story is Done (Jira) or closed (GitHub), by whoever moved it.
   done(key: string): Promise<boolean>;
+  // The operator finished the story outside the factory; landed is whether its branch reached main.
+  settled(key: string, landed: boolean): Promise<void>;
   comment(key: string, body: string): Promise<void>;
   addLabel(key: string, label: string): Promise<void>;
   removeLabel(key: string, label: string): Promise<void>;

@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
-import { issueLanded, ownerApplied, vetIssue, type Issue } from "./github.ts";
+import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
@@ -277,6 +277,10 @@ check("afk-merge from anyone else does not", ownerApplied(issue({ timelineItems:
 check("a closed issue has landed", issueLanded({ state: "closed", labels: [] }), true);
 check("an open issue labelled afk-merged has landed", issueLanded({ state: "open", labels: [{ name: "afk" }, { name: "afk-merged" }] }), true);
 check("an open issue still in review has not", issueLanded({ state: "open", labels: [{ name: "afk" }, { name: "afk-review" }] }), false);
+check("a story finished by hand that landed drops its in-flight labels and is marked merged", settleLabels(true),
+  { remove: ["afk-running", "afk-review"], add: ["afk-merged"] });
+check("one closed without landing drops them and is not marked merged", settleLabels(false),
+  { remove: ["afk-running", "afk-review"], add: [] });
 
 const brief = (met: boolean[]) => ({ brief: { acceptanceCriteria: met.map((m, i) => ({ criterion: `AC ${i + 1}`, met: m })) } });
 check("a clean report with ordinary files may merge", mergeVerdict(brief([true, true]), []), undefined);

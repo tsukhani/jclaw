@@ -661,7 +661,12 @@ const reconcile = async (candidates: Snapshot[], unread: Set<Tracker>) => {
     const tracker = source(key);
     if (!tracker || running.has(key)) continue;
     try {
-      if (await tracker.done(key)) board.set(key, { state: "merged", sha: landedAs(CHECKOUT, key) ?? null, by: "operator" });
+      if (await tracker.done(key)) {
+        const sha = landedAs(CHECKOUT, key) ?? null;
+        // Labels first: if that fails the story stays in review and the next poll tries again.
+        await tracker.settled(key, sha !== null);
+        board.set(key, { state: "merged", sha, by: "operator" });
+      }
       lastSaid.delete(`done ${key}`);
     } catch (error) {
       note(`done ${key}`, `[factory] could not read whether ${key} is Done: ${errorText(error)}`);

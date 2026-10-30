@@ -108,6 +108,10 @@ const repositoryOf = (configured: string | undefined): string | undefined => {
 export const issueLanded = (issue: { state: string; labels: { name: string }[] }): boolean =>
   issue.state === "closed" || issue.labels.some((l) => l.name === "afk-merged");
 
+// A story finished outside the factory keeps no in-flight label, and is marked merged only if it landed.
+export const settleLabels = (landed: boolean): { remove: string[]; add: string[] } =>
+  ({ remove: ["afk-running", "afk-review"], add: landed ? ["afk-merged"] : [] });
+
 export const githubTracker = (): Tracker | undefined => {
   // Only from FACTORY_HOME/github.env, never .env, which the gateway mounts: no container ever holds the token.
   const env = readEnvFile(GITHUB_ENV_FILE);
@@ -233,6 +237,11 @@ export const githubTracker = (): Tracker | undefined => {
       await removeLabel(key, "afk-review");
     },
     done: async (key) => issueLanded(await api(`${issuesPath}/${number(key)}`)),
+    settled: async (key, landed) => {
+      const { remove, add } = settleLabels(landed);
+      for (const label of add) await addLabel(key, label);
+      for (const label of remove) await removeLabel(key, label);
+    },
     comment: async (key, body) => {
       await api(`${issuesPath}/${number(key)}/comments`, { method: "POST", body: { body } });
     },

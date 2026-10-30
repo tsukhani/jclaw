@@ -156,6 +156,8 @@ export const jira: Tracker = {
     await transitionTo(key, "Done");
   },
   done: async (key) => (await api(`/rest/api/2/issue/${key}?fields=status`)).fields.status.statusCategory.key === "done",
+  // The status is the state here, and reviewing() already dropped afk-running.
+  settled: async () => {},
   comment: async (key, body) => {
     await comment(key, body);
   },
