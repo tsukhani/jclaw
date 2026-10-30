@@ -17,11 +17,11 @@ import memory.ontology.OntologyRecord.Valence;
 import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
 import services.TimezoneResolver;
+import services.grapheval.CaseMeasurement.DecisionModel;
 import services.grapheval.Certifier.ClassWalk;
 import services.grapheval.ExtractionPipeline.CaseRun;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.ExtractionPipeline.Decision;
-import services.grapheval.GraphEvalHarness.DecisionModel;
 import services.grapheval.SequenceScorer.Answered;
 import services.grapheval.SequenceScorer.Judged;
 import services.grapheval.SequenceScorer.Timeline;
@@ -147,7 +147,7 @@ public final class SequenceHarness {
                 }
             }
         }
-        var results = GraphEvalHarness.fanOut(tasks, concurrency);
+        var results = FanOut.run(tasks, concurrency);
         var out = new LinkedHashMap<String, List<List<List<CaseRun>>>>();
         int i = 0;
         for (int r = 0; r < runs; r++) {
@@ -331,16 +331,16 @@ public final class SequenceHarness {
         return SequenceScorer.timeline(answers);
     }
 
-    /** Every {@link GraphEvalHarness#SPOT_CHECK_STRIDE}th chain asked again and compared with {@code first}. */
+    /** Every {@link CaseMeasurement#SPOT_CHECK_STRIDE}th chain asked again and compared with {@code first}. */
     public static SequenceSpotCheck spotCheck(OntologySchema schema, Sequences set, DecisionModel m,
                                               List<List<CaseRun>> first, int concurrency, ZoneId zone) {
         var sample = new ArrayList<Integer>();
-        for (int c = 0; c < set.chains().size(); c += GraphEvalHarness.SPOT_CHECK_STRIDE) sample.add(c);
+        for (int c = 0; c < set.chains().size(); c += CaseMeasurement.SPOT_CHECK_STRIDE) sample.add(c);
         var tasks = new ArrayList<Callable<List<CaseRun>>>();
         for (int c : sample) {
             tasks.add(() -> ask(schema, set.ownerName(), set.chains().get(c), c, m.name(), m.decider(), zone));
         }
-        var again = GraphEvalHarness.fanOut(tasks, concurrency);
+        var again = FanOut.run(tasks, concurrency);
         int decisions = 0;
         int differing = 0;
         for (int s = 0; s < sample.size(); s++) {

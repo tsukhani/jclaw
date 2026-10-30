@@ -243,4 +243,15 @@ class ArchitectureTest extends UnitTest {
                         + "shared parsing and ranking live in services.discovery (JCLAW-999)");
         rule.check(APP_CLASSES);
     }
+
+    /** JCLAW-1487: the sequence harness reaches the shared thread pool through {@code FanOut}, not the case harness. */
+    @Test
+    void sequenceHarnessDoesNotDependOnGraphEvalHarness() {
+        ArchRule rule = noClasses().that().haveNameMatching("services\\.grapheval\\.SequenceHarness(\\$.*)?")
+                .should().dependOnClassesThat()
+                .haveNameMatching("services\\.grapheval\\.GraphEvalHarness(\\$.*)?")
+                .because("SequenceHarness needs only the fan-out and the decision model, which live in FanOut and "
+                        + "CaseMeasurement (JCLAW-1487)");
+        rule.check(APP_CLASSES);
+    }
 }
