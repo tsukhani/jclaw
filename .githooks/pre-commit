@@ -70,6 +70,24 @@ done
 # bash 3.2-compatible array build — `mapfile` is bash 4+ and macOS ships
 # 3.2 by default, so this hook (which is shared across the team) avoids
 # the 4+ builtin to keep everyone's commits working.
+# The packager drops a path that starts with a .distignore line (Play1Plugin's
+# startsWith), not one a gitignore pattern matches, so that layer is checked
+# the same way: git's matcher would report an unanchored name as excluded at
+# every depth while the dist still ships it.
+distignore_matches() {
+    local f p
+    for f in "$@"; do
+        while IFS= read -r p || [[ -n "$p" ]]; do
+            p="${p#"${p%%[![:space:]]*}"}"
+            p="${p%"${p##*[![:space:]]}"}"
+            [[ -z "$p" || "$p" == \#* ]] && continue
+            if [[ "$f" == "$p"* ]]; then
+                echo "$f"
+                break
+            fi
+        done < "$REPO_ROOT/.distignore"
+    done
+}
 added_files=()
 while IFS= read -r line; do
     added_files+=("$line")
@@ -80,13 +98,18 @@ if (( ${#added_files[@]} > 0 )); then
         ignore_file="${layer%%:*}"
         artifact="${layer##*:}"
         [[ -f "$REPO_ROOT/$ignore_file" ]] || continue
-        # git ls-files --cached --exclude-from=FILE --ignored applies
-        # gitignore-syntax patterns from FILE against the index. Restricting
-        # to just-added paths via the trailing pathspec keeps the output
-        # focused on this commit instead of scanning the whole tree.
+        if [[ "$ignore_file" == .distignore ]]; then
+            matcher=(distignore_matches)
+        else
+            # git ls-files --cached --exclude-from=FILE --ignored applies
+            # gitignore-syntax patterns from FILE against the index. Restricting
+            # to just-added paths via the trailing pathspec keeps the output
+            # focused on this commit instead of scanning the whole tree.
+            matcher=(git ls-files --cached --exclude-from="$REPO_ROOT/$ignore_file" --ignored --)
+        fi
         while IFS= read -r match; do
             [[ -n "$match" ]] && ignore_matches+=("${match}|${ignore_file}|${artifact}")
-        done < <(git ls-files --cached --exclude-from="$REPO_ROOT/$ignore_file" --ignored -- "${added_files[@]}")
+        done < <("${matcher[@]}" "${added_files[@]}")
     done
     if (( ${#ignore_matches[@]} > 0 )); then
         echo "[jclaw pre-commit] Heads up — these newly-added files match an ignore rule" >&2

@@ -742,20 +742,24 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
     }
 }
 
-// ── Release bundle: no Playwright driver-bundle ────────────────────────────────
+// ── Release bundle: no Playwright driver-bundle, no test libraries ─────────────
 // driver-bundle is Node.js for all five Playwright platforms (~194 MB, near half the bundle).
 // A bundle install, and the Docker image built from the bundle, downloads its one platform's
 // official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
-// Dev, tests and `play run` keep the jar on the classpath. playBundle fills both lib/ and the
-// launcher's .classpath from playClasspath, so filtering it keeps the jar out of both.
+// ArchUnit, jqwik and MockWebServer are `implementation` only so the fork's test runner sees
+// them (see their declarations); no app/ class loads one.
+// Dev, tests and `play run` keep the jars on the classpath. playBundle fills both lib/ and the
+// launcher's .classpath from playClasspath, so filtering it keeps a jar out of both.
 tasks.named<play.gradle.PlayBundleTask>("playBundle") {
+    val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jqwik-api-", "jqwik-engine-", "mockwebserver3-")
     // Snapshot the sources first: filtering playClasspath into itself would be circular.
     val resolved = files(playClasspath.from.toList())
-    playClasspath.setFrom(resolved.filter { !it.name.startsWith("driver-bundle-") })
+    playClasspath.setFrom(resolved.filter { jar -> excludedJarPrefixes.none { jar.name.startsWith(it) } })
     doFirst {
         // Loud rather than silent: a renamed or removed jar means this filter is stale.
-        check(resolved.any { it.name.startsWith("driver-bundle-") }) {
-            "no driver-bundle jar on playBundle's classpath; the Playwright filter in build.gradle.kts is stale"
+        val stale = excludedJarPrefixes.filter { prefix -> resolved.none { it.name.startsWith(prefix) } }
+        check(stale.isEmpty()) {
+            "no $stale jar on playBundle's classpath; the bundle jar filter in build.gradle.kts is stale"
         }
     }
 }

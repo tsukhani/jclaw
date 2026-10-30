@@ -5,7 +5,7 @@ development machine, run JClaw from source, test it, and find your way around th
 
 - JClaw does not accept outside contributions. [CONTRIBUTING.md](CONTRIBUTING.md) explains why,
   and holds the team's working standards.
-- Coding agents read [AGENTS.md](AGENTS.md), which holds the project's conventions with their reasons.
+- Coding agents read [AGENTS.md](https://github.com/tsukhani/jclaw/blob/main/AGENTS.md), which holds the project's conventions with their reasons.
 - To install and run a released JClaw, read [INSTALL.md](INSTALL.md).
 
 ## Contents
@@ -214,7 +214,7 @@ A human can bypass it for a one-off push (e.g. urgent hotfix) with `JCLAW_SKIP_T
 ## Running evals
 
 Evals measure how well JClaw's agents behave. Tests check that the code works; evals check that an
-agent, on a real model, does the right thing. The datasets live in [`evals/`](evals/README.md).
+agent, on a real model, does the right thing. The datasets live in [`evals/`](https://github.com/tsukhani/jclaw/blob/main/evals/README.md).
 
 Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
 
@@ -231,7 +231,7 @@ Agent behaviour is measured against datasets in `evals/suites/` — tool selecti
 ./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection  # drive a live agent
 ```
 
-Validating and scoring are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. `--capture` is the exception: it drives real agent turns, so it needs the backend running and spends model calls. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
+Validating and scoring are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. `--capture` is the exception: it drives real agent turns, so it needs the backend running and spends model calls. See [evals/README.md](https://github.com/tsukhani/jclaw/blob/main/evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
 
 ### Measuring an agent
 
@@ -272,7 +272,7 @@ measured, so it is left out of the pass rate, but it still fails the run.
 
 Both need the backend running.
 
-`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (required, repeatable), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
+`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (required, repeatable), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](https://github.com/tsukhani/jclaw/blob/main/evals/graph/README.md).
 
 ---
 
@@ -394,4 +394,4 @@ The implementation is entirely original — no code is shared with any of them. 
 - [OpenClaw Reference](https://docs.openclaw.ai)
 - [Nuxt 4 Docs](https://nuxt.com/docs)
 - [JavaClaw Concepts](https://github.com/jobrunr/javaclaw)
-- [docs/README.md](docs/README.md) — every kind of documentation in this repository, and how each is kept accurate
+- [docs/README.md](https://github.com/tsukhani/jclaw/blob/main/docs/README.md) — every kind of documentation in this repository, and how each is kept accurate

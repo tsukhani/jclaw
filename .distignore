@@ -1,3 +1,6 @@
+# Each line is a path prefix from the repository root, not a gitignore pattern: the
+# packager drops a file whose path starts with a line (Play1Plugin's startsWith), so a
+# glob matches nothing and a bare name such as `.gitignore` matches only at the root.
 # Exclude project management artifacts from distribution
 _bmad/
 _bmad-output/
@@ -30,9 +33,17 @@ Jenkinsfile.renovate
 .dockerignore
 .gitignore
 .gitattributes
+sidecar/asr/.gitignore
+sidecar/diarize/.gitignore
+sidecar/fetch/.gitignore
+sidecar/image/.gitignore
+sidecar/stealth/.gitignore
+sidecar/tts/.gitignore
+sidecar/video/.gitignore
 # Developer-only tooling — git hooks, dev container config, AI assistant
-# state, and the Renovate bot's dependency-update config all belong to
-# the source repo, not to a `play dist` tarball an end user unzips.
+# state, the Renovate bot's dependency-update config, GitHub's repository
+# settings and the jenv/asdf Java pin all belong to the source repo, not
+# to a `play dist` tarball an end user unzips.
 # Note: .play-version is NOT excluded — build.gradle.kts reads it at
 # Gradle configure time (every `playStart` / `playRun` evaluation), so
 # it must ship in the dist alongside build.gradle.kts itself.
@@ -41,6 +52,12 @@ Jenkinsfile.renovate
 .claude/
 .sandcastle/
 renovate.json5
+.github/
+.java-version
+# Read only in test mode (%test.application.log.path) and by the release
+# build's ProGuard step, neither of which runs in an install.
+conf/log4j2-test.xml
+conf/proguard-debug-strip.pro
 # Build-time coverage artifacts (Jenkins only; not for the prod zip).
 # bin/ + conf/jacoco-agent.properties ship in the source repo so the
 # `%test.javaagent.path` line in conf/application.conf still resolves
@@ -50,8 +67,7 @@ jacoco.exec
 jacoco.xml
 bin/
 conf/jacoco-agent.properties
-# ArchUnit's frozen-violation baseline for WallClockDisciplineTest and the
-# config knob that regenerates it: both are read only by test/, which is
-# already excluded, so neither belongs in a prod zip.
-archunit_store/
+# The config knob that regenerates archunit_store/'s frozen-violation
+# baselines: read only by test/, which is already excluded, so it does not
+# belong in a prod zip.
 conf/archunit.properties

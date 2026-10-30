@@ -78,7 +78,7 @@ puts in front of the AI model at each step:
 
 A smaller prompt is faster to read, costs less and gives the model less to get wrong.
 
-To measure JClaw's agents yourself, use the test sets in [`evals/`](evals/README.md). They check
+To measure JClaw's agents yourself, use the test sets in [`evals/`](https://github.com/tsukhani/jclaw/blob/main/evals/README.md). They check
 that an agent picks the right tools, returns valid structured answers and answers only from its
 sources. [DEVELOPMENT.md](DEVELOPMENT.md#running-evals) shows you how to run them.
 
