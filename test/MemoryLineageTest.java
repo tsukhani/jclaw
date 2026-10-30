@@ -62,6 +62,45 @@ class MemoryLineageTest extends UnitTest {
     }
 
     @Test
+    void deletingAMidChainRowRepointsItsPredecessorToTheLiveHead() {
+        var first = mem("The user lives in Berlin");
+        var middle = mem("The user lives in Porto");
+        var head = mem("The user lives in Lisbon");
+        first.supersede(middle.id);
+        middle.supersede(head.id);
+
+        ((Memory) Memory.findById(middle.id)).deleteWithLineage();
+
+        assertEquals(head.id, ((Memory) Memory.findById(first.id)).supersededById);
+    }
+
+    @Test
+    void deletingARetiredRoutineRepointsItsAddendaToTheReplacement() {
+        var routine = mem("The user's morning routine is coffee, then news");
+        var replacement = mem("The user's morning routine is tea, then news, then the calendar");
+        var addendum = mem("The user wants the weather checked during their morning routine");
+        addendum.extendsId = routine.id;
+        addendum.save();
+        routine.supersede(replacement.id);
+
+        ((Memory) Memory.findById(routine.id)).deleteWithLineage();
+
+        assertEquals(replacement.id, ((Memory) Memory.findById(addendum.id)).extendsId);
+    }
+
+    @Test
+    void deletingALiveRoutineUnlinksItsAddenda() {
+        var routine = mem("The user's morning routine is coffee, then news");
+        var addendum = mem("The user wants the weather checked during their morning routine");
+        addendum.extendsId = routine.id;
+        addendum.save();
+
+        routine.deleteWithLineage();
+
+        assertNull(((Memory) Memory.findById(addendum.id)).extendsId);
+    }
+
+    @Test
     void deletingAMemoryNothingPointsAtIsUnaffected() {
         var solo = mem("The deploy pipeline requires manual approval");
         solo.deleteWithLineage();

@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import llm.TokenUsageEstimator;
 import mcp.McpViewTools;
 import memory.MemoryAutoCapture;
+import memory.MemoryClusters;
 import memory.MemoryDecay;
 import memory.MemorySafety;
 import memory.MemoryStore;
@@ -918,7 +919,7 @@ public class SystemPromptAssembler {
      * One candidate as recall scored it, for {@link #recall} callers that want to see the
      * reasoning rather than only the outcome (JCLAW-937).
      *
-     * @param selected whether it survived the limit
+     * @param selected whether it survived the limit or was injected with a selected memory's cluster
      */
     public record RecallCandidate(MemoryStore.MemoryEntry entry, double decay,
                                   double score, boolean selected) {}
@@ -999,8 +1000,10 @@ public class SystemPromptAssembler {
         // JCLAW-526: the blend is multiplied by a half-life time decay, so
         // stale facts fade in ranking (never vanish — the factor is floored).
         var now = AppClock.now();
-        var selected = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
+        var ranked = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
                 e -> MemoryDecay.factorFor(e, now));
+        // GH-15: a routine and the addenda linked to it are injected together, past the limit.
+        var selected = MemoryClusters.expand(agentId, ranked, excludeIds, scope);
 
         var selectedIds = selected.stream().map(MemoryStore.MemoryEntry::id).collect(Collectors.toSet());
         var candidates = new ArrayList<RecallCandidate>(hits.size());
@@ -1019,7 +1022,7 @@ public class SystemPromptAssembler {
     /**
      * What the selected set costs as {@link #appendMemories} renders it — bullet and
      * category prefix included, since that is what reaches the prompt. Reported, never
-     * enforced: recall is bounded by {@code memory.recall.limit} and every selected
+     * enforced: recall is bounded by {@code memory.recall.limit} and its clusters, and every selected
      * memory is delivered whole. Truncating here would drop a memory the ranker had
      * already judged relevant, for the incidental reason that it is wordy, and would do
      * it silently (JCLAW-955).

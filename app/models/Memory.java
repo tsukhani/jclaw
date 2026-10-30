@@ -41,7 +41,8 @@ import java.util.List;
 @Table(name = "memory", indexes = {
         @Index(name = "idx_memory_agent", columnList = "agent_id"),
         // JCLAW-40: core-memory auto-load ranks by importance within an agent.
-        @Index(name = "idx_memory_agent_importance", columnList = "agent_id,importance")
+        @Index(name = "idx_memory_agent_importance", columnList = "agent_id,importance"),
+        @Index(name = "idx_memory_extends", columnList = "extends_id")
 })
 public class Memory extends Model {
 
@@ -135,6 +136,13 @@ public class Memory extends Model {
      */
     @Column(name = "superseded_by_id")
     public Long supersededById;
+
+    /**
+     * The older memory describing the routine, procedure or list this one adds to (GH-15). A plain id
+     * like {@link #supersededById}; recall injects the rows linked this way as one cluster.
+     */
+    @Column(name = "extends_id")
+    public Long extendsId;
 
     /** Conversation of the turn this memory was captured from (JCLAW-1318); null outside a chat. */
     @Column(name = "source_conversation_id")
@@ -325,17 +333,22 @@ public class Memory extends Model {
     }
 
     /**
-     * Delete this memory, first clearing any supersession pointer aimed at it (JCLAW-529).
+     * Delete this memory, first re-pointing any supersession or extension pointer aimed at it (JCLAW-529).
      *
      * <p>{@code supersededById} is a bare column with no foreign key — only {@code agent_id}
      * carries one — so nothing at the database level stops a delete from leaving retired
      * rows pointing at an id that no longer exists. A live store had 265 such pointers, each
      * one a lineage chain that cannot be walked to its surviving descendant.
      *
-     * <p>Recall is unaffected either way: it filters on {@code supersededAt}, never on this
-     * pointer. What breaks is the audit question "what replaced this?", and the answer once
-     * the successor is gone is "nothing that still exists" — which null records faithfully
-     * and a dangling id does not.
+     * <p>A row this one superseded is re-pointed to this row's own {@code supersededById}, so a
+     * chain stays walkable to its live head past a deleted middle link — recall's cluster
+     * expansion (GH-15) walks it. When this row has no successor the pointer becomes null:
+     * the answer to "what replaced this?" is then "nothing that still exists", which null
+     * records faithfully and a dangling id does not.
+     *
+     * <p>A row whose {@code extendsId} names this one is re-pointed to this row's own
+     * {@code supersededById}: an addendum of a retired routine still reaches the replacement,
+     * and one of a live routine is unlinked.
      *
      * <p>Deliberately not a {@code @PreRemove} hook: modifying other entities from a
      * lifecycle callback is undefined under JPA, and this runs a bulk update.
@@ -344,11 +357,17 @@ public class Memory extends Model {
         if (id != null) {
             // Entity updates, not a bulk JPQL one: a bulk update bypasses the persistence
             // context, so an entity already loaded in this request would keep reporting the
-            // pointer this method just cleared. The row count here is the number of rows
+            // pointer this method just changed. The row count here is the number of rows
             // superseded by this one — almost always zero or one.
             List<Memory> referencing = find("supersededById = ?1", id).fetch();
             for (var m : referencing) {
-                m.supersededById = null;
+                m.supersededById = supersededById;
+                m.save();
+            }
+            // An addendum of a retired routine follows it to the replacement; of a live one, it is unlinked.
+            List<Memory> extending = find("extendsId = ?1", id).fetch();
+            for (var m : extending) {
+                m.extendsId = supersededById;
                 m.save();
             }
             // A derivation link outlives its input and keeps the copied turn refs (JCLAW-1318).
