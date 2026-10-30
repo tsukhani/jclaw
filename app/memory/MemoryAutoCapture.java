@@ -884,13 +884,22 @@ public final class MemoryAutoCapture {
             survivorTokens.add(toks);
             // Same-subject shortlist: moderate overlap below the dup threshold
             // (at/above it the candidate would have been NOOPed as a duplicate).
-            int added = 0;
-            for (int i = 0; i < poolRows.size() && added < shortlistCap; i++) {
+            // Closest first, so a row covering much of the candidate is not capped out by newer weak matches.
+            var related = new ArrayList<Map.Entry<Integer, Double>>();
+            for (int i = 0; i < poolRows.size(); i++) {
                 double j = jaccard(toks.raw(), poolTokens.get(i).raw());
-                boolean related = j >= shortlistMin
-                        || candidateShare(toks.content(), poolTokens.get(i).content()) >= shortlistContainment;
-                if (related && j < dupThreshold && shortlisted.add(poolRows.get(i).id)) {
-                    shortlist.add(new Existing(poolRows.get(i).id, poolRows.get(i).text));
+                double share = candidateShare(toks.content(), poolTokens.get(i).content());
+                if ((j >= shortlistMin || share >= shortlistContainment) && j < dupThreshold) {
+                    related.add(Map.entry(i, Math.max(j, share)));
+                }
+            }
+            related.sort(Map.Entry.<Integer, Double>comparingByValue().reversed());
+            int added = 0;
+            for (var r : related) {
+                if (added >= shortlistCap) break;
+                var row = poolRows.get(r.getKey());
+                if (shortlisted.add(row.id)) {
+                    shortlist.add(new Existing(row.id, row.text));
                     added++;
                 }
             }

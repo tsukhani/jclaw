@@ -747,6 +747,40 @@ class MemoryConsolidationTest extends UnitTest {
         assertNull(judgedAgainst("shortlist-short-row", stored, candidate), "an empty shortlist never reaches the judge");
     }
 
+    /** {@code shared} of the candidate's words, padded with distinct filler to twenty words. */
+    private static String rowSharing(List<String> candidateWords, int shared, int fillerStart) {
+        var words = new ArrayList<>(candidateWords.subList(0, shared));
+        for (int n = fillerStart; words.size() < 20; n++) words.add("zor" + (char) ('a' + n / 26) + (char) ('a' + n % 26) + "uk");
+        return String.join(" ", words);
+    }
+
+    @Test
+    void aFullShortlistKeepsTheRowsCoveringMostOfTheCandidateOverNewerOnes() {
+        var candidateWords = new ArrayList<String>();
+        for (int k = 0; k < 20; k++) candidateWords.add("kal" + (char) ('a' + k) + "vop");
+        var candidate = String.join(" ", candidateWords);
+        var strong = rowSharing(candidateWords, 12, 0);
+        var decoys = new ArrayList<String>();
+        for (int shared = 6; shared <= 10; shared++) decoys.add(rowSharing(candidateWords, shared, 20 * shared));
+        assertEquals(0.6, candidateShare(candidate, strong), 1e-9);
+        assertEquals(0.3, candidateShare(candidate, decoys.getFirst()), 1e-9);
+        assertEquals(0.5, candidateShare(candidate, decoys.getLast()), 1e-9);
+
+        var agent = agentId("shortlist-ranked");
+        MemoryStoreFactory.get().store(agent, strong, "fact", 0.7);
+        for (var d : decoys) MemoryStoreFactory.get().store(agent, d, "fact", 0.7);
+        var seen = new AtomicReference<String>();
+        MemoryAutoCapture.capture(agent, "shortlist-ranked", candidate, "Noted.", msgs -> extractorJson(candidate),
+                msgs -> {
+                    var rendered = String.valueOf(msgs.get(1).content());
+                    seen.set(rendered.substring(rendered.indexOf("EXISTING:")));
+                    return "{\"supersessions\":[],\"extensions\":[]}";
+                }, freshBreaker());
+
+        assertEquals("EXISTING:\n0: " + strong + "\n1: " + decoys.get(4) + "\n2: " + decoys.get(3)
+                + "\n3: " + decoys.get(2) + "\n4: " + decoys.get(1) + "\n", seen.get());
+    }
+
     // ─── GH-15: the shipped prompts ──────────────────────────────────────────
 
     @Test
