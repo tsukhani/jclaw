@@ -2,7 +2,7 @@
 /**
  * How many memories reach the prompt.
  *
- * These two counts are the ONLY bounds on their blocks. The token budgets that used
+ * These counts are the ONLY bounds on their blocks. The token budgets that used
  * to sit alongside them were removed (JCLAW-955, JCLAW-979) because they dropped
  * whichever memory happened to be verbose rather than whichever ranked lowest, and
  * did it silently. So what is set here decides the whole memory footprint of a turn,
@@ -10,34 +10,50 @@
  */
 const { configValue, saveField, saving } = useSettingsConfig()
 
-/** Mirrors the code defaults in agents.SystemPromptAssembler. */
+/** Mirrors the code defaults in agents.SystemPromptAssembler, memory.MemoryClusters and memory.MemoryAutoCapture. */
 const MemoryLimitKeys = {
   coreMaxCount: 'memory.coreload.maxCount',
   recallLimit: 'memory.recall.limit',
+  clusterMax: 'memory.recall.clusterMax',
+  shortlistContainment: 'memory.consolidation.shortlist.minContainment',
 } as const
 
 const savedCoreMaxCount = computed(() => configValue(MemoryLimitKeys.coreMaxCount, '20'))
 const savedRecallLimit = computed(() => configValue(MemoryLimitKeys.recallLimit, '10'))
+const savedClusterMax = computed(() => configValue(MemoryLimitKeys.clusterMax, '10'))
+const savedShortlistContainment = computed(() => configValue(MemoryLimitKeys.shortlistContainment, '0.3'))
 
 const coreMaxCount = ref(savedCoreMaxCount.value)
 const recallLimit = ref(savedRecallLimit.value)
+const clusterMax = ref(savedClusterMax.value)
+const shortlistContainment = ref(savedShortlistContainment.value)
 
-const isDirty = computed(() =>
-  coreMaxCount.value !== savedCoreMaxCount.value || recallLimit.value !== savedRecallLimit.value)
+const fields = [
+  { key: MemoryLimitKeys.coreMaxCount, value: coreMaxCount, saved: savedCoreMaxCount },
+  { key: MemoryLimitKeys.recallLimit, value: recallLimit, saved: savedRecallLimit },
+  { key: MemoryLimitKeys.clusterMax, value: clusterMax, saved: savedClusterMax },
+  { key: MemoryLimitKeys.shortlistContainment, value: shortlistContainment, saved: savedShortlistContainment },
+]
 
-/** Both are counts of whole memories, so below 1 silently disables the block. */
+const isDirty = computed(() => fields.some(f => String(f.value.value) !== f.saved.value))
+
+const isCount = (value: string) => Number.isInteger(Number(value)) && Number(value) >= 1
+
+/** The counts are whole memories, so below 1 silently disables a block; the overlap is a share of words. */
 const isValid = computed(() =>
-  Number.isInteger(Number(coreMaxCount.value)) && Number(coreMaxCount.value) >= 1
-  && Number.isInteger(Number(recallLimit.value)) && Number(recallLimit.value) >= 1)
+  isCount(String(coreMaxCount.value)) && isCount(String(recallLimit.value)) && isCount(String(clusterMax.value))
+  && Number(shortlistContainment.value) > 0 && Number(shortlistContainment.value) <= 1)
 
 const { saveError, attempt } = useSaveAttempt()
 
 async function saveLimits() {
   if (!isDirty.value || !isValid.value) return
+  // Only changed fields, so an unset key keeps following its code default.
   // saveField refreshes after each write, so one that lands before another fails still shows.
   await attempt(async () => {
-    await saveField(MemoryLimitKeys.coreMaxCount, String(Number(coreMaxCount.value)))
-    await saveField(MemoryLimitKeys.recallLimit, String(Number(recallLimit.value)))
+    for (const f of fields) {
+      if (String(f.value.value) !== f.saved.value) await saveField(f.key, String(Number(f.value.value)))
+    }
   })
 }
 </script>
@@ -97,6 +113,51 @@ async function saveLimits() {
           </p>
         </div>
 
+        <div>
+          <label
+            for="memory-cluster-max"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Linked memories recalled together</span>
+            <input
+              id="memory-cluster-max"
+              v-model="clusterMax"
+              type="number"
+              min="1"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-cluster-max"
+            >
+          </label>
+          <p class="mt-1 text-xs text-fg-muted">
+            When a recalled memory is linked to others, such as a routine and the steps added to it later,
+            they are recalled together, up to this many. They come on top of the recalled memories above.
+          </p>
+        </div>
+
+        <div>
+          <label
+            for="memory-shortlist-containment"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Consolidation overlap</span>
+            <input
+              id="memory-shortlist-containment"
+              v-model="shortlistContainment"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-shortlist-containment"
+            >
+          </label>
+          <p class="mt-1 text-xs text-fg-muted">
+            When a new memory is saved, an existing one holding at least this share of its words is checked
+            to see whether the new one replaces or extends it. Words found in most of an agent's memories,
+            such as your name, are not counted.
+          </p>
+        </div>
+
         <div class="flex items-center gap-2">
           <button
             type="button"
@@ -111,7 +172,7 @@ async function saveLimits() {
             v-if="!isValid"
             class="text-xs text-red-700 dark:text-red-400"
             data-testid="memory-limits-invalid"
-          >Both limits must be a whole number of at least 1.</span>
+          >Each count must be a whole number of at least 1, and the overlap above 0 and at most 1.</span>
         </div>
       </div>
       <ApiErrorAlert

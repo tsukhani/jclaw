@@ -16,6 +16,8 @@ import llm.routing.ModelRouter;
 import llm.routing.RouterClassifier;
 import llm.routing.RouterPolicy;
 import memory.JpaMemoryStore;
+import memory.MemoryAutoCapture;
+import memory.MemoryClusters;
 import memory.MemoryReranker;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
@@ -381,6 +383,10 @@ public class ConfigService {
             atLeast(JpaMemoryStore.KEY_RRF_K, 0, " must be a non-negative integer."),
             (key, value) -> key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)
                     ? "memory.recall.minCosine must be a finite number between -1.0 and 1.0." : null,
+            // GH-15: a bad cluster size reads as the default, and a share of 0 or less shows the judge every row.
+            atLeast(MemoryClusters.CLUSTER_MAX_KEY, 1, " must be a whole number of memories, at least 1."),
+            (key, value) -> key.equals(MemoryAutoCapture.SHORTLIST_CONTAINMENT_KEY) && !isShare(value)
+                    ? key + " must be a number above 0 and at most 1." : null,
             under(WebScrapeSettings.PREFIX, WebScrapeSettings::rejectionFor),
             // JCLAW-1222: a model list naming what is not registered would route to nothing, and silently.
             under(RouterPolicy.PREFIX, RouterPolicy::rejectionFor),
@@ -674,6 +680,16 @@ public class ConfigService {
         try {
             double v = Double.parseDouble(value == null ? "" : value.trim());
             return Double.isFinite(v) && v >= -1.0 && v <= 1.0;
+        } catch (NumberFormatException _) {
+            return false;
+        }
+    }
+
+    /** A share of words: finite, above 0 and at most 1. */
+    private static boolean isShare(String value) {
+        try {
+            double v = Double.parseDouble(value == null ? "" : value.trim());
+            return Double.isFinite(v) && v > 0 && v <= 1.0;
         } catch (NumberFormatException _) {
             return false;
         }

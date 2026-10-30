@@ -27,6 +27,8 @@ import java.util.TreeMap;
  */
 public final class MemoryClusters {
 
+    public static final String CLUSTER_MAX_KEY = "memory.recall.clusterMax";
+
     /** Rows one cluster's traversal may discover before it stops. */
     static final int MAX_VISITED = 50;
 
@@ -51,7 +53,7 @@ public final class MemoryClusters {
         var linked = linkedSeeds(pk, byId.keySet(), scope);
         if (linked.isEmpty()) return selected;
 
-        int clusterMax = Math.max(1, ConfigService.getInt("memory.recall.clusterMax", 10));
+        int clusterMax = Math.max(1, ConfigService.getInt(CLUSTER_MAX_KEY, 10));
         var out = new ArrayList<MemoryStore.MemoryEntry>();
         var emitted = new HashSet<Long>();
         for (var entry : selected) {

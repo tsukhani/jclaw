@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { setResponseStatus } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { looksLikeEmbeddingModel } from '~/utils/embeddingModels'
@@ -104,6 +104,46 @@ describe('Settings page — Memory Embeddings', () => {
 
     expect((component.find('[data-testid="memory-core-max-count"]').element as HTMLInputElement).value).toBe('20')
     expect((component.find('[data-testid="memory-recall-limit"]').element as HTMLInputElement).value).toBe('10')
+    expect((component.find('[data-testid="memory-cluster-max"]').element as HTMLInputElement).value).toBe('10')
+    expect((component.find('[data-testid="memory-shortlist-containment"]').element as HTMLInputElement).value).toBe('0.3')
+  })
+
+  it.each([
+    ['memory-cluster-max', '1', true],
+    ['memory-cluster-max', '0', false],
+    ['memory-cluster-max', '2.5', false],
+    ['memory-shortlist-containment', '1', true],
+    ['memory-shortlist-containment', '1.01', false],
+    ['memory-shortlist-containment', '0.01', true],
+    ['memory-shortlist-containment', '0', false],
+  ])('%s set to %s can be saved: %s', async (testid, value, valid) => {
+    baseEndpoints()
+    const component = await mountSettingsSection('memory-limits')
+
+    await component.find(`[data-testid="${testid}"]`).setValue(value)
+    await flushPromises()
+
+    expect(component.find('[data-testid="memory-limits-invalid"]').exists()).toBe(!valid)
+    expect((component.find('[data-testid="memory-limits-save"]').element as HTMLButtonElement).disabled).toBe(!valid)
+  })
+
+  it('saves only the field that changed, so an untouched key keeps its code default', async () => {
+    baseEndpoints()
+    const writes: unknown[] = []
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        writes.push(await readBody(event))
+        return { status: 'ok' }
+      },
+    })
+    const component = await mountSettingsSection('memory-limits')
+
+    await component.find('[data-testid="memory-shortlist-containment"]').setValue('0.45')
+    await component.find('[data-testid="memory-limits-save"]').trigger('click')
+    await flushPromises()
+
+    expect(writes).toEqual([{ key: 'memory.consolidation.shortlist.minContainment', value: '0.45' }])
   })
 
   it('refuses to save a limit below one', async () => {

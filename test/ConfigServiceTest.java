@@ -484,6 +484,27 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("0.6", ConfigService.get(memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE));
     }
 
+    @Test
+    void aClusterSizeMustBeAWholeNumberOfAtLeastOne() {
+        var refused = "memory.recall.clusterMax must be a whole number of memories, at least 1.";
+        assertNull(ConfigService.rejectionFor(memory.MemoryClusters.CLUSTER_MAX_KEY, "1"));
+        assertEquals(refused, ConfigService.rejectionFor(memory.MemoryClusters.CLUSTER_MAX_KEY, "0"));
+        assertEquals(refused, ConfigService.rejectionFor(memory.MemoryClusters.CLUSTER_MAX_KEY, "2.5"));
+        assertEquals(refused, ConfigService.rejectionFor(memory.MemoryClusters.CLUSTER_MAX_KEY, "ten"));
+    }
+
+    @Test
+    void aShortlistOverlapMustBeAboveZeroAndAtMostOne() {
+        var key = memory.MemoryAutoCapture.SHORTLIST_CONTAINMENT_KEY;
+        var refused = "memory.consolidation.shortlist.minContainment must be a number above 0 and at most 1.";
+        assertNull(ConfigService.rejectionFor(key, "1"));
+        assertNull(ConfigService.rejectionFor(key, "0.01"));
+        assertEquals(refused, ConfigService.rejectionFor(key, "1.01"));
+        assertEquals(refused, ConfigService.rejectionFor(key, "0"));
+        assertEquals(refused, ConfigService.rejectionFor(key, "NaN"));
+        assertEquals(refused, ConfigService.rejectionFor(key, "a third"));
+    }
+
     // --- setWithSideEffects: settings moved out of application.conf ---
 
     @Test

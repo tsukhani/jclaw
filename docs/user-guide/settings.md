@@ -927,12 +927,14 @@ LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) pag
 
 ## Memory: Limits
 
-How many memories reach the prompt. These two counts are the *only* bound on their blocks, so between them they decide memory's entire footprint in a turn, which is why they sit here rather than in the config table alone. Both count whole memories; a value below 1 disables that block.
+How many memories reach the prompt. These counts are the *only* bound on their blocks, so between them they decide memory's entire footprint in a turn, which is why they sit here rather than in the config table alone. Each counts whole memories; a value below 1 disables that block. Save writes only the fields you changed.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `memory.coreload.maxCount` | 20 | Core memories loaded into the prompt on every turn. |
 | `memory.recall.limit` | 10 | Memories recalled per turn. |
+| `memory.recall.clusterMax` | 10 | **Linked memories recalled together**: when a recalled memory is linked to others, such as a routine and the steps added to it later, they come in together, up to this many. These come on top of `memory.recall.limit`. |
+| `memory.consolidation.shortlist.minContainment` | 0.3 | **Consolidation overlap**: a stored memory holding at least this share of a new memory's words is checked to see whether the new one replaces or extends it. Words found in most of an agent's memories, such as your name, are not counted. Above 0, at most 1. |
 
 ## Memory: Embeddings
 

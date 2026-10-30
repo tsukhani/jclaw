@@ -781,6 +781,35 @@ class MemoryConsolidationTest extends UnitTest {
                 + "\n3: " + decoys.get(2) + "\n4: " + decoys.get(1) + "\n", seen.get());
     }
 
+    @Test
+    void aWordInEveryMemoryAdmitsNothingButASharedRareWordStillDoes() {
+        var agent = agentId("shortlist-common-word");
+        var unrelated = new ArrayList<String>();
+        for (int k = 0; k < 24; k++) {
+            var letter = (char) ('a' + k);
+            unrelated.add("tarvok zor" + letter + "auk zor" + letter + "buk zor" + letter + "cuk");
+        }
+        for (var text : unrelated) MemoryStoreFactory.get().store(agent, text, "fact", 0.7);
+        var match = "tarvok plemvat kesdur volnap hesmik dorpal jintor balmuk sopret fimlad";
+        MemoryStoreFactory.get().store(agent, match, "fact", 0.7);
+        var candidate = "tarvok plemvat quorbat";
+        var c = MemorySimilarity.Tokens.of(candidate);
+        assertTrue(MemorySimilarity.jaccard(c.raw(), MemorySimilarity.Tokens.of(match).raw()) < 0.2,
+                "only containment can admit the match");
+        assertEquals(1.0 / 3, candidateShare(candidate, unrelated.getFirst()), 1e-9,
+                "as built, the shared name alone carries a third of the candidate");
+
+        var seen = new AtomicReference<String>();
+        MemoryAutoCapture.capture(agent, "shortlist-common-word", candidate, "Noted.", msgs -> extractorJson(candidate),
+                msgs -> {
+                    var rendered = String.valueOf(msgs.get(1).content());
+                    seen.set(rendered.substring(rendered.indexOf("EXISTING:")));
+                    return "{\"supersessions\":[],\"extensions\":[]}";
+                }, freshBreaker());
+
+        assertEquals("EXISTING:\n0: " + match + "\n", seen.get());
+    }
+
     // ─── GH-15: the shipped prompts ──────────────────────────────────────────
 
     @Test

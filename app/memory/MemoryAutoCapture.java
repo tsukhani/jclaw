@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -823,6 +824,14 @@ public final class MemoryAutoCapture {
      * <p>Both legs keep to {@code scope} (JF-147), so a turn's candidates meet only the rows it may
      * dedup against or supersede.
      */
+    public static final String SHORTLIST_CONTAINMENT_KEY = "memory.consolidation.shortlist.minContainment";
+
+    // Measured on a 1,038-memory store (2026-10-30): the operator's name, in 93% of rows, let the containment rule
+    // admit 12.5 unrelated rows per new memory at 0.3; leaving out words in over 10% of rows cut that to 1.3.
+    private static final double COMMON_WORD_SHARE = 0.10;
+    // Below this many recent rows, 10% is one or two memories, and a word they share is a subject, not filler.
+    private static final int COMMON_WORD_MIN_ROWS = 20;
+
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan,
                                           Set<Integer> semanticDupes, Set<Long> corroborated,
@@ -830,7 +839,7 @@ public final class MemoryAutoCapture {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
         // GH-15: a short addendum shares little of a long routine's wording, so Jaccard alone never
         // pairs them; this is the share of the candidate's content words the row also holds.
-        double shortlistContainment = ConfigService.getDouble("memory.consolidation.shortlist.minContainment", 0.3);
+        double shortlistContainment = ConfigService.getDouble(SHORTLIST_CONTAINMENT_KEY, 0.3);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
         // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
         // pairs with no false positive, 0.85 catches 8. Below 0.80 unrelated facts
@@ -848,9 +857,12 @@ public final class MemoryAutoCapture {
         int retrievalLimit = ConfigService.getInt("memory.autocapture.dedup.retrievalLimit", 25);
 
         var pool = new LinkedHashMap<Long, Memory>();
-        for (var m : Memory.findByAgent(agentKey, dedupScan, scope)) {
+        var recent = Memory.findByAgent(agentKey, dedupScan, scope);
+        for (var m : recent) {
             pool.put(m.id, m);
         }
+        // From the recent rows alone: the search hits below are chosen by the candidate's own words.
+        var common = commonWords(recent);
         for (var c : candidates) {
             for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit, scope, hiddenGuestIds)) {
                 pool.putIfAbsent(hit.memory().id, hit.memory());
@@ -888,7 +900,7 @@ public final class MemoryAutoCapture {
             var related = new ArrayList<Map.Entry<Integer, Double>>();
             for (int i = 0; i < poolRows.size(); i++) {
                 double j = jaccard(toks.raw(), poolTokens.get(i).raw());
-                double share = candidateShare(toks.content(), poolTokens.get(i).content());
+                double share = candidateShare(toks.content(), poolTokens.get(i).content(), common);
                 if ((j >= shortlistMin || share >= shortlistContainment) && j < dupThreshold) {
                     related.add(Map.entry(i, Math.max(j, share)));
                 }
@@ -919,14 +931,29 @@ public final class MemoryAutoCapture {
     }
 
     /**
-     * {@code |candidate ∩ row| / |candidate|}. Not {@link MemorySimilarity#containment}: its
-     * smaller-set denominator scores a two-word row sharing one word at 0.5 (GH-15).
+     * {@code |candidate ∩ row| / |candidate|} over the candidate's words outside {@code common}. Not
+     * {@link MemorySimilarity#containment}: its smaller-set denominator scores a two-word row sharing one word at 0.5 (GH-15).
      */
-    private static double candidateShare(Set<String> candidate, Set<String> row) {
-        if (candidate.isEmpty()) return 0;
-        int shared = 0;
-        for (var t : candidate) if (row.contains(t)) shared++;
-        return (double) shared / candidate.size();
+    private static double candidateShare(Set<String> candidate, Set<String> row, Set<String> common) {
+        int counted = 0, shared = 0;
+        for (var t : candidate) {
+            if (common.contains(t)) continue;
+            counted++;
+            if (row.contains(t)) shared++;
+        }
+        return counted == 0 ? 0 : (double) shared / counted;
+    }
+
+    /** Content words in more than {@link #COMMON_WORD_SHARE} of {@code rows}, such as the operator's name; none for a small store. */
+    private static Set<String> commonWords(List<Memory> rows) {
+        if (rows.size() < COMMON_WORD_MIN_ROWS) return Set.of();
+        var counts = new HashMap<String, Integer>();
+        for (var m : rows) for (var t : MemorySimilarity.contentTokens(m.text)) counts.merge(t, 1, Integer::sum);
+        var common = new HashSet<String>();
+        counts.forEach((t, n) -> {
+            if (n > COMMON_WORD_SHARE * rows.size()) common.add(t);
+        });
+        return common;
     }
 
     /**
