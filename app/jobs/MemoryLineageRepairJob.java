@@ -17,8 +17,9 @@ import services.Tx;
  * descendant. {@code deleteWithLineage} stops new ones; this repairs the ones already
  * written.
  *
- * <p>Recall never reads the pointer — it filters on {@code supersededAt} — so this fixes
- * an audit question rather than a retrieval one, and is safe to run at any time.
+ * <p>Recall filters on {@code supersededAt}, and its cluster expansion follows the pointer
+ * only to live rows, so a dangling one hides nothing from it: this fixes an audit question
+ * rather than a retrieval one, and is safe to run at any time.
  *
  * <p>Idempotent, and cheap once it has run: the {@code WHERE} matches nothing on a
  * repaired store, so the steady-state cost is one indexed-scan UPDATE per boot. Left in

@@ -1,15 +1,25 @@
+import llm.LlmTypes.ChatMessage;
 import memory.MemoryAutoCapture;
+import memory.MemoryProvenance;
+import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.EventLogger;
+import services.Tx;
+import utils.AppClock;
 import utils.CircuitBreaker;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-525: memory consolidation — supersession and conflict resolution.
@@ -394,5 +404,382 @@ class MemoryConsolidationTest extends UnitTest {
 
         assertNotNull(Memory.<Memory>findById(berlinId).supersededAt,
                 "the shared-subject guard must not block a genuine correction");
+    }
+
+    // ─── GH-15: the judge links an addendum to the routine it extends ────────
+
+    private static final String ROUTINE =
+            "The user's morning routine is to make coffee, read the news and review the calendar";
+    private static final String WEATHER = "The user wants checking the weather added to their morning routine";
+    private static final String WEATHER_TURN = "Please add checking the weather to my morning routine.";
+
+    @Test
+    void parsesExtensionsKeepingTheFirstForEachNewMemory() {
+        assertEquals(Map.of(0, 2, 1, 0), MemoryAutoCapture.parseExtensions(
+                "{\"supersessions\":[],\"extensions\":[{\"new\":0,\"extends\":2},{\"new\":1,\"extends\":0},"
+                        + "{\"new\":0,\"extends\":1}]}", 2, 3));
+    }
+
+    @Test
+    void extensionIndicesAtTheEdgesOfTheirRanges() {
+        assertEquals(Map.of(1, 2), MemoryAutoCapture.parseExtensions(
+                "{\"extensions\":[{\"new\":1,\"extends\":2}]}", 2, 3));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(
+                "{\"extensions\":[{\"new\":2,\"extends\":0}]}", 2, 3));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(
+                "{\"extensions\":[{\"new\":0,\"extends\":3}]}", 2, 3));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(
+                "{\"extensions\":[{\"new\":-1,\"extends\":0},{\"new\":0,\"extends\":-1}]}", 2, 3));
+    }
+
+    @Test
+    void malformedExtensionsYieldNoLinks() {
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(
+                "{\"supersessions\":[{\"new\":0,\"old\":[0]}]}", 1, 1));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions("{\"extensions\":\"oops\"}", 1, 1));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(
+                "{\"extensions\":[{\"new\":0,\"extends\":\"0\"},{\"new\":0,\"extends\":0.5},"
+                        + "{\"new\":0,\"extends\":null},{\"new\":0},[0,0]]}", 1, 1));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions("not json", 1, 1));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions("", 1, 1));
+        assertEquals(Map.of(), MemoryAutoCapture.parseExtensions(null, 1, 1));
+    }
+
+    /** The EXISTING index the judge was shown {@code text} at, or -1. */
+    private static int existingIndex(List<ChatMessage> msgs, String text) {
+        var rendered = String.valueOf(msgs.get(1).content());
+        for (var line : rendered.substring(rendered.indexOf("EXISTING:")).split("\n")) {
+            int colon = line.indexOf(": ");
+            if (colon > 0 && line.substring(colon + 2).equals(text)) return Integer.parseInt(line.substring(0, colon));
+        }
+        return -1;
+    }
+
+    private static String extendsJson(int existing) {
+        return "{\"supersessions\":[],\"extensions\":[{\"new\":0,\"extends\":" + existing + "}]}";
+    }
+
+    private static String snippet(String text) {
+        return text.length() <= 60 ? text : text.substring(0, 57) + "...";
+    }
+
+    private static List<String> linkEvents(List<EventLogger.Captured> events) {
+        return events.stream().map(EventLogger.Captured::message)
+                .filter(m -> m.contains("linked as an extension") || m.contains("unlinked from")).toList();
+    }
+
+    private Memory onlyNewRow(String agent, Long... existing) {
+        var fresh = new ArrayList<Memory>(Memory.<Memory>find("agent.id = ?1 ORDER BY id", Long.valueOf(agent)).fetch());
+        fresh.removeIf(m -> List.of(existing).contains(m.id));
+        assertEquals(1, fresh.size(), "exactly one row captured: " + fresh);
+        return fresh.getFirst();
+    }
+
+    private List<EventLogger.Captured> captureWeather(String agent, MemoryAutoCapture.Consolidator judge,
+                                                      MemoryProvenance provenance) {
+        return EventLogger.captureForTest(() -> MemoryAutoCapture.capture(agent, "routine", WEATHER_TURN, "Done.",
+                msgs -> extractorJson(WEATHER), judge, freshBreaker(), provenance));
+    }
+
+    private List<EventLogger.Captured> captureWeather(String agent, MemoryAutoCapture.Consolidator judge) {
+        return captureWeather(agent, judge, MemoryProvenance.extractor("m"));
+    }
+
+    @Test
+    void anAddendumIsLinkedToTheRoutineItExtends() {
+        var agent = agentId("ext-link");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+
+        var events = captureWeather(agent, msgs -> extendsJson(existingIndex(msgs, ROUTINE)));
+
+        var added = onlyNewRow(agent, routineId);
+        assertEquals(WEATHER, added.text);
+        assertEquals(routineId, added.extendsId);
+        assertNull(Memory.<Memory>findById(routineId).supersededAt, "an extension never supersedes");
+        assertEquals(List.of("Memory %d linked as an extension of %d: \"%s\" extends \"%s\""
+                .formatted(added.id, routineId, snippet(WEATHER), snippet(ROUTINE))), linkEvents(events));
+    }
+
+    @Test
+    void aLinkToARoutineSupersededMeanwhileLandsOnItsReplacement() {
+        var agent = agentId("ext-head");
+        var store = MemoryStoreFactory.get();
+        var routineId = Long.valueOf(store.store(agent, ROUTINE, "fact", 0.7));
+        var replacementId = new AtomicReference<Long>();
+
+        var events = captureWeather(agent, msgs -> {
+            int idx = existingIndex(msgs, ROUTINE);
+            Tx.run(() -> {
+                replacementId.set(Long.valueOf(store.store(agent,
+                        "The user's morning routine is to make tea, read the news and review the calendar", "fact", 0.7)));
+                Memory.<Memory>findById(routineId).supersede(replacementId.get());
+            });
+            return extendsJson(idx);
+        });
+
+        var added = onlyNewRow(agent, routineId, replacementId.get());
+        assertEquals(replacementId.get(), added.extendsId);
+        assertEquals(1, linkEvents(events).size(), linkEvents(events).toString());
+        assertTrue(linkEvents(events).getFirst().startsWith(
+                "Memory %d linked as an extension of %d: ".formatted(added.id, replacementId.get())));
+    }
+
+    @Test
+    void aRoutineWithNoCurrentVersionIsNotLinked() {
+        var agent = agentId("ext-no-head");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+
+        var events = captureWeather(agent, msgs -> {
+            int idx = existingIndex(msgs, ROUTINE);
+            Tx.run(() -> {
+                Memory r = Memory.findById(routineId);
+                r.supersededAt = AppClock.now();
+                r.save();
+            });
+            return extendsJson(idx);
+        });
+
+        var added = onlyNewRow(agent, routineId);
+        assertNull(added.extendsId);
+        assertEquals(List.of("Kept memory %d unlinked from %d — that memory has no current version"
+                .formatted(added.id, routineId)), linkEvents(events));
+    }
+
+    /** A routine replaced {@code hops} times while the judge ran, so its live head is that many hops away. */
+    private Long[] supersedeChain(String agent, Long routineId, int hops) {
+        var ids = new Long[hops + 1];
+        ids[0] = routineId;
+        Tx.run(() -> {
+            for (int k = 1; k <= hops; k++) {
+                ids[k] = Long.valueOf(MemoryStoreFactory.get().store(agent,
+                        "The user's morning routine, version " + k, "fact", 0.7));
+                Memory.<Memory>findById(ids[k - 1]).supersede(ids[k]);
+            }
+        });
+        return ids;
+    }
+
+    @Test
+    void theLiveHeadIsFollowedForTwentyHops() {
+        var agent = agentId("ext-20-hops");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+        var chain = new AtomicReference<Long[]>();
+
+        captureWeather(agent, msgs -> {
+            int idx = existingIndex(msgs, ROUTINE);
+            chain.set(supersedeChain(agent, routineId, 20));
+            return extendsJson(idx);
+        });
+
+        assertEquals(chain.get()[20], onlyNewRow(agent, chain.get()).extendsId);
+    }
+
+    @Test
+    void aHeadTwentyOneHopsAwayIsNotLinked() {
+        var agent = agentId("ext-21-hops");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+        var chain = new AtomicReference<Long[]>();
+
+        var events = captureWeather(agent, msgs -> {
+            int idx = existingIndex(msgs, ROUTINE);
+            chain.set(supersedeChain(agent, routineId, 21));
+            return extendsJson(idx);
+        });
+
+        var added = onlyNewRow(agent, chain.get());
+        assertNull(added.extendsId);
+        assertEquals(List.of("Kept memory %d unlinked from %d — that memory has no current version"
+                .formatted(added.id, routineId)), linkEvents(events));
+    }
+
+    @Test
+    void aGuestsAddendumIsNotLinkedToTheOperatorsRoutine() {
+        var agent = agentId("ext-guest");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+
+        var events = captureWeather(agent, msgs -> extendsJson(existingIndex(msgs, ROUTINE)),
+                MemoryProvenance.extractor("m", MemoryAuthorType.GUEST_TURN));
+
+        var added = onlyNewRow(agent, routineId);
+        assertNull(added.extendsId);
+        assertEquals(List.of(("Kept memory %d unlinked from %d — a guest's turn never extends a memory that is "
+                + "not a guest's").formatted(added.id, routineId)), linkEvents(events));
+    }
+
+    @Test
+    void malformedExtensionsLeaveTheSupersessionsStanding() {
+        var agent = agentId("ext-garbled");
+        var berlinId = Long.valueOf(MemoryStoreFactory.get().store(agent, BERLIN, "fact", 0.7));
+
+        MemoryAutoCapture.capture(agent, "ext-garbled", "Quick update: I moved from Berlin to Porto last month",
+                "Noted.", msgs -> PORTO_JSON,
+                msgs -> "{\"supersessions\":[{\"new\":0,\"old\":[0]}],\"extensions\":\"oops\"}", freshBreaker());
+
+        var porto = onlyNewRow(agent, berlinId);
+        assertEquals(porto.id, Memory.<Memory>findById(berlinId).supersededById);
+        assertNull(porto.extendsId);
+    }
+
+    @Test
+    void aPairJudgedBothSupersededAndExtendedIsOnlySuperseded() {
+        var agent = agentId("ext-both");
+        var berlinId = Long.valueOf(MemoryStoreFactory.get().store(agent, BERLIN, "fact", 0.7));
+
+        var events = EventLogger.captureForTest(() -> MemoryAutoCapture.capture(agent, "ext-both",
+                "Quick update: I moved from Berlin to Porto last month", "Noted.", msgs -> PORTO_JSON,
+                msgs -> "{\"supersessions\":[{\"new\":0,\"old\":[0]}],\"extensions\":[{\"new\":0,\"extends\":0}]}",
+                freshBreaker()));
+
+        var porto = onlyNewRow(agent, berlinId);
+        assertEquals(porto.id, Memory.<Memory>findById(berlinId).supersededById);
+        assertNull(porto.extendsId);
+        assertEquals(List.of(), linkEvents(events));
+    }
+
+    private static final String LONG_ROUTINE = "The user's morning routine is to make coffee, read the news, review "
+            + "the calendar, water the plants, feed the cat and check the stock prices";
+
+    @Test
+    void aPairWhoseSupersessionAGuardRefusesIsStillLinked() {
+        var agent = agentId("ext-refused");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, LONG_ROUTINE, "fact", 0.7));
+
+        var events = captureWeather(agent, msgs -> {
+            int idx = existingIndex(msgs, LONG_ROUTINE);
+            return "{\"supersessions\":[{\"new\":0,\"old\":[" + idx + "]}],"
+                    + "\"extensions\":[{\"new\":0,\"extends\":" + idx + "}]}";
+        });
+
+        var added = onlyNewRow(agent, routineId);
+        assertEquals(routineId, added.extendsId);
+        assertNull(Memory.<Memory>findById(routineId).supersededAt);
+        assertEquals(List.of(
+                "Kept memory %d instead of superseding it with %d — the newer text drops content: \"%s\" vs \"%s\""
+                        .formatted(routineId, added.id, snippet(WEATHER), snippet(LONG_ROUTINE)),
+                "Memory %d linked as an extension of %d: \"%s\" extends \"%s\""
+                        .formatted(added.id, routineId, snippet(WEATHER), snippet(LONG_ROUTINE))),
+                events.stream().map(EventLogger.Captured::message)
+                        .filter(m -> m.startsWith("Kept memory") || m.contains("linked as an extension")).toList());
+    }
+
+    @Test
+    void anExtensionOfARoutineReplacedInTheSameTurnByALaterSurvivorIsRefused() {
+        var agent = agentId("ext-same-turn");
+        var routineId = Long.valueOf(MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7));
+        var corrected = "The user's morning routine is now to make green tea, skim the headlines and review the calendar";
+
+        var events = EventLogger.captureForTest(() -> MemoryAutoCapture.capture(agent, "ext-same-turn",
+                WEATHER_TURN + " Also, I switched to green tea and skim the headlines now.", "Done.",
+                msgs -> "{\"memories\":[{\"text\":\"" + WEATHER + "\",\"category\":\"fact\",\"importance\":0.7},"
+                        + "{\"text\":\"" + corrected + "\",\"category\":\"fact\",\"importance\":0.7}]}",
+                msgs -> {
+                    int idx = existingIndex(msgs, ROUTINE);
+                    return "{\"supersessions\":[{\"new\":1,\"old\":[" + idx + "]}],"
+                            + "\"extensions\":[{\"new\":0,\"extends\":" + idx + "}]}";
+                }, freshBreaker()));
+
+        Memory weather = Memory.find("agent.id = ?1 AND text = ?2", Long.valueOf(agent), WEATHER).first();
+        Memory replacement = Memory.find("agent.id = ?1 AND text = ?2", Long.valueOf(agent), corrected).first();
+        assertEquals(replacement.id, Memory.<Memory>findById(routineId).supersededById);
+        assertNull(weather.extendsId);
+        assertEquals(List.of("Kept memory %d unlinked from %d — a memory only extends an older one"
+                .formatted(weather.id, replacement.id)), linkEvents(events));
+    }
+
+    // ─── GH-15: the shortlist admits a row holding much of the candidate ─────
+
+    private static final String SHORTLIST_ROW =
+            "kalvar bemtor zorbik trimbol vasgut nerpok yeldam cuspat orvik lantop mibsut regdol ufkat";
+
+    /** The share of {@code candidate}'s content tokens that {@code row} also holds. */
+    private static double candidateShare(String candidate, String row) {
+        var c = MemorySimilarity.Tokens.of(candidate).content();
+        var shared = new HashSet<>(c);
+        shared.retainAll(MemorySimilarity.Tokens.of(row).content());
+        return (double) shared.size() / c.size();
+    }
+
+    /** What the judge saw as EXISTING for one capture of {@code candidate}, or null when it was not called. */
+    private String judgedAgainst(String agentName, String candidate) {
+        return judgedAgainst(agentName, SHORTLIST_ROW, candidate);
+    }
+
+    private String judgedAgainst(String agentName, String stored, String candidate) {
+        var agent = agentId(agentName);
+        MemoryStoreFactory.get().store(agent, stored, "fact", 0.7);
+        var seen = new AtomicReference<String>();
+        MemoryAutoCapture.capture(agent, agentName, candidate, "Noted.", msgs -> extractorJson(candidate), msgs -> {
+            var rendered = String.valueOf(msgs.get(1).content());
+            seen.set(rendered.substring(rendered.indexOf("EXISTING:")));
+            return "{\"supersessions\":[],\"extensions\":[]}";
+        }, freshBreaker());
+        return seen.get();
+    }
+
+    @Test
+    void aRowCoveringThreeTenthsOfTheCandidateIsShortlisted() {
+        var candidate = "kalvar bemtor zorbik plemvat quorbat drensik falmok gristop wendup hoskat";
+        assertEquals(0.3, candidateShare(candidate, SHORTLIST_ROW), 1e-9);
+        var c = MemorySimilarity.Tokens.of(candidate);
+        var row = MemorySimilarity.Tokens.of(SHORTLIST_ROW);
+        assertTrue(MemorySimilarity.jaccard(c.raw(), row.raw()) < 0.2, "only containment can admit it");
+
+        assertEquals("EXISTING:\n0: " + SHORTLIST_ROW + "\n", judgedAgainst("shortlist-at", candidate));
+    }
+
+    @Test
+    void aRowCoveringLessThanThreeTenthsIsNotShortlisted() {
+        var candidate = "kalvar bemtor zorbik plemvat quorbat drensik falmok gristop wendup hoskat jopsik";
+        assertEquals(3.0 / 11, candidateShare(candidate, SHORTLIST_ROW), 1e-9);
+
+        assertNull(judgedAgainst("shortlist-below", candidate), "an empty shortlist never reaches the judge");
+    }
+
+    @Test
+    void aShortRowSharingOneWordWithALongerCandidateIsNotShortlisted() {
+        var stored = "kalvar bemtor";
+        var candidate = "kalvar plemvat quorbat drensik falmok gristop";
+        assertEquals(2, MemorySimilarity.Tokens.of(stored).content().size());
+        assertEquals(6, MemorySimilarity.Tokens.of(candidate).content().size());
+        assertEquals(0.5, MemorySimilarity.containment(MemorySimilarity.Tokens.of(candidate).content(),
+                MemorySimilarity.Tokens.of(stored).content()), 1e-9, "the overlap coefficient would admit it");
+
+        assertNull(judgedAgainst("shortlist-short-row", stored, candidate), "an empty shortlist never reaches the judge");
+    }
+
+    // ─── GH-15: the shipped prompts ──────────────────────────────────────────
+
+    @Test
+    void theShippedPromptsCarryTheRoutineGuidance() {
+        var extraction = new AtomicReference<String>();
+        var consolidation = new AtomicReference<String>();
+        var agent = agentId("prompts");
+        MemoryStoreFactory.get().store(agent, ROUTINE, "fact", 0.7);
+        MemoryAutoCapture.capture(agent, "prompts", WEATHER_TURN, "Done.", msgs -> {
+            extraction.set(String.valueOf(msgs.getFirst().content()));
+            return extractorJson(WEATHER);
+        }, msgs -> {
+            consolidation.set(String.valueOf(msgs.getFirst().content()));
+            return extendsJson(0);
+        }, freshBreaker());
+
+        assertTrue(extraction.get().contains("""
+                Extract the durable part rather than discarding the sentence.
+
+                A routine or procedure the user wants carried out on request — steps they will later ask you to run — is the exception to one fact per memory: keep every step, in order, in a single memory, and say what it is for: "The user's daily morning routine, run when they ask for it: check email, review the calendar, then post the day's plan to Slack". A later turn that adds, removes or changes one step is its own memory that names the routine it belongs to: "The user wants checking the weather added to their daily morning routine, after reviewing the calendar".
+                """), extraction.get());
+        assertTrue(extraction.get().contains("""
+                These are used to find the memory later and are never shown to anyone.
+
+                For a routine or procedure, at least one of the "questions" is the short, casual way the user will start it — "do my morning stuff", "morning routine" — because the request that triggers it arrives as a brief command that shares few words with the steps.
+                """), extraction.get());
+        assertTrue(consolidation.get().contains("""
+                A NEW memory can instead EXTEND an existing one: it adds a step, item or detail to the routine, procedure or list that the existing memory describes, so that the two together are the current whole and both stay true. "The user wants checking the weather added to their morning routine" extends "The user's morning routine is to make coffee, read the news and review the calendar". An extension never supersedes: list it under "extensions", not "supersessions". Give each NEW memory at most one extension, naming the EXISTING memory that describes the routine itself.
+
+                Never judge which side is more recent"""), consolidation.get());
+        assertTrue(consolidation.get().endsWith("""
+                Output ONLY a JSON object — no prose, no code fences — with exactly this shape, and an empty array for either key when nothing qualifies:
+                {"supersessions":[{"new":0,"old":[2],"question":"where does the user live"}],"extensions":[{"new":1,"extends":3}]}
+                """), consolidation.get());
     }
 }

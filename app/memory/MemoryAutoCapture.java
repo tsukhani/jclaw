@@ -102,6 +102,11 @@ public final class MemoryAutoCapture {
     private static final String KEY_SUPERSESSIONS = "supersessions";
     private static final String KEY_NEW = "new";
     private static final String KEY_OLD = "old";
+    private static final String KEY_EXTENSIONS = "extensions";
+    private static final String KEY_EXTENDS = "extends";
+
+    /** How far {@link #liveHead} follows {@code supersededById} before giving up on a chain. */
+    private static final int MAX_HEAD_HOPS = 20;
 
     /**
      * Functional seam for the extraction LLM call (mirrors
@@ -150,6 +155,14 @@ public final class MemoryAutoCapture {
      * is logged where it is dropped, but a candidate past the cut simply never appears.
      */
     public record ConsolidationPlan(List<Candidate> survivors, List<Existing> shortlist, int overflow) {}
+
+    /**
+     * The judge's verdict: {@code survivor index → superseded shortlist indices}, and
+     * {@code survivor index → the shortlist index it extends} (GH-15).
+     */
+    private record Judgement(Map<Integer, List<Integer>> supersessions, Map<Integer, Integer> extensions) {
+        static final Judgement NONE = new Judgement(Map.of(), Map.of());
+    }
 
     public record CaptureResult(int captured, int skipped, @Nullable String skipReason) {
         static CaptureResult skipped(String reason) {
@@ -618,13 +631,13 @@ public final class MemoryAutoCapture {
                         ("Turn yielded more than the %d-memory per-turn cap — %d lower-importance "
                                 + "candidate(s) not stored").formatted(maxPerTurn, plan.overflow()));
             }
-            var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
+            var judgement = judge(agentName, plan, consolidator, breaker);
             // Persist the survivor rows inside the apply Tx (capturing their ids), then
             // generate + write their embeddings AFTER it commits — the embedding HTTP
             // round-trip must never run inside the write tx (same "slow call OUTSIDE the
             // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
             // pooled connection across up to maxPerTurn sequential embedding calls).
-            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions, provenance));
+            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, judgement, provenance));
             int embedded = embedStored(storedIds);
             if (embedded < storedIds.size()) {
                 // Distinct from "Auto-capture failed", which reads as "nothing was captured".
@@ -815,6 +828,9 @@ public final class MemoryAutoCapture {
                                           Set<Integer> semanticDupes, Set<Long> corroborated,
                                           boolean mayCorroborate, MemoryScope scope, List<Long> hiddenGuestIds) {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
+        // GH-15: a short addendum shares little of a long routine's wording, so Jaccard alone never
+        // pairs them; this is the share of the candidate's content words the row also holds.
+        double shortlistContainment = ConfigService.getDouble("memory.consolidation.shortlist.minContainment", 0.3);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
         // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
         // pairs with no false positive, 0.85 catches 8. Below 0.80 unrelated facts
@@ -871,7 +887,9 @@ public final class MemoryAutoCapture {
             int added = 0;
             for (int i = 0; i < poolRows.size() && added < shortlistCap; i++) {
                 double j = jaccard(toks.raw(), poolTokens.get(i).raw());
-                if (j >= shortlistMin && j < dupThreshold && shortlisted.add(poolRows.get(i).id)) {
+                boolean related = j >= shortlistMin
+                        || candidateShare(toks.content(), poolTokens.get(i).content()) >= shortlistContainment;
+                if (related && j < dupThreshold && shortlisted.add(poolRows.get(i).id)) {
                     shortlist.add(new Existing(poolRows.get(i).id, poolRows.get(i).text));
                     added++;
                 }
@@ -892,20 +910,30 @@ public final class MemoryAutoCapture {
     }
 
     /**
+     * {@code |candidate ∩ row| / |candidate|}. Not {@link MemorySimilarity#containment}: its
+     * smaller-set denominator scores a two-word row sharing one word at 0.5 (GH-15).
+     */
+    private static double candidateShare(Set<String> candidate, Set<String> row) {
+        if (candidate.isEmpty()) return 0;
+        int shared = 0;
+        for (var t : candidate) if (row.contains(t)) shared++;
+        return (double) shared / candidate.size();
+    }
+
+    /**
      * Judge phase (no Tx): one batched LLM call pairing the survivors against
      * the shortlist. Fail-open — a missing consolidator, disabled config, open
      * breaker, call failure, or malformed output all yield no supersessions and
-     * the capture stores append-only, exactly the pre-525 behavior.
+     * no extensions, and the capture stores append-only, exactly the pre-525 behavior.
      */
-    private static Map<Integer, List<Integer>> judgeSupersessions(String agentName, ConsolidationPlan plan,
-                                                                  @Nullable Consolidator consolidator,
-                                                                  CircuitBreaker breaker) {
-        if (consolidator == null || plan.survivors().isEmpty() || plan.shortlist().isEmpty()) return Map.of();
-        if (!ConfigService.getBoolean("memory.consolidation.enabled", true)) return Map.of();
+    private static Judgement judge(String agentName, ConsolidationPlan plan,
+                                   @Nullable Consolidator consolidator, CircuitBreaker breaker) {
+        if (consolidator == null || plan.survivors().isEmpty() || plan.shortlist().isEmpty()) return Judgement.NONE;
+        if (!ConfigService.getBoolean("memory.consolidation.enabled", true)) return Judgement.NONE;
         if (!breaker.allowRequest()) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Memory consolidation suspended (circuit breaker %s)".formatted(breaker.state()));
-            return Map.of();
+            return Judgement.NONE;
         }
         try {
             var messages = List.<ChatMessage>of(
@@ -913,13 +941,16 @@ public final class MemoryAutoCapture {
                     ChatMessage.user(renderConsolidation(plan)));
             var raw = consolidator.judge(messages);
             breaker.recordSuccess();
-            return parseSupersessions(raw, plan.survivors().size(), plan.shortlist().size());
+            int newCount = plan.survivors().size();
+            int existingCount = plan.shortlist().size();
+            return new Judgement(parseSupersessions(raw, newCount, existingCount),
+                    parseExtensions(raw, newCount, existingCount));
         } catch (Exception e) {
             breaker.recordFailure();
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Memory consolidation judge failed (storing without supersession): %s"
                             .formatted(e.getMessage()));
-            return Map.of();
+            return Judgement.NONE;
         }
     }
 
@@ -932,13 +963,15 @@ public final class MemoryAutoCapture {
      * same-subject pairs; the direction is enforced here deterministically — a row
      * is superseded only when its id (serial) is strictly lower than the new row's,
      * i.e. the newer write always wins and the LLM can never flip recency
-     * (JCLAW-525 AC). Each supersession is event-logged.
+     * (JCLAW-525 AC). Each supersession is event-logged. Extensions are linked after every
+     * supersession has applied, so a link lands on the routine's current row (GH-15).
      */
     private static List<String> applyPlan(String agentKey, String agentName, ConsolidationPlan plan,
-                                          Map<Integer, List<Integer>> supersessions,
-                                          MemoryProvenance provenance) {
+                                          Judgement judgement, MemoryProvenance provenance) {
+        var supersessions = judgement.supersessions();
         var store = MemoryStoreFactory.get();
         var storedIds = new ArrayList<String>(plan.survivors().size());
+        var applied = new HashSet<List<Integer>>();
         for (int i = 0; i < plan.survivors().size(); i++) {
             var c = plan.survivors().get(i);
             var newIdStr = store.storeDeferred(agentKey, c.text(), c.category(), c.importance(),
@@ -981,12 +1014,59 @@ public final class MemoryAutoCapture {
                     continue;
                 }
                 old.supersede(newId);
+                applied.add(List.of(i, oldIdx));
                 EventLogger.info(EVENT_CATEGORY, agentName, null,
                         "Memory %d superseded by %d: \"%s\" → \"%s\""
                                 .formatted(ex.id(), newId, snippet(ex.text()), snippet(c.text())));
             }
         }
+        for (var ext : judgement.extensions().entrySet()) {
+            // A pair judged both ways is a replacement once a guard let it apply; a refused one still links.
+            if (applied.contains(List.of(ext.getKey(), ext.getValue()))) continue;
+            linkExtension(agentName, Long.parseLong(storedIds.get(ext.getKey())),
+                    plan.shortlist().get(ext.getValue()), provenance);
+        }
         return storedIds;
+    }
+
+    /** Record {@code newId} as extending {@code target}'s live head, under supersession's serial and guest guards. */
+    private static void linkExtension(String agentName, long newId, Existing target, MemoryProvenance provenance) {
+        Memory added = Memory.findById(newId);
+        if (added == null) return;
+        Memory head = liveHead(target.id());
+        if (head == null || !head.agent.id.equals(added.agent.id)) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Kept memory %d unlinked from %d — that memory has no current version"
+                            .formatted(newId, target.id()));
+            return;
+        }
+        if (head.id >= newId) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Kept memory %d unlinked from %d — a memory only extends an older one"
+                            .formatted(newId, head.id));
+            return;
+        }
+        if (guestOverNonGuest(provenance, head)) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    ("Kept memory %d unlinked from %d — a guest's turn never extends a memory that is "
+                            + "not a guest's").formatted(newId, head.id));
+            return;
+        }
+        added.extendsId = head.id;
+        added.save();
+        EventLogger.info(EVENT_CATEGORY, agentName, null,
+                "Memory %d linked as an extension of %d: \"%s\" extends \"%s\""
+                        .formatted(newId, head.id, snippet(added.text), snippet(head.text)));
+    }
+
+    /** {@code id}'s row, or the live row that superseded it, followed at most {@link #MAX_HEAD_HOPS} times. */
+    private static @Nullable Memory liveHead(Long id) {
+        Memory row = Memory.findById(id);
+        for (int hop = 0; row != null && row.supersededAt != null; hop++) {
+            if (hop == MAX_HEAD_HOPS || row.supersededById == null) return null;
+            row = Memory.findById(row.supersededById);
+        }
+        return row;
     }
 
     /** A guest's view includes the operator's rows; the guest may restate one but never retire it (JF-147). */
@@ -1271,6 +1351,50 @@ public final class MemoryAutoCapture {
         if (!olds.isEmpty()) out.merge(newIdx, olds, (a, _) -> a);
     }
 
+    /**
+     * Parse the judge's {@code extensions} into {@code survivor index → extended shortlist index}
+     * (GH-15), keeping the first entry for each survivor. Both indices must be whole JSON numbers
+     * in range; any other entry is dropped alone, and output with no {@code extensions} array
+     * yields no links. Public because the test tree compiles into the default package.
+     */
+    public static Map<Integer, Integer> parseExtensions(@Nullable String raw, int newCount, int existingCount) {
+        if (raw == null || raw.isBlank()) return Map.of();
+        var out = new LinkedHashMap<Integer, Integer>();
+        try {
+            var root = ReplyJson.lenientObject(raw).orElse(null);
+            if (root == null || !root.has(KEY_EXTENSIONS) || !root.get(KEY_EXTENSIONS).isJsonArray()) {
+                return Map.of();
+            }
+            for (var el : root.getAsJsonArray(KEY_EXTENSIONS)) {
+                addExtensionIfValid(el, newCount, existingCount, out);
+            }
+        } catch (Exception _) {
+            return Map.of();
+        }
+        return out;
+    }
+
+    private static void addExtensionIfValid(JsonElement el, int newCount, int existingCount,
+                                            Map<Integer, Integer> out) {
+        if (!el.isJsonObject()) return;
+        var o = el.getAsJsonObject();
+        if (!o.has(KEY_NEW) || !o.has(KEY_EXTENDS)) return;
+        var newEl = o.get(KEY_NEW);
+        var extEl = o.get(KEY_EXTENDS);
+        if (!isInt(newEl) || !isInt(extEl)) return;
+        int newIdx = newEl.getAsInt();
+        int extIdx = extEl.getAsInt();
+        if (newIdx < 0 || newIdx >= newCount || extIdx < 0 || extIdx >= existingCount) return;
+        out.putIfAbsent(newIdx, extIdx);
+    }
+
+    /** A JSON number with no fractional part: {@code getAsInt} would truncate 1.5 or parse "1". */
+    private static boolean isInt(JsonElement el) {
+        if (!el.isJsonPrimitive() || !el.getAsJsonPrimitive().isNumber()) return false;
+        double d = el.getAsDouble();
+        return d == Math.rint(d) && Math.abs(d) <= Integer.MAX_VALUE;
+    }
+
     private static String renderConsolidation(ConsolidationPlan plan) {
         var sb = new StringBuilder("NEW:\n");
         for (int i = 0; i < plan.survivors().size(); i++) {
@@ -1375,9 +1499,13 @@ public final class MemoryAutoCapture {
 
             Splitting must not lose anything. A durable fact often arrives inside a passing remark: "my son Theo turns 12 next week" tells you the user has a son named Theo, which is worth keeping even though the birthday itself is transient. Extract the durable part rather than discarding the sentence.
 
+            A routine or procedure the user wants carried out on request — steps they will later ask you to run — is the exception to one fact per memory: keep every step, in order, in a single memory, and say what it is for: "The user's daily morning routine, run when they ask for it: check email, review the calendar, then post the day's plan to Slack". A later turn that adds, removes or changes one step is its own memory that names the routine it belongs to: "The user wants checking the weather added to their daily morning routine, after reviewing the calendar".
+
             When the user's turn says how they are related to a person or thing, keep that relationship in the sentence: "The user's son Theo goes by Bo", not "Theo goes by Bo". Only when the turn actually says it — never guess a relationship it did not state.
 
             Also give each memory "questions": two or three short questions, phrased the way this user would later ask them, that this memory answers. Ask through the relationship where there is one ("what do my kids go by?") rather than by name, because that is how the question will arrive. These are used to find the memory later and are never shown to anyone.
+
+            For a routine or procedure, at least one of the "questions" is the short, casual way the user will start it — "do my morning stuff", "morning routine" — because the request that triggers it arrives as a brief command that shares few words with the steps.
 
             Classify each into exactly one category:
             - fact: a stable factual statement
@@ -1405,9 +1533,11 @@ public final class MemoryAutoCapture {
 
             For each supersession give "question": the one question both texts answer, in five words or fewer.
 
+            A NEW memory can instead EXTEND an existing one: it adds a step, item or detail to the routine, procedure or list that the existing memory describes, so that the two together are the current whole and both stay true. "The user wants checking the weather added to their morning routine" extends "The user's morning routine is to make coffee, read the news and review the calendar". An extension never supersedes: list it under "extensions", not "supersessions". Give each NEW memory at most one extension, naming the EXISTING memory that describes the routine itself.
+
             Never judge which side is more recent — the NEW entries are always the newer ones.
 
-            Output ONLY a JSON object — no prose, no code fences — with exactly this shape, and an empty array when nothing is superseded:
-            {"supersessions":[{"new":0,"old":[2],"question":"where does the user live"}]}
+            Output ONLY a JSON object — no prose, no code fences — with exactly this shape, and an empty array for either key when nothing qualifies:
+            {"supersessions":[{"new":0,"old":[2],"question":"where does the user live"}],"extensions":[{"new":1,"extends":3}]}
             """;
 }
