@@ -170,6 +170,48 @@ pipeline {
                         echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
                     }
                 }
+                // A release is cut only from the version's signed tag, which
+                // /deploy pushes once the release commit's build has passed.
+                // RELEASE ticked straight after a deploy queues behind that
+                // build, so the tag can still be minutes away: wait up to 20
+                // minutes, then refuse before building anything, saying how
+                // to tag by hand when the deploy session is gone.
+                script {
+                    if (params.RELEASE) {
+                        sh '''
+                            set +x
+                            tag="v${APP_VERSION}"
+                            url=https://github.com/tsukhani/jclaw.git
+                            attempt=0
+                            while :; do
+                                refs=$(git ls-remote --tags "$url" "refs/tags/$tag" "refs/tags/$tag^{}" || true)
+                                [ -n "$refs" ] && break
+                                attempt=$((attempt + 1))
+                                if [ "$attempt" -gt 40 ]; then
+                                    echo "$tag is not on GitHub after 20 minutes. /deploy pushes the version's signed tag once"
+                                    echo "the release commit's build has passed. If that build passed and the deploy session"
+                                    echo "has ended, tag the release commit yourself and run this build again:"
+                                    echo "  git tag -s $tag -m 'Release $tag' $BUILD_COMMIT"
+                                    echo "  git push origin refs/tags/$tag"
+                                    echo "  git push github refs/tags/$tag"
+                                    exit 1
+                                fi
+                                [ "$attempt" -eq 1 ] && echo "Waiting up to 20 minutes for $tag on GitHub..."
+                                sleep 30
+                            done
+                            peeled=$(printf '%s\\n' "$refs" | awk -v r="refs/tags/$tag^{}" '$2 == r { print $1 }')
+                            if [ -z "$peeled" ]; then
+                                echo "$tag on GitHub is not an annotated tag; /deploy pushes a signed one. Not releasing."
+                                exit 1
+                            fi
+                            if [ "$peeled" != "$BUILD_COMMIT" ]; then
+                                echo "$tag on GitHub is commit $peeled, not this build's $BUILD_COMMIT. Not releasing."
+                                exit 1
+                            fi
+                            echo "$tag on GitHub is this build's commit."
+                        '''
+                    }
+                }
             }
         }
 
