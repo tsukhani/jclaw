@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 import { serveConversation } from './conversation-endpoint'
+
+// A page left mounted shares the router, so it follows a later test's ?conversation= and fetches for it too.
+enableAutoUnmount(afterEach)
 
 /**
  * Page-level Vitest coverage for the {@code chat.vue} streaming state machine
@@ -359,7 +362,6 @@ describe('Chat page — MCP Apps views', () => {
     finally {
       Reflect.deleteProperty(navigator, 'userActivation')
       off()
-      component.unmount()
     }
   })
 })
@@ -404,7 +406,6 @@ describe('Chat page — an MCP server\'s question', () => {
     }
     finally {
       off()
-      component.unmount()
     }
   })
 })
@@ -902,7 +903,6 @@ describe('Chat page — async subagent announce polling', () => {
     await vi.waitFor(() => expect(button().exists()).toBe(false))
     expect(vm.messages[0]?.id).toBe(9000)
     expect(document.activeElement).toBe(component.find('[data-testid="chat-messages-scroll"]').element)
-    component.unmount()
   })
 
   it('makes the message list the containing block of its screen-reader text (JCLAW-1439)', async () => {
