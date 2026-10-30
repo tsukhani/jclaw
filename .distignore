@@ -25,6 +25,9 @@ app/
 frontend/
 AGENTS.md
 CLAUDE.md
+# Shipped Markdown links to these two on the GitHub mirror, never by relative path.
+CONTRIBUTING.md
+DEVELOPMENT.md
 Dockerfile
 docker-entrypoint.sh
 Jenkinsfile

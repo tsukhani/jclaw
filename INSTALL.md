@@ -6,7 +6,7 @@ keep it running and keep it up to date. It also lists the optional extras you ca
 - New to JClaw? Start with the [README](README.md).
 - To learn how to use JClaw, read the user guide inside the app.
   Once JClaw runs, open **Help → User Guide** in the sidebar, or go to <http://localhost:9000/guide>.
-- To work on JClaw's code, read [DEVELOPMENT.md](DEVELOPMENT.md).
+- To work on JClaw's code, read [DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md).
 
 ## Contents
 
@@ -49,7 +49,7 @@ cannot reach them, do these steps:
 2. Put Chromium under `PLAYWRIGHT_BROWSERS_PATH`.
 
 Some features need more software. [Optional extras](#optional-extras) lists it.
-To build JClaw from source, read [DEVELOPMENT.md](DEVELOPMENT.md).
+To build JClaw from source, read [DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md).
 
 ---
 
@@ -139,7 +139,7 @@ completion setup, and deletes `~/.jclaw`.
 
 The `jclaw` command runs the install's `jclaw.sh`. If you unzipped a `jclaw-bundle.zip` yourself,
 go to that folder and run `./jclaw.sh` instead. To build a bundle yourself, read
-[Building a release bundle](DEVELOPMENT.md#building-a-release-bundle).
+[Building a release bundle](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md#building-a-release-bundle).
 
 `jclaw.sh` has more commands than the ones above:
 

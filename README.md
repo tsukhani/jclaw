@@ -80,7 +80,7 @@ A smaller prompt is faster to read, costs less and gives the model less to get w
 
 To measure JClaw's agents yourself, use the test sets in [`evals/`](https://github.com/tsukhani/jclaw/blob/main/evals/README.md). They check
 that an agent picks the right tools, returns valid structured answers and answers only from its
-sources. [DEVELOPMENT.md](DEVELOPMENT.md#running-evals) shows you how to run them.
+sources. [DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md#running-evals) shows you how to run them.
 
 ## Easy to set up and run
 
@@ -171,7 +171,7 @@ You can also update JClaw in the app, from **Settings → System → Maintenance
 - **User guide**: how to use each page of JClaw. It is inside the app.
   Once JClaw runs, open **Help → User Guide** in the sidebar, or go to <http://localhost:9000/guide>.
 - **[INSTALL.md](INSTALL.md)**: Docker, updates, HTTPS, optional extras and every install option.
-- **[DEVELOPMENT.md](DEVELOPMENT.md)**: for the team that builds JClaw.
+- **[DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md)**: for the team that builds JClaw.
 - **[Release notes](https://github.com/tsukhani/jclaw/releases)**: what changed in each version.
 
 ## Get help
@@ -181,7 +181,7 @@ You can also update JClaw in the app, from **Settings → System → Maintenance
 - **Found a security problem?** Email [security@abundent.com](mailto:security@abundent.com).
   Do not open a public issue for it.
 - **Want to contribute code?** Only the Abundent team writes JClaw's code, so we do not accept pull requests.
-  [CONTRIBUTING.md](CONTRIBUTING.md) explains why, and lists the help we welcome.
+  [CONTRIBUTING.md](https://github.com/tsukhani/jclaw/blob/main/CONTRIBUTING.md) explains why, and lists the help we welcome.
 
 ## Where JClaw comes from
 
