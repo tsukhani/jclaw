@@ -70,14 +70,36 @@ public final class FactoryStatus {
                                 @SerializedName(FactoryHome.KEY_POLL_SECONDS) int pollSeconds,
                                 @SerializedName(FactoryHome.KEY_MODEL) String model) {}
 
-    /** One story as {@code .sandcastle/README.md}'s Board section defines it; state-specific fields are null otherwise. */
+    /**
+     * One story as {@code .sandcastle/README.md}'s Board section defines it; state-specific fields are null otherwise.
+     *
+     * @param blockedBy the open blockers' keys of a waiting story; empty otherwise, and from a factory that predates it
+     */
     public record BoardStory(String key, String summary, String source, boolean autoMerge, String state,
                              String since, @Nullable String reason, @Nullable String phase,
                              @Nullable String phaseStartedAt, @Nullable String sha, @Nullable String by,
-                             List<String> logs) {}
+                             List<String> logs, List<String> blockedBy) {
+        public BoardStory {
+            // Gson builds records through this constructor and passes null for a missing member.
+            blockedBy = blockedBy == null ? List.of() : blockedBy;
+        }
+    }
 
+    /** An open story the factory will not build that keeps a waiting story from starting; {@code reason} says why. */
+    public record BoardBlocker(String key, @Nullable String summary, @Nullable String status, @Nullable String reason,
+                               List<String> blockedBy) {
+        public BoardBlocker {
+            blockedBy = blockedBy == null ? List.of() : blockedBy;
+        }
+    }
+
+    /** @param blockers empty from a factory that predates them */
     public record Board(int schema, String updatedAt, BoardHarness harness, @Nullable BoardSettings settings,
-                        List<BoardStory> stories) {}
+                        List<BoardStory> stories, List<BoardBlocker> blockers) {
+        public Board {
+            blockers = blockers == null ? List.of() : blockers;
+        }
+    }
 
     /**
      * @param sandboxes   null when Docker could not be asked
@@ -236,6 +258,9 @@ public final class FactoryStatus {
         var stories = board.stories();
         if (stories == null || stories.stream().anyMatch(s -> s == null || s.key() == null || s.logs() == null)) {
             return new BoardRead(null, "board.json has a story without a key or logs.");
+        }
+        if (board.blockers().stream().anyMatch(b -> b == null || b.key() == null)) {
+            return new BoardRead(null, "board.json has a blocker without a key.");
         }
         return new BoardRead(board, null);
     }

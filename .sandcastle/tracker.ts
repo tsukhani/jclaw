@@ -1,5 +1,6 @@
 // What the factory needs from a story source: Jira, or the repository's GitHub issues. Each maps the factory's states
 // (claimed, running, in review, blocked) onto what it has, Jira statuses or GitHub labels, and writes its own markup.
+import type { BoardBlocker } from "./board.ts";
 
 export type Snapshot = {
   key: string;
@@ -14,6 +15,10 @@ export type Snapshot = {
   // Why the source will not let this story run as it stands; the harness blocks it with this reason.
   refused?: string;
 };
+
+// An open story that blocks a candidate, read for the board only: never written to state/, never shown to an agent.
+// `blockedBy` holds its own open blockers' keys; `reason` is why the factory will not build it.
+export type Blocker = BoardBlocker & { done: boolean };
 
 export type Markup = {
   code: (text: string) => string;
@@ -35,6 +40,8 @@ export interface Tracker {
   mergeQueue(): Promise<string[]>;
   orphaned(): Promise<string[]>;
   snapshotToState(key: string): Promise<Snapshot>;
+  // A source without dependencies (GitHub) has no blockers to read.
+  blocker?(key: string): Promise<Blocker>;
   claim(key: string): Promise<boolean>;
   started(key: string): Promise<void>;
   reviewing(key: string): Promise<void>;

@@ -7,8 +7,9 @@ export const BOARD_SCHEMA = 1;
 // A merged or blocked story stays this long, so the file stays small.
 export const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
+// A waiting story's `blockedBy` holds the keys of its open blockers, so a reader can draw the chain.
 export type State =
-  | { state: "waiting"; reason: string }
+  | { state: "waiting"; reason: string; blockedBy?: string[] }
   | { state: "running"; phase: string }
   | { state: "review" }
   | { state: "blocked"; reason: string }
@@ -20,6 +21,9 @@ export type About = { summary: string; autoMerge: boolean };
 export type Entry = { key: string; summary: string; source: "jira" | "github"; autoMerge: boolean; since: string } & Shown;
 export type Story = Entry & { logs: string[] };
 
+// An open story the factory will not build that keeps a candidate waiting, directly or through another such story.
+export type BoardBlocker = { key: string; summary: string; status: string; reason: string; blockedBy: string[] };
+
 export type Settings = { FACTORY_MAX_PARALLEL: number; FACTORY_CPUS: number; FACTORY_POLL_SECONDS: number; FACTORY_MODEL: string };
 export type Document = {
   schema: number;
@@ -27,6 +31,19 @@ export type Document = {
   harness: { pid: number; startedAt: string; main: string | null };
   settings: Settings;
   stories: Story[];
+  blockers: BoardBlocker[];
+};
+
+// Why a candidate waits on its blockers, or undefined once every one is Done.
+export const blockedReason = (blockedBy: { key: string; status: string; done: boolean }[]): string | undefined => {
+  const open = blockedBy.filter((b) => !b.done);
+  return open.length > 0 ? `blocked by ${open.map((b) => `${b.key} (${b.status})`).join(", ")}` : undefined;
+};
+
+// A candidate waiting for `reason`, naming its open blockers whatever the reason, so a reader draws it in its chain.
+export const waitingOn = (reason: string, blockedBy: { key: string; done: boolean }[]): Extract<State, { state: "waiting" }> => {
+  const open = blockedBy.filter((b) => !b.done).map((b) => b.key);
+  return open.length > 0 ? { state: "waiting", reason, blockedBy: open } : { state: "waiting", reason };
 };
 
 // The story or its epic carries `afk-merge`, and `no-afk-merge` does not exempt it.
@@ -73,13 +90,16 @@ export class Board {
   // Oldest change first: a change re-inserts its story at the end.
   private readonly entries = new Map<string, Entry>();
   main: string | undefined;
+  // Each poll's walk replaces it. The document leaves out a key the board holds as a story, so each appears once.
+  blockers: BoardBlocker[] = [];
 
   constructor(
     private readonly opts: { file: string; logs: string; pid: number; startedAt: Date; settings: Settings; enabled: boolean },
   ) {}
 
-  // The previous run's board, so merged and blocked stories keep their retention across restarts. A story it left
-  // running was interrupted: a landing is back in review, and anything else waits to be resumed.
+  // The previous run's board, so merged and blocked stories keep their retention across restarts, and its blockers
+  // until a walk replaces them. A story it left running was interrupted: a landing is back in review, and anything else
+  // waits to be resumed.
   load() {
     let previous: Document;
     try {
@@ -88,6 +108,7 @@ export class Board {
       return;
     }
     if (previous.schema !== BOARD_SCHEMA || !Array.isArray(previous.stories)) return;
+    if (Array.isArray(previous.blockers)) this.blockers = previous.blockers;
     const since = new Date().toISOString();
     for (const { logs: _, ...entry } of [...previous.stories].reverse()) {
       if (entry.state !== "running") this.entries.set(entry.key, entry);
@@ -144,6 +165,7 @@ export class Board {
       harness: { pid: this.opts.pid, startedAt: this.opts.startedAt.toISOString(), main: this.main ?? null },
       settings: this.opts.settings,
       stories: [...this.entries.values()].reverse().map((e) => ({ ...e, logs: files.filter((f) => f.startsWith(`${e.key}-`)) })),
+      blockers: this.blockers.filter((b) => !this.entries.has(b.key)),
     };
   }
 

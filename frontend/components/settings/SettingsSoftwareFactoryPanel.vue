@@ -248,6 +248,7 @@ onBeforeUnmount(() => {
       <FactoryStoryBoard
         v-if="status.board"
         :stories="status.board.stories"
+        :blockers="status.board.blockers ?? []"
         :selected="selectedKey"
         :now="now"
         @select="selectedKey = $event"

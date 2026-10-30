@@ -1,18 +1,19 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
-// merge queries, the board, model-API overloads, the frontend gate against a scripted shell, and auto-merge, which lands
-// branches between throwaway repos with real signing. `pnpm run check`.
+// merge queries, the board and the blockers it lists, model-API overloads, the frontend gate against a scripted shell,
+// and auto-merge, which lands branches between throwaway repos with real signing. `pnpm run check`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
-import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
+import { Board, RETENTION_MS, autoMerges, blockedReason, expired, transition, waitingOn as waitingFor, writeAtomically, type BoardBlocker, type Entry, type State, type Story } from "./board.ts";
+import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
-import { intakeJql, mergeJql } from "./jira-intake.ts";
+import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
-import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
+import { overruled, rejectionFeedback, type Blocker, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -267,6 +268,29 @@ check("with no afk epic, a story is taken by its own label alone", intakeJql([])
 check("an afk epic's stories are taken with the labelled ones", intakeJql(["JCLAW-538", "JCLAW-902"]),
   `${SPRINT} AND (labels = afk OR "Epic Link" in (JCLAW-538, JCLAW-902)) AND ${HOLD}`);
 
+// Why a blocker is no candidate, with a fake epic read that counts its calls.
+const epicReads: string[][] = [];
+const why = (labels: string[], status: string, epic: string[] = []) =>
+  notCandidate({ labels, status }, async () => (epicReads.push(labels), epic));
+check("why an open blocker is no candidate: a label that holds it, then no afk, then its status, else intake",
+  await Promise.all([why(["no-afk"], "To Do"), why(["afk", "wont-do"], "To Do"), why(["afk-blocked"], "To Do"), why(["bmad"], "To Do"),
+    why(["afk"], "In Progress"), why([], "Review", ["afk"]), why(["afk"], "To Do"), why([], "To Do", ["afk"])]),
+  ["labelled no-afk", "labelled wont-do", "labelled afk-blocked", "not labelled afk", "In Progress", "Review", "outside intake", "outside intake"]);
+check("…reading the epic only for a story whose own labels neither hold it nor carry afk", epicReads, [["bmad"], [], []]);
+epicReads.length = 0;
+check("a label that holds a story wins over its epic's afk and its status, and its epic is not read",
+  [await why(["no-afk"], "In Progress", ["afk"]), epicReads], ["labelled no-afk", []]);
+check("an epic without afk does not make its story one", await why([], "To Do", ["afk-merge"]), "not labelled afk");
+const link = (type: string, side: "inwardIssue" | "outwardIssue", key: string, status: string, category: string) =>
+  ({ type: { name: type }, [side]: { key, fields: { status: { name: status, statusCategory: { key: category } } } } });
+const links = [link("Blocks", "outwardIssue", "JCLAW-1346", "To Do", "new"), link("Blocks", "inwardIssue", "JCLAW-1377", "To Do", "new"),
+  link("Blocks", "inwardIssue", "JCLAW-1365", "Done", "done"), link("Relates", "inwardIssue", "JCLAW-9", "To Do", "new"),
+  link("Blocks", "inwardIssue", "JF-170", "In Progress", "indeterminate")];
+check("a Blocks link with an inward issue is a blocker, Done or not; an outward one or another link type is not", blockersOf(links),
+  [{ key: "JCLAW-1377", status: "To Do", done: false }, { key: "JCLAW-1365", status: "Done", done: true }, { key: "JF-170", status: "In Progress", done: false }]);
+check("…and a blocker's own blockers are the open ones, another project's included", [openBlockersOf(links), openBlockersOf(undefined)],
+  [["JCLAW-1377", "JF-170"], []]);
+
 const MERGE = "project = JCLAW AND labels = afk AND status = Review";
 check("with no afk-merge epic, a story merges by its own label", mergeJql([]), `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge) ORDER BY rank`);
 check("an afk-merge epic's stories merge with the labelled ones", mergeJql(["JCLAW-538"]),
@@ -293,8 +317,17 @@ check("files that run on the Mac need a human", mergeVerdict(brief([true]), [".g
 // The board: one transition per state, what moves `since`, retention at its boundary, and the document's shape.
 const T0 = new Date("2026-10-01T10:00:00.000Z"), T1 = new Date("2026-10-01T11:00:00.000Z"), T2 = new Date("2026-10-01T12:00:00.000Z");
 const entering = (next: State) => transition(undefined, "JCLAW-7", next, T0, { summary: "Do it", autoMerge: true });
-check("waiting carries its reason", entering({ state: "waiting", reason: "blocked by JCLAW-6 (To Do)" }),
-  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "blocked by JCLAW-6 (To Do)", since: T0.toISOString() });
+check("waiting carries its reason", entering({ state: "waiting", reason: "all 2 slots are busy" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "all 2 slots are busy", since: T0.toISOString() });
+const blockedWait = entering({ state: "waiting", reason: "blocked by JCLAW-6 (To Do), JCLAW-5 (In Progress)", blockedBy: ["JCLAW-6", "JCLAW-5"] })!;
+check("waiting on blockers names their keys beside the reason", blockedWait,
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "blocked by JCLAW-6 (To Do), JCLAW-5 (In Progress)", blockedBy: ["JCLAW-6", "JCLAW-5"], since: T0.toISOString() });
+check("…and drops them when it waits for another reason, keeping since",
+  transition(blockedWait, "JCLAW-7", { state: "waiting", reason: "all 2 slots are busy" }, T1),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "all 2 slots are busy", since: T0.toISOString() });
+check("…and when one blocker turns Done, the other stays",
+  transition(blockedWait, "JCLAW-7", { state: "waiting", reason: "blocked by JCLAW-6 (To Do)", blockedBy: ["JCLAW-6"] }, T1),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "blocked by JCLAW-6 (To Do)", blockedBy: ["JCLAW-6"], since: T0.toISOString() });
 check("running carries its phase and when it started", entering({ state: "running", phase: "gate-1" }),
   { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "running", phase: "gate-1", phaseStartedAt: T0.toISOString(), since: T0.toISOString() });
 check("review carries nothing more", entering({ state: "review" }),
@@ -343,22 +376,35 @@ const newBoard = () => new Board({ file: boardFile, logs: boardLogs, pid: 4242, 
 const board = newBoard();
 board.main = "f".repeat(40);
 board.set("JCLAW-1", { state: "running", phase: "picked-up" }, { summary: "One", autoMerge: false }, T0);
-board.set("JCLAW-10", { state: "waiting", reason: "blocked by JCLAW-1 (In Progress)" }, { summary: "Ten", autoMerge: true }, T1);
+board.set("JCLAW-10", { state: "waiting", reason: "blocked by JCLAW-1 (In Progress)", blockedBy: ["JCLAW-1"] }, { summary: "Ten", autoMerge: true }, T1);
 board.set("JCLAW-1", { state: "running", phase: "build" }, undefined, T2);
 const written = JSON.parse(fs.readFileSync(boardFile, "utf8"));
-check("the document carries exactly its fields", Object.keys(written), ["schema", "updatedAt", "harness", "settings", "stories"]);
+check("the document carries exactly its fields, with no blockers before a walk", [Object.keys(written), written.blockers],
+  [["schema", "updatedAt", "harness", "settings", "stories", "blockers"], []]);
 check("…with the harness and its effective settings", [written.schema, written.updatedAt, written.harness, written.settings],
   [1, T2.toISOString(), { pid: 4242, startedAt: T0.toISOString(), main: "f".repeat(40) }, settings]);
 check("stories by most recent change, each with only its own logs",
   written.stories.map((s: Story) => [s.key, s.state, s.logs]), [["JCLAW-1", "running", ["JCLAW-1-build.log", "JCLAW-1-report.json"]], ["JCLAW-10", "waiting", ["JCLAW-10-build.log"]]]);
 check("a story entry carries exactly its fields", Object.keys(written.stories[0]).sort(),
   ["autoMerge", "key", "logs", "phase", "phaseStartedAt", "since", "source", "state", "summary"]);
+check("a waiting story blocked by another names it", Object.keys(written.stories[1]).sort(),
+  ["autoMerge", "blockedBy", "key", "logs", "reason", "since", "source", "state", "summary"]);
+board.blockers = [
+  { key: "JCLAW-40", summary: "Forty", status: "In Progress", reason: "labelled no-afk", blockedBy: ["JCLAW-41"] },
+  { key: "JCLAW-10", summary: "Ten", status: "To Do", reason: "outside intake", blockedBy: [] },
+];
+board.write(T2);
+check("a blocker carries exactly its fields, and one the board holds as a story is left out, so each appears once",
+  JSON.parse(fs.readFileSync(boardFile, "utf8")).blockers,
+  [{ key: "JCLAW-40", summary: "Forty", status: "In Progress", reason: "labelled no-afk", blockedBy: ["JCLAW-41"] }]);
 board.set("JCLAW-2", { state: "blocked", reason: "x" }, { summary: "Two" }, T0);
 check("a blocked story leaves the next write after 14 days", board.document(at(RETENTION_MS)).stories.map((s) => s.key), ["JCLAW-1", "JCLAW-10"]);
 board.set("JCLAW-3", { state: "running", phase: "gate-merge" }, { summary: "Three" }, T2);
 board.write(T2);
 const restarted = newBoard();
 restarted.load();
+check("a restart keeps the last blockers until a walk replaces them", restarted.document(T2).blockers,
+  [{ key: "JCLAW-40", summary: "Forty", status: "In Progress", reason: "labelled no-afk", blockedBy: ["JCLAW-41"] }]);
 check("a restart keeps the order; a story left running waits, and one left landing is back in review",
   restarted.document(T2).stories.map((s) => [s.key, s.state]), [["JCLAW-3", "review"], ["JCLAW-1", "waiting"], ["JCLAW-10", "waiting"]]);
 restarted.set("JCLAW-4", { state: "running", phase: "implement" }, { summary: "Four" }, T2);
@@ -400,6 +446,66 @@ const raced = JSON.parse(out.slice(out.indexOf("{")));
 check("a reader racing the writer always parses a complete board", [writes > 50, raced.reads > 50, raced.torn], [true, true, 0]);
 check("the temporary file does not outlive the write", fs.readdirSync(home).filter((f) => f.endsWith(".tmp")), []);
 fs.rmSync(home, { recursive: true, force: true });
+
+// The walk over the open stories the factory will not build, against a fake fetch that records what it was asked.
+const outsideStory = (key: string, reason: string, blockedBy: string[] = [], done = false): Blocker =>
+  ({ key, summary: `Summary of ${key}`, status: done ? "Done" : "To Do", done, reason, blockedBy });
+const waitingOn = (key: string, ...blockers: (string | [string, "done"])[]) =>
+  ({ key, blockedBy: blockers.map((b) => (typeof b === "string" ? { key: b, done: false } : { key: b[0], done: true })) });
+const walk = async (stories: Blocker[], candidates: ReturnType<typeof waitingOn>[], known: string[] = [], limit?: number) => {
+  const byKey = new Map(stories.map((b) => [b.key, b]));
+  const fetched: string[] = [];
+  const found = await outsideBlockers(candidates, (k) => known.includes(k), async (k) => (fetched.push(k), byKey.get(k)), limit);
+  return { found: found.map((b) => [b.key, b.reason, b.blockedBy]), fetched };
+};
+const NO_AFK = "labelled no-afk";
+const today = [outsideStory("JCLAW-1380", NO_AFK, ["JCLAW-1377", "JCLAW-1378"]), outsideStory("JCLAW-1377", NO_AFK), outsideStory("JCLAW-1378", NO_AFK)];
+const chain = [waitingOn("JCLAW-1346", "JCLAW-1380", ["JCLAW-1365", "done"]), waitingOn("JCLAW-1347", "JCLAW-1346"), waitingOn("JCLAW-1351", "JCLAW-1347"),
+  waitingOn("JCLAW-1381", "JCLAW-1346"), waitingOn("JCLAW-1382", "JCLAW-1381")];
+check("the chain behind JCLAW-1380 lists it and the two stories behind it, each read once; candidates and Done links are not read",
+  await walk(today, chain), {
+    found: [["JCLAW-1380", NO_AFK, ["JCLAW-1377", "JCLAW-1378"]], ["JCLAW-1377", NO_AFK, []], ["JCLAW-1378", NO_AFK, []]],
+    fetched: ["JCLAW-1380", "JCLAW-1377", "JCLAW-1378"],
+  });
+check("a blocker that turned Done since the candidate was read is left out, and what blocks it is not read",
+  await walk([outsideStory("JCLAW-1380", NO_AFK, ["JCLAW-1377"], true), ...today.slice(1)], chain), { found: [], fetched: ["JCLAW-1380"] });
+check("a blocker the board already holds is not read; a story with no source is left out",
+  await walk([outsideStory("X-2", "outside intake")], [waitingOn("A", "B", "X-2", "GH-9")], ["B"]), { found: [["X-2", "outside intake", []]], fetched: ["X-2", "GH-9"] });
+check("a cycle among blockers reads each once and ends",
+  await walk([outsideStory("X", "not labelled afk", ["Y"]), outsideStory("Y", "In Progress", ["X", "A"])], [waitingOn("A", "X")]),
+  { found: [["X", "not labelled afk", ["Y"]], ["Y", "In Progress", ["X", "A"]]], fetched: ["X", "Y"] });
+const long = Array.from({ length: BLOCKER_LIMIT + 10 }, (_, i) => outsideStory(`O-${i}`, NO_AFK, [`O-${i + 1}`]));
+check("a chain longer than the limit stops after the limit's reads", (await walk(long, [waitingOn("A", "O-0")])).fetched.length, BLOCKER_LIMIT);
+check("…and so does one wide level", (await walk(long, [waitingOn("A", ...long.map((b) => b.key))])).found.length, BLOCKER_LIMIT);
+const three = [outsideStory("O-0", NO_AFK, ["O-1"]), outsideStory("O-1", NO_AFK, ["O-2"]), outsideStory("O-2", NO_AFK)];
+check("the limit is exact: a chain of exactly the limit is read in full", await walk(three, [waitingOn("A", "O-0")], [], 3),
+  { found: [["O-0", NO_AFK, ["O-1"]], ["O-1", NO_AFK, ["O-2"]], ["O-2", NO_AFK, []]], fetched: ["O-0", "O-1", "O-2"] });
+check("a read that fails rejects the walk, for the caller to keep its last list",
+  await outsideBlockers([waitingOn("A", "X")], () => false, async () => { throw new Error("Jira GET /rest/api/2/issue/X: 503"); }).then(() => "resolved", (e: Error) => e.message),
+  "Jira GET /rest/api/2/issue/X: 503");
+
+// What a poll leaves on the board: the walk's list, or the last one when the walk failed or a source went unread.
+const lastList: BoardBlocker[] = [{ key: "JCLAW-1380", summary: "s", status: "To Do", reason: NO_AFK, blockedBy: [] }];
+const walked: BoardBlocker[] = [{ key: "JCLAW-1377", summary: "t", status: "To Do", reason: NO_AFK, blockedBy: [] }];
+let walks = 0;
+const counted = (result: () => Promise<BoardBlocker[]>) => () => (walks++, result());
+check("a walk that succeeds replaces the list, even with nothing", [await nextBlockers(lastList, false, counted(async () => walked)), await nextBlockers(lastList, false, counted(async () => []))],
+  [{ blockers: walked }, { blockers: [] }]);
+const failedWalk = await nextBlockers(lastList, false, counted(async () => { throw new Error("Jira GET /rest/api/2/issue/JF-170: 404"); }));
+check("a walk that fails keeps the last list and says why", [failedWalk.blockers, (failedWalk.failure as Error).message], [lastList, "Jira GET /rest/api/2/issue/JF-170: 404"]);
+check("a source that went unread keeps the last list without walking", [await nextBlockers(lastList, true, counted(async () => walked)), walks],
+  [{ blockers: lastList }, 3]);
+
+// The waiting state round() gives a candidate: its open blockers named, whatever it waits for.
+const links2 = [{ key: "JCLAW-1380", status: "To Do", done: false }, { key: "JCLAW-1365", status: "Done", done: true }];
+check("one open and one Done blocker: the reason and blockedBy name only the open one",
+  [blockedReason(links2), waitingFor(blockedReason(links2)!, links2)],
+  ["blocked by JCLAW-1380 (To Do)", { state: "waiting", reason: "blocked by JCLAW-1380 (To Do)", blockedBy: ["JCLAW-1380"] }]);
+check("a candidate held for an overload still names its open blockers",
+  waitingFor("the model API was overloaded; eligible again at 2026-10-05T20:50:00.000Z", links2),
+  { state: "waiting", reason: "the model API was overloaded; eligible again at 2026-10-05T20:50:00.000Z", blockedBy: ["JCLAW-1380"] });
+check("every blocker Done: no blocked reason, and a wait names none", [blockedReason([links2[1]!]), waitingFor("all 2 slots are busy", [links2[1]!])],
+  [undefined, { state: "waiting", reason: "all 2 slots are busy" }]);
 
 // Model-API overloads: which phase logs count, the backoff, the third strike, the reset, and a restart in between.
 const run = (...lines: string[]) => `\n--- Run started: 2026-10-05T20:30:00.000Z ---\n${lines.join("\n")}\n`;

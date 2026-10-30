@@ -365,7 +365,16 @@ other, never a partial one. `FACTORY_PLAN_ONLY` writes nothing.
   "stories": [
     { "key": "JCLAW-1390", "summary": "Factory writes a board.json status file", "source": "jira", "autoMerge": false,
       "state": "running", "phase": "gate-1", "phaseStartedAt": "2026-10-05T09:10:02.311Z", "since": "2026-10-05T08:31:40.007Z",
-      "logs": ["JCLAW-1390-gate-1-diag.json", "JCLAW-1390-implement.log"] }
+      "logs": ["JCLAW-1390-gate-1-diag.json", "JCLAW-1390-implement.log"] },
+    { "key": "JCLAW-1346", "summary": "Populate the graph at capture", "source": "jira", "autoMerge": false,
+      "state": "waiting", "reason": "blocked by JCLAW-1380 (To Do)", "blockedBy": ["JCLAW-1380"],
+      "since": "2026-10-05T08:31:40.007Z", "logs": [] }
+  ],
+  "blockers": [
+    { "key": "JCLAW-1380", "summary": "Certify the extractors", "status": "To Do", "reason": "labelled no-afk",
+      "blockedBy": ["JCLAW-1377"] },
+    { "key": "JCLAW-1377", "summary": "Measure the live write rates", "status": "In Progress", "reason": "labelled no-afk",
+      "blockedBy": [] }
   ]
 }
 ```
@@ -376,10 +385,20 @@ other, never a partial one. `FACTORY_PLAN_ONLY` writes nothing.
 - `stories` is ordered by most recent change, first. `source` is `jira` or `github`. `autoMerge` is true when the
   story or its epic carries `afk-merge` and `no-afk-merge` does not exempt it. `since` is when the story entered its
   state. `logs` names the files under `~/.jclaw-factory/logs/` that belong to the story.
+- `blockers` lists the open stories the factory will not build that keep a candidate waiting, directly or through
+  another such story, in the order the poll found them. `reason` says why each is no candidate: `labelled no-afk`,
+  `labelled wont-do`, `labelled afk-blocked`, `not labelled afk`, its status when that is not To Do (such as
+  `In Progress`), or `outside intake` for anything else, such as another sprint or another assignee. `blockedBy` holds
+  its own open blockers' keys, as a waiting story's does. Each poll rewrites the list once it has started its stories,
+  a `FACTORY_TICKET` round included. It reads at most 50 stories, and the epic of each whose own labels neither hold it
+  nor carry `afk`, so up to 100 requests. A read that fails, or a poll that could not read a source's candidates, keeps
+  the last list, and a restart keeps it until its first walk. A story the board holds in `stories` is never listed here
+  too, and a GitHub issue has no blockers. A reader takes a missing `blockers` or `blockedBy` as empty, so a board from an older factory still
+  reads.
 
 | `state` | Extra fields | Means |
 |---|---|---|
-| `waiting` | `reason` | A candidate not started: blocked by named stories, a named file overlap, every slot busy, interrupted by the last stop, or a model API overload with the time it is eligible again |
+| `waiting` | `reason`, and `blockedBy` while open stories block it | A candidate not started: blocked by named stories, a named file overlap, every slot busy, interrupted by the last stop, or a model API overload with the time it is eligible again. `blockedBy` holds the keys of the open stories blocking it |
 | `running` | `phase`, `phaseStartedAt` | `picked-up`, then `implement`, `rework`, `spec`, `build`, `gate-N`, `repair-N`, `review`, `gate-review`, `brief`; a landing runs `merge`, then `gate-merge` |
 | `review` | | Offered for review, awaiting a human |
 | `blocked` | `reason` | The factory gave up, or would not start it (a won't-do verdict, or a GitHub issue edited after its label) |

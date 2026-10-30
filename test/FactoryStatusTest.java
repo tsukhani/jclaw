@@ -59,13 +59,17 @@ class FactoryStatusTest extends UnitTest {
     }
 
     private void board(String stories) throws Exception {
+        board(stories, null);
+    }
+
+    private void board(String stories, String blockers) throws Exception {
         Files.writeString(home.resolve("board.json"), """
                 {"schema": 1, "updatedAt": "2026-10-05T09:12:44.120Z",
                  "harness": {"pid": 4242, "startedAt": "2026-10-05T08:00:01.002Z", "main": null},
                  "settings": {"FACTORY_MAX_PARALLEL": 2, "FACTORY_CPUS": 6, "FACTORY_POLL_SECONDS": 120,
                               "FACTORY_MODEL": "claude-opus-5-5"},
-                 "stories": [%s]}
-                """.formatted(stories));
+                 "stories": [%s]%s}
+                """.formatted(stories, blockers == null ? "" : ", \"blockers\": [" + blockers + "]"));
     }
 
     private void boardListing(String... logs) throws Exception {
@@ -206,6 +210,50 @@ class FactoryStatusTest extends UnitTest {
         assertEquals("gate-1", running.phase());
         assertTrue(running.autoMerge());
         assertEquals(List.of("JCLAW-7-implement.log"), board.stories().get(0).logs());
+    }
+
+    @Test
+    void aWaitingStorysBlockersAndTheStoriesTheFactoryWillNotBuildAreParsed() throws Exception {
+        board("""
+                {"key": "JCLAW-1346", "summary": "Graph population", "source": "jira", "autoMerge": false,
+                 "state": "waiting", "reason": "blocked by JCLAW-1380 (To Do)", "blockedBy": ["JCLAW-1380"],
+                 "since": "2026-10-05T08:31:40.007Z", "logs": []}
+                """, """
+                {"key": "JCLAW-1380", "summary": "Certify under schema v3", "status": "To Do",
+                 "reason": "labelled no-afk", "blockedBy": ["JCLAW-1377", "JCLAW-1378"]},
+                {"key": "JCLAW-1377", "summary": "Must-not-write strata", "status": "In Progress",
+                 "reason": "labelled no-afk", "blockedBy": []}
+                """);
+        var s = FactoryStatus.read("Linux");
+        assertNull(s.boardReason());
+        assertEquals(List.of("JCLAW-1380"), s.board().stories().getFirst().blockedBy());
+        assertEquals(List.of(
+                new FactoryStatus.BoardBlocker("JCLAW-1380", "Certify under schema v3", "To Do", "labelled no-afk",
+                        List.of("JCLAW-1377", "JCLAW-1378")),
+                new FactoryStatus.BoardBlocker("JCLAW-1377", "Must-not-write strata", "In Progress",
+                        "labelled no-afk", List.of())), s.board().blockers());
+    }
+
+    @Test
+    void aBoardFromAFactoryWithoutBlockersReadsThemAsEmpty() throws Exception {
+        boardListing("JCLAW-7-implement.log");
+        var board = FactoryStatus.read("Linux").board();
+        assertEquals(List.of(), board.blockers());
+        assertEquals(List.of(List.of(), List.of()), board.stories().stream().map(FactoryStatus.BoardStory::blockedBy).toList());
+
+        board("", "{\"key\": \"JCLAW-1380\"}");
+        assertEquals(List.of(new FactoryStatus.BoardBlocker("JCLAW-1380", null, null, null, List.of())),
+                FactoryStatus.read("Linux").board().blockers());
+    }
+
+    @Test
+    void aBlockerWithoutAKeyMakesTheBoardUnreadableWithAReason() throws Exception {
+        for (var blockers : List.of("{\"summary\": \"x\", \"reason\": \"labelled no-afk\", \"blockedBy\": []}", "null")) {
+            board("", blockers);
+            var s = FactoryStatus.read("Linux");
+            assertNull(s.board(), blockers);
+            assertEquals("board.json has a blocker without a key.", s.boardReason(), blockers);
+        }
     }
 
     @Test

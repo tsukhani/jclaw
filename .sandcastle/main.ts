@@ -14,7 +14,8 @@ import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracke
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
-import { Board, autoMerges, type About } from "./board.ts";
+import { Board, autoMerges, blockedReason, waitingOn, type About } from "./board.ts";
+import { nextBlockers, outsideBlockers } from "./blockers.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
 import { frontendGate, type Diagnostic } from "./frontend-gate.ts";
 
@@ -560,7 +561,7 @@ const landAll = async (): Promise<Promise<void>[]> => {
 };
 
 const wait = (stories: Snapshot[], reason: string) => {
-  for (const s of stories) board.set(s.key, { state: "waiting", reason }, about(s));
+  for (const s of stories) board.set(s.key, waitingOn(reason, s.blockedBy), about(s));
 };
 
 // Starts as many stories as there are free slots, returning their runs.
@@ -579,10 +580,9 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
       await refuse(story);
       continue;
     }
-    const open = story.blockedBy.filter((b) => !b.done);
-    if (open.length === 0) unblocked.push(story);
+    const reason = blockedReason(story.blockedBy);
+    if (reason === undefined) unblocked.push(story);
     else {
-      const reason = `blocked by ${open.map((b) => `${b.key} (${b.status})`).join(", ")}`;
       note(story.key, `[plan] ${story.key} waits: ${reason}`);
       wait([story], reason);
     }
@@ -676,6 +676,16 @@ const reconcile = async (candidates: Snapshot[], unread: Set<Tracker>) => {
       note(`done ${key}`, `[factory] could not read whether ${key} is Done: ${errorText(error)}`);
     }
   }
+};
+
+// The open stories the factory will not build that hold its candidates, for the board; it never stops the poll. A Jira
+// link may name another project's issue, which jira.owns does not claim, so every key but a GitHub one is read from Jira.
+const readBlockers = async (candidates: Snapshot[], unread: Set<Tracker>) => {
+  const read = async (key: string) => (github?.owns(key) ? undefined : jira.blocker?.(key));
+  const { blockers, failure } = await nextBlockers(board.blockers, unread.size > 0, () => outsideBlockers(candidates, (key) => board.has(key), read));
+  board.blockers = blockers;
+  if (failure === undefined) lastSaid.delete("blockers");
+  else note("blockers", `[factory] could not read the stories that block the candidates, so the board keeps the last list: ${errorText(failure)}`);
 };
 
 let wake = () => {};
@@ -786,6 +796,8 @@ while (true) {
             wake();
           });
         }
+        // After the round has started its stories: the walk is for the board alone, so it never delays a start.
+        await readBlockers(candidates, unread);
         lastSaid.delete("round");
       } catch (error) {
         note("round", `[factory] round failed, retrying next poll: ${errorText(error)}`);

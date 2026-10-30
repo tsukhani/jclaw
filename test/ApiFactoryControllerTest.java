@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -409,7 +410,9 @@ class ApiFactoryControllerTest extends FunctionalTest {
                  "harness": {"pid": 4242, "startedAt": "2026-10-05T08:00:01.002Z", "main": null},
                  "stories": [{"key": "JCLAW-7", "summary": "s", "source": "jira", "autoMerge": false,
                               "state": "review", "since": "2026-10-05T08:31:40.007Z",
-                              "logs": ["JCLAW-7-implement.log", "../.env"]}]}
+                              "logs": ["JCLAW-7-implement.log", "../.env"]}],
+                 "blockers": [{"key": "JCLAW-6", "summary": "u", "status": "In Progress", "reason": "labelled no-afk",
+                               "blockedBy": ["JCLAW-5"]}]}
                 """);
         Files.writeString(home.resolve("logs/JCLAW-7-implement.log"), "built\n");
         Files.writeString(home.resolve("logs/JCLAW-7-other.log"), "x");
@@ -426,6 +429,10 @@ class ApiFactoryControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"installed\":true"), body);
         assertTrue(body.contains("\"key\":\"JCLAW-7\""), body);
         assertTrue(body.contains("\"state\":\"review\""), body);
+        var board = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("board");
+        assertEquals("[]", board.getAsJsonArray("stories").get(0).getAsJsonObject().get("blockedBy").toString());
+        assertEquals("[{\"key\":\"JCLAW-6\",\"summary\":\"u\",\"status\":\"In Progress\","
+                + "\"reason\":\"labelled no-afk\",\"blockedBy\":[\"JCLAW-5\"]}]", board.get("blockers").toString());
         assertFalse(body.contains("sk-test"), body);
     }
 

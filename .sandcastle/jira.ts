@@ -1,9 +1,9 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { intakeJql, mergeJql } from "./jira-intake.ts";
+import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
-import type { Snapshot, Tracker } from "./tracker.ts";
+import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
 
 // Only from FACTORY_HOME/jira.env, never .env, which the gateway mounts: no container ever holds the Jira token.
 const env = readEnvFile(JIRA_ENV_FILE);
@@ -33,16 +33,24 @@ export const snapshot = async (key: string): Promise<Snapshot> => {
     labels: f.labels ?? [],
     comments: (f.comment?.comments ?? []).map((c: any) => ({ author: c.author?.displayName ?? "unknown", body: c.body })),
     parent: epic ? { key: epicKey!, summary: epic.summary, description: epic.description ?? "", labels: epic.labels ?? [] } : undefined,
-    // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B".
-    blockedBy: (f.issuelinks ?? [])
-      .filter((l: any) => l.type.name === "Blocks" && l.inwardIssue)
-      .map((l: any) => ({
-        key: l.inwardIssue.key,
-        status: l.inwardIssue.fields.status.name,
-        done: l.inwardIssue.fields.status.statusCategory.key === "done",
-      })),
+    blockedBy: blockersOf(f.issuelinks),
     updated: f.updated,
     fetchedAt: new Date().toISOString(),
+  };
+};
+
+// A story that blocks a candidate, without its description or comments.
+export const blocker = async (key: string): Promise<Blocker> => {
+  const f = (await api(`/rest/api/2/issue/${key}?fields=summary,status,labels,issuelinks,${EPIC_LINK}`)).fields;
+  const epicKey: string | null = f[EPIC_LINK];
+  const epicLabels = async (): Promise<string[]> => (epicKey ? ((await api(`/rest/api/2/issue/${epicKey}?fields=labels`)).fields.labels ?? []) : []);
+  return {
+    key,
+    summary: f.summary,
+    status: f.status.name,
+    done: f.status.statusCategory.key === "done",
+    reason: await notCandidate({ labels: f.labels ?? [], status: f.status.name }, epicLabels),
+    blockedBy: openBlockersOf(f.issuelinks),
   };
 };
 
@@ -135,6 +143,7 @@ export const jira: Tracker = {
   mergeQueue,
   orphaned,
   snapshotToState,
+  blocker,
   claim,
   started: async (key) => {
     await transitionTo(key, "In Progress");

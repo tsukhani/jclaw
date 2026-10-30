@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ChevronRightIcon } from '@heroicons/vue/24/outline'
-import { elapsed, groupStories, mergedLabel, type BoardStory } from './factory-board'
+import { boardGroups, elapsed, mergedLabel, outsideDetail, rowIndent, type BoardBlocker, type BoardStory } from './factory-board'
 
 const props = defineProps<{
   stories: BoardStory[]
+  /** Open stories outside the factory that keep waiting ones from starting; drawn in Waiting's tree. */
+  blockers: BoardBlocker[]
   selected: string | null
   /** When the status was read; elapsed times are recomputed per refresh, not per second. */
   now: number
@@ -11,7 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ select: [key: string] }>()
 
-const groups = computed(() => groupStories(props.stories).filter(g => g.stories.length > 0))
+const groups = computed(() => boardGroups(props.stories, props.blockers).filter(g => g.stories.length > 0))
 
 const collapsed = ref<Record<string, boolean>>({})
 </script>
@@ -48,7 +50,9 @@ const collapsed = ref<Record<string, boolean>>({})
             :class="collapsed[g.id] ? '' : 'rotate-90'"
             aria-hidden="true"
           />
-          {{ g.title }} ({{ g.stories.length }})
+          {{ g.title }} ({{ g.stories.length }})<template v-if="g.outside > 0">
+            · {{ g.outside }} outside the factory
+          </template>
         </button>
       </h4>
       <ul
@@ -56,42 +60,59 @@ const collapsed = ref<Record<string, boolean>>({})
         class="bg-surface-elevated border border-border divide-y divide-border"
       >
         <li
-          v-for="s in g.stories"
-          :key="s.key"
+          v-for="r in g.rows"
+          :key="r.key"
+          :data-depth="r.depth"
         >
           <button
+            v-if="r.kind === 'story'"
             type="button"
             class="w-full text-left px-4 py-2.5 flex flex-wrap items-start gap-3 hover:bg-muted/40"
-            :aria-pressed="selected === s.key"
-            :data-testid="`factory-story-${s.key}`"
-            @click="emit('select', s.key)"
+            :style="{ paddingLeft: rowIndent(r.depth) }"
+            :aria-pressed="selected === r.key"
+            :data-testid="`factory-story-${r.key}`"
+            @click="emit('select', r.key)"
           >
-            <span class="text-sm font-mono text-fg-strong w-28 shrink-0">{{ s.key }}</span>
-            <span class="text-sm text-fg-strong flex-1 min-w-48">{{ s.summary }}</span>
+            <span class="text-sm font-mono text-fg-strong w-28 shrink-0">{{ r.key }}</span>
+            <span class="text-sm text-fg-strong flex-1 min-w-[min(12rem,100%)]">{{ r.story.summary }}</span>
             <span
-              v-if="s.autoMerge"
+              v-if="r.story.autoMerge"
               class="text-xs border px-1 text-sky-800 dark:text-sky-400 border-sky-400/30"
               data-testid="factory-automerge-badge"
             >Auto-merge</span>
             <span
-              v-if="s.state === 'running'"
+              v-if="r.story.state === 'running'"
               class="text-xs text-fg-muted"
               data-testid="factory-story-detail"
-            >{{ s.phase }} · {{ elapsed(s.since, now) }}</span>
+            >{{ r.story.phase }} · {{ elapsed(r.story.since, now) }}</span>
             <span
-              v-else-if="s.state === 'merged'"
+              v-else-if="r.story.state === 'merged'"
               class="text-xs text-fg-muted"
               data-testid="factory-story-detail"
-            >{{ mergedLabel(s) }}<template v-if="s.sha"> · <span
+            >{{ mergedLabel(r.story) }}<template v-if="r.story.sha"> · <span
               class="font-mono"
-              :title="s.sha"
-            >{{ s.sha.slice(0, 8) }}</span></template></span>
+              :title="r.story.sha"
+            >{{ r.story.sha.slice(0, 8) }}</span></template></span>
             <span
-              v-else-if="s.reason"
+              v-else-if="r.story.reason"
               class="text-xs text-fg-muted"
               data-testid="factory-story-detail"
-            ><template v-if="s.state === 'refused'">Auto-merge refused: </template>{{ s.reason }}</span>
+            ><template v-if="r.story.state === 'refused'">Auto-merge refused: </template>{{ r.story.reason }}</span>
           </button>
+          <div
+            v-else
+            class="px-4 py-2.5 flex flex-wrap items-start gap-3"
+            :style="{ paddingLeft: rowIndent(r.depth) }"
+            :data-testid="`factory-outside-${r.key}`"
+          >
+            <span class="text-sm font-mono text-fg-muted w-28 shrink-0">{{ r.key }}</span>
+            <span class="text-sm text-fg-muted flex-1 min-w-[min(12rem,100%)]">{{ r.blocker.summary }}</span>
+            <span class="text-xs border px-1 text-fg-muted border-border">Outside the factory</span>
+            <span
+              class="text-xs text-fg-muted"
+              data-testid="factory-outside-detail"
+            >{{ outsideDetail(r.blocker) }}</span>
+          </div>
         </li>
       </ul>
     </div>
