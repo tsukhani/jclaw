@@ -5470,14 +5470,31 @@ do_test() {
         fi
     fi
 
-    echo "==> Running backend tests (play autotest)..."
+    # The pre-push hook narrows the run (bin/select-tests.mjs): JCLAW_TEST_BACKEND is "none" or a -Ptests
+    # class list, and JCLAW_TEST_FRONTEND=0 skips the four frontend checks. Unset, both run in full.
+    local backend_scope="${JCLAW_TEST_BACKEND:-all}"
+    local run_frontend="${JCLAW_TEST_FRONTEND:-1}"
+    local backend_skipped=0 frontend_skipped=0
+    [[ "$backend_scope" == "none" ]] && backend_skipped=1
+    [[ "$run_frontend" == "0" ]] && frontend_skipped=1
+
     t0=$(_now)
+    if [[ "$backend_skipped" == 1 ]]; then
+        echo "==> Backend tests skipped: the change reaches none."
+        backend_elapsed=0
+    else
     # JCLAW-684: clear this run's per-class result sentinels first so the
     # post-run check below can't trip on stale *.class.failed.html from an
     # earlier run (play does not purge them).
     rm -f "$SCRIPT_DIR"/test-result/*.class.failed.html 2>/dev/null || true
     set +e
-    play autotest 2>&1 | tee "$backend_log"
+    if [[ "$backend_scope" == "all" ]]; then
+        echo "==> Running backend tests (play autotest)..."
+        play autotest 2>&1 | tee "$backend_log"
+    else
+        echo "==> Running the $(printf '%s\n' "$backend_scope" | tr ',' '\n' | wc -l | tr -d ' ') backend test classes the change reaches..."
+        ./gradlew playAutotest -Ptests="$backend_scope" 2>&1 | tee "$backend_log"
+    fi
     backend_rc=${PIPESTATUS[0]}
     set -e
     if ! grep -q "^~ All tests passed" "$backend_log" 2>/dev/null; then
@@ -5492,7 +5509,13 @@ do_test() {
         backend_rc=1
     fi
     backend_elapsed=$(_elapsed "$t0")
+    fi
 
+    if [[ "$frontend_skipped" == 1 ]]; then
+        echo ""
+        echo "==> Frontend checks skipped: the change touches nothing they build from."
+        frontend_elapsed=0; stylelint_elapsed=0; lint_elapsed=0; typecheck_elapsed=0
+    else
     echo ""
     echo "==> Running frontend tests (pnpm test)..."
     t0=$(_now)
@@ -5537,6 +5560,7 @@ do_test() {
     typecheck_rc=${PIPESTATUS[0]}
     set -e
     typecheck_elapsed=$(_elapsed "$t0")
+    fi
 
     # Extract human-readable counts for the summary. Each grep is shielded
     # with `|| true` so a missing match under `set -e` + `pipefail` doesn't
@@ -5562,19 +5586,24 @@ do_test() {
     echo "────────────────────────────────────────────────────────────"
     echo " jclaw test summary"
     echo "────────────────────────────────────────────────────────────"
-    if [[ "$backend_rc" -eq 0 ]]; then
+    if [[ "$backend_skipped" == 1 ]]; then
+        printf " backend  : SKIPPED (the change reaches no backend test)\n"
+    elif [[ "$backend_rc" -eq 0 ]]; then
         printf " backend  : PASSED  (%s classes, %ss)\n" "${backend_passed:-?}" "$backend_elapsed"
     else
         printf " backend  : FAILED  (%s passed / %s failed, %ss)\n" \
             "${backend_passed:-?}" "${backend_failed:-?}" "$backend_elapsed"
         echo "            log: $backend_log"
     fi
-    if [[ "$frontend_rc" -eq 0 ]]; then
+    if [[ "$frontend_skipped" == 1 ]]; then
+        printf " frontend : SKIPPED (stylelint, lint and typecheck too: no frontend input changed)\n"
+    elif [[ "$frontend_rc" -eq 0 ]]; then
         printf " frontend : PASSED  %s\n" "$frontend_summary"
     else
         printf " frontend : FAILED  %s\n" "$frontend_summary"
         echo "            log: $frontend_log"
     fi
+    if [[ "$frontend_skipped" == 0 ]]; then
     if [[ "$stylelint_rc" -eq 0 ]]; then
         printf " stylelint: PASSED  (%ss)\n" "$stylelint_elapsed"
     else
@@ -5592,6 +5621,7 @@ do_test() {
     else
         printf " typecheck: FAILED  (%ss)\n" "$typecheck_elapsed"
         echo "            log: $typecheck_log"
+    fi
     fi
     echo "────────────────────────────────────────────────────────────"
 

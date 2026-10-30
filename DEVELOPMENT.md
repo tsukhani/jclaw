@@ -107,7 +107,7 @@ Ports `9000` (backend) and `3000` (Nuxt) are forwarded to your host automaticall
 
 ### Commits and `/deploy`
 
-The pre-commit hook (frontend lint-staged) and pre-push hook (full test suite) work inside the container without any extra setup. Two nuances:
+The pre-commit hook (frontend lint-staged) and pre-push hook (the tests the push reaches) work inside the container without any extra setup. Two nuances:
 
 - **Signed commits** — `/deploy` produces signed commits and signed tags (`commit -S`, `tag -s`). Your host's GPG/SSH keys aren't visible inside the container by default. Two recovery options:
   1. **Easiest**: do `/deploy` from your host shell (open a host terminal, `cd` into the project, run the slash command). Code inside the container, deploy from outside.
@@ -201,7 +201,7 @@ A few more developer commands sit beside it:
 
 ### Git hooks
 
-`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` skips by itself when the push changes only documentation (`docs/`, `*.md`, `.github/`) or only the `application.version` line; otherwise it runs a wildcard-import check, `spotlessCheck` and `compileJava`, then `./jclaw.sh test`, before a push reaches the remote, and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
+`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` skips by itself when the push changes only documentation (`docs/`, `*.md`, `.github/`) or only the `application.version` line; otherwise it runs a wildcard-import check, `spotlessCheck`, `compileJava` and `compileTestJava`, then `./jclaw.sh test` narrowed to the push: the backend test classes `bin/select-tests.mjs` picks (none, a list, or the whole suite) and the four frontend checks only when `frontend/`, `docs/user-guide/` or `bin/llms-full.mjs` changed. Jenkins runs the full suite on every push. It does this before a push reaches the remote, and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
 
 ```bash
 git config core.hooksPath .githooks

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Pre-push hook: run the consolidated test suite before a push leaves the
-# laptop. Skips the run when the current HEAD has already been tested (so
-# the two-remote deploy flow — origin + github — only pays the ~10 min cost
-# once). Cache lives inside $GIT_DIR so it stays local to this clone and
-# is automatically scoped per worktree.
+# Pre-push hook: run the tests a push can break before it leaves the laptop.
+# The backend runs only the test classes the pushed change reaches
+# (bin/select-tests.mjs), and the frontend checks only when a frontend input
+# changed; Jenkins runs the whole suite on every push. Skips the run when the
+# current HEAD has already been tested (so the two-remote deploy flow, origin
+# then github, pays once). Cache lives inside $GIT_DIR so it stays local to this
+# clone and is automatically scoped per worktree.
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 # Bypass for a single push (use sparingly):  JCLAW_SKIP_TESTS=1 git push ...
@@ -126,8 +128,42 @@ if ! nullaway_out=$(cd "$repo_root" && ./gradlew --quiet compileJava 2>&1); then
     exit 1
 fi
 
+# The selection reads the compiled test classes, so they are compiled here as well.
+echo "[jclaw pre-push] Compiling the tests..."
+if ! compile_out=$(cd "$repo_root" && ./gradlew --quiet compileTestJava 2>&1); then
+    printf '%s\n' "$compile_out" >&2
+    echo "[jclaw pre-push] compileTestJava failed — see the output above." >&2
+    exit 1
+fi
+
+# Without an upstream, node or a working selection, the whole suite runs as before.
+backend_scope=all
+run_frontend=1
+if base=$(git rev-parse --verify --quiet "@{u}") && command -v node >/dev/null 2>&1 \
+        && selection=$(cd "$repo_root" && node bin/select-tests.mjs --base "$base" --head HEAD); then
+    case "$selection" in
+        ALL) backend_scope=all ;;
+        NONE) backend_scope=none ;;
+        *) backend_scope="$selection" ;;
+    esac
+    # The inputs the factory's frontend gate watches (.sandcastle/frontend-gate.ts FRONTEND_INPUTS). A here-string,
+    # not a pipe: under pipefail, grep -q exiting at its first match fails the pipeline with git's SIGPIPE.
+    changed=$(git diff --name-only "$base...HEAD")
+    if ! grep -qE '^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)' <<< "$changed"; then
+        run_frontend=0
+    fi
+fi
+case "$backend_scope" in
+    all) backend_label="the whole suite" ;;
+    none) backend_label="nothing the change reaches" ;;
+    *) backend_label="the classes the change reaches" ;;
+esac
+frontend_label=run
+[[ "$run_frontend" == 1 ]] || frontend_label=skipped
+echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label. Jenkins runs everything."
+
 echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
-if (cd "$repo_root" && ./jclaw.sh test); then
+if (cd "$repo_root" && JCLAW_TEST_BACKEND="$backend_scope" JCLAW_TEST_FRONTEND="$run_frontend" ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"
     echo "[jclaw pre-push] Tests passed — proceeding with push."
     exit 0
