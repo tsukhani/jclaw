@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
@@ -6,6 +6,11 @@ import { serveConversation } from './conversation-endpoint'
 
 // A page left mounted shares the router, so it follows a later test's ?conversation= and fetches for it too.
 enableAutoUnmount(afterEach)
+// The last page's message-id reconcile can still be in flight when it unmounts; its 404 is logged after the file's
+// environment closes, which vitest reports as an unhandled teardown error (Jenkins 1372).
+afterAll(() => {
+  for (const level of ['error', 'warn', 'log'] as const) vi.spyOn(console, level).mockImplementation(() => {})
+})
 
 /**
  * Page-level Vitest coverage for the {@code chat.vue} streaming state machine
