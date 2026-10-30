@@ -63,7 +63,7 @@ Fan the work out: one read-only auditor per cluster (a prose cluster, or one top
 - **Endpoint / feature mismatches** — feature lists or `/api` endpoints that no longer match `conf/routes`, controllers, or frontend pages.
 - **On-screen strings** — the user guide quotes them exactly, so the `.vue` source is the truth for every label, button, heading and empty state it quotes.
 - **Coverage gaps** — shipped capabilities with no doc coverage (e.g. a new channel or feature with no user-guide page). Flag these; do not silently auto-author whole new pages.
-- **Broken internal markdown links** between docs, and `/guide#<page id>-<slug>` links (the slug rules are in `frontend/components/guide/GuideRenderer.vue`).
+- **Broken internal markdown links** between docs, and `/guide#<page id>-<slug>` links (the slug rules are in `frontend/components/guide/GuideRenderer.vue`). A file that ships in the release zips links to a file `.distignore` drops (each line there is a path prefix from the repo root) on the GitHub mirror, never by relative path: a relative link resolves in a checkout and breaks in the zip.
 
 *2b — Documentation in source and config files (fix + gate).* Three passes, cheapest first:
 
