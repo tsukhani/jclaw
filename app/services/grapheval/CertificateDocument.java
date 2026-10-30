@@ -41,12 +41,12 @@ public record CertificateDocument(JsonObject json) {
     private static final Set<String> TIMELINE_KEYS = Set.of("probes", "definite", "wrong", "bound", "result");
     private static final Set<String> RECALL_KEYS = Set.of("floor");
     /** The set that certified each part (JCLAW-1369): the classes and G_trap on synthetic strata, not the live sample. */
-    static final Map<String, String> SETS = Map.of("terms", Certifier.certifyingSet(Certifier.TERMS),
-            "relations", Certifier.certifyingSet("relations"),
-            Certifier.G_WRITTEN, Certifier.certifyingSet(Certifier.G_WRITTEN),
-            "recall", Certifier.certifyingSet(Certifier.TERMS),
-            "classes", Certifier.certifyingSet(Certifier.V2_CLASSES.getFirst()),
-            Certifier.G_TRAP, Certifier.certifyingSet(Certifier.G_TRAP), "lineage", SEQUENCES, "timeline", SEQUENCES);
+    static final Map<String, String> SETS = Map.of("terms", Sequencer.certifyingSet(Sequencer.TERMS),
+            "relations", Sequencer.certifyingSet("relations"),
+            Sequencer.G_WRITTEN, Sequencer.certifyingSet(Sequencer.G_WRITTEN),
+            "recall", Sequencer.certifyingSet(Sequencer.TERMS),
+            "classes", Sequencer.certifyingSet(Sequencer.V2_CLASSES.getFirst()),
+            Sequencer.G_TRAP, Sequencer.certifyingSet(Sequencer.G_TRAP), "lineage", SEQUENCES, "timeline", SEQUENCES);
 
     public CertificateDocument {
         json = json.deepCopy();
@@ -57,7 +57,7 @@ public record CertificateDocument(JsonObject json) {
      * {@code guide} is the guide version its verdicts were judged under.
      */
     public static CertificateDocument of(String model, String digest, String status, CertificationSplit split,
-                                         String guide, String schema, String extraction, Certifier.Sequencing sequencing,
+                                         String guide, String schema, String extraction, Sequencer.Sequencing sequencing,
                                          ClassWalk lineage, Timeline timeline, String timelineResult,
                                          double recallFloor) {
         return of(model, digest, status, split, guide, schema, extraction, sequencing, lineage, timeline,
@@ -65,12 +65,12 @@ public record CertificateDocument(JsonObject json) {
     }
 
     /**
-     * {@link #of(String, String, String, CertificationSplit, String, String, String, Certifier.Sequencing, ClassWalk,
+     * {@link #of(String, String, String, CertificationSplit, String, String, String, Sequencer.Sequencing, ClassWalk,
      * Timeline, String, double)} with the optional {@code resolution} section, written only when the shortlist walk
      * reached a threshold, from its step there.
      */
     public static CertificateDocument of(String model, String digest, String status, CertificationSplit split,
-                                         String guide, String schema, String extraction, Certifier.Sequencing sequencing,
+                                         String guide, String schema, String extraction, Sequencer.Sequencing sequencing,
                                          ClassWalk lineage, Timeline timeline, String timelineResult,
                                          double recallFloor, ResolutionCalibration.@Nullable Walk shortlist) {
         var o = new JsonObject();
@@ -96,7 +96,7 @@ public record CertificateDocument(JsonObject json) {
                 lineage.bound()));
         o.add("classes", classes);
         var pooled = new JsonObject();
-        for (var p : new Certifier.Pooled[] {sequencing.written(), sequencing.trap()}) {
+        for (var p : new Sequencer.Pooled[] {sequencing.written(), sequencing.trap()}) {
             if (p == null) continue;
             var po = new JsonObject();
             po.addProperty("n", p.n());
@@ -137,7 +137,7 @@ public record CertificateDocument(JsonObject json) {
         return new CertificateDocument(Fingerprints.canonical(withId).getAsJsonObject());
     }
 
-    private static JsonObject gate(Certifier.Gate g) {
+    private static JsonObject gate(Sequencer.Gate g) {
         var o = new JsonObject();
         o.addProperty("state", g.state());
         o.add("threshold", g.threshold() == null ? JsonNull.INSTANCE : new JsonPrimitive(g.threshold()));
@@ -205,11 +205,11 @@ public record CertificateDocument(JsonObject json) {
         var relations = new TreeMap<String, Double>();
         for (var e : json.getAsJsonObject("relations").entrySet()) {
             var g = e.getValue().getAsJsonObject();
-            if (g.get("state").getAsString().equals(Certifier.ON)) relations.put(e.getKey(), g.get("threshold").getAsDouble());
+            if (g.get("state").getAsString().equals(Sequencer.ON)) relations.put(e.getKey(), g.get("threshold").getAsDouble());
         }
         var classes = new TreeMap<String, ClassSetting>();
         for (var e : json.getAsJsonObject("classes").entrySet()) {
-            if (!Certifier.V2_CLASSES.contains(e.getKey())) continue;
+            if (!Sequencer.V2_CLASSES.contains(e.getKey())) continue;
             var c = e.getValue().getAsJsonObject();
             var state = c.get("state").getAsString();
             classes.put(e.getKey(), new ClassSetting(state,

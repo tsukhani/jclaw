@@ -6,12 +6,14 @@ import play.test.UnitTest;
 import services.grapheval.CertificateDocument;
 import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
+import services.grapheval.ClopperPearson;
 import services.grapheval.Configuration;
 import services.grapheval.Configuration.ClassSetting;
 import services.grapheval.Fingerprints;
 import services.grapheval.ResolutionCalibration;
 import services.grapheval.ResolutionCalibration.Counts;
 import services.grapheval.SequenceScorer;
+import services.grapheval.Sequencer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -42,11 +44,11 @@ class CertificateDocumentTest extends UnitTest {
         }
     }
 
-    private static final Certifier.Power POWER = new Certifier.Power(0.5, 0.2, 0.1);
+    private static final Sequencer.Power POWER = new Sequencer.Power(0.5, 0.2, 0.1);
 
-    private static Certifier.Gate gate(String name, String state, Double threshold, int n, int k, double bound,
+    private static Sequencer.Gate gate(String name, String state, Double threshold, int n, int k, double bound,
                                        double recall) {
-        return new Certifier.Gate(name, state, threshold, n, k, bound, recall, POWER, List.of(), null);
+        return new Sequencer.Gate(name, state, threshold, n, k, bound, recall, POWER, List.of(), null);
     }
 
     private static CertificateDocument certificate(String model, int termsK) {
@@ -62,14 +64,14 @@ class CertificateDocumentTest extends UnitTest {
         classes.put("time", new ClassSetting(Certifier.PROVISIONAL, 0.90));
         classes.put("negation", new ClassSetting(Certifier.DISABLED, null));
         var reached = new Configuration(0.85, new TreeMap<>(Map.of("works_at", 0.90)), classes);
-        var sequencing = new Certifier.Sequencing(0.95, gate("terms", Certifier.ON, 0.85, 410, termsK, 0.022, 0.71),
-                List.of(gate("works_at", Certifier.ON, 0.90, 71, 0, 0.041, 0.58),
-                        gate("kind_of", Certifier.OFF, null, 6, 0, 0.393, 0.12)),
-                List.of(new Certifier.ClassGate("status", Certifier.CLASS_CERTIFIED, 0.85, 262, 5, 0.040, POWER, List.of()),
-                        new Certifier.ClassGate("time", Certifier.PROVISIONAL, 0.90, 84, 2, 0.073, POWER, List.of()),
-                        new Certifier.ClassGate("negation", Certifier.DISABLED, null, 10, 0, 0.3, POWER, List.of())),
-                new Certifier.Pooled(Certifier.G_WRITTEN, 1650, 41, 0.032, true, POWER),
-                new Certifier.Pooled(Certifier.G_TRAP, 228, 4, 0.040, true, POWER), List.of(), reached, true, List.of(),
+        var sequencing = new Sequencer.Sequencing(0.95, gate("terms", Sequencer.ON, 0.85, 410, termsK, 0.022, 0.71),
+                List.of(gate("works_at", Sequencer.ON, 0.90, 71, 0, 0.041, 0.58),
+                        gate("kind_of", Sequencer.OFF, null, 6, 0, 0.393, 0.12)),
+                List.of(new Sequencer.ClassGate("status", Certifier.CLASS_CERTIFIED, 0.85, 262, 5, 0.040, POWER, List.of()),
+                        new Sequencer.ClassGate("time", Certifier.PROVISIONAL, 0.90, 84, 2, 0.073, POWER, List.of()),
+                        new Sequencer.ClassGate("negation", Certifier.DISABLED, null, 10, 0, 0.3, POWER, List.of())),
+                new Sequencer.Pooled(Sequencer.G_WRITTEN, 1650, 41, 0.032, true, POWER),
+                new Sequencer.Pooled(Sequencer.G_TRAP, 228, 4, 0.040, true, POWER), List.of(), reached, true, List.of(),
                 List.of());
         var lineage = new Certifier.ClassWalk("lineage", 0.90, Certifier.PROVISIONAL, 80, 1, 0.058, List.of());
         var timeline = SequenceScorer.timeline(240, 205, 3, 10, 2, 200);
@@ -193,7 +195,7 @@ class CertificateDocumentTest extends UnitTest {
         var shortlist = cert.json().getAsJsonObject("resolution").getAsJsonObject("shortlist");
         assertEquals(74, shortlist.get("n").getAsInt());
         assertEquals(0, shortlist.get("k").getAsInt());
-        assertEquals(Certifier.upperBound(0, 74), shortlist.get("bound").getAsDouble());
+        assertEquals(ClopperPearson.upperBound(0, 74), shortlist.get("bound").getAsDouble());
         cert.write(root);
         var read = CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).certificate();
         assertNotNull(read);

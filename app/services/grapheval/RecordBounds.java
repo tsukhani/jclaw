@@ -29,17 +29,17 @@ public final class RecordBounds implements GateBounds {
 
     @Override
     public boolean passes(List<MemoryCounts> writing, double limit, double tail) {
-        return Certifier.boundPasses(k(writing), n(writing), limit, tail);
+        return ClopperPearson.boundPasses(k(writing), n(writing), limit, tail);
     }
 
     @Override
     public double upper(List<MemoryCounts> writing, double tail) {
-        return Certifier.upperBound(k(writing), n(writing), tail);
+        return ClopperPearson.upperBound(k(writing), n(writing), tail);
     }
 
     @Override
     public double recallLower(List<MemoryCounts> labeled, double tail) {
-        return Certifier.lowerBound(labeled.stream().mapToInt(MemoryCounts::right).sum(),
+        return ClopperPearson.lowerBound(labeled.stream().mapToInt(MemoryCounts::right).sum(),
                 labeled.stream().mapToInt(MemoryCounts::gold).sum(), tail);
     }
 
@@ -48,14 +48,14 @@ public final class RecordBounds implements GateBounds {
     public double power(List<MemoryCounts> writing, double trueWrongShare, double limit, double tail) {
         int n = n(writing);
         int kmax = -1;
-        while (kmax + 1 < n && Certifier.boundPasses(kmax + 1, n, limit, tail)) kmax++;
-        return kmax < 0 ? 0.0 : Math.exp(Certifier.logCdf(kmax, n, trueWrongShare));
+        while (kmax + 1 < n && ClopperPearson.boundPasses(kmax + 1, n, limit, tail)) kmax++;
+        return kmax < 0 ? 0.0 : Math.exp(ClopperPearson.logCdf(kmax, n, trueWrongShare));
     }
 
     @Override
     public int recordsNeeded(int wrong, double limit, double tail) {
         for (int n = wrong + 1; n <= MAX_RECORDS; n++) {
-            if (Certifier.boundPasses(wrong, n, limit, tail)) return n;
+            if (ClopperPearson.boundPasses(wrong, n, limit, tail)) return n;
         }
         throw new IllegalArgumentException("no record count up to " + MAX_RECORDS + " passes with " + wrong + " wrong");
     }

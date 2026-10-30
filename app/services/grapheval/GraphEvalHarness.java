@@ -365,7 +365,7 @@ public final class GraphEvalHarness {
                 default -> throw new IllegalStateException("no tally for class " + w.name());
             };
             classes.add(new ClassAt(w.name(), w.state(), tally.n(), tally.wrong(),
-                    Certifier.upperBound(tally.wrong(), tally.n())));
+                    ClopperPearson.upperBound(tally.wrong(), tally.n())));
         }
         int denied = 0;
         int cued = 0;

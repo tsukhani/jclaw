@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.grapheval.Certifier;
+import services.grapheval.ClopperPearson;
 import services.grapheval.ResolutionCalibration;
 import services.grapheval.ResolutionCalibration.Counts;
 
@@ -20,7 +20,7 @@ class ResolutionCalibrationTest extends UnitTest {
                 "stops at the first failure, so 0.91 is never evaluated");
         var failed = walk.steps().getLast();
         assertFalse(failed.passes());
-        assertEquals(Certifier.upperBound(6, 130), failed.bound());
+        assertEquals(ClopperPearson.upperBound(6, 130), failed.bound());
         assertEquals(6 / 130.0, failed.rate());
         assertEquals(new Counts(124, 2).attachments(), walk.at(0.95).attachments());
     }

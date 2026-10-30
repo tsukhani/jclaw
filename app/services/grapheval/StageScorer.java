@@ -71,7 +71,7 @@ public final class StageScorer {
     /**
      * Resolution over scored mentions: {@code clusters} are the Terms, {@code falseMerges} the attachments whose gold
      * differs from their Term's, {@code falseMergeRate} that share of {@code attachments} (null with none) and
-     * {@code falseMergeBound} its {@link Certifier#upperBound}. Precision and recall are null when nothing could be
+     * {@code falseMergeBound} its {@link ClopperPearson#upperBound}. Precision and recall are null when nothing could be
      * measured.
      */
     public record Resolution(int mentions, int clusters, int goldEntities, int falseMerges, int attachments,
@@ -508,7 +508,7 @@ public final class StageScorer {
         int n = scored.size();
         return new Resolution(n, clusters.size(), goldSize.size(), falseMerges, attachments,
                 attachments == 0 ? null : (double) falseMerges / attachments,
-                Certifier.upperBound(falseMerges, attachments),
+                ClopperPearson.upperBound(falseMerges, attachments),
                 n == 0 ? null : precision / n, n == 0 ? null : recall / n,
                 samePredicted == 0 ? null : (double) sameBoth / samePredicted,
                 sameGold == 0 ? null : (double) sameBoth / sameGold);

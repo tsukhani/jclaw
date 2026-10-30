@@ -37,6 +37,7 @@ import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.WrongRecord;
 import services.grapheval.HeldOut;
 import services.grapheval.MemoryBounds;
+import services.grapheval.Sequencer;
 import services.grapheval.Sequences;
 import services.grapheval.SplitUses;
 import services.grapheval.StageScorer;
@@ -397,7 +398,7 @@ class GraphEvalHarnessTest extends UnitTest {
         var model = report.models().getFirst();
         var dev = model.v2().sequencing();
         assertNotNull(dev);
-        assertEquals(Certifier.ON, dev.terms().state(), dev.terms().toString());
+        assertEquals(Sequencer.ON, dev.terms().state(), dev.terms().toString());
         assertNotNull(dev.trap(), "a development run routes nothing: the Terms and G_trap read one set");
         assertTrue(dev.trap().n() > 0, dev.trap().toString());
         assertEquals(cases.size(), dev.terms().n(), "Terms n counts writing memories");
@@ -861,7 +862,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var sequencing = model.sequencing();
             assertNotNull(sequencing);
             // Decision 2: Terms are certified on the live sample, so a cases split cannot certify until JCLAW-1380.
-            assertEquals(Certifier.OFF, sequencing.terms().state(), sequencing.terms().toString());
+            assertEquals(Sequencer.OFF, sequencing.terms().state(), sequencing.terms().toString());
             assertEquals(TERMS_NOT_EVALUABLE, sequencing.terms().reason());
             assertFalse(sequencing.passed());
             assertNotNull(model.sequences(), "the sequences were scored at the configuration reached");
@@ -874,9 +875,9 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status(), model.verdict().reasons().toString());
             assertEquals(List.of("Terms gate: " + TERMS_NOT_EVALUABLE), model.verdict().reasons());
             var terms = model.requirements().getFirst();
-            assertEquals(Certifier.TERMS, terms.name());
+            assertEquals(Sequencer.TERMS, terms.name());
             assertEquals(CertificationSplit.SET_HELDOUT, terms.set());
-            assertEquals(Certifier.BASE_GATE_TAIL, terms.tail());
+            assertEquals(Sequencer.BASE_GATE_TAIL, terms.tail());
             assertEquals(0, terms.writingMemories(), "a cases split holds no live Term data");
             assertEquals(false, terms.reachable());
             assertTrue(model.unjudgedByGate().values().stream().mapToInt(Integer::intValue).sum() > 0);
@@ -968,7 +969,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertNull(model.sequencing(), "no gate result");
             assertNull(model.sequences());
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
-            assertEquals(Certifier.VOID_RUN, model.verdict().reasons().getFirst());
+            assertEquals(Sequencer.VOID_RUN, model.verdict().reasons().getFirst());
             var tallies = model.tallies();
             assertEquals(3, tallies.memories());
             assertEquals(1, tallies.failedMemories());
@@ -1038,7 +1039,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var once = CertificationRun.certify(request(root, split, source, sequences, drifting, 1, List.of(),
                     List.of()), EvalProgress.none()).models().getFirst();
             assertTrue(once.spotCheck().differing() > 0, once.spotCheck().toString());
-            assertEquals(Certifier.NEEDS_SECOND_RUN, once.verdict().reasons().getFirst());
+            assertEquals(Sequencer.NEEDS_SECOND_RUN, once.verdict().reasons().getFirst());
             assertEquals(SplitUses.NEEDS_SECOND_RUN, SplitUses.latest(root, "cert-s", "tev1", DIGEST).state());
             assertThrows(IllegalArgumentException.class, () -> CertificationRun.admit(request(root, split, source,
                     sequences, golden, 1, List.of(), List.of())));
@@ -1064,7 +1065,7 @@ class GraphEvalHarnessTest extends UnitTest {
                 CandidateGenerator.generate(c.text(), owner() == null ? List.of() : List.of(owner())), "tev1", golden,
                 CaseMeasurement.inputs(c, owner(), false, null))).toList();
         var classes = new java.util.TreeMap<String, Configuration.ClassSetting>();
-        for (var name : Certifier.V2_CLASSES) classes.put(name, new Configuration.ClassSetting(Certifier.PROVISIONAL, 0.5));
+        for (var name : Sequencer.V2_CLASSES) classes.put(name, new Configuration.ClassSetting(Certifier.PROVISIONAL, 0.5));
         var all = new java.util.TreeMap<String, Double>();
         SCHEMA.relations().keySet().forEach(r -> all.put(r, 0.5));
         var without = new java.util.TreeMap<>(all);
@@ -1117,12 +1118,12 @@ class GraphEvalHarnessTest extends UnitTest {
         // At 0.05 / 39 none wrong of 100 bounds higher than one of 150; at 0.05 it bounds lower.
         var oneOf150 = spread(150, 1);
         var noneOf100 = spread(100, 0);
-        double base = Certifier.BASE_GATE_TAIL;
+        double base = Sequencer.BASE_GATE_TAIL;
         assertTrue(MemoryBounds.INSTANCE.upper(noneOf100, base) > MemoryBounds.INSTANCE.upper(oneOf150, base));
         assertTrue(MemoryBounds.INSTANCE.upper(noneOf100, 0.05) < MemoryBounds.INSTANCE.upper(oneOf150, 0.05));
-        var a = new Certifier.Evaluation(Map.of("uses", new Certifier.GateCounts(oneOf150, List.of())), Map.of(),
+        var a = new Sequencer.Evaluation(Map.of("uses", new Sequencer.GateCounts(oneOf150, List.of())), Map.of(),
                 oneOf150, List.of());
-        var b = new Certifier.Evaluation(Map.of("uses", new Certifier.GateCounts(noneOf100, List.of())), Map.of(),
+        var b = new Sequencer.Evaluation(Map.of("uses", new Sequencer.GateCounts(noneOf100, List.of())), Map.of(),
                 noneOf100, List.of());
         var worst = V2Scoring.worst(List.of(a, b), MemoryBounds.INSTANCE);
         assertEquals(noneOf100, worst.gates().get("uses").writing(), "a relation gate is read at its corrected tail");
@@ -1177,7 +1178,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(2, model.runs());
             var sequencing = model.sequencing();
             assertNotNull(sequencing);
-            assertEquals(Certifier.OFF, sequencing.terms().state(), sequencing.terms().toString());
+            assertEquals(Sequencer.OFF, sequencing.terms().state(), sequencing.terms().toString());
             assertEquals(TERMS_NOT_EVALUABLE, sequencing.terms().reason());
             assertFalse(sequencing.passed());
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
@@ -1263,7 +1264,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(0, model.failedDecisions());
             var sequencing = model.sequencing();
             assertNotNull(sequencing);
-            assertEquals(Certifier.ON, sequencing.terms().state(), sequencing.terms().toString());
+            assertEquals(Sequencer.ON, sequencing.terms().state(), sequencing.terms().toString());
             for (var c : sequencing.classes()) assertEquals(Certifier.DISABLED, c.state(), c.name());
             assertEquals(List.of(), sequencing.backOff());
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());

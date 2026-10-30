@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Certifier;
 import services.grapheval.Certifier.ClassWalk;
+import services.grapheval.ClopperPearson;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.GateBounds;
@@ -69,11 +70,11 @@ class SequenceScorerTest extends UnitTest {
         assertEquals(SequenceScorer.REPORTED, SequenceScorer.result(SequenceScorer.timeline(249, 249, 30, 0, 0, 0),
                 false));
         var passing = SequenceScorer.timeline(250, 250, 6, 0, 0, 0);
-        assertTrue(Certifier.boundPasses(6, 250, Certifier.LIMIT));
+        assertTrue(ClopperPearson.boundPasses(6, 250, Certifier.LIMIT));
         assertEquals(SequenceScorer.PASSED, SequenceScorer.result(passing, false));
         assertEquals(SequenceScorer.REPORTED, SequenceScorer.result(passing, true));
         var failing = SequenceScorer.timeline(250, 250, 7, 0, 0, 0);
-        assertFalse(Certifier.boundPasses(7, 250, Certifier.LIMIT));
+        assertFalse(ClopperPearson.boundPasses(7, 250, Certifier.LIMIT));
         assertEquals(SequenceScorer.FAILED, SequenceScorer.result(failing, false));
         assertEquals(SequenceScorer.FAILED, SequenceScorer.result(failing, true));
     }
@@ -90,7 +91,7 @@ class SequenceScorerTest extends UnitTest {
         assertEquals(3, t.definiteGold());
         assertEquals(1, t.definiteWrong());
         assertEquals(1.0 / 3, t.wrongShare(), 1e-9);
-        assertEquals(Certifier.upperBound(1, 3), t.bound(), 1e-9);
+        assertEquals(ClopperPearson.upperBound(1, 3), t.bound(), 1e-9);
         assertEquals(1, t.incomplete());
         assertEquals(1, t.definiteWhereGoldUnknown());
         assertEquals(3, t.assumedAgreement());

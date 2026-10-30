@@ -69,11 +69,11 @@ public final class CertificationRun {
     public record CertifiedModel(String model, String digest, int runs, int memoriesChanged, int failedDecisions,
                                  @Nullable SpotCheck spotCheck,
                                  SequenceHarness.@Nullable SequenceSpotCheck sequenceSpotCheck,
-                                 List<JsonElement> stages, Certifier.@Nullable Sequencing sequencing, Tallies tallies,
+                                 List<JsonElement> stages, Sequencer.@Nullable Sequencing sequencing, Tallies tallies,
                                  AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks,
                                  SequenceHarness.@Nullable ModelReport sequences,
-                                 Certifier.@Nullable Power lineagePower, Certifier.Verdict verdict,
-                                 @Nullable String certificate, List<Certifier.Requirement> requirements) {
+                                 Sequencer.@Nullable Power lineagePower, Sequencer.Verdict verdict,
+                                 @Nullable String certificate, List<Sequencer.Requirement> requirements) {
         public CertifiedModel {
             requirements = List.copyOf(requirements);
         }
@@ -246,7 +246,7 @@ public final class CertificationRun {
                     stored.sequenceSpotCheck(), zone, RecordBounds.INSTANCE);
         }
         var judgment = v2.judgment();
-        var verdict = Certifier.verdict(sequencing, new Certifier.VerdictInputs(stored.memoriesChanged() > 0, failed,
+        var verdict = Sequencer.verdict(sequencing, new Sequencer.VerdictInputs(stored.memoriesChanged() > 0, failed,
                 spotCheckDiffered(stored), judgment.labelError(), seq == null ? null : seq.timeline(),
                 agreement.complete(), judgment.unjudgedCount(), judgment.uncheckedMarked()));
         CertificateDocument certificate = null;
@@ -268,10 +268,10 @@ public final class CertificationRun {
     }
 
     /** Lineage's power at its walked n, as {@link Certifier} gives every other class's; 0 when disabled. */
-    private static Certifier.Power lineagePower(ClassWalk lineage) {
+    private static Sequencer.Power lineagePower(ClassWalk lineage) {
         var at = lineage.threshold() == null ? List.<MemoryCounts>of()
                 : List.of(new MemoryCounts("", lineage.n(), lineage.k(), 0, 0, 0));
-        return Certifier.Power.of(RecordBounds.INSTANCE, at);
+        return Sequencer.Power.of(RecordBounds.INSTANCE, at);
     }
 
     /**

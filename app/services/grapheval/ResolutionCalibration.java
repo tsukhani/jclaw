@@ -19,7 +19,7 @@ public final class ResolutionCalibration {
     /** The attachments made at a threshold and how many of them were false merges. */
     public record Counts(int attachments, int falseMerges) {}
 
-    /** {@code rate} is null with no attachments; {@code bound} and {@code passes} are {@link Certifier}'s. */
+    /** {@code rate} is null with no attachments; {@code bound} and {@code passes} are {@link ClopperPearson}'s. */
     public record Step(double t, int attachments, int falseMerges, @Nullable Double rate, double bound,
                        boolean passes) {}
 
@@ -42,8 +42,8 @@ public final class ResolutionCalibration {
             var c = at.apply(t);
             int n = c.attachments();
             int k = c.falseMerges();
-            boolean passes = Certifier.boundPasses(k, n);
-            steps.add(new Step(t, n, k, n == 0 ? null : (double) k / n, Certifier.upperBound(k, n), passes));
+            boolean passes = ClopperPearson.boundPasses(k, n);
+            steps.add(new Step(t, n, k, n == 0 ? null : (double) k / n, ClopperPearson.upperBound(k, n), passes));
             if (!passes) break;
             threshold = t;
         }

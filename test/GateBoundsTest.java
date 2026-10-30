@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Certifier;
+import services.grapheval.ClopperPearson;
 import services.grapheval.GateBounds.MemoryCounts;
 import services.grapheval.RecordBounds;
 
@@ -42,7 +43,7 @@ class GateBoundsTest extends UnitTest {
         var counts = List.of(new MemoryCounts("m1", 60, 1, 0, 0, 0), new MemoryCounts("m2", 40, 0, 5.0, 0, 0));
         assertEquals(100, RecordBounds.n(counts));
         assertEquals(6, RecordBounds.k(counts), "one wrong plus one sampled wrong at inclusion 0.2");
-        assertEquals(Certifier.upperBound(6, 100), BOUNDS.upper(counts, TAIL));
+        assertEquals(ClopperPearson.upperBound(6, 100), BOUNDS.upper(counts, TAIL));
         var thirds = List.of(new MemoryCounts("m1", 100, 0, 1 / 0.3 * 3, 0, 0));
         assertEquals(10, RecordBounds.k(thirds), "three weights of 1 / 0.3 make 10, not 11");
         assertEquals(1, RecordBounds.k(List.of(new MemoryCounts("m1", 100, 0, 0.5, 0, 0))));
@@ -50,13 +51,13 @@ class GateBoundsTest extends UnitTest {
 
     @Test
     void aTailOtherThanFivePercentGoesThroughTheNewOverloads() {
-        assertEquals(1 - Math.pow(0.10, 1.0 / 59), Certifier.upperBound(0, 59, 0.10), 1e-9);
+        assertEquals(1 - Math.pow(0.10, 1.0 / 59), ClopperPearson.upperBound(0, 59, 0.10), 1e-9);
         assertEquals(1 - Math.pow(0.10, 1.0 / 59), BOUNDS.upper(written(59, 0), 0.10), 1e-9);
-        assertTrue(Certifier.boundPasses(0, 45, LIMIT, 0.10));
-        assertFalse(Certifier.boundPasses(0, 44, LIMIT, 0.10));
+        assertTrue(ClopperPearson.boundPasses(0, 45, LIMIT, 0.10));
+        assertFalse(ClopperPearson.boundPasses(0, 44, LIMIT, 0.10));
         assertEquals(45, BOUNDS.recordsNeeded(0, LIMIT, 0.10));
-        assertEquals(Certifier.boundPasses(1, 93), Certifier.boundPasses(1, 93, LIMIT, TAIL));
-        assertEquals(Certifier.boundPasses(1, 92, 0.05), Certifier.boundPasses(1, 92, 0.05, TAIL));
+        assertEquals(ClopperPearson.boundPasses(1, 93), ClopperPearson.boundPasses(1, 93, LIMIT, TAIL));
+        assertEquals(ClopperPearson.boundPasses(1, 92, 0.05), ClopperPearson.boundPasses(1, 92, 0.05, TAIL));
     }
 
     /** P(X >= x) for X ~ Binomial(n, p), summed directly. */

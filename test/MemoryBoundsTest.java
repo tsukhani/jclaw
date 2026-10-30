@@ -1,8 +1,10 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Certifier;
+import services.grapheval.ClopperPearson;
 import services.grapheval.GateBounds.MemoryCounts;
 import services.grapheval.MemoryBounds;
+import services.grapheval.Sequencer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +32,7 @@ class MemoryBoundsTest extends UnitTest {
         assertEquals(60, MemoryBounds.n(writing));
         assertEquals(6, MemoryBounds.k(writing));
         double upper = BOUNDS.upper(writing, TAIL);
-        assertEquals(Certifier.upperBound(6, 60, TAIL), upper);
+        assertEquals(ClopperPearson.upperBound(6, 60, TAIL), upper);
         assertEquals(0.18786, upper, 5e-5);
     }
 
@@ -92,7 +94,7 @@ class MemoryBoundsTest extends UnitTest {
         assertEquals(80, BOUNDS.recordsNeeded(0, LIMIT, 0.05 / 3));
         assertEquals(109, BOUNDS.recordsNeeded(0, LIMIT, 0.05 / 13));
         assertEquals(130, BOUNDS.recordsNeeded(0, LIMIT, 0.05 / 39));
-        assertEquals(0.05 / 39, Certifier.BASE_GATE_TAIL);
+        assertEquals(0.05 / 39, Sequencer.BASE_GATE_TAIL);
     }
 
     @Test
@@ -101,7 +103,7 @@ class MemoryBoundsTest extends UnitTest {
         int[] corrected = {130, 176, 215, 251, 317};
         int[] uncorrected = {59, 93, 124, 153, 208};
         for (int i = 0; i < wrong.length; i++) {
-            boundary(wrong[i], corrected[i], Certifier.BASE_GATE_TAIL);
+            boundary(wrong[i], corrected[i], Sequencer.BASE_GATE_TAIL);
             boundary(wrong[i], uncorrected[i], TAIL);
         }
     }
@@ -120,8 +122,8 @@ class MemoryBoundsTest extends UnitTest {
 
     @Test
     void powerIsTheChanceOfAtMostTheLargestPassingKOverMemories() {
-        assertEquals(Math.pow(0.99, 130), BOUNDS.power(memories(130), 0.01, LIMIT, Certifier.BASE_GATE_TAIL), 1e-12);
-        assertEquals(0.0, BOUNDS.power(memories(129), 0.01, LIMIT, Certifier.BASE_GATE_TAIL));
+        assertEquals(Math.pow(0.99, 130), BOUNDS.power(memories(130), 0.01, LIMIT, Sequencer.BASE_GATE_TAIL), 1e-12);
+        assertEquals(0.0, BOUNDS.power(memories(129), 0.01, LIMIT, Sequencer.BASE_GATE_TAIL));
     }
 
     private static List<MemoryCounts> labeled(int seed, int count) {

@@ -3,7 +3,7 @@ import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.CandidateGenerator.Source;
-import services.grapheval.Certifier;
+import services.grapheval.ClopperPearson;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Overlap;
@@ -217,7 +217,7 @@ class StageScorerTest extends UnitTest {
         assertEquals(1, r.falseMerges(), "the second Harborlight attached to the office's Term");
         assertEquals(4, r.attachments());
         assertEquals(0.25, r.falseMergeRate());
-        assertEquals(Certifier.upperBound(1, 4), r.falseMergeBound());
+        assertEquals(ClopperPearson.upperBound(1, 4), r.falseMergeBound());
         assertTrue(r.bcubedPrecision() < 1.0);
         assertTrue(r.bcubedRecall() < 1.0);
     }
@@ -232,7 +232,7 @@ class StageScorerTest extends UnitTest {
         assertEquals(2, r.attachments());
         assertEquals(1, r.falseMerges(), "b attached to a Term whose first mention is a");
         assertEquals(0.5, r.falseMergeRate());
-        assertEquals(Certifier.upperBound(1, 2), r.falseMergeBound());
+        assertEquals(ClopperPearson.upperBound(1, 2), r.falseMergeBound());
         assertEquals(11.0 / 15, r.bcubedPrecision(), 1e-12);
         assertEquals(11.0 / 15, r.bcubedRecall(), 1e-12);
         assertEquals(1.0 / 3, r.pairwisePrecision(), 1e-12);

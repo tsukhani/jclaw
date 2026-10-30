@@ -68,7 +68,7 @@ public final class SequenceScorer {
                                     int definiteWhereGoldUnknown, int assumedAgreement) {
         double share = definiteGold == 0 ? 0.0 : (double) definiteWrong / definiteGold;
         return new Timeline(probes, definiteGold, definiteWrong, share,
-                Certifier.upperBound(definiteWrong, definiteGold), incomplete, definiteWhereGoldUnknown,
+                ClopperPearson.upperBound(definiteWrong, definiteGold), incomplete, definiteWhereGoldUnknown,
                 assumedAgreement);
     }
 
@@ -78,7 +78,7 @@ public final class SequenceScorer {
      */
     public static String result(Timeline endToEnd, boolean anyFailed) {
         if (endToEnd.definiteGold() < TIMELINE_GATE_N) return REPORTED;
-        if (!Certifier.boundPasses(endToEnd.definiteWrong(), endToEnd.definiteGold(), Certifier.LIMIT)) return FAILED;
+        if (!ClopperPearson.boundPasses(endToEnd.definiteWrong(), endToEnd.definiteGold(), Certifier.LIMIT)) return FAILED;
         return anyFailed ? REPORTED : PASSED;
     }
 

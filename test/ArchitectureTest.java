@@ -254,4 +254,15 @@ class ArchitectureTest extends UnitTest {
                         + "CaseMeasurement (JCLAW-1487)");
         rule.check(APP_CLASSES);
     }
+
+    /** JCLAW-1488: the bounds are leaves under the certifier; the binomial maths they share lives in ClopperPearson. */
+    @Test
+    void gateBoundsDoNotDependOnCertifier() {
+        ArchRule rule = noClasses().that()
+                .haveNameMatching("services\\.grapheval\\.(RecordBounds|MemoryBounds)(\\$.*)?")
+                .should().dependOnClassesThat().haveNameMatching("services\\.grapheval\\.Certifier(\\$.*)?")
+                .because("the certifier is configured with a GateBounds, so a bound calling back into it closes a "
+                        + "cycle; the Clopper-Pearson maths is ClopperPearson's (JCLAW-1488)");
+        rule.check(APP_CLASSES);
+    }
 }

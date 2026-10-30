@@ -63,11 +63,11 @@ public final class V2Scoring {
      * A development run's v2 sequencing, information only: no ledger line and no certificate. {@code sequencing} is
      * null on a run with a failed decision.
      */
-    public record Development(double startingThreshold, Certifier.@Nullable Sequencing sequencing, Tallies tallies,
+    public record Development(double startingThreshold, Sequencer.@Nullable Sequencing sequencing, Tallies tallies,
                               AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks) {}
 
     /** Stored decisions scored the v2 way; {@code sequencing} is null on a void run. */
-    record V2(Certifier.@Nullable Sequencing sequencing, Tallies tallies, AgreedSample agreedSample,
+    record V2(Sequencer.@Nullable Sequencing sequencing, Tallies tallies, AgreedSample agreedSample,
               Adjudications.Judgment judgment, List<GraphEvalScorer.GateRecord> inScope) {}
 
     static Development development(List<Case> cases, List<List<CaseRun>> runs, OntologySchema schema,
@@ -111,10 +111,10 @@ public final class V2Scoring {
         };
         int failed = (int) runs.stream().flatMap(List::stream).flatMap(r -> r.decisions().stream())
                 .filter(Decision::failed).count();
-        Certifier.Sequencing sequencing = null;
+        Sequencer.Sequencing sequencing = null;
         Configuration reached = new Configuration(start, new TreeMap<>(), new TreeMap<>());
         if (failed == 0 && !runs.isEmpty()) {
-            sequencing = Certifier.sequence(bounds, set, start, relationOrder, recallFloor,
+            sequencing = Sequencer.sequence(bounds, set, start, relationOrder, recallFloor,
                     c -> worst(scoreAt.apply(c).stream().map(cf -> routed(evaluation(cf, book), set)).toList(),
                             bounds));
             reached = sequencing.reached();
@@ -136,7 +136,7 @@ public final class V2Scoring {
     }
 
     /** One run at one configuration as the certifier reads it: each memory's counts per gate, class and pooled gate. */
-    public static Certifier.Evaluation evaluation(GraphEvalScorer.Configured cf, Adjudications.Book book) {
+    public static Sequencer.Evaluation evaluation(GraphEvalScorer.Configured cf, Adjudications.Book book) {
         var weights = new HashMap<List<String>, Double>();
         var memoryWeight = new HashMap<String, Double>();
         for (var r : cf.records()) {
@@ -157,7 +157,7 @@ public final class V2Scoring {
                 if (t.written() > 0) writing.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
                 if (t.gold() > 0) labeled.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
             });
-            for (var name : Certifier.V2_CLASSES) {
+            for (var name : Sequencer.V2_CLASSES) {
                 var c = m.classes().get(name);
                 if (c != null && c.n() > 0) {
                     classes.computeIfAbsent(name, _ -> new ArrayList<>())
@@ -170,21 +170,21 @@ public final class V2Scoring {
             }
             if (m.trapGold() > 0) trap.add(new MemoryCounts(m.caseId(), m.trapGold(), m.trapViolations(), 0, 0, 0));
         }
-        var gates = new HashMap<String, Certifier.GateCounts>();
+        var gates = new HashMap<String, Sequencer.GateCounts>();
         var names = new TreeSet<>(writing.keySet());
         names.addAll(labeled.keySet());
         for (var g : names) {
-            gates.put(g, new Certifier.GateCounts(writing.getOrDefault(g, List.of()),
+            gates.put(g, new Sequencer.GateCounts(writing.getOrDefault(g, List.of()),
                     labeled.getOrDefault(g, List.of())));
         }
-        return new Certifier.Evaluation(gates, classes, written, trap);
+        return new Sequencer.Evaluation(gates, classes, written, trap);
     }
 
     /** The evaluation as {@code set} certifies it: the gates the other set certifies read no counts. */
-    private static Certifier.Evaluation routed(Certifier.Evaluation e, @Nullable String set) {
+    private static Sequencer.Evaluation routed(Sequencer.Evaluation e, @Nullable String set) {
         if (set == null) return e;
-        Predicate<String> ours = gate -> Certifier.certifyingSet(gate).equals(set);
-        var gates = new HashMap<String, Certifier.GateCounts>();
+        Predicate<String> ours = gate -> Sequencer.certifyingSet(gate).equals(set);
+        var gates = new HashMap<String, Sequencer.GateCounts>();
         e.gates().forEach((g, c) -> {
             if (ours.test(g)) gates.put(g, c);
         });
@@ -192,36 +192,36 @@ public final class V2Scoring {
         e.classes().forEach((c, l) -> {
             if (ours.test(c)) classes.put(c, l);
         });
-        return new Certifier.Evaluation(gates, classes, ours.test(Certifier.G_WRITTEN) ? e.written() : List.of(),
-                ours.test(Certifier.G_TRAP) ? e.trap() : List.of());
+        return new Sequencer.Evaluation(gates, classes, ours.test(Sequencer.G_WRITTEN) ? e.written() : List.of(),
+                ours.test(Sequencer.G_TRAP) ? e.trap() : List.of());
     }
 
     /**
      * Each gate at the run whose bound at that gate's tail is highest, its recall at the run whose recall bound is
      * lowest.
      */
-    public static Certifier.Evaluation worst(List<Certifier.Evaluation> runs, GateBounds bounds) {
+    public static Sequencer.Evaluation worst(List<Sequencer.Evaluation> runs, GateBounds bounds) {
         if (runs.size() == 1) return runs.getFirst();
         var tail = Certifier.CONFIDENCE_TAIL;
         var names = new TreeSet<String>();
         runs.forEach(e -> names.addAll(e.gates().keySet()));
-        var gates = new HashMap<String, Certifier.GateCounts>();
+        var gates = new HashMap<String, Sequencer.GateCounts>();
         for (var g : names) {
-            var counts = runs.stream().map(e -> e.gates().getOrDefault(g, Certifier.GateCounts.EMPTY)).toList();
-            var labeled = counts.stream().map(Certifier.GateCounts::labeled)
+            var counts = runs.stream().map(e -> e.gates().getOrDefault(g, Sequencer.GateCounts.EMPTY)).toList();
+            var labeled = counts.stream().map(Sequencer.GateCounts::labeled)
                     .min((a, b) -> Double.compare(bounds.recallLower(a, tail), bounds.recallLower(b, tail)))
                     .orElse(List.of());
-            gates.put(g, new Certifier.GateCounts(highest(counts.stream().map(Certifier.GateCounts::writing).toList(),
-                    bounds, Certifier.BASE_GATE_TAIL), labeled));
+            gates.put(g, new Sequencer.GateCounts(highest(counts.stream().map(Sequencer.GateCounts::writing).toList(),
+                    bounds, Sequencer.BASE_GATE_TAIL), labeled));
         }
         var classes = new HashMap<String, List<MemoryCounts>>();
-        for (var name : Certifier.V2_CLASSES) {
+        for (var name : Sequencer.V2_CLASSES) {
             classes.put(name, highest(runs.stream().map(e -> e.classes().getOrDefault(name, List.of())).toList(),
                     RecordBounds.INSTANCE, tail));
         }
-        return new Certifier.Evaluation(gates, classes,
-                highest(runs.stream().map(Certifier.Evaluation::written).toList(), bounds, tail),
-                highest(runs.stream().map(Certifier.Evaluation::trap).toList(), RecordBounds.INSTANCE, tail));
+        return new Sequencer.Evaluation(gates, classes,
+                highest(runs.stream().map(Sequencer.Evaluation::written).toList(), bounds, tail),
+                highest(runs.stream().map(Sequencer.Evaluation::trap).toList(), RecordBounds.INSTANCE, tail));
     }
 
     private static List<MemoryCounts> highest(List<List<MemoryCounts>> lists, GateBounds bounds, double tail) {
