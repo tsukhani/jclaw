@@ -19,15 +19,15 @@ import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 import static services.grapheval.Certifier.CERTIFIED;
-import static services.grapheval.Certifier.CONFIDENCE_TAIL;
 import static services.grapheval.Certifier.LABELS_NEED_FIXING;
-import static services.grapheval.Certifier.LIMIT;
 import static services.grapheval.Certifier.MIN_CLASS_N;
 import static services.grapheval.Certifier.NOT_CERTIFIED;
 import static services.grapheval.Certifier.PENDING_ADJUDICATION;
 import static services.grapheval.Certifier.PENDING_AGREEMENT;
 import static services.grapheval.Certifier.PROVISIONAL;
 import static services.grapheval.Certifier.classWalk;
+import static services.grapheval.ClopperPearson.CONFIDENCE_TAIL;
+import static services.grapheval.ClopperPearson.LIMIT;
 
 /**
  * Protocol v2 (JCLAW-1368): {@link #sequence} certifies Terms first, then each relation type by its own gate, then the
@@ -191,11 +191,11 @@ public final class Sequencer {
      * Sequences the gates: Terms walked from {@code start} down while their bound passes at {@link #BASE_GATE_TAIL}
      * and recall-checked once at the bottom of that run; each relation in {@code relationOrder} walked the same way,
      * never below the Term threshold; then the classes from the highest threshold at or below {@code start} with n of
-     * at least {@link Certifier#MIN_CLASS_N}, and {@code G_written} and {@code G_trap}. While a pooled gate fails, the relation
-     * latest in {@code relationOrder} among those on is switched off and the classes and pooled gates evaluated again.
-     * {@code set} is the run's certifying set, null for a development run: with one, a Term or relation gate with no
-     * writing memory is off and a pooled gate with no data fails at once, each as not evaluable. {@code evaluate} is
-     * pure: it re-scores stored decisions at a configuration.
+     * at least {@link Certifier#MIN_CLASS_N}, and {@code G_written} and {@code G_trap}. While a pooled gate fails, the
+     * relation latest in {@code relationOrder} among those on is switched off and the classes and pooled gates
+     * evaluated again. {@code set} is the run's certifying set, null for a development run: with one, a Term or
+     * relation gate with no writing memory is off and a pooled gate with no data fails at once, each as not evaluable.
+     * {@code evaluate} is pure: it re-scores stored decisions at a configuration.
      */
     public static Sequencing sequence(GateBounds bounds, @Nullable String set, double start,
                                       List<String> relationOrder, double recallFloor,
@@ -476,9 +476,9 @@ public final class Sequencer {
     /**
      * The v2 verdict, first match wins: a changed memory, any failed decision ({@link #VOID_RUN}), a single run's
      * differing spot-check, a {@code label-error} in scope, the Term gate off or a pooled gate failing with no
-     * relation on, a failed timeline, missing second labels ({@link Certifier#PENDING_AGREEMENT}), and any unjudged record or
-     * unchecked marked model verdict ({@link Certifier#PENDING_ADJUDICATION}); otherwise {@link Certifier#CERTIFIED}. {@code sequencing}
-     * is null on a void run.
+     * relation on, a failed timeline, missing second labels ({@link Certifier#PENDING_AGREEMENT}), and any unjudged
+     * record or unchecked marked model verdict ({@link Certifier#PENDING_ADJUDICATION}); otherwise
+     * {@link Certifier#CERTIFIED}. {@code sequencing} is null on a void run.
      */
     public static Verdict verdict(@Nullable Sequencing sequencing, VerdictInputs in) {
         if (in.memoryChanged()) return new Verdict(NOT_CERTIFIED, List.of("a case memory changed during the run"));
@@ -507,6 +507,7 @@ public final class Sequencer {
         }
         return new Verdict(CERTIFIED, List.of());
     }
+
     private static String fmt(double v) {
         return String.format(Locale.ROOT, "%.3f", v);
     }

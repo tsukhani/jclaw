@@ -78,7 +78,9 @@ public final class SequenceScorer {
      */
     public static String result(Timeline endToEnd, boolean anyFailed) {
         if (endToEnd.definiteGold() < TIMELINE_GATE_N) return REPORTED;
-        if (!ClopperPearson.boundPasses(endToEnd.definiteWrong(), endToEnd.definiteGold(), Certifier.LIMIT)) return FAILED;
+        if (!ClopperPearson.boundPasses(endToEnd.definiteWrong(), endToEnd.definiteGold(), ClopperPearson.LIMIT)) {
+            return FAILED;
+        }
         return anyFailed ? REPORTED : PASSED;
     }
 

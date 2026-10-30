@@ -267,7 +267,7 @@ public final class CertificationRun {
         return new Scored(model, sheet(split, guide, book, cases, v2.inScope()), certificate);
     }
 
-    /** Lineage's power at its walked n, as {@link Certifier} gives every other class's; 0 when disabled. */
+    /** Lineage's power at its walked n, as {@link Sequencer} gives every other class's; 0 when disabled. */
     private static Sequencer.Power lineagePower(ClassWalk lineage) {
         var at = lineage.threshold() == null ? List.<MemoryCounts>of()
                 : List.of(new MemoryCounts("", lineage.n(), lineage.k(), 0, 0, 0));
