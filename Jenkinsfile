@@ -401,11 +401,10 @@ pipeline {
                     def version = "v${env.APP_VERSION}"
                     echo "Creating release: ${version}"
 
-                    // No local `git tag` here. The one this replaces was never
-                    // pushed, and post{cleanup{cleanWs}} deleted the workspace
-                    // that held it — so it read as if Jenkins owned tagging
-                    // while doing nothing. `gh release create` below creates
-                    // the tag server-side from the repo's default branch.
+                    // No local `git tag` here: /deploy pushes the signed tag once
+                    // the release commit's build has passed, and --verify-tag
+                    // below refuses a version without one rather than letting
+                    // gh mint an unsigned tag at the default branch's head.
 
                     // GitHub Release with both the source dist and the runnable
                     // bundle attached (delete existing release if re-running).
@@ -452,7 +451,7 @@ pipeline {
                             fi
 
                             gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip dist/SHA256SUMS dist/SHA256SUMS.sig \
-                                --repo tsukhani/jclaw \
+                                --repo tsukhani/jclaw --verify-tag \
                                 --title "JClaw ${version}" \
                                 \$NOTES_ARG
                         """

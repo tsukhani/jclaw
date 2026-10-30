@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Bump application.version (defaults to the active JCLAW sprint) in conf/application.conf, commit all changes, and push to both git remotes (origin + github).
+description: Bump application.version (defaults to the active JCLAW sprint) in conf/application.conf, commit all changes, push to both git remotes (origin + github), and tag the version once its Jenkins build passes.
 category: Release
 tags: [release, version, git, deploy]
 argument-hint: "[empty | patch | minor | major | x.y.z]"
@@ -8,7 +8,7 @@ argument-hint: "[empty | patch | minor | major | x.y.z]"
 
 **Deploy Workflow**
 
-Bump the project version, commit every pending change alongside it, and push the result to both remotes. Use `/usr/bin/git` for every git invocation (per project convention).
+Bump the project version, commit every pending change alongside it, push the result to both remotes, and tag it once Jenkins has built it green. Use `/usr/bin/git` for every git invocation (per project convention).
 
 **Arguments**
 
@@ -24,7 +24,7 @@ Reject anything else with a clear message; do not guess.
 
 **Preflight: every commit either remote would receive is signed, and committed by you**
 
-GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the full suite while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. Check before bumping anything:
+GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the pre-push tests while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. Check before bumping anything:
 
 ```bash
 /usr/bin/git fetch -q origin && /usr/bin/git fetch -q github
@@ -71,7 +71,7 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 7. Run `/usr/bin/git diff` to review the full set of changes (including the version bump) so the commit message reflects reality.
 8. Run `/usr/bin/git log --oneline -5` to match the repository's commit-message style.
 9. Stage every change with `/usr/bin/git add -A`.
-10. **Establish the range the notes must cover.** The body of this commit *is* the GitHub release notes — `Jenkinsfile`'s RELEASE stage copies it verbatim (minus the `Co-Authored-By:` trailer) into `gh release create`. So the audience is a reader on the Releases page, and the span they see is **from the last published Release**, not from the last tag. Those differ: `/deploy` tags every version, while a Release is cut only when someone ticks the Jenkins `RELEASE` toggle, so several versions routinely sit between them.
+10. **Establish the range the notes must cover.** The body of this commit *is* the GitHub release notes — `Jenkinsfile`'s RELEASE stage copies it verbatim (minus the `Co-Authored-By:` trailer) into `gh release create`. So the audience is a reader on the Releases page, and the span they see is **from the last published Release**, not from the last tag. Those differ: `/deploy` tags every version whose build passes, while a Release is cut only when someone ticks the Jenkins `RELEASE` toggle, so several versions routinely sit between them.
 
     ```bash
     # Tag of the newest published Release — the reader's actual starting point.
@@ -103,23 +103,19 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 
     <body paragraph>
 
-    <Co-Authored-By trailer per step 10 — do not paste a model version from this file>
+    <Co-Authored-By trailer per step 11 — do not paste a model version from this file>
     EOF
     )"
     ```
-13. Create a **signed annotated tag** pointing at the new commit. The lowercase `-s` flag makes it both annotated AND signed (lightweight tags can't be signed — they're just refs). Same defense-in-depth rationale as step 12. The tag message stays short because the full release notes live in the commit body:
-    ```bash
-    /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>"
-    ```
-    Verify the tag was created and signed: `/usr/bin/git tag -v "v<NEW_VERSION>"` should print `Good "git" signature`.
+    Record the release commit: `REL=$(/usr/bin/git rev-parse HEAD)`. Phase 4 tags that commit, not whatever `HEAD` is by then.
 
-**Phase 3: Push to both remotes**
+**Phase 3: Push the release commit to both remotes**
 
-14. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
-15. Push to `origin` first: `/usr/bin/git push --follow-tags origin HEAD`. The `--follow-tags` flag pushes both the branch HEAD and any annotated tags reachable from it (i.e., the `v<NEW_VERSION>` tag we just created), so the commit and tag land in one atomic operation per remote. Report the result.
-16. Push to `github`: `/usr/bin/git push --follow-tags github HEAD`. Report the result.
-17. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
-18. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
+13. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
+14. Push to `origin` first: `/usr/bin/git push origin HEAD`. No tag goes with it: a tag marks a version Jenkins has built green, so it waits for Phase 4. Report the result.
+15. Push to `github`: `/usr/bin/git push github HEAD`. Report the result.
+16. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
+17. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
     ```bash
     /usr/bin/git fetch -q origin --prune
     /usr/bin/git branch -r --list 'origin/renovate/*' | sed 's|^ *origin/||' |
@@ -128,15 +124,30 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
 
-**Phase 4: Report**
+**Phase 4: Tag the version once Jenkins passes it**
 
-19. Summarize in one message: new version, commit hash, tag name, branch name, both push destinations with their reported ref updates, and the Renovate branches step 18 deleted, if any. Example:
+The pre-push hook runs only the tests the change reaches, so the release commit's Jenkins build is the first whole-suite run it gets. The tag waits for that build: a version whose build fails is never tagged, and a RELEASE build cannot run for it.
 
-    > Released **v0.7.6** as `a1b2c3d` on `main` (signed, tagged `v0.7.6`).
-    > - origin (Bitbucket): `<old-sha>..a1b2c3d` + tag `v0.7.6`
-    > - github: `<old-sha>..a1b2c3d` + tag `v0.7.6`
+18. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 19.
+19. **On `SUCCESS`, tag `$REL` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
+    ```bash
+    /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>" "$REL"
+    /usr/bin/git tag -v "v<NEW_VERSION>"        # must print Good "git" signature
+    /usr/bin/git push origin "refs/tags/v<NEW_VERSION>"
+    /usr/bin/git push github "refs/tags/v<NEW_VERSION>"
+    ```
+    The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build may run only after this: the Release stage's `gh release create --verify-tag` refuses a version with no tag on GitHub, rather than minting an unsigned one at `main`'s head.
+20. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
 
-20. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
+**Phase 5: Report**
+
+21. Summarize in one message: new version, commit hash, branch name, both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), and the Renovate branches step 17 deleted, if any. Example:
+
+    > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
+    > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
+    > - github: `<old-sha>..a1b2c3d`, then tag `v0.7.6`
+
+22. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
 
     > This release touched the frontend. To verify what shipped: `./jclaw.sh restart`, then `/e2e-audit`.
 
@@ -151,3 +162,4 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 - Never push to `main` with `--force` even if a hook rejects; report the hook failure and let the user decide.
 - Never modify any file other than `conf/application.conf` as part of the bump itself. Whatever else is in the working tree ships as-is.
 - If the current branch is not `main`, stop before bumping anything and report the branch — releases go out only from `main`.
+- Never tag a release commit before its Jenkins build has passed, and never move or delete a tag once it is pushed.

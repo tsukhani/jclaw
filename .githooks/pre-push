@@ -21,15 +21,27 @@ fi
 # line per ref on stdin. A deletion carries an all-zero local sha and pushes
 # no commits, so a push made only of deletions has nothing to test — before
 # this check, deleting a stale branch ran the whole suite against whatever
-# unrelated HEAD the clone happened to be on.
+# unrelated HEAD the clone happened to be on. A tag on a commit the remote
+# already has pushes no commits either: /deploy tags a release only after
+# Jenkins built it, by which time HEAD may be a later, untested commit.
+remote=${1:-}
 zero_sha=0000000000000000000000000000000000000000
-refs_seen=0; deletions_only=1
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+on_remote() {
+    [[ -n "$remote" && -n "$(git for-each-ref --contains "$1^{commit}" "refs/remotes/$remote" 2>/dev/null || true)" ]]
+}
+refs_seen=0; deletions_only=1; known_tags_only=1
+while read -r local_ref local_sha _remote_ref _remote_sha; do
     refs_seen=1
-    [[ "$local_sha" == "$zero_sha" ]] || deletions_only=0
+    [[ "$local_sha" == "$zero_sha" ]] && continue
+    deletions_only=0
+    [[ "$local_ref" == refs/tags/* ]] && on_remote "$local_sha" || known_tags_only=0
 done
 if [[ "$refs_seen" == 1 && "$deletions_only" == 1 ]]; then
     echo "[jclaw pre-push] Push only deletes refs — nothing to test."
+    exit 0
+fi
+if [[ "$refs_seen" == 1 && "$known_tags_only" == 1 ]]; then
+    echo "[jclaw pre-push] Push only tags commits $remote already has — nothing to test."
     exit 0
 fi
 
