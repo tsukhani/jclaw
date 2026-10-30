@@ -856,19 +856,10 @@ public final class MemoryAutoCapture {
         double minLengthRatio = ConfigService.getDouble("memory.autocapture.dedup.minLengthRatio", 0.5);
         int retrievalLimit = ConfigService.getInt("memory.autocapture.dedup.retrievalLimit", 25);
 
-        var pool = new LinkedHashMap<Long, Memory>();
         var recent = Memory.findByAgent(agentKey, dedupScan, scope);
-        for (var m : recent) {
-            pool.put(m.id, m);
-        }
-        // From the recent rows alone: the search hits below are chosen by the candidate's own words.
+        // From the recent rows alone: the pool's search hits are chosen by the candidate's own words.
         var common = commonWords(recent);
-        for (var c : candidates) {
-            for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit, scope, hiddenGuestIds)) {
-                pool.putIfAbsent(hit.memory().id, hit.memory());
-            }
-        }
-        var poolRows = List.copyOf(pool.values());
+        var poolRows = consolidationPool(agentKey, candidates, recent, retrievalLimit, scope, hiddenGuestIds);
         var poolTokens = poolRows.stream().map(m -> MemorySimilarity.Tokens.of(m.text)).toList();
 
         var survivors = new ArrayList<Candidate>();
@@ -894,22 +885,10 @@ public final class MemoryAutoCapture {
             if (duplicateIndex(toks, survivorTokens, dupThreshold, containment, minLengthRatio) >= 0) continue;
             survivors.add(c);
             survivorTokens.add(toks);
-            // Same-subject shortlist: moderate overlap below the dup threshold
-            // (at/above it the candidate would have been NOOPed as a duplicate).
-            // Closest first, so a row covering much of the candidate is not capped out by newer weak matches.
-            var related = new ArrayList<Map.Entry<Integer, Double>>();
-            for (int i = 0; i < poolRows.size(); i++) {
-                double j = jaccard(toks.raw(), poolTokens.get(i).raw());
-                double share = candidateShare(toks.content(), poolTokens.get(i).content(), common);
-                if ((j >= shortlistMin || share >= shortlistContainment) && j < dupThreshold) {
-                    related.add(Map.entry(i, Math.max(j, share)));
-                }
-            }
-            related.sort(Map.Entry.<Integer, Double>comparingByValue().reversed());
             int added = 0;
-            for (var r : related) {
+            for (int r : related(toks, poolTokens, common, shortlistMin, shortlistContainment, dupThreshold)) {
                 if (added >= shortlistCap) break;
-                var row = poolRows.get(r.getKey());
+                var row = poolRows.get(r);
                 if (shortlisted.add(row.id)) {
                     shortlist.add(new Existing(row.id, row.text));
                     added++;
@@ -917,6 +896,38 @@ public final class MemoryAutoCapture {
             }
         }
         return new ConsolidationPlan(survivors, shortlist, overflow);
+    }
+
+    /** The recent rows, then each candidate's search hits, without repeats. */
+    private static List<Memory> consolidationPool(String agentKey, List<Candidate> candidates, List<Memory> recent,
+                                                  int retrievalLimit, MemoryScope scope, List<Long> hiddenGuestIds) {
+        var pool = new LinkedHashMap<Long, Memory>();
+        for (var m : recent) pool.put(m.id, m);
+        for (var c : candidates) {
+            for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit, scope, hiddenGuestIds)) {
+                pool.putIfAbsent(hit.memory().id, hit.memory());
+            }
+        }
+        return List.copyOf(pool.values());
+    }
+
+    /**
+     * Pool rows on the candidate's subject: moderate overlap below the dup threshold (at or above it the candidate
+     * would have been NOOPed as a duplicate). Closest first, so a row covering much of the candidate is not capped
+     * out by newer weak matches; ties keep pool order.
+     */
+    private static List<Integer> related(MemorySimilarity.Tokens toks, List<MemorySimilarity.Tokens> poolTokens,
+                                         Set<String> common, double minJaccard, double minShare, double dupThreshold) {
+        var related = new ArrayList<Map.Entry<Integer, Double>>();
+        for (int i = 0; i < poolTokens.size(); i++) {
+            double j = jaccard(toks.raw(), poolTokens.get(i).raw());
+            double share = candidateShare(toks.content(), poolTokens.get(i).content(), common);
+            if ((j >= minJaccard || share >= minShare) && j < dupThreshold) {
+                related.add(Map.entry(i, Math.max(j, share)));
+            }
+        }
+        related.sort(Map.Entry.<Integer, Double>comparingByValue().reversed());
+        return related.stream().map(Map.Entry::getKey).toList();
     }
 
     /** Index of the first entry in {@code against} that {@code toks} duplicates, or -1. */
@@ -935,7 +946,8 @@ public final class MemoryAutoCapture {
      * {@link MemorySimilarity#containment}: its smaller-set denominator scores a two-word row sharing one word at 0.5 (GH-15).
      */
     private static double candidateShare(Set<String> candidate, Set<String> row, Set<String> common) {
-        int counted = 0, shared = 0;
+        int counted = 0;
+        int shared = 0;
         for (var t : candidate) {
             if (common.contains(t)) continue;
             counted++;
@@ -1017,43 +1029,9 @@ public final class MemoryAutoCapture {
             if (olds == null || olds.isEmpty()) continue;
             long newId = Long.parseLong(newIdStr);
             for (int oldIdx : olds) {
-                var ex = plan.shortlist().get(oldIdx);
-                if (ex.id() >= newId) continue;   // serial guard: of two facts, the newer wins
-                if (!atLeastAsInformative(ex.text(), c.text())) {
-                    EventLogger.info(EVENT_CATEGORY, agentName, null,
-                            ("Kept memory %d instead of superseding it with %d — the newer text drops "
-                                    + "content: \"%s\" vs \"%s\"")
-                                    .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
-                    continue;
+                if (supersedeIfAllowed(agentName, plan.shortlist().get(oldIdx), c, newId, provenance)) {
+                    applied.add(List.of(i, oldIdx));
                 }
-                if (!sharesSubject(ex.text(), c.text())) {
-                    EventLogger.info(EVENT_CATEGORY, agentName, null,
-                            ("Kept memory %d instead of superseding it with %d — no shared subject: "
-                                    + "\"%s\" vs \"%s\"")
-                                    .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
-                    continue;
-                }
-                if (!preservesValues(ex.text(), c.text())) {
-                    EventLogger.info(EVENT_CATEGORY, agentName, null,
-                            ("Kept memory %d instead of superseding it with %d — the newer text pins "
-                                    + "no %s: \"%s\" vs \"%s\"")
-                                    .formatted(ex.id(), newId, lostValueKinds(ex.text(), c.text()),
-                                            snippet(c.text()), snippet(ex.text())));
-                    continue;
-                }
-                Memory old = Memory.findById(ex.id());
-                if (old == null || old.supersededAt != null) continue;
-                if (guestOverNonGuest(provenance, old)) {
-                    EventLogger.info(EVENT_CATEGORY, agentName, null,
-                            ("Kept memory %d instead of superseding it with %d — a guest's turn never "
-                                    + "replaces a memory that is not a guest's").formatted(ex.id(), newId));
-                    continue;
-                }
-                old.supersede(newId);
-                applied.add(List.of(i, oldIdx));
-                EventLogger.info(EVENT_CATEGORY, agentName, null,
-                        "Memory %d superseded by %d: \"%s\" → \"%s\""
-                                .formatted(ex.id(), newId, snippet(ex.text()), snippet(c.text())));
             }
         }
         for (var ext : judgement.extensions().entrySet()) {
@@ -1063,6 +1041,47 @@ public final class MemoryAutoCapture {
                     plan.shortlist().get(ext.getValue()), provenance);
         }
         return storedIds;
+    }
+
+    /** Supersedes {@code ex} by the stored candidate {@code newId} unless a guard refuses, logging the refusal. */
+    private static boolean supersedeIfAllowed(String agentName, Existing ex, Candidate c, long newId,
+                                              MemoryProvenance provenance) {
+        if (ex.id() >= newId) return false;   // serial guard: of two facts, the newer wins
+        if (!atLeastAsInformative(ex.text(), c.text())) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    ("Kept memory %d instead of superseding it with %d — the newer text drops "
+                            + "content: \"%s\" vs \"%s\"")
+                            .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
+            return false;
+        }
+        if (!sharesSubject(ex.text(), c.text())) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    ("Kept memory %d instead of superseding it with %d — no shared subject: "
+                            + "\"%s\" vs \"%s\"")
+                            .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
+            return false;
+        }
+        if (!preservesValues(ex.text(), c.text())) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    ("Kept memory %d instead of superseding it with %d — the newer text pins "
+                            + "no %s: \"%s\" vs \"%s\"")
+                            .formatted(ex.id(), newId, lostValueKinds(ex.text(), c.text()),
+                                    snippet(c.text()), snippet(ex.text())));
+            return false;
+        }
+        Memory old = Memory.findById(ex.id());
+        if (old == null || old.supersededAt != null) return false;
+        if (guestOverNonGuest(provenance, old)) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    ("Kept memory %d instead of superseding it with %d — a guest's turn never "
+                            + "replaces a memory that is not a guest's").formatted(ex.id(), newId));
+            return false;
+        }
+        old.supersede(newId);
+        EventLogger.info(EVENT_CATEGORY, agentName, null,
+                "Memory %d superseded by %d: \"%s\" → \"%s\""
+                        .formatted(ex.id(), newId, snippet(ex.text()), snippet(c.text())));
+        return true;
     }
 
     /** Record {@code newId} as extending {@code target}'s live head, under supersession's serial and guest guards. */

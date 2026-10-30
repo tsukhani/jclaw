@@ -69,12 +69,7 @@ public final class MemoryClusters {
                             && !emitted.contains(m.id))
                     .sorted(Comparator.comparing((Memory m) -> m.id))
                     .toList();
-            var kept = new ArrayList<Memory>();
-            for (var m : live) if (byId.containsKey(m.id)) kept.add(m);
-            for (var m : live) {
-                if (kept.size() >= clusterMax) break;
-                if (!byId.containsKey(m.id)) kept.add(m);
-            }
+            var kept = keep(live, byId.keySet(), clusterMax);
             var cluster = new TreeMap<Long, MemoryStore.MemoryEntry>();
             for (var m : kept) {
                 var own = byId.get(m.id);
@@ -86,6 +81,17 @@ public final class MemoryClusters {
             emitted.addAll(cluster.keySet());
         }
         return out;
+    }
+
+    /** The ranker-selected members, then the oldest others, up to {@code clusterMax}; {@code live} is in id order. */
+    private static List<Memory> keep(List<Memory> live, Set<Long> selected, int clusterMax) {
+        var kept = new ArrayList<Memory>();
+        for (var m : live) if (selected.contains(m.id)) kept.add(m);
+        for (var m : live) {
+            if (kept.size() >= clusterMax) break;
+            if (!selected.contains(m.id)) kept.add(m);
+        }
+        return kept;
     }
 
     /** The seeds with at least one edge, found in one query; all of them when that query hit its cap. */
