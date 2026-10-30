@@ -154,8 +154,22 @@ pipeline {
                         script: "grep '^application.version=' conf/application.conf | cut -d= -f2",
                         returnStdout: true
                     ).trim()
+                    env.BUILD_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    // A RELEASE build of a commit that already passed the whole
+                    // suite skips Test and Sonar: Package needs only Build's
+                    // output, and the rerun let a flaky test fail the release
+                    // of a commit whose own build had passed (build 1372). The
+                    // record is the description post { success } writes.
+                    def tested = "tested ${env.BUILD_COMMIT}".toString()
+                    env.ALREADY_TESTED = (params.RELEASE
+                        && currentBuild.previousSuccessfulBuild?.description == tested) ? 'true' : 'false'
                 }
                 echo "application.version = ${env.APP_VERSION}"
+                script {
+                    if (env.ALREADY_TESTED == 'true') {
+                        echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
+                    }
+                }
             }
         }
 
@@ -198,6 +212,9 @@ pipeline {
         }
 
         stage('Test') {
+            when {
+                expression { env.ALREADY_TESTED != 'true' }
+            }
             parallel {
                 stage('Backend') {
                     steps {
@@ -260,6 +277,9 @@ pipeline {
         }
 
         stage('Sonar Analysis') {
+            when {
+                expression { env.ALREADY_TESTED != 'true' }
+            }
             steps {
                 // withSonarQubeEnv('SonarQube') injects SONAR_HOST_URL and
                 // SONAR_TOKEN (also SONAR_AUTH_TOKEN on older plugin versions)
@@ -617,6 +637,13 @@ pipeline {
     }
 
     post {
+        success {
+            // The record Setup reads. A build that skipped Test writes it too:
+            // its commit passed the whole suite in the build it read it from.
+            script {
+                currentBuild.description = "tested ${env.BUILD_COMMIT}"
+            }
+        }
         cleanup {
             // Wipe the workspace EXCEPT .gradle/ and .git/. gradle.properties
             // sets org.gradle.configuration-cache=true, and Gradle stores those

@@ -136,7 +136,7 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
     /usr/bin/git push origin "refs/tags/v<NEW_VERSION>"
     /usr/bin/git push github "refs/tags/v<NEW_VERSION>"
     ```
-    The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build may run only after this: the Release stage's `gh release create --verify-tag` refuses a version with no tag on GitHub, rather than minting an unsigned one at `main`'s head.
+    The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build may run only after this: the Release stage's `gh release create --verify-tag` refuses a version with no tag on GitHub, rather than minting an unsigned one at `main`'s head. That build skips Test and Sonar, because the green build recorded the commit as tested in its description, so a flaky test cannot fail a release whose commit already passed.
 20. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
 
 **Phase 5: Report**
