@@ -100,6 +100,13 @@ test("another file selects the tests that name it", () => {
   strictEqual(r.reasons.PlainTest, "names jclaw.sh");
 });
 
+test("a Markdown file selects only the tests that name its path, not every test naming a README.md", () => {
+  const g = graph({ PlainTest: 'read("skills/demo/README.md")', MemoryToolTest: 'read("bin/README.md")' });
+  const reasons = select([{ status: "M", path: "bin/README.md" }], g, false).reasons;
+  strictEqual(reasons.MemoryToolTest, "names bin/README.md");
+  strictEqual(reasons.PlainTest, undefined);
+});
+
 test("a deleted class selects nothing by itself: the compile catches what still referred to it", () => {
   strictEqual(select([{ status: "D", path: "app/utils/Gone.java" }], graph(), false).mode, "none");
 });

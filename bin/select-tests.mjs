@@ -120,10 +120,12 @@ export function select(changes, graph, versionOnlyConf, maxDepth = Infinity) {
       if (status !== "D") changedClasses.add(cls);
       continue;
     }
-    // Any other file (jclaw.sh, bin/, sidecar/, evals/, archunit_store/): the tests that name it.
+    // Any other file (jclaw.sh, bin/, sidecar/, evals/, archunit_store/): the tests that name it. A bare file name
+    // counts only when it is distinctive; README.md and SKILL.md are named by tests about other files.
     const base = path.split("/").pop();
+    const byName = base.includes(".") && base.length > 8 && !base.endsWith(".md");
     for (const [test, source] of graph.testSources) {
-      if (source.includes(path) || (base.includes(".") && base.length > 8 && source.includes(base))) note(test, `names ${path}`);
+      if (source.includes(path) || (byName && source.includes(base))) note(test, `names ${path}`);
     }
   }
   if (fullBecause.length > 0) return { mode: "all", tests: [], fullBecause, reasons: {} };
