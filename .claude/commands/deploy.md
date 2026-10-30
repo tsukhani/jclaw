@@ -123,13 +123,24 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
       xargs -r /usr/bin/git push origin --delete
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
+18. **Delete the local branches this release merged, and list the worktrees it finished.** Only after both pushes succeeded. A branch landed outside the factory, such as an `agent/*` branch you merged yourself, stays behind otherwise; the factory deletes only the branches it lands. `git branch -d` refuses a branch that is not merged, so this cannot lose work, and a branch checked out in a worktree is skipped. A worktree is listed, never removed: one that is clean and merged can still belong to another session, mid-run, so removing it is the user's call (`/usr/bin/git worktree remove <path>`, then `/usr/bin/git branch -d <branch>`):
+    ```bash
+    /usr/bin/git for-each-ref --merged "$REL" --format='%(refname:short) %(worktreepath)' refs/heads |
+      while read -r b wt; do [ "$b" != main ] && [ -z "$wt" ] && echo "$b"; done |
+      xargs -r /usr/bin/git branch -d
+    /usr/bin/git worktree list --porcelain | awk '/^worktree /{wt=substr($0, 10)} /^branch /{print substr($0, 8), wt}' |
+      while read -r ref wt; do
+        [ "$ref" != refs/heads/main ] && /usr/bin/git merge-base --is-ancestor "$ref" "$REL" &&
+          [ -z "$(/usr/bin/git -C "$wt" status --porcelain)" ] && echo "merged and clean: $wt (${ref#refs/heads/})"
+      done
+    ```
 
 **Phase 4: Tag the version once Jenkins passes it**
 
 The pre-push hook runs only the tests the change reaches, so the release commit's Jenkins build is the first whole-suite run it gets. The tag waits for that build: a version whose build fails is never tagged, and a RELEASE build cannot run for it.
 
-18. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 19.
-19. **On `SUCCESS`, tag `$REL` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
+19. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 20.
+20. **On `SUCCESS`, tag `$REL` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
     ```bash
     /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>" "$REL"
     /usr/bin/git tag -v "v<NEW_VERSION>"        # must print Good "git" signature
@@ -137,17 +148,17 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
     /usr/bin/git push github "refs/tags/v<NEW_VERSION>"
     ```
     The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build may run only after this: the Release stage's `gh release create --verify-tag` refuses a version with no tag on GitHub, rather than minting an unsigned one at `main`'s head. That build skips Test and Sonar, because the green build recorded the commit as tested in its description, so a flaky test cannot fail a release whose commit already passed.
-20. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
+21. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
 
 **Phase 5: Report**
 
-21. Summarize in one message: new version, commit hash, branch name, both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), and the Renovate branches step 17 deleted, if any. Example:
+22. Summarize in one message: new version, commit hash, branch name, both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
     > - github: `<old-sha>..a1b2c3d`, then tag `v0.7.6`
 
-22. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
+23. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
 
     > This release touched the frontend. To verify what shipped: `./jclaw.sh restart`, then `/e2e-audit`.
 
