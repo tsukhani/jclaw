@@ -33,7 +33,7 @@ Before any agent runs, the plan builder reads every open JCLAW issue and attache
 
 ## Division of labor
 
-Every subagent starts with about 27k tokens of injected instructions (`AGENTS.md` is 106 KB), so the plan spends agents only where judgment happens:
+Every subagent starts with about 15k tokens of injected instructions (`AGENTS.md` is 60 KB), so the plan spends agents only where judgment happens:
 
 | Role | Does | Full `app/` (72 units) |
 |---|---|---|

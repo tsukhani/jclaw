@@ -99,7 +99,7 @@ Present a table (file · drift item · `current → correct` · handling · FIX/
 11. For a genuine **coverage gap** that warrants a new user-guide page or section, confirm scope with the user (in Phase 3) before authoring — don't fabricate a page unprompted.
 12. **Facts only:** in `docs/architecture/*.md`, change only the wrong words and numbers, keeping each doc's voice, tables and structure. Re-measure a count rather than copying it from the report.
 13. **Comments and Javadoc:**
-    - Make the claim true and no longer than it was, following AGENTS.md §8. Never write provenance ("now", "updated", "previously", the ticket of this change): that belongs in the commit message. If the claim cannot be made true in the same space, delete the stale clause rather than grow the comment.
+    - Make the claim true and no longer than it was, following AGENTS.md's Comments Carry Reasoning. Never write provenance ("now", "updated", "previously", the ticket of this change): that belongs in the commit message. If the claim cannot be made true in the same space, delete the stale clause rather than grow the comment.
     - Point a dangling `{@link}` at the symbol's new home (`/usr/bin/git log -S'<name>'` finds it). If the symbol is gone, rewrite the clause without the link.
     - Never edit a directive, an annotation, or an ArchUnit `because(…)`. A `*/` inside Javadoc text, such as a cron glob, closes the comment: rephrase it.
 14. **Approved shipped text:** before editing, find the tests that pin the string (`/usr/bin/git grep -nF '<old text>' -- test frontend/test frontend/tests`) and update them in the same change.

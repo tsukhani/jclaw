@@ -50,8 +50,8 @@ public final class TaskScope<T> implements AutoCloseable {
 
     /** Start {@code task} on its own virtual thread. */
     public Future<T> fork(Callable<T> task) {
-        // Same boundary AGENTS.md documents for ScopedValue: the pool's threads inherit no
-        // OTel context, so the forking thread's span is carried in explicitly.
+        // Same boundary docs/agents/wall-clock.md documents for ScopedValue: the pool's
+        // threads inherit no OTel context, so the forking thread's span is carried in explicitly.
         var future = completion.submit(Context.current().wrap(task));
         forked.add(future);
         return future;

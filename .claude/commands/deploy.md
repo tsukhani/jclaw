@@ -92,7 +92,7 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
       - A trailing `Note:` paragraph for anything genuinely surprising a reader would otherwise trip over.
       - Write for someone who has not read the diff and does not know the internals. No file paths, no function names, no "refactored X" — say what changed for them.
     - If nothing shipped but the bump, write `Version bump only; no code changes since v<OLD_VERSION>.`
-    - Keep it publishable: this lands on the **public** GitHub mirror, so no credentials, customer specifics, or unreleased commercial plans (AGENTS.md §9).
+    - Keep it publishable: this lands on the **public** GitHub mirror, so no credentials, customer specifics, or unreleased commercial plans (AGENTS.md, Commit Messages Are Public).
     - Trailer: the `Co-Authored-By:` line your standing instructions specify, which names the model actually authoring the commit. **Do not hardcode a model version in this file.** It goes stale at every model bump, and a wrong trailer breaks nothing — no hook, test, or push rejects it — so the drift survives indefinitely. If your instructions specify no trailer, omit it rather than guessing a model name.
 
     The body is write-once: once pushed, correcting it would mean rewriting published history, and Jenkins reads whatever is in the commit. Get it right here.

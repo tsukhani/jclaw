@@ -53,7 +53,8 @@ backlog step checks it against that issue's description, which you have not seen
 // ---- shared context baked into every agent so it judges THIS codebase, not generic Java ----
 const PROJECT_CONSTRAINTS = `
 PROJECT GIVENS — treat these as settled, not as findings (flagging them is a false positive):
-- AGENTS.md is already in your context. A finding that recommends what it rules out (a manual IN query instead of
+- AGENTS.md is already in your context, and the docs/agents/ guides it links are as settled: read the one for the
+  subsystem a finding touches. A finding that recommends what they rule out (a manual IN query instead of
   @BatchSize, StructuredTaskScope instead of utils.TaskScope, Thread.interrupt() for cancellation, deleting a
   "zero call sites" member that a retention Javadoc, @SuppressWarnings("unused") or a reflection test keeps) is wrong.
 - If docs/spikes/ holds a verdict on the code you are judging, that verdict stands unless you name evidence it did
@@ -281,7 +282,7 @@ For EACH finding in the review below, rule independently and decisively:
 - "downgraded": real but over-rated — lower the severity.
 - "rejected": false positive — framework-idiomatic (static controllers, Play active-record), already mitigated
   elsewhere, would not actually leak/bottleneck, would not compile, a compile-time gate already rules it out,
-  contradicts AGENTS.md or a docs/spikes verdict, out of scope for this audit, evidence misreads the code, or
+  contradicts AGENTS.md, a docs/agents/ guide or a docs/spikes verdict, out of scope for this audit, evidence misreads the code, or
   style-for-style's-sake. State WHY.
 When you doubt a finding is real, reject it. When it is real, rate its consequence and never lower a severity
 because you are unsure: a defect that loses or corrupts data, takes the database down, or breaks a feature its users

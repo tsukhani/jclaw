@@ -166,7 +166,7 @@ const GROUPS = [
     title: 'Tail latency, tracing and SLOs',
     concepts: ['p95-p99', 'tail-amplification', 'correlation-tracing', 'slo-error-budget'],
     where: 'agents.ParallelToolExecutor, utils.TaskScope callers, subagent batch spawns, the sequential steps on a turn critical path (prompt preparation, memory recall, compaction, tool catalog), utils.LatencyStats and utils.LatencyTrace segments and /api/metrics/latency, services.telemetry.OtelRuntime, GenAiSpans and the Play plugin, every thread hop (agent-stream, llm-stream, the drain thread, db-scheduler workers, virtual-thread executors), services.EventLogger rows, services.BreakerAlarms and services.OperatorAlerts.',
-    seeds: 'LatencyStats/LatencyTrace, OtelRuntime and the Context.current().wrap rule in AGENTS.md, the latency metrics endpoint.',
+    seeds: 'LatencyStats/LatencyTrace, OtelRuntime and the Context.current().wrap rule in docs/agents/telemetry.md, the latency metrics endpoint.',
     questions: `- Tail amplification: a turn that waits for the slowest of N branches (tools, subagents, recall sources) with no
   per-branch deadline, or independent steps run in sequence on the critical path.
 - p95/p99: which segments of a turn are not recorded by LatencyStats/LatencyTrace, so their tail cannot be seen?
@@ -196,7 +196,8 @@ OUT OF SCOPE — another audit owns these; do not report them here:
 `
 
 const PROJECT_GIVENS = `
-PROJECT GIVENS — AGENTS.md is already in your context; its conventions and pitfalls are settled. A finding that
+PROJECT GIVENS — AGENTS.md is already in your context; its conventions and pitfalls are settled, as are the
+docs/agents/ guides it links (read the one for the subsystem a finding touches). A finding that
 recommends what it rules out, or re-proposes a verdict recorded in docs/spikes/ without new evidence, is wrong.
 - Single operator, single node: one JVM, one embedded H2 file, no message broker, no replicas. Realistic load is
   one operator, a handful of channels and agents, scheduled tasks, and the loadtest harness's 100 concurrent
@@ -423,7 +424,7 @@ For EACH finding, rule independently:
 - "confirmed": real, the scenario can happen, and the severity is right.
 - "downgraded": real but over-rated for one operator on one node — lower the severity.
 - "rejected": a protection on the path already covers it (name it), the scenario cannot occur, it needs scale
-  JClaw does not have, it contradicts AGENTS.md or a docs/spikes verdict, it is out of scope, or the evidence
+  JClaw does not have, it contradicts AGENTS.md, a docs/agents/ guide or a docs/spikes verdict, it is out of scope, or the evidence
   misreads the code. State WHY.
 When you doubt a finding is real, reject it. When it is real, rate its consequence on the scale above and never
 lower a severity because you are unsure. Check that file, lines and quoted evidence are accurate.

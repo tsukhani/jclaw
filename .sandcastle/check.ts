@@ -191,8 +191,8 @@ check("implement, build and rework complete the build phase; spec, gates, repair
   ["implement", "build", "rework", "spec", "gate-1", "repair-1", "review", "gate-review", "brief", "merge"].filter(buildsTheDiff), ["implement", "build", "rework"]);
 
 check("sensitive paths are flagged, ordinary ones are not",
-  sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md"]),
-  [".githooks/pre-push", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", ".sandcastle/main.ts"]);
+  sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md", "docs/agents/capabilities.md"]),
+  [".githooks/pre-push", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", ".sandcastle/main.ts", "docs/agents/capabilities.md"]);
 
 const plan = parsePlan('{"A": {"files": ["./app/X.java", "test/XTest.java"], "bmad": true, "why": " open choice "}, "B": {"files": [], "bmad": false, "why": "precise"}}');
 check("a plan parses, with ./ stripped and the reason trimmed",

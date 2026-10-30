@@ -881,7 +881,7 @@ class ApiAgentsControllerTest extends FunctionalTest {
     @Test
     void evalAgentStaysDeletableDespiteBeingHidden() {
         // Hidden is deliberately NOT reserved, and the whole difference is deletion.
-        // AGENTS.md and './jclaw.sh evals --help' both tell the operator to DELETE
+        // docs/agents/evals.md and './jclaw.sh evals --help' both tell the operator to DELETE
         // __evaltest__ to clear what a sweep created — that is the supported way to
         // remove the scheduled tasks a suite's cases leave behind. Folding this name
         // into isReservedName would 404 the delete through requireAgent and silently

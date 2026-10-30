@@ -90,7 +90,7 @@ const SENSITIVE = [
   /^\.githooks\//, /^\.sandcastle\//, /^\.devcontainer\//, /^\.claude\//, /^gradle\/wrapper\//, /^gradlew(\.bat)?$/,
   /^jclaw\.sh$/, /^(build|settings)\.gradle\.kts$/, /^\.play-version$/, /(^|\/)package\.json$/,
   /(^|\/)(pnpm-lock\.yaml|package-lock\.json)$/, /(^|\/)Dockerfile$/, /^docker-entrypoint\.sh$/, /^Jenkinsfile/,
-  /^(AGENTS|CLAUDE)\.md$/,
+  /^(AGENTS|CLAUDE)\.md$/, /^docs\/agents\//,
 ];
 export const sensitivePaths = (files: string[]): string[] => files.filter((f) => SENSITIVE.some((r) => r.test(f)));
 

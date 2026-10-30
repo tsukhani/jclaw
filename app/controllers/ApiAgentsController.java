@@ -119,7 +119,7 @@ public class ApiAgentsController extends Controller {
      *
      * <p>The difference is deletion. Reserved names 404 through
      * {@link #requireAgent}, which would break the documented cleanup for an eval
-     * sweep — both AGENTS.md and {@code ./jclaw.sh evals --help} tell the operator
+     * sweep — both docs/agents/evals.md and {@code ./jclaw.sh evals --help} tell the operator
      * to DELETE {@code __evaltest__} to clear what a sweep created, and that is the
      * supported way to remove the tasks a suite's cases leave behind. Hiding it
      * from a dropdown must not take that away.
