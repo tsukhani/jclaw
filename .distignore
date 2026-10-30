@@ -1,14 +1,15 @@
 # Exclude project management artifacts from distribution
 _bmad/
 _bmad-output/
-# docs/architecture/ holds internal design docs and docs/agents/ the topic guides
-# AGENTS.md links — both excluded from the dist.
+# docs/architecture/ holds internal design docs, docs/agents/ the topic guides
+# AGENTS.md links, and docs/README.md the documentation catalog — all excluded.
 # docs/user-guide/ is intentionally NOT excluded: it ships in the bundle so the
 # in-app user-guide lookup can read it at runtime (Play.applicationPath/docs/user-guide/).
 # Every other docs/ subdirectory is gitignored, and this task's file list comes
-# from `git ls-files`, so these two prefixes leave user-guide as the only docs in a zip.
+# from `git ls-files`, so only a file directly under docs/ needs its own line here.
 docs/architecture/
 docs/agents/
+docs/README.md
 test/
 # The frozen ArchUnit capability allowlists (JCLAW-1152) are a build-time
 # baseline read by test/CapabilityRulesTest, never by a running install.
