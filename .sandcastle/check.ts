@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
-import { ownerApplied, vetIssue, type Issue } from "./github.ts";
+import { issueLanded, ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
@@ -274,6 +274,9 @@ check("an afk-merge epic's stories merge with the labelled ones", mergeJql(["JCL
 const merged = (who: string, at: string) => ({ __typename: "LabeledEvent", createdAt: at, actor: { login: who }, label: { name: "afk-merge" } });
 check("afk-merge counts when the owner applied it last", ownerApplied(issue({ timelineItems: { nodes: [merged("stranger", BEFORE), merged(OWNER, LATER)] } }), OWNER, "afk-merge"), true);
 check("afk-merge from anyone else does not", ownerApplied(issue({ timelineItems: { nodes: [merged(OWNER, BEFORE), merged("stranger", LATER)] } }), OWNER, "afk-merge"), false);
+check("a closed issue has landed", issueLanded({ state: "closed", labels: [] }), true);
+check("an open issue labelled afk-merged has landed", issueLanded({ state: "open", labels: [{ name: "afk" }, { name: "afk-merged" }] }), true);
+check("an open issue still in review has not", issueLanded({ state: "open", labels: [{ name: "afk" }, { name: "afk-review" }] }), false);
 
 const brief = (met: boolean[]) => ({ brief: { acceptanceCriteria: met.map((m, i) => ({ criterion: `AC ${i + 1}`, met: m })) } });
 check("a clean report with ordinary files may merge", mergeVerdict(brief([true, true]), []), undefined);

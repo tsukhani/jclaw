@@ -104,6 +104,10 @@ const repositoryOf = (configured: string | undefined): string | undefined => {
 };
 
 // The GitHub source, or undefined when FACTORY_HOME/github.env holds no token: GitHub is optional, Jira is not.
+// Landed: closed, or labelled afk-merged, which stays on until /deploy closes the issue or the reporter confirms.
+export const issueLanded = (issue: { state: string; labels: { name: string }[] }): boolean =>
+  issue.state === "closed" || issue.labels.some((l) => l.name === "afk-merged");
+
 export const githubTracker = (): Tracker | undefined => {
   // Only from FACTORY_HOME/github.env, never .env, which the gateway mounts: no container ever holds the token.
   const env = readEnvFile(GITHUB_ENV_FILE);
@@ -228,7 +232,7 @@ export const githubTracker = (): Tracker | undefined => {
       await addLabel(key, "afk-merged");
       await removeLabel(key, "afk-review");
     },
-    done: async (key) => (await api(`${issuesPath}/${number(key)}`)).state === "closed",
+    done: async (key) => issueLanded(await api(`${issuesPath}/${number(key)}`)),
     comment: async (key, body) => {
       await api(`${issuesPath}/${number(key)}/comments`, { method: "POST", body: { body } });
     },
