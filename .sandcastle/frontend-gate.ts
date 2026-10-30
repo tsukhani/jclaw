@@ -12,9 +12,10 @@ const IN = "cd frontend &&";
 // Prepared as `./jclaw.sh test` does: a stale .nuxt or vite cache has passed a broken page before (JCLAW-680).
 const PREPARE = `${IN} pnpm install --frozen-lockfile > /tmp/fe-prepare.log 2>&1 && rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare >> /tmp/fe-prepare.log 2>&1`;
 export const STATIC_CHECKS = ["stylelint", "lint", "typecheck"];
-// The SPA's own tree, and the user guide: sections.ts imports each page raw, and guide.page.test.ts pins its anchors.
-export const FRONTEND_INPUTS = ["frontend", "docs/user-guide"];
-const NOT_RUN = "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/";
+// The SPA's own tree, the user guide (sections.ts imports each page raw, and guide.page.test.ts pins its anchors), and
+// the llms-full.txt builder that llms-txt.test.ts imports.
+export const FRONTEND_INPUTS = ["frontend", "docs/user-guide", "bin/llms-full.mjs"];
+const NOT_RUN = "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/, nor bin/llms-full.mjs";
 
 type Failed = { file: string; message: string };
 

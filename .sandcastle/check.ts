@@ -94,13 +94,13 @@ check("a file that fails to import has no assertions, so its own message is the 
   [{ file: fileA, message: 'Failed to resolve import "./gone"' }]);
 check("no report, or one that is not a report, is not an empty list of failures", [vitestFailures(""), vitestFailures("{}"), vitestFailures("[]")], [undefined, undefined, undefined]);
 check("a branch that changes nothing the SPA is built from runs no frontend check", await frontend({ touched: false }),
-  { fresh: [], environment: [], flakes: [], summary: "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/", ran: [] });
-check("the gate asks git about the user guide as well as frontend/, since the SPA bundles it",
+  { fresh: [], environment: [], flakes: [], summary: "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/, nor bin/llms-full.mjs", ran: [] });
+check("the gate asks git about the user guide and the llms-full builder as well as frontend/, since the SPA and its tests read them",
   await (async () => {
     const asked: string[] = [];
     await frontendGate(async (cmd) => (asked.push(cmd), { stdout: "", exitCode: 0 }), (body) => body());
     return asked;
-  })(), ["git diff --name-only main...HEAD -- frontend docs/user-guide | head -1"]);
+  })(), ["git diff --name-only main...HEAD -- frontend docs/user-guide bin/llms-full.mjs | head -1"]);
 // A new import that reaches outside frontend/ has to be added to FRONTEND_INPUTS, or its edits skip the frontend gate.
 const spaRoot = path.resolve(import.meta.dirname, "../frontend");
 const readsOutside = new Set<string>();

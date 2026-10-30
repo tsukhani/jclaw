@@ -61,7 +61,8 @@ lockfile changes. Every two minutes it:
      BMAD instead (see [BMAD stories](#bmad-stories)).
    - **Gate:** the full suite. A failing class is re-run alone. If it passes alone, or also fails on `main`, it is not
      counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline. A branch that changes
-     `frontend/`, or the user guide in `docs/user-guide/` that the web app bundles, also gets the frontend checks
+     `frontend/`, the user guide in `docs/user-guide/` that the web app bundles, or `bin/llms-full.mjs` that a frontend
+     test imports, also gets the frontend checks
      `./jclaw.sh test` runs before a push, which `play autotest` does not:
      `pnpm test`, `pnpm stylelint`, `pnpm lint` and `pnpm typecheck`. They are judged the same way: a failing test file
      is re-run alone, and a file or check that also fails on `main` is not counted.
