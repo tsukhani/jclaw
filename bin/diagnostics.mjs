@@ -12,10 +12,11 @@ const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const TEST_RESULT_DIR = join(PROJECT_ROOT, "test-result");
 const WINDOWS = process.platform === "win32";
 
-const USAGE = `Usage: node bin/diagnostics.mjs [--tests] [--out FILE]
+const USAGE = `Usage: node bin/diagnostics.mjs [--tests [--select BASE]] [--out FILE]
 
-  --tests      also run 'play autotest' and report its failures
-  --out FILE   write the JSON document there instead of stdout
+  --tests        also run 'play autotest' and report its failures
+  --select BASE  with --tests, run only the classes bin/select-tests.mjs picks for BASE...HEAD
+  --out FILE     write the JSON document there instead of stdout
 
 Exit: 0 nothing to report, 1 diagnostics reported, 2 the harness itself failed.`;
 
@@ -154,6 +155,20 @@ function sourceLocator() {
   return (name) => index.get(name) ?? undefined;
 }
 
+/**
+ * The backend run for a bin/select-tests.mjs answer: none, the whole suite, or the listed classes. Anything that is
+ * not a clean answer (an empty or failed selection) runs the whole suite.
+ */
+export function backendRun(selection, gradlew) {
+  const answer = (selection ?? "").trim();
+  if (answer === "NONE") return { skip: true, label: "no backend test reaches the change" };
+  if (answer === "" || answer === "ALL" || /\s/.test(answer)) {
+    return { command: "play", args: ["autotest"], label: "the whole suite" };
+  }
+  const count = answer.split(",").length;
+  return { command: gradlew, args: ["playAutotest", `-Ptests=${answer}`], label: `${count} classes the change reaches` };
+}
+
 function fail(message) {
   process.stderr.write(`${message}\n`);
   return 2;
@@ -161,10 +176,15 @@ function fail(message) {
 
 function main(argv) {
   let runTests = false;
+  let selectBase;
   let out;
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case "--tests": runTests = true; break;
+      case "--select":
+        selectBase = argv[++i];
+        if (selectBase === undefined || selectBase.startsWith("-")) return fail("Error: --select needs a base ref");
+        break;
       case "--out":
         out = argv[++i];
         if (out === undefined || out.startsWith("-")) return fail("Error: --out needs a file path");
@@ -195,13 +215,23 @@ function main(argv) {
     for (const entry of existsSync(TEST_RESULT_DIR) ? readdirSync(TEST_RESULT_DIR) : []) {
       if (/^TEST-.+\.xml$/.test(entry)) rmSync(join(TEST_RESULT_DIR, entry));
     }
-    process.stderr.write("==> Running backend tests (play autotest)...\n");
-    const tests = spawnSync("play", ["autotest"],
-      { cwd: PROJECT_ROOT, stdio: ["ignore", 2, 2], shell: WINDOWS });
-    if (tests.error) return fail(`Error: could not run 'play autotest' — ${tests.error.message}`);
-    records.push(...readTestResults(sourceLocator()));
-    if (tests.status !== 0 && records.length === 0) {
-      return fail("Error: 'play autotest' failed but no test report records a failure.");
+    let selection;
+    if (selectBase !== undefined) {
+      const select = spawnSync(process.execPath, [join(PROJECT_ROOT, "bin", "select-tests.mjs"), "--base", selectBase, "--head", "HEAD"],
+        { cwd: PROJECT_ROOT, encoding: "utf8" });
+      if (select.status === 0) selection = select.stdout;
+      else process.stderr.write(`==> The selection failed, so the whole suite runs: ${(select.stderr || select.error?.message || "").trim()}\n`);
+    }
+    const run = backendRun(selectBase === undefined ? "ALL" : selection, gradlew);
+    process.stderr.write(`==> Selection: ${run.label}\n`);
+    if (!run.skip) {
+      process.stderr.write(`==> Running backend tests (${run.command} ${run.args[0]})...\n`);
+      const tests = spawnSync(run.command, run.args, { cwd: PROJECT_ROOT, stdio: ["ignore", 2, 2], shell: WINDOWS });
+      if (tests.error) return fail(`Error: could not run '${run.command} ${run.args[0]}' — ${tests.error.message}`);
+      records.push(...readTestResults(sourceLocator()));
+      if (tests.status !== 0 && records.length === 0) {
+        return fail(`Error: '${run.command} ${run.args[0]}' failed but no test report records a failure.`);
+      }
     }
   }
 

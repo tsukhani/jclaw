@@ -12,7 +12,7 @@ For each story, list every repository path it will create or modify, tests inclu
 
 # BMAD OR PLAIN
 
-A story is built one of two ways. Plain: one agent implements the ticket. BMAD: an agent first writes a ready-for-development spec from the ticket and the code, stopping with its questions if the ticket can be read more than one way, then builds from that spec and reviews its own diff with four reviewer agents. Either way the harness then runs the full suite and a review. BMAD takes about twice the agent time, so choose it only where it earns that.
+A story is built one of two ways. Plain: one agent implements the ticket. BMAD: an agent first writes a ready-for-development spec from the ticket and the code, stopping with its questions if the ticket can be read more than one way, then builds from that spec and reviews its own diff with four reviewer agents. Either way the harness then runs the tests the change reaches and a review. BMAD takes about twice the agent time, so choose it only where it earns that.
 
 Choose BMAD when the ticket leaves real work to judgement:
 - its acceptance criteria are missing or vague, or leave the shape of the solution open

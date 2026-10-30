@@ -59,8 +59,10 @@ lockfile changes. Every two minutes it:
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
    - **Implement**, or **rework** if you sent it back. A story that needs BMAD is **specced**, then **built**, by
      BMAD instead (see [BMAD stories](#bmad-stories)).
-   - **Gate:** the full suite. A failing class is re-run alone. If it passes alone, or also fails on `main`, it is not
-     counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline. A branch that changes
+   - **Gate:** the backend test classes the branch reaches, as `bin/select-tests.mjs` picks them against `main`;
+     Jenkins runs the full suite once the work is pushed. A failing class is re-run alone. If it passes alone, or
+     also fails on `main`, it is not counted, but the brief names it. There are up to two repair rounds and a
+     30-minute deadline. A branch that changes
      `frontend/`, the user guide in `docs/user-guide/` that the web app bundles, or `bin/llms-full.mjs` that a frontend
      test imports, also gets the frontend checks
      `./jclaw.sh test` runs before a push, which `play autotest` does not:
@@ -177,7 +179,7 @@ verifies your key for; the agent stays the author. It merges it with a signed me
 the story to Done, and deletes the branch in your checkout and in its clone. It never pushes, so `/deploy` still ships
 it. The label works before the story is built or after, and `no-afk-merge` exempts one story of a labelled epic.
 
-- **When `main` moved** since the branch was built, the full suite runs again on the rebased branch in a sandbox first.
+- **When `main` moved** since the branch was built, the gate runs again on the rebased branch in a sandbox first.
   When it has not moved, the review's gate already covers that exact tree.
 - **Your checkout is never disturbed.** The rebase and the merge happen in a throwaway worktree of the clone, and your
   `main` only fast-forwards. If you have a local change on a file the merge touches, a merge or rebase in progress,

@@ -84,8 +84,9 @@ type GateLog = {
   flakes: { gate: string; failure: string }[];
 };
 
-// The full-suite gate on the sandbox's branch, returning only the failures that are new relative to main. A branch that
-// changes what the SPA is built from gets the frontend checks too, which `play autotest` does not run.
+// The gate on the sandbox's branch, returning only the failures that are new relative to main. It runs the backend test
+// classes the branch reaches (bin/select-tests.mjs, against main), and Jenkins runs the full suite once it is pushed. A
+// branch that changes what the SPA is built from gets the frontend checks too, which `play autotest` does not run.
 const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
   const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
   // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.
@@ -108,17 +109,20 @@ const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
       await sandbox.exec(`git switch ${log.branch}`);
     }
   };
-  // The full suite runs here, not in the agent: a blocking 10-minute Bash call would trip the idle timeout.
+  // The suite runs here, not in the agent: a blocking multi-minute Bash call would trip the idle timeout.
   return async (label: string): Promise<Diagnostic[]> =>
     log.timed(label, async () => {
-      const run = await sandbox.exec(`timeout ${GATE_DEADLINE_SECONDS} ./jclaw.sh diagnostics --tests --out /tmp/diag.json > /tmp/gate.log 2>&1`);
+      // A branch built before diagnostics took --select would refuse it (exit 2), so it runs the whole suite.
+      const select = (await sandbox.exec("grep -q -e '--select' bin/diagnostics.mjs")).exitCode === 0 ? " --select main" : "";
+      const run = await sandbox.exec(`timeout ${GATE_DEADLINE_SECONDS} ./jclaw.sh diagnostics --tests${select} --out /tmp/diag.json > /tmp/gate.log 2>&1`);
       // A hung suite would otherwise hold the sandbox, and the story, forever.
-      if (run.exitCode === 124) throw new Error(`the full-suite gate did not finish within ${GATE_DEADLINE_SECONDS / 60} minutes`);
+      if (run.exitCode === 124) throw new Error(`the gate did not finish within ${GATE_DEADLINE_SECONDS / 60} minutes`);
       if (run.exitCode === 2) {
         throw new Error(`diagnostics harness failure (exit 2):\n${(await sandbox.exec("tail -40 /tmp/gate.log")).stdout}`);
       }
       const raw = (await sandbox.exec("cat /tmp/diag.json")).stdout;
       const passed = (await sandbox.exec("ls test-result | grep -c passed.html")).stdout.trim();
+      const scope = (await sandbox.exec("grep -m1 '^==> Selection: ' /tmp/gate.log | cut -c16-")).stdout.trim() || "the whole suite";
       fs.writeFileSync(`${LOGS}/${log.key}-${label}-diag.json`, raw);
       const records = JSON.parse(raw) as Diagnostic[];
       let fresh = records;
@@ -134,7 +138,7 @@ const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
       const frontend = await frontendGate((command) => sandbox.exec(command), onMain);
       for (const failing of frontend.environment) log.environmentFailures.add(failing);
       for (const failure of frontend.flakes) log.flakes.push({ gate: label, failure });
-      log.gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}; ${frontend.summary}`);
+      log.gates.push(`${label}: ${scope}; ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}; ${frontend.summary}`);
       return [...fresh, ...frontend.fresh];
     });
 };

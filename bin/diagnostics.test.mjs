@@ -6,7 +6,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { parseArchViolations, parseCompileDiagnostics, parseTestSuiteXml } from "./diagnostics.mjs";
+import { backendRun, parseArchViolations, parseCompileDiagnostics, parseTestSuiteXml } from "./diagnostics.mjs";
 
 const COMPILE_OUTPUT = `> Task :compileJava FAILED
 /repo/app/utils/ScratchProbe.java:7: error: cannot find symbol
@@ -148,4 +148,19 @@ test("an ArchUnit failure reports sites, not one test failure", () => {
   strictEqual(records.length, 2);
   strictEqual(records.every((r) => r.kind === "arch"), true);
   strictEqual(records[0].file, "ScratchProbe.java");
+});
+
+test("a selection of NONE skips the backend run", () => {
+  deepStrictEqual(backendRun("NONE\n", "./gradlew"), { skip: true, label: "no backend test reaches the change" });
+});
+
+test("a class list runs those classes through playAutotest", () => {
+  deepStrictEqual(backendRun("ArchitectureTest,TestPortsTest\n", "./gradlew"),
+    { command: "./gradlew", args: ["playAutotest", "-Ptests=ArchitectureTest,TestPortsTest"], label: "2 classes the change reaches" });
+});
+
+test("ALL, an empty or failed selection, or one that is not a class list runs the whole suite", () => {
+  for (const answer of ["ALL\n", "", undefined, "not a list of classes"]) {
+    deepStrictEqual(backendRun(answer, "./gradlew"), { command: "play", args: ["autotest"], label: "the whole suite" }, String(answer));
+  }
 });

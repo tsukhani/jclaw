@@ -19,6 +19,7 @@ trees. Nothing here ships in a `play dist` tarball.
 ./jclaw.sh diagnostics                        # compile errors, on stdout
 ./jclaw.sh diagnostics --tests                # also run play autotest (~10 min)
 ./jclaw.sh diagnostics --tests --out d.json   # write the document to a file
+./jclaw.sh diagnostics --tests --select main  # run only the classes select-tests.mjs picks for main...HEAD
 ```
 
 `./jclaw.sh diagnostics` is the wrapper; `node bin/diagnostics.mjs` is the same thing

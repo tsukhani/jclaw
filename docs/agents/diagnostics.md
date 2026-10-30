@@ -4,6 +4,7 @@
 ./jclaw.sh diagnostics                        # compile errors, as JSON on stdout
 ./jclaw.sh diagnostics --tests                # also run play autotest (~10 min)
 ./jclaw.sh diagnostics --tests --out d.json   # write the document to a file
+./jclaw.sh diagnostics --tests --select main  # only the classes select-tests.mjs picks for main...HEAD
 ```
 
 The same facts `./jclaw.sh test` prints for a human, as one JSON array for an agent
@@ -16,7 +17,9 @@ bin/diagnostics.test.mjs` its parser tests.
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
 disk. Parsing the ~754 reports costs milliseconds against a compile measured in seconds
-and a suite measured in minutes.
+and a suite measured in minutes. `--select BASE` narrows `--tests` to the classes
+`bin/select-tests.mjs` picks for `BASE...HEAD`, as the factory's gate does: a change no
+backend test reaches runs none, and a selection that fails runs the whole suite.
 
 Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
 empty output means the command did not run. Without `--tests` the reports in
