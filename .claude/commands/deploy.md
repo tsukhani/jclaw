@@ -112,14 +112,14 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 **Phase 3: Push the release commit to both remotes**
 
 13. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
-14. Push to `origin` first: `/usr/bin/git push origin HEAD`. No tag goes with it: a tag marks a version Jenkins has built green, so it waits for Phase 4. Report the result.
-15. Push to `github`: `/usr/bin/git push github HEAD`. Report the result.
+14. Push the release commit to `origin` first, by name: `/usr/bin/git push origin <REL>:refs/heads/main`, with the full SHA of step 12 written out, because the policy guard reads the command before the shell expands `$REL`. Not `HEAD`: other sessions commit to this checkout, and one landing while this push runs its tests would make `HEAD` a commit that is not the release, which the guard refuses and which would reach one remote only. No tag goes with it: a tag marks a version Jenkins has built green, so it waits for Phase 4. Report the result.
+15. Push it to `github` the same way: `/usr/bin/git push github <REL>:refs/heads/main`. `pre-push` remembers the commit it tested, so this push does not run the tests again. Report the result.
 16. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
-17. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
+17. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed release commit contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch it does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
     ```bash
     /usr/bin/git fetch -q origin --prune
     /usr/bin/git branch -r --list 'origin/renovate/*' | sed 's|^ *origin/||' |
-      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && echo "$b"; done |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "$REL" && echo "$b"; done |
       xargs -r /usr/bin/git push origin --delete
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.

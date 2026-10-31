@@ -38,12 +38,13 @@ zero_sha=0000000000000000000000000000000000000000
 on_remote() {
     [[ -n "$remote" && -n "$(git for-each-ref --contains "$1^{commit}" "refs/remotes/$remote" 2>/dev/null || true)" ]]
 }
-refs_seen=0; deletions_only=1; known_tags_only=1
+refs_seen=0; deletions_only=1; known_tags_only=1; pushed_sha=""
 while read -r local_ref local_sha _remote_ref _remote_sha; do
     [[ -z "$local_ref" ]] && continue
     refs_seen=1
     [[ "$local_sha" == "$zero_sha" ]] && continue
     deletions_only=0
+    pushed_sha=$local_sha
     [[ "$local_ref" == refs/tags/* ]] && on_remote "$local_sha" || known_tags_only=0
 done <<< "$refs"
 if [[ "$refs_seen" == 1 && "$deletions_only" == 1 ]]; then
@@ -58,10 +59,12 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 git_dir=$(git rev-parse --git-dir)
 cache_file="$git_dir/jclaw-last-tested-sha"
-current_sha=$(git rev-parse HEAD)
+# The commit being pushed, not HEAD: /deploy names its release commit, and another session's commit landing between
+# the two pushes must not make the second one test a tree it is not pushing.
+current_sha=${pushed_sha:-$(git rev-parse HEAD)}
 
 if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_sha" ]]; then
-    echo "[jclaw pre-push] HEAD $current_sha already tested — skipping."
+    echo "[jclaw pre-push] $current_sha already tested — skipping."
     exit 0
 fi
 
@@ -150,7 +153,7 @@ frontend_label=run
 [[ "$run_frontend" == 1 ]] || frontend_label=skipped
 echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label. Jenkins runs everything."
 
-echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
+echo "[jclaw pre-push] Testing $current_sha before push..."
 if (cd "$repo_root" && JCLAW_TEST_BACKEND="$backend_scope" JCLAW_TEST_FRONTEND="$run_frontend" ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"
     echo "[jclaw pre-push] Tests passed — proceeding with push."

@@ -14,6 +14,7 @@ const USAGE = `Usage: node bin/policy-guard.mjs hook        (a PreToolUse event 
 const REMOTES = new Set(["origin", "github"]);
 const RELEASE = /^Release v\d+\.\d+\.\d+$/;
 const VERSION_TAG = /^refs\/tags\/v\d+\.\d+\.\d+$/;
+const NAMED_COMMIT = /^([0-9a-f]{40}):refs\/heads\/main$/;
 const STOPS = new Set(["restart", "stop", "restore", "repair", "compact", "reset", "upgrade", "uninstall"]);
 const UPSTREAM_SKILLS = new Set(["claude-designer", "powerpoint-pptx", "humanizer", "youtube-transcript", "git",
   "frontend-design", "ffmpeg-video-processing"]);
@@ -27,8 +28,8 @@ const TRIGGER = /push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|kill|
 
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
-    + "git push origin|github HEAD on main at a \"Release vX.Y.Z\" commit, a version tag pushed alone, and /renovate's "
-    + "deletion of renovate/* branches.",
+    + "a \"Release vX.Y.Z\" commit on main pushed to origin or github as HEAD or by its full sha, a version tag pushed "
+    + "alone, and /renovate's deletion of renovate/* branches.",
   noVerify: "Skipping git hooks is refused (AGENTS.md Policy): fix what the hook reports, then commit again.",
   hooksPath: "Changing core.hooksPath skips the repository's hooks (AGENTS.md Policy): leave it at .githooks.",
   skipTests: "JCLAW_SKIP_TESTS is a human's bypass, never an agent's (AGENTS.md Policy): let the pre-push tests run.",
@@ -307,9 +308,11 @@ function skipsHooks(sub, rest) {
 function pushAllowed(rest, state) {
   if (rest.length === 2 && REMOTES.has(rest[0])) {
     if (VERSION_TAG.test(rest[1])) return true;
-    if (rest[1] === "HEAD") {
-      const s = state();
-      return s.branch === "main" && s.mainCheckout && RELEASE.test(s.subject);
+    // /deploy names its release commit, so a commit another session lands between the two pushes goes out in neither.
+    const rev = rest[1] === "HEAD" ? "HEAD" : rest[1].match(NAMED_COMMIT)?.[1];
+    if (rev) {
+      const s = state(rev);
+      return s.branch === "main" && s.mainCheckout && s.onMain && RELEASE.test(s.subject);
     }
   }
   // The names usually arrive through xargs, where only the ref layer sees them.
@@ -350,7 +353,7 @@ function gitRule(cmd, ctx) {
   if (config.some((c) => /^core\.hookspath=/i.test(c))) return deny("hooksPath");
   const where = dir ? resolve(ctx.dir, dir) : ctx.dir;
   if (sub in VALUE_OPTS && skipsHooks(sub, rest)) return deny("noVerify");
-  if (sub === "push" && !pushAllowed(rest, () => ctx.state(where))) return deny("push");
+  if (sub === "push" && !pushAllowed(rest, (rev) => ctx.state(where, rev))) return deny("push");
   if (sub === "stash" && stashesUntracked(rest)) return deny("stash");
   if (sub === "config" && setsHooksPath(rest)) return deny("hooksPath");
   return null;
@@ -381,7 +384,7 @@ function commandRule(cmd, ctx, line) {
   return null;
 }
 
-/** The refusal for a Bash command line, or null. `ctx`: {cwd, state(dir), serverPid()}. */
+/** The refusal for a Bash command line, or null. `ctx`: {cwd, state(dir, rev), serverPid()}. */
 export function commandVerdict(line, ctx) {
   let dir = ctx.cwd;
   for (const cmd of simpleCommands(line)) {
@@ -405,7 +408,7 @@ export function pathVerdict(file, ctx) {
   return m && UPSTREAM_SKILLS.has(m[1]) ? deny("skills", REASONS.skills(m[1])) : null;
 }
 
-/** The refusal for git's pre-push ref lines, or null. `state(sha)` → {branch, subject, mainCheckout}. */
+/** The refusal for git's pre-push ref lines, or null. `state(sha)` → {branch, subject, mainCheckout, onMain}. */
 export function refsVerdict(text, remote, state) {
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -421,9 +424,10 @@ function refAllowed(localRef, localSha, remoteRef, remote, state) {
   if (VERSION_TAG.test(remoteRef)) return localRef === remoteRef;
   if (remoteRef !== "refs/heads/main") return false;
   const s = state(localSha);
-  // git names the local ref as the refspec spelled it: `git push origin HEAD` arrives as HEAD.
-  const fromMain = localRef === "refs/heads/main" || (localRef === "HEAD" && s.branch === "main");
-  return fromMain && s.mainCheckout && RELEASE.test(s.subject);
+  // git names the local ref as the refspec spelled it: `git push origin HEAD` arrives as HEAD, a named commit as its sha.
+  const fromMain = localRef === "refs/heads/main"
+    || (s.branch === "main" && (localRef === "HEAD" || localRef === localSha));
+  return fromMain && s.mainCheckout && s.onMain && RELEASE.test(s.subject);
 }
 
 // ─── Live context ───
@@ -432,21 +436,30 @@ function git(dir, ...args) {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 }
 
+function isOnMain(dir, rev) {
+  try {
+    git(dir, "merge-base", "--is-ancestor", rev, "refs/heads/main");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function gitState(dir, rev = "HEAD") {
   try {
     const gitDir = git(dir, "rev-parse", "--path-format=absolute", "--git-dir");
     const common = git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir");
     return { branch: git(dir, "rev-parse", "--abbrev-ref", "HEAD"), subject: git(dir, "log", "-1", "--format=%s", rev),
-      mainCheckout: gitDir === common, common };
+      mainCheckout: gitDir === common, onMain: isOnMain(dir, rev), common };
   } catch {
-    return { branch: "", subject: "", mainCheckout: false, common: "" };
+    return { branch: "", subject: "", mainCheckout: false, onMain: false, common: "" };
   }
 }
 
 function liveContext(cwd) {
   return {
     cwd,
-    state: (dir) => gitState(dir),
+    state: (dir, rev) => gitState(dir, rev),
     // The live instance runs from the main checkout, which a worktree reaches through the common git dir.
     serverPid: () => {
       const { common } = gitState(cwd);
