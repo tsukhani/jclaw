@@ -65,6 +65,17 @@ and the eval suites.
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 
+## Stubs that forward to the server
+
+A `page.route` stub that awaits `route.fetch()` can outlive its test, for example
+when the page re-reads after a write, and fails it with "Response has been
+disposed". Every such spec ends with
+`test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))`.
+`'wait'` is not enough: removing the handler continues the route in flight, and the
+stub's late `fulfill()` then fails with "Route is already handled!". `'ignoreErrors'`
+covers only what is thrown after the unroute, so the test's own assertions still
+decide it.
+
 ## Gotchas encoded in `helpers.ts`
 
 - **External hosts are stubbed.** `GithubStarsButton` fetches `api.github.com`
