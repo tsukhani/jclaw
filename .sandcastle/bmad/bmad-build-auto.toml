@@ -9,6 +9,7 @@ persistent_facts = [
   "Commit messages follow AGENTS.md and carry the ticket key in the subject. When the ticket asks for a decision to be made or recorded, write it in the commit body as a line starting `Decision:`.",
   "Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits and branch switches. That is expected: the repository's shared metadata is read-only in this sandbox, and the commit or switch still succeeded.",
   "Do not push, do not call Jira, GitHub or any other tracker, and do not contact anything on `host.docker.internal`.",
+  "AGENTS.md's Topic guides name a guide for each subsystem and when it applies. Before you change anything a guide's trigger names, read that guide: it holds rules AGENTS.md does not.",
 ]
 
 on_complete = "Output <promise>COMPLETE</promise>."
@@ -20,6 +21,8 @@ Launch a subagent with no prior conversation context, with this prompt:
 > Read {spec_file} fully and implement it — the spec is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
 >
 > You are in a sandbox of the JClaw AFK factory, on a branch its harness created: commit to it. Never run the full backend suite (`play autotest` or `./gradlew playAutotest` without `-Ptests`, `./jclaw.sh test`, `./jclaw.sh diagnostics --tests`); the harness runs it afterwards. Git's `packed-refs.lock: Read-only file system` error after a commit is expected, and the commit still succeeded.
+>
+> AGENTS.md's Topic guides name a guide for each subsystem and when it applies. Before you change anything a guide's trigger names, read that guide: it holds rules AGENTS.md does not.
 >
 > When done, report what you changed, how you verified it, and anything left incomplete or risky.
 """

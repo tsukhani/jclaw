@@ -16,7 +16,7 @@ Rules the reviewer asked for on earlier stories. Follow them.
 
 # CONTEXT
 
-AGENTS.md is the project guide and is already loaded. Read the files the ticket names, and their tests, before editing. Upstream sources the ticket refers to can be fetched with `curl`.
+AGENTS.md is the project guide and is already loaded. AGENTS.md's Topic guides name a guide for each subsystem and when it applies. Before you change anything a guide's trigger names, read that guide: it holds rules AGENTS.md does not. Read the files the ticket names, and their tests, before editing. Upstream sources the ticket refers to can be fetched with `curl`.
 
 Recent history on this branch:
 

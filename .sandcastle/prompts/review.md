@@ -28,6 +28,7 @@ Review branch `{{SOURCE_BRANCH}}`, which implements ticket {{KEY}}: {{SUMMARY}}.
 
 1. Check every acceptance criterion against the diff, not against the commit message.
 2. Check AGENTS.md's conventions on the changed lines: comment discipline (Comments Carry Reasoning), nullness annotations, American spelling, test base classes and locks.
+   Then read each guide in AGENTS.md's Topic guides whose trigger names something the diff touches, and check the changed lines against it. A guide holds rules AGENTS.md does not, and the security rules live in one.
 3. For each acceptance criterion, find the test that proves it and hold it to AGENTS.md's Writing tests: it asserts the outcome exactly, covers the failure paths and both sides of any limit involved, and would fail without the change. Where a criterion has no such test, write it, and run it before you commit: if it fails because the code falls short of the criterion, fix the code in the same commit. The harness runs the suite once after review, with no repair rounds, and a red result blocks the story.
 4. Check that every point of the human reviewer's feedback, if any, is addressed, and that the lessons are followed.
 

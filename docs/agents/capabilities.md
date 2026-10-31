@@ -98,3 +98,5 @@ One consequence worth knowing before you reach for the old shape: there is no le
 while refusing nobody, and collapsing it closed two reads that had been pinned open on the
 reasoning that they carried nothing secret (`GET /api/tailscale`, `GET /api/bindings`). If a route
 should be visible to an agent, it is `OPEN`; if not, it is refused.
+
+New ArchUnit rules reuse `ArchitectureTest.APP_CLASSES`, which imports `build/classes/java/main` — never the running JVM's `CodeSource`, where stale precompiled bytecode under FirePhoque manufactures violations.

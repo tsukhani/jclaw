@@ -20,6 +20,8 @@ Rules the reviewer asked for on earlier stories. Follow them.
 
 !`git log main..HEAD --format='%h %s%n%b---'`
 
+AGENTS.md's Topic guides name a guide for each subsystem and when it applies. Before you change anything a guide's trigger names, read that guide: it holds rules AGENTS.md does not.
+
 # FEEDBACK LOOP
 
 - `./jclaw.sh diagnostics` prints compile errors as a JSON array; `[]` means the tree compiles.
