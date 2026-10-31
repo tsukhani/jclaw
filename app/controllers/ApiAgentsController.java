@@ -29,6 +29,7 @@ import tools.ShellExecTool;
 import utils.ApiResponses;
 import utils.HttpKeys;
 import utils.JsonArgs;
+import utils.ServedFiles;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -681,23 +682,14 @@ public class ApiAgentsController extends Controller {
         // A workspace file is agent-writable, so it is served as an attachment unless the type
         // renders without executing: SVG carries script and text/html is a same-origin XSS with
         // the operator's session.
-        var inline = isRasterImage(contentType)
+        var inline = ServedFiles.isRasterImage(contentType)
                 || contentType.startsWith("audio/")
                 || contentType.startsWith("application/pdf");
         response.setHeader(HttpKeys.CONTENT_TYPE, contentType);
         response.setHeader("Content-Disposition",
                 (inline ? "inline" : "attachment") + "; filename=\"%s\"".formatted(file.getName()));
-        // The app declares no global CSP (http.headers.contentSecurityPolicy is empty by design),
-        // so this response carries its own: `sandbox` alone drops the unique origin's scripts,
-        // forms and plugins even if the type sniffs as something executable.
-        response.setHeader("Content-Security-Policy", "sandbox");
+        response.setHeader("Content-Security-Policy", ServedFiles.SANDBOX_CSP);
         renderBinary(file);
-    }
-
-    /** {@code image/*} minus the vector types a browser executes: SVG runs script inline, and
-     *  {@code image/svg+xml-compressed} is the same document gzipped. */
-    private static boolean isRasterImage(String contentType) {
-        return contentType.startsWith("image/") && !contentType.startsWith("image/svg");
     }
 
 

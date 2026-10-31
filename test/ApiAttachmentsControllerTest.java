@@ -207,6 +207,60 @@ class ApiAttachmentsControllerTest extends FunctionalTest {
                 "non-media disposition should be attachment: " + disposition.value());
     }
 
+    // ===== Agent-written bytes never execute on the app's origin (JF-185) =====
+
+    private play.mvc.Http.Response downloadSeeded(String agentName, String filename, String mimeType, String kind,
+                                                  String body) throws Exception {
+        login();
+        var uuid = seedAttachment(agentName, java.util.UUID.randomUUID().toString(), filename, mimeType, kind,
+                body.getBytes(), true);
+        var response = GET("/api/attachments/" + uuid);
+        assertIsOk(response);
+        return response;
+    }
+
+    @Test
+    void anSvgDownloadsRatherThanRendersInline() throws Exception {
+        var response = downloadSeeded("att-agent-svg", "drawing.svg", "image/svg+xml", MessageAttachment.KIND_IMAGE,
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"/>");
+        assertEquals("attachment", dispositionType(response));
+        assertEquals("sandbox", response.getHeader("Content-Security-Policy"));
+    }
+
+    @Test
+    void aCompressedSvgDownloadsRatherThanRendersInline() throws Exception {
+        var response = downloadSeeded("att-agent-svgz", "drawing.svgz", "image/svg+xml-compressed",
+                MessageAttachment.KIND_IMAGE, "gzipped");
+        assertEquals("attachment", dispositionType(response));
+        assertEquals("sandbox", response.getHeader("Content-Security-Policy"));
+    }
+
+    @Test
+    void aRasterImageStaysInlineButSandboxed() throws Exception {
+        var response = downloadSeeded("att-agent-raster", "photo.png", "image/png", MessageAttachment.KIND_IMAGE, "png");
+        assertEquals("inline", dispositionType(response));
+        assertEquals("sandbox", response.getHeader("Content-Security-Policy"));
+    }
+
+    @Test
+    void audioStaysInlineButSandboxed() throws Exception {
+        var response = downloadSeeded("att-agent-sound", "voice.mp3", "audio/mp3", MessageAttachment.KIND_AUDIO, "ID3");
+        assertEquals("inline", dispositionType(response));
+        assertEquals("sandbox", response.getHeader("Content-Security-Policy"));
+    }
+
+    @Test
+    void anyOtherFileDownloadsSandboxed() throws Exception {
+        var response = downloadSeeded("att-agent-html", "page.html", "text/html", MessageAttachment.KIND_FILE,
+                "<script>alert(1)</script>");
+        assertEquals("attachment", dispositionType(response));
+        assertEquals("sandbox", response.getHeader("Content-Security-Policy"));
+    }
+
+    private static String dispositionType(play.mvc.Http.Response response) {
+        return response.getHeader("Content-Disposition").split(";")[0];
+    }
+
     // ===== RFC 6266 dual filename directives =====
 
     @Test

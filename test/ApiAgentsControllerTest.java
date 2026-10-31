@@ -632,6 +632,18 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void serveWorkspaceFileDownloadsAnSvgAndSandboxesEveryResponse() {
+        login();
+        var id = createAgent("serve-workspace-svg");
+        services.AgentService.writeWorkspaceFile("serve-workspace-svg", "drawing.svg",
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"/>");
+        var svg = GET("/api/agents/" + id + "/files/drawing.svg");
+        assertIsOk(svg);
+        assertEquals("attachment", svg.getHeader("Content-Disposition").split(";")[0]);
+        assertEquals("sandbox", svg.getHeader("Content-Security-Policy"));
+    }
+
+    @Test
     void serveWorkspaceFileReturns404ForMissingFile() {
         login();
         var id = createAgent("serve-missing-file");

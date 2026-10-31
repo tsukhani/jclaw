@@ -7,6 +7,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.AttachmentService;
 import utils.HttpKeys;
+import utils.ServedFiles;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -60,15 +61,16 @@ public class ApiAttachmentsController extends Controller {
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();
 
-        // Inline for media that browsers can render natively (image, audio);
-        // attachment otherwise so the user gets a download prompt. Matches
-        // the convention used by ApiAgentsController.serveWorkspaceFile.
-        var disposition = (att.isImage() || att.isAudio()) ? "inline" : "attachment";
+        // Inline only for media a browser renders without executing, so the bytes of an SVG an agent
+        // wrote never run on the app's origin. The chat's <img> and <audio> tags ignore the disposition.
+        var inline = att.isAudio() || (att.isImage() && ServedFiles.isRasterImage(att.mimeType));
+        var disposition = inline ? "inline" : "attachment";
         response.setHeader(HttpKeys.CONTENT_TYPE, att.mimeType);
         response.setHeader("Content-Disposition",
                 disposition + "; filename=\"" + asciiSafeFilename(att.originalFilename) + "\""
                 + "; filename*=UTF-8''" + percentEncodeFilename(att.originalFilename));
         response.setHeader("Cache-Control", "private, max-age=300");
+        response.setHeader("Content-Security-Policy", ServedFiles.SANDBOX_CSP);
         renderBinary(file);
     }
 
