@@ -39,3 +39,7 @@ ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirec
 ltx-core-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirectory = "packages/ltx-core-mlx" }
 ltx-pipelines = { git = "https://github.com/Lightricks/LTX-2.git", subdirectory = "packages/ltx-pipelines" }
 ltx-core = { git = "https://github.com/Lightricks/LTX-2.git", subdirectory = "packages/ltx-core" }
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"

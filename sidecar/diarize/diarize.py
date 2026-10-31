@@ -25,6 +25,7 @@ Audio is transcoded to 16kHz mono wav via ffmpeg first: pyannote expects
 16kHz, and this makes 8kHz telephony mp3 (jclaw's common case) deterministic
 regardless of torchaudio's codec backend.
 """
+
 import json
 import os
 import subprocess
@@ -42,8 +43,10 @@ def _to_wav16k(src):
     """ffmpeg -> 16kHz mono wav in a temp file; caller removes it."""
     fd, wav = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src,
-                    "-ar", "16000", "-ac", "1", wav], check=True)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", src, "-ar", "16000", "-ac", "1", wav],
+        check=True,
+    )
     return wav
 
 
@@ -51,6 +54,7 @@ def _pick_device():
     """cuda > mps > cpu, unless DIARIZE_DEVICE forces one (e.g. cpu for
     bit-reproducibility). torch is already imported by the caller."""
     import torch
+
     forced = os.environ.get("DIARIZE_DEVICE", "").strip().lower()
     if forced:
         return forced
@@ -75,34 +79,38 @@ def _diarize(state, audio_path, num_speakers=None):
     try:
         try:
             out = _run(state["pipe"], wav, num_speakers)
-        except Exception:  # noqa: BLE001 — GPU op may be unimplemented/OOM
+        except Exception:  # GPU op may be unimplemented/OOM; re-raised on CPU
             if state["device"] == "cpu":
                 raise
             # Move the persistent pipeline to CPU and retry once; stay on CPU
             # for later calls rather than thrash back to the failing device.
             import torch
-            sys.stderr.write("[diarize] %s inference failed — falling back to CPU\n"
-                             % state["device"])
+
+            sys.stderr.write("[diarize] {} inference failed — falling back to CPU\n".format(state["device"]))
             state["pipe"].to(torch.device("cpu"))
             state["device"] = "cpu"
             out = _run(state["pipe"], wav, num_speakers)
     finally:
         os.remove(wav)
-    diar = getattr(out, "exclusive_speaker_diarization", None) \
-        or getattr(out, "speaker_diarization", out)
-    return [{"startMs": int(round(t.start * 1000)),
-             "endMs": int(round(t.end * 1000)),
-             "speaker": spk}
-            for t, _, spk in diar.itertracks(yield_label=True)]
+    diar = getattr(out, "exclusive_speaker_diarization", None) or getattr(out, "speaker_diarization", out)
+    return [
+        {
+            "startMs": round(t.start * 1000),
+            "endMs": round(t.end * 1000),
+            "speaker": spk,
+        }
+        for t, _, spk in diar.itertracks(yield_label=True)
+    ]
 
 
 def _load_pipeline():
     import torch
     from pyannote.audio import Pipeline
+
     pipe = Pipeline.from_pretrained(MODEL)
     device = _pick_device()
     pipe.to(torch.device(device))
-    sys.stderr.write("[diarize] pipeline loaded on %s\n" % device)
+    sys.stderr.write(f"[diarize] pipeline loaded on {device}\n")
     return {"pipe": pipe, "device": device}
 
 

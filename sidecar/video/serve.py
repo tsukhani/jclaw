@@ -28,7 +28,9 @@ refuses to start.
 
 Weights live under --cache-dir (jclaw passes data/video-models) via the HF cache layout.
 """
+
 import argparse
+import contextlib
 import hmac
 import json
 import os
@@ -51,6 +53,7 @@ _OUTDIR = tempfile.gettempdir()
 # deps in pyproject), so all runtime imports below are lazy + branched on this flag.
 IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
 
+
 # Registry: the --model id -> backend config, free-VRAM floor, default dims, and the jclaw provider that
 # selects it. Built PER PLATFORM so the adaptive picker offers a memory-scaled spectrum everywhere (SV-2):
 # host_capability() tiers each entry by FREE VRAM, so a bigger GPU simply lights up more of the list — up
@@ -62,14 +65,44 @@ def _build_models():
         # in the quantized transformer's size — hence the rising free-VRAM floor. "ltx" stays int4 for
         # back-compat. Each repo over-bundles (dev/old transformers + LoRAs) so we pre-fetch only the
         # essential files (mlx_ignore). The Gemma text encoder is a separate repo.
-        mlx = {"family": "ltx", "provider": "ltx-local", "width": 704, "height": 480,
-               "mlx_key_file": "transformer-distilled-1.1.safetensors",
-               "mlx_gemma": "mlx-community/gemma-3-12b-it-4bit",
-               "mlx_ignore": ["transformer-dev.safetensors", "transformer-distilled.safetensors", "*lora-384*.safetensors"]}
+        mlx = {
+            "family": "ltx",
+            "provider": "ltx-local",
+            "width": 704,
+            "height": 480,
+            "mlx_key_file": "transformer-distilled-1.1.safetensors",
+            "mlx_gemma": "mlx-community/gemma-3-12b-it-4bit",
+            "mlx_ignore": [
+                "transformer-dev.safetensors",
+                "transformer-distilled.safetensors",
+                "*lora-384*.safetensors",
+            ],
+        }
         return {
-            "ltx":      {**mlx, "label": "LTX-2.3 int4 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx-q4", "mlx_local": "ltx-2.3-mlx-q4",  "min_gb": 11, "comfortable_gb": 16},
-            "ltx-q8":   {**mlx, "label": "LTX-2.3 int8 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx-q8", "mlx_local": "ltx-2.3-mlx-q8",  "min_gb": 21, "comfortable_gb": 30},
-            "ltx-bf16": {**mlx, "label": "LTX-2.3 bf16 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx",    "mlx_local": "ltx-2.3-mlx-bf16", "min_gb": 40, "comfortable_gb": 56},
+            "ltx": {
+                **mlx,
+                "label": "LTX-2.3 int4 (MLX)",
+                "mlx_repo": "dgrauet/ltx-2.3-mlx-q4",
+                "mlx_local": "ltx-2.3-mlx-q4",
+                "min_gb": 11,
+                "comfortable_gb": 16,
+            },
+            "ltx-q8": {
+                **mlx,
+                "label": "LTX-2.3 int8 (MLX)",
+                "mlx_repo": "dgrauet/ltx-2.3-mlx-q8",
+                "mlx_local": "ltx-2.3-mlx-q8",
+                "min_gb": 21,
+                "comfortable_gb": 30,
+            },
+            "ltx-bf16": {
+                **mlx,
+                "label": "LTX-2.3 bf16 (MLX)",
+                "mlx_repo": "dgrauet/ltx-2.3-mlx",
+                "mlx_local": "ltx-2.3-mlx-bf16",
+                "min_gb": 40,
+                "comfortable_gb": 56,
+            },
         }
     # Linux / Windows (CUDA): LTX-2.3 via the official Lightricks ltx_pipelines (the CUDA sibling of the
     # MLX port) — ONE 22B model at three memory strategies (quantization + offload) so it scales from an
@@ -77,17 +110,61 @@ def _build_models():
     # The fp8 + CPU-offload tier is VALIDATED on an RTX 4090: ~8.3 GB peak, 62 s for a 25-frame clip with
     # audio (the weight-load build needs ~8 GB regardless of offload, so there's no sub-8 GB tier — it'd
     # OOM at load). CPU offload streams weights from system RAM (needs ~36 GB free RAM).
-    cuda_ltx = {"family": "ltx", "provider": "ltx-local", "width": 704, "height": 480,
-                "ckpt_repo": "Lightricks/LTX-2.3",
-                "ckpt_file": "ltx-2.3-22b-distilled-1.1.safetensors",
-                "upscaler_file": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
-                "gemma_repo": "google/gemma-3-12b-it-qat-q4_0-unquantized"}
+    cuda_ltx = {
+        "family": "ltx",
+        "provider": "ltx-local",
+        "width": 704,
+        "height": 480,
+        "ckpt_repo": "Lightricks/LTX-2.3",
+        "ckpt_file": "ltx-2.3-22b-distilled-1.1.safetensors",
+        "upscaler_file": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+        "gemma_repo": "google/gemma-3-12b-it-qat-q4_0-unquantized",
+    }
     return {
-        "ltx":             {**cuda_ltx, "label": "LTX-2.3 (CUDA)",            "cuda_fp8": False, "cuda_offload": "none", "min_gb": 32, "comfortable_gb": 40},
-        "ltx-fp8":         {**cuda_ltx, "label": "LTX-2.3 fp8 (CUDA)",        "cuda_fp8": True,  "cuda_offload": "none", "min_gb": 16, "comfortable_gb": 20},
-        "ltx-fp8-offload": {**cuda_ltx, "label": "LTX-2.3 fp8 + CPU offload", "cuda_fp8": True,  "cuda_offload": "cpu",  "min_gb": 10, "comfortable_gb": 12},
-        "wan-5b":  {"repo": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",  "family": "wan", "provider": "wan-local", "label": "WAN 2.2 TI2V-5B",  "min_gb": 8,  "comfortable_gb": 12, "width": 832, "height": 480},
-        "wan-14b": {"repo": "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "family": "wan", "provider": "wan-local", "label": "WAN 2.2 T2V-A14B", "min_gb": 12, "comfortable_gb": 40, "width": 832, "height": 480},
+        "ltx": {
+            **cuda_ltx,
+            "label": "LTX-2.3 (CUDA)",
+            "cuda_fp8": False,
+            "cuda_offload": "none",
+            "min_gb": 32,
+            "comfortable_gb": 40,
+        },
+        "ltx-fp8": {
+            **cuda_ltx,
+            "label": "LTX-2.3 fp8 (CUDA)",
+            "cuda_fp8": True,
+            "cuda_offload": "none",
+            "min_gb": 16,
+            "comfortable_gb": 20,
+        },
+        "ltx-fp8-offload": {
+            **cuda_ltx,
+            "label": "LTX-2.3 fp8 + CPU offload",
+            "cuda_fp8": True,
+            "cuda_offload": "cpu",
+            "min_gb": 10,
+            "comfortable_gb": 12,
+        },
+        "wan-5b": {
+            "repo": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+            "family": "wan",
+            "provider": "wan-local",
+            "label": "WAN 2.2 TI2V-5B",
+            "min_gb": 8,
+            "comfortable_gb": 12,
+            "width": 832,
+            "height": 480,
+        },
+        "wan-14b": {
+            "repo": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            "family": "wan",
+            "provider": "wan-local",
+            "label": "WAN 2.2 T2V-A14B",
+            "min_gb": 12,
+            "comfortable_gb": 40,
+            "width": 832,
+            "height": 480,
+        },
     }
 
 
@@ -112,9 +189,14 @@ def detect_vram():
     Silicon (the MLX venv has no torch) — unified memory via sysctl; torch only on the CUDA/diffusers path."""
     if IS_APPLE_SILICON:
         total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
-        return total * 0.7 / 1e9, total / 1e9, "mps"  # no free-VRAM API on unified memory; ~70% budget
+        return (
+            total * 0.7 / 1e9,
+            total / 1e9,
+            "mps",
+        )  # no free-VRAM API on unified memory; ~70% budget
     try:
         import torch
+
         if torch.cuda.is_available():
             free, total = torch.cuda.mem_get_info()
             return free / 1e9, total / 1e9, "cuda"
@@ -131,7 +213,11 @@ def host_capability():
     Settings dropdown can show what runs (ready / fits-but-slow) and grey out what won't. Model-independent
     (no pipeline load) — used by both `--probe` (one-shot) and the HTTP /capability endpoint."""
     free, total, kind = detect_vram()
-    gpu = {"cuda": "NVIDIA (CUDA)", "mps": "Apple Silicon (unified)", "cpu": "CPU only"}[kind]
+    gpu = {
+        "cuda": "NVIDIA (CUDA)",
+        "mps": "Apple Silicon (unified)",
+        "cpu": "CPU only",
+    }[kind]
     models = []
     for mid, spec in MODELS.items():
         # WAN is NVIDIA-only (SV-2): on Apple Silicon / CPU it's not a real local option, so grey it out
@@ -144,10 +230,24 @@ def host_capability():
             tier, reason = "fits", "runs but slow (low free VRAM — CPU offload)"
         else:
             tier, reason = "no", f"needs {spec['min_gb']} GB free VRAM"
-        models.append({"id": mid, "label": spec["label"], "provider": spec["provider"],
-                       "minVramGb": spec["min_gb"], "tier": tier, "runnable": tier != "no", "reason": reason})
-    return {"kind": kind, "gpu": gpu, "freeVramGb": round(free, 1), "totalVramGb": round(total, 1),
-            "models": models}
+        models.append(
+            {
+                "id": mid,
+                "label": spec["label"],
+                "provider": spec["provider"],
+                "minVramGb": spec["min_gb"],
+                "tier": tier,
+                "runnable": tier != "no",
+                "reason": reason,
+            }
+        )
+    return {
+        "kind": kind,
+        "gpu": gpu,
+        "freeVramGb": round(free, 1),
+        "totalVramGb": round(total, 1),
+        "models": models,
+    }
 
 
 class State:
@@ -160,10 +260,10 @@ class State:
         self.idle_s = idle_s
         self.pipeline = None
         self.device = None
-        self._load_lock = threading.Lock()   # serialize the one-time pipeline load
-        self._gate = threading.Lock()         # protects busy/jobs for the one-job guard
-        self.jobs = {}                        # job_id -> {state, percent, error, path, mime}
-        self.busy = None                      # active job id, or None
+        self._load_lock = threading.Lock()  # serialize the one-time pipeline load
+        self._gate = threading.Lock()  # protects busy/jobs for the one-job guard
+        self.jobs = {}  # job_id -> {state, percent, error, path, mime}
+        self.busy = None  # active job id, or None
         self.last_activity = time.monotonic()
 
     def touch(self):
@@ -197,20 +297,25 @@ class State:
             if _is_cuda_ltx2(self.spec):
                 return self._load_cuda_ltx2()
             import torch
+
             dev = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
             dtype = torch.bfloat16 if dev == "cuda" else torch.float16
             if self.spec["family"] == "ltx":
                 from diffusers import LTXPipeline
+
                 pipe = LTXPipeline.from_pretrained(self.spec["repo"], torch_dtype=dtype, cache_dir=self.cache_dir)
             else:
                 from diffusers import DiffusionPipeline
+
                 pipe = DiffusionPipeline.from_pretrained(self.spec["repo"], torch_dtype=dtype, cache_dir=self.cache_dir)
             # Free-VRAM-aware placement: full GPU when comfortable, else sequential offload (fits, slow).
             free, _total, kind = self.vram()
             if kind == "cuda" and free < self.spec["comfortable_gb"]:
                 pipe.enable_sequential_cpu_offload()
-                sys.stderr.write(f"[video-sidecar] {self.model_id}: {free:.0f}GB free < "
-                                 f"{self.spec['comfortable_gb']}GB — sequential CPU offload (slower)\n")
+                sys.stderr.write(
+                    f"[video-sidecar] {self.model_id}: {free:.0f}GB free < "
+                    f"{self.spec['comfortable_gb']}GB — sequential CPU offload (slower)\n"
+                )
             else:
                 pipe.to(dev)
             self.device = dev
@@ -226,8 +331,11 @@ class State:
 
         local_dir = os.path.join(self.cache_dir, self.spec["mlx_local"])
         sys.stderr.write(f"[video-sidecar] ltx (MLX): fetching int4 weights -> {local_dir}\n")
-        snapshot_download(self.spec["mlx_repo"], local_dir=local_dir,
-                          ignore_patterns=self.spec["mlx_ignore"])
+        snapshot_download(
+            self.spec["mlx_repo"],
+            local_dir=local_dir,
+            ignore_patterns=self.spec["mlx_ignore"],
+        )
         pipe = DistilledPipeline(model_dir=local_dir, gemma_model_id=self.spec["mlx_gemma"], low_memory=True)
         self.device = "mps"
         self.pipeline = pipe
@@ -247,17 +355,30 @@ class State:
         sys.stderr.write(f"[video-sidecar] {self.model_id} (CUDA): fetching LTX-2.3 weights -> {wdir}\n")
         ckpt = hf_hub_download(self.spec["ckpt_repo"], self.spec["ckpt_file"], local_dir=wdir)
         upscaler = hf_hub_download(self.spec["ckpt_repo"], self.spec["upscaler_file"], local_dir=wdir)
-        gemma_root = snapshot_download(self.spec["gemma_repo"],
-                                       local_dir=os.path.join(self.cache_dir, "gemma-3-12b-it"))
+        gemma_root = snapshot_download(
+            self.spec["gemma_repo"],
+            local_dir=os.path.join(self.cache_dir, "gemma-3-12b-it"),
+        )
         quantization = None
         if self.spec.get("cuda_fp8"):
-            from ltx_core.quantization.fp8_cast import build_policy as build_fp8_cast_policy
+            from ltx_core.quantization.fp8_cast import (
+                build_policy as build_fp8_cast_policy,
+            )
+
             quantization = build_fp8_cast_policy(ckpt)  # downcasts the bf16 checkpoint to fp8 on the fly
-        offload = {"none": OffloadMode.NONE, "cpu": OffloadMode.CPU,
-                   "disk": OffloadMode.DISK}[self.spec.get("cuda_offload", "none")]
-        pipe = DistilledPipeline(distilled_checkpoint_path=ckpt, gemma_root=gemma_root,
-                                 spatial_upsampler_path=upscaler, loras=[],
-                                 quantization=quantization, offload_mode=offload)
+        offload = {
+            "none": OffloadMode.NONE,
+            "cpu": OffloadMode.CPU,
+            "disk": OffloadMode.DISK,
+        }[self.spec.get("cuda_offload", "none")]
+        pipe = DistilledPipeline(
+            distilled_checkpoint_path=ckpt,
+            gemma_root=gemma_root,
+            spatial_upsampler_path=upscaler,
+            loras=[],
+            quantization=quantization,
+            offload_mode=offload,
+        )
         self.device = "cuda"
         self.pipeline = pipe
         return pipe
@@ -274,15 +395,21 @@ def run_job(state, jid, prompt, frames, steps, width, height, fps):
         pipe = state.load()
 
         def on_step(_p, step, _t, kw):  # diffusers step callback -> real progress
-            state.jobs[jid]["percent"] = int(round((step + 1) / steps * 100))
+            state.jobs[jid]["percent"] = round((step + 1) / steps * 100)
             state.touch()
             return kw
 
-        kwargs = dict(prompt=prompt, num_frames=frames, num_inference_steps=steps, callback_on_step_end=on_step)
+        kwargs = {
+            "prompt": prompt,
+            "num_frames": frames,
+            "num_inference_steps": steps,
+            "callback_on_step_end": on_step,
+        }
         if state.spec["family"] == "ltx":
             kwargs.update(width=width, height=height)
         frames_out = pipe(**kwargs).frames[0]
         from diffusers.utils import export_to_video
+
         path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
         export_to_video(frames_out, path, fps=fps)
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
@@ -297,8 +424,9 @@ def _run_job_mlx(state, jid, prompt, frames, width, height, fps):
     """Apple Silicon MLX generation (LTX-2.3). Output is an h264+AAC mp4 — video WITH synchronized
     audio. The pipeline exposes no progress callback, so live percent comes from wrapping the sampler's
     tqdm: we count denoise steps across its two distilled stages against the step budget."""
-    import ltx_pipelines_mlx.utils.samplers as samplers
+    from ltx_pipelines_mlx.utils import samplers
     from tqdm import tqdm as _tqdm
+
     try:
         pipe = state.load()
         # LTX-2 needs num_frames of the form 8k+1; snap to the NEAREST valid count (>= 9) so the duration
@@ -313,15 +441,22 @@ def _run_job_mlx(state, jid, prompt, frames, width, height, fps):
                 for obj in super().__iter__():
                     yield obj
                     progress["done"] += 1
-                    state.jobs[jid]["percent"] = min(95, int(round(progress["done"] / total_steps * 100)))
+                    state.jobs[jid]["percent"] = min(95, round(progress["done"] / total_steps * 100))
                     state.touch()
 
         orig_tqdm = samplers.tqdm
         samplers.tqdm = _HookedTqdm
         try:
             path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
-            pipe.generate_and_save(prompt=prompt, output_path=path, height=height, width=width,
-                                   num_frames=frames, frame_rate=fps, seed=42)
+            pipe.generate_and_save(
+                prompt=prompt,
+                output_path=path,
+                height=height,
+                width=width,
+                num_frames=frames,
+                frame_rate=fps,
+                seed=42,
+            )
         finally:
             samplers.tqdm = orig_tqdm
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
@@ -337,10 +472,11 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
     pipeline __call__ returns (video_iterator, audio); we encode the mp4 ourselves with encode_video. Live
     percent via the sampler tqdm (8 + 4 distilled steps). Validated on an RTX 4090 (fp8 + CPU offload)."""
     import torch
-    import ltx_pipelines.utils.samplers as samplers
-    from tqdm import tqdm as _tqdm
-    from ltx_pipelines.utils.media_io import encode_video
     from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
+    from ltx_pipelines.utils import samplers
+    from ltx_pipelines.utils.media_io import encode_video
+    from tqdm import tqdm as _tqdm
+
     try:
         pipe = state.load()
         frames = max(9, round((frames - 1) / 8) * 8 + 1)  # LTX-2 requires num_frames of the form 8k+1
@@ -354,7 +490,7 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
                 for obj in super().__iter__():
                     yield obj
                     progress["done"] += 1
-                    state.jobs[jid]["percent"] = min(95, int(round(progress["done"] / total_steps * 100)))
+                    state.jobs[jid]["percent"] = min(95, round(progress["done"] / total_steps * 100))
                     state.touch()
 
         orig_tqdm = samplers.tqdm
@@ -363,10 +499,23 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
             tiling = TilingConfig.default()
             path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
             with torch.inference_mode():
-                video, audio = pipe(prompt=prompt, seed=42, height=height, width=width,
-                                    num_frames=frames, frame_rate=fps, images=[], tiling_config=tiling)
-                encode_video(video=video, fps=fps, audio=audio, output_path=path,
-                             video_chunks_number=get_video_chunks_number(frames, tiling))
+                video, audio = pipe(
+                    prompt=prompt,
+                    seed=42,
+                    height=height,
+                    width=width,
+                    num_frames=frames,
+                    frame_rate=fps,
+                    images=[],
+                    tiling_config=tiling,
+                )
+                encode_video(
+                    video=video,
+                    fps=fps,
+                    audio=audio,
+                    output_path=path,
+                    video_chunks_number=get_video_chunks_number(frames, tiling),
+                )
         finally:
             samplers.tqdm = orig_tqdm
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
@@ -398,10 +547,8 @@ def _pull_stream(state, wfile):
         total = 0
         if os.path.isdir(blobs):
             for e in os.scandir(blobs):
-                try:
+                with contextlib.suppress(OSError):
                     total += e.stat().st_size
-                except OSError:
-                    pass
         wfile.write((json.dumps({"bytesDownloaded": total, "totalBytes": 0}) + "\n").encode())
         wfile.flush()
         state.touch()
@@ -445,10 +592,12 @@ class Handler(BaseHTTPRequestHandler):
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     def do_GET(self):
@@ -457,14 +606,22 @@ class Handler(BaseHTTPRequestHandler):
         s = self.state
         path = self.path.split("?")[0]
         if path == "/health":
-            self._json(200, {"status": "ok", "model": s.model_id, "device": s.device,
-                             "weights_present": s.weights_present(), "loaded": s.pipeline is not None})
+            self._json(
+                200,
+                {
+                    "status": "ok",
+                    "model": s.model_id,
+                    "device": s.device,
+                    "weights_present": s.weights_present(),
+                    "loaded": s.pipeline is not None,
+                },
+            )
         elif path == "/capability":
             cap = host_capability()  # full adaptive picker payload (all engines tiered for this host)
             cap["activeModel"] = s.model_id
             self._json(200, cap)
         elif path.startswith("/jobs/") and path.endswith("/result"):
-            jid = path[len("/jobs/"):-len("/result")]
+            jid = path[len("/jobs/") : -len("/result")]
             j = s.jobs.get(jid)
             if not j or j["state"] != "succeeded":
                 self._json(409, {"error": "not_ready", "state": j["state"] if j else "unknown"})
@@ -477,14 +634,22 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             s.touch()
         elif path.startswith("/jobs/"):
-            jid = path[len("/jobs/"):]
+            jid = path[len("/jobs/") :]
             j = s.jobs.get(jid)
             if not j:
                 self._json(404, {"error": "unknown_job"})
                 return
             out = {"path": j["path"], "mimeType": j["mime"]} if j["state"] == "succeeded" else None
-            self._json(200, {"job_id": jid, "state": j["state"], "percent": j.get("percent"),
-                             "error": j.get("error"), "output": out})
+            self._json(
+                200,
+                {
+                    "job_id": jid,
+                    "state": j["state"],
+                    "percent": j.get("percent"),
+                    "error": j.get("error"),
+                    "output": out,
+                },
+            )
         else:
             self._json(404, {"error": "not_found"})
 
@@ -510,22 +675,44 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(n) or b"{}")
         free, _total, _kind = s.vram()
         if free < s.spec["min_gb"]:  # SV-2 free-VRAM gate -> jclaw FAILs the job -> cloud fallback
-            self._json(400, {"error": "insufficient_vram", "freeVramGb": round(free, 1),
-                             "requiredGb": s.spec["min_gb"]})
+            self._json(
+                400,
+                {
+                    "error": "insufficient_vram",
+                    "freeVramGb": round(free, 1),
+                    "requiredGb": s.spec["min_gb"],
+                },
+            )
             return
         with s._gate:
             if s.busy:  # one job at a time (VRAM-bound)
                 self._json(409, {"error": "busy", "active_job_id": s.busy})
                 return
             jid = uuid.uuid4().hex[:12]
-            s.jobs[jid] = {"state": "running", "percent": 0, "error": None, "path": None, "mime": None}
+            s.jobs[jid] = {
+                "state": "running",
+                "percent": 0,
+                "error": None,
+                "path": None,
+                "mime": None,
+            }
             s.busy = jid
         s.touch()
         fps = max(1, min(60, int(body.get("fps", 24))))  # clip exported at this rate; clamp to sane bounds
-        threading.Thread(target=run_job, args=(
-            s, jid, body.get("prompt", ""), int(body.get("num_frames", 49)),
-            int(body.get("steps", 30)), int(body.get("width", s.spec["width"])),
-            int(body.get("height", s.spec["height"])), fps), daemon=True).start()
+        threading.Thread(
+            target=run_job,
+            args=(
+                s,
+                jid,
+                body.get("prompt", ""),
+                int(body.get("num_frames", 49)),
+                int(body.get("steps", 30)),
+                int(body.get("width", s.spec["width"])),
+                int(body.get("height", s.spec["height"])),
+                fps,
+            ),
+            daemon=True,
+        ).start()
         self._json(202, {"job_id": jid, "state": "running"})
 
 
@@ -556,10 +743,8 @@ class _ResilientStderr:
             return len(s)
 
     def flush(self):
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
 
     def __getattr__(self, name):
         return getattr(self._raw, name)
@@ -574,8 +759,11 @@ def main():
     ap.add_argument("--model", help="engine id: " + " | ".join(MODELS))
     ap.add_argument("--cache-dir")
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
     # One-shot adaptive probe (SV-2): detect GPU + free VRAM, print the tiered engine list, exit. No server,
     # no model load — this is what the Settings "detect capability" flow runs to populate the dropdown.
     ap.add_argument("--probe", action="store_true")

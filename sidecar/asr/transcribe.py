@@ -25,6 +25,8 @@ usage (worker):   uv run transcribe.py --worker
   faster-whisper's WhisperModel is held per size — a persistent worker
   amortizes the ~5s model load that every one-shot call paid.
 """
+
+import contextlib
 import json
 import os
 import platform
@@ -45,15 +47,14 @@ def is_apple_silicon():
 
 def run_mlx(audio, size, language):
     import mlx_whisper
+
     repo = MLX_REPOS.get(size, MLX_REPOS["large-v3"])
-    sys.stderr.write("[transcribe] mlx-whisper %s\n" % repo)
+    sys.stderr.write(f"[transcribe] mlx-whisper {repo}\n")
     # NO word_timestamps: enabling it perturbs mlx's decode (measured: text
     # changes + 31s stamp drift on the debate benchmark) and its attention-
     # derived stamps are imprecise.
-    result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language,
-                                    condition_on_previous_text=False)
-    return [(s["start"], s["end"], s["text"])
-            for s in result["segments"]]
+    result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language, condition_on_previous_text=False)
+    return [(s["start"], s["end"], s["text"]) for s in result["segments"]]
 
 
 _CT2_CACHE = {}
@@ -67,28 +68,32 @@ def _transcribe(audio, size, language):
 
 def run_ct2_cached(audio, size, language):
     from faster_whisper import WhisperModel
+
     model = _CT2_CACHE.get(size)
     if model is None:
         try:
             model = WhisperModel(size, device="cuda", compute_type="float16")
-            sys.stderr.write("[transcribe] faster-whisper %s on cuda\n" % size)
+            sys.stderr.write(f"[transcribe] faster-whisper {size} on cuda\n")
         except Exception:  # noqa: BLE001 — no CUDA: int8 CPU
             model = WhisperModel(size, device="cpu", compute_type="int8")
-            sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
+            sys.stderr.write(f"[transcribe] faster-whisper {size} on cpu/int8\n")
         _CT2_CACHE[size] = model
     # JCLAW-635: VAD pre-filter suppresses hallucination on silence/music.
-    segments, _ = model.transcribe(audio, language=language,
-                                   condition_on_previous_text=False,
-                                   vad_filter=True)
-    return [(s.start, s.end, s.text)
-            for s in segments]
+    segments, _ = model.transcribe(audio, language=language, condition_on_previous_text=False, vad_filter=True)
+    return [(s.start, s.end, s.text) for s in segments]
 
 
 def _payload(triples):
-    return {"segments": [
-        {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
-         "text": t.strip()}
-        for s, e, t in triples]}
+    return {
+        "segments": [
+            {
+                "startMs": round(s * 1000),
+                "endMs": round(e * 1000),
+                "text": t.strip(),
+            }
+            for s, e, t in triples
+        ]
+    }
 
 
 def _engine_repo(size):
@@ -100,34 +105,39 @@ def _engine_repo(size):
 
 def _cache_dir_bytes(repo):
     from huggingface_hub.constants import HF_HUB_CACHE
+
     d = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
     total = 0
     for root, _, files in os.walk(d):
         for f in files:
-            try:
+            with contextlib.suppress(OSError):
                 total += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
     return total
 
 
 def _status(size):
     """JCLAW-650: is the HOST engine's artifact for this size cached?"""
     from huggingface_hub import snapshot_download
+
     engine, repo = _engine_repo(size)
     try:
         snapshot_download(repo, local_files_only=True)
         cached = True
     except Exception:  # noqa: BLE001 — any miss means not fully cached
         cached = False
-    return {"engine": engine, "repo": repo, "cached": cached,
-            "bytesOnDisk": _cache_dir_bytes(repo)}
+    return {
+        "engine": engine,
+        "repo": repo,
+        "cached": cached,
+        "bytesOnDisk": _cache_dir_bytes(repo),
+    }
 
 
 def _prefetch(size):
     from huggingface_hub import snapshot_download
+
     engine, repo = _engine_repo(size)
-    sys.stderr.write("[transcribe] prefetching %s (%s)\n" % (repo, engine))
+    sys.stderr.write(f"[transcribe] prefetching {repo} ({engine})\n")
     snapshot_download(repo)
     return _status(size)
 
@@ -143,9 +153,10 @@ def worker():
             req = json.loads(line)
             op = req.get("op", "transcribe")
             if op == "status":
-                sizes = [SIZES.get(m, m) for m in req.get("models", [])]
-                print(json.dumps({"status": {m: _status(SIZES.get(m, m))
-                                             for m in req.get("models", [])}}), flush=True)
+                print(
+                    json.dumps({"status": {m: _status(SIZES.get(m, m)) for m in req.get("models", [])}}),
+                    flush=True,
+                )
             elif op == "prefetch":
                 size = SIZES.get(req.get("model") or "large", req.get("model") or "large")
                 print(json.dumps({"prefetched": _prefetch(size)}), flush=True)
@@ -166,6 +177,7 @@ def main():
         # detached so it can't stall the worker/status). JSON line; nonzero=fail.
         try:
             from huggingface_hub import snapshot_download
+
             snapshot_download(sys.argv[2])
             print(json.dumps({"ok": True}), flush=True)
             return 0

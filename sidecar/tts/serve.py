@@ -29,6 +29,7 @@ runtime-artifact convention.
 
 import argparse
 import base64
+import contextlib
 import hmac
 import json
 import os
@@ -45,7 +46,12 @@ DEFAULT_IDENTITY = "tts"
 
 # audio format -> response MIME. WAV is the only guaranteed format today; others
 # depend on the worker's libsndfile build, so unknown formats fall back to octet-stream.
-_MIME = {"wav": "audio/wav", "flac": "audio/flac", "mp3": "audio/mpeg", "opus": "audio/opus"}
+_MIME = {
+    "wav": "audio/wav",
+    "flac": "audio/flac",
+    "mp3": "audio/mpeg",
+    "opus": "audio/opus",
+}
 
 
 def _open_worker_stderr(tag):
@@ -58,7 +64,8 @@ def _open_worker_stderr(tag):
     "died mid-request". Mirrors the ASR sidecar's prefetch path.
     """
     import tempfile
-    fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)
+
+    fd, path = tempfile.mkstemp(suffix=f".{tag}.stderr")
     return os.fdopen(fd, "w"), path
 
 
@@ -81,7 +88,7 @@ def _stderr_tail(path, limit=1200):
     if not path:
         return ""
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, errors="replace") as fh:
             raw = fh.read()
     except OSError:
         return ""
@@ -110,23 +117,28 @@ class SidecarState:
         `self.<attr>` — amortizes the python start + engine import + model load
         that a one-shot call would pay per request. Caller must hold io_lock."""
         import subprocess
+
         w = getattr(self, attr)
         if w is not None and w.poll() is None:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.stderr.write("[tts-sidecar] spawning persistent %s worker\n" % script)
+        sys.stderr.write(f"[tts-sidecar] spawning persistent {script} worker\n")
         errfh, errpath = _open_worker_stderr(attr.lstrip("_"))
-        w = subprocess.Popen(["uv", "run", script, "--worker"],
-                             cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=errfh,
-                             text=True, bufsize=1)
+        w = subprocess.Popen(
+            ["uv", "run", script, "--worker"],
+            cwd=script_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errfh,
+            text=True,
+            bufsize=1,
+        )
         errfh.close()  # the child holds its own dup of the fd
         self._discard_worker_stderr(attr)
         self._worker_stderr[attr] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("%s worker failed to start: %r%s"
-                               % (script, ready, _stderr_tail(errpath)))
+            raise RuntimeError(f"{script} worker failed to start: {ready!r}{_stderr_tail(errpath)}")
         setattr(self, attr, w)
         return w
 
@@ -136,10 +148,8 @@ class SidecarState:
         prev = self._worker_stderr.pop(attr, None)
         if not prev:
             return
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(prev)
-        except OSError:
-            pass
 
     def tts_worker(self):
         return self._spawn("_tts_worker", "synth.py")
@@ -156,9 +166,9 @@ class SidecarState:
             setattr(self, attr, None)
             # Append the worker's own last words — without them this error names
             # the symptom and nothing else (JCLAW-859).
-            raise RuntimeError("%s died mid-request%s"
-                               % (attr.lstrip("_"),
-                                  _stderr_tail(self._worker_stderr.get(attr))))
+            raise RuntimeError(
+                "{} died mid-request{}".format(attr.lstrip("_"), _stderr_tail(self._worker_stderr.get(attr)))
+            )
         payload = json.loads(line)
         if "error" in payload:
             raise RuntimeError(payload["error"])
@@ -210,18 +220,19 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def handle(self):
-        try:
+        # client went away mid-response — not worth a traceback
+        with contextlib.suppress(BrokenPipeError):
             super().handle()
-        except BrokenPipeError:
-            pass  # client went away mid-response — not worth a traceback
 
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._send_json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     def do_GET(self):
@@ -231,13 +242,16 @@ class Handler(BaseHTTPRequestHandler):
             # A health probe signals imminent use — touching the idle clock closes
             # the evict race between the JVM's check and its subsequent request.
             self.state.touch()
-            self._send_json(200, {
-                "status": "ok",
-                "model": self.state.model,
-                "loaded": self.state._tts_worker is not None,
-            })
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "model": self.state.model,
+                    "loaded": self.state._tts_worker is not None,
+                },
+            )
         else:
-            self._send_json(404, {"error": "unknown path %s" % self.path})
+            self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def do_POST(self):
         if not self._authorized():
@@ -252,14 +266,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/synthesize":
             self._handle_synthesize()
             return
-        self._send_json(404, {"error": "unknown path %s" % self.path})
+        self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def _handle_synthesize(self):
         self.state.touch()
         try:
             req = self._read_json()
         except (ValueError, UnicodeDecodeError) as e:
-            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
         text = (req.get("text") or "").strip()
         if not text:
@@ -274,15 +288,23 @@ class Handler(BaseHTTPRequestHandler):
         try:
             t0 = time.time()
             with self.state.io_lock:
-                payload = self.state.ask("_tts_worker", self.state.tts_worker, {
-                    "op": "synthesize", "text": text,
-                    "model": req.get("model"), "voice": req.get("voice"),
-                    "ref_audio": req.get("ref_audio"),
-                    "speed": req.get("speed"), "format": fmt,
-                })
+                payload = self.state.ask(
+                    "_tts_worker",
+                    self.state.tts_worker,
+                    {
+                        "op": "synthesize",
+                        "text": text,
+                        "model": req.get("model"),
+                        "voice": req.get("voice"),
+                        "ref_audio": req.get("ref_audio"),
+                        "speed": req.get("speed"),
+                        "format": fmt,
+                    },
+                )
             audio = base64.b64decode(payload["audio_b64"])
-            sys.stderr.write("[tts-sidecar] synthesized %d chars -> %d bytes in %.1fs\n"
-                             % (len(text), len(audio), time.time() - t0))
+            sys.stderr.write(
+                "[tts-sidecar] synthesized %d chars -> %d bytes in %.1fs\n" % (len(text), len(audio), time.time() - t0)
+            )
             self._send_bytes(200, audio, _MIME.get(fmt, "application/octet-stream"))
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
@@ -295,17 +317,22 @@ def _prewarm(state: SidecarState):
     """Resolve the synth.py script env off the request path so the first real
     synthesis doesn't pay `uv sync`. Env resolution only — no model load."""
     import subprocess
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     while state.run_lock.locked():
         time.sleep(15)  # a real request owns the machine — wait
     try:
         t0 = time.time()
-        proc = subprocess.run(["uv", "sync", "--script", "synth.py"], cwd=script_dir,
-                              capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
-        sys.stderr.write("[tts-sidecar] prewarm synth env: rc=%d in %.0fs\n"
-                         % (proc.returncode, time.time() - t0))
+        proc = subprocess.run(
+            ["uv", "sync", "--script", "synth.py"],
+            cwd=script_dir,
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
+        sys.stderr.write("[tts-sidecar] prewarm synth env: rc=%d in %.0fs\n" % (proc.returncode, time.time() - t0))
     except Exception as e:  # noqa: BLE001 — prewarm must never hurt
-        sys.stderr.write("[tts-sidecar] prewarm failed: %s\n" % e)
+        sys.stderr.write(f"[tts-sidecar] prewarm failed: {e}\n")
     state.touch()  # don't let prewarm time count as idle
 
 
@@ -320,7 +347,7 @@ def _idle_watcher(state: SidecarState):
         if state.run_lock.locked():
             continue
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
-            sys.stderr.write("[tts-sidecar] idle for %.0fs — exiting\n" % state.idle_timeout_s)
+            sys.stderr.write(f"[tts-sidecar] idle for {state.idle_timeout_s:.0f}s — exiting\n")
             os._exit(0)
 
 
@@ -340,10 +367,8 @@ class _ResilientStderr:
             return len(s)
 
     def flush(self):
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
 
     def __getattr__(self, name):
         return getattr(self._raw, name)
@@ -358,8 +383,11 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "tts-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -372,12 +400,9 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
     threading.Thread(target=_prewarm, args=(Handler.state,), daemon=True).start()
-    sys.stderr.write("[tts-sidecar] listening on http://%s:%d (identity=%s)\n"
-                     % (args.host, args.port, args.model))
-    try:
+    sys.stderr.write("[tts-sidecar] listening on http://%s:%d (identity=%s)\n" % (args.host, args.port, args.model))
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ weights cache under --cache-dir via HF_HOME.
 """
 
 import argparse
+import contextlib
 import hmac
 import json
 import os
@@ -116,7 +117,8 @@ def _open_worker_stderr(tag):
     "died mid-request". Mirrors what start_prefetch below already does.
     """
     import tempfile
-    fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)
+
+    fd, path = tempfile.mkstemp(suffix=f".{tag}.stderr")
     return os.fdopen(fd, "w"), path
 
 
@@ -139,7 +141,7 @@ def _stderr_tail(path, limit=1200):
     if not path:
         return ""
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, errors="replace") as fh:
             raw = fh.read()
     except OSError:
         return ""
@@ -166,31 +168,36 @@ class SidecarState:
         # Model downloads run as DETACHED subprocesses (via hf_prefetch.py, not
         # the heavy pyannote/SER workers) so a multi-GB pull can't stall status
         # polling; status sizes them straight off the cache dir instead.
-        self._prefetches = {}        # repo -> {proc, out}
-        self._prefetch_errors = {}   # repo -> error
+        self._prefetches = {}  # repo -> {proc, out}
+        self._prefetch_errors = {}  # repo -> error
         self._prefetch_lock = threading.Lock()
 
     def worker(self):
         """Persistent pyannote worker — the ~20s pipeline load is paid once,
         on the first /diarize, then amortized. Caller must hold io_lock."""
         import subprocess
+
         w = self._worker
         if w is not None and w.poll() is None:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[diarize-sidecar] spawning persistent pyannote worker\n")
         errfh, errpath = _open_worker_stderr("pyannote")
-        w = subprocess.Popen(["uv", "run", "diarize.py", "--worker"],
-                             cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=errfh,
-                             text=True, bufsize=1)
+        w = subprocess.Popen(
+            ["uv", "run", "diarize.py", "--worker"],
+            cwd=script_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errfh,
+            text=True,
+            bufsize=1,
+        )
         errfh.close()  # the child holds its own dup of the fd
         self._discard_worker_stderr("pyannote")
         self._worker_stderr["pyannote"] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("pyannote worker failed to start: %r%s"
-                               % (ready, _stderr_tail(errpath)))
+            raise RuntimeError(f"pyannote worker failed to start: {ready!r}{_stderr_tail(errpath)}")
         self._worker = w
         return w
 
@@ -200,33 +207,36 @@ class SidecarState:
         prev = self._worker_stderr.pop(key, None)
         if not prev:
             return
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(prev)
-        except OSError:
-            pass
 
     def ser_worker(self):
         """Persistent MERaLiON-SER worker — spawned lazily on the first
         emotions=true request (the transformers env + model load are paid once,
         then amortized). Caller must hold io_lock."""
         import subprocess
+
         w = self._ser_worker
         if w is not None and w.poll() is None:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[diarize-sidecar] spawning persistent SER worker\n")
         errfh, errpath = _open_worker_stderr("ser")
-        w = subprocess.Popen(["uv", "run", "ser.py", "--worker"],
-                             cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=errfh,
-                             text=True, bufsize=1)
+        w = subprocess.Popen(
+            ["uv", "run", "ser.py", "--worker"],
+            cwd=script_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errfh,
+            text=True,
+            bufsize=1,
+        )
         errfh.close()  # the child holds its own dup of the fd
         self._discard_worker_stderr("ser")
         self._worker_stderr["ser"] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("SER worker failed to start: %r%s"
-                               % (ready, _stderr_tail(errpath)))
+            raise RuntimeError(f"SER worker failed to start: {ready!r}{_stderr_tail(errpath)}")
         self._ser_worker = w
         return w
 
@@ -236,6 +246,7 @@ class SidecarState:
         Idempotent per repo; subprocess output is captured for error reporting."""
         import subprocess
         import tempfile
+
         with self._prefetch_lock:
             cur = self._prefetches.get(repo)
             if cur is not None and cur["proc"].poll() is None:
@@ -244,8 +255,12 @@ class SidecarState:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             fd, outpath = tempfile.mkstemp(suffix=".prefetch")
             fh = os.fdopen(fd, "w")
-            proc = subprocess.Popen(["uv", "run", "hf_prefetch.py", "--prefetch", repo],
-                                    cwd=script_dir, stdout=fh, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(
+                ["uv", "run", "hf_prefetch.py", "--prefetch", repo],
+                cwd=script_dir,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+            )
             fh.close()
             self._prefetches[repo] = {"proc": proc, "out": outpath}
 
@@ -260,22 +275,37 @@ class SidecarState:
                 err = self._prefetch_errors.get(repo)
                 if err is None:
                     return None
-                return {"engine": engine, "repo": repo, "cached": False,
-                        "downloading": False, "bytesOnDisk": _repo_bytes(repo), "error": err}
+                return {
+                    "engine": engine,
+                    "repo": repo,
+                    "cached": False,
+                    "downloading": False,
+                    "bytesOnDisk": _repo_bytes(repo),
+                    "error": err,
+                }
             proc, outf = entry["proc"], entry["out"]
             if proc.poll() is None:
-                return {"engine": engine, "repo": repo, "cached": False,
-                        "downloading": True, "bytesOnDisk": _repo_bytes(repo)}
+                return {
+                    "engine": engine,
+                    "repo": repo,
+                    "cached": False,
+                    "downloading": True,
+                    "bytesOnDisk": _repo_bytes(repo),
+                }
             self._prefetches.pop(repo, None)
             err = _read_error(outf) if proc.returncode != 0 else None
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(outf)
-            except OSError:
-                pass
             if err:
                 self._prefetch_errors[repo] = err
-                return {"engine": engine, "repo": repo, "cached": False,
-                        "downloading": False, "bytesOnDisk": _repo_bytes(repo), "error": err}
+                return {
+                    "engine": engine,
+                    "repo": repo,
+                    "cached": False,
+                    "downloading": False,
+                    "bytesOnDisk": _repo_bytes(repo),
+                    "error": err,
+                }
             return None  # success -> a cache check now reports cached=true
 
     def touch(self):
@@ -317,18 +347,19 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def handle(self):
-        try:
+        # client went away mid-response — not worth a traceback
+        with contextlib.suppress(BrokenPipeError):
             super().handle()
-        except BrokenPipeError:
-            pass  # client went away mid-response — not worth a traceback
 
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._send_json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     def _hf_status(self, repos):
@@ -336,17 +367,28 @@ class Handler(BaseHTTPRequestHandler):
         (minimal env — no pyannote/SER worker spawned). Returns the same shape
         as prefetch_state so the JVM sees one contract."""
         import subprocess
+
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        proc = subprocess.run(["uv", "run", "hf_prefetch.py", "--status", *repos],
-                              cwd=script_dir, capture_output=True, text=True,
-                              timeout=REQUEST_TIMEOUT_SEC)
+        proc = subprocess.run(
+            ["uv", "run", "hf_prefetch.py", "--status", *repos],
+            cwd=script_dir,
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
         if proc.returncode != 0:
-            raise RuntimeError("hf_prefetch --status failed: %s"
-                               % (proc.stderr or proc.stdout)[:300])
+            raise RuntimeError(f"hf_prefetch --status failed: {(proc.stderr or proc.stdout)[:300]}")
         raw = json.loads(proc.stdout.strip().splitlines()[-1])["status"]
-        return {repo: {"engine": _engine_of(repo), "repo": repo, "cached": s["cached"],
-                       "downloading": False, "bytesOnDisk": s["bytesOnDisk"]}
-                for repo, s in raw.items()}
+        return {
+            repo: {
+                "engine": _engine_of(repo),
+                "repo": repo,
+                "cached": s["cached"],
+                "downloading": False,
+                "bytesOnDisk": s["bytesOnDisk"],
+            }
+            for repo, s in raw.items()
+        }
 
     def do_GET(self):
         if not self._authorized():
@@ -358,7 +400,8 @@ class Handler(BaseHTTPRequestHandler):
             # cache check. Query: ?ids=repo1,repo2 (HF repos).
             self.state.touch()
             try:
-                from urllib.parse import urlparse, parse_qs, unquote
+                from urllib.parse import parse_qs, unquote, urlparse
+
                 ids = unquote(parse_qs(urlparse(self.path).query).get("ids", [""])[0])
                 repos = [r for r in ids.split(",") if r]
                 status, pending = {}, []
@@ -378,13 +421,16 @@ class Handler(BaseHTTPRequestHandler):
             # A health probe signals imminent use — touching the idle clock
             # closes the evict race between the JVM's check and its POST.
             self.state.touch()
-            self._send_json(200, {
-                "status": "ok",
-                "model": self.state.model,
-                "loaded": self.state._worker is not None,
-            })
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "model": self.state.model,
+                    "loaded": self.state._worker is not None,
+                },
+            )
         else:
-            self._send_json(404, {"error": "unknown path %s" % self.path})
+            self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def do_POST(self):
         if not self._authorized():
@@ -411,13 +457,12 @@ class Handler(BaseHTTPRequestHandler):
             # identity no longer matches config. Localhost-only server.
             sys.stderr.write("[diarize-sidecar] shutdown requested — exiting\n")
             self._send_json(200, {"status": "bye"})
-            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)),
-                             daemon=True).start()
+            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)), daemon=True).start()
             return
         if self.path == "/diarize":
             self._handle_diarize()
             return
-        self._send_json(404, {"error": "unknown path %s" % self.path})
+        self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def _handle_diarize(self):
         """Speaker turns via the pyannote worker (diarize.py script env)."""
@@ -425,11 +470,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             req = self._read_json()
         except (ValueError, UnicodeDecodeError) as e:
-            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
         audio_path = req.get("audio_path")
         if not audio_path or not os.path.isfile(audio_path):
-            self._send_json(400, {"error": "audio_path missing or not a file: %r" % audio_path})
+            self._send_json(400, {"error": f"audio_path missing or not a file: {audio_path!r}"})
             return
         if not self.state.run_lock.acquire(blocking=False):
             self._send_json(409, {"error": "another inference is already in progress"})
@@ -446,17 +491,24 @@ class Handler(BaseHTTPRequestHandler):
                 line = w.stdout.readline()
             if not line:
                 self.state._worker = None
-                raise RuntimeError("pyannote worker died mid-request%s"
-                                   % _stderr_tail(self.state._worker_stderr.get("pyannote")))
+                raise RuntimeError(
+                    "pyannote worker died mid-request{}".format(_stderr_tail(self.state._worker_stderr.get("pyannote")))
+                )
             out = json.loads(line)
             if "error" in out:
                 raise RuntimeError(out["error"])
             turns = out.get("turns", [])
             if req.get("emotions") and turns:
                 self._attach_emotions(audio_path, turns, req.get("emotion_model"))
-            sys.stderr.write("[diarize-sidecar] diarized %s: %d turn(s)%s in %.1fs\n"
-                             % (os.path.basename(audio_path), len(turns),
-                                " +emotion" if req.get("emotions") else "", time.time() - t0))
+            sys.stderr.write(
+                "[diarize-sidecar] diarized %s: %d turn(s)%s in %.1fs\n"
+                % (
+                    os.path.basename(audio_path),
+                    len(turns),
+                    " +emotion" if req.get("emotions") else "",
+                    time.time() - t0,
+                )
+            )
             self._send_json(200, out)
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
@@ -481,16 +533,17 @@ class Handler(BaseHTTPRequestHandler):
                 line = w.stdout.readline()
             if not line:
                 self.state._ser_worker = None
-                raise RuntimeError("SER worker died mid-request%s"
-                                   % _stderr_tail(self.state._worker_stderr.get("ser")))
+                raise RuntimeError(
+                    "SER worker died mid-request{}".format(_stderr_tail(self.state._worker_stderr.get("ser")))
+                )
             res = json.loads(line)
             if "error" in res:
                 raise RuntimeError(res["error"])
-            for turn, emo in zip(turns, res.get("emotions", [])):
+            for turn, emo in zip(turns, res.get("emotions", []), strict=False):
                 if emo:
                     turn["emotion"] = emo
         except Exception as e:  # noqa: BLE001 — emotion is best-effort
-            sys.stderr.write("[diarize-sidecar] emotion pass failed: %s\n" % e)
+            sys.stderr.write(f"[diarize-sidecar] emotion pass failed: {e}\n")
 
 
 def _prewarm(state: SidecarState):
@@ -498,18 +551,24 @@ def _prewarm(state: SidecarState):
     diarize doesn't pay `uv sync`. Env resolution only — the ~20s model load
     still happens on the first /diarize."""
     import subprocess
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     while state.run_lock.locked():
         time.sleep(15)  # a real request owns the machine — wait
     try:
         t0 = time.time()
-        proc = subprocess.run(["uv", "sync", "--script", "diarize.py"],
-                              cwd=script_dir, capture_output=True, text=True,
-                              timeout=REQUEST_TIMEOUT_SEC)
-        sys.stderr.write("[diarize-sidecar] prewarm diarize env: rc=%d in %.0fs\n"
-                         % (proc.returncode, time.time() - t0))
+        proc = subprocess.run(
+            ["uv", "sync", "--script", "diarize.py"],
+            cwd=script_dir,
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
+        sys.stderr.write(
+            "[diarize-sidecar] prewarm diarize env: rc=%d in %.0fs\n" % (proc.returncode, time.time() - t0)
+        )
     except Exception as e:  # noqa: BLE001 — prewarm must never hurt
-        sys.stderr.write("[diarize-sidecar] prewarm failed: %s\n" % e)
+        sys.stderr.write(f"[diarize-sidecar] prewarm failed: {e}\n")
     state.touch()
 
 
@@ -526,7 +585,7 @@ def _idle_watcher(state: SidecarState):
         if state.run_lock.locked():
             continue
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
-            sys.stderr.write("[diarize-sidecar] idle for %.0fs — exiting\n" % state.idle_timeout_s)
+            sys.stderr.write(f"[diarize-sidecar] idle for {state.idle_timeout_s:.0f}s — exiting\n")
             os._exit(0)
 
 
@@ -546,10 +605,8 @@ class _ResilientStderr:
             return len(s)
 
     def flush(self):
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
 
     def __getattr__(self, name):
         return getattr(self._raw, name)
@@ -564,8 +621,11 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "diarize-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -578,12 +638,9 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
     threading.Thread(target=_prewarm, args=(Handler.state,), daemon=True).start()
-    sys.stderr.write("[diarize-sidecar] listening on http://%s:%d (identity=%s)\n"
-                     % (args.host, args.port, args.model))
-    try:
+    sys.stderr.write("[diarize-sidecar] listening on http://%s:%d (identity=%s)\n" % (args.host, args.port, args.model))
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

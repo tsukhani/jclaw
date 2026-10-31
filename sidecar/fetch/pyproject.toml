@@ -17,3 +17,7 @@ dependencies = [
     # gap is a better store, never verify=False.
     "certifi>=2024.2.2",
 ]
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"

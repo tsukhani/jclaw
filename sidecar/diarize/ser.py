@@ -30,6 +30,7 @@ model. MERaLiON-SER-v1 is ungated (license: MERaLiON Public License). Runs on
 GPU when available (CUDA/MPS — measured ~2x faster than CPU with identical
 labels), else CPU; DIARIZE_DEVICE (shared with the pyannote worker) forces one.
 """
+
 import json
 import os
 import subprocess
@@ -41,16 +42,18 @@ import tempfile
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 DEFAULT_MODEL = "MERaLiON/MERaLiON-SER-v1"
-MIN_MS = 1000   # skip turns under 1s — too little signal for a reliable label
-MAX_S = 15      # the model's evaluation cap
+MIN_MS = 1000  # skip turns under 1s — too little signal for a reliable label
+MAX_S = 15  # the model's evaluation cap
 BATCH = 8
 
 
 def _to_wav16k(src):
     fd, wav = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src,
-                    "-ar", "16000", "-ac", "1", wav], check=True)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", src, "-ar", "16000", "-ac", "1", wav],
+        check=True,
+    )
     return wav
 
 
@@ -58,6 +61,7 @@ def _pick_device():
     """cuda > mps > cpu, unless DIARIZE_DEVICE forces one (shared with the
     pyannote worker). torch is already imported by the caller."""
     import torch
+
     forced = os.environ.get("DIARIZE_DEVICE", "").strip().lower()
     if forced:
         return forced
@@ -71,22 +75,30 @@ def _pick_device():
 def _load_model(model_id):
     import torch
     from transformers import AutoModelForAudioClassification
+
     # AutoProcessor covers models with a tokenizer (MERaLiON's Whisper stack);
     # audio-only wav2vec2 SER models have only a feature extractor, so fall
     # back to that. Any AutoModelForAudioClassification SER model then works.
     try:
         from transformers import AutoProcessor
+
         proc = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
     except Exception:  # noqa: BLE001 — no tokenizer → feature-extractor only
         from transformers import AutoFeatureExtractor
+
         proc = AutoFeatureExtractor.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForAudioClassification.from_pretrained(
-        model_id, trust_remote_code=True).eval()
+    model = AutoModelForAudioClassification.from_pretrained(model_id, trust_remote_code=True).eval()
     device = _pick_device()
     model.to(torch.device(device))
-    sys.stderr.write("[ser] %s loaded on %s\n" % (model_id, device))
-    return {"proc": proc, "model": model, "id2label": model.config.id2label,
-            "torch": torch, "device": device, "pad": _needs_pad(proc)}
+    sys.stderr.write(f"[ser] {model_id} loaded on {device}\n")
+    return {
+        "proc": proc,
+        "model": model,
+        "id2label": model.config.id2label,
+        "torch": torch,
+        "device": device,
+        "pad": _needs_pad(proc),
+    }
 
 
 def _needs_pad(proc):
@@ -95,6 +107,7 @@ def _needs_pad(proc):
     (padding=True would pad to the batch's longest and break the model).
     Detect by the output key on a 0.1s dummy: Whisper -> input_features."""
     import numpy as np
+
     out = proc(np.zeros(1600, dtype="float32"), sampling_rate=16000, return_tensors="pt")
     return "input_features" not in out
 
@@ -113,16 +126,17 @@ def _infer(state, batch):
     try:
         with torch.inference_mode():
             res = state["model"](**on_dev)
-    except Exception:  # noqa: BLE001 — GPU op unimplemented/OOM
+    except Exception:  # GPU op unimplemented/OOM; re-raised on CPU
         if dev == "cpu":
             raise
-        sys.stderr.write("[ser] %s inference failed — falling back to CPU\n" % dev)
+        sys.stderr.write(f"[ser] {dev} inference failed — falling back to CPU\n")
         state["model"].to(torch.device("cpu"))
         state["device"] = "cpu"
         on_cpu = {k: (v.to("cpu") if hasattr(v, "to") else v) for k, v in inputs.items()}
         with torch.inference_mode():
             res = state["model"](**on_cpu)
-    logits = res["logits"] if "logits" in res else res.logits
+    # MERaLiON-SER returns a plain dict, which has no .logits; dict.get() would evaluate that default first.
+    logits = res["logits"] if "logits" in res else res.logits  # noqa: SIM401
     probs = torch.softmax(logits, dim=1).cpu()
     dims = res["dims"].cpu() if "dims" in res else None
     return probs, dims
@@ -132,8 +146,10 @@ def _label(state, probs_row, dims_row):
     torch = state["torch"]
     ci = int(torch.argmax(probs_row))
     id2label = state["id2label"]  # keys may be int or str depending on the model
-    emo = {"label": id2label.get(ci, id2label.get(str(ci), str(ci))),
-           "confidence": round(float(probs_row[ci]), 3)}
+    emo = {
+        "label": id2label.get(ci, id2label.get(str(ci), str(ci))),
+        "confidence": round(float(probs_row[ci]), 3),
+    }
     if dims_row is not None:
         v, a, d = dims_row.tolist()
         emo.update(valence=round(v, 3), arousal=round(a, 3), dominance=round(d, 3))
@@ -142,6 +158,7 @@ def _label(state, probs_row, dims_row):
 
 def _emotions(state, audio_path, spans):
     import soundfile as sf
+
     wav = _to_wav16k(audio_path)
     try:
         data, sr = sf.read(wav, dtype="float32")
@@ -163,7 +180,7 @@ def _emotions(state, audio_path, spans):
             slices.append(seg)
 
     for b in range(0, len(slices), BATCH):
-        batch = slices[b:b + BATCH]
+        batch = slices[b : b + BATCH]
         probs, dims = _infer(state, batch)
         for j in range(len(batch)):
             out[idxs[b + j]] = _label(state, probs[j], dims[j] if dims is not None else None)

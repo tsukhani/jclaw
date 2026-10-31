@@ -83,12 +83,14 @@ def is_apple_silicon():
 
 def _load_mlx(model_id):
     from pathlib import Path
+
     from huggingface_hub import snapshot_download
     from mlx_audio.tts.utils import load_model
+
     m = _MODEL_CACHE.get(model_id)
     if m is None:
         repo = MLX_REPOS.get(model_id, MLX_REPOS[DEFAULT_MODEL])
-        sys.stderr.write("[synth] loading %s (%s)\n" % (model_id, repo))
+        sys.stderr.write(f"[synth] loading {model_id} ({repo})\n")
         m = load_model(Path(snapshot_download(repo)))
         _MODEL_CACHE[model_id] = m
     return m
@@ -112,6 +114,7 @@ def _pick_device():
     if override in ("cuda", "mps", "cpu"):
         return override
     import torch
+
     if torch.cuda.is_available():
         return "cuda"
     if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
@@ -132,17 +135,21 @@ def _load_chatterbox():
         # optional, inaudible provenance mark; for a self-hosted local engine we
         # substitute a no-op so synthesis works (audio is otherwise unchanged).
         import perth
+
         if getattr(perth, "PerthImplicitWatermarker", None) is None:
+
             class _NoopWatermarker:
                 def apply_watermark(self, wav, *args, **kwargs):
                     return wav
 
                 def get_watermark(self, *args, **kwargs):
                     return None
+
             perth.PerthImplicitWatermarker = _NoopWatermarker
         from chatterbox.tts import ChatterboxTTS
+
         device = _pick_device()
-        sys.stderr.write("[synth] loading chatterbox on %s\n" % device)
+        sys.stderr.write(f"[synth] loading chatterbox on {device}\n")
         m = ChatterboxTTS.from_pretrained(device=device)
         _MODEL_CACHE["chatterbox"] = m
         # Keep the builtin speaker so clearing the reference clip can get back to
@@ -161,6 +168,7 @@ def _synthesize_chatterbox(text, ref_audio):
     to a short clean clip) does zero-shot voice cloning; Chatterbox has no named
     voices, so the `voice` field is unused on this path."""
     import numpy as np
+
     model = _load_chatterbox()
     if ref_audio:
         kw = {"audio_prompt_path": ref_audio}
@@ -182,6 +190,7 @@ def _synthesize_chatterbox(text, ref_audio):
 def _synthesize_mlx(text, model_id, voice, ref_audio, speed):
     """mlx-audio synth (Apple silicon) -> (float mono audio, sample_rate)."""
     import numpy as np
+
     model = _load_mlx(model_id)
     kw = {"verbose": False}
     # Kokoro has named voices; Qwen3-TTS-Base does not — for it, `voice` selects a
@@ -198,6 +207,7 @@ def _synthesize_mlx(text, model_id, voice, ref_audio, speed):
     # RNG deterministically (a numeric `voice` picks a specific speaker; blank
     # keeps one stable default). Harmless for the already-deterministic Kokoro.
     import mlx.core as mx
+
     mx.random.seed(_voice_seed(voice))
 
     segments = list(model.generate(text=text, **kw))
@@ -227,7 +237,8 @@ def _synthesize(text, model_id, voice, ref_audio, speed, fmt):
                 "TTS on this platform is not yet supported for mlx-audio models — only "
                 "Apple silicon is implemented (JCLAW-789). Use model=chatterbox for the "
                 "cross-platform MPS/CUDA engine (JCLAW-814); the NVIDIA/vLLM Qwen backend "
-                "is pending the JCLAW-788 RTX 4090 validation.")
+                "is pending the JCLAW-788 RTX 4090 validation."
+            )
         audio, sr = _synthesize_mlx(text, model_id, voice, ref_audio, speed)
 
     # WAV is the guaranteed format (libsndfile always writes it). FLAC too if the
@@ -240,8 +251,7 @@ def _synthesize(text, model_id, voice, ref_audio, speed, fmt):
 
 def worker():
     _init_protocol_stdout()
-    sys.stderr.write("[synth] worker ready (platform=%s)\n"
-                     % ("apple-silicon" if is_apple_silicon() else sys.platform))
+    sys.stderr.write("[synth] worker ready (platform=%s)\n" % ("apple-silicon" if is_apple_silicon() else sys.platform))
     _emit_json({"ready": True})
     for line in sys.stdin:
         line = line.strip()
@@ -250,11 +260,20 @@ def worker():
         try:
             req = json.loads(line)
             b64, sr = _synthesize(
-                req.get("text", ""), req.get("model"), req.get("voice"),
-                req.get("ref_audio"), req.get("speed"),
-                (req.get("format") or "wav").lower())
-            _emit_json({"audio_b64": b64, "sample_rate": sr,
-                        "format": (req.get("format") or "wav").lower()})
+                req.get("text", ""),
+                req.get("model"),
+                req.get("voice"),
+                req.get("ref_audio"),
+                req.get("speed"),
+                (req.get("format") or "wav").lower(),
+            )
+            _emit_json(
+                {
+                    "audio_b64": b64,
+                    "sample_rate": sr,
+                    "format": (req.get("format") or "wav").lower(),
+                }
+            )
         except Exception as e:  # noqa: BLE001 — reported per-request
             _emit_json({"error": str(e)})
     return 0

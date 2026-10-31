@@ -27,6 +27,8 @@ transcribed, and the texts are joined. Dropping the silence is what stops the
 model hallucinating (it fabricates text — often in another language — on silent
 tails). GPU when available (CUDA/MPS), else CPU.
 """
+
+import contextlib
 import json
 import os
 import subprocess
@@ -38,39 +40,46 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 DEFAULT_MODEL = "MERaLiON/MERaLiON-3-3B-ASR"
 # The fixed ASR prompt from the meralion-3-asr package; "<SpeechHere>" is the
 # audio placeholder the processor expands into speech tokens.
-ASR_CONTENT = ("Instruction: Please transcribe this speech. \n"
-               "Follow the text instruction based on the following audio: <SpeechHere>")
+ASR_CONTENT = (
+    "Instruction: Please transcribe this speech. \n"
+    "Follow the text instruction based on the following audio: <SpeechHere>"
+)
 GEN = {"max_new_tokens": 512, "do_sample": False, "no_repeat_ngram_size": 6}
 
 
 def _cache_dir_bytes(repo):
     from huggingface_hub.constants import HF_HUB_CACHE
+
     d = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
     total = 0
     for root, _, files in os.walk(d):
         for f in files:
-            try:
+            with contextlib.suppress(OSError):
                 total += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
     return total
 
 
 def _status(repo):
     """Is the MERaLiON snapshot cached? (Settings download state, JCLAW-650.)"""
     from huggingface_hub import snapshot_download
+
     try:
         snapshot_download(repo, local_files_only=True)
         cached = True
     except Exception:  # noqa: BLE001 — any miss means not fully cached
         cached = False
-    return {"engine": "meralion", "repo": repo, "cached": cached,
-            "bytesOnDisk": _cache_dir_bytes(repo)}
+    return {
+        "engine": "meralion",
+        "repo": repo,
+        "cached": cached,
+        "bytesOnDisk": _cache_dir_bytes(repo),
+    }
 
 
 def _prefetch(repo):
     from huggingface_hub import snapshot_download
-    sys.stderr.write("[meralion] prefetching %s\n" % repo)
+
+    sys.stderr.write(f"[meralion] prefetching {repo}\n")
     snapshot_download(repo)
     return _status(repo)
 
@@ -78,13 +87,16 @@ def _prefetch(repo):
 def _to_wav16k(src):
     fd, wav = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src,
-                    "-ar", "16000", "-ac", "1", wav], check=True)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", src, "-ar", "16000", "-ac", "1", wav],
+        check=True,
+    )
     return wav
 
 
 def _pick_device():
     import torch
+
     forced = os.environ.get("ASR_DEVICE", "").strip().lower()
     if forced:
         return forced
@@ -98,27 +110,41 @@ def _pick_device():
 def _load(model_id):
     import torch
     from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+
     proc = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        model_id, trust_remote_code=True, torch_dtype=torch.float16).eval()
+        model_id, trust_remote_code=True, torch_dtype=torch.float16
+    ).eval()
     device = _pick_device()
     model.to(device)
     prompt = proc.tokenizer.apply_chat_template(
-        [{"role": "user", "content": ASR_CONTENT}], tokenize=False, add_generation_prompt=True)
+        [{"role": "user", "content": ASR_CONTENT}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
     from silero_vad import load_silero_vad
-    sys.stderr.write("[meralion] %s loaded on %s\n" % (model_id, device))
-    return {"proc": proc, "model": model, "torch": torch, "device": device,
-            "dtype": next(model.parameters()).dtype, "prompt": prompt, "vad": load_silero_vad()}
+
+    sys.stderr.write(f"[meralion] {model_id} loaded on {device}\n")
+    return {
+        "proc": proc,
+        "model": model,
+        "torch": torch,
+        "device": device,
+        "dtype": next(model.parameters()).dtype,
+        "prompt": prompt,
+        "vad": load_silero_vad(),
+    }
 
 
 def _transcribe(state, audio_path):
     import numpy as np
     import soundfile as sf
     from silero_vad import get_speech_timestamps
+
     torch = state["torch"]
     wav = _to_wav16k(audio_path)
     try:
-        data, sr = sf.read(wav, dtype="float32")
+        data, _sr = sf.read(wav, dtype="float32")
     finally:
         os.remove(wav)
     if data.ndim > 1:
@@ -129,8 +155,11 @@ def _transcribe(state, audio_path):
     # clips) AND every chunk ends at speech, not silence (which is what the model
     # hallucinates on). Beats both trim-only and merge-only.
     speech = get_speech_timestamps(
-        torch.from_numpy(np.ascontiguousarray(data)), state["vad"],
-        sampling_rate=16000, return_seconds=False)
+        torch.from_numpy(np.ascontiguousarray(data)),
+        state["vad"],
+        sampling_rate=16000,
+        return_seconds=False,
+    )
     if not speech:
         return ""
     maxs = 30 * 16000
@@ -147,14 +176,18 @@ def _transcribe(state, audio_path):
     for chunk in chunks:
         if chunk.size < 1600:  # <0.1s — skip
             continue
-        inputs = state["proc"](text=[state["prompt"]], audios=[chunk],
-                               return_tensors="pt", padding=True)
-        inputs = {k: (v.to(dev, dtype) if (hasattr(v, "to") and v.is_floating_point())
-                      else (v.to(dev) if hasattr(v, "to") else v))
-                  for k, v in inputs.items()}
+        inputs = state["proc"](text=[state["prompt"]], audios=[chunk], return_tensors="pt", padding=True)
+        inputs = {
+            k: (
+                v.to(dev, dtype)
+                if (hasattr(v, "to") and v.is_floating_point())
+                else (v.to(dev) if hasattr(v, "to") else v)
+            )
+            for k, v in inputs.items()
+        }
         with torch.inference_mode():
             gen = state["model"].generate(**inputs, **GEN)
-        new = gen[:, inputs["input_ids"].shape[1]:]
+        new = gen[:, inputs["input_ids"].shape[1] :]
         texts.append(state["proc"].batch_decode(new, skip_special_tokens=True)[0].strip())
     return " ".join(t for t in texts if t)
 
@@ -171,15 +204,20 @@ def worker():
             req = json.loads(line)
             op = req.get("op", "transcribe")
             if op == "status":
-                print(json.dumps({"status": {m: _status(m)
-                                             for m in req.get("models", [])}}), flush=True)
+                print(
+                    json.dumps({"status": {m: _status(m) for m in req.get("models", [])}}),
+                    flush=True,
+                )
             elif op == "prefetch":
                 print(json.dumps({"prefetched": _prefetch(req["model"])}), flush=True)
             else:
                 model_id = req.get("model") or DEFAULT_MODEL
                 if model_id not in cache:
                     cache[model_id] = _load(model_id)
-                print(json.dumps({"text": _transcribe(cache[model_id], req["audio_path"])}), flush=True)
+                print(
+                    json.dumps({"text": _transcribe(cache[model_id], req["audio_path"])}),
+                    flush=True,
+                )
         except Exception as e:  # noqa: BLE001 — reported per-request
             print(json.dumps({"error": str(e)}), flush=True)
     return 0

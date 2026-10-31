@@ -30,3 +30,7 @@ dependencies = [
 #    or an explicit extra index. See README.md.
 #  - Linux + AMD (ROCm): use the ROCm wheel index. Coverage for klein on ROCm is
 #    unverified (flagged in the spike).
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"

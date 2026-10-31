@@ -13,8 +13,8 @@ import ipaddress
 import socket
 
 EXTRA_BLOCKED = (
-    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT
-    ipaddress.ip_network("fec0::/10"),       # deprecated v6 site-local
+    ipaddress.ip_network("100.64.0.0/10"),  # carrier-grade NAT
+    ipaddress.ip_network("fec0::/10"),  # deprecated v6 site-local
 )
 
 
@@ -37,8 +37,9 @@ def is_public_ip(addr):
     for net in EXTRA_BLOCKED:
         if ip.version == net.version and ip in net:
             return False
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    return not (
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+    )
 
 
 def is_public_host(host):

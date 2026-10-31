@@ -69,6 +69,7 @@ ipaddress admitted fec0::/10, which Java's isSiteLocalAddress() rejects.
 
 import argparse
 import concurrent.futures
+import contextlib
 import hmac
 import json
 import os
@@ -80,6 +81,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
+
+from ssrf import is_allowed_proxy_host, is_public_host, is_public_ip
 
 DEFAULT_TIMEOUT_MS = 35_000
 # Waiting for "networkidle" hangs on a Cloudflare challenge — one that keeps polling never
@@ -116,14 +119,14 @@ DEFAULT_MAX_CONCURRENT = 4
 # continue_(headers=...) is accepted and then discarded, because Chromium regenerates
 # browser-managed client hints after interception. Verified by sending an x-probe header
 # through the same call — the probe arrives, the brand list does not change.
-from ssrf import is_allowed_proxy_host, is_public_host, is_public_ip
 
 try:
     from patchright.sync_api import sync_playwright
+
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - exercised only on a broken install
     sync_playwright = None
-    _IMPORT_ERROR = "%s: %s" % (type(exc).__name__, exc)
+    _IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
 _UA_LOCK = threading.Lock()
 _UA = None
@@ -148,8 +151,7 @@ _HOST_CACHE_MAX = 512
 # A lookup past the deadline is abandoned, and getaddrinfo cannot be interrupted, so its
 # thread lives until the resolver gives up. Unbounded, a black-holed resolver would leave
 # one live thread per host the page names.
-_RESOLVER = concurrent.futures.ThreadPoolExecutor(max_workers=8,
-                                                  thread_name_prefix="stealth-resolve")
+_RESOLVER = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="stealth-resolve")
 _HOST_LOCK = threading.Lock()
 _HOST_DECISIONS = {}
 
@@ -180,8 +182,7 @@ _SCREEN = {"width": 1920, "height": 1080}
 _CONTEXT_OPTIONS = {"service_workers": "block", "viewport": _SCREEN, "screen": _SCREEN}
 _FINGERPRINT_ARGS = [
     # Headless can report no fine pointer and no hover on a host with no pointing device.
-    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
-    "availablePointerTypes=4",
+    ("--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"),
     # Neither route gate sees UDP. Each build honors one spelling and silently ignores the
     # other — the full Chromium this one, the headless-shell fallback the force one (measured).
     "--webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -199,13 +200,15 @@ def _accept_languages(language):
 def _launch_args(pins, language, user_agent=None):
     """Every flag a render launches with. Language is a flag rather than the context locale,
     which Playwright applies to the main thread only: a Worker kept the host's languages."""
-    args = ["--lang=" + language, "--accept-lang=" + ",".join(_accept_languages(language))]
+    args = [
+        "--lang=" + language,
+        "--accept-lang=" + ",".join(_accept_languages(language)),
+    ]
     args += _FINGERPRINT_ARGS
     if user_agent:
         args.append("--user-agent=" + user_agent)
     if pins:
-        args.append("--host-resolver-rules="
-                    + ",".join("MAP %s %s" % (h, ip) for h, ip in pins.items()))
+        args.append("--host-resolver-rules=" + ",".join(f"MAP {h} {ip}" for h, ip in pins.items()))
     return args
 
 
@@ -286,11 +289,21 @@ fetch('%(echo)s').finally(() => postMessage(surfaces()));
 
 # Every request the fixture must see, and the ones Chromium sends Sec-CH-UA on: none from a
 # dedicated Worker, with or without the UA override (measured).
-_FIXTURE_REQUESTS = ("/", "/echo/main", "/worker.js", "/echo/worker",
-                     "/frame", "/frame-worker.js", "/echo/frame-worker")
+_FIXTURE_REQUESTS = (
+    "/",
+    "/echo/main",
+    "/worker.js",
+    "/echo/worker",
+    "/frame",
+    "/frame-worker.js",
+    "/echo/frame-worker",
+)
 _FIXTURE_CLIENT_HINTED = ("/", "/echo/main", "/frame")
-_FIXTURE_THREADS = (("worker", "the Worker"), ("frame", "a cross-site iframe"),
-                    ("frameWorker", "the iframe's Worker"))
+_FIXTURE_THREADS = (
+    ("worker", "the Worker"),
+    ("frame", "a cross-site iframe"),
+    ("frameWorker", "the iframe's Worker"),
+)
 _CROSS_SITE_THREADS = ("frame", "frameWorker")
 # Without the WebRTC flags the first datagram arrived ~100 ms after load (measured).
 _WEBRTC_WINDOW_S = 2.0
@@ -300,11 +313,9 @@ def fingerprint_problems(observed, language, platform=sys.platform):
     """Each way the self-check's observations disagree with one Chrome in `language`; empty
     when the page, its iframe, their Workers and every request header tell the same story."""
     main = observed.get("main")
-    silent = [label for key, label in (("main", "the page"),) + _FIXTURE_THREADS
-              if not observed.get(key)]
+    silent = [label for key, label in (("main", "the page"), *_FIXTURE_THREADS) if not observed.get(key)]
     if silent:
-        return ["the fixture heard nothing from %s: %s"
-                % (", ".join(silent), observed.get("error"))]
+        return ["the fixture heard nothing from {}: {}".format(", ".join(silent), observed.get("error"))]
     problems = []
     for key, label in _FIXTURE_THREADS:
         for field in ("userAgent", "brands", "language", "languages", "intl"):
@@ -313,35 +324,31 @@ def fingerprint_problems(observed, language, platform=sys.platform):
             if field == "intl" and key in _CROSS_SITE_THREADS and platform == "darwin":
                 continue
             if observed[key][field] != main[field]:
-                problems.append("%s's %s %r differs from the page's %r"
-                                % (label, field, observed[key][field], main[field]))
+                problems.append(f"{label}'s {field} {observed[key][field]!r} differs from the page's {main[field]!r}")
     for field, label in (("language", "navigator.language"), ("intl", "Intl")):
         if main[field].lower() != language.lower():
-            problems.append("%s is %r, not %r" % (label, main[field], language))
+            problems.append(f"{label} is {main[field]!r}, not {language!r}")
     if "HeadlessChrome" in main["userAgent"] or "HeadlessChrome" in main["brands"]:
-        problems.append("the User-Agent says HeadlessChrome: %r %r"
-                        % (main["userAgent"], main["brands"]))
+        problems.append("the User-Agent says HeadlessChrome: {!r} {!r}".format(main["userAgent"], main["brands"]))
     for path in _FIXTURE_REQUESTS:
         sent = observed["headers"].get(path)
         if sent is None:
-            problems.append("no request for %s reached the fixture" % path)
+            problems.append(f"no request for {path} reached the fixture")
             continue
         if sent["user-agent"] != main["userAgent"]:
-            problems.append("%s went out as User-Agent %r" % (path, sent["user-agent"]))
+            problems.append("{} went out as User-Agent {!r}".format(path, sent["user-agent"]))
         tags = [t.split(";")[0].strip() for t in (sent["accept-language"] or "").split(",")]
         if tags != main["languages"]:
-            problems.append("%s went out as Accept-Language %r" % (path, sent["accept-language"]))
+            problems.append("{} went out as Accept-Language {!r}".format(path, sent["accept-language"]))
         if path in _FIXTURE_CLIENT_HINTED and "HeadlessChrome" in (sent["sec-ch-ua"] or "HeadlessChrome"):
-            problems.append("%s went out as Sec-CH-UA %r" % (path, sent["sec-ch-ua"]))
+            problems.append("{} went out as Sec-CH-UA {!r}".format(path, sent["sec-ch-ua"]))
     size = [_SCREEN["width"], _SCREEN["height"]]
     if main["screen"] != size or main["viewport"] != size:
-        problems.append("screen %r and viewport %r are not %r"
-                        % (main["screen"], main["viewport"], size))
+        problems.append("screen {!r} and viewport {!r} are not {!r}".format(main["screen"], main["viewport"], size))
     if not (main["pointerFine"] and main["hover"]):
-        problems.append("pointer: fine is %s and hover: hover is %s"
-                        % (main["pointerFine"], main["hover"]))
+        problems.append("pointer: fine is {} and hover: hover is {}".format(main["pointerFine"], main["hover"]))
     if main["navigatorOverrides"]:
-        problems.append("a script overrode navigator: %r" % main["navigatorOverrides"])
+        problems.append("a script overrode navigator: {!r}".format(main["navigatorOverrides"]))
     if observed["webrtcUdp"]:
         problems.append("WebRTC sent UDP, which no route gate sees")
     return problems
@@ -432,6 +439,7 @@ def await_challenge(page, standing, budget_ms, solve, clock=time.monotonic, rng=
 def _settle(page, navigation, settle_ms, challenge_ms, solve, clock=time.monotonic, rng=random):
     """Wait out the settle window, or a standing challenge in its place. Returns the X-Challenge
     report, or None when no challenge stood."""
+
     def standing():
         try:
             return challenge_type(page.content(), navigation["mitigated"])
@@ -452,7 +460,8 @@ def _settle(page, navigation, settle_ms, challenge_ms, solve, clock=time.monoton
         left_ms = challenge_ms - (clock() - started) * 1000
         if settle_ms > 0 and left_ms > 0:
             page.wait_for_timeout(min(settle_ms, left_ms))
-    return "%s; %s%s" % (kind, outcome, "; clicks=%d" % clicks if clicks else "")
+    suffix = f"; clicks={clicks}" if clicks else ""
+    return f"{kind}; {outcome}{suffix}"
 
 
 def _await_parsed(page, budget_ms):
@@ -460,10 +469,8 @@ def _await_parsed(page, budget_ms):
     by then is captured as it is."""
     if budget_ms <= 0:
         return
-    try:
+    with contextlib.suppress(Exception):
         page.wait_for_load_state("domcontentloaded", timeout=budget_ms)
-    except Exception:
-        pass
 
 
 class _ResolveBudget:
@@ -589,12 +596,14 @@ def _navigate(context, page, url, timeout_ms, settle_ms, challenge_ms, solve, wa
     _disguise(context, page, language)
     response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
     challenge = _settle(page, settled, settle_ms, challenge_ms, solve)
-    return {"html": page.content(),
-            "status": response.status if response else 0,
-            "settledStatus": settled["status"],
-            "mitigated": settled["mitigated"],
-            "url": page.url,
-            "challenge": challenge}
+    return {
+        "html": page.content(),
+        "status": response.status if response else 0,
+        "settledStatus": settled["status"],
+        "mitigated": settled["mitigated"],
+        "url": page.url,
+        "challenge": challenge,
+    }
 
 
 def _unsafe_pin(pins):
@@ -624,10 +633,13 @@ def _launch_proxy(proxy):
         raise ValueError("proxy url must be http:// or socks5:// with a host and port")
     if not is_allowed_proxy_host(parts.hostname):
         raise ValueError("proxy host is link-local, multicast or unresolvable")
-    host = "[%s]" % parts.hostname if ":" in parts.hostname else parts.hostname
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
     # Patchright adds this only while PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK is unset;
     # without it Chromium dials loopback and link-local directly, around the JVM's screen.
-    settings = {"server": "%s://%s:%d" % (parts.scheme, host, parts.port), "bypass": "<-loopback>"}
+    settings = {
+        "server": "%s://%s:%d" % (parts.scheme, host, parts.port),
+        "bypass": "<-loopback>",
+    }
     if proxy.get("username"):
         settings["username"] = proxy["username"]
         settings["password"] = proxy.get("password") or ""
@@ -647,9 +659,11 @@ def _launch(p, args, proxy=None):
     try:
         browser = p.chromium.launch(headless=True, channel=channel, args=args, proxy=proxy)
     except Exception as exc:
-        sys.stderr.write("[stealth-sidecar] full Chromium launch failed (%s: %s) — this "
-                         "render uses the headless shell; if the build is missing, run "
-                         "'patchright install chromium'\n" % (type(exc).__name__, exc))
+        sys.stderr.write(
+            f"[stealth-sidecar] full Chromium launch failed ({type(exc).__name__}: {exc}) — this "
+            "render uses the headless shell; if the build is missing, run "
+            "'patchright install chromium'\n"
+        )
         channel = _FALLBACK_CHANNEL
         browser = p.chromium.launch(headless=True, channel=channel, args=args, proxy=proxy)
     with _CHANNEL_LOCK:
@@ -667,13 +681,14 @@ def _user_agent(p, proxy=None):
         try:
             browser = _launch(p, [], proxy)
             try:
-                _UA = browser.new_page().evaluate("navigator.userAgent").replace(
-                    "HeadlessChrome/", "Chrome/")
+                _UA = browser.new_page().evaluate("navigator.userAgent").replace("HeadlessChrome/", "Chrome/")
             finally:
                 browser.close()
         except Exception as exc:
-            sys.stderr.write("[stealth-sidecar] UA probe failed (%s: %s) — rendering with the "
-                             "browser's own User-Agent\n" % (type(exc).__name__, exc))
+            sys.stderr.write(
+                f"[stealth-sidecar] UA probe failed ({type(exc).__name__}: {exc}) — rendering with the "
+                "browser's own User-Agent\n"
+            )
             _UA_RETRY_AT = time.monotonic() + _UA_RETRY_S
         return _UA
 
@@ -699,8 +714,12 @@ class SidecarState:
 def capability():
     channel = _active_channel()
     if sync_playwright is None:
-        return {"kind": "render", "runnable": False, "channel": channel,
-                "reason": "patchright unavailable (%s)" % _IMPORT_ERROR}
+        return {
+            "kind": "render",
+            "runnable": False,
+            "channel": channel,
+            "reason": f"patchright unavailable ({_IMPORT_ERROR})",
+        }
     return {"kind": "render", "runnable": True, "channel": channel, "reason": ""}
 
 
@@ -743,18 +762,19 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def handle(self):
-        try:
+        # client went away mid-response
+        with contextlib.suppress(BrokenPipeError):
             super().handle()
-        except BrokenPipeError:
-            pass
 
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._send_json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     def do_GET(self):
@@ -762,17 +782,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/health":
             self.state.touch()
-            self._send_json(200, {
-                "status": "ok",
-                "model": self.state.identity,
-                "patchright": sync_playwright is not None,
-                "channel": _active_channel(),
-                "browser_ready": capability()["runnable"],
-            })
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "model": self.state.identity,
+                    "patchright": sync_playwright is not None,
+                    "channel": _active_channel(),
+                    "browser_ready": capability()["runnable"],
+                },
+            )
         elif self.path == "/capability":
             self._send_json(200, capability())
         else:
-            self._send_json(404, {"error": "unknown path %s" % self.path})
+            self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def do_POST(self):
         if not self._authorized():
@@ -785,12 +808,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/render":
             self._handle_render()
             return
-        self._send_json(404, {"error": "unknown path %s" % self.path})
+        self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def _handle_render(self):
         self.state.touch()
         if sync_playwright is None:
-            self._send_json(502, {"error": "patchright unavailable (%s)" % _IMPORT_ERROR})
+            self._send_json(502, {"error": f"patchright unavailable ({_IMPORT_ERROR})"})
             return
         # Every coercion of the body belongs inside this try: an escape here reaches no
         # handler at all, so the caller gets a closed connection where a 400 is promised.
@@ -807,12 +830,18 @@ class Handler(BaseHTTPRequestHandler):
             proxy = req.get("proxy")
             if proxy is not None and not isinstance(proxy, dict):
                 raise TypeError("proxy must be a JSON object")
-            timeout_ms = max(1_000, min(int(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
-                                        MAX_TIMEOUT_MS))
-            settle_ms = max(0, min(int(req.get("settleMs") or DEFAULT_SETTLE_MS),
-                                   MAX_SETTLE_MS))
-            challenge_ms = max(0, min(int(req.get("challengeMs") or DEFAULT_CHALLENGE_MS),
-                                      MAX_CHALLENGE_MS))
+            timeout_ms = max(
+                1_000,
+                min(int(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS),
+            )
+            settle_ms = max(0, min(int(req.get("settleMs") or DEFAULT_SETTLE_MS), MAX_SETTLE_MS))
+            challenge_ms = max(
+                0,
+                min(
+                    int(req.get("challengeMs") or DEFAULT_CHALLENGE_MS),
+                    MAX_CHALLENGE_MS,
+                ),
+            )
             solve = req.get("solveTurnstile", False)
             if not isinstance(solve, bool):
                 raise TypeError("solveTurnstile must be true or false")
@@ -824,7 +853,7 @@ class Handler(BaseHTTPRequestHandler):
             wait_until = req.get("waitUntil") or DEFAULT_WAIT_UNTIL
             language = req.get("language") or DEFAULT_LANGUAGE
         except Exception as exc:
-            self._send_json(400, {"error": "malformed request: %s" % exc})
+            self._send_json(400, {"error": f"malformed request: {exc}"})
             return
 
         if not url:
@@ -841,7 +870,7 @@ class Handler(BaseHTTPRequestHandler):
         # the pin — and --no-auth drops even that — so pins are re-checked rather than trusted.
         unsafe = _unsafe_pin(pins)
         if unsafe is not None:
-            self._send_json(400, {"error": "pin for %s is not a public address" % unsafe})
+            self._send_json(400, {"error": f"pin for {unsafe} is not a public address"})
             return
 
         try:
@@ -852,10 +881,19 @@ class Handler(BaseHTTPRequestHandler):
 
         with self.state.render_slots:
             try:
-                result = self._render(url, pins, timeout_ms, settle_ms, challenge_ms, solve,
-                                      wait_until, language, launch_proxy)
+                result = self._render(
+                    url,
+                    pins,
+                    timeout_ms,
+                    settle_ms,
+                    challenge_ms,
+                    solve,
+                    wait_until,
+                    language,
+                    launch_proxy,
+                )
             except Exception as exc:
-                self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                self._send_json(502, {"error": f"{type(exc).__name__}: {exc}"})
                 return
         self._send_rendered(url, result, max_bytes)
 
@@ -887,16 +925,14 @@ class Handler(BaseHTTPRequestHandler):
             if blocked:
                 # The list is clipped, so the count is the only way to tell twenty
                 # blocked hosts from two hundred.
-                headers.append(("X-Blocked-Hosts",
-                                _header_safe(",".join(sorted(blocked)[:20]))))
+                headers.append(("X-Blocked-Hosts", _header_safe(",".join(sorted(blocked)[:20]))))
                 headers.append(("X-Blocked-Hosts-Count", str(len(blocked))))
             if truncated:
                 headers.append(("X-Upstream-Truncated", "true"))
             headers.append(("Content-Length", str(len(body))))
         except Exception as exc:
-            sys.stderr.write("[stealth-sidecar] response assembly failed for %s: %s\n"
-                             % (url, exc))
-            self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            sys.stderr.write(f"[stealth-sidecar] response assembly failed for {url}: {exc}\n")
+            self._send_json(502, {"error": f"{type(exc).__name__}: {exc}"})
             return
 
         self.send_response(200)
@@ -905,16 +941,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _render(self, url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
-                proxy=None):
+    def _render(
+        self,
+        url,
+        pins,
+        timeout_ms,
+        settle_ms,
+        challenge_ms,
+        solve,
+        wait_until,
+        language,
+        proxy=None,
+    ):
         scope = _RenderScope()
         with sync_playwright() as p:
             browser = _launch(p, _launch_args(pins, language, _user_agent(p, proxy)), proxy)
             try:
                 context = browser.new_context(**_CONTEXT_OPTIONS)
                 _install_gates(context, pins, lambda: scope)
-                result = _navigate(context, context.new_page(), url, timeout_ms, settle_ms,
-                                   challenge_ms, solve, wait_until, language)
+                result = _navigate(
+                    context,
+                    context.new_page(),
+                    url,
+                    timeout_ms,
+                    settle_ms,
+                    challenge_ms,
+                    solve,
+                    wait_until,
+                    language,
+                )
                 result["blocked"] = scope.blocked
                 return result
             finally:
@@ -929,11 +984,18 @@ def self_check(language):
     seen, report, reported = {}, {}, threading.Event()
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(("127.0.0.1", 0))
+
     def worker_js(echo):
-        return "text/javascript", _FIXTURE_WORKER % {"surfaces": _SURFACES_JS, "echo": echo}
+        return "text/javascript", _FIXTURE_WORKER % {
+            "surfaces": _SURFACES_JS,
+            "echo": echo,
+        }
 
     documents = {
-        "/": ("text/html", _FIXTURE_PAGE % {"surfaces": _SURFACES_JS, "udp": udp.getsockname()[1]}),
+        "/": (
+            "text/html",
+            _FIXTURE_PAGE % {"surfaces": _SURFACES_JS, "udp": udp.getsockname()[1]},
+        ),
         "/worker.js": worker_js("/echo/worker"),
         "/frame": ("text/html", _FIXTURE_FRAME % {"surfaces": _SURFACES_JS}),
         "/frame-worker.js": worker_js("/echo/frame-worker"),
@@ -952,8 +1014,9 @@ def self_check(language):
             self.wfile.write(body)
 
         def do_GET(self):
-            seen[self.path] = {name.lower(): self.headers.get(name)
-                               for name in ("User-Agent", "Accept-Language", "Sec-CH-UA")}
+            seen[self.path] = {
+                name.lower(): self.headers.get(name) for name in ("User-Agent", "Accept-Language", "Sec-CH-UA")
+            }
             self._reply(*documents.get(self.path, ("text/plain", "ok")))
 
         def do_POST(self):
@@ -970,14 +1033,17 @@ def self_check(language):
                 context = browser.new_context(**_CONTEXT_OPTIONS)
                 page = context.new_page()
                 _disguise(context, page, language)
-                page.goto("http://127.0.0.1:%d/" % server.server_address[1],
-                          wait_until="domcontentloaded", timeout=15000)
+                page.goto(
+                    "http://127.0.0.1:%d/" % server.server_address[1],
+                    wait_until="domcontentloaded",
+                    timeout=15000,
+                )
                 reported.wait(15)
                 udp.settimeout(_WEBRTC_WINDOW_S)
                 try:
                     udp.recv(2048)
                     leaked = True
-                except socket.timeout:
+                except TimeoutError:
                     leaked = False
             finally:
                 browser.close()
@@ -985,8 +1051,12 @@ def self_check(language):
         server.shutdown()
         udp.close()
     observed = dict(report, headers=seen, webrtcUdp=leaked)
-    return {"language": language, "channel": _active_channel(), "observed": observed,
-            "problems": fingerprint_problems(observed, language)}
+    return {
+        "language": language,
+        "channel": _active_channel(),
+        "observed": observed,
+        "problems": fingerprint_problems(observed, language),
+    }
 
 
 def _idle_watcher(state):
@@ -1006,16 +1076,32 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "stealth-sidecar"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--max-concurrent", type=int, default=DEFAULT_MAX_CONCURRENT,
-                    help="live headless browsers allowed at once")
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
-    ap.add_argument("--probe", action="store_true",
-                    help="print capability JSON and exit without launching a browser")
-    ap.add_argument("--self-check", action="store_true",
-                    help="render a loopback fixture and report whether every surface agrees")
-    ap.add_argument("--language", default=DEFAULT_LANGUAGE,
-                    help="the language --self-check renders in")
+    ap.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=DEFAULT_MAX_CONCURRENT,
+        help="live headless browsers allowed at once",
+    )
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
+    ap.add_argument(
+        "--probe",
+        action="store_true",
+        help="print capability JSON and exit without launching a browser",
+    )
+    ap.add_argument(
+        "--self-check",
+        action="store_true",
+        help="render a loopback fixture and report whether every surface agrees",
+    )
+    ap.add_argument(
+        "--language",
+        default=DEFAULT_LANGUAGE,
+        help="the language --self-check renders in",
+    )
     args = ap.parse_args()
 
     if args.probe:
@@ -1024,10 +1110,10 @@ def main():
     if args.self_check:
         try:
             if sync_playwright is None:
-                raise RuntimeError("patchright unavailable (%s)" % _IMPORT_ERROR)
+                raise RuntimeError(f"patchright unavailable ({_IMPORT_ERROR})")
             result = self_check(args.language)
         except Exception as exc:
-            print(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}))
+            print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
             sys.exit(2)
         print(json.dumps(result))
         sys.exit(1 if result["problems"] else 0)
@@ -1040,10 +1126,8 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
     sys.stderr.write("[stealth-sidecar] listening on http://%s:%d\n" % (args.host, args.port))
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

@@ -10,3 +10,11 @@ requires-python = ">=3.11"
 # (Local diarization / embedding / separation were removed in JCLAW-654;
 # their torch / pyannote / sherpa-onnx dependencies went with them.)
 dependencies = []
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"
+
+# Each broad except here carries a noqa: BLE001 marker saying why it is deliberate.
+[tool.ruff.lint]
+extend-select = ["BLE"]

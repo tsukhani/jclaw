@@ -12,6 +12,7 @@ usage:
   uv run hf_prefetch.py --status <repo> [<repo>...]  -> {"status": {repo: {...}}}
   uv run hf_prefetch.py --prefetch <repo>            -> {"ok": true} | {"error": ...}
 """
+
 import json
 import os
 import sys
@@ -19,6 +20,7 @@ import sys
 
 def _repo_bytes(repo):
     from huggingface_hub.constants import HF_HUB_CACHE
+
     d = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
     total = 0
     for root, _, files in os.walk(d):
@@ -34,6 +36,7 @@ def _repo_bytes(repo):
 
 def _status(repo):
     from huggingface_hub import snapshot_download
+
     try:
         snapshot_download(repo, local_files_only=True)
         cached = True
@@ -52,6 +55,7 @@ def main():
         return 0
     if op == "--prefetch":
         from huggingface_hub import snapshot_download
+
         try:
             snapshot_download(sys.argv[2])
             print(json.dumps({"ok": True}), flush=True)
@@ -59,7 +63,7 @@ def main():
         except Exception as e:  # noqa: BLE001 — reported; nonzero exit signals failure
             print(json.dumps({"error": str(e)}), flush=True)
             return 1
-    sys.stderr.write("unknown op %r\n" % op)
+    sys.stderr.write(f"unknown op {op!r}\n")
     return 2
 
 

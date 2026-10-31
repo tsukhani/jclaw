@@ -1,0 +1,15 @@
+# Shared ruff config for JClaw's Python sidecars (~/Programming/jclaw/sidecar/*).
+# Each sidecar's pyproject.toml extends this file. Sidecars are launched by the
+# JVM via `uv run serve.py --probe` / `uv run serve.py` (LocalSidecarDaemon),
+# so anything here must keep `uv run` working unchanged.
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "UP031",   # printf-style % formatting: deliberate in log lines; hand-converting live daemon code is not worth the typo risk
+    "SIM115",  # open without context manager: long-lived handles in daemon code
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"

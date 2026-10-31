@@ -40,6 +40,7 @@ matching jclaw's data/ runtime-artifact convention (asr-models, lucene).
 """
 
 import argparse
+import contextlib
 import fnmatch
 import hmac
 import io
@@ -77,9 +78,14 @@ def detect_vram():
     (unified memory via sysctl); torch only on the CUDA path. Mirrors the video sidecar's detector."""
     if IS_APPLE_SILICON:
         total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
-        return total * 0.7 / 1e9, total / 1e9, "mps"  # no free-VRAM API on unified memory; ~70% budget
+        return (
+            total * 0.7 / 1e9,
+            total / 1e9,
+            "mps",
+        )  # no free-VRAM API on unified memory; ~70% budget
     try:
         import torch
+
         if torch.cuda.is_available():
             free, total = torch.cuda.mem_get_info()
             return free / 1e9, total / 1e9, "cuda"
@@ -96,7 +102,11 @@ def host_capability():
     used by both `--probe` (one-shot) and the HTTP /capability endpoint. CPU is treated as not runnable:
     Flux on CPU is too slow to be a real local option, so the Settings radio greys out."""
     free, total, kind = detect_vram()
-    gpu = {"cuda": "NVIDIA (CUDA)", "mps": "Apple Silicon (unified)", "cpu": "CPU only"}[kind]
+    gpu = {
+        "cuda": "NVIDIA (CUDA)",
+        "mps": "Apple Silicon (unified)",
+        "cpu": "CPU only",
+    }[kind]
     if kind == "cpu":
         tier, reason = "no", "no GPU detected (CPU is too slow for Flux)"
     elif free >= FLUX_COMFORTABLE_GB:
@@ -105,8 +115,16 @@ def host_capability():
         tier, reason = "fits", "runs but slow (low free VRAM)"
     else:
         tier, reason = "no", f"needs {FLUX_MIN_GB} GB free VRAM"
-    return {"kind": kind, "gpu": gpu, "freeVramGb": round(free, 1), "totalVramGb": round(total, 1),
-            "minVramGb": FLUX_MIN_GB, "tier": tier, "runnable": tier != "no", "reason": reason}
+    return {
+        "kind": kind,
+        "gpu": gpu,
+        "freeVramGb": round(free, 1),
+        "totalVramGb": round(total, 1),
+        "minVramGb": FLUX_MIN_GB,
+        "tier": tier,
+        "runnable": tier != "no",
+        "reason": reason,
+    }
 
 
 class SidecarState:
@@ -116,9 +134,9 @@ class SidecarState:
         self.model = model
         self.cache_dir = cache_dir
         self.idle_timeout_s = idle_timeout_s
-        self.pipeline = None          # diffusers pipeline, loaded on first /generate
-        self.device = None            # "mps" | "cuda" | "cpu"
-        self.dtype = None             # torch dtype name, e.g. "float16"
+        self.pipeline = None  # diffusers pipeline, loaded on first /generate
+        self.device = None  # "mps" | "cuda" | "cpu"
+        self.dtype = None  # torch dtype name, e.g. "float16"
         self.load_lock = threading.Lock()
         self.last_activity = time.monotonic()
         # One generation at a time (ThreadingHTTPServer would otherwise drive the single resident
@@ -134,6 +152,7 @@ class SidecarState:
         """Pick the best backend and a matching dtype. The JVM can't see this,
         so /health reports it back to jclaw for the Settings UI + logs."""
         import torch
+
         if torch.backends.mps.is_available():
             return "mps", torch.float16
         if torch.cuda.is_available():
@@ -162,27 +181,27 @@ class SidecarState:
             if self.pipeline is not None:
                 return self.pipeline
             if not self.weights_present():
-                raise FileNotFoundError(
-                    "model weights for '%s' are not present — POST /pull first" % self.model)
+                raise FileNotFoundError(f"model weights for '{self.model}' are not present — POST /pull first")
             import torch  # noqa: F401  (ensures torch is importable before diffusers)
+
             # AutoPipeline reads the repo's model_index.json and instantiates the
             # right pipeline class, so the sidecar doesn't hard-code a class name
             # that may differ across diffusers/FLUX.2 versions. NOTE (JCLAW-226
             # open item): the exact pipeline class + min diffusers/torch versions
             # for FLUX.2 klein on MPS must be confirmed against the HF model card.
             from diffusers import AutoPipelineForText2Image
+
             device, dtype = self.detect_device()
             if device == "cpu":
                 sys.stderr.write(
-                    "[image-sidecar] WARNING: no GPU backend (MPS/CUDA) — running on CPU; "
-                    "generation will be slow\n")
-            pipe = AutoPipelineForText2Image.from_pretrained(
-                self.model, torch_dtype=dtype, cache_dir=self.cache_dir)
+                    "[image-sidecar] WARNING: no GPU backend (MPS/CUDA) — running on CPU; generation will be slow\n"
+                )
+            pipe = AutoPipelineForText2Image.from_pretrained(self.model, torch_dtype=dtype, cache_dir=self.cache_dir)
             pipe = pipe.to(device)
             self.pipeline = pipe
             self.device = device
             self.dtype = str(dtype).replace("torch.", "")
-            sys.stderr.write("[image-sidecar] pipeline loaded on %s (%s)\n" % (device, self.dtype))
+            sys.stderr.write(f"[image-sidecar] pipeline loaded on {device} ({self.dtype})\n")
             return self.pipeline
 
     def current_device(self):
@@ -219,11 +238,10 @@ def _pull_stream(state: SidecarState):
         # 100% (we skip ~7.7 GB) and never reach done.
         total = sum((s.size or 0) for s in info.siblings if not ignored(s.rfilename))
     except Exception as e:
-        yield line({"status": "error", "error": "metadata fetch failed: %s" % e})
+        yield line({"status": "error", "error": f"metadata fetch failed: {e}"})
         return
 
-    blobs = os.path.join(
-        state.cache_dir, "models--" + state.model.replace("/", "--"), "blobs")
+    blobs = os.path.join(state.cache_dir, "models--" + state.model.replace("/", "--"), "blobs")
 
     def disk_bytes():
         if not os.path.isdir(blobs):
@@ -231,28 +249,37 @@ def _pull_stream(state: SidecarState):
         tot = 0
         with os.scandir(blobs) as it:
             for entry in it:
-                try:
+                with contextlib.suppress(OSError):
                     tot += entry.stat(follow_symlinks=False).st_size
-                except OSError:
-                    pass
         return tot
 
     outcome = {"done": False, "error": None}
 
     def run_download():
         try:
-            snapshot_download(state.model, cache_dir=state.cache_dir,
-                              ignore_patterns=IGNORE_PATTERNS)
+            snapshot_download(state.model, cache_dir=state.cache_dir, ignore_patterns=IGNORE_PATTERNS)
         except Exception as e:
             outcome["error"] = str(e)
         finally:
             outcome["done"] = True
 
     threading.Thread(target=run_download, name="image-snapshot", daemon=True).start()
-    yield line({"status": "downloading", "bytesDownloaded": min(disk_bytes(), total), "totalBytes": total})
+    yield line(
+        {
+            "status": "downloading",
+            "bytesDownloaded": min(disk_bytes(), total),
+            "totalBytes": total,
+        }
+    )
     while not outcome["done"]:
         time.sleep(1.0)
-        yield line({"status": "downloading", "bytesDownloaded": min(disk_bytes(), total), "totalBytes": total})
+        yield line(
+            {
+                "status": "downloading",
+                "bytesDownloaded": min(disk_bytes(), total),
+                "totalBytes": total,
+            }
+        )
     if outcome["error"]:
         yield line({"status": "error", "error": outcome["error"]})
     else:
@@ -286,16 +313,12 @@ class Handler(BaseHTTPRequestHandler):
     # The JVM health probe closes the socket as soon as it has the response, which
     # can race our write; that's benign, not an error worth a traceback.
     def handle(self):
-        try:
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
             super().handle()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
 
     def finish(self):
-        try:
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
             super().finish()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
 
     def _send_json(self, code, obj):
         body = json.dumps(obj).encode("utf-8")
@@ -315,10 +338,12 @@ class Handler(BaseHTTPRequestHandler):
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._send_json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     def do_GET(self):
@@ -340,14 +365,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.state.touch()
         device, dtype = self.state.current_device()
-        self._send_json(200, {
-            "status": "ok",
-            "device": device,
-            "dtype": dtype,
-            "model": self.state.model,
-            "weights_present": self.state.weights_present(),
-            "loaded": self.state.pipeline is not None,
-        })
+        self._send_json(
+            200,
+            {
+                "status": "ok",
+                "device": device,
+                "dtype": dtype,
+                "model": self.state.model,
+                "weights_present": self.state.weights_present(),
+                "loaded": self.state.pipeline is not None,
+            },
+        )
 
     def do_POST(self):
         if not self._authorized():
@@ -365,7 +393,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._read_json()
         except (ValueError, json.JSONDecodeError) as e:
-            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -384,12 +412,13 @@ class Handler(BaseHTTPRequestHandler):
         ref_b64 = body.get("image")
         if ref_b64:
             import base64
+
             from PIL import Image
+
             try:
-                ref_image = Image.open(
-                    io.BytesIO(base64.b64decode(ref_b64))).convert("RGB").resize((width, height))
+                ref_image = Image.open(io.BytesIO(base64.b64decode(ref_b64))).convert("RGB").resize((width, height))
             except Exception as e:
-                self._send_json(400, {"error": "invalid reference image: %s" % e})
+                self._send_json(400, {"error": f"invalid reference image: {e}"})
                 return
         # One generation at a time. The resident pipeline isn't safe to drive concurrently, and the
         # shared %-progress assumes a single in-flight gen. A second caller gets 409 (the Java client
@@ -405,28 +434,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(409, {"error": str(e)})
                 return
             except Exception as e:
-                self._send_json(500, {"error": "pipeline load failed: %s" % e})
+                self._send_json(500, {"error": f"pipeline load failed: {e}"})
                 return
             try:
+
                 def on_step(_p, step, _t, kw):  # diffusers step callback -> live percent for /progress
-                    self.state.gen_percent = int(round((step + 1) / steps * 100))
+                    self.state.gen_percent = round((step + 1) / steps * 100)
                     self.state.touch()
                     return kw
 
-                kwargs = {"prompt": prompt, "width": width, "height": height,
-                          "num_inference_steps": steps, "callback_on_step_end": on_step}
+                kwargs = {
+                    "prompt": prompt,
+                    "width": width,
+                    "height": height,
+                    "num_inference_steps": steps,
+                    "callback_on_step_end": on_step,
+                }
                 if ref_image is not None:
                     kwargs["image"] = ref_image  # reference conditioning -> image-to-image
                 if seed is not None:
                     import torch
-                    kwargs["generator"] = torch.Generator(
-                        device=self.state.device).manual_seed(int(seed))
+
+                    kwargs["generator"] = torch.Generator(device=self.state.device).manual_seed(int(seed))
                 image = pipe(**kwargs).images[0]
                 buf = io.BytesIO()
                 image.save(buf, format="PNG")
                 data = buf.getvalue()
             except Exception as e:
-                self._send_json(500, {"error": "generation failed: %s" % e})
+                self._send_json(500, {"error": f"generation failed: {e}"})
                 return
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
@@ -455,8 +490,7 @@ def _idle_watcher(state: SidecarState, server: ThreadingHTTPServer):
     while True:
         time.sleep(min(60.0, state.idle_timeout_s))
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
-            sys.stderr.write("[image-sidecar] idle for %.0fs — exiting to free the GPU\n"
-                             % state.idle_timeout_s)
+            sys.stderr.write(f"[image-sidecar] idle for {state.idle_timeout_s:.0f}s — exiting to free the GPU\n")
             # os._exit avoids hanging on torch/CUDA background threads at shutdown.
             os._exit(0)
 
@@ -477,10 +511,8 @@ class _ResilientStderr:
             return len(s)
 
     def flush(self):
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
 
     def __getattr__(self, name):
         return getattr(self._raw, name)
@@ -495,8 +527,11 @@ def main():
     ap.add_argument("--model", help="Hugging Face repo id")
     ap.add_argument("--cache-dir", default=os.path.join("data", "image-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
     # One-shot capability probe: detect GPU + free VRAM, print the verdict, exit. No server, no model
     # load — what the Settings "detect GPU" flow runs to decide whether local Flux is offered.
     ap.add_argument("--probe", action="store_true")
@@ -515,14 +550,10 @@ def main():
     Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, cache_dir, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    threading.Thread(
-        target=_idle_watcher, args=(Handler.state, server), daemon=True).start()
-    sys.stderr.write("[image-sidecar] listening on http://%s:%d (model=%s)\n"
-                     % (args.host, args.port, args.model))
-    try:
+    threading.Thread(target=_idle_watcher, args=(Handler.state, server), daemon=True).start()
+    sys.stderr.write("[image-sidecar] listening on http://%s:%d (model=%s)\n" % (args.host, args.port, args.model))
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

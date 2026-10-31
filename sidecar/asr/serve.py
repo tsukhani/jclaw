@@ -30,6 +30,7 @@ runtime-artifact convention.
 """
 
 import argparse
+import contextlib
 import hmac
 import json
 import os
@@ -113,7 +114,8 @@ def _open_worker_stderr(tag):
     "died mid-request". Mirrors what the prefetch path below already does.
     """
     import tempfile
-    fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)
+
+    fd, path = tempfile.mkstemp(suffix=f".{tag}.stderr")
     return os.fdopen(fd, "w"), path
 
 
@@ -136,7 +138,7 @@ def _stderr_tail(path, limit=1200):
     if not path:
         return ""
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, errors="replace") as fh:
             raw = fh.read()
     except OSError:
         return ""
@@ -168,8 +170,8 @@ class SidecarState:
         # Model downloads run as DETACHED subprocesses (not the worker pipe, not
         # under asr_io_lock) so a multi-GB pull can't stall status polling; the
         # status endpoint sizes them straight off the cache dir instead.
-        self._prefetches = {}        # model id -> {proc, repo, out}
-        self._prefetch_errors = {}   # model id -> {repo, error}
+        self._prefetches = {}  # model id -> {proc, repo, out}
+        self._prefetch_errors = {}  # model id -> {repo, error}
         self._prefetch_lock = threading.Lock()
 
     def _spawn(self, attr, script):
@@ -179,23 +181,28 @@ class SidecarState:
         (transcribe/meralion/align) shares this line-protocol lifecycle. Caller
         must hold asr_io_lock."""
         import subprocess
+
         w = getattr(self, attr)
         if w is not None and w.poll() is None:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.stderr.write("[asr-sidecar] spawning persistent %s worker\n" % script)
+        sys.stderr.write(f"[asr-sidecar] spawning persistent {script} worker\n")
         errfh, errpath = _open_worker_stderr(attr.lstrip("_"))
-        w = subprocess.Popen(["uv", "run", script, "--worker"],
-                             cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=errfh,
-                             text=True, bufsize=1)
+        w = subprocess.Popen(
+            ["uv", "run", script, "--worker"],
+            cwd=script_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errfh,
+            text=True,
+            bufsize=1,
+        )
         errfh.close()  # the child holds its own dup of the fd
         self._discard_worker_stderr(attr)
         self._worker_stderr[attr] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("%s worker failed to start: %r%s"
-                               % (script, ready, _stderr_tail(errpath)))
+            raise RuntimeError(f"{script} worker failed to start: {ready!r}{_stderr_tail(errpath)}")
         setattr(self, attr, w)
         return w
 
@@ -205,10 +212,8 @@ class SidecarState:
         prev = self._worker_stderr.pop(attr, None)
         if not prev:
             return
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(prev)
-        except OSError:
-            pass
 
     def asr_worker(self):
         return self._spawn("_asr_worker", "transcribe.py")
@@ -231,9 +236,9 @@ class SidecarState:
             setattr(self, attr, None)
             # Append the worker's own last words — without them this error
             # names the symptom and nothing else (JCLAW-859).
-            raise RuntimeError("%s died mid-request%s"
-                               % (attr.lstrip("_"),
-                                  _stderr_tail(self._worker_stderr.get(attr))))
+            raise RuntimeError(
+                "{} died mid-request{}".format(attr.lstrip("_"), _stderr_tail(self._worker_stderr.get(attr)))
+            )
         payload = json.loads(line)
         if "error" in payload:
             raise RuntimeError(payload["error"])
@@ -246,6 +251,7 @@ class SidecarState:
         Subprocess stdout+stderr is captured to a temp file for error reporting."""
         import subprocess
         import tempfile
+
         with self._prefetch_lock:
             cur = self._prefetches.get(model)
             if cur is not None and cur["proc"].poll() is None:
@@ -254,8 +260,12 @@ class SidecarState:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             fd, outpath = tempfile.mkstemp(suffix=".prefetch")
             fh = os.fdopen(fd, "w")
-            proc = subprocess.Popen(["uv", "run", script, "--prefetch", repo],
-                                    cwd=script_dir, stdout=fh, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(
+                ["uv", "run", script, "--prefetch", repo],
+                cwd=script_dir,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+            )
             fh.close()
             self._prefetches[model] = {"proc": proc, "repo": repo, "out": outpath}
 
@@ -271,24 +281,37 @@ class SidecarState:
                 err = self._prefetch_errors.get(model)
                 if err is None:
                     return None
-                return {"engine": engine, "repo": err["repo"], "cached": False,
-                        "downloading": False, "bytesOnDisk": _repo_bytes(err["repo"]),
-                        "error": err["error"]}
+                return {
+                    "engine": engine,
+                    "repo": err["repo"],
+                    "cached": False,
+                    "downloading": False,
+                    "bytesOnDisk": _repo_bytes(err["repo"]),
+                    "error": err["error"],
+                }
             proc, repo, outf = entry["proc"], entry["repo"], entry["out"]
             if proc.poll() is None:
-                return {"engine": engine, "repo": repo, "cached": False,
-                        "downloading": True, "bytesOnDisk": _repo_bytes(repo)}
+                return {
+                    "engine": engine,
+                    "repo": repo,
+                    "cached": False,
+                    "downloading": True,
+                    "bytesOnDisk": _repo_bytes(repo),
+                }
             self._prefetches.pop(model, None)
             err = _read_error(outf) if proc.returncode != 0 else None
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(outf)
-            except OSError:
-                pass
             if err:
                 self._prefetch_errors[model] = {"repo": repo, "error": err}
-                return {"engine": engine, "repo": repo, "cached": False,
-                        "downloading": False, "bytesOnDisk": _repo_bytes(repo),
-                        "error": err}
+                return {
+                    "engine": engine,
+                    "repo": repo,
+                    "cached": False,
+                    "downloading": False,
+                    "bytesOnDisk": _repo_bytes(repo),
+                    "error": err,
+                }
             return None  # success -> the worker now reports cached=true
 
     def touch(self):
@@ -334,23 +357,27 @@ class Handler(BaseHTTPRequestHandler):
         (authoritative — avoids duplicating the mlx/faster-whisper table here).
         A quick cache-check status call, not a download."""
         with self.state.asr_io_lock:
-            st = self.state.ask("_asr_worker", self.state.asr_worker,
-                                {"op": "status", "models": [model]})["status"]
+            st = self.state.ask(
+                "_asr_worker",
+                self.state.asr_worker,
+                {"op": "status", "models": [model]},
+            )["status"]
         return st[model]["repo"]
 
     def handle(self):
-        try:
+        # client went away mid-response — not an error worth a traceback
+        with contextlib.suppress(BrokenPipeError):
             super().handle()
-        except BrokenPipeError:
-            pass  # client went away mid-response — not an error worth a traceback
 
     def _authorized(self):
         if self.token is None:
             return True
-        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
-                               self.token.encode("utf-8")):
+        if hmac.compare_digest(
+            self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+            self.token.encode("utf-8"),
+        ):
             return True
-        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        self._send_json(401, {"error": f"missing or invalid {AUTH_HEADER}"})
         return False
 
     # ---- endpoints ------------------------------------------------------
@@ -363,7 +390,8 @@ class Handler(BaseHTTPRequestHandler):
             # are cached. Query: ?ids=comma,separated,model,ids
             self.state.touch()
             try:
-                from urllib.parse import urlparse, parse_qs
+                from urllib.parse import parse_qs, urlparse
+
                 ids = parse_qs(urlparse(self.path).query).get("ids", [""])[0]
                 models = [m for m in ids.split(",") if m]
                 status = {}
@@ -381,15 +409,21 @@ class Handler(BaseHTTPRequestHandler):
                         whisper.append(m)
                 with self.state.asr_io_lock:
                     if whisper:
-                        status.update(self.state.ask(
-                            "_asr_worker", self.state.asr_worker,
-                            {"op": "status", "models": whisper})["status"])
+                        status.update(
+                            self.state.ask(
+                                "_asr_worker",
+                                self.state.asr_worker,
+                                {"op": "status", "models": whisper},
+                            )["status"]
+                        )
                     if mer:
                         # workers key status by their engine-native artifact
                         # name (HF repo); re-key back to the config ids.
                         got = self.state.ask(
-                            "_meralion_worker", self.state.meralion_worker,
-                            {"op": "status", "models": [MERALION_HF[m] for m in mer]})["status"]
+                            "_meralion_worker",
+                            self.state.meralion_worker,
+                            {"op": "status", "models": [MERALION_HF[m] for m in mer]},
+                        )["status"]
                         status.update({m: got[MERALION_HF[m]] for m in mer})
                 self._send_json(200, {"status": status})
             except Exception as e:  # noqa: BLE001
@@ -401,15 +435,23 @@ class Handler(BaseHTTPRequestHandler):
             # its POST. Only ensureRunning probes health, so this cannot
             # keep an unused sidecar alive.
             self.state.touch()
-            self._send_json(200, {
-                "status": "ok",
-                "model": self.state.model,
-                "loaded": any(w is not None for w in (
-                    self.state._asr_worker, self.state._meralion_worker,
-                    self.state._align_worker)),
-            })
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "model": self.state.model,
+                    "loaded": any(
+                        w is not None
+                        for w in (
+                            self.state._asr_worker,
+                            self.state._meralion_worker,
+                            self.state._align_worker,
+                        )
+                    ),
+                },
+            )
         else:
-            self._send_json(404, {"error": "unknown path %s" % self.path})
+            self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def do_POST(self):
         if not self._authorized():
@@ -439,13 +481,12 @@ class Handler(BaseHTTPRequestHandler):
             # a sidecar that survived a JVM crash). Localhost-only server.
             sys.stderr.write("[asr-sidecar] shutdown requested — exiting\n")
             self._send_json(200, {"status": "bye"})
-            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)),
-                             daemon=True).start()
+            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)), daemon=True).start()
             return
         if self.path == "/transcribe":
             self._handle_transcribe()
             return
-        self._send_json(404, {"error": "unknown path %s" % self.path})
+        self._send_json(404, {"error": f"unknown path {self.path}"})
 
     def _handle_transcribe(self):
         """JCLAW-627: GPU ASR via the transcribe.py script env."""
@@ -453,11 +494,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             req = self._read_json()
         except (ValueError, UnicodeDecodeError) as e:
-            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
         audio_path = req.get("audio_path")
         if not audio_path or not os.path.isfile(audio_path):
-            self._send_json(400, {"error": "audio_path missing or not a file: %r" % audio_path})
+            self._send_json(400, {"error": f"audio_path missing or not a file: {audio_path!r}"})
             return
         model = req.get("model") or "large"
         language = req.get("language") or "-"
@@ -470,19 +511,35 @@ class Handler(BaseHTTPRequestHandler):
                 if model in MERALION_HF:
                     # MERaLiON -> plain transcript, then forced-align to segments.
                     text = self.state.ask(
-                        "_meralion_worker", self.state.meralion_worker,
-                        {"audio_path": audio_path, "model": MERALION_HF[model]}).get("text", "")
-                    payload = {"segments": self.state.ask(
-                        "_align_worker", self.state.align_worker,
-                        {"audio_path": audio_path, "text": text}).get("segments", [])}
+                        "_meralion_worker",
+                        self.state.meralion_worker,
+                        {"audio_path": audio_path, "model": MERALION_HF[model]},
+                    ).get("text", "")
+                    payload = {
+                        "segments": self.state.ask(
+                            "_align_worker",
+                            self.state.align_worker,
+                            {"audio_path": audio_path, "text": text},
+                        ).get("segments", [])
+                    }
                 else:
                     payload = self.state.ask(
-                        "_asr_worker", self.state.asr_worker,
-                        {"audio": audio_path, "model": model,
-                         "language": None if language == "-" else language})
-            sys.stderr.write("[asr-sidecar] transcribed %s: %d segment(s) in %.1fs\n"
-                             % (os.path.basename(audio_path),
-                                len(payload.get("segments", [])), time.time() - t0))
+                        "_asr_worker",
+                        self.state.asr_worker,
+                        {
+                            "audio": audio_path,
+                            "model": model,
+                            "language": None if language == "-" else language,
+                        },
+                    )
+            sys.stderr.write(
+                "[asr-sidecar] transcribed %s: %d segment(s) in %.1fs\n"
+                % (
+                    os.path.basename(audio_path),
+                    len(payload.get("segments", [])),
+                    time.time() - t0,
+                )
+            )
             self._send_json(200, payload)
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
@@ -496,6 +553,7 @@ def _prewarm(state: SidecarState):
     transcription doesn't pay `uv sync`. Env resolution only — no model
     load, cheap after the first run."""
     import subprocess
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     steps = [
         (["uv", "sync", "--script", "transcribe.py"], "transcribe env"),
@@ -505,12 +563,16 @@ def _prewarm(state: SidecarState):
             time.sleep(15)  # a real request owns the machine — wait
         try:
             t0 = time.time()
-            proc = subprocess.run(cmd, cwd=script_dir, capture_output=True,
-                                  text=True, timeout=REQUEST_TIMEOUT_SEC)
-            sys.stderr.write("[asr-sidecar] prewarm %s: rc=%d in %.0fs\n"
-                             % (label, proc.returncode, time.time() - t0))
+            proc = subprocess.run(
+                cmd,
+                cwd=script_dir,
+                capture_output=True,
+                text=True,
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+            sys.stderr.write("[asr-sidecar] prewarm %s: rc=%d in %.0fs\n" % (label, proc.returncode, time.time() - t0))
         except Exception as e:  # noqa: BLE001 — prewarm must never hurt
-            sys.stderr.write("[asr-sidecar] prewarm %s failed: %s\n" % (label, e))
+            sys.stderr.write(f"[asr-sidecar] prewarm {label} failed: {e}\n")
     state.touch()  # don't let prewarm time count as idle
 
 
@@ -527,7 +589,7 @@ def _idle_watcher(state: SidecarState):
         if state.run_lock.locked():
             continue
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
-            sys.stderr.write("[asr-sidecar] idle for %.0fs — exiting\n" % state.idle_timeout_s)
+            sys.stderr.write(f"[asr-sidecar] idle for {state.idle_timeout_s:.0f}s — exiting\n")
             os._exit(0)
 
 
@@ -547,10 +609,8 @@ class _ResilientStderr:
             return len(s)
 
     def flush(self):
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
 
     def __getattr__(self, name):
         return getattr(self._raw, name)
@@ -565,8 +625,11 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "asr-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
-    ap.add_argument("--no-auth", action="store_true",
-                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
+    ap.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="serve unauthenticated — for hand-running this sidecar without the JVM",
+    )
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -579,12 +642,9 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
     threading.Thread(target=_prewarm, args=(Handler.state,), daemon=True).start()
-    sys.stderr.write("[asr-sidecar] listening on http://%s:%d (identity=%s)\n"
-                     % (args.host, args.port, args.model))
-    try:
+    sys.stderr.write("[asr-sidecar] listening on http://%s:%d (identity=%s)\n" % (args.host, args.port, args.model))
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

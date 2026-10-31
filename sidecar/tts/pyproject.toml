@@ -9,3 +9,11 @@ requires-python = ">=3.11"
 # the ASR sidecar (sidecar/asr) exactly, but the data direction is inverted:
 # text in, audio bytes out. So this project env has an empty runtime dep set.
 dependencies = []
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"
+
+# Each broad except here carries a noqa: BLE001 marker saying why it is deliberate.
+[tool.ruff.lint]
+extend-select = ["BLE"]

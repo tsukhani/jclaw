@@ -8,3 +8,11 @@ requires-python = ">=3.11"
 # which carries pyannote.audio + torch in its own PEP 723 inline script env.
 # So this project env has an empty runtime dependency set.
 dependencies = []
+
+[tool.ruff]
+line-length = 120
+extend = "../ruff-shared.toml"
+
+# Each broad except here carries a noqa: BLE001 marker saying why it is deliberate.
+[tool.ruff.lint]
+extend-select = ["BLE"]
