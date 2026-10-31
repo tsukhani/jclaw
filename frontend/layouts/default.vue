@@ -62,6 +62,7 @@ const sidebarOpen = ref(typeof globalThis.matchMedia !== 'function' || globalThi
 const isMac = ref(true)
 const paletteOpen = ref(false)
 
+const productName = ref('')
 const apiVersion = ref('')
 const frameworkVersion = ref('')
 const expectedFrameworkVersion = ref('')
@@ -138,6 +139,7 @@ async function checkStatus() {
     const timeout = setTimeout(() => controller.abort(), 5000)
     const data = await $fetch<{
       status: string
+      productName: string
       applicationVersion: string
       frameworkVersion?: string
       expectedFrameworkVersion?: string | null
@@ -150,6 +152,7 @@ async function checkStatus() {
     })
     clearTimeout(timeout)
     if (!probes.isCurrent(request)) return
+    productName.value = data.productName
     apiVersion.value = data.applicationVersion
     // frameworkVersion landed in the StatusResponse alongside the app
     // version so the sidebar can render Play's own version under the
@@ -426,7 +429,7 @@ const navGroups: NavGroup[] = [
         >
           <img
             src="/clawdia.webp"
-            alt="JClaw"
+            :alt="productName"
             class="w-9 h-9 rounded-full"
           >
           <div
@@ -436,8 +439,11 @@ const navGroups: NavGroup[] = [
             <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium">
               Control
             </div>
-            <div class="text-sm font-bold text-emerald-700 dark:text-emerald-400">
-              JClaw Pro
+            <div
+              data-testid="brand-name"
+              class="text-sm font-bold text-emerald-700 dark:text-emerald-400"
+            >
+              {{ productName }}
             </div>
           </div>
         </div>

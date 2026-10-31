@@ -49,6 +49,8 @@ const { data: preflight } = useLazyFetch<UpgradePreflight>('/api/system/upgrade'
 // including the one that installed the version now serving this page.
 const { data: lastStatus } = useLazyFetch<UpgradeStatus | null>('/api/system/upgrade/status')
 
+const { data: appStatus } = useLazyFetch<{ productName: string }>('/api/status')
+
 type Mode = 'idle' | 'working' | 'down' | 'checking'
 const mode = ref<Mode>('idle')
 const live = ref<UpgradeStatus | null>(null)
@@ -124,7 +126,7 @@ async function handleUpgrade() {
 
   const ok = await confirm({
     title: `Upgrade to ${p.latestVersion}`,
-    message: `JClaw ${p.latestVersion} will be downloaded and verified while this instance keeps `
+    message: `Version ${p.latestVersion} will be downloaded and verified while this instance keeps `
       + 'running, then installed and restarted. Your data, workspace, credentials and installed '
       + `apps are preserved, and the database is backed up first. ${interruptionSummary(p)} `
       + 'If the new version fails to start, it is rolled back automatically.',
@@ -284,14 +286,17 @@ const summaryLine = computed(() => {
     <p class="text-xs text-fg-muted">
       Downloads the newest release and installs it in place via <code>jclaw.sh upgrade</code>, then
       restarts. Your database, workspace, credentials, installed apps and edited configuration are
-      kept, and the database is backed up first. The download runs while JClaw keeps serving — you
-      can leave this page and come back.
+      kept, and the database is backed up first. The download runs while this instance keeps
+      serving — you can leave this page and come back.
     </p>
 
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 flex items-center justify-between gap-4">
         <div class="min-w-0">
-          <span class="text-sm font-medium text-fg-strong">JClaw Pro {{ preflight?.currentVersion ?? '' }}</span>
+          <span
+            data-testid="upgrade-current"
+            class="text-sm font-medium text-fg-strong"
+          >{{ appStatus?.productName }} {{ preflight?.currentVersion ?? '' }}</span>
           <div class="text-xs text-fg-muted mt-0.5">
             {{ summaryLine }}
           </div>

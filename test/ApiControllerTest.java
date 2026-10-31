@@ -15,6 +15,15 @@ class ApiControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"applicationVersion\""), "must echo version: " + body);
     }
 
+    @Test
+    void statusNamesTheFreeBuildAndTheProductTheSpaRenders() {
+        var resp = GET("/api/status");
+        assertIsOk(resp);
+        var body = com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        assertEquals("free", body.get("build").getAsString());
+        assertEquals("JClaw", body.get("productName").getAsString());
+    }
+
     /**
      * The build id is the first triage question on any "I'm seeing stale JS"
      * report (JCLAW-886): it separates a caching problem from a deploy that

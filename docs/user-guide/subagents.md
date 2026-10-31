@@ -333,7 +333,7 @@ Killed runs do not get an announce card. The `/subagent kill` response *is* your
 :::
 
 :::tip Scoping
-Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so the [Subagents](/subagents) page shows and controls every run on the instance. The same is true of `/subagent info`, `log`, and `kill`. `/subagent list` stays scoped to the current conversation, and `history` stays scoped to runs the current agent spawned.
+Every subagent run belongs to you. JClaw has a single **admin** operator, so the [Subagents](/subagents) page shows and controls every run on the instance. The same is true of `/subagent info`, `log`, and `kill`. `/subagent list` stays scoped to the current conversation, and `history` stays scoped to runs the current agent spawned.
 :::
 
 ## Where coding output lands

@@ -26,7 +26,12 @@ let preflight: Record<string, unknown>
 let status: Record<string, unknown> | null
 let upgradePosts = 0
 let preflightQueries: Record<string, unknown>[] = []
+let statusEndpointUp = true
 
+registerEndpoint('/api/status', () => {
+  if (!statusEndpointUp) throw new Error('backend down')
+  return { status: 'ok', productName: 'Name From Backend' }
+})
 registerEndpoint('/api/system/upgrade', {
   method: 'GET',
   handler: (event) => {
@@ -82,15 +87,24 @@ beforeEach(() => {
   preflightQueries = []
   preflight = available()
   status = null
+  statusEndpointUp = true
   document.body.innerHTML = ''
 })
 
 describe('SettingsUpgradePanel — availability', () => {
-  it('names the edition beside the installed version', async () => {
+  it('renders the name the status endpoint supplies beside the installed version', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    expect(c.text()).toContain('JClaw Pro 0.17.49')
+    expect(c.find('[data-testid="upgrade-current"]').text()).toBe('Name From Backend 0.17.49')
+  })
+
+  it('holds no name of its own while the status endpoint cannot answer', async () => {
+    statusEndpointUp = false
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="upgrade-current"]').text()).toBe('0.17.49')
   })
 
   it('explains why a source checkout cannot upgrade, and offers no button', async () => {

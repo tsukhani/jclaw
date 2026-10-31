@@ -54,10 +54,18 @@ public class ApiController extends Controller {
      *                                 that gate every restart minted a new id
      *                                 and the field would have reported churn
      *                                 rather than change.
+     * @param build                    which build is running
+     * @param productName              the name the sidebar brand and the Upgrade
+     *                                 panel render
      */
     public record StatusResponse(String status, String application, String mode,
                                   String applicationVersion, String frameworkVersion,
-                                  @Nullable String expectedFrameworkVersion, @Nullable String spaBuildId) {}
+                                  @Nullable String expectedFrameworkVersion, @Nullable String spaBuildId,
+                                  String build, String productName) {}
+
+    private static final String BUILD = "free";
+    // Constant rather than application.name: no config value may decide what a build calls itself.
+    private static final String PRODUCT_NAME = "JClaw";
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")
@@ -70,7 +78,9 @@ public class ApiController extends Controller {
                 Play.configuration.getProperty("application.version", "0.0.0"),
                 Play.version,
                 readExpectedFrameworkVersion(),
-                readSpaBuildId());
+                readSpaBuildId(),
+                BUILD,
+                PRODUCT_NAME);
         renderJSON(GSON.toJson(resp));
     }
 
