@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, blockedReason, expired, transition, waitingOn as waitingFor, writeAtomically, type BoardBlocker, type Entry, type State, type Story } from "./board.ts";
 import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
+import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
 import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf } from "./jira-intake.ts";
@@ -190,6 +191,51 @@ check("an unknown prediction holds the real diff once built", heldBy("R", { pred
 check("a build that changed nothing holds no files", heldBy("E", { predicted: new Set(["a"]), built: true }), []);
 check("implement, build and rework complete the build phase; spec, gates, repairs, review and brief do not",
   ["implement", "build", "rework", "spec", "gate-1", "repair-1", "review", "gate-review", "brief", "merge"].filter(buildsTheDiff), ["implement", "build", "rework"]);
+
+// The scripted sandbox behind checkGate: the check's exit code on the branch and on main, and whether jclaw.sh has it.
+const scriptedCheck = (onBranch: number, main: number, hasCommand = true) => {
+  const ran: string[] = [];
+  let baseline = false;
+  const exec = async (command: string) => {
+    if (command.startsWith("grep -q")) return { stdout: "", exitCode: hasCommand ? 0 : 1 };
+    if (command.startsWith("tail")) return { stdout: "Wildcard imports are banned", exitCode: 0 };
+    ran.push(baseline ? "main" : "branch");
+    return { stdout: "", exitCode: baseline ? main : onBranch };
+  };
+  const onMain = async <T>(body: () => Promise<T>): Promise<T> => {
+    baseline = true;
+    try { return await body(); } finally { baseline = false; }
+  };
+  return { exec, onMain, ran };
+};
+const runCheck = async (onBranch: number, main: number, hasCommand = true) => {
+  const s = scriptedCheck(onBranch, main, hasCommand);
+  const result = await checkGate(s.exec, s.onMain);
+  return { ...result, fresh: result.fresh.map((d) => `${d.kind}: ${d.message}`), ran: s.ran };
+};
+check("a branch that passes the check runs it once and has nothing to report", await runCheck(0, 0),
+  { fresh: [], environment: [], summary: "check passed", ran: ["branch"] });
+check("a failure new to the branch reports the check's own output", await runCheck(1, 0),
+  { fresh: ["check: ./jclaw.sh check --backend-only failed:\nWildcard imports are banned"], environment: [],
+    summary: "check failed, so the tests did not run", ran: ["branch", "main"] });
+check("a check that also fails on main is the environment, and is not handed to the agent", await runCheck(1, 1),
+  { fresh: [], environment: ["jclaw.sh check"], summary: "check also fails on main, so it is not counted", ran: ["branch", "main"] });
+check("a branch that predates the command does not run it", await runCheck(0, 0, false),
+  { fresh: [], environment: [], summary: "check not run: this branch predates it", ran: [] });
+const withCheck = async (outcome: Awaited<ReturnType<typeof checkGate>>) => {
+  const seen: string[] = [];
+  const failures = await checkFirst(async () => outcome, (r) => seen.push(r.summary),
+    async () => (seen.push("tests ran"), [{ kind: "test", file: null, line: null, message: "red" }]));
+  return { seen, failures: failures.map((f) => f.kind) };
+};
+const failedCheck = { fresh: [{ kind: "check", file: null, line: null, message: "x" }], environment: [], summary: "check failed" };
+check("a failed check goes to repair without starting the tests", await withCheck(failedCheck),
+  { seen: ["check failed"], failures: ["check"] });
+check("a clean check runs the tests", await withCheck({ fresh: [], environment: [], summary: "check passed" }),
+  { seen: ["check passed", "tests ran"], failures: ["test"] });
+check("a check that fails on main too still runs the tests",
+  await withCheck({ fresh: [], environment: ["jclaw.sh check"], summary: "also on main" }),
+  { seen: ["also on main", "tests ran"], failures: ["test"] });
 
 check("sensitive paths are flagged, ordinary ones are not",
   sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md", "docs/agents/capabilities.md", ".codex/hooks.json", "bin/policy-guard.mjs", "bin/select-tests.test.mjs"]),

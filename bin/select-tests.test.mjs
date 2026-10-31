@@ -5,7 +5,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { classOfPath, dependents, outerClass, parseJdeps, routesOf, select } from "./select-tests.mjs";
+import { classOfPath, dependents, isRuleCheck, outerClass, parseJdeps, routesOf, select } from "./select-tests.mjs";
 
 const JDEPS = `build/classes/java/test -> build/classes/java/main
    MemoryToolTest                                     -> tools.MemoryTool                                   main
@@ -109,4 +109,11 @@ test("a Markdown file selects only the tests that name its path, not every test 
 
 test("a deleted class selects nothing by itself: the compile catches what still referred to it", () => {
   strictEqual(select([{ status: "D", path: "app/utils/Gone.java" }], graph(), false).mode, "none");
+});
+
+test("the rule checks are the three named classes and every conformance class", () => {
+  const tests = ["ArchitectureTest", "CapabilityRulesTest", "WallClockDisciplineTest", "SpaBuildInputsConformanceTest",
+    "MemoryToolTest", "ConformanceHelperTest"];
+  deepStrictEqual(tests.filter(isRuleCheck),
+    ["ArchitectureTest", "CapabilityRulesTest", "WallClockDisciplineTest", "SpaBuildInputsConformanceTest"]);
 });

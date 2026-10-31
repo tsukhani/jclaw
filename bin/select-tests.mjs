@@ -12,11 +12,13 @@ const MAIN_CLASSES = join(PROJECT_ROOT, "build", "classes", "java", "main");
 const TEST_CLASSES = join(PROJECT_ROOT, "build", "classes", "java", "test");
 
 const USAGE = `Usage: node bin/select-tests.mjs [--base REF] [--head REF] [--depth N] [--json]
+       node bin/select-tests.mjs --rules
 
   --base REF   compare against this commit (default origin/main); the diff is base...head
   --head REF   the change to test (default HEAD)
   --depth N    follow dependents N hops above a changed class (default 2; Infinity for all)
   --json       print {mode, tests, fullBecause, reasons} instead of the -Ptests list
+  --rules      print the rule checks alone, for ./jclaw.sh check-arch; needs no compiled classes
 
 Prints ALL, NONE, or a comma-separated class list for ./gradlew playAutotest -Ptests=.
 Exit: 0 printed a selection, 2 the selection could not be made (no compiled classes, git failed).`;
@@ -24,6 +26,7 @@ Exit: 0 printed a selection, 2 the selection could not be made (no compiled clas
 // Rule checks guard the whole tree, not one class, so every gate runs them.
 const ALWAYS = ["ArchitectureTest", "CapabilityRulesTest", "WallClockDisciplineTest"];
 const ALWAYS_SUFFIX = "ConformanceTest";
+export const isRuleCheck = (test) => ALWAYS.includes(test) || test.endsWith(ALWAYS_SUFFIX);
 
 // A change to any of these reaches tests no class graph shows.
 const FULL_PATHS = [/^conf\/(?!application\.conf$)/, /^build\.gradle\.kts$/, /^settings\.gradle\.kts$/, /^\.play-version$/,
@@ -145,7 +148,7 @@ export function select(changes, graph, versionOnlyConf, maxDepth = Infinity) {
   }
   if (reasons.size === 0 && changedClasses.size === 0) return { mode: "none", tests: [], fullBecause, reasons: {} };
   for (const test of graph.tests) {
-    if (ALWAYS.includes(test) || test.endsWith(ALWAYS_SUFFIX)) note(test, "rule check");
+    if (isRuleCheck(test)) note(test, "rule check");
   }
   const tests = [...reasons.keys()].sort();
   return { mode: "some", tests, fullBecause, reasons: Object.fromEntries([...reasons].sort()) };
@@ -201,6 +204,10 @@ function main(argv) {
     if (argv[i] === "--base") base = argv[++i];
     else if (argv[i] === "--head") head = argv[++i];
     else if (argv[i] === "--json") json = true;
+    else if (argv[i] === "--rules") {
+      process.stdout.write(`${testClassNames().filter(isRuleCheck).join(",")}\n`);
+      return;
+    }
     else if (argv[i] === "--depth") depth = Number(argv[++i]);
     else {
       process.stderr.write(`${USAGE}\n`);

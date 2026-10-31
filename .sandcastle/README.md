@@ -59,7 +59,9 @@ lockfile changes. Every two minutes it:
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
    - **Implement**, or **rework** if you sent it back. A story that needs BMAD is **specced**, then **built**, by
      BMAD instead (see [BMAD stories](#bmad-stories)).
-   - **Gate:** the backend test classes the branch reaches, as `bin/select-tests.mjs` picks them against `main`;
+   - **Gate:** first `./jclaw.sh check --backend-only`, whose wildcard-import and import-order checks nothing else in
+     the gate runs. A failure goes to a repair round without starting the tests, unless it also fails on `main`. Then
+     the backend test classes the branch reaches, as `bin/select-tests.mjs` picks them against `main`;
      Jenkins runs the full suite once the work is pushed. A failing class is re-run alone. If it passes alone, or
      also fails on `main`, it is not counted, but the brief names it. There are up to two repair rounds and a
      30-minute deadline. A branch that changes

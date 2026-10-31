@@ -17,6 +17,7 @@ import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTI
 import { Board, autoMerges, blockedReason, waitingOn, type About } from "./board.ts";
 import { nextBlockers, outsideBlockers } from "./blockers.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
+import { checkFirst, checkGate } from "./check-gate.ts";
 import { frontendGate, type Diagnostic } from "./frontend-gate.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
@@ -111,8 +112,13 @@ const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
     }
   };
   // The suite runs here, not in the agent: a blocking multi-minute Bash call would trip the idle timeout.
-  return async (label: string): Promise<Diagnostic[]> =>
-    log.timed(label, async () => {
+  return async (label: string): Promise<Diagnostic[]> => checkFirst(
+    () => log.timed(`${label}-check`, () => checkGate((command) => sandbox.exec(command), onMain)),
+    (check) => {
+      for (const failing of check.environment) log.environmentFailures.add(failing);
+      if (check.fresh.length > 0 || check.environment.length > 0) log.gates.push(`${label}: ${check.summary}`);
+    },
+    () => log.timed(label, async () => {
       // A branch built before diagnostics took --select would refuse it (exit 2), so it runs the whole suite.
       const select = (await sandbox.exec("grep -q -e '--select' bin/diagnostics.mjs")).exitCode === 0 ? " --select main" : "";
       const run = await sandbox.exec(`timeout ${GATE_DEADLINE_SECONDS} ./jclaw.sh diagnostics --tests${select} --out /tmp/diag.json > /tmp/gate.log 2>&1`);
@@ -141,7 +147,8 @@ const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
       for (const failure of frontend.flakes) log.flakes.push({ gate: label, failure });
       log.gates.push(`${label}: ${scope}; ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}; ${frontend.summary}`);
       return [...fresh, ...frontend.fresh];
-    });
+    }),
+  );
 };
 
 const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> => {
@@ -252,7 +259,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     let failures = await gate("gate-1");
     for (let round = 1; failures.length > 0 && round <= MAX_REPAIRS; round++) {
       const message =
-        `The harness ran the full suite on branch ${branch} (ticket ${key}) and these failures are new relative to main. ` +
+        `The harness's gate on branch ${branch} (ticket ${key}) found these failures, new relative to main. ` +
         `Fix them, re-run the affected classes or frontend checks, commit, then output <promise>COMPLETE</promise>.\n\n${JSON.stringify(failures, null, 2)}`;
       const options = { idleTimeoutSeconds: 1200, logging: logTo(`repair-${round}`) };
       const previous = current;

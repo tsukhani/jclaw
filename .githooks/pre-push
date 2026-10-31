@@ -108,45 +108,11 @@ if should_skip_for_docs; then
     exit 0
 fi
 
-# Import-hygiene gate (code-audit follow-up): app/ and test/ must have no wildcard
-# imports, and import order must be canonical (Spotless). Both are fast — run them
-# before the slower test suite so a hygiene slip fails the push immediately.
-wildcards=$(cd "$repo_root" && grep -rlE '^import (static )?[a-z][[:alnum:]_.]*\.\*;' app/ test/ 2>/dev/null || true)
-if [[ -n "$wildcards" ]]; then
-    echo "[jclaw pre-push] Wildcard imports are banned in app/ and test/ — found in:" >&2
-    echo "$wildcards" >&2
-    echo "[jclaw pre-push] Replace them with explicit imports, then re-commit." >&2
-    exit 1
-fi
-echo "[jclaw pre-push] Checking import order (spotlessCheck)..."
-# Capture rather than stream so the failure can be classified before this hook
-# names a cause. spotlessCheck exits non-zero for anything that stops the build,
-# including failures during Gradle *configuration* that run no Spotless task at
-# all — the .play-version/fork-mismatch guard in build.gradle.kts is one. This
-# hook used to report every such exit as "Import order drift", which sent the
-# v0.17.8 release chasing a spotlessApply that could not have fixed it.
-# Assigning inside the `if` keeps `set -e` from aborting before we can report.
-if ! spotless_out=$(cd "$repo_root" && ./gradlew --quiet spotlessCheck 2>&1); then
-    printf '%s\n' "$spotless_out" >&2
-    if printf '%s' "$spotless_out" | grep -q 'format violations'; then
-        echo "[jclaw pre-push] Import drift in app/ or test/ — run ./gradlew spotlessApply, then re-commit." >&2
-    else
-        echo "[jclaw pre-push] spotlessCheck failed without reporting format violations." >&2
-        echo "[jclaw pre-push] See the Gradle output above for the real cause; spotlessApply will not fix it." >&2
-    fi
-    exit 1
-fi
-
-# JCLAW-1149: nullness gate. Play's ECJ compile cannot host a javac plugin, so the Gradle
-# compileJava is the only place NullAway runs. The suite below reaches it through the play
-# CLI's task graph too, but this step fails in ~10 s instead of after the suite's own compile.
-echo "[jclaw pre-push] Checking nullness (NullAway on compileJava)..."
-if ! nullaway_out=$(cd "$repo_root" && ./gradlew --quiet compileJava 2>&1); then
-    printf '%s\n' "$nullaway_out" >&2
-    echo "[jclaw pre-push] compileJava failed — see the output above." >&2
-    if printf '%s' "$nullaway_out" | grep -q '\[NullAway\]'; then
-        echo "[jclaw pre-push] Annotate the nullable contract (@Nullable / @NullMarked), then re-commit." >&2
-    fi
+# The fast checks run before the slower suite, so a wildcard import, an import-order slip or a nullness error
+# fails the push in seconds.
+echo "[jclaw pre-push] Running the fast checks..."
+if ! (cd "$repo_root" && ./jclaw.sh check --backend-only); then
+    echo "[jclaw pre-push] The fast checks failed: see the output above." >&2
     exit 1
 fi
 

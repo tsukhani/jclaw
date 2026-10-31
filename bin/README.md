@@ -120,6 +120,8 @@ takes about a second. It prints one of three things:
 A deleted class selects nothing by itself, because the compile catches whatever still referred to it. The full
 suite is Jenkins' job: anything further than the selected depth is caught there.
 
+`--rules` prints the rule checks alone, for `./jclaw.sh check-arch`, and needs no compiled classes.
+
 Exit 0 printed a selection; exit 2 means there were no compiled classes, or git or jdeps failed.
 
 ## policy-guard.mjs
@@ -148,7 +150,8 @@ The command layer refuses:
 Both layers pass only `git push origin|github HEAD` from the main checkout on `main` when HEAD's subject is exactly
 `Release vX.Y.Z`, a version tag pushed alone, and the deletion of `renovate/*` branches on `origin`.
 
-It reads flags, not text: a commit message or heredoc that mentions a refused flag passes. It stops drift and accidents,
+It reads flags, not text: a commit message or heredoc that mentions a refused flag passes. It judges HEAD when the call
+starts, so `git commit … && git push` in one call is refused, and it fails closed on a `cd` it cannot resolve. It stops drift and accidents,
 not an agent that writes a refused command into a script and runs it, though the ref layer still sees that script's push
 unless it skips hooks. `pkill` and `killall`, a `sed` into a skill and Codex's `apply_patch` edits are not checked. If
 the guard itself fails, the hook refuses only calls that mention what it guards, and the ref layer refuses the push.

@@ -141,7 +141,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|scrapetest|grapheval|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|scrapetest|grapheval|evals|diagnostics|check|check-arch|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -189,6 +189,11 @@ Commands:
             Compile (and optionally test) and print every compile error,
             test failure and ArchUnit violation as one JSON array — the
             machine-readable form of what 'test' prints for a human.
+  check     Run what fails without running a test: wildcard imports,
+            import order, the compile with NullAway, ESLint, Stylelint and
+            the typecheck. --backend-only leaves the frontend out.
+  check-arch
+            Run the ArchUnit and conformance test classes alone.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
             and frontend quality gates (stylelint, lint, typecheck), and
             report a consolidated pass/fail summary. Exits non-zero on any
@@ -415,7 +420,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|check|check-arch|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -447,6 +452,8 @@ usage_for() {
         grapheval) usage_grapheval ;;
         evals)    usage_evals    ;;
         diagnostics) usage_diagnostics ;;
+        check)    usage_check    ;;
+        check-arch) usage_check_arch ;;
         test)     usage_test     ;;
         e2e)      usage_e2e      ;;
         dist)     usage_dist     ;;
@@ -1282,6 +1289,57 @@ EOF
     fi
 }
 
+usage_check() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: ${INVOKE} check [--backend-only]
+
+Run what fails without running a test: the wildcard-import grep, spotlessCheck,
+compileJava with NullAway, ESLint, Stylelint and the typecheck. Every check
+runs, so one pass names everything to fix. Logs at logs/check-*.log. Exits
+non-zero if any check fails.
+
+  --backend-only   Leave the frontend checks out
+
+Example:
+  ${INVOKE} check
+EOF
+    else
+        cat <<EOF
+Usage: ${INVOKE} check
+
+Not available in this distribution. The 'check' command compiles from source
+and lints the frontend of a developer checkout; neither ships in a 'play dist'
+tarball.
+
+For the full list of commands in this distribution: ${INVOKE} help
+EOF
+    fi
+}
+
+usage_check_arch() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: ${INVOKE} check-arch
+
+Run the ArchUnit and conformance test classes alone, the rule checks every gate
+runs (bin/select-tests.mjs --rules), and print the summary 'test' prints.
+
+Example:
+  ${INVOKE} check-arch
+EOF
+    else
+        cat <<EOF
+Usage: ${INVOKE} check-arch
+
+Not available in this distribution. The 'check-arch' command runs test classes,
+and the test/ directory does not ship in a 'play dist' tarball.
+
+For the full list of commands in this distribution: ${INVOKE} help
+EOF
+    fi
+}
+
 usage_test() {
     if is_developer_clone; then
         cat <<EOF
@@ -1754,7 +1812,7 @@ while [[ $# -gt 0 ]]; do
             AOT_ARGS=("$@")
             break
             ;;
-        setup|init-worktree|loadtest|test|e2e|dist|bundle)
+        setup|init-worktree|loadtest|check|check-arch|test|e2e|dist|bundle)
             # Developer-only commands. Available on a `git clone` because
             # they touch repo state (hooks, fixtures, frontend deps); not
             # available on a `play dist` install where there's no .git
@@ -5492,7 +5550,7 @@ do_test() {
         echo "==> Running backend tests (play autotest)..."
         play autotest 2>&1 | tee "$backend_log"
     else
-        echo "==> Running the $(printf '%s\n' "$backend_scope" | tr ',' '\n' | wc -l | tr -d ' ') backend test classes the change reaches..."
+        echo "==> Running the $(printf '%s\n' "$backend_scope" | tr ',' '\n' | wc -l | tr -d ' ') selected backend test classes..."
         ./gradlew playAutotest -Ptests="$backend_scope" 2>&1 | tee "$backend_log"
     fi
     backend_rc=${PIPESTATUS[0]}
@@ -5630,6 +5688,88 @@ do_test() {
     fi
 }
 
+# What a failed do_check step should send the reader to.
+check_hint() {
+    case "$1" in
+        spotless)
+            # spotlessCheck exits non-zero for anything that stops the build, including failures during
+            # Gradle *configuration* that run no Spotless task at all: the .play-version/fork-mismatch
+            # guard in build.gradle.kts is one. Reporting every such exit as import drift sent the
+            # v0.17.8 release chasing a spotlessApply that could not have fixed it.
+            if grep -q 'format violations' "$2"; then
+                echo "    Import drift in app/ or test/: run ./gradlew spotlessApply, then commit again." >&2
+            else
+                echo "    spotlessCheck failed without reporting format violations." >&2
+                echo "    See the Gradle output above for the real cause; spotlessApply will not fix it." >&2
+            fi
+            ;;
+        compile)
+            if grep -q '\[NullAway\]' "$2"; then
+                echo "    Annotate the nullable contract (@Nullable / @NullMarked), then commit again." >&2
+            fi
+            ;;
+        wildcards)
+            echo "    Replace them with explicit imports, then commit again." >&2
+            ;;
+    esac
+}
+
+# One do_check step: its output goes to logs/check-<name>.log, and to stderr when it fails.
+check_step() {
+    local name="$1" log="$SCRIPT_DIR/logs/check-$1.log" t0 elapsed rc=0
+    shift
+    t0=$(date +%s.%N)
+    "$@" > "$log" 2>&1 || rc=$?
+    elapsed=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
+    if [[ "$rc" -eq 0 ]]; then
+        printf ' %-10s: PASSED  (%ss)\n' "$name" "$elapsed"
+    else
+        printf ' %-10s: FAILED  (%ss)\n' "$name" "$elapsed"
+        cat "$log" >&2
+        check_hint "$name" "$log"
+        CHECK_FAILED=1
+    fi
+}
+
+check_wildcard_imports() {
+    local found
+    found=$(grep -rlE '^import (static )?[a-z][[:alnum:]_.]*\.\*;' app/ test/ 2>/dev/null || true)
+    [[ -z "$found" ]] && return 0
+    echo "Wildcard imports are banned in app/ and test/. Found in:"
+    echo "$found"
+    return 1
+}
+
+frontend_script() {
+    (cd "$SCRIPT_DIR/frontend" && pnpm "$@")
+}
+
+# The fast tier: what fails without running a test. Every step runs, so one pass names everything to fix. The
+# pre-push hook and the factory's gate call it with --backend-only, since a frontend check belongs to their own gates.
+do_check() {
+    cd "$SCRIPT_DIR"
+    mkdir -p "$SCRIPT_DIR/logs"
+    CHECK_FAILED=0
+    check_step wildcards check_wildcard_imports
+    check_step spotless ./gradlew --quiet spotlessCheck
+    # JCLAW-1149: Play's ECJ compile cannot host a javac plugin, so the Gradle compileJava is the only place NullAway runs.
+    check_step compile ./gradlew --quiet compileJava
+    if [[ "$BACKEND_ONLY" != true ]]; then
+        # The typecheck reads the generated .nuxt, which a fresh tree does not have.
+        [[ -d "$SCRIPT_DIR/frontend/.nuxt" ]] || check_step prepare frontend_script exec nuxi prepare
+        check_step eslint frontend_script lint
+        check_step stylelint frontend_script stylelint
+        check_step typecheck frontend_script typecheck
+    fi
+    [[ "$CHECK_FAILED" -eq 0 ]] || exit 1
+}
+
+do_check_arch() {
+    local rules
+    rules=$(node "$SCRIPT_DIR/bin/select-tests.mjs" --rules)
+    JCLAW_TEST_BACKEND="$rules" JCLAW_TEST_FRONTEND=0 do_test
+}
+
 # Emit a shell completion script for `jclaw` (the installed shim) and `jclaw.sh`.
 # The completable command + option lists track this install's audience, so a
 # dist exposes the end-user surface and a developer clone the full one — driven
@@ -5664,6 +5804,8 @@ do_completion() {
             grapheval     "Certify graph-extraction decision models"
             evals         "Validate or score the eval dataset"
             diagnostics   "Report build and test failures as JSON"
+            check         "Run what fails without running a test"
+            check-arch    "Run the ArchUnit and conformance tests"
             test          "Run backend + frontend tests"
             e2e           "Run the Playwright end-to-end suite"
             dist          "Build the developer-distribution zip"
@@ -7142,6 +7284,14 @@ case "$COMMAND" in
         ;;
     diagnostics)
         do_diagnostics
+        ;;
+    check)
+        check_prereqs
+        do_check
+        ;;
+    check-arch)
+        check_prereqs
+        do_check_arch
         ;;
     test)
         check_prereqs

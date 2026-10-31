@@ -25,6 +25,7 @@ Rules the reviewer asked for on earlier stories. Follow them.
 - `./jclaw.sh diagnostics` prints compile errors as a JSON array; `[]` means the tree compiles.
 - `./gradlew playAutotest -Ptests=ClassA,ClassB` runs chosen test classes (about a minute). Never pipe it; afterwards check `ls test-result | grep failed.html`.
 - `./gradlew spotlessApply` after any change that moves imports.
+- `./jclaw.sh check --backend-only` runs the wildcard-import, import-order and compile checks the harness runs before the tests.
 - Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits and branch switches. That is expected: the repository's shared metadata is read-only in this sandbox, and the commit or switch still succeeded (`git log -1` shows it).
 - Do NOT run the full suite (`play autotest` with no filter, `./jclaw.sh test`, `./jclaw.sh diagnostics --tests`). After you finish, the harness runs the test classes your change reaches, and the rule checks, and hands you any failures; Jenkins runs the full suite once the work is pushed.
 
