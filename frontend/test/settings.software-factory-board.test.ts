@@ -7,8 +7,8 @@ import { createError } from 'h3'
 import SettingsSoftwareFactoryPanel from '~/components/settings/SettingsSoftwareFactoryPanel.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import {
-  MAX_INDENT_DEPTH, boardGroups, elapsed, groupStories, mergedLabel, outsideDetail, rowIndent, waitingRows,
-  type BoardBlocker, type BoardStory, type StatusView, type StoryRow,
+  boardGroups, elapsed, groupStories, mergedLabel, outsideBadge, outsideDetail, outsideSpoken, storyDetail, treeGutter, treeStem,
+  waitingRows, type BoardBlocker, type BoardStory, type OutsideStoryRow, type StatusView, type StoryRow,
 } from '~/components/settings/factory-board'
 
 /**
@@ -296,11 +296,54 @@ describe('factory-board helpers', () => {
     expect(groups.find(g => g.id === 'merged')!.rows.map(r => r.depth)).toEqual([0, 0, 0])
   })
 
-  it('caps the indent, and says why an outside story is not built, its status and what blocks it', () => {
-    expect([0, 1, 3, MAX_INDENT_DEPTH, MAX_INDENT_DEPTH + 1, 9].map(rowIndent)).toEqual(['1rem', '1.75rem', '3.25rem', '5.5rem', '5.5rem', '5.5rem'])
-    expect(outsideDetail(outside('X', { blockedBy: ['JCLAW-1377', 'JCLAW-1378'] }))).toBe('labelled no-afk · To Do · blocked by JCLAW-1377, JCLAW-1378')
-    expect(outsideDetail(outside('X', { reason: 'In Progress', status: 'In Progress' }))).toBe('In Progress')
-    expect(outsideDetail(outside('X', { reason: null, status: null, blockedBy: null }))).toBe('')
+  it('draws each row\'s lines: a guide per ancestor column still running, then its own elbow', () => {
+    expect(Object.fromEntries(waitingRows(chainStories(), chainBlockers()).map(r => [r.key, treeGutter(r)]))).toEqual({
+      'JCLAW-1377': [],
+      'JCLAW-1378': ['end'],
+      'JCLAW-1380': ['blank', 'end'],
+      'JCLAW-1346': ['blank', 'blank', 'end'],
+      'JCLAW-1347': ['blank', 'blank', 'blank', 'tee'],
+      'JCLAW-1351': ['blank', 'blank', 'blank', 'pipe', 'end'],
+      'JCLAW-1381': ['blank', 'blank', 'blank', 'end'],
+      'JCLAW-1382': ['blank', 'blank', 'blank', 'blank', 'end'],
+    })
+  })
+
+  it('runs a parent\'s line past a child that has a later sibling, and ends it at the last', () => {
+    const rows = waitingRows([story({ key: 'A', state: 'waiting' }), waitingOn('B', 'A'), waitingOn('C', 'B'), waitingOn('D', 'A')], [])
+    expect(rows.map(r => [r.key, treeGutter(r), r.parent, r.hasChildren])).toEqual([
+      ['A', [], null, true], ['B', ['tee'], 'A', true], ['C', ['pipe', 'end'], 'B', false], ['D', ['end'], 'A', false],
+    ])
+  })
+
+  it('drops a stem where a row\'s children\'s elbows sit, and draws a deep chain\'s nearest six columns with no stem', () => {
+    const stems = Object.fromEntries(waitingRows(chainStories(), chainBlockers()).map(r => [r.key, treeStem(r)]))
+    expect([stems['JCLAW-1377'], stems['JCLAW-1346'], stems['JCLAW-1382']]).toEqual(['0.75rem', '3.75rem', null])
+    const deep = waitingRows(Array.from({ length: 9 }, (_, i) => (i === 0 ? story({ key: 'D-0', state: 'waiting' }) : waitingOn(`D-${i}`, `D-${i - 1}`))), [])
+    expect(deep.map(r => treeGutter(r).length)).toEqual([0, 1, 2, 3, 4, 5, 6, 6, 6])
+    expect(deep.map(r => treeStem(r))).toEqual(['0.75rem', '1.75rem', '2.75rem', '3.75rem', '4.75rem', '5.75rem', null, null, null])
+  })
+
+  it('names only the blockers besides the one a row hangs from, and every blocker where it hangs from none', () => {
+    const rows = waitingRows([...chainStories(), waitingOn('JCLAW-1390', 'JCLAW-1346', 'JCLAW-1347'), waitingOn('JCLAW-1391', 'JCLAW-9')], chainBlockers())
+    const detail = (key: string) => {
+      const r = rows.find(x => x.key === key)!
+      return r.kind === 'story' ? storyDetail(r) : outsideDetail(r)
+    }
+    expect(['JCLAW-1346', 'JCLAW-1390', 'JCLAW-1391', 'JCLAW-1380', 'JCLAW-1378', 'JCLAW-1377'].map(detail))
+      .toEqual(['', 'also blocked by JCLAW-1346', 'blocked by JCLAW-9 (To Do)', 'also blocked by JCLAW-1377', '', ''])
+    const refused = boardGroups(stories(), []).find(g => g.id === 'blocked')!.rows.find(r => r.key === 'JCLAW-5')!
+    expect(refused.kind === 'story' && storyDetail(refused)).toBe('gate failed')
+  })
+
+  it('badges why an outside story is not built, shows its status only when that is news, and speaks it all', () => {
+    expect(['labelled no-afk', 'labelled wont-do', 'not labelled afk', 'In Progress', null].map(reason => outsideBadge(outside('X', { reason }))))
+      .toEqual(['no-afk', 'wont-do', 'not labelled afk', 'In Progress', 'outside the factory'])
+    const root = (over: Partial<BoardBlocker>) => waitingRows([], [outside('X', over)])[0] as OutsideStoryRow
+    expect([root({ status: 'In Progress' }), root({ reason: 'In Progress', status: 'In Progress' }), root({ blockedBy: ['Y'] }), root({ status: null, blockedBy: null })]
+      .map(outsideDetail)).toEqual(['In Progress', '', 'blocked by Y', ''])
+    expect(outsideSpoken(outside('X', { blockedBy: ['JCLAW-1377', 'JCLAW-1378'] })))
+      .toBe('Outside the factory, labelled no-afk, To Do, blocked by JCLAW-1377, JCLAW-1378')
   })
 })
 
@@ -360,9 +403,18 @@ describe('Settings — Software Factory panel', () => {
     ])
     const row1380 = waiting.find('[data-testid="factory-outside-JCLAW-1380"]')
     expect(row1380.element.tagName).toBe('DIV')
-    expect(row1380.text()).toBe('JCLAW-1380Summary of JCLAW-1380Outside the factorylabelled no-afk · To Do · blocked by JCLAW-1377, JCLAW-1378')
-    expect(waiting.find('[data-testid="factory-outside-JCLAW-1377"] [data-testid="factory-outside-detail"]').text()).toBe('labelled no-afk · To Do')
-    expect(waiting.find('[data-testid="factory-story-JCLAW-1346"]').text()).toBe('JCLAW-1346Summary of JCLAW-1346blocked by JCLAW-1380 (To Do)')
+    expect(row1380.text()).toBe(
+      'JCLAW-1380Summary of JCLAW-1380no-afkalso blocked by JCLAW-1377Outside the factory, labelled no-afk, To Do, blocked by JCLAW-1377, JCLAW-1378')
+    expect(waiting.find('[data-testid="factory-outside-JCLAW-1377"] [data-testid="factory-outside-detail"]').exists()).toBe(false)
+    const row1346 = waiting.find('[data-testid="factory-story-JCLAW-1346"]')
+    expect(row1346.text()).toBe('JCLAW-1346Summary of JCLAW-1346blocked by JCLAW-1380 (To Do)')
+    expect(row1346.find('[data-testid="factory-story-detail"]').exists()).toBe(false)
+    expect(row1346.find('.sr-only').text()).toBe('blocked by JCLAW-1380 (To Do)')
+    expect(row1346.find('[data-testid="factory-tree-stem"]').attributes('style')).toBe('left: 3.75rem;')
+    expect(waiting.findAll('[data-testid="factory-story-JCLAW-1351"] [data-testid="factory-tree-cell"]').map(cell => cell.attributes('data-cell')))
+      .toEqual(['blank', 'blank', 'blank', 'pipe', 'end'])
+    expect(waiting.find('ul').classes()).toEqual(['bg-surface-elevated', 'border', 'border-border'])
+    expect(waiting.findAll('li').map(li => li.classes())).toEqual([...Array(8).fill([]), ['border-t', 'border-border']])
     expect(waiting.findAll('button').map(b => b.attributes('data-testid'))).not.toContain('factory-outside-JCLAW-1380')
   })
 
@@ -382,23 +434,24 @@ describe('Settings — Software Factory panel', () => {
   it('draws Waiting flat, with no outside count, for a board from an older factory', async () => {
     const c = await mount()
     expect(c.find('[data-testid="factory-toggle-waiting"]').text()).toBe('Waiting (1)')
-    expect(c.find('[data-testid="factory-story-JCLAW-1"]').attributes('style')).toBe('padding-left: 1rem;')
+    expect(c.findAll('[data-testid="factory-story-JCLAW-1"] [data-testid="factory-tree-cell"]')).toHaveLength(0)
+    expect(c.find('[data-testid="factory-group-merged"] ul').classes()).toEqual(['bg-surface-elevated', 'border', 'border-border', 'divide-y', 'divide-border'])
   })
 
-  it('indents a deep chain no further than the cap, so its rows wrap at phone width', async () => {
+  it('draws a deep chain no more than six columns wide, so its rows wrap at phone width', async () => {
     const deep = Array.from({ length: 9 }, (_, i) => (i === 0 ? story({ key: 'D-0', state: 'waiting' }) : waitingOn(`D-${i}`, `D-${i - 1}`)))
     status = installed({ board: { ...installed().board!, stories: deep } })
     const c = await mount()
-    const pad = (k: string) => c.find(`[data-testid="factory-story-${k}"]`).attributes('style')
-    expect(['D-0', 'D-3', 'D-6', 'D-8'].map(pad)).toEqual(['padding-left: 1rem;', 'padding-left: 3.25rem;', 'padding-left: 5.5rem;', 'padding-left: 5.5rem;'])
-    expect(c.find('[data-testid="factory-story-D-8"]').classes()).toContain('flex-wrap')
+    const cells = (k: string) => c.findAll(`[data-testid="factory-story-${k}"] [data-testid="factory-tree-cell"]`).length
+    expect(['D-0', 'D-3', 'D-6', 'D-8'].map(cells)).toEqual([0, 3, 6, 6])
+    expect(c.find('[data-testid="factory-story-D-8"] > span:last-child').classes()).toContain('flex-wrap')
   })
 
   it('lets a deep row\'s summary shrink below 12rem rather than scroll sideways, on both kinds of row', async () => {
     status = installed({ board: { ...installed().board!, stories: [...stories(), ...chainStories()], blockers: chainBlockers() } })
     const c = await mount()
     for (const row of ['factory-story-JCLAW-1351', 'factory-outside-JCLAW-1380']) {
-      const summary = c.find(`[data-testid="${row}"] > span:nth-child(2)`)
+      const summary = c.find(`[data-testid="${row}"] > span:last-child > span:nth-child(2)`)
       expect(summary.text(), row).toMatch(/^Summary of /)
       expect(summary.classes().filter(k => k.startsWith('min-w-')), row).toEqual(['min-w-[min(12rem,100%)]'])
     }

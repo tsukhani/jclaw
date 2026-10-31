@@ -90,9 +90,25 @@ export interface StoryGroup {
   stories: BoardStory[]
 }
 
-export interface FactoryStoryRow { kind: 'story', key: string, depth: number, story: BoardStory }
-export interface OutsideStoryRow { kind: 'outside', key: string, depth: number, blocker: BoardBlocker }
+export type TreeGuide = 'pipe' | 'blank'
+export type TreeElbow = 'tee' | 'end'
+
+/** Where a row sits in Waiting's tree; every other group's rows are roots with no lines. */
+export interface TreePlace {
+  /** One per ancestor column: `pipe` while that ancestor has a later sibling, so its line runs past this row. */
+  guides: TreeGuide[]
+  /** The row's own connector: `tee` when a sibling follows it, `end` for the last, null for a root. */
+  elbow: TreeElbow | null
+  /** The key of the story it is drawn under, null for a root. */
+  parent: string | null
+  hasChildren: boolean
+}
+
+export interface FactoryStoryRow extends TreePlace { kind: 'story', key: string, depth: number, story: BoardStory }
+export interface OutsideStoryRow extends TreePlace { kind: 'outside', key: string, depth: number, blocker: BoardBlocker }
 export type StoryRow = FactoryStoryRow | OutsideStoryRow
+
+const ROOT: TreePlace = { guides: [], elbow: null, parent: null, hasChildren: false }
 
 export interface BoardGroup extends StoryGroup {
   rows: StoryRow[]
@@ -120,16 +136,16 @@ export function groupStories(stories: BoardStory[]): StoryGroup[] {
  * ends.
  */
 export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): StoryRow[] {
-  interface TreeNode { key: string, rank: number, blockedBy: string[], row: (depth: number) => StoryRow }
+  interface TreeNode { key: string, rank: number, blockedBy: string[], row: (depth: number, at: TreePlace) => StoryRow }
   const nodes = new Map<string, TreeNode>()
   const add = (key: string, blockedBy: string[] | null | undefined, row: TreeNode['row']) => {
     if (!nodes.has(key)) nodes.set(key, { key, rank: nodes.size, blockedBy: blockedBy ?? [], row })
   }
   const waitingKeys = new Set(waiting.map(s => s.key))
   for (const b of blockers) {
-    if (!waitingKeys.has(b.key)) add(b.key, b.blockedBy, depth => ({ kind: 'outside', key: b.key, depth, blocker: b }))
+    if (!waitingKeys.has(b.key)) add(b.key, b.blockedBy, (depth, at) => ({ kind: 'outside', key: b.key, depth, blocker: b, ...at }))
   }
-  for (const s of waiting) add(s.key, s.blockedBy, depth => ({ kind: 'story', key: s.key, depth, story: s }))
+  for (const s of waiting) add(s.key, s.blockedBy, (depth, at) => ({ kind: 'story', key: s.key, depth, story: s, ...at }))
 
   const depth = new Map<string, number>()
   const measuring = new Set<string>()
@@ -177,11 +193,17 @@ export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): St
   }
 
   const rows: StoryRow[] = []
-  const place = (n: TreeNode, level: number) => {
-    rows.push(n.row(level))
-    for (const c of (children.get(n.key) ?? []).sort((a, b) => a.rank - b.rank)) place(c, level + 1)
+  // `below` is the guides a node's children inherit: its own, plus whether its column runs on past its subtree.
+  const place = (n: TreeNode, level: number, at: TreePlace, below: TreeGuide[]) => {
+    const kids = (children.get(n.key) ?? []).sort((a, b) => a.rank - b.rank)
+    rows.push(n.row(level, { ...at, hasChildren: kids.length > 0 }))
+    kids.forEach((c, i) => {
+      const last = i === kids.length - 1
+      place(c, level + 1, { guides: below, elbow: last ? 'end' : 'tee', parent: n.key, hasChildren: false },
+        [...below, last ? 'blank' : 'pipe'])
+    })
   }
-  for (const n of roots.sort((a, b) => a.rank - b.rank)) place(n, 0)
+  for (const n of roots.sort((a, b) => a.rank - b.rank)) place(n, 0, ROOT, [])
   return rows
 }
 
@@ -190,26 +212,69 @@ export function boardGroups(stories: BoardStory[], blockers: BoardBlocker[]): Bo
   return groupStories(stories).map((g) => {
     const rows = g.id === 'waiting'
       ? waitingRows(g.stories, blockers)
-      : g.stories.map((s): StoryRow => ({ kind: 'story', key: s.key, depth: 0, story: s }))
+      : g.stories.map((s): StoryRow => ({ kind: 'story', key: s.key, depth: 0, story: s, ...ROOT }))
     return { ...g, rows, outside: rows.filter(r => r.kind === 'outside').length }
   })
 }
 
-/** Rows deeper than this are indented as this deep, so a long chain still wraps within a phone's width. */
+/**
+ * Rows deeper than this draw only their nearest this-many columns, so a long chain still wraps within a phone's width;
+ * their lines then no longer meet their parent's.
+ */
 export const MAX_INDENT_DEPTH = 6
 
-/** A row's left padding: the list's 1rem, plus 0.75rem a level. */
-export function rowIndent(depth: number): string {
-  return `${1 + Math.min(depth, MAX_INDENT_DEPTH) * 0.75}rem`
+/** The cells of a row's gutter, 1rem each: its ancestors' guides, then its own elbow. */
+export function treeGutter(row: TreePlace): (TreeGuide | TreeElbow)[] {
+  const cells: (TreeGuide | TreeElbow)[] = row.elbow ? [...row.guides, row.elbow] : [...row.guides]
+  return cells.slice(-MAX_INDENT_DEPTH)
 }
 
-/** Why the factory will not build it, its status unless that is the why, and what blocks it in turn. */
-export function outsideDetail(b: BoardBlocker): string {
-  const parts = b.reason ? [b.reason] : []
-  if (b.status && b.status !== b.reason) parts.push(b.status)
+/**
+ * Where the line down to a row's first child runs: the centre of the column its children's elbows sit in, past the
+ * row's 0.25rem padding. Null when it has no children, or sits too deep for its children's columns to line up.
+ */
+export function treeStem(row: TreePlace & { depth: number }): string | null {
+  if (!row.hasChildren || row.depth >= MAX_INDENT_DEPTH) return null
+  return `${0.75 + row.depth}rem`
+}
+
+/** The keys a row names beside its tree parent; a root has no parent, so it names them all. */
+function besidesParent(blockedBy: string[] | null | undefined, parent: string | null): { keys: string[], also: boolean } {
+  const keys = (blockedBy ?? []).filter(k => k !== parent)
+  return { keys, also: parent !== null && keys.length < (blockedBy ?? []).length }
+}
+
+/**
+ * What a factory story's row says: under its blocker in the tree it names only its other blockers, since the line
+ * shows the one it hangs from; elsewhere its reason, as before. The full reason stays for screen readers.
+ */
+export function storyDetail(row: FactoryStoryRow): string {
+  const s = row.story
+  if (s.state !== 'waiting' || row.parent === null || !(s.blockedBy ?? []).includes(row.parent)) return s.reason ?? ''
+  const { keys } = besidesParent(s.blockedBy, row.parent)
+  return keys.length > 0 ? `also blocked by ${keys.join(', ')}` : ''
+}
+
+/** The outside row's badge: why the factory will not build it, without the word "labelled". */
+export function outsideBadge(b: BoardBlocker): string {
+  return (b.reason ?? 'outside the factory').replace(/^labelled /, '')
+}
+
+/** Its status when that is news (not To Do, and not already its badge), then what else blocks it. */
+export function outsideDetail(row: OutsideStoryRow): string {
+  const b = row.blocker
+  const parts = b.status && b.status !== 'To Do' && b.status !== b.reason ? [b.status] : []
+  const { keys, also } = besidesParent(b.blockedBy, row.parent)
+  if (keys.length > 0) parts.push(`${also ? 'also blocked by' : 'blocked by'} ${keys.join(', ')}`)
+  return parts.join(' · ')
+}
+
+/** The whole of an outside row for a screen reader, which sees no badge colour or lines. */
+export function outsideSpoken(b: BoardBlocker): string {
+  const parts = ['Outside the factory', b.reason, b.status].filter((p): p is string => Boolean(p))
   const by = b.blockedBy ?? []
   if (by.length > 0) parts.push(`blocked by ${by.join(', ')}`)
-  return parts.join(' · ')
+  return parts.join(', ')
 }
 
 export function mergedLabel(story: BoardStory): string {

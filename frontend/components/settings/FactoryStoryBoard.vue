@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ChevronRightIcon } from '@heroicons/vue/24/outline'
-import { boardGroups, elapsed, mergedLabel, outsideDetail, rowIndent, type BoardBlocker, type BoardStory } from './factory-board'
+import FactoryTreeGutter from './FactoryTreeGutter.vue'
+import {
+  boardGroups, elapsed, mergedLabel, outsideBadge, outsideDetail, outsideSpoken, storyDetail, type BoardBlocker, type BoardStory,
+} from './factory-board'
 
 const props = defineProps<{
   stories: BoardStory[]
@@ -55,63 +58,82 @@ const collapsed = ref<Record<string, boolean>>({})
           </template>
         </button>
       </h4>
+      <!-- Waiting is a tree whose lines run from row to row, so only a new tree gets a divider. -->
       <ul
         v-if="!collapsed[g.id]"
-        class="bg-surface-elevated border border-border divide-y divide-border"
+        class="bg-surface-elevated border border-border"
+        :class="g.id === 'waiting' ? '' : 'divide-y divide-border'"
       >
         <li
-          v-for="r in g.rows"
+          v-for="(r, i) in g.rows"
           :key="r.key"
+          :class="g.id === 'waiting' && i > 0 && r.depth === 0 ? 'border-t border-border' : ''"
           :data-depth="r.depth"
         >
           <button
             v-if="r.kind === 'story'"
             type="button"
-            class="w-full text-left px-4 py-2.5 flex flex-wrap items-start gap-3 hover:bg-muted/40"
-            :style="{ paddingLeft: rowIndent(r.depth) }"
+            class="relative w-full text-left pl-1 pr-4 flex items-stretch hover:bg-muted/40"
             :aria-pressed="selected === r.key"
             :data-testid="`factory-story-${r.key}`"
             @click="emit('select', r.key)"
           >
-            <span class="text-sm font-mono text-fg-strong w-28 shrink-0">{{ r.key }}</span>
-            <span class="text-sm text-fg-strong flex-1 min-w-[min(12rem,100%)]">{{ r.story.summary }}</span>
-            <span
-              v-if="r.story.autoMerge"
-              class="text-xs border px-1 text-sky-800 dark:text-sky-400 border-sky-400/30"
-              data-testid="factory-automerge-badge"
-            >Auto-merge</span>
-            <span
-              v-if="r.story.state === 'running'"
-              class="text-xs text-fg-muted"
-              data-testid="factory-story-detail"
-            >{{ r.story.phase }} · {{ elapsed(r.story.since, now) }}</span>
-            <span
-              v-else-if="r.story.state === 'merged'"
-              class="text-xs text-fg-muted"
-              data-testid="factory-story-detail"
-            >{{ mergedLabel(r.story) }}<template v-if="r.story.sha"> · <span
-              class="font-mono"
-              :title="r.story.sha"
-            >{{ r.story.sha.slice(0, 8) }}</span></template></span>
-            <span
-              v-else-if="r.story.reason"
-              class="text-xs text-fg-muted"
-              data-testid="factory-story-detail"
-            ><template v-if="r.story.state === 'refused'">Auto-merge refused: </template>{{ r.story.reason }}</span>
+            <FactoryTreeGutter :row="r" />
+            <span class="flex-1 min-w-0 pl-3 py-2.5 flex flex-wrap items-start gap-3">
+              <span class="text-sm font-mono text-fg-strong w-28 shrink-0">{{ r.key }}</span>
+              <span class="text-sm text-fg-strong flex-1 min-w-[min(12rem,100%)]">{{ r.story.summary }}</span>
+              <span
+                v-if="r.story.autoMerge"
+                class="text-xs border px-1 text-sky-800 dark:text-sky-400 border-sky-400/30"
+                data-testid="factory-automerge-badge"
+              >Auto-merge</span>
+              <span
+                v-if="r.story.state === 'running'"
+                class="text-xs text-fg-muted"
+                data-testid="factory-story-detail"
+              >{{ r.story.phase }} · {{ elapsed(r.story.since, now) }}</span>
+              <span
+                v-else-if="r.story.state === 'merged'"
+                class="text-xs text-fg-muted"
+                data-testid="factory-story-detail"
+              >{{ mergedLabel(r.story) }}<template v-if="r.story.sha"> · <span
+                class="font-mono"
+                :title="r.story.sha"
+              >{{ r.story.sha.slice(0, 8) }}</span></template></span>
+              <span
+                v-else-if="storyDetail(r)"
+                class="text-xs text-fg-muted"
+                data-testid="factory-story-detail"
+              ><template v-if="r.story.state === 'refused'">Auto-merge refused: </template>{{ storyDetail(r) }}</span>
+              <span
+                v-if="r.story.reason && storyDetail(r) !== r.story.reason"
+                class="sr-only"
+              >{{ r.story.reason }}</span>
+            </span>
           </button>
           <div
             v-else
-            class="px-4 py-2.5 flex flex-wrap items-start gap-3"
-            :style="{ paddingLeft: rowIndent(r.depth) }"
+            class="relative pl-1 pr-4 flex items-stretch"
             :data-testid="`factory-outside-${r.key}`"
           >
-            <span class="text-sm font-mono text-fg-muted w-28 shrink-0">{{ r.key }}</span>
-            <span class="text-sm text-fg-muted flex-1 min-w-[min(12rem,100%)]">{{ r.blocker.summary }}</span>
-            <span class="text-xs border px-1 text-fg-muted border-border">Outside the factory</span>
-            <span
-              class="text-xs text-fg-muted"
-              data-testid="factory-outside-detail"
-            >{{ outsideDetail(r.blocker) }}</span>
+            <FactoryTreeGutter :row="r" />
+            <span class="flex-1 min-w-0 pl-3 py-2.5 flex flex-wrap items-start gap-3">
+              <span class="text-sm font-mono text-fg-muted w-28 shrink-0">{{ r.key }}</span>
+              <span class="text-sm text-fg-muted flex-1 min-w-[min(12rem,100%)]">{{ r.blocker.summary }}</span>
+              <span
+                class="text-xs border px-1 text-fg-muted border-border"
+                :title="`Outside the factory: ${r.blocker.reason ?? 'not built'}`"
+                aria-hidden="true"
+                data-testid="factory-outside-badge"
+              >{{ outsideBadge(r.blocker) }}</span>
+              <span
+                v-if="outsideDetail(r)"
+                class="text-xs text-fg-muted"
+                aria-hidden="true"
+                data-testid="factory-outside-detail"
+              >{{ outsideDetail(r) }}</span>
+              <span class="sr-only">{{ outsideSpoken(r.blocker) }}</span>
+            </span>
           </div>
         </li>
       </ul>
