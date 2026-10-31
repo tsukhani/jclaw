@@ -42,7 +42,6 @@ class WebhookTelegramControllerTest extends FunctionalTest {
     @BeforeEach
     void setup() throws Exception {
         Fixtures.deleteDatabase();
-        EventLogger.clear();
         // M1: clear the static per-binding rate-limit counters so a flood test
         // doesn't bleed into unrelated cases (and vice-versa). The default
         // ceiling (60/60s) is permissive enough that other single-request
@@ -477,19 +476,16 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         play.Play.configuration.setProperty("telegram.webhook.max-body-bytes", "8");
         play.Play.configuration.setProperty("telegram.webhook.trusted-proxy", "true");
         try {
-            EventLogger.clear();
             var bindingId = seedBinding(true);
             var headers = new java.util.HashMap<String, String>();
             headers.put("content-length", "100000");        // far above the 8-byte cap
             headers.put("x-forwarded-for", "203.0.113.7, 10.0.0.1");
-            var response = postWithExtraHeaders(bindingId, SECRET, headers, "{}");
-            assertEquals(413, response.status.intValue());
-
-            EventLogger.flush();
-            var loggedXff = models.EventLog.findRecent(20).stream()
-                    .anyMatch(e -> e.message != null && e.message.contains("203.0.113.7"));
-            assertTrue(loggedXff,
-                    "the oversize audit log must record the trusted X-Forwarded-For client IP");
+            var audit = EventLogger.captureMatchingForTest(
+                    e -> e.message().contains("for binding " + bindingId + " from "),
+                    _ -> assertEquals(413, postWithExtraHeaders(bindingId, SECRET, headers, "{}").status.intValue()));
+            assertEquals(java.util.List.of("Oversized webhook body (Content-Length) for binding " + bindingId
+                            + " from 203.0.113.7"),
+                    audit.stream().map(EventLogger.Captured::message).toList());
         } finally {
             play.Play.configuration.remove("telegram.webhook.max-body-bytes");
             play.Play.configuration.remove("telegram.webhook.trusted-proxy");

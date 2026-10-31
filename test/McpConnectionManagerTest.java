@@ -401,11 +401,11 @@ class McpConnectionManagerTest extends UnitTest {
                     "allowlist rows must be cleared on stop");
             // stop() saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var unregEvents = EventLog.find(
-                    "category = ?1 ORDER BY timestamp DESC", "MCP_TOOL_UNREGISTER")
+                    "category = ?1 AND message LIKE ?2 ORDER BY timestamp DESC", "MCP_TOOL_UNREGISTER", "%'fixture'")
                     .<EventLog>fetch();
             assertFalse(unregEvents.isEmpty(),
                     "MCP_TOOL_UNREGISTER event must be persisted on stop");
-            assertTrue(unregEvents.get(0).message.contains("fixture"));
+            assertEquals("Removed 1 MCP allowlist row(s) for server 'fixture'", unregEvents.get(0).message);
         });
     }
 

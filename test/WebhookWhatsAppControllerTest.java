@@ -1,6 +1,5 @@
 import controllers.WebhookIngressGate;
 import models.Agent;
-import models.EventLog;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
 import models.WhatsAppTransport;
@@ -44,7 +43,6 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        EventLogger.clear();
         // JCLAW-783: clear the shared ingress-gate counters between cases. Safe in
         // @BeforeEach: the play1 runner serializes functional tests, and no unit
         // test touches this gate's map.
@@ -239,16 +237,12 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     @Test
     void rejectionsAreAuditedAsWebhookSignatureFailure() {
-        seedBinding(APP_SECRET);
-        var response = postWithSig(textPayload(), "sha256=bad");
-        assertEquals(401, response.status.intValue());
-
-        EventLogger.flush();
-        var events = EventLog.findRecent(20);
-        var found = events.stream().anyMatch(e ->
-                "WEBHOOK_SIGNATURE_FAILURE".equals(e.category)
-                        && "whatsapp".equals(e.channel));
-        assertTrue(found, "expected WEBHOOK_SIGNATURE_FAILURE event for whatsapp");
+        var bindingId = seedBinding(APP_SECRET);
+        var rejections = EventLogger.captureMatchingForTest(
+                e -> EventLogger.WEBHOOK_SIGNATURE_FAILURE.equals(e.category()) && "whatsapp".equals(e.channel()),
+                _ -> assertEquals(401, postWithSig(textPayload(), "sha256=bad").status.intValue()));
+        assertEquals(java.util.List.of("Invalid webhook signature for binding " + bindingId),
+                rejections.stream().map(EventLogger.Captured::message).toList());
     }
 
     // ── JCLAW-1411: delivery statuses ──
@@ -279,11 +273,9 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         return commitInFreshTx(() -> WhatsAppBinding.<WhatsAppBinding>findById(bindingId));
     }
 
-    private static java.util.List<EventLog> eventsFor(String agentId) {
-        EventLogger.flush();
-        return EventLog.findRecent(500).stream()
-                .filter(e -> agentId.equals(e.agentId))
-                .toList();
+    /** Every event logged for {@code agentId} while {@code post} ran. */
+    private static java.util.List<EventLogger.Captured> loggedFor(String agentId, Runnable post) {
+        return EventLogger.captureMatchingForTest(e -> agentId.equals(e.agentId()), _ -> post.run());
     }
 
     @Test
@@ -293,19 +285,17 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var updatedBefore = reload(bindingId).updatedAt;
         var body = failedStatusBody(uniqueWamid(), "1751142888");
 
-        assertIsOk(postWithSig(body, sign(body)));
-
-        var events = eventsFor(agentId);
+        var events = loggedFor(agentId, () -> assertIsOk(postWithSig(body, sign(body))));
         assertEquals(1, events.size(), () -> "events: " + events);
         var e = events.get(0);
-        assertEquals("WARN", e.level);
-        assertEquals("channel", e.category);
-        assertEquals("whatsapp", e.channel);
-        assertTrue(e.message.contains("16505551234"), e.message);
-        assertTrue(e.message.contains("131049"), e.message);
-        assertTrue(e.message.contains("This message was not delivered to maintain healthy ecosystem engagement."),
-                e.message);
-        assertTrue(e.message.contains("the message failed to be delivered."), e.message);
+        assertEquals("WARN", e.level());
+        assertEquals("channel", e.category());
+        assertEquals("whatsapp", e.channel());
+        assertTrue(e.message().contains("16505551234"), e.message());
+        assertTrue(e.message().contains("131049"), e.message());
+        assertTrue(e.message().contains("This message was not delivered to maintain healthy ecosystem engagement."),
+                e.message());
+        assertTrue(e.message().contains("the message failed to be delivered."), e.message());
 
         var b = reload(bindingId);
         assertEquals(java.time.Instant.ofEpochSecond(1751142888L), b.lastDeliveryFailureAt);
@@ -323,10 +313,10 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var agentId = agentIdOf(bindingId);
         var body = failedStatusBody(uniqueWamid(), "1751142888");
 
-        assertEquals(401, postWithSig(body, null).status.intValue());
-        assertEquals(401, postWithSig(body, "sha256=bad").status.intValue());
-
-        assertTrue(eventsFor(agentId).isEmpty());
+        assertTrue(loggedFor(agentId, () -> {
+            assertEquals(401, postWithSig(body, null).status.intValue());
+            assertEquals(401, postWithSig(body, "sha256=bad").status.intValue());
+        }).isEmpty());
         var b = reload(bindingId);
         assertNull(b.lastDeliveryFailureAt);
         assertNull(b.lastDeliveryFailureCode);
@@ -339,10 +329,11 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var agentId = agentIdOf(bindingId);
         var body = failedStatusBody(uniqueWamid(), "1751142888");
 
-        assertIsOk(postWithSig(body, sign(body)));
-        assertIsOk(postWithSig(body, sign(body)));
-
-        assertEquals(1, eventsFor(agentId).size());
+        var events = loggedFor(agentId, () -> {
+            assertIsOk(postWithSig(body, sign(body)));
+            assertIsOk(postWithSig(body, sign(body)));
+        });
+        assertEquals(1, events.size(), () -> "events: " + events);
     }
 
     @Test
@@ -353,9 +344,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
                 .replace("106540352242922", PHONE_NUMBER_ID)
                 .replace(META_WAMID_DELIVERED, uniqueWamid());
 
-        assertIsOk(postWithSig(body, sign(body)));
-
-        assertTrue(eventsFor(agentId).isEmpty());
+        assertTrue(loggedFor(agentId, () -> assertIsOk(postWithSig(body, sign(body)))).isEmpty());
         var b = reload(bindingId);
         assertNull(b.lastDeliveryFailureAt);
         assertNull(b.lastDeliveryFailureCode);
@@ -392,12 +381,10 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
                 [{"id":"%s","status":"failed","timestamp":"1751142888","recipient_id":"16505551234"}]
                 """.formatted(uniqueWamid()));
 
-        assertIsOk(postWithSig(body, sign(body)));
-
-        var events = eventsFor(agentId);
+        var events = loggedFor(agentId, () -> assertIsOk(postWithSig(body, sign(body))));
         assertEquals(1, events.size(), () -> "events: " + events);
-        assertTrue(events.get(0).message.contains("16505551234"), events.get(0).message);
-        assertTrue(events.get(0).message.contains("no error detail"), events.get(0).message);
+        assertTrue(events.get(0).message().contains("16505551234"), events.get(0).message());
+        assertTrue(events.get(0).message().contains("no error detail"), events.get(0).message());
         var b = reload(bindingId);
         assertEquals(java.time.Instant.ofEpochSecond(1751142888L), b.lastDeliveryFailureAt);
         assertNull(b.lastDeliveryFailureCode);
@@ -430,12 +417,10 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
                  {"id":"%s","status":"failed","timestamp":"1751142002","recipient_id":"222"}]
                 """.formatted(uniqueWamid(), uniqueWamid(), uniqueWamid()));
 
-        assertIsOk(postWithSig(body, sign(body)));
-
-        var events = eventsFor(agentId);
+        var events = loggedFor(agentId, () -> assertIsOk(postWithSig(body, sign(body))));
         assertEquals(2, events.size(), () -> "events: " + events);
-        assertTrue(events.stream().anyMatch(e -> e.message.contains("111")));
-        assertTrue(events.stream().anyMatch(e -> e.message.contains("222")));
+        assertTrue(events.stream().anyMatch(e -> e.message().contains("111")));
+        assertTrue(events.stream().anyMatch(e -> e.message().contains("222")));
         assertEquals(java.time.Instant.ofEpochSecond(1751142002L), reload(bindingId).lastDeliveryFailureAt);
     }
 
@@ -451,9 +436,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var body = "{\"entry\":[{\"changes\":[{\"value\":{"
                 + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"}}}]}]}";
 
-        assertIsOk(postWithSig(body, sign(body)));
-
-        assertTrue(eventsFor(agentId).isEmpty());
+        assertTrue(loggedFor(agentId, () -> assertIsOk(postWithSig(body, sign(body)))).isEmpty());
         assertNull(reload(bindingId).lastDeliveryFailureAt);
     }
 

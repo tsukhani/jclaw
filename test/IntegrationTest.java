@@ -6,7 +6,6 @@ import channels.TelegramChannel;
 import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
 import models.AgentBinding;
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +20,7 @@ import services.EventLogger;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.List;
 
 /**
  * Integration tests verifying the full pipeline from inbound message to outbound response.
@@ -317,18 +317,17 @@ class IntegrationTest extends UnitTest {
 
     @Test
     void eventLogCapturesActivity() {
-        EventLogger.clear();
-        Fixtures.deleteDatabase();
-        EventLogger.info("system", "Application started");
-        EventLogger.info("agent", "main", null, "Agent created");
-        EventLogger.warn("channel", null, "telegram", "Delivery retry");
-        EventLogger.error("llm", "Provider timeout");
-        EventLogger.flush();
+        var events = EventLogger.captureForTest(() -> {
+            EventLogger.info("system", "Application started");
+            EventLogger.info("agent", "main", null, "Agent created");
+            EventLogger.warn("channel", null, "telegram", "Delivery retry");
+            EventLogger.error("llm", "Provider timeout");
+        });
 
-        var events = EventLog.findRecent(10);
-        assertEquals(4, events.size());
-        assertEquals("ERROR", events.getFirst().level);
-        assertEquals("llm", events.getFirst().category);
+        assertEquals(List.of("INFO system", "INFO agent", "WARN channel", "ERROR llm"),
+                events.stream().map(e -> e.level() + " " + e.category()).toList());
+        assertEquals("main", events.get(1).agentId());
+        assertEquals("telegram", events.get(2).channel());
     }
 
     // --- Helpers ---

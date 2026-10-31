@@ -3,7 +3,6 @@ import channels.SlackApprovalService;
 import channels.SlackApprovalService.Outcome;
 import controllers.WebhookIngressGate;
 import models.Agent;
-import models.EventLog;
 import models.SlackBinding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +20,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -46,7 +46,6 @@ class WebhookSlackControllerTest extends FunctionalTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        EventLogger.clear();
         // JCLAW-783: clear the shared ingress-gate counters so a flood case doesn't
         // bleed into unrelated cases. Safe in @BeforeEach: the play1 runner
         // serializes functional tests, and no unit test touches this gate's map.
@@ -174,22 +173,21 @@ class WebhookSlackControllerTest extends FunctionalTest {
         var id = seedBinding();
         var ts = String.valueOf(Instant.now().getEpochSecond());
         var sentSignature = "v0=canary0deadbeef0canary";
-        assertEquals(401, postWithSlackHeaders(id, "{}", ts, sentSignature).status.intValue());
+        var rejections = rejectionsNaming(id,
+                () -> assertEquals(401, postWithSlackHeaders(id, "{}", ts, sentSignature).status.intValue()));
+        assertEquals(1, rejections.size(), () -> "the operator-facing entry must name binding " + id);
+        var rejection = rejections.getFirst();
 
-        EventLogger.flush();
-        var rejection = EventLog.findRecent(20).stream()
-                .filter(e -> "WEBHOOK_SIGNATURE_FAILURE".equals(e.category) && "slack".equals(e.channel))
-                .filter(e -> e.message != null && e.message.contains("binding " + id))
-                .findFirst();
-        assertTrue(rejection.isPresent(), "the operator-facing entry must name binding " + id);
-
-        var logged = rejection.get().message + " " + rejection.get().details;
+        var logged = rejection.message() + " " + rejection.details();
         assertTrue(logged.contains("Signing Secret"), "points at what to fix: " + logged);
-        // The retry's tail, asserted on the STORED message. EventLog.message is capped at 500 and
+        // The retry's tail has to fit what is stored. EventLog.message is capped at 500 and
         // EventLogger cuts from the tail, so a call site that skips the capped renderer silently
         // loses the instruction the operator acts on — the Slack template alone is 610 chars.
-        assertTrue(rejection.get().message.contains("Slack's next retry will verify"),
-                "the retry instruction was truncated out of the log: " + rejection.get().message);
+        // A capture holds the message uncut, so the length is what proves it survives.
+        assertTrue(rejection.message().length() <= EventLogger.MESSAGE_MAX_CHARS,
+                "the stored message would lose its tail: " + rejection.message().length() + " chars");
+        assertTrue(rejection.message().contains("Slack's next retry will verify"),
+                "the retry instruction was truncated out of the log: " + rejection.message());
         assertFalse(logged.contains(SIGNING_SECRET), "the stored secret leaked: " + logged);
         assertFalse(logged.contains("canary0deadbeef0canary"), "the received signature leaked: " + logged);
         assertFalse(logged.contains("xoxb-"), "a bot token leaked: " + logged);
@@ -363,15 +361,24 @@ class WebhookSlackControllerTest extends FunctionalTest {
         // operator dashboard can highlight them.
         var id = seedBinding();
         var ts = String.valueOf(Instant.now().getEpochSecond());
-        var response = postWithSlackHeaders(id, "{}", ts, "v0=bad");
-        assertEquals(401, response.status.intValue());
+        var rejections = rejectionsNaming(id,
+                () -> assertEquals(401, postWithSlackHeaders(id, "{}", ts, "v0=bad").status.intValue()));
+        assertEquals(List.of("slack"), rejections.stream().map(EventLogger.Captured::channel).toList());
+    }
 
-        EventLogger.flush();
-        var events = EventLog.findRecent(20);
-        var found = events.stream().anyMatch(e ->
-                "WEBHOOK_SIGNATURE_FAILURE".equals(e.category)
-                        && "slack".equals(e.channel));
-        assertTrue(found, "expected WEBHOOK_SIGNATURE_FAILURE event for slack");
+    /** The signature failures naming binding {@code id} logged while {@code post} ran. */
+    private static List<EventLogger.Captured> rejectionsNaming(Long id, Runnable post) {
+        return EventLogger.captureMatchingForTest(
+                e -> EventLogger.WEBHOOK_SIGNATURE_FAILURE.equals(e.category()) && e.message().contains("binding " + id),
+                _ -> post.run());
+    }
+
+    /** What the access gate logged about {@code user} while {@code post} ran. */
+    private static List<String> accessLines(String user, Runnable post) {
+        return EventLogger.captureMatchingForTest(
+                        e -> "slack".equals(e.channel()) && e.message().contains("from " + user + " in "),
+                        _ -> post.run())
+                .stream().map(EventLogger.Captured::message).toList();
     }
 
     // ── Access policy gate (JCLAW-354) ──────────────────────────────────
@@ -386,13 +393,9 @@ class WebhookSlackControllerTest extends FunctionalTest {
         var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
                 + "\"channel\":\"C123\",\"channel_type\":\"channel\",\"user\":\"U456\",\"text\":\"hello team\"}}";
         var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertEquals(200, response.status.intValue());
 
-        EventLogger.flush();
-        var dropped = EventLog.findRecent(20).stream().anyMatch(e ->
-                e.message != null && e.message.contains("dropped by access policy"));
-        assertTrue(dropped, "an unaddressed channel message must be dropped by the access policy");
+        assertEquals(List.of("Message from U456 in C123 (channel) dropped by access policy"),
+                accessLines("U456", () -> assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue())));
     }
 
     @Test
@@ -405,17 +408,9 @@ class WebhookSlackControllerTest extends FunctionalTest {
                 + "\"channel\":\"C123\",\"channel_type\":\"channel\",\"user\":\"U456\","
                 + "\"text\":\"<@" + BOT_USER_ID + "> hi\"}}";
         var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertEquals(200, response.status.intValue());
 
-        EventLogger.flush();
-        var events = EventLog.findRecent(20);
-        assertTrue(events.stream().anyMatch(e ->
-                        e.message != null && e.message.contains("Message received from")),
-                "a mention-addressed channel message must be accepted");
-        assertFalse(events.stream().anyMatch(e ->
-                        e.message != null && e.message.contains("dropped by access policy")),
-                "a mention-addressed channel message must not be dropped");
+        assertEquals(List.of("Message received from U456 in C123"),
+                accessLines("U456", () -> assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue())));
     }
 
     @Test
@@ -427,13 +422,9 @@ class WebhookSlackControllerTest extends FunctionalTest {
         var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
                 + "\"channel\":\"D123\",\"channel_type\":\"im\",\"user\":\"U_INTRUDER\",\"text\":\"hi\"}}";
         var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertEquals(200, response.status.intValue());
 
-        EventLogger.flush();
-        var dropped = EventLog.findRecent(20).stream().anyMatch(e ->
-                e.message != null && e.message.contains("dropped by access policy"));
-        assertTrue(dropped, "a non-owner DM to the main agent must be dropped (owner-locked)");
+        assertEquals(List.of("Message from U_INTRUDER in D123 (im) dropped by access policy"),
+                accessLines("U_INTRUDER", () -> assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue())));
     }
 
     @Test
@@ -448,13 +439,13 @@ class WebhookSlackControllerTest extends FunctionalTest {
                 + "\"channel\":\"C123\",\"channel_type\":\"im\",\"user\":\"U456\",\"text\":\"hi\","
                 + "\"ts\":\"" + msgTs + "\"}}";
         var sig = hmac(body, ts);
-        assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
-        assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
-
-        EventLogger.flush();
-        var deduped = EventLog.findRecent(20).stream().anyMatch(e ->
-                e.message != null && e.message.contains("Duplicate Slack event") && e.message.contains(msgTs));
-        assertTrue(deduped, "the redelivered event must be logged as a duplicate drop");
+        var duplicates = EventLogger.captureMatchingForTest(
+                e -> e.message().contains("Duplicate Slack event") && e.message().contains(msgTs),
+                _ -> {
+                    assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
+                    assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
+                });
+        assertEquals(1, duplicates.size(), () -> "the redelivered event must be logged as one duplicate drop: " + duplicates);
     }
 
     // ── JCLAW-783: pre-auth ingress gate (rate-limit + body cap before DB/parse) ──

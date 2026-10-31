@@ -1,7 +1,6 @@
 import channels.ChannelTransport;
 import models.Agent;
 import models.ChannelConfig;
-import models.EventLog;
 import models.SlackBinding;
 import models.TelegramBinding;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +40,6 @@ class WebhookControllerTest extends FunctionalTest {
         ChannelConfig.evictCache("slack");
         ChannelConfig.evictCache("whatsapp");
         ChannelConfig.evictCache("telegram");
-        EventLogger.clear();
     }
 
     // ===== Telegram =====
@@ -59,10 +57,9 @@ class WebhookControllerTest extends FunctionalTest {
         // Binding + secret exist, but the x-telegram-bot-api-secret-token header —
         // now the SOLE auth factor (JCLAW-784) — is absent. Reject with 401.
         var bindingId = seedTelegramBinding("correct-secret", true);
-        var response = POST("/api/webhooks/telegram/" + bindingId,
-                "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("telegram");
+        assertSignatureFailureLogged("telegram", "Missing or invalid secret-token header for binding " + bindingId,
+                () -> assertEquals(401, POST("/api/webhooks/telegram/" + bindingId,
+                        "application/json", "{}").status.intValue()));
     }
 
     @Test
@@ -83,9 +80,8 @@ class WebhookControllerTest extends FunctionalTest {
     void slackWebhookReturns404ForUnknownBinding() {
         // The URL carries the binding id; an unknown id is rejected before any
         // body/signature work (and audited).
-        var response = POST("/api/webhooks/slack/99999", "application/json", "{}");
-        assertEquals(404, response.status.intValue());
-        assertSignatureFailureLogged("slack");
+        assertSignatureFailureLogged("slack", "Webhook rejected: unknown Slack binding 99999",
+                () -> assertEquals(404, POST("/api/webhooks/slack/99999", "application/json", "{}").status.intValue()));
     }
 
     @Test
@@ -93,9 +89,8 @@ class WebhookControllerTest extends FunctionalTest {
         // Binding exists but enabled=false — rejected with 403 before any body
         // parse, distinct from the unknown-binding 404.
         var bindingId = seedSlackBinding(false);
-        var response = POST("/api/webhooks/slack/" + bindingId, "application/json", "{}");
-        assertEquals(403, response.status.intValue());
-        assertSignatureFailureLogged("slack");
+        assertSignatureFailureLogged("slack", "Webhook rejected: Slack binding " + bindingId + " is disabled",
+                () -> assertEquals(403, POST("/api/webhooks/slack/" + bindingId, "application/json", "{}").status.intValue()));
     }
 
     @Test
@@ -104,10 +99,9 @@ class WebhookControllerTest extends FunctionalTest {
         // x-slack-signature and x-slack-request-timestamp — controller must
         // reject before any signature compute.
         var bindingId = seedSlackBinding(true);
-        var response = POST("/api/webhooks/slack/" + bindingId,
-                "application/json", "{\"type\":\"event_callback\"}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("slack");
+        assertSignatureFailureLogged("slack", "Missing signature headers",
+                () -> assertEquals(401, POST("/api/webhooks/slack/" + bindingId,
+                        "application/json", "{\"type\":\"event_callback\"}").status.intValue()));
     }
 
     // ===== WhatsApp =====
@@ -268,14 +262,15 @@ class WebhookControllerTest extends FunctionalTest {
         });
     }
 
-    private void assertSignatureFailureLogged(String channel) {
-        EventLogger.flush();
-        var events = EventLog.findRecent(20);
-        var found = events.stream().anyMatch(e ->
-                "WEBHOOK_SIGNATURE_FAILURE".equals(e.category)
-                        && channel.equals(e.channel));
-        assertTrue(found,
-                "expected WEBHOOK_SIGNATURE_FAILURE event for " + channel
-                        + " in recent events");
+    /**
+     * {@code request} logs exactly this one signature failure. A missing-header rejection names no
+     * binding, so the match is the channel; the runner serializes functional tests, so no other
+     * class's webhook logs while the capture is open.
+     */
+    private static void assertSignatureFailureLogged(String channel, String message, Runnable request) {
+        var failures = EventLogger.captureMatchingForTest(
+                e -> EventLogger.WEBHOOK_SIGNATURE_FAILURE.equals(e.category()) && channel.equals(e.channel()),
+                _ -> request.run());
+        assertEquals(List.of(message), failures.stream().map(EventLogger.Captured::message).toList());
     }
 }

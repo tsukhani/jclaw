@@ -14,6 +14,8 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 class ModelTest extends UnitTest {
 
@@ -168,16 +170,37 @@ class ModelTest extends UnitTest {
 
     @Test
     void canCreateEventLog() {
-        Fixtures.deleteDatabase();
+        var category = "modeltest." + UUID.randomUUID();
         var log = new EventLog();
         log.level = "INFO";
-        log.category = "system";
+        log.category = category;
         log.message = "Application started";
         log.save();
 
-        var recent = EventLog.findRecent(10);
-        assertEquals(1, recent.size());
-        assertEquals("system", recent.getFirst().category);
+        assertEquals(List.of("Application started"), messagesIn(category));
+    }
+
+    @Test
+    void findRecentReturnsTheNewestRowsNewestFirst() {
+        var category = "modeltest." + UUID.randomUUID();
+        // Stamped past every other class's rows, so theirs cannot take a place in the limit.
+        for (var year : List.of(2102, 2100, 2103, 2101)) {
+            var row = new EventLog();
+            row.level = "INFO";
+            row.category = category;
+            row.message = String.valueOf(year);
+            row.timestamp = Instant.parse(year + "-01-01T00:00:00Z");
+            row.save();
+        }
+
+        assertEquals(List.of("2103", "2102", "2101"), EventLog.findRecent(3).stream().map(e -> e.message).toList());
+        EventLog.delete("category = ?1", category);
+    }
+
+    /** The messages of the rows in {@code category}: each test saves its own rows, so the table is the subject. */
+    private static List<String> messagesIn(String category) {
+        List<EventLog> rows = EventLog.find("category = ?1", category).fetch();
+        return rows.stream().map(e -> e.message).toList();
     }
 
     private static Agent mkAgent(String name) {
@@ -241,25 +264,24 @@ class ModelTest extends UnitTest {
 
     @Test
     void canDeleteOldEventLogs() {
-        Fixtures.deleteDatabase();
+        var category = "modeltest." + UUID.randomUUID();
         var old = new EventLog();
         old.level = "INFO";
-        old.category = "system";
+        old.category = category;
         old.message = "Old event";
-        old.timestamp = Instant.parse("2020-01-01T00:00:00Z");
+        old.timestamp = Instant.parse("1999-01-01T00:00:00Z");
         old.save();
 
         var recent = new EventLog();
         recent.level = "INFO";
-        recent.category = "system";
+        recent.category = category;
         recent.message = "Recent event";
         recent.save();
 
-        var deleted = EventLog.deleteOlderThan(Instant.parse("2025-01-01T00:00:00Z"));
+        // A cutoff older than any other class's rows: the delete takes only this test's, and leaves theirs.
+        var deleted = EventLog.deleteOlderThan(Instant.parse("2000-01-01T00:00:00Z"));
         assertEquals(1, deleted);
 
-        var remaining = EventLog.findRecent(10);
-        assertEquals(1, remaining.size());
-        assertEquals("Recent event", remaining.getFirst().message);
+        assertEquals(List.of("Recent event"), messagesIn(category));
     }
 }
