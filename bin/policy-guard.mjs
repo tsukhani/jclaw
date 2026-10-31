@@ -408,26 +408,27 @@ export function pathVerdict(file, ctx) {
   return m && UPSTREAM_SKILLS.has(m[1]) ? deny("skills", REASONS.skills(m[1])) : null;
 }
 
-/** The refusal for git's pre-push ref lines, or null. `state(sha)` → {branch, subject, mainCheckout, onMain}. */
+/** The refusal for git's pre-push ref lines, or null. `state(sha, remoteSha)` → {branch, subject, mainCheckout, onMain, fastForward}. */
 export function refsVerdict(text, remote, state) {
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    const [localRef, localSha, remoteRef] = line.split(" ");
-    if (!refAllowed(localRef, localSha, remoteRef, remote, state)) return { ...deny("push"), ref: remoteRef };
+    const [localRef, localSha, remoteRef, remoteSha] = line.split(" ");
+    if (!refAllowed(localRef, localSha, remoteRef, remoteSha, remote, state)) return { ...deny("push"), ref: remoteRef };
   }
   return null;
 }
 
-function refAllowed(localRef, localSha, remoteRef, remote, state) {
+function refAllowed(localRef, localSha, remoteRef, remoteSha, remote, state) {
   if (/^0+$/.test(localSha)) return remote === "origin" && remoteRef.startsWith("refs/heads/renovate/");
   if (!REMOTES.has(remote)) return false;
   if (VERSION_TAG.test(remoteRef)) return localRef === remoteRef;
   if (remoteRef !== "refs/heads/main") return false;
-  const s = state(localSha);
+  const s = state(localSha, remoteSha);
   // git names the local ref as the refspec spelled it: `git push origin HEAD` arrives as HEAD, a named commit as its sha.
   const fromMain = localRef === "refs/heads/main"
     || (s.branch === "main" && (localRef === "HEAD" || localRef === localSha));
-  return fromMain && s.mainCheckout && s.onMain && RELEASE.test(s.subject);
+  // A release commit is on main however old it is, so only this keeps a forced push from rolling the remote back.
+  return fromMain && s.mainCheckout && s.onMain && s.fastForward && RELEASE.test(s.subject);
 }
 
 // ─── Live context ───
@@ -436,9 +437,9 @@ function git(dir, ...args) {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 }
 
-function isOnMain(dir, rev) {
+function isAncestor(dir, rev, of) {
   try {
-    git(dir, "merge-base", "--is-ancestor", rev, "refs/heads/main");
+    git(dir, "merge-base", "--is-ancestor", rev, of);
     return true;
   } catch {
     return false;
@@ -450,7 +451,7 @@ function gitState(dir, rev = "HEAD") {
     const gitDir = git(dir, "rev-parse", "--path-format=absolute", "--git-dir");
     const common = git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir");
     return { branch: git(dir, "rev-parse", "--abbrev-ref", "HEAD"), subject: git(dir, "log", "-1", "--format=%s", rev),
-      mainCheckout: gitDir === common, onMain: isOnMain(dir, rev), common };
+      mainCheckout: gitDir === common, onMain: isAncestor(dir, rev, "refs/heads/main"), common };
   } catch {
     return { branch: "", subject: "", mainCheckout: false, onMain: false, common: "" };
   }
@@ -506,7 +507,9 @@ function main(argv) {
   if (argv[0] === "pre-push") {
     let v;
     try {
-      v = refsVerdict(input, argv[1] ?? "", (sha) => gitState(process.cwd(), sha));
+      const dir = process.cwd();
+      v = refsVerdict(input, argv[1] ?? "", (sha, remoteSha) => ({ ...gitState(dir, sha),
+        fastForward: /^0+$/.test(remoteSha) || isAncestor(dir, remoteSha, sha) }));
     } catch (e) {
       v = { ref: "", reason: `the policy guard failed (${e.message}), so it refuses the push.` };
     }

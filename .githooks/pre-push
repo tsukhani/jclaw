@@ -39,12 +39,12 @@ on_remote() {
     [[ -n "$remote" && -n "$(git for-each-ref --contains "$1^{commit}" "refs/remotes/$remote" 2>/dev/null || true)" ]]
 }
 refs_seen=0; deletions_only=1; known_tags_only=1; pushed_sha=""
-while read -r local_ref local_sha _remote_ref _remote_sha; do
+while read -r local_ref local_sha remote_ref _remote_sha; do
     [[ -z "$local_ref" ]] && continue
     refs_seen=1
     [[ "$local_sha" == "$zero_sha" ]] && continue
     deletions_only=0
-    pushed_sha=$local_sha
+    [[ "$remote_ref" == refs/heads/main ]] && pushed_sha=$local_sha
     [[ "$local_ref" == refs/tags/* ]] && on_remote "$local_sha" || known_tags_only=0
 done <<< "$refs"
 if [[ "$refs_seen" == 1 && "$deletions_only" == 1 ]]; then
@@ -66,6 +66,14 @@ current_sha=${pushed_sha:-$(git rev-parse HEAD)}
 if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_sha" ]]; then
     echo "[jclaw pre-push] $current_sha already tested — skipping."
     exit 0
+fi
+
+# This hook tests the checkout, so it can vouch only for HEAD. A commit it already tested passed above, which is what
+# carries /deploy's second push past a commit another session landed after the first.
+if [[ "$current_sha" != "$(git rev-parse HEAD)" ]]; then
+    echo "[jclaw pre-push] HEAD has moved past $current_sha, and this hook can test only HEAD." >&2
+    echo "[jclaw pre-push] It has not been tested, so nothing went out: run /deploy again for a release commit at HEAD." >&2
+    exit 1
 fi
 
 # Path-aware skip: if the entire push range only touches documentation

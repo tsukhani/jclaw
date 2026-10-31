@@ -149,8 +149,9 @@ The command layer refuses:
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
 `main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, and the deletion of `renovate/*`
-branches on `origin`. `/deploy` pushes by SHA, so a commit another session lands between its two pushes goes out in
-neither.
+branches on `origin`. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
+back. `/deploy` pushes by SHA, so a commit another session lands between its two pushes goes out in neither. `pre-push`
+tests the checkout, so a named commit that is not HEAD passes only if it was already tested.
 
 It reads flags, not text: a commit message or heredoc that mentions a refused flag passes. It judges HEAD when the call
 starts, so `git commit … && git push` in one call is refused, and it fails closed on a `cd` it cannot resolve. It stops drift and accidents,

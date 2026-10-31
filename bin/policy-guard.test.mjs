@@ -4,7 +4,7 @@
 
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -211,7 +211,7 @@ test("a hook input the guard cannot read is refused only when it mentions what t
 test("refsVerdict passes /deploy's and /renovate's refs and refuses every other", () => {
   const zero = "0".repeat(40);
   const sha = "a".repeat(40);
-  const release = () => ({ branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true });
+  const release = () => ({ branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true, fastForward: true });
   const line = (l, r, s = sha) => `${l} ${s} ${r} ${zero}\n`;
   deepStrictEqual(refsVerdict(line("HEAD", "refs/heads/main"), "origin", release), null);
   deepStrictEqual(refsVerdict(line(sha, "refs/heads/main"), "github", release), null);
@@ -230,6 +230,8 @@ test("refsVerdict passes /deploy's and /renovate's refs and refuses every other"
   deepStrictEqual(refsVerdict(line("refs/heads/feature", "refs/heads/main"), "origin", release), no("refs/heads/main"));
   deepStrictEqual(refsVerdict(line(sha, "refs/heads/main"), "github",
     () => ({ ...release(), onMain: false })), no("refs/heads/main"));
+  deepStrictEqual(refsVerdict(line(sha, "refs/heads/main"), "github",
+    () => ({ ...release(), fastForward: false })), no("refs/heads/main"));
   deepStrictEqual(refsVerdict(line("(delete)", "refs/heads/main", zero), "origin", release), no("refs/heads/main"));
   deepStrictEqual(refsVerdict(line("(delete)", "refs/heads/renovate/x", zero), "github", release),
     no("refs/heads/renovate/x"));
@@ -317,5 +319,55 @@ test("a commit landing between /deploy's two pushes neither blocks the release n
     const offMain = git(work, "rev-parse", "HEAD").stdout.trim();
     git(work, "checkout", "-q", "main");
     strictEqual(git(work, "push", "origin", `${offMain}:refs/heads/main`).status, 1);
+  });
+});
+
+test("pre-push vouches only for what it tested, whatever the refs say", () => {
+  inScratchRepo(({ work, git, env }) => {
+    const { JCLAW_SKIP_TESTS: _, ...tested } = env;
+    const push = (...args) => spawnSync("git", ["push", ...args], { cwd: work, env: tested, encoding: "utf8" });
+    const gitDir = git(work, "rev-parse", "--absolute-git-dir").stdout.trim();
+    const cache = join(gitDir, "jclaw-last-tested-sha");
+
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.1");
+    const release = git(work, "rev-parse", "HEAD").stdout.trim();
+    git(work, "commit", "-q", "--allow-empty", "-m", "feat: a peer session's work");
+
+    // Never tested, and the hook can test only HEAD: it must refuse, and record nothing.
+    const moved = push("origin", `${release}:refs/heads/main`);
+    strictEqual(moved.status, 1);
+    strictEqual(moved.stderr.includes("HEAD has moved past"), true, moved.stderr);
+    strictEqual(existsSync(cache), false);
+
+    // A tag listed after main must not lend main its tested commit.
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.2");
+    git(work, "tag", "v0.0.1", release);
+    writeFileSync(cache, `${release}\n`);
+    const both = push("origin", "refs/heads/main", "refs/tags/v0.0.1");
+    strictEqual(both.status === 0, false, "main was pushed on the tag's cached commit");
+    strictEqual(`${both.stdout}${both.stderr}`.includes("already tested"), false, both.stdout);
+  });
+});
+
+test("a release commit cannot roll main back, even forced", () => {
+  inScratchRepo(({ scratch, work, git }) => {
+    const tip = () => git(scratch, "--git-dir=origin.git", "rev-parse", "main").stdout.trim();
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.1");
+    const older = git(work, "rev-parse", "HEAD").stdout.trim();
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.2");
+    const newer = git(work, "rev-parse", "HEAD").stdout.trim();
+    strictEqual(git(work, "push", "origin", `${newer}:refs/heads/main`).status, 0);
+
+    const forced = git(work, "push", "--force", "origin", `${older}:refs/heads/main`);
+    strictEqual(forced.status, 1);
+    strictEqual(forced.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/main: ${REASONS.push}`);
+    strictEqual(tip(), newer);
+
+    // A remote tip this clone has never seen cannot be shown to be an ancestor, so it is refused too.
+    git(scratch, "--git-dir=origin.git", "commit-tree", "-m", "from elsewhere", `${newer}^{tree}`);
+    const elsewhere = git(scratch, "--git-dir=origin.git", "commit-tree", "-m", "from elsewhere", `${newer}^{tree}`).stdout.trim();
+    git(scratch, "--git-dir=origin.git", "update-ref", "refs/heads/main", elsewhere);
+    strictEqual(git(work, "push", "--force", "origin", `${newer}:refs/heads/main`).status, 1);
+    strictEqual(tip(), elsewhere);
   });
 });
