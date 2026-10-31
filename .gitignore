@@ -79,6 +79,9 @@ evals/local/
 # because they hold per-developer state that shouldn't be checked in.
 !.claude/commands/
 !.claude/commands/**
+# …and the shared settings, which register the policy guard (bin/policy-guard.mjs).
+# Hooks that name a path on one machine go in settings.local.json.
+!.claude/settings.json
 # …and the workflows those commands drive. Other saved workflows stay local.
 !.claude/workflows/
 .claude/workflows/*

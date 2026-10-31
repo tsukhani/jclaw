@@ -53,6 +53,7 @@ sidecar/video/.gitignore
 .githooks/
 .devcontainer/
 .claude/
+.codex/
 .sandcastle/
 renovate.json5
 .github/

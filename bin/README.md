@@ -9,6 +9,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `diagnostics.test.mjs` | Its parser tests: `node --test bin/diagnostics.test.mjs` |
 | `select-tests.mjs` | The backend test classes a change can reach, for the pre-push and factory gates — see below |
 | `select-tests.test.mjs` | Its tests: `node --test bin/select-tests.test.mjs` |
+| `policy-guard.mjs` | Enforces AGENTS.md's Policy block for Claude Code, Codex and `.githooks/pre-push` — see below |
+| `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
@@ -119,3 +121,34 @@ A deleted class selects nothing by itself, because the compile catches whatever 
 suite is Jenkins' job: anything further than the selected depth is caught there.
 
 Exit 0 printed a selection; exit 2 means there were no compiled classes, or git or jdeps failed.
+
+## policy-guard.mjs
+
+```bash
+node bin/policy-guard.mjs hook               # a PreToolUse event on stdin
+node bin/policy-guard.mjs pre-push REMOTE    # git's pre-push ref lines on stdin
+```
+
+Two layers share one set of rules. `hook` is the command layer: `.claude/settings.json` and `.codex/hooks.json` run it
+before each tool call, and it prints a deny decision or nothing. Codex runs a project hook only after the operator
+trusts it once with `/hooks`, and again after it changes. `pre-push` is the ref layer: it sees what the command layer
+cannot, the refs a push really carries, including names fed through `xargs` and a push from a script. It exits 1 to
+refuse, and runs ahead of `JCLAW_SKIP_TESTS`, which skips the tests and never the guard.
+
+The command layer refuses:
+
+- **`git push`**, except the forms below;
+- **skipping hooks**: `--no-verify`, `git commit -n`, any change to `core.hooksPath`, and `JCLAW_SKIP_TESTS`;
+- **`git stash` with untracked files**;
+- **stopping the instance**: the `jclaw.sh` subcommands the Policy block names, and `kill` aimed at the pid in
+  `server.pid` or at ports 9000 or 9443, unless the command carries `JCLAW_OPERATOR_APPROVED=1`. The agent asks in chat
+  and adds the prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting;
+- **an edit under the seven upstream-imported skills**, through Claude Code's edit tools.
+
+Both layers pass only `git push origin|github HEAD` from the main checkout on `main` when HEAD's subject is exactly
+`Release vX.Y.Z`, a version tag pushed alone, and the deletion of `renovate/*` branches on `origin`.
+
+It reads flags, not text: a commit message or heredoc that mentions a refused flag passes. It stops drift and accidents,
+not an agent that writes a refused command into a script and runs it, though the ref layer still sees that script's push
+unless it skips hooks. `pkill` and `killall`, a `sed` into a skill and Codex's `apply_patch` edits are not checked. If
+the guard itself fails, the hook refuses only calls that mention what it guards, and the ref layer refuses the push.

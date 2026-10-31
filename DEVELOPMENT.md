@@ -207,7 +207,7 @@ A few more developer commands sit beside it:
 git config core.hooksPath .githooks
 ```
 
-A human can bypass it for a one-off push (e.g. urgent hotfix) with `JCLAW_SKIP_TESTS=1 git push origin HEAD`; an agent never does.
+`pre-push` first runs the policy guard (`bin/policy-guard.mjs`), which lets out only `/deploy`'s and `/renovate`'s pushes. A human can skip the tests for a one-off push with `JCLAW_SKIP_TESTS=1 git push origin HEAD`, which still goes through the guard; an agent never does.
 
 ---
 
