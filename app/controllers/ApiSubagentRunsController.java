@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
@@ -105,7 +104,8 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
     @Operation(summary = "List subagent runs with optional filters and pagination")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "the parent-agent filter is pinned to the caller before the query runs; main reaches every agent's")
     public static void list(Long parentAgentId, Long parentConversationId, Long parentTaskRunId, Boolean coding,
                             String status, String since, String q,
                             String sort, String dir,
@@ -122,7 +122,7 @@ public class ApiSubagentRunsController extends Controller {
         // ambiguous under Hibernate 7 strict HQL. `r.` is valid for both the
         // fetch query and the fetch-less COUNT.
         var filter = new JpqlFilter()
-                .eq("r.parentAgent.id", parentAgentId)
+                .eq("r.parentAgent.id", scopedParentAgentId(parentAgentId))
                 .eq("r.parentConversation.id", parentConversationId)
                 .eq("r.parentTaskRun.id", parentTaskRunId)
                 .eq("r." + STATUS, statusEnum)
@@ -560,7 +560,8 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = StepView.class))))
     @Operation(summary = "Ordered persisted step transcript for a subagent coding run")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "a run's steps are its transcript, read only by the agent that started it; main reaches every agent's")
     public static void steps(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
@@ -571,6 +572,7 @@ public class ApiSubagentRunsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Run " + id + " not found.");
             return;
         }
+        requireOwnRun(run);
         if (run.childConversation == null) {
             renderJSON("[]");
             return;

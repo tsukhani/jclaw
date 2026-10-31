@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import controllers.RequestPrincipal;
 import models.Agent;
 import models.Conversation;
@@ -12,6 +13,7 @@ import utils.AppClock;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -166,6 +168,54 @@ class AgentScopedAccessTest extends FunctionalTest {
     // --- subagent runs: bulk delete narrows, it does not refuse -------------------------------
 
     @Test
+    void anAgentListsOnlyItsOwnRuns() {
+        var own = freshRunOwner();
+        var resp = asAgent(() -> GET(agentRequest(own.agentId()), "/api/subagent-runs"));
+        assertStatus(200, resp);
+        assertEquals(List.of(own.runId()), listedRunIds(resp));
+    }
+
+    @Test
+    void aListFilterCannotBeAimedAtAnotherAgent() {
+        // The same pinning as the bulk delete: the filter names the alien, and the answer stays the caller's.
+        var own = freshRunOwner();
+        var resp = asAgent(() -> GET(agentRequest(own.agentId()), "/api/subagent-runs?parentAgentId=" + alienAgentId));
+        assertStatus(200, resp);
+        assertEquals(List.of(own.runId()), listedRunIds(resp));
+    }
+
+    @Test
+    void anUnstampedBearerCannotListRuns() {
+        var resp = asAgent(() -> GET(bareBearerRequest(), "/api/subagent-runs"));
+        assertStatus(403, resp);
+        assertTrue(getContent(resp).contains(AGENT_SCOPE), getContent(resp));
+    }
+
+    @Test
+    void theOperatorStillListsAnyAgentsRuns() {
+        assertIsOk(POST("/api/auth/login", "application/json", "{\"username\":\"admin\",\"password\":\"changeme\"}"));
+        var resp = GET("/api/subagent-runs?parentAgentId=" + alienAgentId + "&limit=500");
+        assertStatus(200, resp);
+        assertTrue(listedRunIds(resp).contains(alienRunId), getContent(resp));
+    }
+
+    @Test
+    void anAgentReadsItsOwnRunStepsAndNotAnotherAgents() {
+        var own = asAgent(() -> GET(agentRequest(callerAgentId), "/api/subagent-runs/" + ownRunId + "/steps"));
+        assertStatus(200, own);
+
+        var alien = asAgent(() -> GET(agentRequest(callerAgentId), "/api/subagent-runs/" + alienRunId + "/steps"));
+        assertStatus(403, alien);
+        assertTrue(getContent(alien).contains(AGENT_SCOPE), getContent(alien));
+    }
+
+    @Test
+    void anUnstampedBearerCannotReadRunSteps() {
+        var resp = asAgent(() -> GET(bareBearerRequest(), "/api/subagent-runs/" + ownRunId + "/steps"));
+        assertStatus(403, resp);
+    }
+
+    @Test
     void aBulkDeleteByIdsNarrowsToTheCallersOwnRuns() {
         var resp = asAgent(() -> deleteWithBody(agentRequest(callerAgentId), "/api/subagent-runs",
                 "{\"ids\":[" + ownRunId + "," + alienRunId + "]}"));
@@ -252,6 +302,23 @@ class AgentScopedAccessTest extends FunctionalTest {
     }
 
     /** Committed read: the test body's own transaction cannot see what the request committed. */
+    private record RunOwner(Long agentId, Long runId) {}
+
+    /** An agent with exactly one run, so a list can be compared with it exactly. */
+    private static RunOwner freshRunOwner() {
+        return commit(() -> {
+            var agent = freshAgentNamed("scope-test-lister");
+            return new RunOwner(agent.id, settledRunFor(agent, conversationFor(agent)).id);
+        });
+    }
+
+    private static List<Long> listedRunIds(Http.Response response) {
+        var ids = new java.util.ArrayList<Long>();
+        JsonParser.parseString(getContent(response)).getAsJsonArray()
+                .forEach(run -> ids.add(run.getAsJsonObject().get("id").getAsLong()));
+        return ids;
+    }
+
     private static boolean runExists(Long id) {
         return commit(() -> SubagentRun.findById(id) != null);
     }
