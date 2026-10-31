@@ -1,4 +1,7 @@
 {
+  "enabledPlugins": {
+    "huggingface-skills@claude-plugins-official": false
+  },
   "hooks": {
     "PreToolUse": [
       {
