@@ -111,6 +111,12 @@ out/
 .classpath
 .project
 .settings/
+# Build output of Eclipse JDT LS, which Zed runs for Java. bin/ also holds tracked scripts, so name each folder.
+/bin/main/
+/bin/test/
+/bin/default/
+/bin/generated-sources/
+/bin/generated-test-sources/
 
 # NetBeans
 nbproject/
