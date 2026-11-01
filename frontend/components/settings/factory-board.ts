@@ -129,24 +129,9 @@ export function groupStories(stories: BoardStory[]): StoryGroup[] {
   return GROUPS.map(g => ({ id: g.id, title: g.title, stories: stories.filter(s => g.states.includes(s.state)) }))
 }
 
-/**
- * The Waiting group as a tree. Outside blockers come first, then waiting stories, each in board order. A node sits under
- * its deepest blocker in the tree, the one drawn later when tied, and is drawn once, so a subtree two stories share
- * appears once. Depth is the longest chain of blockers; a link back into the chain being measured is ignored, so a cycle
- * ends.
- */
-export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): StoryRow[] {
-  interface TreeNode { key: string, rank: number, blockedBy: string[], row: (depth: number, at: TreePlace) => StoryRow }
-  const nodes = new Map<string, TreeNode>()
-  const add = (key: string, blockedBy: string[] | null | undefined, row: TreeNode['row']) => {
-    if (!nodes.has(key)) nodes.set(key, { key, rank: nodes.size, blockedBy: blockedBy ?? [], row })
-  }
-  const waitingKeys = new Set(waiting.map(s => s.key))
-  for (const b of blockers) {
-    if (!waitingKeys.has(b.key)) add(b.key, b.blockedBy, (depth, at) => ({ kind: 'outside', key: b.key, depth, blocker: b, ...at }))
-  }
-  for (const s of waiting) add(s.key, s.blockedBy, (depth, at) => ({ kind: 'story', key: s.key, depth, story: s, ...at }))
+interface TreeNode { key: string, rank: number, blockedBy: string[], row: (depth: number, at: TreePlace) => StoryRow }
 
+function blockerDepths(nodes: Map<string, TreeNode>): Map<string, number> {
   const depth = new Map<string, number>()
   const measuring = new Set<string>()
   const depthOf = (n: TreeNode): number => {
@@ -164,34 +149,26 @@ export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): St
   }
   // In board order, so where a cycle is cut does not depend on the order a sort compares in.
   for (const n of nodes.values()) depthOf(n)
+  return depth
+}
 
-  // A node's board ranks from its root: comparing two of them orders nodes as the tree draws them. Placing shallowest
-  // first is enough, because a node added under a parent never reorders the nodes already placed.
-  const path = new Map<string, number[]>()
-  const drawnLater = (a: number[], b: number[]) => {
-    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! > b[i]!
-    return a.length > b.length
-  }
-  const children = new Map<string, TreeNode[]>()
-  const roots: TreeNode[] = []
-  const byDepth = [...nodes.values()].sort((a, b) => depthOf(a) - depthOf(b) || a.rank - b.rank)
-  for (const n of byDepth) {
-    let parent: TreeNode | undefined
-    for (const k of n.blockedBy) {
-      const b = nodes.get(k)
-      if (!b || !path.has(k) || depthOf(b) >= depthOf(n)) continue
-      if (!parent || depthOf(b) > depthOf(parent) || (depthOf(b) === depthOf(parent) && drawnLater(path.get(k)!, path.get(parent.key)!))) parent = b
-    }
-    if (parent) {
-      children.set(parent.key, [...(children.get(parent.key) ?? []), n])
-      path.set(n.key, [...path.get(parent.key)!, n.rank])
-    }
-    else {
-      roots.push(n)
-      path.set(n.key, [n.rank])
-    }
-  }
+function drawnLater(a: number[], b: number[]): boolean {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! > b[i]!
+  return a.length > b.length
+}
 
+function placedParent(n: TreeNode, nodes: Map<string, TreeNode>, depth: Map<string, number>, path: Map<string, number[]>): TreeNode | undefined {
+  const depthOf = (t: TreeNode) => depth.get(t.key)!
+  let parent: TreeNode | undefined
+  for (const k of n.blockedBy) {
+    const b = nodes.get(k)
+    if (!b || !path.has(k) || depthOf(b) >= depthOf(n)) continue
+    if (!parent || depthOf(b) > depthOf(parent) || (depthOf(b) === depthOf(parent) && drawnLater(path.get(k)!, path.get(parent.key)!))) parent = b
+  }
+  return parent
+}
+
+function treeRows(roots: TreeNode[], children: Map<string, TreeNode[]>): StoryRow[] {
   const rows: StoryRow[] = []
   // `below` is the guides a node's children inherit: its own, plus whether its column runs on past its subtree.
   const place = (n: TreeNode, level: number, at: TreePlace, below: TreeGuide[]) => {
@@ -203,8 +180,49 @@ export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): St
         [...below, last ? 'blank' : 'pipe'])
     })
   }
-  for (const n of roots.sort((a, b) => a.rank - b.rank)) place(n, 0, ROOT, [])
+  for (const n of roots) place(n, 0, ROOT, [])
   return rows
+}
+
+/**
+ * The Waiting group as a tree. Outside blockers come first, then waiting stories, each in board order. A node sits under
+ * its deepest blocker in the tree, the one drawn later when tied, and is drawn once, so a subtree two stories share
+ * appears once. Depth is the longest chain of blockers; a link back into the chain being measured is ignored, so a cycle
+ * ends.
+ */
+export function waitingRows(waiting: BoardStory[], blockers: BoardBlocker[]): StoryRow[] {
+  const nodes = new Map<string, TreeNode>()
+  const add = (key: string, blockedBy: string[] | null | undefined, row: TreeNode['row']) => {
+    if (!nodes.has(key)) nodes.set(key, { key, rank: nodes.size, blockedBy: blockedBy ?? [], row })
+  }
+  const waitingKeys = new Set(waiting.map(s => s.key))
+  for (const b of blockers) {
+    if (!waitingKeys.has(b.key)) add(b.key, b.blockedBy, (depth, at) => ({ kind: 'outside', key: b.key, depth, blocker: b, ...at }))
+  }
+  for (const s of waiting) add(s.key, s.blockedBy, (depth, at) => ({ kind: 'story', key: s.key, depth, story: s, ...at }))
+
+  const depth = blockerDepths(nodes)
+
+  // A node's board ranks from its root: comparing two of them orders nodes as the tree draws them. Placing shallowest
+  // first is enough, because a node added under a parent never reorders the nodes already placed.
+  const path = new Map<string, number[]>()
+  const children = new Map<string, TreeNode[]>()
+  const roots: TreeNode[] = []
+  const byDepth = [...nodes.values()].sort((a, b) => depth.get(a.key)! - depth.get(b.key)! || a.rank - b.rank)
+  for (const n of byDepth) {
+    const parent = placedParent(n, nodes, depth, path)
+    if (parent) {
+      children.set(parent.key, [...(children.get(parent.key) ?? []), n])
+      path.set(n.key, [...path.get(parent.key)!, n.rank])
+    }
+    else {
+      roots.push(n)
+      path.set(n.key, [n.rank])
+    }
+  }
+
+  roots.sort((a, b) => a.rank - b.rank)
+  return treeRows(roots, children)
 }
 
 /** {@link groupStories} with each group's rows: Waiting as its tree, every other group flat. */
