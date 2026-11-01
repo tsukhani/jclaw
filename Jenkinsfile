@@ -638,19 +638,12 @@ pipeline {
                                 done
                         '''
 
-                        // Keep only the 5 most recent GHCR package versions, never touching
-                        // whichever version the :latest tag currently points at.
+                        // Images follow the Releases kept above. Never count package versions here:
+                        // one multi-arch image is three of them, so a count deletes images a kept
+                        // Release still lists in its signed IMAGE_DIGEST.
                         sh '''
-                            echo "Pruning old GHCR package versions (keeping last 5, preserving :latest)..."
-                            gh api --paginate /users/tsukhani/packages/container/jclaw/versions \
-                                | jq -r '[.[] | select((.metadata.container.tags | index("latest")) | not)]
-                                         | sort_by(.created_at) | reverse
-                                         | .[5:] | .[].id' \
-                                | while read id; do
-                                    [ -z "$id" ] && continue
-                                    echo "Deleting GHCR version id: $id"
-                                    gh api -X DELETE "/user/packages/container/jclaw/versions/$id" || true
-                                done
+                            echo "Pruning GHCR images no kept Release needs..."
+                            node bin/ghcr-prune.mjs --apply
                         '''
 
                         // Prune BuildKit cache older than 30 days. The Release

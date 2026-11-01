@@ -13,6 +13,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
 | `sonar-precheck.mjs` | Sonar's rules over the files a release changes, run by `/deploy` before it bumps anything — see below |
 | `sonar-precheck.test.mjs` | Its tests: `node --test bin/sonar-precheck.test.mjs` |
+| `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
+| `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
@@ -162,6 +164,28 @@ cannot run at once: a second one removes the first.
 | 0 | Nothing that can fail the gate; any other findings are listed |
 | 1 | At least one finding that can fail the gate |
 | 2 | It did not finish: Docker, the analyzer or git failed, or a file went unchecked. The reason is printed |
+
+## ghcr-prune.mjs
+
+```bash
+node bin/ghcr-prune.mjs          # name what it would delete, and delete nothing
+node bin/ghcr-prune.mjs --apply  # delete it, as the Cleanup Old Releases stage does
+```
+
+Images follow the Releases. It keeps the index of every listed Release and of `latest`, with their platform manifests, and
+deletes every other package version of `ghcr.io/tsukhani/jclaw`, so each listed `IMAGE_DIGEST` stays pullable. The stage
+prunes Releases first, so this sees the ones that survive.
+
+A package version is one manifest, not one image: a multi-arch image is an index plus an untagged version per platform.
+Keeping five versions kept two images, which left three of five Releases with a signed digest that returned 404.
+
+It reads everything and decides before it deletes anything, so a failed lookup deletes nothing. With no Release listed it
+refuses, because nothing then says what to keep. A Release whose image is already gone is named and skipped.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Finished, or nothing to delete |
+| 1 | Refused or stopped, and the reason is printed. A failed delete stops the run, and earlier deletions stand |
 
 ## policy-guard.mjs
 
