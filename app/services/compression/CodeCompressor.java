@@ -227,12 +227,22 @@ public final class CodeCompressor implements ContentCompressor {
                     + "|func\\b|fn\\b|def\\b|function\\b)"
                     + ")");
 
+    // KEEP's modifier run stops at a type keyword, so a C# method went with its body. An access
+    // modifier only ever opens a declaration, so such a line is kept whatever it declares; an
+    // interface member has none, and is told from a call by its return type. The lookahead
+    // rejects the statements of that same shape.
+    private static final Pattern CSHARP_MEMBER = Pattern.compile(
+            "^(?:namespace\\b"
+                    + "|(?:public|private|protected|internal|static|sealed|abstract|partial|override|virtual|async)\\b"
+                    + "|(?!(?:return|await|throw|new|yield|else|goto)\\b)"
+                    + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$)");
+
     private static @Nullable String compressByRegex(String code, Language language) {
         String marker = (language == Language.PYTHON ? "# [...]" : "// [...]");
         var sb = new StringBuilder(code.length());
         boolean eliding = false;
         for (var line : code.split("\n", -1)) {
-            if (isStructural(line)) {
+            if (isStructural(line, language)) {
                 if (eliding) {
                     sb.append(marker).append('\n');
                     eliding = false;
@@ -247,13 +257,13 @@ public final class CodeCompressor implements ContentCompressor {
         return sb.isEmpty() ? null : sb.toString();
     }
 
-    private static boolean isStructural(String line) {
+    private static boolean isStructural(String line, Language language) {
         var t = line.strip();
         if (t.isEmpty()) return false;
         // Lone structural punctuation: closing/opening braces of kept blocks.
         if (t.equals("}") || t.equals("};") || t.equals("{") || t.equals(")") || t.equals("),")) {
             return true;
         }
-        return KEEP.matcher(t).find();
+        return KEEP.matcher(t).find() || (language == Language.CSHARP && CSHARP_MEMBER.matcher(t).find());
     }
 }

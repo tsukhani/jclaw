@@ -281,11 +281,12 @@ class CodeCompressorTest extends UnitTest {
         assertEquals("""
                 using System;
                 using System.Collections.Generic;
-                // [...]
+                namespace Acme.Core.Episodes
                 {
                     public class EpisodeService
                     {
-                // [...]
+                        private readonly IList<int> _ids = new List<int>();
+                        public int Count()
                         {
                 // [...]
                         }
@@ -293,6 +294,126 @@ class CodeCompressorTest extends UnitTest {
                 }
                 """, result.content());
         assertFalse(result.degraded(), "C# is no failed Java parse");
+    }
+
+    @Test
+    void csharpMembersSurviveWithTheirBodiesElided() {
+        var csharp = """
+                namespace Acme.Core
+                {
+                    public interface IEpisodes
+                    {
+                        Episode Find(int id);
+                        List<Episode> ForSeries(int seriesId, bool monitored);
+                        Dictionary<int, string> Titles(int seriesId);
+                    }
+
+                    internal sealed class Episodes : IEpisodes
+                    {
+                        public string Title { get; set; }
+
+                        public Episodes(IStore store) : base(store)
+                        {
+                            _store = store;
+                        }
+
+                        protected override async Task<int> Save(Episode episode)
+                        {
+                            var saved = await _store.Write(episode);
+                            Log(saved);
+                            if (saved > 0)
+                            {
+                                return Count(saved);
+                            }
+                            return await Retry(episode);
+                        }
+
+                        public int Count() => _ids.Count;
+                    }
+                }
+                """;
+
+        var out = compressor.compress(csharp).content();
+
+        assertEquals("""
+                namespace Acme.Core
+                {
+                    public interface IEpisodes
+                    {
+                        Episode Find(int id);
+                        List<Episode> ForSeries(int seriesId, bool monitored);
+                        Dictionary<int, string> Titles(int seriesId);
+                    }
+                    internal sealed class Episodes : IEpisodes
+                    {
+                        public string Title { get; set; }
+                        public Episodes(IStore store) : base(store)
+                        {
+                // [...]
+                        }
+                        protected override async Task<int> Save(Episode episode)
+                        {
+                // [...]
+                            {
+                // [...]
+                            }
+                // [...]
+                        }
+                        public int Count() => _ids.Count;
+                    }
+                }
+                """, out);
+    }
+
+    @Test
+    void csharpStatementsAreNotTakenForInterfaceMembers() {
+        var statements = """
+                using System;
+                public class Runner
+                {
+                    public int Run()
+                    {
+                        return Compute(a);
+                        await Save(b);
+                        throw new Failure(c);
+                        new Thing(d);
+                        yield return Next(e);
+                        store.Write(f);
+                        int total = Sum(g);
+                    }
+                }
+                """;
+
+        var out = compressor.compress(statements).content();
+
+        assertEquals("""
+                using System;
+                public class Runner
+                {
+                    public int Run()
+                    {
+                // [...]
+                    }
+                }
+                """, out);
+    }
+
+    @Test
+    void theCSharpMemberRuleLeavesOtherLanguagesAlone() {
+        var typescript = """
+                export class Episodes {
+                  public count(): number {
+                    return this.ids.length;
+                  }
+                }
+                """;
+
+        assertEquals("""
+                export class Episodes {
+                // [...]
+                  }
+                }
+                """, compressor.compress(typescript, Language.JAVASCRIPT).content());
     }
 
     @Test
