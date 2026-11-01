@@ -11,6 +11,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `select-tests.test.mjs` | Its tests: `node --test bin/select-tests.test.mjs` |
 | `policy-guard.mjs` | Enforces AGENTS.md's Policy block for Claude Code, Codex and `.githooks/pre-push` — see below |
 | `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
+| `sonar-precheck.mjs` | Sonar's rules over the files a release changes, run by `/deploy` before it bumps anything — see below |
+| `sonar-precheck.test.mjs` | Its tests: `node --test bin/sonar-precheck.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
@@ -123,6 +125,43 @@ suite is Jenkins' job: anything further than the selected depth is caught there.
 `--rules` prints the rule checks alone, for `./jclaw.sh check-arch`, and needs no compiled classes.
 
 Exit 0 printed a selection; exit 2 means there were no compiled classes, or git or jdeps failed.
+
+## sonar-precheck.mjs
+
+```bash
+node bin/sonar-precheck.mjs                                 # the working tree against the newest version tag
+node bin/sonar-precheck.mjs --base v0.19.78 --head v0.19.79 # replay a past release
+```
+
+Jenkins reaches Sonar after the tests, so a failed quality gate costs a whole build. This runs Sonar's rules first, about
+3 seconds a file, with no push and no write to the server. It starts the `mcp/sonarqube` image with the token from
+`~/.claude.json` and drives its `analyze_code_snippet` tool over stdio, because through an agent every file would have to
+be retyped into the tool call.
+
+- **What it covers:** every file under `app/`, `frontend/` and `test/` changed since the newest `v*` tag on `origin/main`,
+  uncommitted and untracked files included. `/deploy` tags only a version whose build passed, so the range also holds code
+  that reached `main` in a build that stopped before Sonar.
+- **What it reports:** only issues on changed lines, which is what Sonar counts as new code here (`PREVIOUS_VERSION`).
+  It applies the `sonar.issue.ignore.multicriteria` list in `build.gradle.kts`.
+- **What it cannot see:** duplication and coverage, the gate's other two conditions. It knows nothing of false-positive
+  or accepted marks on the server, so a marked issue on a changed line is reported again.
+
+Reliability and security findings are listed as able to fail the gate, because the gate requires an A on both and a
+single issue costs it. Maintainability is a debt ratio, so those are listed separately and do not change the exit code.
+
+Replaying releases that aborted at the gate found the rules behind #1309 (S6418), #1314 (S5332, which needed the range to
+start at the last passed version) and #1318 (S2077, S2115), and missed #1315, which was duplication. On v0.19.79 it found
+exactly the two issues Sonar reported, out of 42 the analyzer raised across those files.
+
+The container uses its own volume, `sonarqube-mcp-precheck`, and a fixed name. Sharing the MCP server's
+`sonarqube-mcp-cache` fails every analysis with `CancellationException` while a session's server is up, so two pre-checks
+cannot run at once: a second one removes the first.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Nothing that can fail the gate; any other findings are listed |
+| 1 | At least one finding that can fail the gate |
+| 2 | It did not finish: Docker, the analyzer or git failed, or a file went unchecked. The reason is printed |
 
 ## policy-guard.mjs
 

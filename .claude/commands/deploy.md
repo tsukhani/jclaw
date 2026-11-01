@@ -36,6 +36,22 @@ Renovate's own commits pass as `U`: a good signature from the Renovate runner's 
 
 If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 
+**Preflight: Sonar's rules over what this release changes**
+
+Jenkins reaches Sonar only after its tests, and a failed quality gate aborts the build before Package. Check first, while stopping costs no version:
+
+```bash
+node bin/sonar-precheck.mjs
+```
+
+Run it in the background: it needs Docker and takes about 3 seconds a file. It covers every file changed since the newest version tag, uncommitted and untracked files included because `git add -A` ships them, and reports only what falls on changed lines. `bin/README.md` has the contract.
+
+- **Exit 0:** carry on, and keep any findings it lists for the report.
+- **Exit 1:** it found issues that can fail the gate. Stop and list them, with `/sonar`'s known verdict for any rule that has one, and ask whether to fix them first or deploy anyway. Sonar cannot mark an issue until an analysis has raised it, so a false positive needs a code change or, in Java, `@SuppressWarnings` with its reason; without one, this build aborts at the gate. The answer covers this release only.
+- **Exit 2:** it did not finish. Report why and carry on: a Docker or analyzer failure must not block a release.
+
+It cannot see duplication or coverage, the gate's other two conditions, so a clean result does not promise a green gate. Read new test code by hand for a copied test body: that is how #1315 aborted, with no issue to find.
+
 **Phase 1: Bump the version**
 
 1. Read `conf/application.conf` and find the single line that starts with `application.version=`. If missing, stop and tell the user — this command only runs against a project that already uses that key.
@@ -152,7 +168,7 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
 
 **Phase 5: Report**
 
-22. Summarize in one message: new version, commit hash, branch name, both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
+22. Summarize in one message: new version, commit hash, branch name, the Sonar pre-check's findings (or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
