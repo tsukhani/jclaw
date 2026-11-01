@@ -47,6 +47,42 @@ class ContentTypeDetectorTest extends UnitTest {
     }
 
     @Test
+    void csharpWithTwoDeclarationsIsCode() {
+        var csharp = """
+                using System;
+
+                namespace Acme.Core
+                {
+                    public interface IEpisodes
+                    {
+                    }
+
+                    public class Episodes : IEpisodes
+                    {
+                    }
+                }
+                """;
+        assertEquals(ContentType.CODE, ContentTypeDetector.detect(csharp));
+    }
+
+    @Test
+    void csharpUsingLinesAreNotCodeSignals() {
+        var oneDeclaration = """
+                using System;
+                using System.Linq;
+                using System.Text;
+
+                namespace Acme.Core
+                {
+                    public class Episodes
+                    {
+                    }
+                }
+                """;
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect(oneDeclaration));
+    }
+
+    @Test
     void malformedJsonIsNotJson() {
         // Starts with { but doesn't parse → falls through to TEXT, never JSON.
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect("{not: valid, json"));

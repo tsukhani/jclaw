@@ -1,7 +1,15 @@
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.CodeCompressor;
 import services.compression.CodeCompressor.Language;
+import services.compression.ContentHash;
+
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * JCLAW-463: CodeCompressor. Validates the Java AST path (imports, signatures and
@@ -246,6 +254,94 @@ class CodeCompressorTest extends UnitTest {
         var result = compressor.compress(broken.toString(), Language.JAVA);
         assertTrue(result.changed(), "the regex fallback still shrinks a body-heavy listing");
         assertTrue(result.degraded(), "a swallowed parse failure must reach the caller");
+    }
+
+    @Test
+    void csharpListingTakesTheRegexPathWithoutAParseFailure() {
+        var csharp = """
+                using System;
+                using System.Collections.Generic;
+
+                namespace Acme.Core.Episodes
+                {
+                    public class EpisodeService
+                    {
+                        private readonly IList<int> _ids = new List<int>();
+
+                        public int Count()
+                        {
+                            return _ids.Count;
+                        }
+                    }
+                }
+                """;
+
+        var result = compressor.compress(csharp);
+
+        assertEquals("""
+                using System;
+                using System.Collections.Generic;
+                // [...]
+                {
+                    public class EpisodeService
+                    {
+                // [...]
+                        {
+                // [...]
+                        }
+                    }
+                }
+                """, result.content());
+        assertFalse(result.degraded(), "C# is no failed Java parse");
+    }
+
+    @Test
+    void csharpDirectivesOutrankTheDeclarationFormCSharpSharesWithJava() {
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("using System;\npublic class B {}"));
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("using System.Linq;\npublic class B {}"));
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("using static System.Math;\npublic class B {}"));
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("namespace A.B;\npublic class C {}"));
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("namespace A.B\n{\n    public class C {}\n}"));
+        assertEquals(Language.CSHARP, CodeCompressor.detectLanguage("namespace A.B {\n    public class C {}\n}"));
+    }
+
+    @Test
+    void javaWithoutACSharpDirectiveStaysJava() {
+        assertEquals(Language.JAVA, CodeCompressor.detectLanguage("public class B {}"));
+        assertEquals(Language.JAVA, CodeCompressor.detectLanguage("import java.util.List;\npublic class B {}"));
+        assertEquals(Language.JAVA, CodeCompressor.detectLanguage("public class B {\n    // using Foo here\n}"));
+        assertEquals(Language.JAVA, CodeCompressor.detectLanguage("public class B {}\nusing a wrench\nnamespace of it"));
+    }
+
+    @Test
+    void anUnparseableListingWarnsOnOneLineWithoutAStackTrace() {
+        var broken = "public class X {\n    void broken( {{{ not valid ;;; }}}\n    garbage line\n}";
+        var logged = new CopyOnWriteArrayList<LogEvent>();
+        var capture = new AbstractAppender("CodeCompressorTest", null, null, true, Property.EMPTY_ARRAY) {
+            @Override
+            public void append(LogEvent event) {
+                logged.add(event.toImmutable());
+            }
+        };
+        capture.start();
+        var logger = (org.apache.logging.log4j.core.Logger) LogManager.getLogger("play");
+        logger.addAppender(capture);
+        try {
+            compressor.compress(broken, Language.JAVA);
+        } finally {
+            logger.removeAppender(capture);
+            capture.stop();
+        }
+
+        // Other classes log to "play" concurrently, and this handle is unique to this input.
+        var warning = "[compress] Java parse failed for content " + ContentHash.handle(broken)
+                + " — using the regex fallback";
+        var mine = logged.stream()
+                .filter(event -> warning.equals(event.getMessage().getFormattedMessage()))
+                .toList();
+        assertEquals(1, mine.size());
+        assertEquals(Level.WARN, mine.getFirst().getLevel());
+        assertNull(mine.getFirst().getThrown());
     }
 
 }

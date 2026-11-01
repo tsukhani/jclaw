@@ -2,6 +2,7 @@ package services.compression;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.JavaParserAdapter;
+import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ParserConfiguration.LanguageLevel;
 import com.github.javaparser.Position;
@@ -31,7 +32,7 @@ import java.util.regex.Pattern;
  *       the original string by node <em>range</em> (not by re-serializing the
  *       AST), imports and signatures stay byte-identical and formatting is
  *       preserved. Unparseable Java falls through to the regex path.</li>
- *   <li><b>Everything else</b> (Python, JS/TS, Go, Rust, unknown) → a line-based
+ *   <li><b>Everything else</b> (Python, JS/TS, Go, Rust, C#, unknown) → a line-based
  *       regex fallback: keep import/declaration/signature lines, collapse runs of
  *       body lines to a single comment marker.</li>
  * </ul>
@@ -44,8 +45,10 @@ public final class CodeCompressor implements ContentCompressor {
 
     public static final String ALGORITHM_NAME = "code-structural";
 
+    private static final String PARSE_FAILED = "[compress] Java parse failed for content %s — using the regex fallback";
+
     /** Recognized source languages; {@link #UNKNOWN} routes through the generic regex fallback. */
-    public enum Language { JAVA, PYTHON, JAVASCRIPT, GO, RUST, UNKNOWN }
+    public enum Language { JAVA, PYTHON, JAVASCRIPT, GO, RUST, CSHARP, UNKNOWN }
 
     @Override
     public String algorithm() {
@@ -66,11 +69,15 @@ public final class CodeCompressor implements ContentCompressor {
         if (language == Language.JAVA) {
             try {
                 out = compressJava(code);
-            } catch (RuntimeException e) {
+            } catch (ParseProblemException _) {
                 // A silent fall-through hid real loss: the regex path keeps far less
                 // than the AST path. The handle is the pipeline's ccr_retrieve marker.
-                Logger.warn(e, "[compress] Java parse failed for content %s — using the regex fallback",
-                        ContentHash.handle(code));
+                // No trace: the pipeline repeats this every model round, and the exception's
+                // message quotes tool output, which play.Logger would write unredacted.
+                Logger.warn(PARSE_FAILED, ContentHash.handle(code));
+                degraded = true;
+            } catch (RuntimeException e) {
+                Logger.warn(e, PARSE_FAILED, ContentHash.handle(code));
                 degraded = true;
             }
         }
@@ -100,6 +107,13 @@ public final class CodeCompressor implements ContentCompressor {
     private static final Pattern JS_HINT = Pattern.compile(
             "(?m)^\\s*(?:function\\s+\\w+\\s*\\(|const\\s+\\w+\\s*=|export\\s+(?:default\\s+)?|import\\s++.*\\bfrom\\b)");
 
+    // `public class` is valid C#, so this runs ahead of JAVA_HINT: JavaParser takes a bare
+    // `using System;` for a compact source file's field and throws at the first dotted one.
+    // Not in LANGUAGE_HINTS: it keeps C# from the parser and leaves what counts as code alone.
+    private static final Pattern CSHARP_HINT = Pattern.compile(
+            "(?m)^\\s*+(?:using\\s++(?:static\\s++)?[\\w.]++\\s*+;"
+                    + "|namespace[ \\t]++[\\w.]++[ \\t]*+[;{]?+[ \\t]*+$)");
+
     private static final List<Pattern> LANGUAGE_HINTS =
             List.of(JAVA_HINT, PYTHON_HINT, GO_HINT, RUST_HINT, JS_HINT);
 
@@ -125,6 +139,7 @@ public final class CodeCompressor implements ContentCompressor {
 
     public static Language detectLanguage(String code) {
         if (code == null || code.isBlank()) return Language.UNKNOWN;
+        if (CSHARP_HINT.matcher(code).find()) return Language.CSHARP;
         if (JAVA_HINT.matcher(code).find()) return Language.JAVA;
         if (PYTHON_HINT.matcher(code).find()) return Language.PYTHON;
         if (GO_HINT.matcher(code).find()) return Language.GO;
