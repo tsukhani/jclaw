@@ -137,6 +137,95 @@ class CompressionPipelineTest extends UnitTest {
                 "ccr handle present");
     }
 
+    // ---- the loop's list already holds the prepare step's compressed copy ----
+
+    private static void assertASecondPassChangesNothing(String original) {
+        var firstPass = CompressionPipeline.compressMessages(
+                List.of(ChatMessage.toolResult("c1", "read_file", original)), MODEL, 250);
+        var compressed = (String) firstPass.get(0).content();
+        assertTrue(compressed.endsWith("ccr_retrieve(\"" + ContentHash.handle(original) + "\") for the full original]"),
+                "the first pass must leave the original's handle: " + compressed);
+
+        var secondPass = CompressionPipeline.compressMessages(firstPass, MODEL, 250);
+
+        assertEquals(compressed, secondPass.get(0).content());
+    }
+
+    private static String javaListing() {
+        var sb = new StringBuilder("package demo;\n\nimport java.util.List;\n\npublic class Service {\n");
+        for (int i = 0; i < 40; i++) {
+            sb.append("    public int compute").append(i).append("(int a, int b) {\n");
+            for (int j = 0; j < 10; j++) {
+                sb.append("        int temp").append(j).append(" = a * ").append(j).append(" + b;\n");
+            }
+            sb.append("        return a + b;\n    }\n");
+        }
+        return sb.append("}\n").toString();
+    }
+
+    private static String csharpListing() {
+        var sb = new StringBuilder("using System;\nusing System.Linq;\n\nnamespace Acme.Core\n{\n");
+        for (int i = 0; i < 40; i++) {
+            sb.append("    public class Service").append(i).append("\n    {\n")
+                    .append("        public int Compute(int a, int b)\n        {\n")
+                    .append("            return a + b;\n        }\n    }\n\n");
+        }
+        return sb.append("}\n").toString();
+    }
+
+    @Test
+    void aSecondPassLeavesCompressedJsonAlone() {
+        assertASecondPassChangesNothing(bigJsonArray());
+    }
+
+    @Test
+    void aSecondPassLeavesCompressedJavaAlone() {
+        assertASecondPassChangesNothing(javaListing());
+    }
+
+    @Test
+    void aSecondPassLeavesCompressedCSharpAlone() {
+        assertASecondPassChangesNothing(csharpListing());
+    }
+
+    private static String prose() {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 200; i++) {
+            sb.append("Sentence number ").append(i).append(" explains something quite different about topic ")
+                    .append(i % 17).append(" in plain words.\n");
+        }
+        return sb.toString();
+    }
+
+    @Test
+    void aSecondPassLeavesCompressedTextAlone() {
+        assertASecondPassChangesNothing(prose());
+    }
+
+    @Test
+    void aSecondPassLeavesCompressedLogsAlone() {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 200; i++) {
+            sb.append("2026-01-01 12:00:").append(i % 60).append(" INFO worker-").append(i % 7)
+                    .append(" finished job ").append(i).append(" after ").append(i * 3).append(" ms\n");
+        }
+        assertASecondPassChangesNothing(sb.toString());
+    }
+
+    @Test
+    void aResultThatOnlyQuotesTheMarkerIsStillCompressed() {
+        var midway = "[compressed \u2014 call ccr_retrieve(\"0123456789abcdef\") for the full original]\n" + prose();
+        var badHandle = prose() + "[compressed \u2014 call ccr_retrieve(\"not-a-handle\") for the full original]";
+
+        for (var body : List.of(midway, badHandle)) {
+            var out = CompressionPipeline.compressMessages(
+                    List.of(ChatMessage.toolResult("c1", "read_file", body)), MODEL, 250);
+            var content = (String) out.get(0).content();
+            assertTrue(content.endsWith("ccr_retrieve(\"" + ContentHash.handle(body) + "\") for the full original]"),
+                    content);
+        }
+    }
+
     // ---- first view: a result the model has not read yet stays whole ----
 
     private static final int FIRST_VIEW_CAP = 6_000;

@@ -1,3 +1,4 @@
+import agents.CompressionPipeline;
 import agents.CurrentTimeInjector;
 import agents.ToolContext;
 import agents.ToolResultPruner;
@@ -65,6 +66,30 @@ class ToolResultPrunerTest extends UnitTest {
         assertSame(BIG, pruned.get(7).content(), "the current turn's result is sent whole");
         assertSame(messages.get(3), messages.get(3), "the input list is not mutated");
         assertEquals(BIG, messages.get(3).content());
+    }
+
+    @Test
+    void aStubOfACompressedResultCarriesTheOriginalsHandle() {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < 500; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"id\":").append(i).append(",\"title\":\"A long descriptive title, number ").append(i).append("\"}");
+        }
+        var original = sb.append(']').toString();
+        var compressed = (String) CompressionPipeline.compressMessages(
+                List.of(tool("c1", "web_search", original)), "gpt-4o", 250).get(0).content();
+        var messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("first ask"),
+                tool("c1", "web_search", compressed),
+                ChatMessage.user("second ask"));
+
+        var pruned = ToolResultPruner.prune(messages, 100, 0, 1, NO_CAP, null, null);
+
+        assertEquals("[tool result elided: web_search returned " + compressed.length()
+                        + " chars earlier in this conversation; call ccr_retrieve(\"" + ContentHash.handle(original)
+                        + "\") if you need the full text again]",
+                pruned.get(2).content());
     }
 
     @Test

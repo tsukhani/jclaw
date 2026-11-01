@@ -203,7 +203,7 @@ public final class ToolResultPruner {
 
     static String stub(@Nullable String toolName, String body) {
         return STUB_MARKER + ": " + (toolName != null ? toolName : "a tool") + " returned " + body.length()
-                + " chars earlier in this conversation; call ccr_retrieve(\"" + ContentHash.handle(body)
+                + " chars earlier in this conversation; call ccr_retrieve(\"" + CompressionPipeline.retrievalHandle(body)
                 + "\") if you need the full text again]";
     }
 }

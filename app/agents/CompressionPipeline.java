@@ -22,6 +22,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Content-aware compression pipeline (JCLAW-465 core). Sits between
@@ -63,6 +64,10 @@ public final class CompressionPipeline {
     // Literal rather than tools.CcrRetrieveTool.TOOL_NAME to avoid an
     // agents <-> tools package cycle.
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
+
+    /** The marker a compressed result ends in; the group is the original's handle. */
+    private static final Pattern COMPRESSED_MARKER = Pattern.compile(
+            "\\n\\[compressed — call ccr_retrieve\\(\"([0-9a-f]{16})\"\\) for the full original\\]\\z");
 
     static final String FIRST_VIEW_MAX_TOKENS_KEY = "chat.compression.firstViewMaxTokens";
     static final int DEFAULT_FIRST_VIEW_MAX_TOKENS = 6_000;
@@ -157,6 +162,12 @@ public final class CompressionPipeline {
         return anyChanged ? out : messages;
     }
 
+    /** The handle {@code ccr_retrieve} finds {@code body}'s original under: its marker's, else its own hash. */
+    static String retrievalHandle(String body) {
+        var marker = COMPRESSED_MARKER.matcher(body);
+        return marker.find() ? marker.group(1) : ContentHash.handle(body);
+    }
+
     private static int lastAssistantIndex(List<ChatMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (MessageRole.ASSISTANT.value.equals(messages.get(i).role())) return i;
@@ -179,6 +190,9 @@ public final class CompressionPipeline {
         // view it called the tool to escape — a retrieval loop. Pass it through.
         if (CCR_RETRIEVE_TOOL.equals(msg.toolName())) return msg;
         if (!(msg.content() instanceof String content) || content.isBlank()) return msg;
+        // The prepare step's compressed copy seeds the tool loop, so later rounds meet it here. Compressed
+        // again it loses its marker, and a handle hashed from compressed text matches no Message row.
+        if (COMPRESSED_MARKER.matcher(content).find()) return msg;
         // A catalog compressed to its first entries is fetched back whole, and then sent twice;
         // a skill's instructions compressed lose the rules the model has not used yet.
         if (callArgs != null && declaredWhole(msg.toolName(), callArgs)) return msg;

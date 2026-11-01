@@ -273,8 +273,9 @@ public final class ToolCallLoopRunner {
 
     /**
      * What a round sends: tool results pruned and compressed (JCLAW-465), then trimmed to the turn's
-     * overflow budget once a refusal set one. The caller's list is left as it was, keeping the
-     * originals for retries, yield detection and the next round's appends.
+     * overflow budget once a refusal set one. The caller's list is left as it was for retries, yield
+     * detection and the next round's appends; earlier turns' results in it are already the prepare
+     * step's compressed copies, which {@link CompressionPipeline} passes through.
      */
     private static List<ChatMessage> sendView(List<ChatMessage> messages, Agent agent, Conversation conversation,
                                               LlmProvider provider, @Nullable List<ToolDef> tools,
