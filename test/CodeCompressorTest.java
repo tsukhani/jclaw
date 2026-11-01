@@ -9,7 +9,10 @@ import services.compression.CodeCompressor;
 import services.compression.CodeCompressor.Language;
 import services.compression.ContentHash;
 
+import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
+
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 
 /**
  * JCLAW-463: CodeCompressor. Validates the Java AST path (imports, signatures and
@@ -396,6 +399,32 @@ class CodeCompressorTest extends UnitTest {
                     }
                 }
                 """, out);
+    }
+
+    @Test
+    void aCraftedCSharpLineCannotStallTheMemberRule() {
+        var crafted = "a<" + "> b<".repeat(12_500);
+        var csharp = "using System;\n" + (crafted + "\n").repeat(3) + "public class C\n{\n}\n";
+
+        var result = assertTimeout(Duration.ofSeconds(1), () -> compressor.compress(csharp));
+
+        assertEquals("using System;\n// [...]\npublic class C\n{\n}\n", result.content());
+    }
+
+    @Test
+    void aCSharpMemberLineIsKeptUpToTheLengthLimit() {
+        var shape = "public int Run(%s)";
+        var atLimit = shape.formatted("p".repeat(500 - shape.length() + 2));
+        var overLimit = shape.formatted("p".repeat(501 - shape.length() + 2));
+        var filler = "        var total = Sum(values);\n".repeat(40);
+        assertEquals(500, atLimit.length());
+        assertEquals(501, overLimit.length());
+
+        var kept = compressor.compress("using System;\n" + atLimit + "\n{\n" + filler + "}\n").content();
+        var elided = compressor.compress("using System;\n" + overLimit + "\n{\n" + filler + "}\n").content();
+
+        assertEquals("using System;\n" + atLimit + "\n{\n// [...]\n}\n", kept);
+        assertEquals("using System;\n// [...]\n{\n// [...]\n}\n", elided);
     }
 
     @Test

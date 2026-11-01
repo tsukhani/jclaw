@@ -237,6 +237,10 @@ public final class CodeCompressor implements ContentCompressor {
                     + "|(?!(?:return|await|throw|new|yield|else|goto)\\b)"
                     + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$)");
 
+    // The generic groups backtrack quadratically on a crafted line, and tool output can be a fetched
+    // page: 50,000 chars took a second. The longest line in 23 real C# files was 213.
+    private static final int CSHARP_MEMBER_MAX_CHARS = 500;
+
     private static @Nullable String compressByRegex(String code, Language language) {
         String marker = (language == Language.PYTHON ? "# [...]" : "// [...]");
         var sb = new StringBuilder(code.length());
@@ -264,6 +268,7 @@ public final class CodeCompressor implements ContentCompressor {
         if (t.equals("}") || t.equals("};") || t.equals("{") || t.equals(")") || t.equals("),")) {
             return true;
         }
-        return KEEP.matcher(t).find() || (language == Language.CSHARP && CSHARP_MEMBER.matcher(t).find());
+        return KEEP.matcher(t).find() || (language == Language.CSHARP
+                && t.length() <= CSHARP_MEMBER_MAX_CHARS && CSHARP_MEMBER.matcher(t).find());
     }
 }
