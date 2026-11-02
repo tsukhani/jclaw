@@ -428,8 +428,8 @@ class CodeCompressorTest extends UnitTest {
     }
 
     @Test
-    void theCSharpMemberRuleLeavesOtherLanguagesAlone() {
-        var typescript = """
+    void theMemberRulesLeaveOtherLanguagesAlone() {
+        var listing = """
                 export class Episodes {
                   public count(): number {
                     return this.ids.length;
@@ -442,7 +442,121 @@ class CodeCompressorTest extends UnitTest {
                 // [...]
                   }
                 }
+                """, compressor.compress(listing, Language.UNKNOWN).content());
+    }
+
+    @Test
+    void typescriptMembersSurviveWithTheirBodiesElided() {
+        var typescript = """
+                import { Store } from './store';
+
+                export class Episodes {
+                  private readonly store: Store;
+
+                  constructor(store: Store) {
+                    this.store = store;
+                  }
+
+                  get size(): number {
+                    return this.ids.length;
+                  }
+
+                  async save(episode: Episode): Promise<number> {
+                    const saved = await this.store.write(episode);
+                    return saved;
+                  }
+
+                  static create<T>(seed: T): Episodes {
+                    return new Episodes(seed);
+                  }
+                }
+
+                const format = (value) => {
+                  return String(value);
+                };
+
+                export interface Repo {
+                  find(id: number): Episode;
+                }
+                """;
+
+        assertEquals("""
+                import { Store } from './store';
+                export class Episodes {
+                  private readonly store: Store;
+                  constructor(store: Store) {
+                // [...]
+                  }
+                  get size(): number {
+                // [...]
+                  }
+                  async save(episode: Episode): Promise<number> {
+                // [...]
+                  }
+                  static create<T>(seed: T): Episodes {
+                // [...]
+                  }
+                }
+                const format = (value) => {
+                // [...]
+                };
+                export interface Repo {
+                  find(id: number): Episode;
+                }
                 """, compressor.compress(typescript, Language.JAVASCRIPT).content());
+    }
+
+    @Test
+    void javascriptBlocksAndCallsAreNotTakenForMembers() {
+        var statements = """
+                export function run(items) {
+                  if (items.length) {
+                    for (const item of items) {
+                      setTimeout(function () {
+                        store.write(item);
+                      });
+                      items.forEach((other) => {
+                        log(other);
+                      });
+                    }
+                  }
+                  while (pending()) {
+                    tick();
+                  }
+                  switch (mode) {
+                    default:
+                      return compute(items);
+                  }
+                }
+                """;
+
+        assertEquals("""
+                export function run(items) {
+                // [...]
+                    }
+                  }
+                // [...]
+                  }
+                // [...]
+                  }
+                }
+                """, compressor.compress(statements, Language.JAVASCRIPT).content());
+    }
+
+    @Test
+    void aJavascriptMemberLineIsKeptUpToTheLengthLimit() {
+        var shape = "public run(%s) {";
+        var atLimit = shape.formatted("p".repeat(500 - shape.length() + 2));
+        var overLimit = shape.formatted("p".repeat(501 - shape.length() + 2));
+        var filler = "total += compute(value);\n".repeat(40);
+        assertEquals(500, atLimit.length());
+        assertEquals(501, overLimit.length());
+
+        var kept = compressor.compress("export class C {\n" + atLimit + "\n" + filler + "}\n", Language.JAVASCRIPT).content();
+        var elided = compressor.compress("export class C {\n" + overLimit + "\n" + filler + "}\n", Language.JAVASCRIPT).content();
+
+        assertEquals("export class C {\n" + atLimit + "\n// [...]\n}\n", kept);
+        assertEquals("export class C {\n// [...]\n}\n", elided);
     }
 
     @Test

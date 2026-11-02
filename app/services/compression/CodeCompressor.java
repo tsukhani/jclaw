@@ -237,9 +237,23 @@ public final class CodeCompressor implements ContentCompressor {
                     + "|(?!(?:return|await|throw|new|yield|else|goto)\\b)"
                     + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$)");
 
+    private static final String NOT_A_JS_STATEMENT =
+            "(?!(?:if|for|while|switch|catch|function|return|do|else|try|with|await|new|typeof|delete|void|throw|yield|super)\\b)";
+
+    // KEEP sees `class` and `function` but no method, so a TS class came out as its name and braces
+    // (the live check's model reported "not visible"). `[^()]` in the parameters is what refuses a
+    // call taking a callback, `setTimeout(function () {`, which has the same shape as a method.
+    private static final Pattern JS_MEMBER = Pattern.compile(
+            "^(?:(?:public|private|protected|readonly|abstract|declare|static)\\b"
+                    + "|" + NOT_A_JS_STATEMENT + "(?:(?:async|get|set|override)\\s++)*+[\\w$#]++\\??+(?:<[^()=;]*>)?"
+                    + "\\([^()]*+\\)(?:\\s*+:\\s*+[^{=;]++)?\\s*+\\{$"
+                    + "|" + NOT_A_JS_STATEMENT + "[\\w$#]++\\??+(?:<[^()=;]*>)?\\([^()]*+\\)\\s*+:\\s*+[^{=;]++;$"
+                    + "|(?:const|let|var)\\s++[\\w$]++\\s*+(?::\\s*+[^=]++)?=\\s*+(?:async\\s++)?"
+                    + "(?:\\([^()]*+\\)|[\\w$]++)\\s*+(?::\\s*+[^=]++)?=>)");
+
     // The generic groups backtrack quadratically on a crafted line, and tool output can be a fetched
     // page: 50,000 chars took a second. The longest line in 23 real C# files was 213.
-    private static final int CSHARP_MEMBER_MAX_CHARS = 500;
+    private static final int MEMBER_MAX_CHARS = 500;
 
     private static @Nullable String compressByRegex(String code, Language language) {
         String marker = (language == Language.PYTHON ? "# [...]" : "// [...]");
@@ -268,7 +282,15 @@ public final class CodeCompressor implements ContentCompressor {
         if (t.equals("}") || t.equals("};") || t.equals("{") || t.equals(")") || t.equals("),")) {
             return true;
         }
-        return KEEP.matcher(t).find() || (language == Language.CSHARP
-                && t.length() <= CSHARP_MEMBER_MAX_CHARS && CSHARP_MEMBER.matcher(t).find());
+        return KEEP.matcher(t).find() || isMember(t, language);
+    }
+
+    private static boolean isMember(String line, Language language) {
+        if (line.length() > MEMBER_MAX_CHARS) return false;
+        return switch (language) {
+            case CSHARP -> CSHARP_MEMBER.matcher(line).find();
+            case JAVASCRIPT -> JS_MEMBER.matcher(line).find();
+            default -> false;
+        };
     }
 }
