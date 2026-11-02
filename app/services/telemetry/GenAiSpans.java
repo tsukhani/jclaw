@@ -155,30 +155,6 @@ public final class GenAiSpans {
     }
 
     /**
-     * Whether a frame is a chunk as the convention counts one: new output, never a role, an ID,
-     * usage or a finish marker alone. Refusals, audio and images never reach {@link ChunkDelta}.
-     */
-    private static boolean carriesOutput(ChatCompletionChunk chunk) {
-        if (chunk.choices() == null) return false;
-        return chunk.choices().stream().anyMatch(choice -> choice.delta() != null && carriesOutput(choice.delta()));
-    }
-
-    private static boolean carriesOutput(ChunkDelta delta) {
-        return present(delta.content()) || present(delta.reasoning()) || present(delta.reasoningContent())
-                || (delta.reasoningDetails() != null && !delta.reasoningDetails().isEmpty())
-                || (delta.toolCalls() != null && delta.toolCalls().stream().anyMatch(GenAiSpans::carriesOutput));
-    }
-
-    private static boolean carriesOutput(ToolCallChunk call) {
-        var function = call.function();
-        return function != null && (present(function.name()) || present(function.arguments()));
-    }
-
-    private static boolean present(@Nullable String text) {
-        return text != null && !text.isEmpty();
-    }
-
-    /**
      * One in-flight model call. Thread-safe: a streaming call reports its chunks and its
      * completion from the HTTP client's IO thread.
      */
@@ -343,6 +319,37 @@ public final class GenAiSpans {
 
         private double seconds(long untilNanos) {
             return (untilNanos - startNanos) / 1_000_000_000.0;
+        }
+
+        /**
+         * Whether a frame is a chunk as the convention counts one: new output, never a role, an ID,
+         * usage or a finish marker alone. Refusals, audio and images never reach {@link ChunkDelta}.
+         */
+        private static boolean carriesOutput(ChatCompletionChunk chunk) {
+            var choices = chunk.choices();
+            if (choices == null) return false;
+            for (var choice : choices) {
+                var delta = choice.delta();
+                if (delta != null && carriesOutput(delta)) return true;
+            }
+            return false;
+        }
+
+        private static boolean carriesOutput(ChunkDelta delta) {
+            var details = delta.reasoningDetails();
+            var calls = delta.toolCalls();
+            return present(delta.content()) || present(delta.reasoning()) || present(delta.reasoningContent())
+                    || (details != null && !details.isEmpty())
+                    || (calls != null && calls.stream().anyMatch(Call::carriesOutput));
+        }
+
+        private static boolean carriesOutput(ToolCallChunk call) {
+            var function = call.function();
+            return function != null && (present(function.name()) || present(function.arguments()));
+        }
+
+        private static boolean present(@Nullable String text) {
+            return text != null && !text.isEmpty();
         }
     }
 }

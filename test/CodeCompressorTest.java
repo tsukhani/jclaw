@@ -12,7 +12,6 @@ import services.compression.ContentHash;
 import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import static org.junit.jupiter.api.Assertions.assertTimeout;
 
 /**
  * JCLAW-463: CodeCompressor. Validates the Java AST path (imports, signatures and

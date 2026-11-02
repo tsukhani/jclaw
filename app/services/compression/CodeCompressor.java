@@ -236,9 +236,11 @@ public final class CodeCompressor implements ContentCompressor {
     // rejects the statements of that same shape.
     private static final Pattern CSHARP_DECLARATION = Pattern.compile(
             "^(?:namespace|public|private|protected|internal|static|sealed|abstract|partial|override|virtual|async)\\b");
+    private static final String NOT_A_CSHARP_STATEMENT = "(?!(?:return|await|throw|new|yield|else|goto)\\b)";
+    private static final String CSHARP_GENERICS = "(?:<[^()=;]*>)?";
     private static final Pattern CSHARP_INTERFACE_MEMBER = Pattern.compile(
-            "^(?!(?:return|await|throw|new|yield|else|goto)\\b)"
-                    + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$");
+            "^" + NOT_A_CSHARP_STATEMENT
+                    + "[\\w.?\\[\\]]++" + CSHARP_GENERICS + " ++\\w++" + CSHARP_GENERICS + "\\([^)]*\\) *;?$");
 
     private static final String NOT_A_JS_STATEMENT =
             "(?!(?:if|for|while|switch|catch|function|return|do|else|try|with|await|new|typeof|delete|void|throw|yield|super)\\b)";
@@ -246,13 +248,17 @@ public final class CodeCompressor implements ContentCompressor {
     // KEEP sees `class` and `function` but no method, so a TS class came out as its name and braces
     // (the live check's model reported "not visible"). `[^()]` in the parameters is what refuses a
     // call taking a callback, `setTimeout(function () {`, which has the same shape as a method.
-    private static final Pattern JS_MEMBER = Pattern.compile(
-            "^(?:(?:public|private|protected|readonly|abstract|declare|static)\\b"
-                    + "|" + NOT_A_JS_STATEMENT + "(?:(?:async|get|set|override)\\s++)*+[\\w$#]++\\??+(?:<[^()=;]*>)?"
-                    + "\\([^()]*+\\)(?:\\s*+:\\s*+[^{=;]++)?\\s*+\\{$"
-                    + "|" + NOT_A_JS_STATEMENT + "[\\w$#]++\\??+(?:<[^()=;]*>)?\\([^()]*+\\)\\s*+:\\s*+[^{=;]++;$"
-                    + "|(?:const|let|var)\\s++[\\w$]++\\s*+(?::\\s*+[^=]++)?=\\s*+(?:async\\s++)?"
-                    + "(?:\\([^()]*+\\)|[\\w$]++)\\s*+(?::\\s*+[^=]++)?=>)");
+    private static final String JS_CALLABLE = "[\\w$#]++\\??+(?:<[^()=;]*>)?\\([^()]*+\\)";
+    private static final String TS_RETURN_TYPE = "\\s*+:\\s*+[^{=;]++";
+    private static final String TS_OPTIONAL_TYPE = "(?::\\s*+[^=]++)?";
+    private static final String JS_ARROW_PARAMETERS = "(?:\\([^()]*+\\)|[\\w$]++)";
+    private static final List<Pattern> JS_MEMBERS = List.of(
+            Pattern.compile("^(?:public|private|protected|readonly|abstract|declare|static)\\b"),
+            Pattern.compile("^" + NOT_A_JS_STATEMENT + "(?:(?:async|get|set|override)\\s++)*+" + JS_CALLABLE
+                    + "(?:" + TS_RETURN_TYPE + ")?\\s*+\\{$"),
+            Pattern.compile("^" + NOT_A_JS_STATEMENT + JS_CALLABLE + TS_RETURN_TYPE + ";$"),
+            Pattern.compile("^(?:const|let|var)\\s++[\\w$]++\\s*+" + TS_OPTIONAL_TYPE + "=\\s*+(?:async\\s++)?"
+                    + JS_ARROW_PARAMETERS + "\\s*+" + TS_OPTIONAL_TYPE + "=>"));
 
     // The generic groups backtrack quadratically on a crafted line, and tool output can be a fetched
     // page: 50,000 chars took a second. The longest line in 23 real C# files was 213.
@@ -292,7 +298,7 @@ public final class CodeCompressor implements ContentCompressor {
         if (line.length() > MEMBER_MAX_CHARS) return false;
         return switch (language) {
             case CSHARP -> CSHARP_DECLARATION.matcher(line).find() || CSHARP_INTERFACE_MEMBER.matcher(line).find();
-            case JAVASCRIPT -> JS_MEMBER.matcher(line).find();
+            case JAVASCRIPT -> JS_MEMBERS.stream().anyMatch(member -> member.matcher(line).find());
             default -> false;
         };
     }
