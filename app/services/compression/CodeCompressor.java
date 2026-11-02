@@ -109,12 +109,13 @@ public final class CodeCompressor implements ContentCompressor {
     private static final Pattern JS_HINT = Pattern.compile(
             "(?m)^\\s*(?:function\\s+\\w+\\s*\\(|const\\s+\\w+\\s*=|export\\s+(?:default\\s+)?|import\\s++.*\\bfrom\\b)");
 
-    // `public class` is valid C#, so this runs ahead of JAVA_HINT: JavaParser takes a bare
+    // `public class` is valid C#, so these run ahead of JAVA_HINT: JavaParser takes a bare
     // `using System;` for a compact source file's field and throws at the first dotted one.
-    // Not in LANGUAGE_HINTS: it keeps C# from the parser and leaves what counts as code alone.
-    private static final Pattern CSHARP_HINT = Pattern.compile(
-            "(?m)^\\s*+(?:using\\s++(?:static\\s++)?[\\w.]++\\s*+;"
-                    + "|namespace[ \\t]++[\\w.]++[ \\t]*+[;{]?+[ \\t]*+$)");
+    // Not in LANGUAGE_HINTS: they keep C# from the parser and leave what counts as code alone.
+    private static final Pattern CSHARP_USING = Pattern.compile(
+            "(?m)^\\s*+using\\s++(?:static\\s++)?[\\w.]++\\s*+;");
+    private static final Pattern CSHARP_NAMESPACE = Pattern.compile(
+            "(?m)^\\s*+namespace[ \\t]++[\\w.]++[ \\t]*+[;{]?+[ \\t]*+$");
 
     private static final List<Pattern> LANGUAGE_HINTS =
             List.of(JAVA_HINT, PYTHON_HINT, GO_HINT, RUST_HINT, JS_HINT);
@@ -141,7 +142,7 @@ public final class CodeCompressor implements ContentCompressor {
 
     public static Language detectLanguage(String code) {
         if (code == null || code.isBlank()) return Language.UNKNOWN;
-        if (CSHARP_HINT.matcher(code).find()) return Language.CSHARP;
+        if (CSHARP_USING.matcher(code).find() || CSHARP_NAMESPACE.matcher(code).find()) return Language.CSHARP;
         if (JAVA_HINT.matcher(code).find()) return Language.JAVA;
         if (PYTHON_HINT.matcher(code).find()) return Language.PYTHON;
         if (GO_HINT.matcher(code).find()) return Language.GO;
@@ -233,11 +234,11 @@ public final class CodeCompressor implements ContentCompressor {
     // modifier only ever opens a declaration, so such a line is kept whatever it declares; an
     // interface member has none, and is told from a call by its return type. The lookahead
     // rejects the statements of that same shape.
-    private static final Pattern CSHARP_MEMBER = Pattern.compile(
-            "^(?:namespace\\b"
-                    + "|(?:public|private|protected|internal|static|sealed|abstract|partial|override|virtual|async)\\b"
-                    + "|(?!(?:return|await|throw|new|yield|else|goto)\\b)"
-                    + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$)");
+    private static final Pattern CSHARP_DECLARATION = Pattern.compile(
+            "^(?:namespace|public|private|protected|internal|static|sealed|abstract|partial|override|virtual|async)\\b");
+    private static final Pattern CSHARP_INTERFACE_MEMBER = Pattern.compile(
+            "^(?!(?:return|await|throw|new|yield|else|goto)\\b)"
+                    + "[\\w.?\\[\\]]++(?:<[^()=;]*>)?[ ]++\\w++(?:<[^()=;]*>)?\\([^)]*\\)[ ]*;?$");
 
     private static final String NOT_A_JS_STATEMENT =
             "(?!(?:if|for|while|switch|catch|function|return|do|else|try|with|await|new|typeof|delete|void|throw|yield|super)\\b)";
@@ -290,7 +291,7 @@ public final class CodeCompressor implements ContentCompressor {
     private static boolean isMember(String line, Language language) {
         if (line.length() > MEMBER_MAX_CHARS) return false;
         return switch (language) {
-            case CSHARP -> CSHARP_MEMBER.matcher(line).find();
+            case CSHARP -> CSHARP_DECLARATION.matcher(line).find() || CSHARP_INTERFACE_MEMBER.matcher(line).find();
             case JAVASCRIPT -> JS_MEMBER.matcher(line).find();
             default -> false;
         };
