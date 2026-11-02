@@ -14,7 +14,8 @@ import java.util.regex.Pattern;
  *       even after a short non-JSON prefix (e.g. a {@code "HTTP 200"} status
  *       line); malformed input fast-fails.</li>
  *   <li><b>CODE</b> — {@link CodeCompressor}'s own language hints, so the
- *       detector and the compressor cannot disagree about what code is.</li>
+ *       detector and the compressor cannot disagree about what code is. A
+ *       Markdown document stays out however much code it shows.</li>
  *   <li><b>LOG</b> — log-level tokens ({@code ERROR}, {@code WARN}, …).</li>
  *   <li><b>TEXT</b> — the catch-all when nothing else matches.</li>
  * </ol>
@@ -28,6 +29,11 @@ public final class ContentTypeDetector {
 
     /** Short enough that one declaration line is most of the content, so one signal is enough. */
     private static final int SNIPPET_LINES = 5;
+
+    // The regex path keeps declarations and drops the rest, so a document kept only its code lines:
+    // 39 of 75 recent CODE results were Markdown, cut to 2-5% and often sent before being read.
+    // Indented fences and `#` lines are left to source files: a docstring example, a Python comment.
+    private static final Pattern MARKDOWN_MARK = Pattern.compile("(?m)^ {0,3}(?:```|#{2,6} \\S)");
 
     private static final Pattern LOG_LEVEL = Pattern.compile(
             "(?m)\\b(?:ERROR|WARN|WARNING|INFO|DEBUG|FATAL|TRACE)\\b");
@@ -50,7 +56,14 @@ public final class ContentTypeDetector {
 
     private static boolean isCode(String content) {
         if (CodeCompressor.detectLanguage(content) == CodeCompressor.Language.UNKNOWN) return false;
+        if (isMarkdown(content)) return false;
         return CodeCompressor.signalLineCount(content) >= MIN_CODE_SIGNAL_LINES
                 || content.lines().filter(line -> !line.isBlank()).count() <= SNIPPET_LINES;
+    }
+
+    /** Two fence lines or `##` headings, whichever: one is a stray line in a source file. */
+    private static boolean isMarkdown(String content) {
+        var marks = MARKDOWN_MARK.matcher(content);
+        return marks.find() && marks.find();
     }
 }

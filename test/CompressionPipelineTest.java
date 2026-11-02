@@ -226,6 +226,22 @@ class CompressionPipelineTest extends UnitTest {
         }
     }
 
+    @Test
+    void aFencedDocumentKeepsItsProseThroughThePipeline() {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 60; i++) {
+            sb.append("Section ").append(i).append(" explains why the worker retries topic ").append(i % 7)
+                    .append(" twice before it gives up.\n\n```python\nfrom settings import load\ndef step").append(i)
+                    .append("():\n    return load()\n```\n\n");
+        }
+        var document = sb.append("The review code for this design is 7110.\n").toString();
+
+        var out = CompressionPipeline.compressMessages(
+                List.of(ChatMessage.toolResult("c1", "read_file", document)), MODEL, 250);
+
+        assertEquals(document, out.get(0).content());
+    }
+
     // ---- first view: a result the model has not read yet stays whole ----
 
     private static final int FIRST_VIEW_CAP = 6_000;
