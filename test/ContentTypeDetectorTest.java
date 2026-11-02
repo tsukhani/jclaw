@@ -162,6 +162,13 @@ class ContentTypeDetectorTest extends UnitTest {
     }
 
     @Test
+    void anEndlessModifierRunInAPageDoesNotOverflowTheStack() {
+        var page = "A fetched page.\npublic " + "final ".repeat(8_333) + "x\nThe end of the page.\n";
+
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect(page));
+    }
+
+    @Test
     void malformedJsonIsNotJson() {
         // Starts with { but doesn't parse → falls through to TEXT, never JSON.
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect("{not: valid, json"));

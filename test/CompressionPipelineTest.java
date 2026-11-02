@@ -242,6 +242,18 @@ class CompressionPipelineTest extends UnitTest {
         assertEquals(document, out.get(0).content());
     }
 
+    @Test
+    void anEndlessModifierRunDoesNotStopTheTurn() {
+        var page = "A fetched page.\npublic " + "final ".repeat(8_333) + "x\nThe end of the page.\n";
+        var result = ChatMessage.toolResult("c1", "web_fetch", page);
+
+        var out = CompressionPipeline.compressMessages(List.of(result), MODEL, 250);
+
+        assertEquals("A fetched page.\n[\u2026 summarized \u2014 2 more lines/sentences]\n"
+                + "[compressed \u2014 call ccr_retrieve(\"" + ContentHash.handle(page) + "\") for the full original]",
+                out.get(0).content());
+    }
+
     // ---- first view: a result the model has not read yet stays whole ----
 
     private static final int FIRST_VIEW_CAP = 6_000;

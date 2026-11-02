@@ -428,6 +428,14 @@ class CodeCompressorTest extends UnitTest {
     }
 
     @Test
+    void anEndlessModifierRunInAListingDoesNotOverflowTheStack() {
+        var listing = "export const a = 1;\n" + "async ".repeat(8_333) + "x\nexport const b = 2;\n";
+
+        assertEquals("export const a = 1;\n// [...]\nexport const b = 2;\n",
+                compressor.compress(listing, Language.JAVASCRIPT).content());
+    }
+
+    @Test
     void theMemberRulesLeaveOtherLanguagesAlone() {
         var listing = """
                 export class Episodes {

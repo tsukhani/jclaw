@@ -94,9 +94,11 @@ public final class CodeCompressor implements ContentCompressor {
 
     // ---------------------------------------------------------------- language
 
+    // Bounded: an alternating group recurses once per repeat, and this runs on nearly every text
+    // result, so one 48,000-char line of `final` in a fetched page overflowed the stack.
     private static final Pattern JAVA_HINT = Pattern.compile(
             "(?m)^\\s*(?:package\\s+[\\w.]+;|import\\s+[\\w.]+;"
-                    + "|(?:public|private|protected|final|abstract)\\s+(?:final\\s+|abstract\\s+)*"
+                    + "|(?:public|private|protected|final|abstract)\\s+(?:final\\s+|abstract\\s+){0,4}"
                     + "(?:class|interface|enum|record)\\s)");
     private static final Pattern PYTHON_HINT = Pattern.compile(
             "(?m)^\\s*(?:def\\s+\\w+\\s*\\(|from\\s+[\\w.]+\\s+import\\s|class\\s+\\w+\\s*[:(])");
@@ -222,7 +224,7 @@ public final class CodeCompressor implements ContentCompressor {
             "^(?:"
                     + "package\\b|import\\b|from\\s+[\\w.]+\\s+import\\b|use\\s+|#include|using\\s+"
                     + "|export\\b|pub\\b|@\\w|#\\["
-                    + "|(?:public\\s+|private\\s+|protected\\s+|static\\s+|final\\s+|abstract\\s+|async\\s+)*"
+                    + "|(?:public\\s+|private\\s+|protected\\s+|static\\s+|final\\s+|abstract\\s+|async\\s+){0,8}"
                     + "(?:class\\b|interface\\b|enum\\b|struct\\b|trait\\b|impl\\b|record\\b|type\\s+\\w"
                     + "|func\\b|fn\\b|def\\b|function\\b)"
                     + ")");
