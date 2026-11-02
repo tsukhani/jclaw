@@ -48,6 +48,8 @@ public final class GenAiSpans {
 
     private static final String SCOPE = "jclaw";
 
+    private static final Usage NO_USAGE = new Usage(0, 0, 0, 0, 0, 0, 0);
+
     private record Instruments(OpenTelemetry api, DoubleHistogram inputTokens, DoubleHistogram outputTokens,
                                DoubleHistogram inferenceDuration, DoubleHistogram firstChunk,
                                DoubleHistogram embeddingsInputTokens, DoubleHistogram embeddingsDuration) {}
@@ -234,6 +236,7 @@ public final class GenAiSpans {
             if (!live) return;
             if (firstChunkNanos < 0 && carriesOutput(chunk)) {
                 firstChunkNanos = System.nanoTime();
+                span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK, seconds(firstChunkNanos));
             }
             if (chunk.usage() != null) usage = chunk.usage();
             if (chunk.model() != null) responseModel = chunk.model();
@@ -266,12 +269,11 @@ public final class GenAiSpans {
             if (responseId != null) span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_ID, responseId);
             if (responseModel != null) span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_MODEL, responseModel);
             if (!finishReasons.isEmpty()) span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS, finishReasons);
-            if (firstChunkNanos >= 0) {
-                span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK, seconds(firstChunkNanos));
-            }
             if (u != null) {
                 span.setAttribute(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS, (long) u.promptTokens());
-                span.setAttribute(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, (long) u.completionTokens());
+                if (!OPERATION_EMBEDDINGS.equals(operation)) {
+                    span.setAttribute(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, (long) u.completionTokens());
+                }
                 if (u.cachedTokens() > 0) {
                     span.setAttribute(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, (long) u.cachedTokens());
                 }
@@ -305,7 +307,10 @@ public final class GenAiSpans {
             if (!TelemetryState.enabled) return;
             var i = instruments();
             var attrs = baseAttributes(errorType);
-            var u = errorType == null ? usage : null;
+            var reported = usage;
+            // Upstream counts a failed call too, as 0 when no usage arrived. A successful call
+            // without usage records nothing: its 0 would carry no error.type to filter it out by.
+            var u = reported == null && errorType != null ? NO_USAGE : reported;
             if (OPERATION_EMBEDDINGS.equals(operation)) {
                 i.embeddingsDuration().record(seconds(System.nanoTime()), attrs);
                 if (u != null) i.embeddingsInputTokens().record(u.promptTokens(), attrs);
@@ -316,8 +321,9 @@ public final class GenAiSpans {
                 i.inputTokens().record(u.promptTokens(), attrs);
                 i.outputTokens().record(u.completionTokens(), attrs);
             }
-            if (firstChunkNanos >= 0 && errorType == null) {
-                i.firstChunk().record(seconds(firstChunkNanos), attrs);
+            if (firstChunkNanos >= 0) {
+                // Upstream defines no error.type on this metric, unlike the ones above.
+                i.firstChunk().record(seconds(firstChunkNanos), baseAttributes(null));
             }
         }
 

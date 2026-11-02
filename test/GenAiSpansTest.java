@@ -369,7 +369,7 @@ class GenAiSpansTest extends UnitTest {
 
     @Test
     void aRefusedCallEndsTheSpanWithTheErrorType() {
-        var p = provider("https://api.example.test/v1");
+        var p = provider("https://refused.example.test/v1");
         var spans = HttpFactories.callWith(canned(400, "{\"error\":{\"message\":\"bad request\"}}"),
                 () -> OtelRuntime.captureForTest(() -> assertThrows(RuntimeException.class, () ->
                         p.chat("gpt-x", List.of(ChatMessage.user("hi")), null, null, null, "web"))));
@@ -378,8 +378,16 @@ class GenAiSpansTest extends UnitTest {
         assertNotNull(chat.getAttributes().get(ErrorAttributes.ERROR_TYPE));
     }
 
+    private static void assertFailedPoint(Collection<MetricData> metrics, String name, String host, double sum) {
+        var series = hostSeries(metrics, name, host);
+        assertEquals(1, series.size(), () -> name + " points: " + series);
+        assertEquals(1L, series.getFirst().getCount());
+        assertEquals(sum, series.getFirst().getSum());
+        assertEquals(IllegalStateException.class.getName(), series.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
+    }
+
     @Test
-    void aCallThatFailsAfterReportingUsageRecordsNoTokens() {
+    void aCallThatFailsAfterReportingUsageRecordsThoseTokensWithTheErrorType() {
         var metrics = OtelRuntime.captureMetricsForTest(() -> {
             var call = GenAiSpans.start(openAiAt("fails.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
             call.response("chatcmpl-f", "gpt-x-2024", USAGE, List.of());
@@ -388,10 +396,60 @@ class GenAiSpansTest extends UnitTest {
         var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "fails.example.test");
         assertEquals(1, duration.size(), () -> "duration points: " + duration);
         assertEquals(IllegalStateException.class.getName(), duration.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
-        for (var name : List.of(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
-                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME)) {
-            assertTrue(hostSeries(metrics, name, "fails.example.test").isEmpty(), () -> name + " recorded for a failed call");
-        }
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME, "fails.example.test", 10.0);
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME, "fails.example.test", 5.0);
+    }
+
+    @Test
+    void aCallThatFailsBeforeAnyUsageRecordsZeroTokensWithTheErrorType() {
+        var metrics = OtelRuntime.captureMetricsForTest(() ->
+                GenAiSpans.start(openAiAt("fails-early.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", false, null)
+                        .failed(new IllegalStateException("refused")));
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME, "fails-early.example.test", 0.0);
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME, "fails-early.example.test", 0.0);
+    }
+
+    @Test
+    void aSuccessfulCallWithoutUsageRecordsNoTokens() {
+        var metrics = OtelRuntime.captureMetricsForTest(() ->
+                GenAiSpans.start(openAiAt("no-usage.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", false, null).succeeded());
+        assertEquals(1, hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "no-usage.example.test").size());
+        assertNoSeries(metrics, "no-usage.example.test",
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME);
+    }
+
+    private static void failStream(String host, ChatCompletionChunk frame) {
+        var call = GenAiSpans.start(openAiAt(host), GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
+        call.chunk(frame);
+        call.failed(new IllegalStateException("stream died"));
+    }
+
+    @Test
+    void aStreamThatFailsAfterItsFirstChunkKeepsItsFirstChunkTime() {
+        var chat = one(OtelRuntime.captureForTest(() -> failStream("torn.example.test", FRAMES_WITH_OUTPUT.get("text"))),
+                "chat gpt-x");
+        assertEquals(StatusCode.ERROR, chat.getStatus().getStatusCode());
+        assertNotNull(chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK));
+    }
+
+    @Test
+    void aStreamThatFailsAfterItsFirstChunkRecordsTheMetricWithoutAnErrorType() {
+        var metrics = OtelRuntime.captureMetricsForTest(() ->
+                failStream("torn-metric.example.test", FRAMES_WITH_OUTPUT.get("text")));
+        var firstChunk = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME, "torn-metric.example.test");
+        assertEquals(1, firstChunk.size(), () -> "first-chunk points: " + firstChunk);
+        assertNull(firstChunk.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
+    }
+
+    @Test
+    void aStreamThatFailsBeforeAnyOutputReportsNoFirstChunkTime() {
+        var frame = FRAMES_WITHOUT_OUTPUT.get("an empty start");
+        var chat = one(OtelRuntime.captureForTest(() -> failStream("mute.example.test", frame)), "chat gpt-x");
+        assertNull(chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK));
+
+        var metrics = OtelRuntime.captureMetricsForTest(() -> failStream("mute-metric.example.test", frame));
+        assertNoSeries(metrics, "mute-metric.example.test", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME);
     }
 
     private static void assertNoInferenceMetrics(Collection<MetricData> metrics, String host) {
@@ -426,7 +484,16 @@ class GenAiSpansTest extends UnitTest {
     }
 
     @Test
-    void aFailedEmbeddingsCallRecordsItsDurationWithTheErrorTypeAndNoTokens() {
+    void anEmbeddingsSpanCarriesInputTokensAndNoOutputTokens() {
+        var spans = HttpFactories.callWith(canned(200, EMBEDDINGS_JSON), () -> OtelRuntime.captureForTest(() ->
+                provider("https://embeds-span.example.test/v1").embeddings("embed-x", "hello", "web")));
+        var a = one(spans, "embeddings embed-x").getAttributes();
+        assertEquals(7L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS));
+        assertNull(a.get(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
+    }
+
+    @Test
+    void aFailedEmbeddingsCallRecordsItsReportedTokensWithTheErrorType() {
         var metrics = OtelRuntime.captureMetricsForTest(() -> {
             var call = GenAiSpans.start(openAiAt("embeds-fail.example.test"), GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null);
             call.response(null, "embed-x-2024", USAGE, List.of());
@@ -435,8 +502,17 @@ class GenAiSpansTest extends UnitTest {
         var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME, "embeds-fail.example.test");
         assertEquals(1, duration.size(), () -> "duration points: " + duration);
         assertEquals(IllegalStateException.class.getName(), duration.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
-        assertNoSeries(metrics, "embeds-fail.example.test", GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME);
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME, "embeds-fail.example.test", 10.0);
         assertNoInferenceMetrics(metrics, "embeds-fail.example.test");
+    }
+
+    @Test
+    void anEmbeddingsCallThatFailsBeforeAnyUsageRecordsZeroTokensWithTheErrorType() {
+        var metrics = OtelRuntime.captureMetricsForTest(() ->
+                GenAiSpans.start(openAiAt("embeds-early.example.test"), GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null)
+                        .failed(new IllegalStateException("refused")));
+        assertFailedPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME, "embeds-early.example.test", 0.0);
+        assertNoInferenceMetrics(metrics, "embeds-early.example.test");
     }
 
     @Test
