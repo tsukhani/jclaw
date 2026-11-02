@@ -342,7 +342,7 @@ dependencies {
     // it imports the core and -alpha BOMs it was built against, so a core BOM pinned
     // beside it can run ahead of the api-incubator its -alpha one pins (core 1.67 broke
     // OtelRuntime.init). The OTLP sender runs on framework/lib's okhttp-jvm.
-    implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.32.0-alpha"))
+    implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.33.1-alpha"))
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
     implementation("io.opentelemetry:opentelemetry-exporter-otlp")
