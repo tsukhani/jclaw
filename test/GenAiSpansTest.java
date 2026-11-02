@@ -6,8 +6,15 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.semconv.ErrorAttributes;
 import io.opentelemetry.semconv.HttpAttributes;
 import io.opentelemetry.semconv.ServerAttributes;
+import llm.LlmTypes.ChatCompletionChunk;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ChunkChoice;
+import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ProviderConfig;
+import llm.LlmTypes.ReasoningDetail;
+import llm.LlmTypes.ToolCallChunk;
+import llm.LlmTypes.Usage;
 import llm.OpenAiProvider;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
@@ -30,6 +37,7 @@ import utils.LatencyTrace;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 
 /**
@@ -56,6 +64,56 @@ class GenAiSpansTest extends UnitTest {
             data: [DONE]
 
             """;
+
+    private static final String SSE_WITHOUT_OUTPUT = """
+            data: {"id":"chatcmpl-e","object":"chat.completion.chunk","model":"gpt-x-2024","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+            data: {"id":"chatcmpl-e","object":"chat.completion.chunk","model":"gpt-x-2024","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+            data: {"id":"chatcmpl-e","object":"chat.completion.chunk","model":"gpt-x-2024","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}}
+
+            data: [DONE]
+
+            """;
+
+    private static final String EMBEDDINGS_JSON = """
+            {"object":"list","model":"embed-x-2024",
+             "data":[{"index":0,"embedding":[0.1,0.2]}],
+             "usage":{"prompt_tokens":7,"total_tokens":7}}
+            """;
+
+    private static final String RETIRED_OPERATION_DURATION = "gen_ai.client.operation.duration";
+
+    private static final Usage USAGE = new Usage(10, 5, 15, 0, 0, 0, 0);
+
+    private static final Map<String, ChatCompletionChunk> FRAMES_WITHOUT_OUTPUT = Map.of(
+            "a role alone", frame(new ChunkDelta("assistant", null, null, null, null, null)),
+            "an empty start", frame(new ChunkDelta("assistant", "", null, null, null, null)),
+            "empty reasoning", frame(new ChunkDelta(null, null, null, "", "", List.of())),
+            "a tool call's id alone", toolFrame(new ToolCallChunk(0, "call_1", "function", null)),
+            "an unnamed tool call", toolFrame(new ToolCallChunk(0, "call_1", "function", new FunctionCall(null, ""))),
+            "an empty tool call", toolFrame(new ToolCallChunk(0, "call_1", "function", new FunctionCall("", ""))),
+            "usage alone", new ChatCompletionChunk("chatcmpl-f", "gpt-x-2024", List.of(), USAGE),
+            "a finish marker", new ChatCompletionChunk("chatcmpl-f", "gpt-x-2024",
+                    List.of(new ChunkChoice(0, null, "stop")), null));
+
+    private static final Map<String, ChatCompletionChunk> FRAMES_WITH_OUTPUT = Map.of(
+            "text", frame(new ChunkDelta(null, "Hel", null, null, null, null)),
+            "whitespace", frame(new ChunkDelta(null, " ", null, null, null, null)),
+            "reasoning", frame(new ChunkDelta(null, null, null, "weighing it", null, null)),
+            "reasoning_content", frame(new ChunkDelta(null, null, null, null, "weighing it", null)),
+            "an opaque reasoning payload", frame(new ChunkDelta(null, null, null, null, null,
+                    List.of(new ReasoningDetail("reasoning.encrypted", null)))),
+            "a tool call's name", toolFrame(new ToolCallChunk(0, "call_1", "function", new FunctionCall("search", ""))),
+            "a tool call's arguments", toolFrame(new ToolCallChunk(0, null, null, new FunctionCall(null, "{\"q\""))));
+
+    private static ChatCompletionChunk frame(ChunkDelta delta) {
+        return new ChatCompletionChunk("chatcmpl-f", "gpt-x-2024", List.of(new ChunkChoice(0, delta, null)), null);
+    }
+
+    private static ChatCompletionChunk toolFrame(ToolCallChunk call) {
+        return frame(new ChunkDelta(null, null, List.of(call), null, null, null));
+    }
 
     @BeforeEach
     void lock() {
@@ -164,6 +222,9 @@ class GenAiSpansTest extends UnitTest {
         }
         assertTrue(metrics.stream().noneMatch(m -> m.getName().equals("gen_ai.client.token.usage")),
                 () -> "the pre-PR-374 histogram is gone: " + metrics.stream().map(MetricData::getName).toList());
+        assertNoSeries(metrics, "api.example.test", RETIRED_OPERATION_DURATION,
+                GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME);
     }
 
     private static HistogramPointData histogramPoint(Collection<MetricData> metrics, String name) {
@@ -174,18 +235,17 @@ class GenAiSpansTest extends UnitTest {
                 .orElseThrow(() -> new AssertionError(name + " in " + metrics.stream().map(MetricData::getName).toList()));
     }
 
-    @Test
-    void aStreamedCallCarriesFirstChunkTimeAndTheFinalChunksUsage() throws Exception {
+    private static List<SpanData> streamedSpans(String sse) throws Exception {
         try (var server = new MockWebServer()) {
             server.start();
             server.enqueue(new MockResponse.Builder()
                     .code(200)
                     .addHeader("Content-Type", "text/event-stream")
-                    .body(SSE)
+                    .body(sse)
                     .build());
             var p = provider(server.url("/v1").toString());
 
-            var spans = OtelRuntime.captureForTest(() -> {
+            return OtelRuntime.captureForTest(() -> {
                 var trace = LatencyTrace.forTurn("web", null);
                 try (var _ = LatencyTrace.bind(trace)) {
                     var acc = p.chatStreamAccumulate("gpt-x", List.of(ChatMessage.user("hi")), null,
@@ -199,24 +259,111 @@ class GenAiSpansTest extends UnitTest {
                 }
                 trace.end();
             });
+        }
+    }
 
-            var turn = one(spans, "turn");
-            var chat = one(spans, "chat gpt-x");
-            var a = chat.getAttributes();
-            assertEquals(Boolean.TRUE, a.get(GenAiAttributes.GEN_AI_REQUEST_STREAM));
-            var ttfc = a.get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK);
-            assertNotNull(ttfc, "time to first chunk is stamped on a streamed call");
-            assertTrue(ttfc >= 0.0);
-            assertEquals(10L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS));
-            assertEquals(5L, a.get(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
-            assertEquals(4L, a.get(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
-                    "the re-scanned cache reads reach the span");
-            assertEquals(List.of("stop"), a.get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
-            assertEquals(turn.getSpanContext().getSpanId(), chat.getParentSpanContext().getSpanId(),
-                    "the span opened on the dispatching thread parents under the turn");
-            var http = httpClientSpan(spans);
-            assertEquals(chat.getSpanContext().getSpanId(), http.getParentSpanContext().getSpanId(),
-                    "the transport thread inherited the model call's context");
+    @Test
+    void aStreamedCallCarriesFirstChunkTimeAndTheFinalChunksUsage() throws Exception {
+        var spans = streamedSpans(SSE);
+
+        var turn = one(spans, "turn");
+        var chat = one(spans, "chat gpt-x");
+        var a = chat.getAttributes();
+        assertEquals(Boolean.TRUE, a.get(GenAiAttributes.GEN_AI_REQUEST_STREAM));
+        var ttfc = a.get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK);
+        assertNotNull(ttfc, "time to first chunk is stamped on a streamed call");
+        assertTrue(ttfc >= 0.0);
+        assertEquals(10L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS));
+        assertEquals(5L, a.get(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
+        assertEquals(4L, a.get(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+                "the re-scanned cache reads reach the span");
+        assertEquals(List.of("stop"), a.get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+        assertEquals(turn.getSpanContext().getSpanId(), chat.getParentSpanContext().getSpanId(),
+                "the span opened on the dispatching thread parents under the turn");
+        var http = httpClientSpan(spans);
+        assertEquals(chat.getSpanContext().getSpanId(), http.getParentSpanContext().getSpanId(),
+                "the transport thread inherited the model call's context");
+    }
+
+    @Test
+    void aStreamThatNeverProducesOutputCarriesNoFirstChunkTime() throws Exception {
+        var a = one(streamedSpans(SSE_WITHOUT_OUTPUT), "chat gpt-x").getAttributes();
+        assertNull(a.get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK));
+        assertEquals(10L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS), "the frames were decoded");
+    }
+
+    private static void stream(ProviderConfig config, String model, ChatCompletionChunk... frames) {
+        var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, true, null);
+        for (var frame : frames) call.chunk(frame);
+        call.succeeded();
+    }
+
+    private static ProviderConfig openAiAt(String host) {
+        return new ProviderConfig("OpenAI", "https://" + host + "/v1", "sk-test", List.of());
+    }
+
+    @Test
+    void aFrameWithoutOutputIsNotAFirstChunk() {
+        var spans = OtelRuntime.captureForTest(() -> FRAMES_WITHOUT_OUTPUT.forEach((label, frame) ->
+                stream(openAiAt("silent.example.test"), label, frame)));
+        FRAMES_WITHOUT_OUTPUT.keySet().forEach(label ->
+                assertNull(one(spans, "chat " + label).getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK),
+                        label));
+    }
+
+    @Test
+    void aFrameWithoutOutputRecordsNoFirstChunkMetric() {
+        var metrics = OtelRuntime.captureMetricsForTest(() -> FRAMES_WITHOUT_OUTPUT.forEach((label, frame) ->
+                stream(openAiAt("silent-metric.example.test"), label, frame)));
+        assertEquals(FRAMES_WITHOUT_OUTPUT.size(),
+                hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "silent-metric.example.test").size());
+        assertNoSeries(metrics, "silent-metric.example.test", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME);
+    }
+
+    @Test
+    void aFrameWithOutputIsAFirstChunk() {
+        var spans = OtelRuntime.captureForTest(() -> FRAMES_WITH_OUTPUT.forEach((label, frame) ->
+                stream(openAiAt("speaks.example.test"), label, frame)));
+        FRAMES_WITH_OUTPUT.keySet().forEach(label ->
+                assertNotNull(one(spans, "chat " + label).getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK),
+                        label));
+    }
+
+    @Test
+    void aFrameWithOutputRecordsAFirstChunkMetric() {
+        var metrics = OtelRuntime.captureMetricsForTest(() -> FRAMES_WITH_OUTPUT.forEach((label, frame) ->
+                stream(openAiAt("speaks-metric.example.test"), label, frame)));
+        assertEquals(FRAMES_WITH_OUTPUT.size(),
+                hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME, "speaks-metric.example.test").size());
+    }
+
+    @Test
+    void firstChunkTimeRunsToTheFirstFrameWithOutputAndNoFurther() {
+        var spans = OtelRuntime.captureForTest(() -> {
+            var call = GenAiSpans.start(openAiAt("paced.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
+            call.chunk(FRAMES_WITHOUT_OUTPUT.get("an empty start"));
+            pause();
+            call.chunk(FRAMES_WITH_OUTPUT.get("text"));
+            pause();
+            call.chunk(FRAMES_WITH_OUTPUT.get("whitespace"));
+            call.succeeded();
+        });
+        var chat = one(spans, "chat gpt-x");
+        var ttfc = chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK);
+        assertNotNull(ttfc);
+        assertTrue(ttfc >= PAUSE_SECONDS, () -> "stamped before the first output: " + ttfc);
+        var elapsed = (chat.getEndEpochNanos() - chat.getStartEpochNanos()) / 1_000_000_000.0;
+        assertTrue(elapsed - ttfc >= PAUSE_SECONDS, () -> "a later frame moved the stamp: " + ttfc + " of " + elapsed);
+    }
+
+    private static final double PAUSE_SECONDS = 0.05;
+
+    private static void pause() {
+        try {
+            Thread.sleep((long) (PAUSE_SECONDS * 1000));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
         }
     }
 
@@ -233,11 +380,9 @@ class GenAiSpansTest extends UnitTest {
 
     @Test
     void aCallThatFailsAfterReportingUsageRecordsNoTokens() {
-        var usage = new llm.LlmTypes.Usage(10, 5, 15, 0, 0, 0, 0);
         var metrics = OtelRuntime.captureMetricsForTest(() -> {
-            var call = GenAiSpans.start(new ProviderConfig("OpenAI", "https://fails.example.test/v1", "sk-test", List.of()),
-                    GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
-            call.response("chatcmpl-f", "gpt-x-2024", usage, List.of());
+            var call = GenAiSpans.start(openAiAt("fails.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
+            call.response("chatcmpl-f", "gpt-x-2024", USAGE, List.of());
             call.failed(new IllegalStateException("stream died after its usage chunk"));
         });
         var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "fails.example.test");
@@ -249,15 +394,59 @@ class GenAiSpansTest extends UnitTest {
         }
     }
 
+    private static void assertNoInferenceMetrics(Collection<MetricData> metrics, String host) {
+        assertNoSeries(metrics, host, RETIRED_OPERATION_DURATION,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME);
+    }
+
     @Test
-    void anEmbeddingsCallRecordsTheOperationDurationNotTheInferenceOne() {
+    void anEmbeddingsCallRecordsTheEmbeddingsMetricsAndNoInferenceOnes() {
+        var metrics = HttpFactories.callWith(canned(200, EMBEDDINGS_JSON), () -> OtelRuntime.captureMetricsForTest(() ->
+                provider("https://embeds.example.test/v1").embeddings("embed-x", "hello", "web")));
+
+        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME, "embeds.example.test");
+        assertEquals(1, duration.size(), () -> "duration points: " + duration);
+        assertEquals("embeddings", duration.getFirst().getAttributes().get(GenAiAttributes.GEN_AI_OPERATION_NAME));
+        assertEquals("embed-x", duration.getFirst().getAttributes().get(GenAiAttributes.GEN_AI_REQUEST_MODEL));
+        assertEquals("embed-x-2024", duration.getFirst().getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_MODEL));
+        assertTrue(duration.getFirst().getBoundaries().contains(0.01),
+                () -> "semconv buckets on the duration: " + duration.getFirst().getBoundaries());
+
+        var input = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME, "embeds.example.test");
+        assertEquals(1, input.size(), () -> "input points: " + input);
+        assertEquals(1L, input.getFirst().getCount());
+        assertEquals(7.0, input.getFirst().getSum());
+        assertTrue(input.getFirst().getBoundaries().contains(4.0),
+                () -> "semconv buckets on tokens: " + input.getFirst().getBoundaries());
+
+        assertNoInferenceMetrics(metrics, "embeds.example.test");
+    }
+
+    @Test
+    void aFailedEmbeddingsCallRecordsItsDurationWithTheErrorTypeAndNoTokens() {
+        var metrics = OtelRuntime.captureMetricsForTest(() -> {
+            var call = GenAiSpans.start(openAiAt("embeds-fail.example.test"), GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null);
+            call.response(null, "embed-x-2024", USAGE, List.of());
+            call.failed(new IllegalStateException("died after reporting usage"));
+        });
+        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME, "embeds-fail.example.test");
+        assertEquals(1, duration.size(), () -> "duration points: " + duration);
+        assertEquals(IllegalStateException.class.getName(), duration.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
+        assertNoSeries(metrics, "embeds-fail.example.test", GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME);
+        assertNoInferenceMetrics(metrics, "embeds-fail.example.test");
+    }
+
+    @Test
+    void anEmbeddingsCallWithoutReportedUsageRecordsOnlyItsDuration() {
         var metrics = OtelRuntime.captureMetricsForTest(() ->
-                GenAiSpans.start(new ProviderConfig("OpenAI", "https://embeds.example.test/v1", "sk-test", List.of()),
-                        GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null).succeeded());
-        var operation = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME, "embeds.example.test");
-        assertEquals(1, operation.size(), () -> "operation.duration points: " + operation);
-        var inference = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "embeds.example.test");
-        assertTrue(inference.isEmpty(), () -> "inference.duration recorded for embeddings: " + inference);
+                GenAiSpans.start(openAiAt("embeds-bare.example.test"), GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null).succeeded());
+        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME, "embeds-bare.example.test");
+        assertEquals(1, duration.size(), () -> "duration points: " + duration);
+        assertNoSeries(metrics, "embeds-bare.example.test", GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME);
+        assertNoInferenceMetrics(metrics, "embeds-bare.example.test");
     }
 
     private static List<HistogramPointData> hostSeries(Collection<MetricData> metrics, String name, String host) {
@@ -266,6 +455,13 @@ class GenAiSpansTest extends UnitTest {
                 .flatMap(m -> m.getHistogramData().getPoints().stream())
                 .filter(pt -> host.equals(pt.getAttributes().get(ServerAttributes.SERVER_ADDRESS)))
                 .toList();
+    }
+
+    private static void assertNoSeries(Collection<MetricData> metrics, String host, String... names) {
+        for (var name : names) {
+            var series = hostSeries(metrics, name, host);
+            assertTrue(series.isEmpty(), () -> name + " recorded for " + host + ": " + series);
+        }
     }
 
     @Test

@@ -13,10 +13,6 @@ public final class GenAiMetrics {
 
     private GenAiMetrics() {}
 
-    public static final String GEN_AI_CLIENT_OPERATION_DURATION_NAME = "gen_ai.client.operation.duration";
-    public static final String GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION = "GenAI operation duration.";
-    public static final String GEN_AI_CLIENT_OPERATION_DURATION_UNIT = "s";
-
     public static final String GEN_AI_CLIENT_INFERENCE_DURATION_NAME = "gen_ai.client.inference.duration";
     public static final String GEN_AI_CLIENT_INFERENCE_DURATION_DESCRIPTION =
             "GenAI client inference operation duration.";
@@ -25,8 +21,7 @@ public final class GenAiMetrics {
     public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME =
             "gen_ai.client.inference.time_to_first_chunk";
     public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_DESCRIPTION =
-            "Time to receive the first chunk, measured from when the client issues the generation"
-                    + " request to when the first chunk is received in the response stream.";
+            "Time from the start of a logical inference operation to the first chunk in its streaming response.";
     public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_UNIT = "s";
 
     public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME =
@@ -40,4 +35,15 @@ public final class GenAiMetrics {
     public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_DESCRIPTION =
             "The number of output (completion) tokens used per inference operation.";
     public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_UNIT = "{token}";
+
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME = "gen_ai.client.embeddings.duration";
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_DURATION_DESCRIPTION =
+            "GenAI client embeddings operation duration.";
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_DURATION_UNIT = "s";
+
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME =
+            "gen_ai.client.embeddings.operation.input_tokens";
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_DESCRIPTION =
+            "The number of input tokens used per embeddings operation.";
+    public static final String GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_UNIT = "{token}";
 }

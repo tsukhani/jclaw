@@ -14,7 +14,9 @@ import io.opentelemetry.context.Scope;
 import io.opentelemetry.semconv.ErrorAttributes;
 import io.opentelemetry.semconv.ServerAttributes;
 import llm.LlmTypes.ChatCompletionChunk;
+import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
+import llm.LlmTypes.ToolCallChunk;
 import llm.LlmTypes.Usage;
 import org.jspecify.annotations.Nullable;
 import utils.LatencyTrace;
@@ -47,8 +49,8 @@ public final class GenAiSpans {
     private static final String SCOPE = "jclaw";
 
     private record Instruments(OpenTelemetry api, DoubleHistogram inputTokens, DoubleHistogram outputTokens,
-                               DoubleHistogram operationDuration, DoubleHistogram inferenceDuration,
-                               DoubleHistogram firstChunk) {}
+                               DoubleHistogram inferenceDuration, DoubleHistogram firstChunk,
+                               DoubleHistogram embeddingsInputTokens, DoubleHistogram embeddingsDuration) {}
 
     private static volatile @Nullable Instruments instruments;
 
@@ -130,10 +132,6 @@ public final class GenAiSpans {
                         .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_DESCRIPTION)
                         .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_UNIT)
                         .setExplicitBucketBoundariesAdvice(MetricBuckets.TOKENS).build(),
-                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME)
-                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION)
-                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_UNIT)
-                        .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build(),
                 meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME)
                         .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_DESCRIPTION)
                         .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_UNIT)
@@ -141,9 +139,41 @@ public final class GenAiSpans {
                 meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME)
                         .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_DESCRIPTION)
                         .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build(),
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_OPERATION_INPUT_TOKENS_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.TOKENS).build(),
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_EMBEDDINGS_DURATION_UNIT)
                         .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build());
         instruments = built;
         return built;
+    }
+
+    /**
+     * Whether a frame is a chunk as the convention counts one: new output, never a role, an ID,
+     * usage or a finish marker alone. Refusals, audio and images never reach {@link ChunkDelta}.
+     */
+    private static boolean carriesOutput(ChatCompletionChunk chunk) {
+        if (chunk.choices() == null) return false;
+        return chunk.choices().stream().anyMatch(choice -> choice.delta() != null && carriesOutput(choice.delta()));
+    }
+
+    private static boolean carriesOutput(ChunkDelta delta) {
+        return present(delta.content()) || present(delta.reasoning()) || present(delta.reasoningContent())
+                || (delta.reasoningDetails() != null && !delta.reasoningDetails().isEmpty())
+                || (delta.toolCalls() != null && delta.toolCalls().stream().anyMatch(GenAiSpans::carriesOutput));
+    }
+
+    private static boolean carriesOutput(ToolCallChunk call) {
+        var function = call.function();
+        return function != null && (present(function.name()) || present(function.arguments()));
+    }
+
+    private static boolean present(@Nullable String text) {
+        return text != null && !text.isEmpty();
     }
 
     /**
@@ -199,10 +229,10 @@ public final class GenAiSpans {
             return live ? Context.current().with(span) : Context.current();
         }
 
-        /** One streamed chunk: the first stamps time-to-first-chunk, every one may carry usage. */
+        /** One streamed frame: the first with output stamps time-to-first-chunk, every one may carry usage. */
         public void chunk(ChatCompletionChunk chunk) {
             if (!live) return;
-            if (firstChunkNanos < 0) {
+            if (firstChunkNanos < 0 && carriesOutput(chunk)) {
                 firstChunkNanos = System.nanoTime();
             }
             if (chunk.usage() != null) usage = chunk.usage();
@@ -275,11 +305,14 @@ public final class GenAiSpans {
             if (!TelemetryState.enabled) return;
             var i = instruments();
             var attrs = baseAttributes(errorType);
-            // Upstream keeps operation.duration for calls that are not inference; embeddings is one.
-            var duration = OPERATION_CHAT.equals(operation) ? i.inferenceDuration() : i.operationDuration();
-            duration.record(seconds(System.nanoTime()), attrs);
-            var u = usage;
-            if (u != null && errorType == null) {
+            var u = errorType == null ? usage : null;
+            if (OPERATION_EMBEDDINGS.equals(operation)) {
+                i.embeddingsDuration().record(seconds(System.nanoTime()), attrs);
+                if (u != null) i.embeddingsInputTokens().record(u.promptTokens(), attrs);
+                return;
+            }
+            i.inferenceDuration().record(seconds(System.nanoTime()), attrs);
+            if (u != null) {
                 i.inputTokens().record(u.promptTokens(), attrs);
                 i.outputTokens().record(u.completionTokens(), attrs);
             }
