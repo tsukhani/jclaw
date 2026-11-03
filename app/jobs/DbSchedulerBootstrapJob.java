@@ -163,6 +163,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
             return;
         }
 
+        DbSchedulerShutdownLogFilter.install();
         var jclawTask = TaskExecutionHandler.buildTask();
 
         SchedulerBuilder builder = Scheduler.create(datasource, List.of(jclawTask))
