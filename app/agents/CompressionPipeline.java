@@ -1,5 +1,7 @@
 package agents;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import llm.LlmTypes.ChatMessage;
 import llm.TokenUsageEstimator;
 import models.Agent;
@@ -22,7 +24,6 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Content-aware compression pipeline (JCLAW-465 core). Sits between
@@ -65,9 +66,10 @@ public final class CompressionPipeline {
     // agents <-> tools package cycle.
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
 
-    /** The marker a compressed result ends in; the group is the original's handle. */
-    private static final Pattern COMPRESSED_MARKER = Pattern.compile(
-            "\\n\\[compressed — call ccr_retrieve\\(\"([0-9a-f]{16})\"\\) for the full original\\]\\z");
+    // What compression wrote, by String instance, with the original's handle. A tool result is outside text
+    // and can end in a copy of the marker, so the text cannot say what it is. Weak keys compare by identity
+    // and leave with the message list that holds them; compressed text is never stored.
+    private static final Cache<String, String> OWN_OUTPUT = Caffeine.newBuilder().weakKeys().build();
 
     static final String FIRST_VIEW_MAX_TOKENS_KEY = "chat.compression.firstViewMaxTokens";
     static final int DEFAULT_FIRST_VIEW_MAX_TOKENS = 6_000;
@@ -162,10 +164,16 @@ public final class CompressionPipeline {
         return anyChanged ? out : messages;
     }
 
-    /** The handle {@code ccr_retrieve} finds {@code body}'s original under: its marker's, else its own hash. */
+    /** The handle {@code ccr_retrieve} finds {@code body}'s original under: the one compression recorded, else its own hash. */
     static String retrievalHandle(String body) {
-        var marker = COMPRESSED_MARKER.matcher(body);
-        return marker.find() ? marker.group(1) : ContentHash.handle(body);
+        var original = OWN_OUTPUT.getIfPresent(body);
+        return original != null ? original : ContentHash.handle(body);
+    }
+
+    /** {@code shortened} is {@code text} cut down, so a stub of it must name the same original. */
+    static void carryHandle(String text, String shortened) {
+        var original = OWN_OUTPUT.getIfPresent(text);
+        if (original != null) OWN_OUTPUT.put(shortened, original);
     }
 
     private static int lastAssistantIndex(List<ChatMessage> messages) {
@@ -192,7 +200,7 @@ public final class CompressionPipeline {
         if (!(msg.content() instanceof String content) || content.isBlank()) return msg;
         // The prepare step's compressed copy seeds the tool loop, so later rounds meet it here. Compressed
         // again it loses its marker, and a handle hashed from compressed text matches no Message row.
-        if (COMPRESSED_MARKER.matcher(content).find()) return msg;
+        if (OWN_OUTPUT.getIfPresent(content) != null) return msg;
         // A catalog compressed to its first entries is fetched back whole, and then sent twice;
         // a skill's instructions compressed lose the rules the model has not used yet.
         if (callArgs != null && declaredWhole(msg.toolName(), callArgs)) return msg;
@@ -229,6 +237,7 @@ public final class CompressionPipeline {
                 before, after, before - after);
         CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), msg.toolName(), handle, modelId,
                 type.name(), result.algorithm(), before, after);
+        OWN_OUTPUT.put(hinted, handle);
         return candidate;
     }
 }

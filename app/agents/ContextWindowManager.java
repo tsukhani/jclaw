@@ -690,11 +690,13 @@ public final class ContextWindowManager {
         var head = original.substring(0, Math.min(keepHead, len));
         var tail = original.substring(Math.max(0, len - keepTail));
         int elidedChars = len - head.length() - tail.length();
-        return head
+        var truncated = head
                 + "\n\n[...JClaw elided " + elidedChars
                 + " chars of this tool result to fit the context window. "
                 + "The full output is preserved in the conversation history database.]\n\n"
                 + tail;
+        CompressionPipeline.carryHandle(original, truncated);
+        return truncated;
     }
 
     static TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
