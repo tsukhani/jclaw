@@ -139,6 +139,7 @@ public final class SherpaNative {
      * to {@link #installDir}. Nothing reaches that directory unless every step succeeded, so a failed attempt
      * is simply retried.
      */
+    @SuppressWarnings("java:S5042") // the jar matches a pinned SHA-256 before it is opened, so its expansion is known
     public static Path install(Build build, Path jar, Path cacheRoot) throws IOException {
         var actual = PinnedDownload.sha256(jar);
         if (!actual.equalsIgnoreCase(build.sha256())) {

@@ -56,6 +56,7 @@ public final class DbSchedulerShutdownLogFilter extends AbstractFilter {
      * none, and removes one an earlier start installed: matched by class name, since a dev reload loads this
      * class again in a new class loader.
      */
+    @SuppressWarnings("java:S1872") // by name on purpose: a dev reload's copy is another Class, which instanceof misses
     public static void install(DbSchedulerShutdownLogFilter filter) {
         var context = (LoggerContext) LogManager.getContext(false);
         var configuration = context.getConfiguration();
