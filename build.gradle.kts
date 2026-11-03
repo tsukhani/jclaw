@@ -748,18 +748,28 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
 // ArchUnit, jqwik and MockWebServer are `implementation` only so the fork's test runner sees
 // them (see their declarations); no app/ class loads one.
+// framework/lib also carries the fork's test runner and build tools: JUnit and its companions
+// for play autotest, ECJ for compiling sources (a bundle ships none and starts precompiled), and
+// Ivy for resolving framework/dependencies.yml or an app's conf/dependencies.yml (JClaw has none).
 // Dev, tests and `play run` keep the jars on the classpath. playBundle fills both lib/ and the
-// launcher's .classpath from playClasspath, so filtering it keeps a jar out of both.
+// launcher's .classpath from playClasspath, and framework/lib/ and its .classpath entries from
+// frameworkLib, so filtering each keeps a jar out of both.
 tasks.named<play.gradle.PlayBundleTask>("playBundle") {
     val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jqwik-api-", "jqwik-engine-", "mockwebserver3-")
-    // Snapshot the sources first: filtering playClasspath into itself would be circular.
+    val excludedFrameworkJarPrefixes = listOf(
+        "junit-jupiter-", "junit-platform-", "hamcrest-", "opentest4j-", "apiguardian-api-", "ecj-", "ivy-",
+    )
+    // Snapshot the sources first: filtering a collection into itself would be circular.
     val resolved = files(playClasspath.from.toList())
     playClasspath.setFrom(resolved.filter { jar -> excludedJarPrefixes.none { jar.name.startsWith(it) } })
+    val frameworkResolved = files(frameworkLib.from.toList())
+    frameworkLib.setFrom(frameworkResolved.filter { jar -> excludedFrameworkJarPrefixes.none { jar.name.startsWith(it) } })
     doFirst {
         // Loud rather than silent: a renamed or removed jar means this filter is stale.
-        val stale = excludedJarPrefixes.filter { prefix -> resolved.none { it.name.startsWith(prefix) } }
+        val stale = excludedJarPrefixes.filter { prefix -> resolved.none { it.name.startsWith(prefix) } } +
+            excludedFrameworkJarPrefixes.filter { prefix -> frameworkResolved.none { it.name.startsWith(prefix) } }
         check(stale.isEmpty()) {
-            "no $stale jar on playBundle's classpath; the bundle jar filter in build.gradle.kts is stale"
+            "no $stale jar on playBundle's classpath or in framework/lib; the bundle jar filter in build.gradle.kts is stale"
         }
     }
 }
