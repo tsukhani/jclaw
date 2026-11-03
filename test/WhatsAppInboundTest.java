@@ -338,11 +338,15 @@ class WhatsAppInboundTest extends UnitTest {
     void aHandOffThatFailsLeavesTheIdUnclaimedSoTheRedeliveryIsServed() {
         withDisabledCloudBinding(binding -> {
             var id = uniqueId();
-            // An unsaved WhatsApp-Web binding has no id, so the hand-off's binding lookup throws.
-            var unsaved = new WhatsAppBinding();
-            unsaved.transport = WhatsAppTransport.WHATSAPP_WEB;
+            // A WhatsApp-Web binding with an owner number checks the sender against it, so a message without a
+            // sender throws in the hand-off, after the claim and inside its transaction.
+            var web = new WhatsAppBinding();
+            web.transport = WhatsAppTransport.WHATSAPP_WEB;
+            web.ownerNumber = "15550004444";
+            var senderless = cloudDm(id, null);
 
-            assertThrows(RuntimeException.class, () -> dispatched(unsaved, cloudDm(id, "15550004444")));
+            var thrown = assertThrows(RuntimeException.class, () -> dispatched(web, senderless));
+            assertInstanceOf(NullPointerException.class, thrown.getCause());
             assertFalse(isRecorded(id), "the claim commits with the hand-off, never ahead of it");
             assertEquals(List.of("Message received from 15550004444 in 15550004444"),
                     dispatched(binding, cloudDm(id, "15550004444")));
