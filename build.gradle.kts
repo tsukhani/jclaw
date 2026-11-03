@@ -330,6 +330,12 @@ dependencies {
     // without this the stdio transport's constructor throws ServiceConfigurationError.
     runtimeOnly("com.agentclientprotocol:acp-json-jackson2:$acpVersion")
 
+    // Jackson 2, which telegrambots, cobalt, Tika and ACP need: the fork ships only Jackson 3, so without this
+    // the version is whatever those libraries ask for, and Renovate never offers its security patches.
+    // jackson-annotations stays the fork's, and databind 2.N needs annotations 2.N: take a minor only once the
+    // fork's lib-coordinates.properties lists that annotations minor.
+    implementation(platform("com.fasterxml.jackson:jackson-bom:2.22.4"))
+
     // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
     // The tree-wide standard for expressing null contracts; introduced first on
     // the security-utility public surface (PasswordHasher / SsrfGuard /
