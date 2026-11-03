@@ -198,6 +198,44 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         }
     }
 
+    // ─── JF-189: an Error in the turn still ends it with onError ────────
+
+    @Test
+    void anErrorInTheTurnEndsItWithOnErrorAndAnEventLogRow() throws Exception {
+        var agent = persistAgent("jf189-turn-error", "missing", "model");
+        var convo = persistConversation(agent, "web", "u-jf189");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        try {
+            var h = new Harness();
+            var cb = new AgentRunner.StreamingCallbacks(
+                    _ -> { throw new StackOverflowError(); }, h.tokens::add, h.reasoning::add, _ -> {}, _ -> {},
+                    content -> { h.completed.set(content); h.terminated.countDown(); },
+                    error -> { h.error.set(error); h.terminated.countDown(); },
+                    () -> { h.cancelled.set(true); h.terminated.countDown(); });
+
+            var events = services.EventLogger.captureMatchingForTest(
+                    e -> agent.name.equals(e.agentId()) && e.level().equals("ERROR"), _ -> {
+                        AgentRunner.runStreaming(agent, convo.id, "web", convo.peerId, "hello",
+                                new AtomicBoolean(false), cb, null, List.of());
+                        try {
+                            assertTrue(h.terminated.await(15, TimeUnit.SECONDS), "the turn reaches a terminal callback");
+                        } catch (InterruptedException e) {
+                            throw new IllegalStateException(e);
+                        }
+                    });
+
+            assertEquals("java.lang.StackOverflowError", h.error.get().getMessage());
+            assertInstanceOf(StackOverflowError.class, h.error.get().getCause());
+            assertEquals(List.of("Streaming error: java.lang.StackOverflowError"),
+                    events.stream().map(services.EventLogger.Captured::message).toList());
+            assertFalse(services.ConversationQueue.isBusy(convo.id), "the failed turn released the conversation");
+        } finally {
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
     // ─── GH-12: operator stop releases the queue for the next send ──────
 
     @Test

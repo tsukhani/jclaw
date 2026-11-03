@@ -117,6 +117,11 @@ final class StreamingAgentRunner {
                 EventLogger.error("llm", agent.name, channelType,
                         "Streaming error: %s".formatted(e.getMessage()));
                 tracedCb.onError().accept(e);
+            } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                // agent-stream is a virtual-thread root: an Error escaping it reached only system.out, and the client,
+                // given no terminal event, waited until it gave up (JF-189).
+                EventLogger.error("llm", agent.name, channelType, "Streaming error: %s".formatted(t), t);
+                tracedCb.onError().accept(new RuntimeException(t.toString(), t));
             } finally {
                 var sink = sinkRef[0];
                 if (sink != null && sink.droppedRows() > 0) {

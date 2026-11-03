@@ -354,7 +354,7 @@ public final class ParallelToolExecutor {
     }
 
     /**
-     * Dispatch one call and convert any thrown exception into an
+     * Dispatch one call and convert anything it throws, an Error included, into an
      * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
      */
     private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent,
@@ -371,6 +371,11 @@ public final class ParallelToolExecutor {
                     "Tool '%s' threw: %s"
                             .formatted(tc.function().name(), e.getMessage()));
             return ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
+        } catch (@SuppressWarnings("java:S1181") Throwable t) {
+            // A parallel call runs at a virtual-thread root: an Error escaping here ended it with no result, and the
+            // commit skipped the call as cancelled (JF-189).
+            EventLogger.error("tool", agent.name, null, "Tool '%s' threw %s".formatted(tc.function().name(), t), t);
+            return ToolRegistry.ToolResult.text("Error executing tool: " + t);
         }
     }
 

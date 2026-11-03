@@ -20,6 +20,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.SubagentRegistry;
 import services.Tx;
 import tools.FileSystemTools;
@@ -40,6 +41,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Exercises {@link agents.ParallelToolExecutor#executeToolsParallel}'s scheduling model:
@@ -75,7 +77,10 @@ class ParallelToolExecutionTest extends UnitTest {
                 sleepTool("slow_b", false),
                 sleepTool("slow_c", false),
                 sleepTool("safe_x", true),
-                sleepTool("safe_y", true)));
+                sleepTool("safe_y", true),
+                failingTool("missing_class", false, () -> new NoClassDefFoundError("org/example/Missing")),
+                failingTool("too_deep", true, StackOverflowError::new),
+                failingTool("boom", false, () -> new IllegalStateException("boom"))));
     }
 
     @AfterEach
@@ -132,6 +137,27 @@ class ParallelToolExecutionTest extends UnitTest {
         };
     }
 
+    /** A tool whose every call throws {@code failure}: an unchecked exception or an Error. */
+    private static ToolRegistry.Tool failingTool(String toolName, boolean parallelSafe, Supplier<Throwable> failure) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return toolName; }
+            @Override public String description() { return "Fails for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public boolean parallelSafe() { return parallelSafe; }
+            @Override public String execute(String argsJson, Agent agent) {
+                var thrown = failure.get();
+                if (thrown instanceof RuntimeException e) throw e;
+                throw (Error) thrown;
+            }
+        };
+    }
+
+    private static List<String> contents(List<ChatMessage> messages) {
+        return messages.stream().map(m -> String.valueOf(m.content())).toList();
+    }
+
     /** Create agent + conversation in the DB so the commit phase of
      *  executeToolsParallel has real rows to write to. */
     private long[] seedAgentAndConversation() {
@@ -182,6 +208,75 @@ class ParallelToolExecutionTest extends UnitTest {
                 Set.class);
         m.setAccessible(true);
         m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled, sink, null);
+    }
+
+    // ─── JF-189: an Error from a tool fails its call, not the turn ──────────
+
+    @Test
+    void anErrorFromAToolAloneInItsRoundBecomesThatCallsErrorResult() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var messages = new ArrayList<ChatMessage>();
+
+        var events = EventLogger.captureForTest(() -> {
+            try {
+                invokeParallel(List.of(new ToolCall("c1", "function", new FunctionCall("missing_class", "{}"))),
+                        agent, ids[1], messages, new AtomicBoolean(false));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertEquals(List.of("c1"), messages.stream().map(ChatMessage::toolCallId).toList());
+        assertEquals(List.of("Error executing tool 'missing_class': java.lang.NoClassDefFoundError: org/example/Missing"),
+                contents(messages));
+        var errors = events.stream().filter(e -> e.level().equals("ERROR")).toList();
+        assertEquals(1, errors.size(), events.toString());
+        var error = errors.getFirst();
+        assertEquals("tool", error.category());
+        assertEquals(agent.name, error.agentId());
+        assertEquals("Tool 'missing_class' threw java.lang.NoClassDefFoundError: org/example/Missing", error.message());
+        var trace = error.details().lines().toList();
+        assertEquals("java.lang.NoClassDefFoundError: org/example/Missing", trace.getFirst());
+        assertTrue(trace.get(1).startsWith("\tat "), "the row carries the stack: " + trace.get(1));
+    }
+
+    @Test
+    void anErrorFromAToolAmongOthersBecomesThatCallsErrorResultAndTheOthersRunAsUsual() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var messages = new ArrayList<ChatMessage>();
+        var calls = List.of(
+                new ToolCall("u1", "function", new FunctionCall("slow_a", "{}")),
+                new ToolCall("d1", "function", new FunctionCall("too_deep", "{}")),
+                new ToolCall("s1", "function", new FunctionCall("safe_x", "{}")));
+
+        var events = EventLogger.captureMatchingForTest(
+                e -> e.level().equals("ERROR") && e.message().contains("'too_deep'"), _ -> {
+            try {
+                invokeParallel(calls, agent, ids[1], messages, new AtomicBoolean(false));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertEquals(List.of("u1", "d1", "s1"), messages.stream().map(ChatMessage::toolCallId).toList());
+        assertEquals(List.of("ok-from-slow_a", "Error executing tool 'too_deep': java.lang.StackOverflowError", "ok-from-safe_x"),
+                contents(messages));
+        assertEquals(List.of("ERROR Tool 'too_deep' threw java.lang.StackOverflowError"),
+                events.stream().map(e -> e.level() + " " + e.message()).toList());
+    }
+
+    @Test
+    void anExceptionFromAToolStillBecomesItsErrorResult() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var messages = new ArrayList<ChatMessage>();
+
+        invokeParallel(List.of(new ToolCall("c1", "function", new FunctionCall("boom", "{}"))),
+                agent, ids[1], messages, new AtomicBoolean(false));
+
+        assertEquals(List.of("Error executing tool 'boom': boom"), contents(messages));
     }
 
     @Test

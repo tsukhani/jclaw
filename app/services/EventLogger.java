@@ -11,6 +11,8 @@ import utils.AppClock;
 import utils.GsonHolder;
 import utils.SecretRedactor;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -325,6 +327,23 @@ public class EventLogger {
     public static void error(String category, String message, @Nullable Throwable t) {
         record(LEVEL_ERROR, category, message, t != null ? t.toString() : null);
     }
+
+    /**
+     * An ERROR whose details carry the first {@link #MAX_TRACE_LINES} lines of {@code t}'s stack trace, for a
+     * failure no handler expects: otherwise the trace reaches only the dying thread's stderr.
+     */
+    public static void error(String category, @Nullable String agentId, @Nullable String channel, String message,
+                             Throwable t) {
+        var trace = new StringWriter();
+        t.printStackTrace(new PrintWriter(trace));
+        var lines = trace.toString().lines().toList();
+        var details = lines.size() <= MAX_TRACE_LINES ? String.join("\n", lines)
+                : String.join("\n", lines.subList(0, MAX_TRACE_LINES)) + "\n\t... " + (lines.size() - MAX_TRACE_LINES) + " more";
+        record(LEVEL_ERROR, category, agentId, channel, message, details);
+    }
+
+    /** A StackOverflowError's trace runs to a thousand frames. */
+    static final int MAX_TRACE_LINES = 60;
 
     // ----- JCLAW-272: typed subagent lifecycle helpers ---------------------
     //
