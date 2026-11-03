@@ -201,7 +201,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
     // ─── JF-189: an Error in the turn still ends it with onError ────────
 
     @Test
-    void anErrorInTheTurnEndsItWithOnErrorAndAnEventLogRow() throws Exception {
+    void anErrorInTheTurnEndsItWithOnErrorAndAnEventLogRow() {
         var agent = persistAgent("jf189-turn-error", "missing", "model");
         var convo = persistConversation(agent, "web", "u-jf189");
         JPA.em().getTransaction().commit();

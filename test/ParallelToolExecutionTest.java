@@ -213,7 +213,7 @@ class ParallelToolExecutionTest extends UnitTest {
     // ─── JF-189: an Error from a tool fails its call, not the turn ──────────
 
     @Test
-    void anErrorFromAToolAloneInItsRoundBecomesThatCallsErrorResult() throws Exception {
+    void anErrorFromAToolAloneInItsRoundBecomesThatCallsErrorResult() {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
         var messages = new ArrayList<ChatMessage>();
@@ -242,7 +242,7 @@ class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    void anErrorFromAToolAmongOthersBecomesThatCallsErrorResultAndTheOthersRunAsUsual() throws Exception {
+    void anErrorFromAToolAmongOthersBecomesThatCallsErrorResultAndTheOthersRunAsUsual() {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
         var messages = new ArrayList<ChatMessage>();
