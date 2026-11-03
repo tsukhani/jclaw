@@ -1,23 +1,17 @@
 package services.browser;
 
-import okhttp3.Request;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream;
 import org.jspecify.annotations.Nullable;
-import utils.HttpFactories;
+import utils.PinnedDownload;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.IntConsumer;
@@ -148,7 +142,7 @@ public final class PlaywrightNode {
         var archive = Files.createTempFile(cacheRoot, "node-", ".part");
         var staged = Files.createTempFile(dir, "node-", ".part");
         try {
-            fetch(build, archive, onPercent);
+            PinnedDownload.fetch(build.url(), build.sha256(), MAX_ARCHIVE_BYTES, archive, onPercent);
             extract(build, archive, staged);
             if (!build.platform().startsWith("win")) {
                 Files.setPosixFilePermissions(staged, PosixFilePermissions.fromString("rwx------"));
@@ -159,40 +153,6 @@ public final class PlaywrightNode {
         } finally {
             Files.deleteIfExists(archive);
             Files.deleteIfExists(staged);
-        }
-    }
-
-    private static void fetch(Build build, Path archive, IntConsumer onPercent) throws IOException {
-        var request = new Request.Builder().url(build.url()).build();
-        try (var response = HttpFactories.general().newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                throw new IOException("HTTP " + response.code() + " fetching " + build.url());
-            }
-            var body = response.body();
-            long total = body.contentLength();
-            if (total > MAX_ARCHIVE_BYTES) throw new IOException("refusing a " + total + "-byte archive");
-            var digest = sha256();
-            try (var in = new DigestInputStream(body.byteStream(), digest);
-                 OutputStream out = Files.newOutputStream(archive)) {
-                var buffer = new byte[64 * 1024];
-                long read = 0;
-                int reported = -1;
-                for (int n; (n = in.read(buffer)) != -1; ) {
-                    read += n;
-                    if (read > MAX_ARCHIVE_BYTES) throw new IOException("archive exceeds " + MAX_ARCHIVE_BYTES + " bytes");
-                    out.write(buffer, 0, n);
-                    int pct = total > 0 ? (int) (read * 100 / total) : 0;
-                    if (pct != reported) {
-                        onPercent.accept(pct);
-                        reported = pct;
-                    }
-                }
-            }
-            var actual = HexFormat.of().formatHex(digest.digest());
-            if (!actual.equalsIgnoreCase(build.sha256())) {
-                throw new IOException("checksum mismatch for " + build.url() + ": expected " + build.sha256()
-                        + ", got " + actual);
-            }
         }
     }
 
@@ -221,13 +181,5 @@ public final class PlaywrightNode {
             }
         }
         throw new IOException(build.entry() + " not found in " + build.url());
-    }
-
-    private static MessageDigest sha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is mandatory on every JRE", e);
-        }
     }
 }

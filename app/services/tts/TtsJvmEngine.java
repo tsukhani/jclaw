@@ -11,6 +11,7 @@ import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 import services.ConfigService;
+import services.voice.SherpaNative;
 import utils.HttpFactories;
 
 import java.io.File;
@@ -34,9 +35,9 @@ import java.util.stream.Collectors;
  * dispatches here.
  *
  * <p>Validated by the JCLAW-793 spike on Apple silicon (Piper VITS, RTF ~0.03,
- * CPU). The native lib (libsherpa-onnx-jni with ONNX Runtime statically linked)
- * is bundled by the build for the host platform and auto-extracted+loaded by
- * sherpa's {@code LibraryLoader} on the first {@link OfflineTts} construction.
+ * CPU). The native libraries (libsherpa-onnx-jni and the ONNX Runtime it links
+ * against) come from {@link SherpaNative}, and sherpa's {@code LibraryLoader}
+ * loads them on the first {@link OfflineTts} construction.
  *
  * <p>Weights are provisioned lazily on first use: the sherpa model archive is
  * downloaded from the k2-fsa releases and extracted under
@@ -139,7 +140,7 @@ public final class TtsJvmEngine {
             var spec = specFor(id);
             var dir = ensureModel(spec);
             Logger.info("TtsJvmEngine: loading sherpa OfflineTts model '%s' from %s", id, dir);
-            return new OfflineTts(buildConfig(spec, dir));
+            return SherpaNative.load(() -> new OfflineTts(buildConfig(spec, dir)));
         });
     }
 

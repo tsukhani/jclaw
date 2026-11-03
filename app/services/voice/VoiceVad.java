@@ -73,7 +73,7 @@ public final class VoiceVad implements AutoCloseable {
                 .setProvider("cpu")
                 .setDebug(false)
                 .build();
-        this.vad = new Vad(config); // triggers sherpa's native-lib load
+        this.vad = SherpaNative.load(() -> new Vad(config));
     }
 
     /**

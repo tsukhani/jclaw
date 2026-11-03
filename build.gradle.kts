@@ -572,14 +572,15 @@ dependencies {
     // JCLAW-793: sherpa-onnx returns to the JVM — deliberately — as the
     // operator-selectable "JVM-native" TTS engine (Settings > Speech), an
     // alternative to the Python sidecar. Apache-2.0. The classes jar is
-    // platform-neutral; the native-lib jar carries libsherpa-onnx-jni with ONNX
-    // Runtime STATICALLY LINKED inside it, so this adds ONE native lib and does
-    // NOT pull com.microsoft.onnxruntime. Selected for the target host below; CPU
+    // platform-neutral; the native-lib jar carries libsherpa-onnx-jni and the ONNX
+    // Runtime library it links against, so this does NOT pull
+    // com.microsoft.onnxruntime. Selected for the target host below; CPU
     // inference (RTF ~0.03 for Piper, validated in the JCLAW-793 spike) — the
     // GPU path stays on the sidecar (Qwen3-TTS/vLLM). Resolved via the Ivy repo.
     //
     // This is the only architecture-specific artifact in the whole resolved
-    // graph, so it alone decides whether a bundle is portable. -PtargetArch
+    // graph, so it alone decides whether a bundle is portable; playBundle leaves
+    // it out unless -PtargetArch names the target (JF-188, below). -PtargetArch
     // (Docker's TARGETARCH: amd64/arm64) exists because the image's bundle
     // stage builds natively on $BUILDPLATFORM and cross-targets — keying off
     // os.arch there would ship the builder's x64 lib inside the arm64 image.
@@ -748,6 +749,9 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
 // ArchUnit, jqwik and MockWebServer are `implementation` only so the fork's test runner sees
 // them (see their declarations); no app/ class loads one.
+// sherpa-onnx's native-lib jar is the build host's platform only, so a bundle for no named target
+// drops it and fetches its own host's on first use (services.voice.SherpaNative, JF-188). Docker
+// builds its bundle for one -PtargetArch and keeps that platform's.
 // framework/lib also carries the fork's test runner and build tools: JUnit and its companions
 // for play autotest, ECJ for compiling sources (a bundle ships none and starts precompiled), and
 // Ivy for resolving framework/dependencies.yml or an app's conf/dependencies.yml (JClaw has none).
@@ -755,7 +759,9 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // launcher's .classpath from playClasspath, and framework/lib/ and its .classpath entries from
 // frameworkLib, so filtering each keeps a jar out of both.
 tasks.named<play.gradle.PlayBundleTask>("playBundle") {
-    val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jqwik-api-", "jqwik-engine-", "mockwebserver3-")
+    val forOneTarget = (findProperty("targetArch") as String?)?.isNotBlank() == true
+    val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jqwik-api-", "jqwik-engine-", "mockwebserver3-") +
+        if (forOneTarget) emptyList() else listOf("sherpa-onnx-native-lib-")
     val excludedFrameworkJarPrefixes = listOf(
         "junit-jupiter-", "junit-platform-", "hamcrest-", "opentest4j-", "apiguardian-api-", "ecj-", "ivy-",
     )
