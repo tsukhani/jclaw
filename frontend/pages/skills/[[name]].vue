@@ -834,7 +834,7 @@ watch(() => route.params.name, (raw) => {
     clearViewer()
     return
   }
-  // Case-insensitive so a hand-typed /skills/OReilly-Books still lands; the stored
+  // Case-insensitive so a hand-typed /skills/Visual-Explainer still lands; the stored
   // folder name is what the breadcrumb shows and the API path uses.
   const wanted = decodeURIComponent(slug).toLowerCase()
   const skill = (skills.value ?? []).find(s => (s.folderName || s.name).toLowerCase() === wanted)

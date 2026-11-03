@@ -252,7 +252,7 @@ __pycache__/
 
 # Note: per-skill `credentials/` directories ARE tracked here, but only as
 # README templates that document the expected JSON shape. Real secret files
-# (radarr.json, etc.) live operator-local in workspace/main/skills/<skill>/
+# (an API key, a cookie jar) live operator-local in workspace/main/skills/<skill>/
 # credentials/, which is gitignored via the workspace/* rule below.
 
 # Agent workspaces — never tracked (JCLAW-910). Everything under here is operator
