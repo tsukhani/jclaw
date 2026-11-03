@@ -620,6 +620,11 @@ public final class WebExtraction {
 
     /** Extract text from a non-HTML document (PDF, Office, EPUB, …) with Tika. */
     private static String extractWithTika(byte[] body, String contentType, String url) {
+        return extractWithTika(TIKA, body, contentType, url);
+    }
+
+    /** {@link #extractWithTika(byte[], String, String)} with the Tika given. Public because test sources are the default package. */
+    public static String extractWithTika(Tika tika, byte[] body, String contentType, String url) {
         try {
             var metadata = new Metadata();
             if (!contentType.isBlank()) {
@@ -627,9 +632,10 @@ public final class WebExtraction {
             }
             // Resource-name hint lets Tika fall back to extension-based detection.
             metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, url);
-            var text = TIKA.parseToString(new ByteArrayInputStream(body), metadata);
+            var text = tika.parseToString(new ByteArrayInputStream(body), metadata);
             return truncate(text.strip(), "content");
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
+            // LinkageError: an Office document needing a schema class poi-ooxml-lite does not carry.
             return "Error: could not extract text from %s: %s".formatted(url, e.getMessage());
         }
     }

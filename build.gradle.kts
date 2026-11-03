@@ -416,12 +416,15 @@ dependencies {
     }
 
     // OOXML schema classes (STTblWidth, CTTbl, CTRow, CTTc) that DocumentWriter compiles
-    // against. Tika 3.3.2 pulled poi-ooxml-full transitively and Tika 4.0.0 does not; POI
-    // publishes -lite and -full under one capability, so nothing substitutes for it and the
-    // classes just vanish. Declared here because DocumentWriter needs them whatever Tika
-    // ships. Must stay on the same version as the poi/poi-ooxml that Tika resolves —
-    // xmlbeans-generated schemas and poi-ooxml are a matched pair (JCLAW-1142).
-    implementation("org.apache.poi:poi-ooxml-full:5.5.1")
+    // against. Tika 4 excludes poi-ooxml's own schema jar, and POI publishes -lite and -full
+    // under one capability, so nothing substitutes for it and the classes just vanish
+    // (JCLAW-1142). -lite is the 2,555 classes POI's own tests use, byte-identical to -full's
+    // 6,063 and 5.4 MB smaller in the bundle. Tika reads Office files with SAX and loaded none
+    // across a 613-file corpus; DocumentWriter's 125 are all in -lite. A document needing a
+    // class -lite lacks fails with NoClassDefFoundError, which DocumentsTool.readDocument and
+    // WebExtraction report as unreadable. Must stay on the same version as the poi/poi-ooxml
+    // that Tika resolves — xmlbeans-generated schemas and poi-ooxml are a matched pair.
+    implementation("org.apache.poi:poi-ooxml-lite:5.5.1")
 
     // Tika core — drop OSGi/bndlib (Ivy promoted provided→runtime) and the
     // test/lombok pulls.

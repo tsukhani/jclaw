@@ -11,6 +11,7 @@ import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
+import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.ocr.TesseractOCRConfig;
 import org.apache.tika.parser.pages.TextPolicy;
 import org.apache.tika.parser.pdf.PDFParserConfig;
@@ -410,12 +411,17 @@ public class DocumentsTool implements ToolRegistry.Tool {
      * (JCLAW-177). Public + static so {@code DocumentsToolTest} can drive the
      * Tika path without going through Agent/workspace plumbing.
      */
+    public static String readDocument(Path path) {
+        return readDocument(path, TikaHolder.PARSER);
+    }
+
+    /** {@link #readDocument(Path)} with the parser given. Public because test sources are the default package. */
     // Nested try/catch (S1141) intentional: the inner try-with-resources lets us
     // distinguish Tika's WriteLimitReached (a SAXException subclass that signals
     // successful truncation, not failure) from other SAX failures, while the outer
     // catch handles the orthogonal TikaException + IOException paths.
     @SuppressWarnings("java:S1141")
-    public static String readDocument(Path path) {
+    public static String readDocument(Path path, Parser parser) {
         try {
             if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());
             var size = Files.size(path);
@@ -424,7 +430,6 @@ public class DocumentsTool implements ToolRegistry.Tool {
                         .formatted(MAX_DOCUMENT_READ_BYTES, size);
             }
 
-            var parser = TikaHolder.PARSER;
             var handler = new BodyContentHandler(MAX_DOCUMENT_TEXT_CHARS);
             var metadata = new Metadata();
             boolean ocrActive = ocrEnabled();
@@ -458,6 +463,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
             return "Error parsing document: %s".formatted(e.getMessage());
         } catch (IOException e) {
             return "Error reading document: %s".formatted(e.getMessage());
+        } catch (LinkageError e) {
+            // poi-ooxml-lite holds only the schema classes POI's own tests use; a document that needs another
+            // fails with a NoClassDefFoundError, which the tool call would otherwise let escape.
+            return "Error parsing document: %s".formatted(e);
         }
     }
 
