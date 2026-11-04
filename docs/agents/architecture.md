@@ -6,7 +6,7 @@ Read this before changing `build.gradle.kts`, `settings.gradle.kts`, `.play-vers
 
 JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 4** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
 
-**Status**: pre-v1 (beta), work in progress.
+**Status**: released; 1.0.0 was the first stable version.
 
 ## Backend
 - **Play 1.x** conventions: controllers are static methods in `app/controllers/`, models in `app/models/`, views (Groovy templates) in `app/views/`

@@ -68,7 +68,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - `Result` is a `RuntimeException`: a render inside `try {…} catch (Exception)` is swallowed into a 500 — assign in the try and render after it, or rethrow with `catch (Result r) { throw r; }` ahead of the broad catch.
 - `Model.find().fetch()` is untyped (`<T> List<T>`, `T` inferred): copy elementwise. Fix a lazy N+1 with `@BatchSize`, not a manual IN query. `FunctionalTest` has no PATCH helper.
 - Bulk and cascade deletes skip `@PostRemove` and orphan Lucene docs — evict explicitly. A Lucene codec-boundary bump: wipe `data/jclaw-lucene/` while pre-v1 rather than add backward-codecs, and verify through the live search endpoint.
-- "Zero call sites" is not dead code: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test marks a deliberate keep. Drop an applied `renameKeyIfPresent` call site, keep the helper.
+- "Zero call sites" is not dead code: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test marks a deliberate keep. Every `renameKeyIfPresent` call stays once applied: an install can upgrade straight from any earlier release, and a rename it skipped must still run.
 - JCLAW acceptance criteria forward-reference helpers and tickets that were never built: verify before designing around them.
 - Log anything that can carry a command, a URL or tool arguments through `EventLogger`, never `play.Logger`, which bypasses `SecretRedactor`. When reading `logs/application.log` or `event_log` rows written before the mask, never print an `exec:` or `args:` line.
 - `memory.jpa.vector.queryPrefix` and `memory.recall.minCosine` move together. A CSP, if enabled, must allow `'unsafe-inline'` for `script-src`; Nuxt inlines `window.__NUXT__`.

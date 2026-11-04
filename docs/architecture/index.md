@@ -7,7 +7,7 @@
 ## Project at a glance
 
 - **Name:** JClaw — Abundent's Java-first AI agent & automation platform.
-- **Version:** `application.version` in `conf/application.conf` (source of truth; status: pre-v1 / beta per AGENTS.md).
+- **Version:** `application.version` in `conf/application.conf` (source of truth).
 - **Repository type:** multi-part monorepo — `backend` (Play 1.x Java), `frontend` (Nuxt 4 SPA), `sidecar` (seven on-demand Python daemons). Backend + frontend ship as one bundle zip / container image; the sidecars are opt-in: their scripts ship in the bundle, but `uv`, Python and model weights do not.
 - **License:** MIT (see `LICENSE`); bundled third-party components keep their own licenses, listed in `THIRD-PARTY-NOTICES.md`.
 - **Upstream:** `bitbucket.abundent.com/scm/jclaw/jclaw` (Bitbucket origin) + `github.com/tsukhani/jclaw` (GitHub Releases + GHCR).

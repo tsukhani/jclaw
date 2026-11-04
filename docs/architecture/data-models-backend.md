@@ -108,6 +108,6 @@ String-backed (stored as VARCHAR): `MessageRole` (user/assistant/tool/system), `
 
 ## Migration policy
 
-- **Pre-release:** `jclaw` has no legacy users to protect. When a one-shot migration helper is applied (`DefaultConfigJob.renameKeyIfPresent`), drop the call site afterward but retain the helper.
+- **Config key renames:** an install can upgrade straight from any earlier release, so every one-shot rename call (`DefaultConfigJob.renameKeyIfPresent`) stays once applied.
 - NOT NULL columns added to populated tables carry `@ColumnDefault` so the `update` DDL backfills cleanly.
 - No `db.evolution` / Flyway / Liquibase today — all schema flows through Hibernate auto-DDL.
