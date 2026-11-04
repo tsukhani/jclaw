@@ -26,6 +26,9 @@ const VIRTUAL_HELPERS: Array<[RegExp, string]> = [
   [/^plugin-vue:/, '@vitejs/plugin-vue'],
 ]
 
+// Code-unit order, not localeCompare: the notices built from this file must be byte-identical on every machine and locale.
+const byCodeUnit = (a: string, b: string): number => Number(a > b) - Number(a < b)
+
 export interface PackageRef {
   root?: string
   name?: string
@@ -77,7 +80,7 @@ export function bundledPackages(outFile = join(process.cwd(), BUNDLED_PACKAGES_F
     closeBundle() {
       if (roots.size === 0) return
       mkdirSync(dirname(outFile), { recursive: true })
-      writeFileSync(outFile, JSON.stringify({ roots: [...roots].sort(), helpers: [...names].sort() }, null, 2) + '\n')
+      writeFileSync(outFile, JSON.stringify({ roots: [...roots].sort(byCodeUnit), helpers: [...names].sort(byCodeUnit) }, null, 2) + '\n')
     },
   }
 }

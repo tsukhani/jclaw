@@ -65,6 +65,19 @@ describe('bundledPackages', () => {
     })
   })
 
+  it('sorts by code unit, so every machine and locale writes the same file', () => {
+    const outFile = runPlugin({
+      'entry.js': {
+        type: 'chunk',
+        moduleIds: [`${ROOT}/a/index.js`, `${ROOT}/JSONStream/index.js`, `${ROOT}/@scope/x/index.js`, '\0vite/preload-helper.js', '\0plugin-vue:export-helper', '\0rolldown/runtime.js'],
+      },
+    }, 'client')
+    expect(JSON.parse(readFileSync(outFile, 'utf8'))).toEqual({
+      roots: [`${ROOT}/@scope/x`, `${ROOT}/JSONStream`, `${ROOT}/a`],
+      helpers: ['@vitejs/plugin-vue', 'rolldown', 'vite'],
+    })
+  })
+
   it('records nothing from a server build', () => {
     const outFile = runPlugin({ 'server.js': { type: 'chunk', moduleIds: [`${ROOT}/h3/dist/index.mjs`] } }, 'ssr')
     expect(() => readFileSync(outFile, 'utf8')).toThrow()
