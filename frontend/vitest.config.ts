@@ -62,10 +62,10 @@ export default defineVitestConfig({
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
       reportsDirectory: 'coverage',
-      // layouts/ must stay listed: sonar.coverage.exclusions does not exclude
-      // it, so anything omitted here is counted by Sonar with no coverage data
-      // and reports as 0% however well it is tested.
-      include: ['components/**', 'composables/**', 'layouts/**', 'pages/**', 'plugins/**', 'utils/**'],
+      // layouts/ and tools/ must stay listed: sonar.coverage.exclusions does not
+      // exclude them, so anything omitted here is counted by Sonar with no
+      // coverage data and reports as 0% however well it is tested.
+      include: ['components/**', 'composables/**', 'layouts/**', 'pages/**', 'plugins/**', 'tools/**', 'utils/**'],
       exclude: [
         'test/**',
         'tests/**',
