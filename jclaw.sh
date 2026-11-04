@@ -1384,8 +1384,8 @@ spec runs:
     alongside PLAY_SECRET). Never put it in conf/application.conf: that
     file is tracked and ships to both remotes, one of which is public.
   * Base URL — follows whichever mode is actually listening (:${FRONTEND_PORT}
-    in dev, else :${BACKEND_PORT} in production). Override with
-    JCLAW_E2E_BASE_URL.
+    in dev, when JClaw's dev server holds it, else :${BACKEND_PORT} in
+    production). Override with JCLAW_E2E_BASE_URL.
   * Browser build — Playwright pins a browser per package version, so a
     dependency bump silently outdates the cache and the suite cannot
     launch. Reconciled on every run.
@@ -5413,6 +5413,16 @@ wait_for_backend_ready() {
     done
 }
 
+# Whether :$FRONTEND_PORT is JClaw's dev server: one this script started (a live frontend.pid), or one
+# started by hand that answers /api/status with JClaw's payload. Any other project's dev server can hold
+# the port, and taking it for JClaw fails the run before a single spec.
+frontend_is_jclaw() {
+    if [[ -f "$SCRIPT_DIR/$FRONTEND_PID_FILE" ]] && kill -0 "$(cat "$SCRIPT_DIR/$FRONTEND_PID_FILE")" 2>/dev/null; then
+        return 0
+    fi
+    curl -fs -m 5 "http://localhost:$FRONTEND_PORT/api/status" 2>/dev/null | grep -q '"applicationVersion"'
+}
+
 # Confirm the resolved target answers before handing the suite a base URL.
 #
 # Separate from wait_for_backend_ready because this one follows whichever base
@@ -5441,9 +5451,12 @@ do_e2e() {
 
     local base="${JCLAW_E2E_BASE_URL:-}"
     if [[ -z "$base" ]]; then
-        if port_answers "$FRONTEND_PORT"; then
+        if port_answers "$FRONTEND_PORT" && frontend_is_jclaw; then
             base="http://localhost:$FRONTEND_PORT"
         elif port_answers "$BACKEND_PORT"; then
+            if port_answers "$FRONTEND_PORT"; then
+                echo "==> :$FRONTEND_PORT is held by something other than JClaw; using :$BACKEND_PORT."
+            fi
             base="http://localhost:$BACKEND_PORT"
         else
             echo "Error: no JClaw server is listening on :$FRONTEND_PORT or :$BACKEND_PORT." >&2
