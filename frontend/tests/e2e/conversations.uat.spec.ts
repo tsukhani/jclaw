@@ -84,8 +84,16 @@ test.describe('UAT-8 conversations', () => {
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeDisabled()
   })
 
-  test('subagent runs list renders and links back to its conversation', async ({ page }) => {
+  test('subagent runs page lists the runs, or says there are none yet', async ({ page, request }) => {
+    // With no runs and no filter the page swaps its table for a landing, so the install's own count decides.
+    const res = await request.get('/api/subagent-runs?limit=1')
+    const total = Number(res.headers()['x-total-count'] ?? (await res.json()).length)
     await gotoPage(page, '/subagents')
+    if (total === 0) {
+      await expect(page.getByRole('heading', { name: 'No subagent runs yet' })).toBeVisible()
+      await expect(page.locator('table')).toHaveCount(0)
+      return
+    }
     await expect(page.locator('table')).toBeVisible()
     const link = page.locator('a[href^="/chat?conversation="]').first()
     if (await link.count() > 0) await expect(link).toBeVisible()
