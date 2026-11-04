@@ -128,7 +128,7 @@ jclaw/
 ├── Jenkinsfile                   # CI (build, test, dist/bundle, release to GitHub + GHCR).
 ├── .play-version                 # Pinned play1 fork version (the exact patch of the 1.13.x line).
 └── README.md, CLAUDE.md, AGENTS.md,          # Root docs.
-    LICENSE.md, COMMERCIAL-LICENSE.md
+    LICENSE, TRADEMARK.md, THIRD-PARTY-NOTICES.md
 ```
 
 ## Integration points (multi-part)

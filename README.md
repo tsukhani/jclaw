@@ -12,13 +12,11 @@
   <a href="https://jenkins.abundent.com/job/JClaw/"><img src="https://jenkins.abundent.com/buildStatus/icon?job=JClaw&style=flat-square" alt="Build Status"></a>
   <img src="https://img.shields.io/github/v/release/tsukhani/jclaw?style=flat-square&label=release&color=blue" alt="Release">
   <img src="https://img.shields.io/github/repo-size/tsukhani/jclaw?style=flat-square&label=repo%20size&color=blue" alt="Repo Size">
-  <img src="https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue?style=flat-square" alt="License: PolyForm Noncommercial 1.0.0">
-  <img src="https://img.shields.io/badge/source-available-orange?style=flat-square" alt="Source-available">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT">
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=flat-square" alt="JDK: 25+">
 </p>
 
-> **Free for noncommercial use.** Commercial use needs a
-> [commercial license](COMMERCIAL-LICENSE.md) from [Abundent Sdn Bhd](https://abundent.com).
+> **Open source under the MIT License.** Use it, change it and share it, for any purpose.
 > See [License](#license) for the details.
 
 <br>
@@ -180,8 +178,8 @@ You can also update JClaw in the app, from **Settings → System → Maintenance
   or email [support@abundent.com](mailto:support@abundent.com).
 - **Found a security problem?** Email [security@abundent.com](mailto:security@abundent.com).
   Do not open a public issue for it.
-- **Want to contribute code?** Only the Abundent team writes JClaw's code, so we do not accept pull requests.
-  [CONTRIBUTING.md](https://github.com/tsukhani/jclaw/blob/main/CONTRIBUTING.md) explains why, and lists the help we welcome.
+- **Want to contribute code?** Open a pull request on GitHub.
+  [CONTRIBUTING.md](https://github.com/tsukhani/jclaw/blob/main/CONTRIBUTING.md) explains how.
 
 ## Where JClaw comes from
 
@@ -194,19 +192,14 @@ JClaw is written in Java, and it is built to be light and fast.
 
 ## License
 
-JClaw is **source-available**. You can read and study its code.
-It is not open-source software, because the free license limits how you can use it.
+JClaw is **open source** under the [MIT License](LICENSE).
+You may use, change and share it, for any purpose, commercial use included.
 
-- **Noncommercial use is free**, under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
-  This covers personal use, study, research and evaluation.
-  It also covers use by registered non-profits, schools and other educational institutions, and government bodies.
-- **Commercial use of any kind needs a license.** Get a
-  [commercial license from Abundent Sdn Bhd](COMMERCIAL-LICENSE.md).
-  The size of your company changes the price. It does not change the need for a license.
-
-Versions up to and including **v0.15.4** were released under the MIT License.
-They stay available under that license from their git tags.
-The current license applies from **v0.16.0** onward.
+- The third-party components in JClaw's releases keep their own licenses.
+  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists each one.
+- The JClaw name and logo are trademarks of Abundent Sdn Bhd.
+  [TRADEMARK.md](TRADEMARK.md) explains how you may use them.
+- Contributions are welcome under the same license; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

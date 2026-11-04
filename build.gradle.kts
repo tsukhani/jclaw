@@ -788,3 +788,6 @@ tasks.named<play.gradle.PlayBundleTask>("playBundle") {
         }
     }
 }
+
+// THIRD-PARTY-NOTICES.md: the license of everything the bundle ships, which playBundle and playDist regenerate.
+apply(from = "gradle/third-party-notices.gradle.kts")

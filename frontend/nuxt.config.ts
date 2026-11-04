@@ -1,4 +1,5 @@
 import tailwindcss from '@tailwindcss/vite'
+import { bundledPackages } from './tools/bundled-packages'
 
 const backendPort = process.env.JCLAW_BACKEND_PORT || '9000'
 const backendUrl = `http://localhost:${backendPort}`
@@ -81,7 +82,7 @@ export default defineNuxtConfig({
   },
 
   vite: {
-    plugins: [tailwindcss()],
+    plugins: [tailwindcss(), bundledPackages()],
     build: {
       // 3Dmol ships as one pre-minified 534 kB file that cannot be split; it loads only when a structure fence is drawn.
       chunkSizeWarningLimit: 600,

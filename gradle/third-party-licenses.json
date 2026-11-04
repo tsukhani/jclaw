@@ -1,0 +1,135 @@
+{
+  "comment": "Licenses gradle/third-party-notices.gradle.kts cannot read from a POM, a package or the component itself. Each entry must match something the bundle ships, or the build fails as stale.",
+  "jars": {
+    "play-*.jar": {
+      "name": "Play Framework 1.x (tsukhani/play1 fork)",
+      "license": "Apache-2.0",
+      "source": "https://github.com/tsukhani/play1",
+      "licenseFile": "LICENSE",
+      "noticeFile": "NOTICE"
+    },
+    "jj-textile.jar": {
+      "name": "Eclipse Mylyn WikiText Textile, repackaged by Play under jj.play",
+      "license": "EPL-1.0",
+      "source": "https://projects.eclipse.org/projects/mylyn.docs",
+      "copyright": [
+        "Copyright (c) 2007, 2010 David Green and others"
+      ],
+      "note": "Inferred from the jar's org.eclipse.mylyn.wikitext packages and its 2010 import into Play; the jar carries no license file. Source: the Eclipse Mylyn Docs project."
+    },
+    "jj-wikitext.jar": {
+      "name": "Eclipse Mylyn WikiText core, repackaged by Play under jj.play",
+      "license": "EPL-1.0",
+      "source": "https://projects.eclipse.org/projects/mylyn.docs",
+      "copyright": [
+        "Copyright (c) 2007, 2010 David Green and others"
+      ],
+      "note": "Inferred from the jar's org.eclipse.mylyn.wikitext packages and its 2010 import into Play; the jar carries no license file. Source: the Eclipse Mylyn Docs project."
+    },
+    "jregex-1.2_01.jar": {
+      "name": "jregex",
+      "license": "BSD-3-Clause",
+      "source": "https://jregex.sourceforge.net",
+      "licenseEntry": "docs/license.txt"
+    }
+  },
+  "modules": {
+    "com.k2fsa.sherpa.onnx:sherpa-onnx": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/k2-fsa/sherpa-onnx",
+      "note": "Its POM declares no license; the upstream repository's LICENSE is Apache 2.0."
+    },
+    "com.grack:nanojson": {
+      "license": "MIT OR Apache-2.0",
+      "source": "https://github.com/mmastrac/nanojson",
+      "note": "Its POM declares no license; the upstream README says it is dual-licensed under the MIT and Apache licenses."
+    },
+    "net.sf.oval:oval": {
+      "license": "EPL-2.0",
+      "source": "https://github.com/sebthom/oval",
+      "note": "Its POM declares no license; the upstream README releases all files under the Eclipse Public License 2.0. Its source code is available from that repository."
+    }
+  },
+  "js": {},
+  "jsAlsoShipped": {
+    "tailwindcss": "A dev dependency, but its preflight and utility CSS are compiled into the web interface's stylesheet."
+  },
+  "files": {
+    "gradle/wrapper/gradle-wrapper.jar": {
+      "name": "Gradle Wrapper",
+      "license": "Apache-2.0",
+      "source": "https://github.com/gradle/gradle"
+    },
+    "conf/browser/jev-snapshot.js": {
+      "name": "jev-ultrafast by Browser Use",
+      "license": "MIT",
+      "source": "https://github.com/browser-use/jev-ultrafast",
+      "licenseFile": "conf/browser/jev-ultrafast-LICENSE",
+      "note": "JClaw's Jev browser engine carries its prompts, page scripts and this snapshot script verbatim, and ports its loop, request and executor from the Python original."
+    },
+    "skills/whatsapp-wacli-linux/tools/README.md": {
+      "name": "wacli documentation, in the whatsapp-wacli-linux skill",
+      "license": "MIT",
+      "source": "https://github.com/openclaw/wacli",
+      "licenseFile": "skills/whatsapp-wacli-linux/tools/LICENSE"
+    },
+    "skills/whatsapp-wacli-mac/tools/README.md": {
+      "name": "wacli documentation, in the whatsapp-wacli-mac skill",
+      "license": "MIT",
+      "source": "https://github.com/openclaw/wacli",
+      "licenseFile": "skills/whatsapp-wacli-mac/tools/LICENSE"
+    }
+  },
+  "ownSkillAuthors": [
+    "Tarun Sukhani",
+    "main"
+  ],
+  "skills": {
+    "claude-designer": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/cced3000/skills/claude-designer"
+    },
+    "powerpoint-pptx": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/ivangdavila/powerpoint-pptx"
+    },
+    "humanizer": {
+      "license": "MIT",
+      "source": "https://clawhub.ai/biostartechnology/humanizer"
+    },
+    "youtube-transcript": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/xthezealot/skills/youtube-transcript"
+    },
+    "git": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/git"
+    },
+    "frontend-design": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/anthropics/skills"
+    },
+    "ffmpeg-video-processing": {
+      "license": "MIT",
+      "source": "https://github.com/digitalsamba/claude-code-video-toolkit",
+      "copyright": [
+        "Copyright (c) 2024 Digital Samba"
+      ]
+    },
+    "in-depth-research": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/ivangdavila/skills/in-depth-research"
+    },
+    "research-paper-writer-pro": {
+      "license": "MIT-0",
+      "source": "https://clawhub.ai/earthwalking/skills/research-paper-writer-pro"
+    },
+    "ui-ux-pro-max": {
+      "license": "MIT",
+      "source": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "copyright": [
+        "Copyright (c) 2024 Next Level Builder"
+      ]
+    }
+  }
+}
