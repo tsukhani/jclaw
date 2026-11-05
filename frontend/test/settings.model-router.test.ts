@@ -119,6 +119,32 @@ beforeEach(() => {
   ]
 })
 
+// The add picker's popover teleports to the document body, so its contents are read from there.
+async function openAddPicker(c: { find: (s: string) => { trigger: (e: string) => Promise<void> } }, label: string) {
+  await c.find(`button[aria-label="Add a model to the ${label} list"]`).trigger('click')
+  await flushPromises()
+}
+
+async function typeFilter(text: string) {
+  const input = document.body.querySelector<HTMLInputElement>('[data-slot="command-input"]')!
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await flushPromises()
+}
+
+/** An option as the operator reads it: its label, then its detail when it has one. */
+function optionText(e: Element): string {
+  return [...e.querySelectorAll('span')].map(s => s.textContent!.trim()).join(' · ')
+}
+
+function addOptions(): string[] {
+  return [...document.body.querySelectorAll('[data-slot="command-item"]')].map(optionText)
+}
+
+function addOption(text: string): HTMLElement {
+  return [...document.body.querySelectorAll<HTMLElement>('[data-slot="command-item"]')].find(e => optionText(e) === text)!
+}
+
 /** An Ollama decision model as GET /api/decision/ollama lists it, stating nothing else. */
 function ollamaModel(name: string) {
   return { name, contextTokens: null, parameterSize: null, sizeBytes: null }
@@ -138,10 +164,41 @@ describe('SettingsModelRouterPanel', () => {
     expect(c.find('[data-testid="router-class-reasoning"]').text()).toContain('uses the Chat list')
   })
 
+  it('narrows the add list to the models whose provider or name holds what is typed', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await openAddPicker(c, 'Chat')
+    expect(addOptions()).toEqual(['ollama-cloud / glm-5.3-flash', 'ollama-cloud / kimi-k3', 'openrouter / z-ai/glm-5.3-flash'])
+    await typeFilter('glm')
+    expect(addOptions()).toEqual(['ollama-cloud / glm-5.3-flash', 'openrouter / z-ai/glm-5.3-flash'])
+    await typeFilter('openrouter')
+    expect(addOptions()).toEqual(['openrouter / z-ai/glm-5.3-flash'])
+    c.unmount()
+  })
+
+  it('finds a model with a display name by the id the lists show', async () => {
+    entries = entries.map(e => e.key === 'provider.openrouter.models'
+      ? { ...e, value: JSON.stringify([{ id: 'z-ai/glm-5.3-flash', name: 'Z.ai: GLM 5.3 Flash' }]) }
+      : e)
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await openAddPicker(c, 'Chat')
+    await typeFilter('z-ai/glm')
+    expect(addOptions()).toEqual(['openrouter / Z.ai: GLM 5.3 Flash · z-ai/glm-5.3-flash'])
+    addOption('openrouter / Z.ai: GLM 5.3 Flash · z-ai/glm-5.3-flash').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 })
+    expect(posts[0]!.value).toBe(JSON.stringify([
+      { provider: 'ollama-cloud', model: 'glm-5.3-flash' },
+      { provider: 'openrouter', model: 'z-ai/glm-5.3-flash' },
+    ]))
+  })
+
   it('adds a model by writing the whole ordered list', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await c.find('[data-testid="router-class-chat"] select').setValue('openrouter::z-ai/glm-5.3-flash')
+    await openAddPicker(c, 'Chat')
+    await typeFilter('z-ai')
+    addOption('openrouter / z-ai/glm-5.3-flash').click()
     await vi.waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 })
     expect(posts).toContainEqual({
       key: 'router.chat.models',

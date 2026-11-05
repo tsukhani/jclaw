@@ -80,10 +80,12 @@ const modelOptions = computed(() => {
     const name = e.key.split('.')[1]!
     if (!IMAGE_ONLY_PROVIDERS.has(name)) names.add(name)
   }
-  const options: { value: string, label: string }[] = []
+  const options: { value: string, label: string, detail?: string }[] = []
   for (const provider of names) {
     for (const m of getProviderModels(provider)) {
-      options.push({ value: `${provider}::${m.id}`, label: `${provider} / ${m.name || m.id}` })
+      // The lists above name a model by its id, so the add picker shows and matches the id too.
+      const detail = m.name && m.name !== m.id ? m.id : undefined
+      options.push({ value: `${provider}::${m.id}`, label: `${provider} / ${m.name || m.id}`, detail })
     }
   }
   return options
@@ -414,24 +416,17 @@ function usageTone(fraction: number): string {
             </button>
           </li>
         </ol>
-        <select
-          value=""
-          :aria-label="`Add a model to the ${label} list`"
+        <SearchableSelect
+          :options="modelOptions"
+          placeholder="Add a model…"
+          :label="`Add a model to the ${label} list`"
           :disabled="saving"
+          search-label="Type to filter models"
+          empty-text="No matching models."
+          content-class="font-mono"
           class="w-full max-w-md min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-          @change="addModel(taskClass, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
-        >
-          <option value="">
-            Add a model…
-          </option>
-          <option
-            v-for="o in modelOptions"
-            :key="o.value"
-            :value="o.value"
-          >
-            {{ o.label }}
-          </option>
-        </select>
+          @update:model-value="addModel(taskClass, $event)"
+        />
       </div>
     </div>
 
