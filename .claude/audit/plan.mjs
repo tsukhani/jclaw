@@ -1,4 +1,4 @@
-// Builds /code-audit's unit plan and attaches the open JCLAW issues that name each unit's files.
+// Builds /code-audit's unit plan and attaches the open JF issues that name each unit's files.
 //   node .claude/audit/plan.mjs [pathspec ...] [max-loc] [--offline]   → the unit plan (default: app 3000)
 //   node .claude/audit/plan.mjs --known-only                           → every open issue, for /resilience-audit
 // Jira is read with the PAT the jira-confluence MCP server uses; the token is never printed.
@@ -24,7 +24,7 @@ async function openIssues() {
   const out = []
   for (let start = 0; ;) {
     const q = new URLSearchParams({
-      jql: 'project = JCLAW AND statusCategory != Done AND issuetype != Epic',
+      jql: 'project = JF AND statusCategory != Done AND issuetype != Epic',
       fields: 'summary,description,status,customfield_10002', maxResults: '100', startAt: String(start),
     })
     const r = await fetch(`${base}/rest/api/2/search?${q}`, { headers: { Authorization: `Bearer ${env.JIRA_PERSONAL_TOKEN}` } })

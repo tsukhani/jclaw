@@ -60,13 +60,13 @@ Install JClaw with one command.
 **On macOS or Linux**, open a terminal and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh | sh
 ```
 
 **On Windows**, open PowerShell and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+irm https://github.com/tsukhani/jclaw/releases/latest/download/install.ps1 | iex
 ```
 
 The installer does these steps:
@@ -114,7 +114,7 @@ For example, this command installs version v0.14.7 and does not start it:
 
 ```bash
 # Pin a version and install without auto-starting:
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh \
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh \
   | JCLAW_VERSION=v0.14.7 JCLAW_NO_START=1 sh
 ```
 
@@ -285,11 +285,11 @@ One command checks that signature, pulls exactly that image and pins it. Run it 
 holds `docker-compose.yml`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/docker-pull-verified.sh | sh
 docker compose up -d
 
 # A specific release rather than the latest:
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | JCLAW_VERSION=vX.Y.Z sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/docker-pull-verified.sh | JCLAW_VERSION=vX.Y.Z sh
 ```
 
 The command writes `JCLAW_IMAGE=ghcr.io/tsukhani/jclaw@sha256:…` to `.env`, where
@@ -307,7 +307,7 @@ To do the same check by hand:
 V=vX.Y.Z   # the release you want
 curl -fsSLO "https://github.com/tsukhani/jclaw/releases/download/$V/IMAGE_DIGEST"
 curl -fsSLO "https://github.com/tsukhani/jclaw/releases/download/$V/IMAGE_DIGEST.sig"
-curl -fsSLO https://raw.githubusercontent.com/tsukhani/jclaw/main/release-signing.pub
+curl -fsSLO https://github.com/tsukhani/jclaw/releases/latest/download/release-signing.pub
 
 # Must print "Verified OK". Then read the file: it must name the release you asked for.
 openssl dgst -sha256 -verify release-signing.pub -signature IMAGE_DIGEST.sig IMAGE_DIGEST

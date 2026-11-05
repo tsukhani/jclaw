@@ -1,5 +1,5 @@
 ---
-description: File an approved /code-audit or /resilience-audit backlog proposal into Jira JCLAW through REST — new epics, stories carrying priority, labels and epic link, links to the issues they extend or depend on, and comments on the open issues that already cover a finding. Writes only what the operator approved; estimates and sprints stay with /backlog-grooming.
+description: File an approved /code-audit or /resilience-audit backlog proposal into Jira JF through REST — new epics, stories carrying priority, labels and epic link, links to the issues they extend or depend on, and comments on the open issues that already cover a finding. Writes only what the operator approved; estimates and sprints stay with /backlog-grooming.
 argument-hint: "<backlog.json> [approved: all | ranks 1-N | refs ...] [afk: refs ...]"
 ---
 
@@ -19,7 +19,7 @@ Use the helper and the field table in `/backlog-grooming`'s **Jira access** sect
 
 In this order, recording each new key against its ref:
 
-1. **New epics** (`key` is null): `POST /rest/api/2/issue` with `project` `JCLAW`, `issuetype` id `10000`, `summary`, `customfield_10004` (the Epic Name) and `description` → 201. Then `POST /rest/agile/1.0/epic/{key}` with `{"color": {"key": "color_N"}}`, using a colour no open epic uses where one is free, so its stories show a pill.
+1. **New epics** (`key` is null): `POST /rest/api/2/issue` with `project` `JF`, `issuetype` id `10000`, `summary`, `customfield_10004` (the Epic Name) and `description` → 201. Then `POST /rest/agile/1.0/epic/{key}` with `{"color": {"key": "color_N"}}`, using a colour no open epic uses where one is free, so its stories show a pill.
 2. **Stories** whose `jira.verdict` is `new` or `extends`, in rank order: `POST /rest/api/2/issue` with `issuetype` `{"name": "Story"}`, `summary`, `description`, `priority` `{"name": <priority>}`, `labels` (plus `afk` where approved) and `customfield_10002` set to the epic's key → 201. No story points: `/backlog-grooming` estimates every unpointed story against Done anchors.
 3. **Links.** `extends` → `POST /rest/api/2/issueLink` with type `Relates` between the new story and `jira.key`. `dependsOn` → type `Blocks`, the blocker in `inwardIssue` and the dependent in `outwardIssue`; read it back from the blocked story, where the blocker must show as "is blocked by".
 4. **Covered** stories are not created. Post the story's description on `jira.key` as a comment — the open issue gains the fresh evidence instead of a duplicate. Head it `h3. Still present at <head> (/<source>, <date>)` when `jira.sitesListed` is true, and `h3. Sites to add to this issue's scope (/<source>, <date>, at <head>)` when it is false, with one line saying the issue's description does not list these sites, so working its acceptance criteria as written would miss them.

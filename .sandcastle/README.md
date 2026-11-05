@@ -11,7 +11,7 @@ it into `main` and ship it with `/deploy`.
 ## Architecture
 
 ```
-                         Jira (JCLAW, active sprint)
+                         Jira (JF, active sprint)
                               ▲    intake, claims, comments, transitions
 ┌─────────────────────────────┼──────────────────────────── your Mac ─┐
 │  Harness  (LaunchAgent → run.sh → main.ts)                          │
@@ -317,7 +317,7 @@ paths.
 ## Several developers
 
 Each developer's harness takes unassigned `afk` stories and its own. It claims a story by assigning it to its own Jira
-user, because every JCLAW transition is global, so moving a story locks nothing. The claim is best effort: the harness
+user, because every JF transition is global, so moving a story locks nothing. The claim is best effort: the harness
 re-reads the assignment two seconds later before it moves the story to In Progress.
 
 A story's branch lives only on the machine that built it. So a rejected story stays assigned to that developer, and

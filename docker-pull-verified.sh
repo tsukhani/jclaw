@@ -1,7 +1,7 @@
 #!/bin/sh
 # JClaw verified image pull (macOS + Linux)
 #
-#   curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | sh
+#   curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/docker-pull-verified.sh | sh
 #
 # Fetches a release's signed IMAGE_DIGEST, checks the signature against the release
 # key below, and pulls exactly that image by digest. Run in the directory holding

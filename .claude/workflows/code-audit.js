@@ -38,7 +38,7 @@ const knownList = (unit) => {
   const ks = (unit.known || []).map((key) => KNOWN.get(key)).filter(Boolean)
   if (!ks.length) return ''
   const shown = unit.knownTotal ? ` (the ${ks.length} naming most of its files, of ${unit.knownTotal})` : ''
-  return `ALREADY FILED — open JCLAW issues that name this unit's files${shown}:
+  return `ALREADY FILED — open JF issues that name this unit's files${shown}:
 ${ks.map((k) => `- ${k.key} (${k.status}${k.epic ? `, epic ${k.epic}` : ''}): ${k.summary}`).join('\n')}`
 }
 // A defect a filed issue already covers still gets a card, marked covered_by: the backlog step reads that issue's
@@ -139,7 +139,7 @@ const VERIFY_SCHEMA = {
           principle: { type: 'string' },
           severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', 'none'], description: 'severity AFTER adjudication' },
           defect: { type: 'string', enum: ['yes', 'no'] },
-          coveredBy: { type: 'string', description: 'the JCLAW key from covered_by, or "" for none' },
+          coveredBy: { type: 'string', description: 'the JF key from covered_by, or "" for none' },
           title: { type: 'string' },
           evidence: { type: 'string' },
           impact: { type: 'string' },
@@ -223,7 +223,7 @@ function parseCards(text) {
       file: card.file, lines: card.lines, axis: enumOf(card.axis),
       category: card.category || '', principle: card.principle || '',
       severity: enumOf(card.final_severity || card.severity), defect: enumOf(card.defect) === 'yes' ? 'yes' : 'no', title: card.title,
-      coveredBy: ((card.covered_by || '').match(/JCLAW-\d+/) || [''])[0],
+      coveredBy: ((card.covered_by || '').match(/JF-\d+/) || [''])[0],
       evidence: card.evidence || '', impact: card.impact || '', fix: card.fix || '',
       verdict: enumOf(card.verdict) || 'confirmed', adjudication: card.adjudication || '',
     }
@@ -306,7 +306,7 @@ const extractPrompt = (unit, verdictText) => `Transform the adjudicated code-rev
 tool except the final structured-output call. Parse each "### FINDING" block into one array entry.
 Map "final_severity" -> "severity". Map "verdict" -> "verdict". Carry over file/lines/axis/category/principle/
 defect/title/evidence/impact/fix/adjudication verbatim; a block with no defect field is "no". Map "covered_by" ->
-"coveredBy" as the bare JCLAW key, or "" when it is none or absent. If a block lacks a verdict, treat it as "confirmed" at its
+"coveredBy" as the bare JF key, or "" when it is none or absent. If a block lacks a verdict, treat it as "confirmed" at its
 stated severity. Produce {unitId:"${unit.id}", verified:[...]} with one entry per FINDING block. If the text is
 "NO FINDINGS" or contains no blocks, return an empty verified array.
 

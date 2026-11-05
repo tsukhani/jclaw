@@ -25,7 +25,7 @@ Every agent prompt carries the audit split as the workflow's `OUT_OF_SCOPE` text
 
 ## Jira first, so known work is not paid for twice
 
-Before any agent runs, the plan builder reads every open JCLAW issue and attaches each one to the units whose files it names — by path, or by a class name with two or more capitals, since a bare `Agent` or `Task` would tie every issue to every unit. A unit lists at most twelve, those naming most of its files. Then:
+Before any agent runs, the plan builder reads every open JF issue and attaches each one to the units whose files it names — by path, or by a class name with two or more capitals, since a bare `Agent` or `Task` would tie every issue to every unit. A unit lists at most twelve, those naming most of its files. Then:
 
 - **Reviewers** see their unit's filed issues. A defect a filed issue already plans to fix still gets a finding card, marked `covered_by: <key>`, and the skeptic judges it like any other — a title that merely sounds related is no reason to drop a bug. Covered findings never fold into a cleanup story; the writer groups them by issue, and the backlog's Jira check reads that issue's description: `covered` stands only when the issue plans this fix, and records whether the description lists these sites. A confirmed cover is filed as evidence on the issue ("still present", or "sites to add to this issue's scope"); a cover that does not hold becomes `extends` or `new`.
 - **Skeptics** judge a covered finding's defect like any other; the cover itself is checked by the backlog step, against the issue's description, which a skeptic never sees.

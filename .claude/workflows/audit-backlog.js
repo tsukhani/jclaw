@@ -3,7 +3,7 @@ export const meta = {
   description: 'Turn adjudicated audit findings into a ranked, Jira-deduplicated proposal of epics and stories; reads Jira, never writes it',
   whenToUse: 'Called by code-audit.js and resilience-audit.js as their last step; not run on its own',
   phases: [
-    { title: 'Survey', detail: 'read the open JCLAW epics', model: 'opus' },
+    { title: 'Survey', detail: 'read the open JF epics', model: 'opus' },
     { title: 'Cluster', detail: 'assign every finding to an open or a proposed epic', model: 'opus' },
     { title: 'Stories', detail: 'per epic: group findings into shippable stories', model: 'opus' },
     { title: 'Dedup', detail: 'per epic: search Jira for issues already covering each story', model: 'opus' },
@@ -41,7 +41,7 @@ const compact = (f) => ({
 
 phase('Survey')
 const survey = await agent(
-  `List every open epic in Jira project JCLAW: JQL \`project = JCLAW AND issuetype = Epic AND statusCategory != Done\`,
+  `List every open epic in Jira project JF: JQL \`project = JF AND issuetype = Epic AND statusCategory != Done\`,
 fields summary, description, customfield_10004 (Epic Name). Page with start_at until you have all of them.
 Return each with key, summary, epicName and a one-sentence gist of its description (at most 200 characters).
 ${READ_ONLY}`,
@@ -65,7 +65,7 @@ if (!survey) throw new Error('jira:epics returned nothing; no backlog without th
 
 phase('Cluster')
 const cluster = await agent(
-  `Assign each adjudicated ${SOURCE} finding below to an epic, for a remediation backlog in Jira project JCLAW.
+  `Assign each adjudicated ${SOURCE} finding below to an epic, for a remediation backlog in Jira project JF.
 
 Rules:
 - Every finding id appears exactly once: in one epic's findingIds, or in unfiled with a reason. Leave a finding
@@ -174,7 +174,7 @@ const DEDUP_SCHEMA = {
 }
 
 const writeStories = (e, mainIds, lowIds) => agent(
-  `Write the remediation stories for one epic of a JCLAW backlog, from adjudicated ${SOURCE} findings.
+  `Write the remediation stories for one epic of a JF backlog, from adjudicated ${SOURCE} findings.
 Epic: ${e.existingKey || 'NEW'} — ${e.summary}. ${e.description}
 
 Rules:
@@ -209,8 +209,8 @@ LOW FINDINGS: ${JSON.stringify(lowIds.map((id) => byId.get(id)))}`,
 )
 
 const dedupStories = (e, stories) => agent(
-  `For each proposed story below, search Jira project JCLAW for an issue that already covers the same defect: open
-issues, and issues resolved in the last 90 days. Query by the classes it touches, e.g. \`project = JCLAW AND
+  `For each proposed story below, search Jira project JF for an issue that already covers the same defect: open
+issues, and issues resolved in the last 90 days. Query by the classes it touches, e.g. \`project = JF AND
 (statusCategory != Done OR resolved >= -90d) AND text ~ "ClassName"\`, plus the story's own key words. Read each
 candidate's description, and its comments where they matter, before ruling.
 - "new": nothing covers it (key "").

@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Bump application.version (the patch by default) in conf/application.conf, commit all changes, push to both git remotes (origin + github), and tag the version once its Jenkins build passes.
+description: Merge in the pull requests merged on GitHub, bump application.version (the patch by default) in conf/application.conf, commit all changes, push to both git remotes (origin + github), and tag the version once its Jenkins build passes.
 category: Release
 tags: [release, version, git, deploy]
 argument-hint: "[empty | patch | minor | major | x.y.z]"
@@ -14,7 +14,7 @@ Bump the project version, commit every pending change alongside it, push the res
 
 `$ARGUMENTS` may be one of:
 
-- *(empty)* → bump the **patch**: `1.0.0` → `1.0.1`. The version is JClaw's own release line and does not follow the sprint's name: sprints keep their own numbering, so a sprint named `v0.20` says nothing about a release after `1.0.0`.
+- *(empty)* → bump the **patch**: `1.0.0` → `1.0.1`. Each JF sprint is named after the minor release it ships (`v1.0` holds 1.0.1, 1.0.2, …; `v1.1` the 1.1.x releases), so the first release of a new sprint is `/deploy minor`, and every later one in it is a bare `/deploy`.
 - `patch` / `minor` / `major` → bump that segment; lower segments reset to `0`. Examples: `minor` on `1.0.5` → `1.1.0`; `major` on `1.4.2` → `2.0.0`.
 - An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. Any leading `v` is stripped.
 
@@ -22,17 +22,37 @@ Reject anything else with a clear message; do not guess.
 
 ---
 
-**Preflight: every commit either remote would receive is signed, and committed by you**
+**Preflight: bring in the pull requests merged on GitHub**
 
-GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the pre-push tests while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. Check before bumping anything:
+Contributors' pull requests are merged on GitHub (CONTRIBUTING.md), so `github/main` can hold commits the local `main` lacks. A release without them leaves them out, and the push to `github` is refused as not a fast-forward. Fetch both remotes and compare:
 
 ```bash
 /usr/bin/git fetch -q origin && /usr/bin/git fetch -q github
-me=$(/usr/bin/git config user.email)
-for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %ce %h %an | %s'; done | grep -vE "^(G $me|[GU] renovate@abundent\.com) " | sort -u
+/usr/bin/git merge-base --is-ancestor github/main HEAD && echo "nothing new on GitHub"
 ```
 
-Renovate's own commits pass as `U`: a good signature from the Renovate runner's key, which GitHub verifies but this keyring does not trust.
+- **Nothing new on GitHub:** go on to the next preflight. The release goes out as it always has.
+- **New commits:** CONTRIBUTING.md takes a change only under the Developer Certificate of Origin, so every commit a contributor wrote must carry a `Signed-off-by` line. List what comes in, then the commits without one:
+  ```bash
+  /usr/bin/git log --no-merges --format='%h %an | %s' HEAD..github/main
+  /usr/bin/git log --no-merges --invert-grep --grep='^Signed-off-by: ' --format='%h %an | %s' HEAD..github/main
+  ```
+  If the second prints anything, stop and name those commits: nothing is merged. Otherwise merge with a signed merge commit that names the pull requests it brings in:
+  ```bash
+  /usr/bin/git merge --no-ff -S -m "Merge GitHub's main: <the pull requests it brings in>" github/main
+  ```
+  On a conflict, run `/usr/bin/git merge --abort` and stop before the bump, with nothing committed, and report the conflicting files. Resolving a contributor's conflict is the user's call, never a release step's. The merged commits reach the release notes (step 10) like any other, so name each contributor's change there.
+
+**Preflight: every commit either remote would receive is signed, and committed by you**
+
+GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the pre-push tests while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. After the fetch above, check before bumping anything:
+
+```bash
+me=$(/usr/bin/git config user.email)
+for r in origin github; do /usr/bin/git log "$r/main..HEAD" --not github/main --format='%G? %ce %h %an | %s'; done | grep -vE "^(G $me|[GU] renovate@abundent\.com) " | sort -u
+```
+
+Commits already on `github/main` are left out: GitHub verified them when it took them, contributors' commits and GitHub's own merge commits alike, and this keyring cannot check their keys. Renovate's own commits pass as `U`: a good signature from the Renovate runner's key, which GitHub verifies but this keyring does not trust.
 
 If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 

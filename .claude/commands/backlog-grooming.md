@@ -1,6 +1,6 @@
 ---
 name: backlog-grooming
-description: Groom the JCLAW Jira backlog — consolidate duplicate and overlapping stories, link every open story to a matching epic (creating epics where none fits), estimate unpointed stories, and plan them into the active and future v0.N sprints within measured velocity, each sprint with a real goal and a feature/NFR balance. Plans first; writes to Jira only after approval.
+description: Groom the JF Jira backlog — consolidate duplicate and overlapping stories, link every open story to a matching epic (creating epics where none fits), estimate unpointed stories, and plan them into the active and future v<major>.<minor> sprints within measured velocity, each sprint with a real goal and a feature/NFR balance. Plans first; writes to Jira only after approval.
 category: Planning
 tags: [jira, backlog, sprint, planning, estimation, consolidation]
 argument-hint: "[empty | plan] [capacity=<points>] [nfr=<percent>]"
@@ -8,7 +8,7 @@ argument-hint: "[empty | plan] [capacity=<points>] [nfr=<percent>]"
 
 **Backlog Grooming**
 
-Brings the JCLAW backlog into a plannable state in five passes — consolidation, epics, estimates, sprints, goals — against live Jira data. Every pass lands in one plan, and nothing is written until the operator approves it: Jira is shared state, and a wrong bulk write means hand-repairing dozens of issues.
+Brings the JF backlog into a plannable state in five passes — consolidation, epics, estimates, sprints, goals — against live Jira data. Every pass lands in one plan, and nothing is written until the operator approves it: Jira is shared state, and a wrong bulk write means hand-repairing dozens of issues.
 
 **Arguments** — `$ARGUMENTS` may combine, in any order:
 
@@ -60,25 +60,25 @@ Facts of this instance (verified 2026-09-26; if a call fails on one, re-read it 
 
 | What | Value |
 | --- | --- |
-| Project / board | `JCLAW` (id 12400) / board **30** |
+| Project / board | `JF` (id 12500) / board **31** |
 | Sprint / Epic Link / Epic Name / Story Points | `customfield_10001` / `customfield_10002` / `customfield_10004` / `customfield_10006` |
 | Epic issue type id | `10000` |
-| An epic's children | `"Epic Link" = JCLAW-N` — `parent = …` matches nothing on this Server instance |
-| Story Points write | only `PUT /rest/agile/1.0/issue/{key}/estimation?boardId=30`; the field is on no edit screen. Bug and Task issues do not have the field at all: the PUT answers 400 "not editable due to its issue type", and `"Story Points" is EMPTY` never matches them |
+| An epic's children | `"Epic Link" = JF-N` — `parent = …` matches nothing on this Server instance |
+| Story Points write | only `PUT /rest/agile/1.0/issue/{key}/estimation?boardId=31`; the field is on no edit screen. Bug and Task issues do not have the field at all: the PUT answers 400 "not editable due to its issue type", and `"Story Points" is EMPTY` never matches them |
 | Link types | `Duplicate` (duplicates / is duplicated by), `Relates`, `Blocks`, `Cloners`, `Problem/Incident` |
 | Closing | transitions are To Do 11, In Progress 21, Done 31, Test 41, Review 51; there is no Won't Do or Duplicate resolution that can be applied — 31 stamps Done |
-| Epic Status | `customfield_10003`, separate from the workflow status and on no edit screen. Write it with `POST /rest/agile/1.0/epic/{key}` and `{"done": true}` (or `false`). The backlog's Epics panel is `GET /rest/agile/1.0/board/30/epic?done=false`, so an epic closed without it stays listed |
+| Epic Status | `customfield_10003`, separate from the workflow status and on no edit screen. Write it with `POST /rest/agile/1.0/epic/{key}` and `{"done": true}` (or `false`). The backlog's Epics panel is `GET /rest/agile/1.0/board/31/epic?done=false`, so an epic closed without it stays listed |
 | Epic pill | a story's epic pill on the backlog shows the epic's Epic Name (`customfield_10004`) in its Epic Color (`customfield_10005`, on no edit screen); an epic missing either shows no pill on any of its stories. Set both with `POST /rest/agile/1.0/epic/{key}` and `{"name": …, "color": {"key": "color_N"}}` (`color_N` is the field's `ghx-label-N`) |
-| Versions | one Jira version per sprint, same name (`v0.20`); the backlog's Versions panel groups by `fixVersion`. Create with `POST /rest/api/2/version` `{"name","project":"JCLAW","description","startDate","releaseDate"}`; `v1.0` is a deliberate GA target, not a sprint |
+| Versions | one Jira version per sprint, same name (`v1.1`); the backlog's Versions panel groups by `fixVersion`. Create with `POST /rest/api/2/version` `{"name","project":"JF","description","startDate","releaseDate"}`; each sprint is named after the minor release it ships, from `v1.0` (the 1.0.x releases) on |
 
 ---
 
 **Phase 1 — Survey (read-only)**
 
-1. **Sprints** on board 30, all states (`/rest/agile/1.0/board/30/sprint`, paginate until `isLast`). Record the active sprint, any future sprints, and the highest `v<major>.<minor>` sprint name in any state — the naming rubric continues from it.
-2. **Open issues**: `project = JCLAW AND statusCategory != Done ORDER BY Rank ASC` with `summary, description, issuetype, status, priority, labels, fixVersions, issuelinks, comment, customfield_10001, customfield_10002, customfield_10006`. Backlog rank is the operator's own ordering and is the final tiebreak everywhere below.
+1. **Sprints** on board 31, all states (`/rest/agile/1.0/board/31/sprint`, paginate until `isLast`). Record the active sprint, any future sprints, and the highest `v<major>.<minor>` sprint name in any state — the naming rubric continues from it.
+2. **Open issues**: `project = JF AND statusCategory != Done ORDER BY Rank ASC` with `summary, description, issuetype, status, priority, labels, fixVersions, issuelinks, comment, customfield_10001, customfield_10002, customfield_10006`. Backlog rank is the operator's own ordering and is the final tiebreak everywhere below.
 3. **Epics**: open epics with summary, description, labels and open-child count; closed epics' summaries too. A story that matches only a closed epic gets a new follow-up epic — never a link to the closed one. An open epic whose stories are all resolved is a closing candidate — unless its own description sets an exit criterion still unmet (JCLAW-305's coverage bar), or it never had stories and no decision about it is recorded; list those instead. An open epic with no Epic Name or no Epic Color gets one: ten had none on 2026-09-27, and their stories showed no pill.
-4. **Capacity**: completed points of the last three closed sprints from `GET /rest/greenhopper/1.0/rapid/charts/sprintreport?rapidViewId=30&sprintId=<id>` (`contents.completedIssuesEstimateSum.value`). Capacity is their median unless `capacity=` overrides it. Print all three and the median: they have ranged from 74 to 332 points, so the operator should see what the number rests on.
+4. **Capacity**: completed points of the last three closed sprints from `GET /rest/greenhopper/1.0/rapid/charts/sprintreport?rapidViewId=31&sprintId=<id>` (`contents.completedIssuesEstimateSum.value`). Capacity is their median unless `capacity=` overrides it. Print each and the median, so the operator sees what the number rests on; JCLAW's sprints ranged from 74 to 332 points. With fewer than three closed sprints, use those there are, and with none, stop and ask for `capacity=` rather than guess.
 5. **Pins**: a label or `fixVersion` that names an **active or future** sprint pins the issue to that sprint. One that names a closed sprint is stale — it pins nothing and goes on the plan's stale list. One that names a version beyond every sprint this plan creates (`v1.0`) keeps the issue in the backlog on purpose; list those as well. So does a story whose own comment records a deferral ("Deferred — leaving To Do", a revisit trigger that has not fired), unless a later operator decision overrides it — the first run scheduled two such stories (JCLAW-801/802) by never reading comments.
 
 **Phase 2 — Consolidation**
@@ -121,17 +121,17 @@ Facts of this instance (verified 2026-09-26; if a call fails on one, re-read it 
 **Phase 3 — Epics**
 
 12. For every open non-epic issue with no Epic Link, find its epic, strongest signal first, and record which signal decided it:
-    - a label `epic-JCLAW-N` naming an open epic;
+    - a label `epic-JF-N` naming an open epic;
     - a summary prefix shared with an open epic (`Context Shards: …` → `Context Shards: Shared Memory Pipeline for AI Agents`);
     - an issue link to an epic, or to a story already under one;
     - subject matter, judged from the story's description against the epic's — not from titles alone. A match on this signal alone gets a one-line reason in the plan.
 13. Cluster the stories no open epic fits by theme, and propose one new epic per cluster — a cluster of one is allowed, since every story ends with an epic. Each proposal carries a summary, a short Epic Name, a two-to-four sentence description of the problem its stories share, and the story keys. A proposed epic whose theme an open epic already covers is a missed match from step 12, not a new epic.
-14. **Key collision check.** Find the highest key (`project = JCLAW ORDER BY key DESC`); for each key the new epics will take (highest+1 … highest+N) run `git grep -nP 'JCLAW-<n>\b'`. A hit means work was committed under a ticket that does not exist yet, and filing an epic onto that key would repoint every reference to it: stop and report it.
+14. **Key collision check.** Find the highest key (`project = JF ORDER BY key DESC`); for each key the new epics will take (highest+1 … highest+N) run `git grep -nP 'JF-<n>\b'`. A hit means work was committed under a ticket that does not exist yet, and filing an epic onto that key would repoint every reference to it: stop and report it.
 
 **Phase 4 — Estimates**
 
 15. Estimate every open Story and Bug that has no Story Points, and every merge survivor from step 10. Keep all other existing estimates — re-estimating is the operator's call, not a grooming side effect. Epics get no points: their stories carry them, and epic points would be counted twice in a sprint's sum.
-16. Use the Fibonacci scale the project's existing estimates use, `1, 2, 3, 5, 8, 13`, and anchor by comparison: pull Done stories from the same epic or theme with their points (`"Epic Link" = JCLAW-N AND statusCategory = Done AND "Story Points" is not EMPTY`) and size relative to them. Size against the code, not the title — `graphify query "<subject>"` first, then `git grep -P` for the classes and files the description names — counting subsystems touched, test surface (a backend change pays `play autotest`, a frontend one `pnpm test` and typecheck) and open unknowns.
+16. Use the Fibonacci scale the project's existing estimates use, `1, 2, 3, 5, 8, 13`, and anchor by comparison: pull Done stories from the same epic or theme with their points (`"Epic Link" = JF-N AND statusCategory = Done AND "Story Points" is not EMPTY`) and size relative to them. Size against the code, not the title — `graphify query "<subject>"` first, then `git grep -P` for the classes and files the description names — counting subsystems touched, test surface (a backend change pays `play autotest`, a frontend one `pnpm test` and typecheck) and open unknowns.
     - **1** — one file, an obvious change, an existing test pattern.
     - **2** — two or three files, or one change that needs a new test.
     - **3** — one subsystem, clear design, moderate test work.
@@ -156,7 +156,7 @@ Facts of this instance (verified 2026-09-26; if a call fails on one, re-read it 
 21. **Balance**: each sprint's NFR share of points should sit within ±10 percentage points of the `nfr=` target. Out of band, swap across adjacent sprints — the lowest-ranked item of the over-represented class moves later, the highest-ranked of the under-represented class moves earlier — without breaking rules 19.1–19.3. First measure the NFR share of everything being placed: when that pool itself sits outside the band, no arrangement keeps every sprint inside it, and holding early sprints to the target only piles the surplus into the last ones (the first run: a 48% NFR pool against a 30% target left v0.22 at 63% and v0.23 at 97%). Spread at the pool's own share instead, and report the gap between it and the target.
 22. **Epics in sprints**: an open epic goes in the earliest sprint holding one of its planned stories (Jira keeps an issue in one open sprint at a time), as JCLAW-1255 sits in v0.19 with its stories.
 23. **Sprint goals**: every active and future sprint gets a goal naming what it delivers, in the shape the board uses — `<Theme>: <deliverables>. <Theme>: <deliverables>.` — one clause per epic or theme carrying most of the points, with NFR work named as its own theme (`Hardening: …`). One to three sentences, no ticket keys. Rewrite an existing goal only when it no longer describes the sprint; a bare version name (`v0.18`) never does. The sprint's version gets the short form as its description, the way the early versions read (`Memory Intelligence`, `MCP + Observability`), and the sprint's dates as its start and release dates.
-23a. **Versions**: every story in a sprint carries exactly that sprint's version as its `fixVersion`, replacing any stale one; an open epic carries the version of the last sprint holding its open stories — the release it finishes in. An open story in no sprint carries no version except a deliberate target (`v1.0`). A version label (`v0.N` in `labels`) naming a closed sprint is removed from open issues: the version lives in `fixVersion`, and a stale label on the card contradicts it. First run: fixVersions had lapsed since v0.13, so the Versions panel showed none of the planned sprints. History stays true too: a version whose sprint has closed is released, dated from the sprint's activation to its completion; a Done issue resolved inside its last closed sprint carries that sprint's version; and a story closed without being built carries none — 23 did on 2026-09-27, which listed unbuilt work as shipped in v0.15–v0.19. A spike that finished its research, or a story whose dropped half was the only part not built, keeps its version.
+23a. **Versions**: every story in a sprint carries exactly that sprint's version as its `fixVersion`, replacing any stale one; an open epic carries the version of the last sprint holding its open stories — the release it finishes in. An open story in no sprint carries no version except a target the operator set on purpose. A version label (`v<major>.<minor>` in `labels`) naming a closed sprint is removed from open issues: the version lives in `fixVersion`, and a stale label on the card contradicts it. First run: fixVersions had lapsed since v0.13, so the Versions panel showed none of the planned sprints. History stays true too: a version whose sprint has closed is released, dated from the sprint's activation to its completion; a Done issue resolved inside its last closed sprint carries that sprint's version; and a story closed without being built carries none — 23 did on 2026-09-27, which listed unbuilt work as shipped in v0.15–v0.19. A spike that finished its research, or a story whose dropped half was the only part not built, keeps its version.
 
 **Phase 6 — Plan and approval**
 
@@ -170,7 +170,7 @@ Facts of this instance (verified 2026-09-26; if a call fails on one, re-read it 
     - **Left in the backlog**, each with its reason.
     - **Versions** — per sprint, its version with description and dates; the fixVersion changes by kind (sprint stories, epics, stale versions cleared) and the stale version labels to remove.
     - **Anomalies** — key collisions, overloaded active sprint, anything else that needs a human.
-25. Summarize in chat: the count per section — stories to close, by verdict, first — one line per sprint (`v0.20 · 2026-10-28 → 2026-11-27 · 281/287 pts · NFR 31% · <goal>`), and the plan's path.
+25. Summarize in chat: the count per section — stories to close, by verdict, first — one line per sprint (`v1.0 · 2026-10-28 → 2026-11-27 · 281/287 pts · NFR 31% · <goal>`), and the plan's path.
 26. With `plan`, stop here. Otherwise ask with `AskUserQuestion`: apply everything / apply everything except the consolidation closures / apply epics and estimates only / cancel. An answer with edits ("put JCLAW-902 in v0.21", "keep JCLAW-924 open") is folded into the plan; show the lines that changed and ask again.
 
 **Phase 7 — Apply**
@@ -178,28 +178,28 @@ Facts of this instance (verified 2026-09-26; if a call fails on one, re-read it 
 In this order, since each step uses the one before. Stop at the first unexpected failure and report exactly what was and was not written — a half-applied plan is recoverable only from a precise stopping point.
 
 27. **Consolidation**, per closing verdict:
-    1. **Survivor** (duplicate, subsumed, merge): append the moved criteria to its description under `h3. Absorbed from JCLAW-N` — `GET /rest/api/2/issue/{key}?fields=description` returns the raw wiki markup; `PUT` it back with the section added at the end, leaving the existing text byte-for-byte unchanged.
-    2. **Comment** on the story being closed, in wiki markup: `Closed as a duplicate of JCLAW-S` (or `merged into JCLAW-S`); *no code was delivered for this story*; its acceptance criteria now live in JCLAW-S. A shipped verdict says no code was delivered under this ticket and names the code or Done story that already delivers it. Done is the only closing status, so the comment is what tells a closed-unbuilt ticket from a shipped one.
+    1. **Survivor** (duplicate, subsumed, merge): append the moved criteria to its description under `h3. Absorbed from JF-N` — `GET /rest/api/2/issue/{key}?fields=description` returns the raw wiki markup; `PUT` it back with the section added at the end, leaving the existing text byte-for-byte unchanged.
+    2. **Comment** on the story being closed, in wiki markup: `Closed as a duplicate of JF-S` (or `merged into JF-S`); *no code was delivered for this story*; its acceptance criteria now live in JF-S. A shipped verdict says no code was delivered under this ticket and names the code or Done story that already delivers it. Done is the only closing status, so the comment is what tells a closed-unbuilt ticket from a shipped one.
     3. **Link**: `POST /rest/api/2/issueLink` with `{"type":{"name":"Duplicate"},"inwardIssue":{"key":<closed>},"outwardIssue":{"key":<survivor>}}` → 201, reading "<closed> duplicates <survivor>". On this instance the inwardIssue takes the outward verb — a `Blocks` link built the other way round came out inverted in 2026-07. Shipped and withdrawn verdicts have no survivor and get no link.
     4. **Out of its sprint**: `POST /rest/agile/1.0/backlog/issue` with `{"issues":[<closed>]}` → 204. A story closed inside a sprint is counted as completed points in that sprint's report, and those reports are where step 4 measures capacity.
     5. **Close**: clear its `fixVersions` (an unbuilt story ships in no release), then `POST /rest/api/2/issue/{key}/transitions` with `{"transition":{"id":"31"}}` → 204. Closing an epic takes one more write, `POST /rest/agile/1.0/epic/{key}` with `{"done": true}`: the transition leaves Epic Status at To Do, which keeps the epic in the Epics panel (41 closed epics were still listed there on 2026-09-27). Reopening one sets `{"done": false}`.
 
     Then the distinct pairs: `Relates` links (or `Blocks`, blocker as inwardIssue).
-28. **Epics**: `POST /rest/api/2/issue` with `{"fields":{"project":{"key":"JCLAW"},"issuetype":{"id":"10000"},"summary":…,"customfield_10004":<Epic Name>,"description":…}}` → 201; record each new key, then give it a colour with `POST /rest/agile/1.0/epic/{key}` and `{"color": {"key": "color_N"}}` so its stories show a pill. REST stores the description verbatim, so write **Jira wiki markup** (`*bold*`, `{{code}}`, `*` bullets) — Markdown would show literal `**` — and keep every `{{…}}` span on one line.
-29. **Epic links**: `PUT /rest/api/2/issue/{key}` with `{"fields":{"customfield_10002":"JCLAW-N"}}` → 204.
-30. **Estimates**: `PUT /rest/agile/1.0/issue/{key}/estimation?boardId=30` with `{"value":N}` → 200. A Bug's estimate answers 400 "not editable due to its issue type": record it and continue. The plan still counts it toward capacity, because the work is real, so that sprint's sum in Jira reads lower by that much.
-31. **Sprints and versions**: new sprints via `POST /rest/agile/1.0/sprint` with `{"name":"v0.N","originBoardId":30,"goal":…,"startDate":…,"endDate":…}` → 201, each with its version via `POST /rest/api/2/version` → 201 (existing versions: `PUT /rest/api/2/version/{id}` → 200). Goals of existing sprints via `POST /rest/agile/1.0/sprint/{id}` with `{"goal":…}` — POST is the partial update; `PUT` replaces the sprint and needs every field.
-32. **Membership**: `POST /rest/agile/1.0/sprint/{id}/issue` with `{"issues":[…]}`, at most 50 per call → 204; the same call moves an issue from another open sprint. Back to the backlog: `POST /rest/agile/1.0/backlog/issue` — the MCP has no tool for it. Then the step 23a versions: `PUT /rest/api/2/issue/{key}` with `{"fields":{"fixVersions":[{"name":"v0.N"}]}}` (or `[]`) → 204, and `{"update":{"labels":[{"remove":"v0.12"}]}}` for a stale version label.
+28. **Epics**: `POST /rest/api/2/issue` with `{"fields":{"project":{"key":"JF"},"issuetype":{"id":"10000"},"summary":…,"customfield_10004":<Epic Name>,"description":…}}` → 201; record each new key, then give it a colour with `POST /rest/agile/1.0/epic/{key}` and `{"color": {"key": "color_N"}}` so its stories show a pill. REST stores the description verbatim, so write **Jira wiki markup** (`*bold*`, `{{code}}`, `*` bullets) — Markdown would show literal `**` — and keep every `{{…}}` span on one line.
+29. **Epic links**: `PUT /rest/api/2/issue/{key}` with `{"fields":{"customfield_10002":"JF-N"}}` → 204.
+30. **Estimates**: `PUT /rest/agile/1.0/issue/{key}/estimation?boardId=31` with `{"value":N}` → 200. A Bug's estimate answers 400 "not editable due to its issue type": record it and continue. The plan still counts it toward capacity, because the work is real, so that sprint's sum in Jira reads lower by that much.
+31. **Sprints and versions**: new sprints via `POST /rest/agile/1.0/sprint` with `{"name":"v<major>.<minor>","originBoardId":31,"goal":…,"startDate":…,"endDate":…}` → 201, each with its version via `POST /rest/api/2/version` → 201 (existing versions: `PUT /rest/api/2/version/{id}` → 200). Goals of existing sprints via `POST /rest/agile/1.0/sprint/{id}` with `{"goal":…}` — POST is the partial update; `PUT` replaces the sprint and needs every field.
+32. **Membership**: `POST /rest/agile/1.0/sprint/{id}/issue` with `{"issues":[…]}`, at most 50 per call → 204; the same call moves an issue from another open sprint. Back to the backlog: `POST /rest/agile/1.0/backlog/issue` — the MCP has no tool for it. Then the step 23a versions: `PUT /rest/api/2/issue/{key}` with `{"fields":{"fixVersions":[{"name":"<the sprint's name>"}]}}` (or `[]`) → 204, and `{"update":{"labels":[{"remove":"<the stale label>"}]}}` for a stale version label.
 
 **Phase 8 — Verify and report**
 
 33. Re-read from Jira, never from write responses — a 2xx is not proof the value landed:
     - Each closed story is Done, in no sprint, and — for a duplicate, subsumed or merge verdict — shows `duplicates <survivor>` under `outwardIssue` when read from its own side; each survivor's description ends with its `Absorbed from` section, and `?expand=renderedFields` shows no leftover `{{` or `h3.`.
-    - `project = JCLAW AND statusCategory != Done AND issuetype != Epic AND "Epic Link" is EMPTY` → none.
-    - `project = JCLAW AND statusCategory != Done AND issuetype = Story AND "Story Points" is EMPTY` → only the split candidates.
-    - Per sprint: its issues match the plan, and its point sum and goal match; every story in it carries exactly its version, and `fixVersion = "v0.N"` returns no story outside it.
-    - `GET /rest/agile/1.0/board/30/epic?done=false` lists exactly the open epics, each with an Epic Name and an Epic Color.
-    - Only versions of open sprints (and `v1.0`) are unreleased, and no released version holds an open issue or a story closed without being built.
+    - `project = JF AND statusCategory != Done AND issuetype != Epic AND "Epic Link" is EMPTY` → none.
+    - `project = JF AND statusCategory != Done AND issuetype = Story AND "Story Points" is EMPTY` → only the split candidates.
+    - Per sprint: its issues match the plan, and its point sum and goal match; every story in it carries exactly its version, and `fixVersion = "<its name>"` returns no story outside it.
+    - `GET /rest/agile/1.0/board/31/epic?done=false` lists exactly the open epics, each with an Epic Name and an Epic Color.
+    - Only versions of open sprints are unreleased, and no released version holds an open issue or a story closed without being built.
 34. Report what changed — stories closed by verdict with their survivors, links added, new epic keys, epic links, estimates, sprints created, goals set, issues placed — then each sprint's line from step 25, then what is left for the operator: split candidates, collisions, and any sprint whose balance could not reach the band.
 
 ---

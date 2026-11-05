@@ -1,7 +1,7 @@
 <#
   JClaw one-line installer (Windows)
 
-    irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+    irm https://github.com/tsukhani/jclaw/releases/latest/download/install.ps1 | iex
 
   Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
   Java 25+ runtime (the bundle's only dependency), extracts it to %USERPROFILE%\.jclaw,

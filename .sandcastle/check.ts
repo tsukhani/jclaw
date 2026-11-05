@@ -10,7 +10,7 @@ import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
 import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
-import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf } from "./jira-intake.ts";
+import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
@@ -308,7 +308,10 @@ check("a story back in intake after the factory's won't-do was overruled",
 check("GitHub's header counts the same way",
   overruled({ ...ticket(), comments: [{ author: OWNER, body: "### AFK factory: won't do\nGibberish." }] }, "### AFK factory"), true);
 
-const SPRINT = "project = JCLAW AND sprint in openSprints() AND issuetype not in (Epic, Sub-task)";
+check("the factory owns Free's JF keys and refuses Pro's JCLAW ones and another tracker's",
+  ["JF-1", "JF-191", "JCLAW-1594", "GH-15", "JF-", "xJF-1", "JF-1a"].map(ownsKey), [true, true, false, false, false, false, false]);
+
+const SPRINT = "project = JF AND sprint in openSprints() AND issuetype not in (Epic, Sub-task)";
 const HOLD = '(labels is EMPTY OR labels not in (afk-blocked, wont-do, no-afk)) AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ORDER BY rank';
 check("with no afk epic, a story is taken by its own label alone", intakeJql([]), `${SPRINT} AND labels = afk AND ${HOLD}`);
 check("an afk epic's stories are taken with the labelled ones", intakeJql(["JCLAW-538", "JCLAW-902"]),
@@ -337,7 +340,7 @@ check("a Blocks link with an inward issue is a blocker, Done or not; an outward 
 check("…and a blocker's own blockers are the open ones, another project's included", [openBlockersOf(links), openBlockersOf(undefined)],
   [["JCLAW-1377", "JF-170"], []]);
 
-const MERGE = "project = JCLAW AND labels = afk AND status = Review";
+const MERGE = "project = JF AND labels = afk AND status = Review";
 check("with no afk-merge epic, a story merges by its own label", mergeJql([]), `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge) ORDER BY rank`);
 check("an afk-merge epic's stories merge with the labelled ones", mergeJql(["JCLAW-538"]),
   `${MERGE} AND (labels = afk-merge OR "Epic Link" in (JCLAW-538)) AND labels not in (no-afk-merge) ORDER BY rank`);

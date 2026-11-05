@@ -2,13 +2,19 @@
 // credentials.
 import type { Snapshot } from "./tracker.ts";
 
+// Free's backlog. JCLAW is JClaw Pro's, whose repo reverts this, so a factory here never builds Pro's work into Free.
+export const PROJECT = "JF";
+
+// Only this project's keys are Jira's; another tracker's keys (GH-15) and Pro's (JCLAW-) are not.
+export const ownsKey = (key: string): boolean => new RegExp(`^${PROJECT}-\\d+$`).test(key);
+
 // Labels that hold a story out of intake. `no-afk` exempts one story of an epic labelled `afk`.
 const HELD = ["afk-blocked", "wont-do", "no-afk"];
 
 // A story is a candidate through its own `afk` label or its epic's. A story with no labels fails a bare `labels != x`,
 // and `"Epic Link" in ()` is a JQL error, so both are spelled out.
 export const intakeJql = (afkEpics: string[]): string =>
-  'project = JCLAW AND sprint in openSprints() AND issuetype not in (Epic, Sub-task) ' +
+  `project = ${PROJECT} AND sprint in openSprints() AND issuetype not in (Epic, Sub-task) ` +
   `AND ${afkEpics.length > 0 ? `(labels = afk OR "Epic Link" in (${afkEpics.join(", ")}))` : "labels = afk"} ` +
   `AND (labels is EMPTY OR labels not in (${HELD.join(", ")})) AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ` +
   'ORDER BY rank';
@@ -39,6 +45,6 @@ export const openBlockersOf = (links: any[] | undefined): string[] => blockersOf
 
 // Stories in review the factory may merge: labelled `afk-merge` themselves or through their epic, unless `no-afk-merge`.
 export const mergeJql = (mergeEpics: string[]): string =>
-  'project = JCLAW AND labels = afk AND status = Review ' +
+  `project = ${PROJECT} AND labels = afk AND status = Review ` +
   `AND ${mergeEpics.length > 0 ? `(labels = afk-merge OR "Epic Link" in (${mergeEpics.join(", ")}))` : "labels = afk-merge"} ` +
   'AND labels not in (no-afk-merge) ORDER BY rank';

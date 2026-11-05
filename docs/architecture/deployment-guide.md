@@ -29,7 +29,7 @@ Key steps:
 - **Test.Frontend** — `(cd frontend && pnpm test --coverage)` (Vitest + lcov).
 - **Sonar** — `./gradlew sonar -Dsonar.projectVersion=v${appVersion}` (project key `abundent:jclaw`), with the quality-gate binding.
 - **Package** — `./gradlew playDist playBundle` writes `dist/jclaw.zip` and `dist/jclaw-bundle.zip`, archived as Jenkins artifacts. The SPA **is** baked into the bundle — `nuxi generate` output is copied into `public/spa/` before packaging.
-- **Release** (param `RELEASE=true`): refresh the GitHub Release `v<application.version>` with both zips plus `SHA256SUMS` and `SHA256SUMS.sig`, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
+- **Release** (param `RELEASE=true`): refresh the GitHub Release `v<application.version>` with both zips, the one-line installers (`install.sh`, `install.ps1`, `docker-pull-verified.sh`) and `release-signing.pub`, plus `SHA256SUMS` listing all six and `SHA256SUMS.sig`, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
 - **Publish Dev Container** (param `PUBLISH_DEVCONTAINER=true`): buildx push `ghcr.io/tsukhani/jclaw-devcontainer:latest`.
 - **Cleanup** (on release): keep the 5 most recent GitHub Releases + 5 most recent GHCR versions (never deleting whatever `:latest` points to); prune BuildKit cache older than 30 days.
 
@@ -46,7 +46,7 @@ cd /opt/jclaw && ./jclaw.sh start         # start; stop; status; logs
 Or use the one-line installer (downloads the latest bundle, installs to `~/.jclaw`, wires the `jclaw` PATH shim + shell completion):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh | sh
 ```
 
 Custom port: `./jclaw.sh --backend-port 8080 start`.

@@ -1,7 +1,7 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf } from "./jira-intake.ts";
+import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
 import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
 
@@ -63,7 +63,7 @@ export const intake = async (): Promise<Snapshot[]> => {
 
 // Open epics carrying `label`: each of their stories carries it without a label of its own.
 const epicsLabelled = async (label: string): Promise<string[]> => {
-  const jql = `project = JCLAW AND issuetype = Epic AND labels = ${label} AND statusCategory != Done`;
+  const jql = `project = ${PROJECT} AND issuetype = Epic AND labels = ${label} AND statusCategory != Done`;
   const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
   return found.issues.map((issue: { key: string }) => issue.key);
 };
@@ -78,7 +78,7 @@ export const mergeQueue = async (): Promise<string[]> => {
 
 // afk stories awaiting human review: their branches are unmerged, so no new story may change the same files yet.
 export const inReview = async (): Promise<string[]> => {
-  const jql = "project = JCLAW AND labels = afk AND status = Review";
+  const jql = `project = ${PROJECT} AND labels = afk AND status = Review`;
   const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
   return found.issues.map((issue: { key: string }) => issue.key);
 };
@@ -112,14 +112,14 @@ export const removeLabel = (key: string, label: string) =>
 // Stories this user's factory was working on when it stopped: it labels what it runs, so a story a human moved to
 // In Progress is never mistaken for one, and it assigns what it runs, so another developer's harness keeps its own.
 export const orphaned = async (): Promise<string[]> => {
-  const jql = 'project = JCLAW AND labels = afk-running AND status = "In Progress" AND assignee = currentUser()';
+  const jql = `project = ${PROJECT} AND labels = afk-running AND status = "In Progress" AND assignee = currentUser()`;
   const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
   return found.issues.map((issue: { key: string }) => issue.key);
 };
 
 let myName: string | undefined;
 
-// Several developers' harnesses may watch one sprint, and every JCLAW transition is global, so moving a story is no lock.
+// Several developers' harnesses may watch one sprint, and every Jira transition is global, so moving a story is no lock.
 // A harness assigns the story to its user and reads it back after a pause longer than its own claim-to-transition step:
 // a rival that assigned first is seen here, and one that assigns later finds the story already In Progress.
 export const claim = async (key: string): Promise<boolean> => {
@@ -137,7 +137,7 @@ export const jira: Tracker = {
   name: "Jira",
   header: FACTORY_HEADER,
   markup: { code: (t) => `{{${t}}}`, heading: (t) => `h4. ${t}`, bullet: (t) => `* ${t}`, met: "(/)", unmet: "(x)" },
-  owns: (key) => /^JCLAW-\d+$/.test(key),
+  owns: ownsKey,
   intake,
   inReview,
   mergeQueue,

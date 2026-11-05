@@ -106,13 +106,13 @@ We also compared how you set up and run JClaw, Hermes and OpenClaw. JClaw was th
 On **macOS or Linux**, open a terminal and run this command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh | sh
 ```
 
 On **Windows**, open PowerShell and run this command:
 
 ```powershell
-irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+irm https://github.com/tsukhani/jclaw/releases/latest/download/install.ps1 | iex
 ```
 
 The installer downloads JClaw and starts it.

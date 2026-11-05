@@ -493,7 +493,13 @@ pipeline {
                     // published. Signed before the old release is deleted, so a
                     // signing failure leaves the published one in place, and in
                     // its own block so the key reaches no other step.
-                    sh '( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip > SHA256SUMS )'
+                    // The one-line installers and the release key are served from the
+                    // release, never from GitHub's main: a pull request merged there
+                    // changes main before any test or release, and install.sh and
+                    // docker-pull-verified.sh carry the key that verifies a release.
+                    // These copies are the tagged commit's, and SHA256SUMS lists them.
+                    sh 'cp install.sh install.ps1 docker-pull-verified.sh release-signing.pub dist/'
+                    sh '( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip install.sh install.ps1 docker-pull-verified.sh release-signing.pub > SHA256SUMS )'
                     withCredentials([file(credentialsId: 'jclaw-release-signing-key', variable: 'SIGNING_KEY')]) {
                         sh 'bin/sign-release.sh dist/SHA256SUMS'
                     }
@@ -513,6 +519,7 @@ pipeline {
                             fi
 
                             gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip dist/SHA256SUMS dist/SHA256SUMS.sig \
+                                dist/install.sh dist/install.ps1 dist/docker-pull-verified.sh dist/release-signing.pub \
                                 --repo tsukhani/jclaw --verify-tag \
                                 --title "JClaw ${version}" \
                                 \$NOTES_ARG

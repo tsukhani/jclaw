@@ -1,7 +1,7 @@
 #!/bin/sh
 # JClaw one-line installer (macOS + Linux)
 #
-#   curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+#   curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh | sh
 #
 # Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
 # Java 25+ runtime (the bundle's only dependency) — auto-installing a self-contained
@@ -141,7 +141,7 @@ detect_os() {
         Darwin) OS=macos;  AZUL_OS=macos  ;;
         MINGW*|MSYS*|CYGWIN*)
             die "this is the Unix installer. On Windows run the PowerShell one:
-       irm https://raw.githubusercontent.com/$JCLAW_REPO/main/install.ps1 | iex" ;;
+       irm https://github.com/$JCLAW_REPO/releases/latest/download/install.ps1 | iex" ;;
         *) die "unsupported OS: $(uname -s)" ;;
     esac
     # CPU arch for the Zulu JRE download. Empty ⇒ unrecognized ⇒ no auto-install.

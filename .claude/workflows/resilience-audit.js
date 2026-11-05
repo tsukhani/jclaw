@@ -177,10 +177,10 @@ const GROUPS = [
   },
 ]
 
-// Every open JCLAW issue (`plan.mjs --known-only`), so a reviewer does not pay to re-find what is already filed.
+// Every open JF issue (`plan.mjs --known-only`), so a reviewer does not pay to re-find what is already filed.
 const KNOWN = (args && args.known) || []
 const KNOWN_LIST = KNOWN.length
-  ? `ALREADY FILED — every open JCLAW issue:\n${KNOWN.map((k) => `- ${k.key} (${k.status}${k.epic ? `, epic ${k.epic}` : ''}): ${k.summary}`).join('\n')}`
+  ? `ALREADY FILED — every open JF issue:\n${KNOWN.map((k) => `- ${k.key} (${k.status}${k.epic ? `, epic ${k.epic}` : ''}): ${k.summary}`).join('\n')}`
   : ''
 
 // /code-audit's OUT_OF_SCOPE names this audit's categories; keep the two lists mirrored.
@@ -276,7 +276,7 @@ const EXTRACT_SCHEMA = {
           scenario: { type: 'string' },
           evidence: { type: 'string' },
           existingProtection: { type: 'string' },
-          coveredBy: { type: 'string', description: 'the JCLAW key from covered_by, or "" for none' },
+          coveredBy: { type: 'string', description: 'the JF key from covered_by, or "" for none' },
           fix: { type: 'string' },
           measurement: { type: 'string' },
           verdict: { type: 'string', enum: ['confirmed', 'downgraded', 'rejected'] },
@@ -454,7 +454,7 @@ ${reviewText}`,
     `Transform the adjudicated reliability-review prose below into structured JSON. Do NOT read any files or use any
 tool except the final structured-output call. Parse each "### CONCEPT" block into concepts[] and each
 "### FINDING" block into findings[]. Map "final_severity" -> "severity", "existing_protection" ->
-"existingProtection", and "covered_by" -> "coveredBy" as the bare JCLAW key ("" when none or absent). Carry every
+"existingProtection", and "covered_by" -> "coveredBy" as the bare JF key ("" when none or absent). Carry every
 other field over verbatim. A FINDING block with no verdict is "confirmed" at its
 stated severity. Produce {groupId:"${g.id}", concepts:[...], findings:[...]}.
 
