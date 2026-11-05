@@ -3288,13 +3288,19 @@ aot_prepare() {
 }
 
 # After a production start. A refused cache costs only time, but it would be refused at every start:
-# drop it, so the next start trains a new one. The JVM reports a refusal at the error level.
+# drop it, so the next start trains a new one. The JVM reports a refusal at the error level. $1 is
+# system.out's size before this start: Play appends to the file at every start, so reading all of it
+# let one old refusal drop every later start's freshly trained cache (JF-194).
 aot_check_used() {
-    local cache store
+    local cache store out="$SCRIPT_DIR/logs/system.out" from="${1:-0}" size fresh
     cache=$(aot_cache_file)
     store=$(aot_store_dir)
     [[ -f "$cache" ]] || return 0
-    if grep -q -E '\[error *\]\[aot' "$SCRIPT_DIR/logs/system.out" 2>/dev/null; then
+    size=$(wc -c < "$out" 2>/dev/null | tr -d ' ' || true)
+    # Shorter than the mark means rotated or truncated, so all of it is this start's.
+    (( ${size:-0} >= from )) || from=0
+    fresh=$(tail -c +"$((from + 1))" "$out" 2>/dev/null || true)
+    if grep -q -E '\[error *\]\[aot' <<<"$fresh"; then
         rm -f "$cache" "$store/app.aot" "$store/app.aot.fingerprint"
         aot_status "refused by the JVM (logs/system.out); the next start trains a new one"
     else
@@ -4040,13 +4046,15 @@ do_start_prod() {
         RESTART_FAIL_REASON="something else answers on port $BACKEND_PORT"
         exit 1
     fi
+    local system_out_from
+    system_out_from=$(wc -c < "$SCRIPT_DIR/logs/system.out" 2>/dev/null | tr -d ' ' || true)
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     # `play start` forks, so this banner used to announce a server that was not
     # reachable yet, and every "restart, then do X" sequence inherited the gap:
     # `${INVOKE} e2e` straight after a restart found no listener and refused.
     wait_for_backend_ready || return 1
-    aot_check_used
+    aot_check_used "${system_out_from:-0}"
 
     echo ""
     echo "JClaw is running (production):"

@@ -6,6 +6,7 @@ import play.test.UnitTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
@@ -225,12 +226,55 @@ class AotCacheScriptTest extends UnitTest {
     }
 
     @Test
+    void aRefusalAnEarlierStartLoggedDoesNotDropThisStartsCache() throws Exception {
+        var home = gradleHome();
+        prepare(home, Map.of(), "--http.port=9000");
+        var out = Files.createDirectories(home.resolve("logs")).resolve("system.out");
+        Files.writeString(out, "[0.027s][error  ][aot] shared class paths mismatch (hint: enable -Xlog:class+path=info)\n");
+        long thisStart = Files.size(out);
+        Files.writeString(out, "[0.017s][info   ][aot] Opened AOT cache\n", StandardOpenOption.APPEND);
+
+        assertEquals("AOT cache: in use", run(home, Map.of(), "aot_check_used " + thisStart).strip());
+        assertEquals("in use", status(home));
+        assertTrue(Files.exists(gradleCache(home)));
+    }
+
+    @Test
+    void aRefusalThisStartLoggedIsStillCaughtAfterEarlierCleanStarts() throws Exception {
+        var home = gradleHome();
+        prepare(home, Map.of(), "--http.port=9000");
+        var out = Files.createDirectories(home.resolve("logs")).resolve("system.out");
+        Files.writeString(out, "[0.017s][info   ][aot] Opened AOT cache\n");
+        long thisStart = Files.size(out);
+        Files.writeString(out, "[0.027s][error  ][aot] shared class paths mismatch (hint: enable -Xlog:class+path=info)\n",
+                StandardOpenOption.APPEND);
+
+        assertEquals("AOT cache: refused by the JVM (logs/system.out); the next start trains a new one",
+                run(home, Map.of(), "aot_check_used " + thisStart).strip());
+        assertFalse(Files.exists(gradleCache(home)));
+    }
+
+    @Test
+    void aSystemOutShorterThanTheMarkIsReadWhole() throws Exception {
+        var home = gradleHome();
+        prepare(home, Map.of(), "--http.port=9000");
+        var out = Files.createDirectories(home.resolve("logs")).resolve("system.out");
+        Files.writeString(out, "[0.027s][error  ][aot] shared class paths mismatch (hint: enable -Xlog:class+path=info)\n");
+
+        assertEquals("AOT cache: refused by the JVM (logs/system.out); the next start trains a new one",
+                run(home, Map.of(), "aot_check_used " + (Files.size(out) + 4096)).strip());
+        assertFalse(Files.exists(gradleCache(home)));
+    }
+
+    @Test
     void everyProductionLaunchKeepsTheCacheCurrentFirst() throws Exception {
         var script = Files.readString(repo().resolve("jclaw.sh"));
         int prepare = script.indexOf("    aot_prepare --http.port=\"$BACKEND_PORT\" \"${jvm_opts[@]}\"\n");
         int start = script.indexOf("    play start --%prod --http.port=\"$BACKEND_PORT\" \"${jvm_opts[@]}\"\n");
-        int ready = script.indexOf("    wait_for_backend_ready || return 1\n    aot_check_used\n");
+        int ready = script.indexOf("    wait_for_backend_ready || return 1\n    aot_check_used \"${system_out_from:-0}\"\n");
         assertTrue(prepare > 0 && prepare < start && start < ready, "do_start_prod trains with the start's own arguments, then checks the cache was used");
+        int mark = script.indexOf("    system_out_from=$(wc -c < \"$SCRIPT_DIR/logs/system.out\" 2>/dev/null | tr -d ' ' || true)\n");
+        assertTrue(mark > prepare && mark < start, "system.out's size is taken just before play start, so the check reads only this start's output");
 
         var dockerfile = Files.readString(repo().resolve("Dockerfile"));
         var cmd = Pattern.compile("(?m)^CMD .*$").matcher(dockerfile);
