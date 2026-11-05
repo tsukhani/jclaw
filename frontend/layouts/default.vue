@@ -420,6 +420,7 @@ const navGroups: NavGroup[] = [
         visible hairline" intent.
       -->
       <div
+        data-testid="brand-row"
         :class="sidebarOpen ? 'justify-between px-3' : 'justify-center px-0'"
         class="h-14 flex items-center border-b border-transparent shrink-0"
       >
@@ -447,14 +448,6 @@ const navGroups: NavGroup[] = [
             </div>
           </div>
         </div>
-        <span
-          v-if="sidebarOpen"
-          class="inline-flex items-center justify-center
-                 rounded-full border border-blue-700 dark:border-blue-400
-                 px-[5px] py-[2px]
-                 text-[10px] font-medium leading-none tracking-[0.04em]
-                 text-blue-700 dark:text-blue-400"
-        >BETA</span>
         <button
           v-if="sidebarOpen"
           class="p-1.5 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"

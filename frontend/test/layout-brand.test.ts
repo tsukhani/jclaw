@@ -61,6 +61,14 @@ describe('default layout — brand line', () => {
     expect(mounted.find('img[src="/clawdia.webp"]').attributes('alt')).toBe('Name From Backend')
   })
 
+  it('shows only the product name in the open sidebar\'s brand row, with no release-stage pill', async () => {
+    const mounted = await mountSuspended(DefaultLayout)
+    layout = mounted
+
+    await vi.waitFor(() => expect(mounted.find('[data-testid="brand-name"]').text()).toBe('Name From Backend'))
+    expect(mounted.find('[data-testid="brand-row"]').text()).toBe('Control Name From Backend')
+  })
+
   it('holds no name of its own while the status endpoint cannot answer', async () => {
     statusUp = false
     const mounted = await mountSuspended(DefaultLayout)
