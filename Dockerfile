@@ -89,6 +89,10 @@ RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; slee
 # "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH=$PNPM_HOME/bin:$PATH
+# The package store moves out of $PNPM_HOME: pnpm 12's installer puts pnpm itself
+# in $PNPM_HOME/store, so the store's cache mount below would hide pnpm on any
+# builder whose cache lacks those files (JF-192).
+RUN pnpm config set --global store-dir /root/.cache/pnpm-store
 
 # Play 1.13.x — tsukhani/play1 fork at /opt/play1, matching the path
 # build.gradle.kts (frameworkPath) and settings.gradle.kts (gradle-plugin-repo)
@@ -137,14 +141,16 @@ COPY . /src/
 #                              ~500 MB warm. Gradle takes exclusive locks
 #                              on this tree, so a shared id would serialise
 #                              the two target builds for their whole run.
-#   /root/.local/share/pnpm/store
-#                              [shared] pnpm's content-addressed store.
-#                              ~200 MB. Writes are hash-addressed adds, so
-#                              concurrent builds pool it safely and skip
-#                              re-downloading the same tarballs. Not the
-#                              parent: that is $PNPM_HOME, holding the pnpm
-#                              shim and @pnpm/exe, and a cache mount starts
-#                              empty — mounting it hid pnpm from this RUN.
+#   /root/.cache/pnpm-store    [shared] pnpm's content-addressed store
+#                              (store-dir, set above). ~200 MB. Writes are
+#                              hash-addressed adds, so concurrent builds pool
+#                              it safely and skip re-downloading the same
+#                              tarballs. Never under $PNPM_HOME: that holds
+#                              pnpm itself, in its own store/ and global/,
+#                              and a cache mount starts empty, so mounting
+#                              there hid pnpm from this RUN ("pnpm: not
+#                              found", exit 127) on every builder whose cache
+#                              did not already hold it.
 #   /src/frontend/node_modules [per-target] pnpm's project-resolved tree
 #                              (symlinks into the store). ~200 MB. A
 #                              mutable tree that two simultaneous `pnpm
@@ -168,7 +174,7 @@ COPY . /src/
 # fresh per-container at entrypoint time instead — see
 # docker-entrypoint.sh.
 RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH} \
-    --mount=type=cache,target=/root/.local/share/pnpm/store \
+    --mount=type=cache,target=/root/.cache/pnpm-store \
     --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${BUILDARCH}-${TARGETARCH} \
     git init -q && \
     ./gradlew --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
