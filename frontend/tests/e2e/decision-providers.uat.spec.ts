@@ -333,12 +333,14 @@ test.describe('UAT-23 decision providers', () => {
       await openPanel(page)
       await page.getByTestId('decision-laya-cut').getByRole('link', { name: 'Settings → Model Router' }).click()
       await expect(page).toHaveURL(/\/settings\?section=model-router$/)
-      const classifier = page.getByRole('combobox', { name: 'Prompt classifier model' })
-      await expect(classifier.locator('optgroup[label="Laya"] option')).toHaveText([
+      await page.getByRole('combobox', { name: 'Prompt classifier model' }).click()
+      const offered = (heading: string) => page.locator('[data-slot="command-group"]')
+        .filter({ has: page.locator('[data-slot="command-group-heading"]', { hasText: new RegExp(`^${heading}$`) }) })
+        .locator('[data-slot="command-item"]')
+      await expect(offered('Laya')).toHaveText([
         'Laya / english (512 tokens)', 'Laya / multilingual (1,024 tokens)', 'Laya / typed-decisions (1,024 tokens)',
       ])
-      await expect(classifier.locator('optgroup[label="Ollama"] option')).toHaveText(
-        DECISION_MODELS.map(name => `Ollama decision / ${name}`))
+      await expect(offered('Ollama')).toHaveText(DECISION_MODELS.map(name => `Ollama decision / ${name}`))
       expect(writes()).toEqual([])
     })
 

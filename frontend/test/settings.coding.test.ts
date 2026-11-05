@@ -5,6 +5,7 @@ import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
 import SettingsCodingPanel from '~/components/settings/SettingsCodingPanel.vue'
 import { useProvideSettingsConfig } from '~/composables/useSettingsConfig'
+import { openPicker, pickerOptionValues, pickValue } from './searchable-select-driver'
 
 /**
  * The Coding settings panel: ACP harness auto-detection, custom-harness
@@ -221,12 +222,9 @@ describe('SettingsCodingPanel — acp harness model override', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    const select = c.find('select[aria-label="ACP harness model"]')
-    expect(select.exists()).toBe(true)
-    const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
-    expect(values).toEqual(['', 'ollama::qwen3.5:9b'])
+    expect(pickerOptionValues(await openPicker(c, 'ACP harness model'))).toEqual(['', 'ollama::qwen3.5:9b'])
 
-    await select.setValue('ollama::qwen3.5:9b')
+    await pickValue(c, 'ACP harness model', 'ollama::qwen3.5:9b')
     await vi.waitFor(() => expect(configPosts).toHaveLength(2))
     expect(configPosts).toContainEqual({ key: 'subagent.acp.modelProvider', value: 'ollama' })
     expect(configPosts).toContainEqual({ key: 'subagent.acp.modelId', value: 'qwen3.5:9b' })
@@ -236,7 +234,7 @@ describe('SettingsCodingPanel — acp harness model override', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    await c.find('select[aria-label="ACP harness model"]').setValue('')
+    await pickValue(c, 'ACP harness model', '')
     await vi.waitFor(() => expect(configDeletes).toHaveLength(2))
     expect(configDeletes).toEqual(['subagent.acp.modelProvider', 'subagent.acp.modelId'])
     expect(configPosts).toEqual([])

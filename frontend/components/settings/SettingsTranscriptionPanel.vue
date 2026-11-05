@@ -6,6 +6,7 @@
 // pre-extraction monolith did. Provider API-key checks and the audio-model
 // catalog are injected from the shared settings-config context.
 import type { ProviderModelDef } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
@@ -120,6 +121,10 @@ const diarizationModelOrphaned = computed(() =>
   diarizationModel.value !== '' && !diarizationAudioModelOptions.value.some(o => o.id === diarizationModel.value),
 )
 const diarizationModelSelectValue = computed(() => (diarizationModelOrphaned.value ? '' : diarizationModel.value))
+const diarizationModelPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: '(select an audio-capable model)' },
+  ...diarizationAudioModels.value.map(m => modelOption(m.id, m.name || m.id, m)),
+])
 async function toggleDiarizationEnabled() {
   saving.value = true
   const defaultProvider = openrouterApiKeyConfigured.value ? 'openrouter' : 'openai'
@@ -192,6 +197,8 @@ const currentSerRepo = computed(() => {
   const v = selectedEmotionModel.value
   return serOptions.value.some(o => o.repo === v) ? v : (serOptions.value[0]?.repo ?? '')
 })
+const serPickerOptions = computed<SearchableOption[]>(() =>
+  serOptions.value.map(o => modelOption(o.repo, o.displayName, { id: o.repo, name: o.displayName })))
 function downloadedMb(bytes: number): number {
   return Math.round((bytes || 0) / 1e6)
 }
@@ -249,6 +256,8 @@ onBeforeUnmount(() => stopDiarizationModelPolling())
 const selectedLocalModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small',
 )
+const localModelOptions = computed<SearchableOption[]>(() =>
+  (transcriptionState.value?.models ?? []).map(m => ({ value: m.id, label: `${m.displayName} (~${m.approxSizeMb} MB)` })))
 
 const selectedLocalModelStatus = computed<TranscriptionModelStatus | null>(() => {
   const id = selectedLocalModel.value
@@ -510,20 +519,16 @@ onUnmounted(() => stopTranscriptionPolling())
             class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
             <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Model</span>
-            <select
-              :value="selectedLocalModel"
-              aria-label="ASR model"
+            <SearchableSelect
+              :model-value="selectedLocalModel"
+              :options="localModelOptions"
+              placeholder="Choose a model"
+              label="ASR model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="setLocalModel(($event.target as HTMLSelectElement).value)"
-            >
-              <option
-                v-for="m in (transcriptionState?.models ?? [])"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
-              </option>
-            </select>
+              @update:model-value="setLocalModel"
+            />
             <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
               <button
                 type="button"
@@ -780,23 +785,16 @@ onUnmounted(() => stopTranscriptionPolling())
         >
           <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Audio model</span>
-            <select
-              :value="diarizationModelSelectValue"
-              aria-label="Diarization audio model"
+            <SearchableSelect
+              :model-value="diarizationModelSelectValue"
+              :options="diarizationModelPickerOptions"
+              placeholder="(select an audio-capable model)"
+              label="Diarization audio model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="setDiarizationModel(($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">
-                (select an audio-capable model)
-              </option>
-              <option
-                v-for="m in diarizationAudioModelOptions"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.label }}
-              </option>
-            </select>
+              @update:model-value="setDiarizationModel"
+            />
           </div>
           <p
             v-if="diarizationAudioModels.length === 0"
@@ -867,21 +865,17 @@ onUnmounted(() => stopTranscriptionPolling())
           <!-- Emotion (SER) model — operator-selectable, download status -->
           <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3 border-t border-border">
             <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Emotion model</span>
-            <select
+            <SearchableSelect
               id="diarization-emotion-model"
-              :value="currentSerRepo"
-              aria-label="On-device emotion (SER) model"
+              :model-value="currentSerRepo"
+              :options="serPickerOptions"
+              placeholder="Choose a model"
+              label="On-device emotion (SER) model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="setEmotionModel(($event.target as HTMLSelectElement).value)"
-            >
-              <option
-                v-for="o in serOptions"
-                :key="o.repo"
-                :value="o.repo"
-              >
-                {{ o.displayName }}
-              </option>
-            </select>
+              @update:model-value="setEmotionModel"
+            />
             <span
               v-if="!emotionModelStatus"
               class="text-xs text-fg-muted shrink-0"

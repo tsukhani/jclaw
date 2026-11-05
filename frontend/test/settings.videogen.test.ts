@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { openPicker, picker, pickerOption, pickerOptionValues, pickerValue, pickValue } from './searchable-select-driver'
 
 /**
  * JCLAW-236 — Video Generation settings section. The enable toggle, the Replicate backend radio, the
@@ -88,11 +89,11 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     expect(radio.element.disabled).toBe(false)
     expect(radio.element.checked).toBe(true)
 
-    // The model field is a <select>, not a text input; the saved value is surfaced even though
+    // The model field is a picker, not a text input; the saved value is surfaced even though
     // discovery (mocked empty here) didn't return it.
-    const model = c.find<HTMLSelectElement>('select[aria-label="Replicate video model"]')
-    expect(model.exists()).toBe(true)
-    expect(model.element.value).toBe('lightricks/ltx-video')
+    expect(picker(c, 'Replicate video model').exists()).toBe(true)
+    expect(pickerValue(c, 'Replicate video model')).toBe('lightricks/ltx-video')
+    expect(picker(c, 'Replicate video model').text()).toBe('lightricks/ltx-video')
     const timeout = c.find<HTMLInputElement>('input[aria-label="Video job timeout in minutes"]')
     expect(timeout.element.value).toBe('45')
   })
@@ -110,9 +111,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     })
     const c = await mountSettingsSection('video-generation')
 
-    const select = c.find('select[aria-label="Replicate video model"]')
-    expect(select.exists()).toBe(true)
-    const optionValues = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+    const optionValues = pickerOptionValues(await openPicker(c, 'Replicate video model'))
     expect(optionValues).toContain('wan-video/wan-2.2-t2v-fast')
     expect(optionValues).toContain('lightricks/ltx-video')
     // The operator-facing jobs panel does not belong in Settings and was removed.
@@ -150,8 +149,9 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
       ] })
     const c = await mountSettingsSection('video-generation')
 
-    const select = c.find('select[aria-label="Replicate video model"]')
-    await select.setValue('wan-video/wan-2.2-t2v-fast')
+    const popover = await openPicker(c, 'Replicate video model')
+    await vi.waitFor(() => expect(pickerOption(popover, 'wan-video/wan-2.2-t2v-fast')).toBeDefined())
+    pickerOption(popover, 'wan-video/wan-2.2-t2v-fast')!.click()
     await flushPromises()
 
     const hit = captured.find(b => b.key === 'videogen.cloud.model')
@@ -180,11 +180,8 @@ describe('Settings — Video Generation through Black Forest Labs', () => {
     expect(c.find<HTMLInputElement>('#videogen-provider-local').element.checked).toBe(false)
     expect(c.find<HTMLInputElement>('#videogen-provider-replicate').element.checked).toBe(false)
 
-    const select = c.find('select[aria-label="Black Forest Labs video model"]')
-    await vi.waitFor(() => {
-      const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
-      expect(values).toEqual(['', 'flux-3-video'])
-    })
+    const popover = await openPicker(c, 'Black Forest Labs video model')
+    await vi.waitFor(() => expect(pickerOptionValues(popover)).toEqual(['', 'flux-3-video']))
   })
 
   it('POSTs videogen.bfl.model when a BFL model is chosen', async () => {
@@ -199,9 +196,9 @@ describe('Settings — Video Generation through Black Forest Labs', () => {
     })
     const c = await mountSettingsSection('video-generation')
 
-    const select = c.find('select[aria-label="Black Forest Labs video model"]')
-    await vi.waitFor(() => expect(select.findAll('option')).toHaveLength(2))
-    await select.setValue('flux-3-video')
+    const popover = await openPicker(c, 'Black Forest Labs video model')
+    await vi.waitFor(() => expect(pickerOptionValues(popover)).toEqual(['', 'flux-3-video']))
+    await pickValue(c, 'Black Forest Labs video model', 'flux-3-video')
     await flushPromises()
 
     expect(captured).toContainEqual({ key: 'videogen.bfl.model', value: 'flux-3-video' })

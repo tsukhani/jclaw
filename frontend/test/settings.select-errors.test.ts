@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus, type H3Event } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { openPicker, picker as pickerTrigger, pickerOption, pickerValue } from './searchable-select-driver'
 
 // A select or input that saves on change must show the saved value and the reason when its save fails
 // (JCLAW-1221). Several of these handlers had no catch and sat in panels that never re-render on failure,
@@ -104,56 +105,65 @@ describe('Settings — a select or input whose save fails shows the saved value 
     unregister = []
   })
 
-  it.each<{ name: string, section: string, control: string, choose: string, saved: string, entries: Record<string, string> }>([
-    { name: 'image captioning model', section: 'image-caption', control: 'select[aria-label="Caption cloud model"]', choose: 'gpt-4.1', saved: 'gpt-4o',
+  it.each<{ name: string, section: string, control?: string, picker?: string, choose: string, saved: string, entries: Record<string, string> }>([
+    { name: 'image captioning model', section: 'image-caption', picker: 'Caption cloud model', choose: 'gpt-4.1', saved: 'gpt-4o',
       entries: { 'caption.provider': 'openai', 'caption.model': 'gpt-4o', 'provider.openai.apiKey': 'sk-****', 'provider.openai.models': openaiModels } },
     { name: 'search recency filter', section: 'search', control: 'select[aria-label="Recency filter"]', choose: 'week', saved: 'month',
       entries: { 'search.perplexity.enabled': 'true', 'search.perplexity.apiKey': 'pplx-****', 'search.perplexity.recencyFilter': 'month' } },
-    { name: 'subagent model', section: 'subagents', control: 'select[aria-label="Subagent model"]', choose: 'openai::gpt-4.1', saved: 'openai::gpt-4o',
+    { name: 'subagent model', section: 'subagents', picker: 'Subagent model', choose: 'openai::gpt-4.1', saved: 'openai::gpt-4o',
       entries: { 'provider.openai.apiKey': 'sk-****', 'provider.openai.models': openaiModels, 'subagent.modelProvider': 'openai', 'subagent.modelId': 'gpt-4o' } },
-    { name: 'local ASR model', section: 'transcription', control: 'select[aria-label="ASR model"]', choose: 'base.en', saved: 'small.en',
+    { name: 'local ASR model', section: 'transcription', picker: 'ASR model', choose: 'base.en', saved: 'small.en',
       entries: { 'transcription.provider': 'whisper-local', 'transcription.localModel': 'small.en' } },
     { name: 'cloud transcription model', section: 'transcription', control: 'input[aria-label="Cloud transcription model"]', choose: 'gpt-4o-transcribe', saved: 'whisper-1',
       entries: { 'transcription.provider': 'openai', 'transcription.model': 'whisper-1', 'provider.openai.apiKey': 'sk-****' } },
-    { name: 'diarization audio model', section: 'transcription', control: 'select[aria-label="Diarization audio model"]', choose: 'audio/two', saved: 'audio/one',
+    { name: 'diarization audio model', section: 'transcription', picker: 'Diarization audio model', choose: 'audio/two', saved: 'audio/one',
       entries: { 'transcription.diarization.provider': 'openrouter', 'transcription.diarization.model': 'audio/one', 'provider.openrouter.apiKey': 'sk-or-****', 'provider.openrouter.models': openrouterAudioModels } },
-    { name: 'emotion (SER) model', section: 'transcription', control: 'select[aria-label="On-device emotion (SER) model"]', choose: 'ser/two', saved: 'ser/one',
+    { name: 'emotion (SER) model', section: 'transcription', picker: 'On-device emotion (SER) model', choose: 'ser/two', saved: 'ser/one',
       entries: { 'transcription.diarization.provider': 'pyannote-local', 'transcription.diarization.emotionModel': 'ser/one' } },
-    { name: 'speech model (JVM engine)', section: 'speech', control: 'select[aria-label="Text-to-speech model"]', choose: 'kokoro-multi-lang-v1_0', saved: 'piper-en_US-amy-low',
+    { name: 'speech model (JVM engine)', section: 'speech', picker: 'Text-to-speech model', choose: 'kokoro-multi-lang-v1_0', saved: 'piper-en_US-amy-low',
       entries: { 'tts.engine': 'jvm', 'tts.jvm.model': 'piper-en_US-amy-low' } },
     { name: 'speech voice', section: 'speech', control: 'select[aria-label="Text-to-speech speaker voice"]', choose: 'bm_george', saved: 'af_bella',
       entries: { 'tts.engine': 'sidecar', 'tts.sidecar.model': 'kokoro', 'tts.sidecar.voice': 'af_bella' } },
     { name: 'speech keep-warm minutes', section: 'speech', control: 'input[aria-label="Minutes the TTS sidecar stays loaded while idle"]', choose: '30', saved: '15',
       entries: { 'tts.engine': 'sidecar', 'tts.sidecar.model': 'kokoro', 'tts.local.idleTimeoutMinutes': '15' } },
-    { name: 'Replicate image model', section: 'image-generation', control: 'select[aria-label="Replicate image model"]', choose: 'image/two', saved: 'image/one',
+    { name: 'Replicate image model', section: 'image-generation', picker: 'Replicate image model', choose: 'image/two', saved: 'image/one',
       entries: { 'imagegen.provider': 'replicate', 'provider.replicate.apiKey': 'r8_****', 'imagegen.replicate.model': 'image/one' } },
-    { name: 'Replicate video model', section: 'video-generation', control: 'select[aria-label="Replicate video model"]', choose: 'video/two', saved: 'video/one',
+    { name: 'Replicate video model', section: 'video-generation', picker: 'Replicate video model', choose: 'video/two', saved: 'video/one',
       entries: { 'videogen.provider': 'replicate', 'provider.replicate.apiKey': 'r8_****', 'videogen.cloud.model': 'video/one' } },
     { name: 'video job timeout', section: 'video-generation', control: 'input[aria-label="Video job timeout in minutes"]', choose: '45', saved: '30',
       entries: { 'videogen.provider': 'replicate', 'provider.replicate.apiKey': 'r8_****', 'videogen.maxJobMinutes': '30' } },
-    { name: 'video interpretation model', section: 'video-interpretation', control: 'select[aria-label="Video model"]', choose: 'vm/two', saved: 'vm/one',
+    { name: 'video interpretation model', section: 'video-interpretation', picker: 'Video model', choose: 'vm/two', saved: 'vm/one',
       entries: { 'video.provider': 'openrouter', 'provider.openrouter.apiKey': 'sk-or-****', 'video.model': 'vm/one' } },
     { name: 'video seconds per frame', section: 'video-interpretation', control: 'input[aria-label="Seconds per frame"]', choose: '10', saved: '5',
       entries: { 'video.secondsPerFrame': '5' } },
     { name: 'video max frames', section: 'video-interpretation', control: 'input[aria-label="Max frames per video"]', choose: '16', saved: '8',
       entries: { 'video.sampleFrames': '8' } },
-  ])('$name', async ({ section, control, choose, saved, entries }) => {
+  ])('$name', async ({ section, control, picker: label, choose, saved, entries }) => {
     setupApi(entries)
     const component = await mountSection(section)
-    await vi.waitFor(() => expect(component.find(control).exists()).toBe(true))
-    await vi.waitFor(() => expect((component.find(control).element as HTMLInputElement).value).toBe(saved))
-    if (control.startsWith('select')) {
-      await vi.waitFor(() => expect(component.find(`${control} option[value="${choose}"]`).exists()).toBe(true))
-    }
+    const shown = () => label ? pickerValue(component, label) : (component.find(control!).element as HTMLInputElement).value
+    await vi.waitFor(() => expect(shown()).toBe(saved))
 
-    const el = component.find(control).element as HTMLInputElement | HTMLSelectElement
-    el.value = choose
-    expect(el.value, `${choose} should be a value the control offers`).toBe(choose)
-    await component.find(control).trigger('change')
+    if (label) {
+      // A picker can be disabled while its model list loads.
+      await vi.waitFor(() => expect(pickerTrigger(component, label).attributes('disabled')).toBeUndefined())
+      const popover = await openPicker(component, label)
+      await vi.waitFor(() => expect(pickerOption(popover, choose), `${choose} should be an option the picker offers`).toBeDefined())
+      pickerOption(popover, choose)!.click()
+    }
+    else {
+      if (control!.startsWith('select')) {
+        await vi.waitFor(() => expect(component.find(`${control} option[value="${choose}"]`).exists()).toBe(true))
+      }
+      const el = component.find(control!).element as HTMLInputElement
+      el.value = choose
+      expect(el.value, `${choose} should be a value the control offers`).toBe(choose)
+      await component.find(control!).trigger('change')
+    }
 
     await vi.waitFor(() => expect(component.findAll('[data-testid="api-error"]').some(a => a.text().includes('/api/config'))).toBe(true))
     await flushPromises()
-    expect((component.find(control).element as HTMLInputElement).value).toBe(saved)
+    expect(shown()).toBe(saved)
   })
 })
 
@@ -189,17 +199,14 @@ describe('Settings — a two-write save that half-lands shows what was saved (JC
       },
     })
     const component = await mountSection('subagents')
-    const control = 'select[aria-label="Subagent model"]'
-    await vi.waitFor(() => expect(component.find(`${control} option[value="ollama-cloud::gpt-4o"]`).exists()).toBe(true))
-
-    const el = component.find(control).element as HTMLSelectElement
-    el.value = 'ollama-cloud::gpt-4o'
-    await component.find(control).trigger('change')
+    const popover = await openPicker(component, 'Subagent model')
+    await vi.waitFor(() => expect(pickerOption(popover, 'ollama-cloud::gpt-4o')).toBeDefined())
+    pickerOption(popover, 'ollama-cloud::gpt-4o')!.click()
 
     await vi.waitFor(() => expect(component.findAll('[data-testid="api-error"]').some(a => a.text().includes('/api/config'))).toBe(true))
     await flushPromises()
     // The provider write landed and the model id is unchanged, so the saved pair is now ollama-cloud::gpt-4o.
-    expect((component.find(control).element as HTMLSelectElement).value).toBe('ollama-cloud::gpt-4o')
+    expect(pickerValue(component, 'Subagent model')).toBe('ollama-cloud::gpt-4o')
   })
 
   it('speech model whose voice reset fails', async () => {
@@ -219,15 +226,13 @@ describe('Settings — a two-write save that half-lands shows what was saved (JC
       },
     })
     const component = await mountSection('speech')
-    const control = 'select[aria-label="Text-to-speech model"]'
-    await vi.waitFor(() => expect(component.find(`${control} option[value="kokoro-multi-lang-v1_0"]`).exists()).toBe(true))
-
-    const el = component.find(control).element as HTMLSelectElement
-    el.value = 'kokoro-multi-lang-v1_0'
-    await component.find(control).trigger('change')
+    await vi.waitFor(() => expect(pickerValue(component, 'Text-to-speech model')).toBe('piper-en_US-amy-low'))
+    const popover = await openPicker(component, 'Text-to-speech model')
+    await vi.waitFor(() => expect(pickerOption(popover, 'kokoro-multi-lang-v1_0')).toBeDefined())
+    pickerOption(popover, 'kokoro-multi-lang-v1_0')!.click()
 
     await vi.waitFor(() => expect(component.findAll('[data-testid="api-error"]').some(a => a.text().includes('/api/config'))).toBe(true))
     await flushPromises()
-    expect((component.find(control).element as HTMLSelectElement).value).toBe('kokoro-multi-lang-v1_0')
+    expect(pickerValue(component, 'Text-to-speech model')).toBe('kokoro-multi-lang-v1_0')
   })
 })

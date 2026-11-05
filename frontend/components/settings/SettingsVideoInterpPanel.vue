@@ -6,6 +6,7 @@
 // Reads the shared config store + provider-model catalog; derives the main
 // agent's model as the default via its own (Nuxt-deduped) /api/agents fetch.
 import type { Agent, ProviderModelDef } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
@@ -181,6 +182,12 @@ const videoModelOrphaned = computed(() =>
   videoModel.value !== '' && !videoModelOptions.value.some(o => o.id === videoModel.value),
 )
 const videoModelSelectValue = computed(() => videoModel.value)
+const videoPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: videoModelsLoading.value ? 'loading…' : '(select a model)' },
+  ...videoModelOptions.value.map(m => modelOption(m.id, m.label, { id: m.id, name: m.label })),
+  // Kept selectable so a saved model discovery no longer lists isn't silently dropped.
+  ...(videoModelOrphaned.value ? [{ value: videoModel.value, label: `${videoModel.value} (saved)` }] : []),
+])
 watch([videoEnabled, videoProvider, vllmReachable], () => {
   discoverVideoModels()
 }, { immediate: true })
@@ -451,31 +458,17 @@ async function setVideoModel(value: string) {
       <div class="bg-surface-elevated border border-border">
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Video model</span>
-          <select
-            :value="videoModelSelectValue"
-            aria-label="Video model"
+          <SearchableSelect
+            :model-value="videoModelSelectValue"
+            :options="videoPickerOptions"
+            placeholder="(select a model)"
+            label="Video model"
             :disabled="videoModelsLoading"
+            search-label="Type to filter models"
+            empty-text="No matching models."
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden disabled:opacity-50"
-            @change="setVideoModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              {{ videoModelsLoading ? 'loading…' : '(select a model)' }}
-            </option>
-            <option
-              v-for="m in videoModelOptions"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.label }}
-            </option>
-            <!-- Keep a saved-but-not-discovered model selectable so it isn't silently dropped. -->
-            <option
-              v-if="videoModelOrphaned"
-              :value="videoModel"
-            >
-              {{ videoModel }} (saved)
-            </option>
-          </select>
+            @update:model-value="setVideoModel"
+          />
           <button
             type="button"
             class="text-xs text-fg-muted underline hover:text-fg-strong disabled:opacity-50 shrink-0"

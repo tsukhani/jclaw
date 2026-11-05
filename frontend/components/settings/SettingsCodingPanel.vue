@@ -26,15 +26,10 @@ const availableProviderNames = computed(() => {
   return [...names]
 })
 
-const allModelOptions = computed(() => {
-  const opts: { value: string, label: string }[] = []
-  for (const provider of availableProviderNames.value) {
-    for (const m of getProviderModels(provider)) {
-      opts.push({ value: `${provider}::${m.id}`, label: `${provider} / ${m.name || m.id}` })
-    }
-  }
-  return opts
-})
+const acpModelOptions = computed(() => [
+  { value: '', label: 'Harness default (the CLI\'s own model and login)' },
+  ...providerModelOptions(availableProviderNames.value, getProviderModels),
+])
 
 // JCLAW-499: external-harness (ACP) runtime command. Empty = disabled
 // (runtime="acp" spawns are refused until set). Operator-set only.
@@ -444,25 +439,17 @@ async function saveAcpModel(value: string) {
               Provider/model the acp coding harness runs with instead of its own default. Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses take neither and refuse the spawn. A per-spawn modelProvider/modelId on subagent_spawn overrides this.
             </InfoTip>
           </span>
-          <!-- min-w-0: a flex item's min-width defaults to its content, and a select's
-               content is its widest option, so flex-1 alone overflows the row. -->
-          <select
-            :value="acpModelValue"
-            aria-label="ACP harness model"
+          <SearchableSelect
+            :model-value="acpModelValue"
+            :options="acpModelOptions"
+            placeholder="Choose a model"
+            label="ACP harness model"
+            search-label="Type to filter models"
+            empty-text="No matching models."
+            content-class="font-mono"
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            @change="saveAcpModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              Harness default (the CLI's own model and login)
-            </option>
-            <option
-              v-for="o in allModelOptions"
-              :key="o.value"
-              :value="o.value"
-            >
-              {{ o.label }}
-            </option>
-          </select>
+            @update:model-value="saveAcpModel"
+          />
         </div>
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">

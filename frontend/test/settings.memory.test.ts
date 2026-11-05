@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { looksLikeEmbeddingModel } from '~/utils/embeddingModels'
+import { openPicker, pickerOption, pickerOptions, pickerOptionValues, pickValue, typeInPicker } from './searchable-select-driver'
 
 /**
  * Settings → Memory Embeddings (JCLAW-932).
@@ -178,6 +179,38 @@ describe('Settings page — Memory Embeddings', () => {
     expect(values).not.toContain('openrouter')
   })
 
+  it('saves the reranker model picked from the list narrowed by typing', async () => {
+    const posts: { key: string, value: string }[] = []
+    baseEndpoints([{ key: 'memory.rerank.enabled', value: 'true' }, { key: 'memory.rerank.provider', value: 'lm-studio' }])
+    registerEndpoint('/api/providers/lm-studio/discover-models', () => ({
+      models: [{ id: CHAT_MODEL, name: CHAT_MODEL }, { id: 'llama-3.2-3b-instruct', name: 'Llama 3.2 3B Instruct' }],
+    }))
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        posts.push(await readBody(event) as { key: string, value: string })
+        return { status: 'ok' }
+      },
+    })
+    const component = await mountSettingsSection('memory-reranker')
+
+    const popover = await openPicker(component, 'Reranker model')
+    await vi.waitFor(() => expect(pickerOptions(popover))
+      .toEqual(['Select a model…', CHAT_MODEL, 'Llama 3.2 3B Instruct · llama-3.2-3b-instruct']))
+    await typeInPicker(popover, 'llama')
+    expect(pickerOptions(popover)).toEqual(['Llama 3.2 3B Instruct · llama-3.2-3b-instruct'])
+    pickerOption(popover, 'llama-3.2-3b-instruct')!.click()
+    await flushPromises()
+
+    await component.find('[data-testid="memory-rerank-save"]').trigger('click')
+    await vi.waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts).toEqual([
+      { key: 'memory.rerank.provider', value: 'lm-studio' },
+      { key: 'memory.rerank.model', value: 'llama-3.2-3b-instruct' },
+    ])
+  })
+
   it('keeps the shipped `memory` id pointing at the embedding panel', async () => {
     // /settings?section=memory has always addressed embeddings; the split must not
     // silently repoint an operator's bookmark at a different panel.
@@ -209,8 +242,7 @@ describe('Settings page — Memory Embeddings', () => {
     const component = await mountSettingsSection('memory')
     await flushPromises()
 
-    const values = component.find('[data-testid="memory-embedding-model"]')
-      .findAll('option').map(o => o.attributes('value'))
+    const values = pickerOptionValues(await openPicker(component, 'Embedding model'))
     expect(values).toContain(EMBED_MODEL)
   })
 
@@ -225,8 +257,7 @@ describe('Settings page — Memory Embeddings', () => {
     const component = await mountSettingsSection('memory')
     await flushPromises()
 
-    const values = component.find('[data-testid="memory-embedding-model"]')
-      .findAll('option').map(o => o.attributes('value'))
+    const values = pickerOptionValues(await openPicker(component, 'Embedding model'))
     expect(values).toContain(EMBED_MODEL)
   })
 
@@ -238,16 +269,14 @@ describe('Settings page — Memory Embeddings', () => {
     await flushPromises()
     await flushPromises()
 
-    const options = component.find('[data-testid="memory-embedding-model"]').findAll('option')
-    const values = options.map(o => o.attributes('value'))
+    const values = pickerOptionValues(await openPicker(component, 'Embedding model'))
     expect(values).toContain(EMBED_MODEL)
     expect(values).not.toContain(CHAT_MODEL)
 
     // The heuristic narrows, it does not decide — the hidden model stays reachable.
     await component.find('[data-testid="memory-embedding-show-all"]').trigger('click')
     await flushPromises()
-    const afterValues = component.find('[data-testid="memory-embedding-model"]')
-      .findAll('option').map(o => o.attributes('value'))
+    const afterValues = pickerOptionValues(await openPicker(component, 'Embedding model'))
     expect(afterValues).toContain(CHAT_MODEL)
   })
 
@@ -261,7 +290,7 @@ describe('Settings page — Memory Embeddings', () => {
     await component.find('[data-testid="memory-embedding-provider"]').setValue('lm-studio')
     await flushPromises()
     await flushPromises()
-    await component.find('[data-testid="memory-embedding-model"]').setValue(EMBED_MODEL)
+    await pickValue(component, 'Embedding model', EMBED_MODEL)
     await flushPromises()
 
     // Unprobed: the model is picked but not yet confirmed, so Save stays shut.
@@ -293,7 +322,7 @@ describe('Settings page — Memory Embeddings', () => {
     await flushPromises()
     await component.find('[data-testid="memory-embedding-show-all"]').trigger('click')
     await flushPromises()
-    await component.find('[data-testid="memory-embedding-model"]').setValue(CHAT_MODEL)
+    await pickValue(component, 'Embedding model', CHAT_MODEL)
     await flushPromises()
     await component.find('[data-testid="memory-embedding-probe"]').trigger('click')
     await flushPromises()
@@ -360,7 +389,7 @@ describe('Settings page — Memory Embeddings', () => {
 
     await component.find('[data-testid="memory-embedding-show-all"]').trigger('click')
     await flushPromises()
-    await component.find('[data-testid="memory-embedding-model"]').setValue(CHAT_MODEL)
+    await pickValue(component, 'Embedding model', CHAT_MODEL)
     await flushPromises()
 
     expect(component.find('[data-testid="memory-embedding-reembed-warning"]').exists()).toBe(true)

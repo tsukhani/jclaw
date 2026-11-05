@@ -6,6 +6,11 @@ import { clearNuxtData } from '#app'
 import SettingsModelRouterPanel from '~/components/settings/SettingsModelRouterPanel.vue'
 import { sectionGroups } from '~/components/settings/sections'
 import { useProvideSettingsConfig } from '~/composables/useSettingsConfig'
+import {
+  openPicker, picker, pickerGroups, pickerItems, pickerOption, pickerOptions, pickerValue, pickValue, typeInPicker,
+} from './searchable-select-driver'
+
+const CLASSIFIER = 'Prompt classifier model'
 
 /**
  * Settings > Model Router (JCLAW-1222): the per-class model lists are written as the JSON the
@@ -119,32 +124,6 @@ beforeEach(() => {
   ]
 })
 
-// The add picker's popover teleports to the document body, so its contents are read from there.
-async function openAddPicker(c: { find: (s: string) => { trigger: (e: string) => Promise<void> } }, label: string) {
-  await c.find(`button[aria-label="Add a model to the ${label} list"]`).trigger('click')
-  await flushPromises()
-}
-
-async function typeFilter(text: string) {
-  const input = document.body.querySelector<HTMLInputElement>('[data-slot="command-input"]')!
-  input.value = text
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  await flushPromises()
-}
-
-/** An option as the operator reads it: its label, then its detail when it has one. */
-function optionText(e: Element): string {
-  return [...e.querySelectorAll('span')].map(s => s.textContent!.trim()).join(' · ')
-}
-
-function addOptions(): string[] {
-  return [...document.body.querySelectorAll('[data-slot="command-item"]')].map(optionText)
-}
-
-function addOption(text: string): HTMLElement {
-  return [...document.body.querySelectorAll<HTMLElement>('[data-slot="command-item"]')].find(e => optionText(e) === text)!
-}
-
 /** An Ollama decision model as GET /api/decision/ollama lists it, stating nothing else. */
 function ollamaModel(name: string) {
   return { name, contextTokens: null, parameterSize: null, sizeBytes: null }
@@ -167,12 +146,12 @@ describe('SettingsModelRouterPanel', () => {
   it('narrows the add list to the models whose provider or name holds what is typed', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await openAddPicker(c, 'Chat')
-    expect(addOptions()).toEqual(['ollama-cloud / glm-5.3-flash', 'ollama-cloud / kimi-k3', 'openrouter / z-ai/glm-5.3-flash'])
-    await typeFilter('glm')
-    expect(addOptions()).toEqual(['ollama-cloud / glm-5.3-flash', 'openrouter / z-ai/glm-5.3-flash'])
-    await typeFilter('openrouter')
-    expect(addOptions()).toEqual(['openrouter / z-ai/glm-5.3-flash'])
+    const popover = await openPicker(c, 'Add a model to the Chat list')
+    expect(pickerOptions(popover)).toEqual(['ollama-cloud / glm-5.3-flash', 'ollama-cloud / kimi-k3', 'openrouter / z-ai/glm-5.3-flash'])
+    await typeInPicker(popover, 'glm')
+    expect(pickerOptions(popover)).toEqual(['ollama-cloud / glm-5.3-flash', 'openrouter / z-ai/glm-5.3-flash'])
+    await typeInPicker(popover, 'openrouter')
+    expect(pickerOptions(popover)).toEqual(['openrouter / z-ai/glm-5.3-flash'])
     c.unmount()
   })
 
@@ -182,10 +161,10 @@ describe('SettingsModelRouterPanel', () => {
       : e)
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await openAddPicker(c, 'Chat')
-    await typeFilter('z-ai/glm')
-    expect(addOptions()).toEqual(['openrouter / Z.ai: GLM 5.3 Flash · z-ai/glm-5.3-flash'])
-    addOption('openrouter / Z.ai: GLM 5.3 Flash · z-ai/glm-5.3-flash').click()
+    const popover = await openPicker(c, 'Add a model to the Chat list')
+    await typeInPicker(popover, 'z-ai/glm')
+    expect(pickerOptions(popover)).toEqual(['openrouter / Z.ai: GLM 5.3 Flash · z-ai/glm-5.3-flash'])
+    pickerOption(popover, 'openrouter::z-ai/glm-5.3-flash')!.click()
     await vi.waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 })
     expect(posts[0]!.value).toBe(JSON.stringify([
       { provider: 'ollama-cloud', model: 'glm-5.3-flash' },
@@ -196,9 +175,9 @@ describe('SettingsModelRouterPanel', () => {
   it('adds a model by writing the whole ordered list', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await openAddPicker(c, 'Chat')
-    await typeFilter('z-ai')
-    addOption('openrouter / z-ai/glm-5.3-flash').click()
+    const popover = await openPicker(c, 'Add a model to the Chat list')
+    await typeInPicker(popover, 'z-ai')
+    pickerOption(popover, 'openrouter::z-ai/glm-5.3-flash')!.click()
     await vi.waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 })
     expect(posts).toContainEqual({
       key: 'router.chat.models',
@@ -268,11 +247,10 @@ describe('SettingsModelRouterPanel', () => {
   it('defaults the classifier to the keyword rules and writes both keys when a model is picked', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    expect((select.element as HTMLSelectElement).value).toBe('')
-    expect(select.text()).toContain('Keyword rules (no model call)')
+    expect(pickerValue(c, CLASSIFIER)).toBe('')
+    expect(picker(c, CLASSIFIER).text()).toBe('Keyword rules (no model call)')
 
-    await select.setValue('ollama-cloud::glm-5.3-flash')
+    await pickValue(c, CLASSIFIER, 'ollama-cloud::glm-5.3-flash')
     await vi.waitFor(() => expect(posts).toHaveLength(2), { timeout: 5000 })
     expect(posts).toContainEqual({ key: 'router.classifier.provider', value: 'ollama-cloud' })
     expect(posts).toContainEqual({ key: 'router.classifier.model', value: 'glm-5.3-flash' })
@@ -286,19 +264,18 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    expect((select.element as HTMLSelectElement).value).toBe('ollama-cloud::glm-5.3-flash')
+    expect(pickerValue(c, CLASSIFIER)).toBe('ollama-cloud::glm-5.3-flash')
 
-    await select.setValue('')
+    await pickValue(c, CLASSIFIER, '')
     await vi.waitFor(() => expect(deletes).toEqual(['router.classifier.provider', 'router.classifier.model']), { timeout: 5000 })
   })
 
   it('offers JEV only once a TypeSafe key is set, and points to where it is set', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const jev = c.find('select[aria-label="Prompt classifier model"] option[value="jev::jev-latest"]')
-    expect(jev.text()).toContain('JEV (TypeSafe AI)')
-    expect((jev.element as HTMLOptionElement).disabled).toBe(true)
+    const jev = () => pickerItems(popover).find(i => i.value === 'jev::jev-latest')
+    const popover = await openPicker(c, CLASSIFIER)
+    expect(jev()).toEqual({ value: 'jev::jev-latest', text: 'JEV (TypeSafe AI) — needs a TypeSafe API key', disabled: true, group: 'JEV (TypeSafe AI)' })
     const hint = c.find('[data-testid="router-jev-key-hint"]')
     expect(hint.text()).toContain('Settings → Decision Providers')
     expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
@@ -307,8 +284,9 @@ describe('SettingsModelRouterPanel', () => {
     clearNuxtData()
     const keyed = await mountSuspended(Harness)
     await flushPromises()
-    const enabled = keyed.find('select[aria-label="Prompt classifier model"] option[value="jev::jev-latest"]')
-    expect((enabled.element as HTMLOptionElement).disabled).toBe(false)
+    const keyedPopover = await openPicker(keyed, CLASSIFIER)
+    expect(pickerItems(keyedPopover).find(i => i.value === 'jev::jev-latest'))
+      .toEqual({ value: 'jev::jev-latest', text: 'JEV (TypeSafe AI)', disabled: false, group: 'JEV (TypeSafe AI)' })
     expect(keyed.find('[data-testid="router-jev-key-hint"]').exists()).toBe(false)
   })
 
@@ -321,7 +299,7 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('jev::jev-latest')
+    await pickValue(c, CLASSIFIER, 'jev::jev-latest')
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
@@ -339,10 +317,9 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    expect((select.element as HTMLSelectElement).value).toBe('jev::jev-latest')
+    expect(pickerValue(c, CLASSIFIER)).toBe('jev::jev-latest')
 
-    await select.setValue('ollama-cloud::glm-5.3-flash')
+    await pickValue(c, CLASSIFIER, 'ollama-cloud::glm-5.3-flash')
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
@@ -356,31 +333,34 @@ describe('SettingsModelRouterPanel', () => {
     entries = [...entries, { key: 'decision.jev.apiKey', value: 'ts-s****' }, { key: 'decision.baseten.apiKey', value: 'bt-s****' }]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    await vi.waitFor(() => expect(select.findAll('optgroup')).toHaveLength(5))
+    const popover = await openPicker(c, CLASSIFIER)
+    await vi.waitFor(() => expect(pickerGroups(popover)).toHaveLength(6))
     // The decision groups run in the Decision Providers cards' order, and the LLM providers' models follow in their own.
-    expect(select.findAll('optgroup').map(g => [g.attributes('label'), g.findAll('option').map(o => o.text())])).toEqual([
+    const grouped = pickerGroups(popover).map(g => [g, pickerItems(popover).filter(i => i.group === g).map(i => i.text)])
+    expect(grouped).toEqual([
+      ['', ['Keyword rules (no model call)']],
       ['JEV (TypeSafe AI)', ['JEV (TypeSafe AI)']],
       ['Laya', ['Laya / english (512 tokens)', 'Laya / multilingual (1,024 tokens)', 'Laya / typed-decisions (1,024 tokens)']],
       ['Ollama', ['Ollama decision / tev1:latest', 'Ollama decision / clef:cloud']],
       ['Baseten', ['Baseten / elephant-1 (16,384 tokens)', 'Baseten / mammoth-1 (16,384 tokens)']],
       ['Language models', ['ollama-cloud / glm-5.3-flash', 'ollama-cloud / kimi-k3', 'openrouter / z-ai/glm-5.3-flash']],
     ])
-    expect(select.findAll('optgroup option').map(o => (o.element as HTMLOptionElement).disabled)).toEqual(Array(11).fill(false))
-    expect(select.findAll(':scope > option').map(o => o.text())).toEqual(['Keyword rules (no model call)'])
+    expect(pickerItems(popover).map(i => i.disabled)).toEqual(Array(12).fill(false))
   })
 
   it('offers each decision model the Ollama server lists, and writes the pair', async () => {
     ollama = { ...ollama, models: [ollamaModel('tev1:latest'), ollamaModel('nimble:latest')] }
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await vi.waitFor(() => expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(2))
-    expect(c.findAll('[data-testid="router-ollama-decision-option"]').map(o => [o.attributes('value'), o.text()])).toEqual([
+    const popover = await openPicker(c, CLASSIFIER)
+    const ollamaOffered = () => pickerItems(popover).filter(i => i.group === 'Ollama').map(i => [i.value, i.text])
+    await vi.waitFor(() => expect(ollamaOffered()).toHaveLength(2))
+    expect(ollamaOffered()).toEqual([
       ['ollama-decision::tev1:latest', 'Ollama decision / tev1:latest'],
       ['ollama-decision::nimble:latest', 'Ollama decision / nimble:latest'],
     ])
 
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1:latest')
+    pickerOption(popover, 'ollama-decision::tev1:latest')!.click()
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
@@ -392,32 +372,27 @@ describe('SettingsModelRouterPanel', () => {
   it('an Ollama server that lists no decision model adds no Ollama group', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await vi.waitFor(() => expect(c.findAll('optgroup')).toHaveLength(4))
-    expect(c.findAll('optgroup').map(g => g.attributes('label'))).toEqual(['JEV (TypeSafe AI)', 'Laya', 'Baseten', 'Language models'])
+    const popover = await openPicker(c, CLASSIFIER)
+    await vi.waitFor(() => expect(pickerGroups(popover)).toEqual(['', 'JEV (TypeSafe AI)', 'Laya', 'Baseten', 'Language models']))
   })
 
   it('an unreachable Ollama server is one disabled option', async () => {
     ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [] }
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const group = () => c.find('optgroup[label="Ollama"]')
-    await vi.waitFor(() => expect(group().exists()).toBe(true))
-    const options = group().findAll('option')
-    expect(options.map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
-      ['Ollama decision — server not reachable', true],
-    ])
-    expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(0)
+    const popover = await openPicker(c, CLASSIFIER)
+    const ollamaGroup = () => pickerItems(popover).filter(i => i.group === 'Ollama').map(i => [i.text, i.disabled])
+    await vi.waitFor(() => expect(ollamaGroup()).toEqual([['Ollama decision — server not reachable', true]]))
+    expect(pickerItems(popover).filter(i => i.value.startsWith('ollama-decision::'))).toEqual([])
   })
 
   it('an Ollama read JClaw could not answer reads as an unreachable server, not as no group', async () => {
     ollamaReadFails = true
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const group = () => c.find('optgroup[label="Ollama"]')
-    await vi.waitFor(() => expect(group().exists()).toBe(true))
-    expect(group().findAll('option').map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
-      ['Ollama decision — server not reachable', true],
-    ])
+    const popover = await openPicker(c, CLASSIFIER)
+    const ollamaGroup = () => pickerItems(popover).filter(i => i.group === 'Ollama').map(i => [i.text, i.disabled])
+    await vi.waitFor(() => expect(ollamaGroup()).toEqual([['Ollama decision — server not reachable', true]]))
   })
 
   it('an unreachable Laya server disables its checkpoints, and a stored Laya classifier stays selected', async () => {
@@ -429,13 +404,15 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const options = () => c.findAll('[data-testid="router-laya-option"]').map(o => [o.text(), (o.element as HTMLOptionElement).disabled])
+    const popover = await openPicker(c, CLASSIFIER)
+    const options = () => pickerItems(popover).filter(i => i.group === 'Laya').map(i => [i.text, i.disabled])
     await vi.waitFor(() => expect(options()).toEqual([
       ['Laya / english (512 tokens) — server not reachable', true],
       ['Laya / multilingual (1,024 tokens) — server not reachable', true],
       ['Laya / typed-decisions (1,024 tokens) — server not reachable', true],
     ]))
-    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+    expect(pickerValue(c, CLASSIFIER)).toBe('laya::english')
+    expect(picker(c, CLASSIFIER).text()).toBe('Laya / english (512 tokens) — server not reachable')
   })
 
   it('a refused model write puts the previous classifier back and keeps the refusal on the panel', async () => {
@@ -448,9 +425,10 @@ describe('SettingsModelRouterPanel', () => {
     refused = body => body.key === 'router.classifier.model' && body.value === 'tev1:latest'
     const c = await mountSuspended(Harness)
     await flushPromises()
-    await vi.waitFor(() => expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(1))
+    const popover = await openPicker(c, CLASSIFIER)
+    await vi.waitFor(() => expect(pickerOption(popover, 'ollama-decision::tev1:latest')).toBeDefined())
 
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1:latest')
+    pickerOption(popover, 'ollama-decision::tev1:latest')!.click()
     await vi.waitFor(() => expect(ops).toHaveLength(5), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
@@ -464,7 +442,7 @@ describe('SettingsModelRouterPanel', () => {
       { key: 'router.classifier.model', value: 'english' },
     ])
     await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').text()).toContain('router.classifier.model refused'))
-    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+    expect(pickerValue(c, CLASSIFIER)).toBe('laya::english')
   })
 
   it('a stored Ollama classifier the server no longer lists shows as itself, not available', async () => {
@@ -476,13 +454,14 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    const stranded = () => select.find('option[value="ollama-decision::tev1:0.8b"]')
-    await vi.waitFor(() => expect(stranded().text()).toBe('Ollama decision / tev1:0.8b — not available'))
-    expect((stranded().element as HTMLOptionElement).disabled).toBe(true)
-    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:0.8b')
-    expect(c.find('optgroup[label="Ollama"]').findAll('option').map(o => o.text()))
-      .toEqual(['Ollama decision / tev1:latest', 'Ollama decision / tev1:0.8b — not available'])
+    const popover = await openPicker(c, CLASSIFIER)
+    const ollamaGroup = () => pickerItems(popover).filter(i => i.group === 'Ollama').map(i => [i.text, i.disabled])
+    await vi.waitFor(() => expect(ollamaGroup()).toEqual([
+      ['Ollama decision / tev1:latest', false],
+      ['Ollama decision / tev1:0.8b — not available', true],
+    ]))
+    expect(pickerValue(c, CLASSIFIER)).toBe('ollama-decision::tev1:0.8b')
+    expect(picker(c, CLASSIFIER).text()).toBe('Ollama decision / tev1:0.8b — not available')
   })
 
   it('while the Ollama read is pending, a stored Ollama classifier stays selected and is not called unavailable', async () => {
@@ -498,15 +477,16 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    const options = () => c.findAll('[data-testid="router-ollama-decision-option"]').map(o => o.text())
+    const popover = await openPicker(c, CLASSIFIER)
+    const options = () => pickerItems(popover).filter(i => i.group === 'Ollama').map(i => i.text)
     expect(options()).toEqual(['Ollama decision / tev1:latest'])
-    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:latest')
+    expect(pickerValue(c, CLASSIFIER)).toBe('ollama-decision::tev1:latest')
 
     answer()
     await vi.waitFor(() => expect(options()).toEqual(['Ollama decision / nimble:latest', 'Ollama decision / tev1:latest']))
-    expect((select.element as HTMLSelectElement).value).toBe('ollama-decision::tev1:latest')
+    expect(pickerValue(c, CLASSIFIER)).toBe('ollama-decision::tev1:latest')
     expect(c.text()).not.toContain('not available')
+    expect(popover.textContent).not.toContain('not available')
   })
 
   it('a stored classifier on a model no provider registers shows as itself, not available', async () => {
@@ -517,11 +497,13 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const select = c.find('select[aria-label="Prompt classifier model"]')
-    const stranded = c.find('[data-testid="router-stranded-classifier-option"]')
-    expect(stranded.text()).toBe('openrouter / z-ai/glm-4.5 — not available')
-    expect((stranded.element as HTMLOptionElement).disabled).toBe(true)
-    expect((select.element as HTMLSelectElement).value).toBe('openrouter::z-ai/glm-4.5')
+    expect(pickerValue(c, CLASSIFIER)).toBe('openrouter::z-ai/glm-4.5')
+    expect(picker(c, CLASSIFIER).text()).toBe('openrouter / z-ai/glm-4.5 — not available')
+    const popover = await openPicker(c, CLASSIFIER)
+    expect(pickerItems(popover).filter(i => i.group === '').map(i => [i.text, i.disabled])).toEqual([
+      ['Keyword rules (no model call)', false],
+      ['openrouter / z-ai/glm-4.5 — not available', true],
+    ])
   })
 
   it('names no classifier as not available once it is one the lists hold', async () => {
@@ -532,23 +514,25 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::typed-decisions')
-    expect(c.find('[data-testid="router-stranded-classifier-option"]').exists()).toBe(false)
+    expect(pickerValue(c, CLASSIFIER)).toBe('laya::typed-decisions')
     expect(c.text()).not.toContain('not available')
+    const popover = await openPicker(c, CLASSIFIER)
+    expect(pickerItems(popover).filter(i => i.group === '').map(i => i.text)).toEqual(['Keyword rules (no model call)'])
+    expect(popover.textContent).not.toContain('not available')
   })
 
   it('offers every Laya checkpoint with its context, and writes the pair', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const options = c.findAll('[data-testid="router-laya-option"]')
-    expect(options.map(o => [o.attributes('value'), o.text()])).toEqual([
+    const popover = await openPicker(c, CLASSIFIER)
+    expect(pickerItems(popover).filter(i => i.group === 'Laya').map(i => [i.value, i.text])).toEqual([
       ['laya::english', 'Laya / english (512 tokens)'],
       ['laya::multilingual', 'Laya / multilingual (1,024 tokens)'],
       ['laya::typed-decisions', 'Laya / typed-decisions (1,024 tokens)'],
     ])
     expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
 
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('laya::english')
+    pickerOption(popover, 'laya::english')!.click()
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',
@@ -565,7 +549,7 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const english = await mountSuspended(Harness)
     await flushPromises()
-    expect((english.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+    expect(pickerValue(english, CLASSIFIER)).toBe('laya::english')
     const hint = english.find('[data-testid="router-laya-limits"]')
     const text = hint.text().replace(/\s+/g, ' ')
     expect(text).toContain('Laya\'s english checkpoint reads 512 tokens of each question; a longer prompt is cut, not refused (Laya\'s model card).')
@@ -598,15 +582,15 @@ describe('SettingsModelRouterPanel', () => {
     ]
     const c = await mountSuspended(Harness)
     await flushPromises()
-    expect((c.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('jev::jev-latest')
+    expect(pickerValue(c, CLASSIFIER)).toBe('jev::jev-latest')
     expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
   })
 
   it('offers both Baseten models with their context, disabled with a hint until a key is set', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
-    const options = c.findAll('[data-testid="router-baseten-option"]')
-    expect(options.map(o => [o.attributes('value'), o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+    const popover = await openPicker(c, CLASSIFIER)
+    expect(pickerItems(popover).filter(i => i.group === 'Baseten').map(i => [i.value, i.text, i.disabled])).toEqual([
       ['baseten-decision::decision-models/baseten-elephant-9b-latest', 'Baseten / elephant-1 (16,384 tokens) — needs a Baseten API key', true],
       ['baseten-decision::decision-models/baseten-mammoth-27b-latest', 'Baseten / mammoth-1 (16,384 tokens) — needs a Baseten API key', true],
     ])
@@ -618,8 +602,8 @@ describe('SettingsModelRouterPanel', () => {
     clearNuxtData()
     const keyed = await mountSuspended(Harness)
     await flushPromises()
-    const enabled = keyed.findAll('[data-testid="router-baseten-option"]')
-    expect(enabled.map(o => [o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+    const keyedPopover = await openPicker(keyed, CLASSIFIER)
+    expect(pickerItems(keyedPopover).filter(i => i.group === 'Baseten').map(i => [i.text, i.disabled])).toEqual([
       ['Baseten / elephant-1 (16,384 tokens)', false],
       ['Baseten / mammoth-1 (16,384 tokens)', false],
     ])
@@ -631,7 +615,7 @@ describe('SettingsModelRouterPanel', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    await c.find('select[aria-label="Prompt classifier model"]').setValue('baseten-decision::decision-models/baseten-mammoth-27b-latest')
+    await pickValue(c, CLASSIFIER, 'baseten-decision::decision-models/baseten-mammoth-27b-latest')
     await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
     expect(ops).toEqual([
       'DELETE router.classifier.model',

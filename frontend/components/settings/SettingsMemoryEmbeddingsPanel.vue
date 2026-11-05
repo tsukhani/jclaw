@@ -12,6 +12,7 @@
  */
 import type { EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
 
@@ -89,6 +90,10 @@ const models = computed(() => {
   const shortlisted = catalog.value.filter(m => looksLikeEmbeddingModel(m.id, m.name))
   return shortlisted.length > 0 ? shortlisted : catalog.value
 })
+const modelPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Select a model…' },
+  ...models.value.map(m => modelOption(m.id, m.name || m.id, m)),
+])
 
 const hiddenModelCount = computed(() =>
   showAllModels.value ? 0 : catalog.value.length - models.value.length,
@@ -285,23 +290,17 @@ async function saveSelection() {
             class="block"
           >
             <span class="block text-xs font-medium text-fg-strong mb-1">Model</span>
-            <select
+            <SearchableSelect
               id="memory-embedding-model"
               v-model="selectedModel"
+              :options="modelPickerOptions"
+              placeholder="Select a model…"
+              label="Embedding model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
               data-testid="memory-embedding-model"
-            >
-              <option value="">
-                Select a model…
-              </option>
-              <option
-                v-for="m in models"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </select>
+            />
           </label>
           <p
             v-if="discovering"

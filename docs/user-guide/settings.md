@@ -4,6 +4,8 @@ The [Settings](/settings) page is the operator's control panel. Configuration is
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
+Every list of models opens with a box that says **Type to filter models**. Type part of a model's name, its ID or its provider, and the list keeps only the models that match. Pick one with the mouse, or with the arrow keys and Enter. Enter alone picks the first match, and Esc closes the list without changing anything.
+
 A saved secret (an API key, token, password or secret header) is never shown back, in Settings or on the channel pages. It appears as `••••••••` with a pencil. The pencil opens an empty field for a whole new value; saving it blank keeps the one already saved, and where a secret can be removed, the editor's **Remove** button does it. JClaw refuses a value that is only the saved one's mask, as the API reads it back, rather than saving it over the saved value.
 
 JClaw stores these secrets encrypted, with a key it makes from the secret in `certs/.env`. If a stored secret does not decrypt, a red banner at the top of Settings says how many ("2 stored credentials do not decrypt") and lists each one with an **Enter it again** link to the page that takes it. JClaw treats each one as missing until you enter it again. This happens when the database came from an installation with a different `certs/.env`. Put that `certs/.env` back and restart, and every one of them decrypts again. See [Encrypted credentials](#settings-encrypted-credentials).

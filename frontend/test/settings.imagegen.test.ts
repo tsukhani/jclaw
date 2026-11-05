@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { openPicker, picker, pickerItems, pickerOptionValues, pickerValue, pickValue } from './searchable-select-driver'
 
 /**
  * JCLAW-229 — Image Generation settings section. Renders the section, gates the cloud-provider radios
@@ -133,7 +134,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     expect(flux.element.disabled).toBe(true)
   })
 
-  it('JCLAW-700: groups Replicate models into image-to-image and text-to-image optgroups', async () => {
+  it('JCLAW-700: groups Replicate models into image-to-image and text-to-image groups', async () => {
     registerEndpoint('/api/imagegen/models', () => [
       { slug: 'black-forest-labs/flux-schnell', name: 'flux-schnell', description: 'fast t2i', imageToImage: false },
       { slug: 'black-forest-labs/flux-kontext-pro', name: 'flux-kontext-pro', description: 'style transfer', imageToImage: true },
@@ -141,20 +142,16 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     setupApi({ imagegenProvider: 'replicate', replicateKey: 're_****' })
     const c = await mountSettingsSection('image-generation')
 
-    const select = c.find('select[aria-label="Replicate image model"]')
-    expect(select.exists()).toBe(true)
+    const popover = await openPicker(c, 'Replicate image model')
 
-    // The discovered models are grouped under labeled optgroups (image-to-image first).
-    await vi.waitFor(() => {
-      const labels = select.findAll('optgroup').map(g => g.attributes('label'))
-      expect(labels).toContain('Image-to-image (style transfer)')
-      expect(labels).toContain('Text-to-image')
-    })
-    const groups = select.findAll('optgroup')
-    const i2i = groups.find(g => g.attributes('label') === 'Image-to-image (style transfer)')!
-    expect(i2i.text()).toContain('black-forest-labs/flux-kontext-pro')
-    const t2i = groups.find(g => g.attributes('label') === 'Text-to-image')!
-    expect(t2i.text()).toContain('black-forest-labs/flux-schnell')
+    // The discovered models are grouped under labeled headings (image-to-image first), each with its description as a tooltip.
+    await vi.waitFor(() => expect(pickerItems(popover).map(i => [i.group, i.value])).toEqual([
+      ['', ''],
+      ['Image-to-image (style transfer)', 'black-forest-labs/flux-kontext-pro'],
+      ['Text-to-image', 'black-forest-labs/flux-schnell'],
+    ]))
+    expect([...popover.querySelectorAll('[data-slot="command-item"]')].map(e => e.getAttribute('title')))
+      .toEqual([null, 'style transfer', 'fast t2i'])
   })
 
   it('enables the self-hosted Flux radio when uv is available and POSTs flux-local on select', async () => {
@@ -249,15 +246,11 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     setupApi({ imagegenProvider: 'bfl', bflKey: 'bfl-****', bflModel: 'flux-retired' })
     const c = await mountSettingsSection('image-generation')
 
-    const select = c.find<HTMLSelectElement>('select[aria-label="Black Forest Labs image model"]')
-    expect(select.exists()).toBe(true)
-    await vi.waitFor(() => {
-      const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
-      expect(values).toEqual(['', 'flux-retired', 'flux-2-pro', 'flux-3-image'])
-    })
-    expect(select.element.value).toBe('flux-retired')
+    const popover = await openPicker(c, 'Black Forest Labs image model')
+    await vi.waitFor(() => expect(pickerOptionValues(popover)).toEqual(['', 'flux-retired', 'flux-2-pro', 'flux-3-image']))
+    expect(pickerValue(c, 'Black Forest Labs image model')).toBe('flux-retired')
     // Each backend keeps its own picker: Replicate's is not shown while BFL is active.
-    expect(c.find('select[aria-label="Replicate image model"]').exists()).toBe(false)
+    expect(picker(c, 'Replicate image model').exists()).toBe(false)
   })
 
   it('POSTs imagegen.bfl.model when a BFL model is chosen', async () => {
@@ -268,9 +261,9 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     setupApi({ imagegenProvider: 'bfl', bflKey: 'bfl-****', capturePost: b => captured.push(b) })
     const c = await mountSettingsSection('image-generation')
 
-    const select = c.find('select[aria-label="Black Forest Labs image model"]')
-    await vi.waitFor(() => expect(select.findAll('option')).toHaveLength(2))
-    await select.setValue('flux-3-image')
+    const popover = await openPicker(c, 'Black Forest Labs image model')
+    await vi.waitFor(() => expect(pickerOptionValues(popover)).toEqual(['', 'flux-3-image']))
+    await pickValue(c, 'Black Forest Labs image model', 'flux-3-image')
     await flushPromises()
 
     expect(captured).toContainEqual({ key: 'imagegen.bfl.model', value: 'flux-3-image' })
@@ -280,7 +273,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: 'bfl-****' })
     const c = await mountSettingsSection('image-generation')
 
-    expect(c.find('select[aria-label="Black Forest Labs image model"]').exists()).toBe(false)
+    expect(picker(c, 'Black Forest Labs image model').exists()).toBe(false)
   })
 
   it('sets the BFL API key inline (not via LLM Providers)', async () => {

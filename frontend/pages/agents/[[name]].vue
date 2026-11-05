@@ -44,6 +44,7 @@ import type {
   WorkspaceScanResponse,
 } from '~/types/api'
 import { effectiveThinkingLevels, findProviderModel, type ProviderModel } from '~/composables/useProviders'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { confirm } = useConfirm()
 
@@ -939,6 +940,11 @@ const autocaptureAvailableModels = computed(() => {
   return provider?.models ?? []
 })
 
+const toModelOptions = (models: ProviderModel[]): SearchableOption[] => models.map(m => modelOption(m.id, m.name || m.id, m))
+const modelPickerOptions = computed(() => toModelOptions(availableModels.value))
+const fallbackModelPickerOptions = computed(() => toModelOptions(fallbackAvailableModels.value))
+const autocaptureModelPickerOptions = computed(() => toModelOptions(autocaptureAvailableModels.value))
+
 // The currently selected model's full metadata — drives the thinking-level dropdown.
 const selectedModel = computed<ProviderModel | null>(() =>
   availableModels.value.find(m => m.id === form.value.modelId) ?? null,
@@ -1368,6 +1374,11 @@ function toggleMemoryAutocapture() {
 // JCLAW-534: immediate-save the extractor-model override. Sent as null when the
 // selection equals the agent's default model, so the agent keeps inheriting the
 // default (and tracks it if the default later changes).
+function pickMemoryModel(model: string) {
+  memoryAutocaptureModel.value = model
+  saveMemoryModel()
+}
+
 async function saveMemoryModel() {
   if (!editing.value) return
   savingMemory.value = true
@@ -2030,19 +2041,16 @@ const agentKinds = [
             class="block"
           >
             <span class="block text-xs text-fg-muted mb-1">Default Model</span>
-            <select
+            <SearchableSelect
               :id="agentModelId"
               v-model="form.modelId"
+              :options="modelPickerOptions"
+              placeholder="Choose a model"
+              label="Default Model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
-            >
-              <option
-                v-for="m in availableModels"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </select>
+            />
           </label>
           <label
             :for="agentFallbackProviderId"
@@ -2071,20 +2079,17 @@ const agentKinds = [
             class="block"
           >
             <span class="block text-xs text-fg-muted mb-1">Fallback Model</span>
-            <select
+            <SearchableSelect
               :id="agentFallbackModelId"
               v-model="form.fallbackModelId"
+              :options="fallbackModelPickerOptions"
+              placeholder="Choose a model"
+              label="Fallback Model"
               :disabled="!form.fallbackProvider"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
-            >
-              <option
-                v-for="m in fallbackAvailableModels"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </select>
+            />
           </label>
         </div>
         <p class="mt-2 text-xs text-fg-muted">
@@ -2275,21 +2280,18 @@ const agentKinds = [
               class="block"
             >
               <span class="block text-xs text-fg-muted mb-1">Model</span>
-              <select
+              <SearchableSelect
                 :id="agentMemoryModelId"
-                v-model="memoryAutocaptureModel"
+                :model-value="memoryAutocaptureModel"
+                :options="autocaptureModelPickerOptions"
+                placeholder="Choose a model"
+                label="Memory autocapture model"
                 :disabled="savingMemory"
+                search-label="Type to filter models"
+                empty-text="No matching models."
                 class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
-                @change="saveMemoryModel"
-              >
-                <option
-                  v-for="m in autocaptureAvailableModels"
-                  :key="m.id"
-                  :value="m.id"
-                >
-                  {{ m.name || m.id }}
-                </option>
-              </select>
+                @update:model-value="pickMemoryModel"
+              />
             </label>
           </div>
         </div>

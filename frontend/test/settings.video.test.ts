@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { openPicker, pickerOptions } from './searchable-select-driver'
 
 /**
  * JCLAW-223 — Video Interpretation settings section. Render + persist round-trip
@@ -190,9 +191,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     // after the panel mounts — drain them before reading the resolved dropdown.
     await flushPromises()
     await flushPromises()
-    const select = c.find('select[aria-label="Video model"]')
-    expect(select.exists()).toBe(true)
-    const opts = select.findAll('option').map(o => o.text())
+    const opts = pickerOptions(await openPicker(c, 'Video model'))
     expect(opts.join(' | ')).toContain('Gemini 2.5 Flash')
     expect(opts.join(' | ')).toContain('Qwen3.5 Flash')
   })
@@ -295,9 +294,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     // Discovery $fetch settles a couple of ticks after mount (see above).
     await flushPromises()
     await flushPromises()
-    const select = c.find('select[aria-label="Video model"]')
-    expect(select.exists()).toBe(true)
-    const opts = select.findAll('option').map(o => o.text())
+    const opts = pickerOptions(await openPicker(c, 'Video model'))
     expect(opts.join(' | ')).toContain('qwen3-vl:8b')
   })
 })

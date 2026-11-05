@@ -9,6 +9,7 @@
  * that enforces it — the key is reachable through POST /api/config directly.
  */
 import type { ProviderModelDef, ProviderModelsResponse } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
 
@@ -65,6 +66,10 @@ const models = computed<ProviderModelDef[]>(() => {
   }
   return base
 })
+const modelPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Select a model…' },
+  ...models.value.map(m => modelOption(m.id, m.name || m.id, m)),
+])
 
 const isDirty = computed(() =>
   selectedProvider.value !== savedProvider.value || selectedModel.value !== savedModel.value)
@@ -182,23 +187,17 @@ async function saveSelection() {
             class="block"
           >
             <span class="block text-xs font-medium text-fg-strong mb-1">Model</span>
-            <select
+            <SearchableSelect
               id="memory-rerank-model"
               v-model="selectedModel"
+              :options="modelPickerOptions"
+              placeholder="Select a model…"
+              label="Reranker model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
               data-testid="memory-rerank-model"
-            >
-              <option value="">
-                Select a model…
-              </option>
-              <option
-                v-for="m in models"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </select>
+            />
           </label>
           <p
             v-if="discovering"

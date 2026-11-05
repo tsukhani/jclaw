@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { openPicker, picker, pickerOptions, pickerOptionValues, pickerValue, pickValue } from './searchable-select-driver'
 
 /**
  * JCLAW-321 — pages/settings.vue critical-flow coverage.
@@ -1564,13 +1565,11 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const component = await mountSettingsSection('transcription')
 
     // The picker lists ONLY audio-capable models.
-    const select = component.find('select[aria-label="Diarization audio model"]')
-    expect(select.exists()).toBe(true)
-    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Diarization audio model'))
     expect(optionValues).toContain('google/gemini-3-flash-preview')
     expect(optionValues).not.toContain('deepseek/deepseek-v4-pro')
 
-    await select.setValue('google/gemini-3-flash-preview')
+    await pickValue(component, 'Diarization audio model', 'google/gemini-3-flash-preview')
     await flushPromises()
 
     const hit = captured.find(b => b.key === 'transcription.diarization.model')
@@ -1618,13 +1617,11 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(llamaRadio.attributes('value')).toBe('llama-cpp')
 
     // The audio model picker lists ONLY audio-capable llama-cpp models.
-    const select = component.find('select[aria-label="Diarization audio model"]')
-    expect(select.exists()).toBe(true)
-    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Diarization audio model'))
     expect(optionValues).toContain('qwen2.5-omni')
     expect(optionValues).not.toContain('llama3.2-vision')
 
-    await select.setValue('qwen2.5-omni')
+    await pickValue(component, 'Diarization audio model', 'qwen2.5-omni')
     await flushPromises()
     const hit = captured.find(b => b.key === 'transcription.diarization.model')
     expect(hit).toBeTruthy()
@@ -1664,7 +1661,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(radio.attributes('value')).toBe('pyannote-local')
 
     // No audio-model dropdown on the local pyannote path (one fixed model).
-    expect(component.find('select[aria-label="Diarization audio model"]').exists()).toBe(false)
+    expect(picker(component, 'Diarization audio model').exists()).toBe(false)
 
     // Selecting it posts the provider AND clears the model (parallel writes).
     await radio.trigger('change')
@@ -1749,11 +1746,10 @@ describe('Settings page — Transcription enable + provider switch', () => {
     await flushPromises() // let the diarization-models fetch populate the SER <select> options
 
     // The local path has no audio-model dropdown but DOES have an emotion-model
-    // <select> populated from the fixed serOptions.
-    expect(component.find('select[aria-label="Diarization audio model"]').exists()).toBe(false)
-    const select = component.find('#diarization-emotion-model')
-    expect(select.exists()).toBe(true)
-    await select.setValue('superb/wav2vec2-base-superb-er')
+    // picker populated from the fixed serOptions.
+    expect(picker(component, 'Diarization audio model').exists()).toBe(false)
+    expect(component.find('#diarization-emotion-model').exists()).toBe(true)
+    await pickValue(component, 'On-device emotion (SER) model', 'superb/wav2vec2-base-superb-er')
     await flushPromises()
     expect(captured.find(b => b.key === 'transcription.diarization.emotionModel')?.value)
       .toBe('superb/wav2vec2-base-superb-er')
@@ -1824,8 +1820,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
 
     const component = await mountSettingsSection('transcription')
 
-    const select = component.find<HTMLSelectElement>('select[aria-label="ASR model"]')
-    expect(select.exists()).toBe(true)
+    expect(picker(component, 'ASR model').exists()).toBe(true)
     // The small.en model is AVAILABLE in our fixture, so the "Ready" pill should appear.
     expect(component.text()).toContain('Ready')
   })
@@ -1863,14 +1858,14 @@ describe('Settings page — Transcription enable + provider switch', () => {
     // than the model dropdown (proves it wasn't suspended on the fetch).
     expect(component.text()).toContain('Enable transcription')
     expect(component.text()).toContain('Starting the transcription engine')
-    expect(component.find('select[aria-label="ASR model"]').exists()).toBe(false)
+    expect(picker(component, 'ASR model').exists()).toBe(false)
 
     // Once the boot-triggering request resolves, real status fills in.
     resolveState({ ...DEFAULT_TRANSCRIPTION_STATE })
     await flushPromises()
     await nextTick()
     await flushPromises()
-    expect(component.find('select[aria-label="ASR model"]').exists()).toBe(true)
+    expect(picker(component, 'ASR model').exists()).toBe(true)
     expect(component.text()).toContain('Ready')
   })
 
@@ -2046,9 +2041,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    const select = component.find('select[aria-label="Caption cloud model"]')
-    expect(select.exists()).toBe(true)
-    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Caption cloud model'))
     expect(optionValues).toContain('gpt-4o') // vision model offered
     expect(optionValues).not.toContain('gpt-3.5-turbo') // non-vision filtered out
     expect(optionValues).toContain('') // "(provider default)" escape hatch
@@ -2075,11 +2068,10 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    const select = component.find('select[aria-label="Caption cloud model"]')
-    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Caption cloud model'))
     expect(optionValues).toContain('gpt-4o') // vision model shown
     expect(optionValues).not.toContain('gpt-3.5-turbo') // saved non-vision model is NOT shown
-    expect((select.element as HTMLSelectElement).value).toBe('') // escape hatch, not a phantom selection
+    expect(pickerValue(component, 'Caption cloud model')).toBe('') // escape hatch, not a phantom selection
     expect(component.text()).toContain('not marked vision-capable') // orphan warning surfaced
   })
 
@@ -2104,14 +2096,13 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    const select = component.find('select[aria-label="Ollama vision model"]')
-    expect(select.exists()).toBe(true) // a <select>, not free text
+    expect(picker(component, 'Ollama vision model').exists()).toBe(true) // a picker, not free text
     expect(component.find('input[aria-label="Ollama vision model"]').exists()).toBe(false)
-    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Ollama vision model'))
     expect(optionValues).toContain('moondream:latest') // vision model listed
     expect(optionValues).not.toContain('deepseek-r1:8b') // non-vision filtered out
     expect(optionValues).toContain('') // "(default: llava)" escape hatch
-    await select.setValue('moondream:latest')
+    await pickValue(component, 'Ollama vision model', 'moondream:latest')
     await flushPromises()
     expect(captured.find(b => b.key === 'caption.model')?.value).toBe('moondream:latest')
   })
@@ -2283,6 +2274,33 @@ describe('Settings page — Timezone section (app.timezone)', () => {
   })
 })
 
+describe('Settings page — skills promotion model', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('offers the explicit provider\'s models and POSTs the one picked on save', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: defaultConfigEntries().map(e => e.key === 'skillsPromotion.provider' ? { ...e, value: 'openai' } : e),
+      }),
+    })
+    const component = await mountSettingsSection('skills')
+
+    const modelRow = component.findAll('div.px-4').find(d => d.find('span.font-mono').exists() && d.find('span.font-mono').text() === 'model')!
+    await modelRow.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    // An explicit provider has no "main agent" default to fall back on, so only its models are offered.
+    expect(pickerOptions(await openPicker(component, 'Skills promotion model'))).toEqual(['GPT-4 · gpt-4'])
+    await pickValue(component, 'Skills promotion model', 'gpt-4')
+    expect(pickerValue(component, 'Skills promotion model')).toBe('gpt-4')
+
+    await modelRow.find('button[title="Save"]').trigger('click')
+    await vi.waitFor(() => expect(captured).toContainEqual({ key: 'skillsPromotion.model', value: 'gpt-4' }))
+  })
+})
+
 describe('Settings page — subagent model (JCLAW-422)', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -2293,15 +2311,12 @@ describe('Settings page — subagent model (JCLAW-422)', () => {
     setupDefaultApi({ capturePost: b => captured.push(b) })
     const component = await mountSettingsSection('subagents')
 
-    const select = component.find('select[aria-label="Subagent model"]')
-    expect(select.exists()).toBe(true)
-    const optionVals = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
-    expect(optionVals).toContain('ollama-cloud::kimi-k2.5')
+    expect(pickerOptionValues(await openPicker(component, 'Subagent model'))).toContain('ollama-cloud::kimi-k2.5')
 
     // Pin to a concrete provider::model from the fixture (ollama-cloud/kimi-k2.5).
     // saveSubagentModel fires two sequential POSTs (provider + modelId) then a
     // refresh(); drain the microtask queue until both have landed.
-    await select.setValue('ollama-cloud::kimi-k2.5')
+    await pickValue(component, 'Subagent model', 'ollama-cloud::kimi-k2.5')
     await vi.waitFor(() => expect(captured.length).toBeGreaterThanOrEqual(2))
 
     expect(captured.find(b => b.key === 'subagent.modelProvider' && b.value === 'ollama-cloud')).toBeTruthy()

@@ -176,7 +176,7 @@ test.describe('UAT-4 agent lifecycle', () => {
 
     await gotoPage(page, `/agents/${agentName}`)
     await expect(page.getByLabel('Fallback Provider')).toHaveValue(fallback!.provider)
-    await expect(page.getByLabel('Fallback Model')).toHaveValue(fallback!.modelId)
+    await expect(page.getByRole('combobox', { name: 'Fallback Model' })).toHaveAttribute('data-value', fallback!.modelId)
   })
 
   test('clearing either half of the fallback clears both', async ({ request }) => {

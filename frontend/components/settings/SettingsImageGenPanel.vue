@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 // Image Generation settings panel (JCLAW-680 second pass).
 // Moved verbatim from pages/settings.vue. Agents produce images via the
 // generate_image tool; the operator picks one backend — BFL / OpenAI /
@@ -88,10 +89,16 @@ const imagegenModelOptions = computed<ImageModel[]>(() => {
   }
   return discovered
 })
-// JCLAW-700: split by capability so the single dropdown groups models under labeled optgroups —
-// image-to-image (Kontext / style transfer, accept an uploaded reference) vs text-to-image.
+// JCLAW-700: split by capability so the picker lists models under labeled groups — image-to-image
+// (Kontext / style transfer, which use_reference_image needs) vs text-to-image, which ignores an
+// uploaded reference.
 const textToImageOptions = computed(() => imagegenModelOptions.value.filter(m => !m.imageToImage))
 const imageToImageOptions = computed(() => imagegenModelOptions.value.filter(m => m.imageToImage))
+const replicatePickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Provider default (black-forest-labs/flux-schnell)' },
+  ...imageToImageOptions.value.map(m => ({ value: m.slug, label: m.slug, title: m.description ?? undefined, group: 'Image-to-image (style transfer)' })),
+  ...textToImageOptions.value.map(m => ({ value: m.slug, label: m.slug, title: m.description ?? undefined, group: 'Text-to-image' })),
+])
 
 // BFL image models, read server-side from BFL's published API spec (it has no list-models endpoint).
 // Stored as imagegen.bfl.model; a saved model the spec no longer lists is still surfaced.
@@ -112,6 +119,10 @@ const bflModelOptions = computed<BflModel[]>(() => {
   }
   return discovered
 })
+const bflPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Provider default (flux-2-pro)' },
+  ...bflModelOptions.value.map(m => ({ value: m.slug, label: m.slug, title: m.description ?? undefined })),
+])
 
 // ──────────────────── Local Flux 2 Klein sidecar (JCLAW-226) ──────────────
 // Runtime state — uv availability + Flux weight download status — comes from
@@ -363,25 +374,17 @@ onUnmounted(() => stopImagegenLocalPolling())
             class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
-            <select
-              :value="bflModel"
+            <SearchableSelect
+              :model-value="bflModel"
+              :options="bflPickerOptions"
+              placeholder="Provider default (flux-2-pro)"
+              label="Black Forest Labs image model"
               :disabled="saving"
-              aria-label="Black Forest Labs image model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="attemptBflModel(() => saveField('imagegen.bfl.model', ($event.target as HTMLSelectElement).value))"
-            >
-              <option value="">
-                Provider default (flux-2-pro)
-              </option>
-              <option
-                v-for="m in bflModelOptions"
-                :key="m.slug"
-                :value="m.slug"
-                :title="m.description ?? ''"
-              >
-                {{ m.slug }}
-              </option>
-            </select>
+              @update:model-value="attemptBflModel(() => saveField('imagegen.bfl.model', $event))"
+            />
             <button
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
@@ -495,46 +498,17 @@ onUnmounted(() => stopImagegenLocalPolling())
             class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
-            <select
-              :value="imagegenModel"
+            <SearchableSelect
+              :model-value="imagegenModel"
+              :options="replicatePickerOptions"
+              placeholder="Provider default (black-forest-labs/flux-schnell)"
+              label="Replicate image model"
               :disabled="saving"
-              aria-label="Replicate image model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="attemptReplicateModel(() => saveField('imagegen.replicate.model', ($event.target as HTMLSelectElement).value))"
-            >
-              <option value="">
-                Provider default (black-forest-labs/flux-schnell)
-              </option>
-              <!-- JCLAW-700: image-to-image (Kontext) models grouped + labeled so the operator can
-                   pick a style-transfer backend for use_reference_image; a text-to-image model
-                   ignores an uploaded reference. -->
-              <optgroup
-                v-if="imageToImageOptions.length"
-                label="Image-to-image (style transfer)"
-              >
-                <option
-                  v-for="m in imageToImageOptions"
-                  :key="m.slug"
-                  :value="m.slug"
-                  :title="m.description ?? ''"
-                >
-                  {{ m.slug }}
-                </option>
-              </optgroup>
-              <optgroup
-                v-if="textToImageOptions.length"
-                label="Text-to-image"
-              >
-                <option
-                  v-for="m in textToImageOptions"
-                  :key="m.slug"
-                  :value="m.slug"
-                  :title="m.description ?? ''"
-                >
-                  {{ m.slug }}
-                </option>
-              </optgroup>
-            </select>
+              @update:model-value="attemptReplicateModel(() => saveField('imagegen.replicate.model', $event))"
+            />
             <button
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"

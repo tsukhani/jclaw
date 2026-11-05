@@ -6,6 +6,7 @@
 // /api/config; provider API-key checks + vision-model catalog injected from
 // the shared settings-config context.
 import type { ProviderModelDef } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
@@ -53,6 +54,10 @@ const captionModelOrphaned = computed(() =>
   captionModel.value !== '' && !captionVisionModelOptions.value.some(o => o.id === captionModel.value),
 )
 const captionModelSelectValue = computed(() => (captionModelOrphaned.value ? '' : captionModel.value))
+const captionModelPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: captionProvider.value === 'ollama-local' ? '(select a model)' : '(provider default)' },
+  ...captionVisionModels.value.map(m => modelOption(m.id, m.name || m.id, m)),
+])
 // Which backend is active, for the status line.
 const captionActiveBackend = computed(() => {
   if (captionIsCloud.value) return 'cloud'
@@ -250,23 +255,16 @@ async function setCaptionModel(value: string) {
       >
         <div class="px-4 py-2.5 flex items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
-          <select
-            :value="captionModelSelectValue"
-            :aria-label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
+          <SearchableSelect
+            :model-value="captionModelSelectValue"
+            :options="captionModelPickerOptions"
+            placeholder="(select a model)"
+            :label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
+            search-label="Type to filter models"
+            empty-text="No matching models."
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              {{ captionProvider === 'ollama-local' ? '(select a model)' : '(provider default)' }}
-            </option>
-            <option
-              v-for="m in captionVisionModelOptions"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.label }}
-            </option>
-          </select>
+            @update:model-value="setCaptionModel"
+          />
         </div>
         <p
           v-if="captionVisionModels.length === 0"

@@ -15,6 +15,8 @@ export interface SearchableOption {
   label: string
   /** Muted text after the label, which the filter matches too: a model's id beside its display name. */
   detail?: string
+  /** A tooltip, such as a model's description. */
+  title?: string
   /** Options sharing a group are listed under it, in the order the group first appears. */
   group?: string
   disabled?: boolean
@@ -25,7 +27,7 @@ defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(defineProps<{
   options: SearchableOption[]
-  /** The selected value; one no option holds shows the placeholder. */
+  /** The selected value; '' with no option for it shows the placeholder. */
   modelValue?: string
   placeholder: string
   /** The field's accessible name. */
@@ -71,14 +73,19 @@ function pick(option: SearchableOption) {
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
+      <!-- A select-only combobox: the label names it and its text is its value, as a native select's are. -->
+      <!-- eslint-disable-next-line vuejs-accessibility/role-has-required-aria-props -- PopoverTrigger sets aria-expanded, and aria-controls while open, through as-child, where the rule cannot see them -->
       <button
         v-bind="$attrs"
         type="button"
-        :aria-label="selected ? `${label}: ${selected.label}` : label"
+        role="combobox"
+        :aria-label="label"
+        :data-value="modelValue"
         :disabled="disabled"
         class="flex items-center justify-between gap-2 text-left disabled:opacity-50"
       >
-        <span class="min-w-0 truncate">{{ selected?.label ?? placeholder }}</span>
+        <!-- A stored value no option holds shows as itself: a blank, as a native select shows, hides what is stored. -->
+        <span class="min-w-0 truncate">{{ selected?.label ?? (modelValue || placeholder) }}</span>
         <ChevronDown
           class="w-4 h-4 shrink-0 opacity-60"
           aria-hidden="true"
@@ -105,11 +112,12 @@ function pick(option: SearchableOption) {
               v-for="o in items"
               :key="o.value"
               :value="o.value"
+              :data-value="o.value"
+              :title="o.title"
               :disabled="o.disabled"
-              class="[overflow-wrap:anywhere] data-[highlighted]:outline-solid data-[highlighted]:outline-2 data-[highlighted]:-outline-offset-2 data-[highlighted]:outline-ring"
+              class="[overflow-wrap:anywhere]"
               @select="pick(o)"
             >
-              <!-- The highlight's background alone measured 1.03:1 against the popover in dark mode: the outline is what a keyboard user sees. -->
               <span class="min-w-0 flex-1">{{ o.label }}</span>
               <span
                 v-if="o.detail"

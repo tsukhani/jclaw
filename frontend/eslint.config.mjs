@@ -76,4 +76,11 @@ export default withNuxt(
   },
   // Vue accessibility (WCAG) rules, Vue SFCs only.
   ...vueA11y.configs['flat/recommended'],
+  {
+    // SearchableSelect renders a combobox, so a <label> for or around one labels a control.
+    files: ['**/*.vue'],
+    rules: {
+      'vuejs-accessibility/label-has-for': ['error', { controlComponents: ['SearchableSelect'] }],
+    },
+  },
 )

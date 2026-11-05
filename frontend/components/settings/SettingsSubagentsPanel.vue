@@ -92,15 +92,10 @@ const subagentInheritLabel = computed(() => {
   return a ? `${a.modelProvider} / ${a.modelId}` : 'the agent default'
 })
 
-const allModelOptions = computed(() => {
-  const opts: { value: string, label: string }[] = []
-  for (const provider of availableProviderNames.value) {
-    for (const m of getProviderModels(provider)) {
-      opts.push({ value: `${provider}::${m.id}`, label: `${provider} / ${m.name || m.id}` })
-    }
-  }
-  return opts
-})
+const subagentModelOptions = computed(() => [
+  { value: '', label: `Conversation default (inherit — ${subagentInheritLabel.value})` },
+  ...providerModelOptions(availableProviderNames.value, getProviderModels),
+])
 
 async function saveSubagentModel(value: string) {
   saving.value = true
@@ -373,25 +368,17 @@ async function saveSubagentModel(value: string) {
               Model subagents run on. "Conversation default" inherits the model your chat is using (your agent default unless you switch mid-chat). Pick a specific model to pin every fan-out to it — e.g. a cheaper model for large evaluations.
             </InfoTip>
           </span>
-          <!-- min-w-0: a flex item's min-width defaults to its content, and a select's
-               content is its widest option, so flex-1 alone overflows the row. -->
-          <select
-            :value="subagentModelValue"
-            aria-label="Subagent model"
+          <SearchableSelect
+            :model-value="subagentModelValue"
+            :options="subagentModelOptions"
+            placeholder="Choose a model"
+            label="Subagent model"
+            search-label="Type to filter models"
+            empty-text="No matching models."
+            content-class="font-mono"
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            @change="saveSubagentModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              Conversation default (inherit — {{ subagentInheritLabel }})
-            </option>
-            <option
-              v-for="o in allModelOptions"
-              :key="o.value"
-              :value="o.value"
-            >
-              {{ o.label }}
-            </option>
-          </select>
+            @update:model-value="saveSubagentModel"
+          />
         </div>
       </div>
       <ApiErrorAlert

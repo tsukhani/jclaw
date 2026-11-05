@@ -8,6 +8,7 @@
 // immediately (mirrors the Transcription panel). Persisted selection reads from
 // the shared config store and writes go through /api/config.
 import type { ApiErrorDetails } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configValue, saveField, saving } = useSettingsConfig()
 
@@ -51,6 +52,8 @@ const activeEntry = computed(() => ttsState.value?.engines?.find(e => e.id === s
 
 // The model id + its status for whichever engine is currently selected.
 const activeModelId = computed(() => (selectedEngine.value === 'jvm' ? jvmModel.value : sidecarModel.value))
+const activeModelOptions = computed<SearchableOption[]>(() =>
+  (activeEntry.value?.models ?? []).map(m => ({ value: m.id, label: `${m.displayName} (~${m.approxSizeMb} MB)` })))
 const activeModelStatus = computed<TtsModelEntry | null>(() =>
   activeEntry.value?.models?.find(m => m.id === activeModelId.value) ?? null,
 )
@@ -315,20 +318,16 @@ onUnmounted(() => stopTtsPolling())
           class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
         >
           <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Model</span>
-          <select
-            :value="activeModelId"
-            aria-label="Text-to-speech model"
+          <SearchableSelect
+            :model-value="activeModelId"
+            :options="activeModelOptions"
+            placeholder="Choose a model"
+            label="Text-to-speech model"
+            search-label="Type to filter models"
+            empty-text="No matching models."
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setModel(selectedEngine, ($event.target as HTMLSelectElement).value)"
-          >
-            <option
-              v-for="m in (activeEntry?.models ?? [])"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
-            </option>
-          </select>
+            @update:model-value="setModel(selectedEngine, $event)"
+          />
 
           <!-- JVM models are disk-provisioned here; sidecar weights auto-pull. -->
           <template v-if="selectedEngine === 'jvm'">

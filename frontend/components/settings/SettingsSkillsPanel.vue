@@ -10,6 +10,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
 const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
 
@@ -70,6 +71,11 @@ const spAvailableModels = computed(() => {
 
 // Whether an explicit (non-default) provider is selected
 const spHasExplicitProvider = computed(() => !!spProviderRaw.value)
+
+const spModelOptions = computed<SearchableOption[]>(() => [
+  ...(spHasExplicitProvider.value ? [] : [{ value: '', label: 'Default (main agent)' }]),
+  ...spAvailableModels.value.map(m => modelOption(m.id, m.name || m.id, m)),
+])
 
 const { saveError, attempt } = useSaveAttempt()
 
@@ -161,26 +167,17 @@ async function saveSPField(configKey: string, value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">model</span>
           <template v-if="editingSPField === 'model'">
-            <select
+            <SearchableSelect
               v-if="spAvailableModels.length"
               v-model="spFieldEdit"
-              aria-label="Skills promotion model"
+              :options="spModelOptions"
+              placeholder="Choose a model"
+              label="Skills promotion model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
+              content-class="font-mono"
               class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            >
-              <option
-                v-if="!spHasExplicitProvider"
-                value=""
-              >
-                Default (main agent)
-              </option>
-              <option
-                v-for="m in spAvailableModels"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </select>
+            />
             <input
               v-else
               v-model="spFieldEdit"

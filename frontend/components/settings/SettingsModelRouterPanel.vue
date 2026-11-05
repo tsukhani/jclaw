@@ -10,6 +10,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import type { LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 import { ROUTE_CLASS_LABELS } from '~/utils/model-route'
 
 interface RouterCandidate {
@@ -80,15 +81,7 @@ const modelOptions = computed(() => {
     const name = e.key.split('.')[1]!
     if (!IMAGE_ONLY_PROVIDERS.has(name)) names.add(name)
   }
-  const options: { value: string, label: string, detail?: string }[] = []
-  for (const provider of names) {
-    for (const m of getProviderModels(provider)) {
-      // The lists above name a model by its id, so the add picker shows and matches the id too.
-      const detail = m.name && m.name !== m.id ? m.id : undefined
-      options.push({ value: `${provider}::${m.id}`, label: `${provider} / ${m.name || m.id}`, detail })
-    }
-  }
-  return options
+  return providerModelOptions(names, getProviderModels)
 })
 
 const chatConfigured = computed(() => listFor('chat').length > 0)
@@ -168,6 +161,9 @@ const ollamaOptions = computed(() => {
 
 const PROVIDER_LABELS: Record<string, string> = { 'jev': 'JEV (TypeSafe AI)', 'laya': 'Laya', 'baseten-decision': 'Baseten' }
 
+// Never stored: the option only says why the Ollama group holds nothing to pick.
+const OLLAMA_UNREACHABLE = 'ollama-decision-unreachable'
+
 // A stored classifier no other list holds, so the select names it rather than reading blank.
 const strandedClassifier = computed(() => {
   const value = classifierValue.value
@@ -178,6 +174,30 @@ const strandedClassifier = computed(() => {
   const sep = value.indexOf('::')
   const provider = value.slice(0, sep)
   return { value, label: `${PROVIDER_LABELS[provider] ?? provider} / ${value.slice(sep + 2)}${NOT_AVAILABLE}` }
+})
+
+// The decision groups run in the Decision Providers cards' order, and the LLM providers' models follow in their own.
+const classifierOptions = computed<SearchableOption[]>(() => {
+  const options: SearchableOption[] = [{ value: '', label: 'Keyword rules (no model call)' }]
+  if (strandedClassifier.value) options.push({ ...strandedClassifier.value, disabled: true })
+  options.push({
+    value: JEV_CLASSIFIER,
+    label: `JEV (TypeSafe AI)${jevKeySet.value ? '' : ' — needs a TypeSafe API key'}`,
+    group: 'JEV (TypeSafe AI)',
+    disabled: !jevKeySet.value,
+  })
+  for (const o of layaOptions) {
+    options.push({ value: o.value, label: `${o.label}${layaUnreachable.value ? ' — server not reachable' : ''}`, group: 'Laya', disabled: layaUnreachable.value })
+  }
+  for (const o of ollamaOptions.value) options.push({ ...o, group: 'Ollama' })
+  if (ollamaUnreachable.value) {
+    options.push({ value: OLLAMA_UNREACHABLE, label: 'Ollama decision — server not reachable', group: 'Ollama', disabled: true })
+  }
+  for (const o of basetenOptions) {
+    options.push({ value: o.value, label: `${o.label}${basetenKeySet.value ? '' : ' — needs a Baseten API key'}`, group: 'Baseten', disabled: !basetenKeySet.value })
+  }
+  for (const o of modelOptions.value) options.push({ ...o, group: 'Language models' })
+  return options
 })
 
 async function saveClassifier(value: string) {
@@ -454,88 +474,18 @@ function usageTone(fraction: number): string {
       <div>
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0">classifier model</span>
-          <select
-            :value="classifierValue"
-            aria-label="Prompt classifier model"
+          <SearchableSelect
+            :model-value="classifierValue"
+            :options="classifierOptions"
+            placeholder="Keyword rules (no model call)"
+            label="Prompt classifier model"
             :disabled="saving"
+            search-label="Type to filter models"
+            empty-text="No matching models."
+            content-class="font-mono"
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            @change="saveClassifier(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              Keyword rules (no model call)
-            </option>
-            <option
-              v-if="strandedClassifier"
-              :value="strandedClassifier.value"
-              disabled
-              data-testid="router-stranded-classifier-option"
-            >
-              {{ strandedClassifier.label }}
-            </option>
-            <optgroup label="JEV (TypeSafe AI)">
-              <option
-                :value="JEV_CLASSIFIER"
-                :disabled="!jevKeySet"
-              >
-                JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
-              </option>
-            </optgroup>
-            <optgroup label="Laya">
-              <option
-                v-for="o in layaOptions"
-                :key="o.value"
-                :value="o.value"
-                :disabled="layaUnreachable"
-                data-testid="router-laya-option"
-              >
-                {{ o.label }}{{ layaUnreachable ? ' — server not reachable' : '' }}
-              </option>
-            </optgroup>
-            <optgroup
-              v-if="ollamaOptions.length > 0 || ollamaUnreachable"
-              label="Ollama"
-            >
-              <option
-                v-for="o in ollamaOptions"
-                :key="o.value"
-                :value="o.value"
-                :disabled="o.disabled"
-                data-testid="router-ollama-decision-option"
-              >
-                {{ o.label }}
-              </option>
-              <option
-                v-if="ollamaUnreachable"
-                disabled
-                data-testid="router-ollama-unreachable-option"
-              >
-                Ollama decision — server not reachable
-              </option>
-            </optgroup>
-            <optgroup label="Baseten">
-              <option
-                v-for="o in basetenOptions"
-                :key="o.value"
-                :value="o.value"
-                :disabled="!basetenKeySet"
-                data-testid="router-baseten-option"
-              >
-                {{ o.label }}{{ basetenKeySet ? '' : ' — needs a Baseten API key' }}
-              </option>
-            </optgroup>
-            <optgroup
-              v-if="modelOptions.length > 0"
-              label="Language models"
-            >
-              <option
-                v-for="o in modelOptions"
-                :key="o.value"
-                :value="o.value"
-              >
-                {{ o.label }}
-              </option>
-            </optgroup>
-          </select>
+            @update:model-value="saveClassifier"
+          />
         </div>
         <p
           v-if="!jevKeySet"

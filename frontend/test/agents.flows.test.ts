@@ -5,6 +5,7 @@ import type { H3Event } from 'h3'
 import { defineComponent, h } from 'vue'
 import Agents from '~/pages/agents/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
+import { openPicker, pickerOption, pickerOptions, pickerValue, typeInPicker } from './searchable-select-driver'
 
 /**
  * JCLAW-322 — pages/agents.vue critical-path flow coverage.
@@ -311,6 +312,42 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     })
   })
 
+  it('PUTs the default model picked from the list narrowed by typing', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi({
+      configEntries: [
+        { key: 'provider.openai.baseUrl', value: 'https://api.openai.com/v1' },
+        { key: 'provider.openai.apiKey', value: 'sk-****' },
+        { key: 'provider.openai.models', value: JSON.stringify([{ id: 'gpt-4', name: 'GPT-4' }, { id: 'gpt-4o', name: 'GPT-4o' }, { id: 'o3' }]) },
+      ],
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    expect(pickerValue(component, 'Default Model')).toBe('gpt-4')
+    const popover = await openPicker(component, 'Default Model')
+    expect(pickerOptions(popover)).toEqual(['GPT-4 · gpt-4', 'GPT-4o · gpt-4o', 'o3'])
+    await typeInPicker(popover, '4o')
+    expect(pickerOptions(popover)).toEqual(['GPT-4o · gpt-4o'])
+    pickerOption(popover, 'gpt-4o')!.click()
+    await flushPromises()
+    expect(pickerValue(component, 'Default Model')).toBe('gpt-4o')
+
+    const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+    expect(putBody).toMatchObject({ modelProvider: 'openai', modelId: 'gpt-4o' })
+  })
+
   // JCLAW-1190: the fallback pair rides the ordinary Save; None is null/null on the wire.
   it('PUTs the chosen fallback provider and its first model when Save is clicked', async () => {
     let putBody: Record<string, unknown> | null = null
@@ -334,9 +371,7 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await fallbackProvider.setValue('ollama-cloud')
     await flushPromises()
 
-    const fallbackModel = component.findAll('label')
-      .find(l => l.text().includes('Fallback Model'))!.find('select')
-    expect((fallbackModel.element as HTMLSelectElement).value).toBe('kimi-k2.5')
+    expect(pickerValue(component, 'Fallback Model')).toBe('kimi-k2.5')
 
     const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
     await saveBtn!.trigger('click')

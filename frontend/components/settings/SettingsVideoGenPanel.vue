@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 // Video Generation settings panel (JCLAW-680 second pass).
 // Moved verbatim from pages/settings.vue. Agents produce videos via the
 // generate_video tool; the operator picks a cloud backend, Black Forest Labs or
@@ -62,6 +63,10 @@ const videogenModelOptions = computed<VideoModel[]>(() => {
   }
   return discovered
 })
+const videogenPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Provider default (wan-video/wan-2.2-t2v-fast)' },
+  ...videogenModelOptions.value.map(m => ({ value: m.slug, label: m.slug, title: m.description ?? undefined })),
+])
 
 // BFL video models, read server-side from BFL's published API spec; stored as videogen.bfl.model, a
 // separate key from Replicate's so switching backends never sends one provider's slug to the other.
@@ -82,6 +87,10 @@ const bflModelOptions = computed<BflModel[]>(() => {
   }
   return discovered
 })
+const bflPickerOptions = computed<SearchableOption[]>(() => [
+  { value: '', label: 'Provider default (flux-3-video)' },
+  ...bflModelOptions.value.map(m => ({ value: m.slug, label: m.slug, title: m.description ?? undefined })),
+])
 
 // ──── Self-hosted adaptive capability picker (SV-2 / JCLAW-232/233) ────
 // The sidecar's one-shot `--probe` reports the host GPU + free VRAM and tiers every local engine, so the
@@ -347,25 +356,17 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- Model — video models from BFL's API spec (GET /api/videogen/bfl/models). -->
           <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
-            <select
-              :value="bflModel"
+            <SearchableSelect
+              :model-value="bflModel"
+              :options="bflPickerOptions"
+              placeholder="Provider default (flux-3-video)"
+              label="Black Forest Labs video model"
               :disabled="saving"
-              aria-label="Black Forest Labs video model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="attemptField(() => saveField('videogen.bfl.model', ($event.target as HTMLSelectElement).value))"
-            >
-              <option value="">
-                Provider default (flux-3-video)
-              </option>
-              <option
-                v-for="m in bflModelOptions"
-                :key="m.slug"
-                :value="m.slug"
-                :title="m.description ?? ''"
-              >
-                {{ m.slug }}
-              </option>
-            </select>
+              @update:model-value="attemptField(() => saveField('videogen.bfl.model', $event))"
+            />
             <button
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
@@ -413,25 +414,17 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- Model — picked from Replicate's curated text-to-video collection (GET /api/videogen/models). -->
           <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
-            <select
-              :value="videogenModel"
+            <SearchableSelect
+              :model-value="videogenModel"
+              :options="videogenPickerOptions"
+              placeholder="Provider default (wan-video/wan-2.2-t2v-fast)"
+              label="Replicate video model"
               :disabled="saving"
-              aria-label="Replicate video model"
+              search-label="Type to filter models"
+              empty-text="No matching models."
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="attemptField(() => saveField('videogen.cloud.model', ($event.target as HTMLSelectElement).value))"
-            >
-              <option value="">
-                Provider default (wan-video/wan-2.2-t2v-fast)
-              </option>
-              <option
-                v-for="m in videogenModelOptions"
-                :key="m.slug"
-                :value="m.slug"
-                :title="m.description ?? ''"
-              >
-                {{ m.slug }}
-              </option>
-            </select>
+              @update:model-value="attemptField(() => saveField('videogen.cloud.model', $event))"
+            />
             <button
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
