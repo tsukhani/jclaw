@@ -171,6 +171,9 @@ fun section(map: Map<String, Any?>, key: String) = (map[key] as? Map<String, Any
 @Suppress("UNCHECKED_CAST")
 fun strings(value: Any?): List<String> = (value as? List<Any?>).orEmpty().mapNotNull { it?.toString() }
 
+/** A record's "license": one SPDX id, or a list when the component ships code under several licenses. */
+fun licensesOf(value: Any?): List<String> = if (value is List<*>) strings(value) else listOf(value.toString())
+
 fun pnpmLicenses(): Map<String, List<Map<String, Any?>>> {
     val cmd = listOf("pnpm", "licenses", "list", "--json")
     val process = ProcessBuilder(cmd).directory(frontendDir).redirectError(ProcessBuilder.Redirect.INHERIT).start()
@@ -231,7 +234,7 @@ fun writeNotices(libJars: Set<File>, frameworkJars: Set<File>) {
             val noticeText = o["noticeFile"]?.let { playHome.resolve(it.toString()).readText() } ?: ownNotice
             addJava(Component(
                 o["name"].toString(), setOf(jar.nameWithoutExtension.substringAfterLast('-').takeIf { it.any(Char::isDigit) } ?: "-"),
-                o["source"]?.toString(), listOf(o["license"].toString()),
+                o["source"]?.toString(), licensesOf(o["license"]),
                 (strings(o["copyright"]) + copyrightLines(licenseText, noticeText)).distinct(), licenseText, noticeText, o["note"]?.toString(),
                 textShipped = ownLicense != null && o["licenseFile"] == null,
             ))
@@ -351,8 +354,13 @@ fun writeNotices(libJars: Set<File>, frameworkJars: Set<File>) {
             distignored.none { path.startsWith(it) } && recordedSkillDirs.none { path.startsWith(it) }
     }.forEach { unrecorded += "file $it: a license file of third-party content; record that content under \"files\"" }
 
+    // A bundle for no -PtargetArch drops each platform's native jar (build.gradle.kts, JF-188), so a record marked
+    // targetOnly can be stale only in a bundle built for one target, the Docker image's, which ships that jar.
+    val forOneTarget = (findProperty("targetArch") as String?)?.isNotBlank() == true
+    val targetOnly = jarOverrides.filterValues { (it as? Map<*, *>)?.get("targetOnly") == true }.keys.map { "jars.$it" }.toSet()
     val stale = (jarOverrides.keys.map { "jars.$it" } + moduleOverrides.keys.map { "modules.$it" } + jsOverrides.keys.map { "js.$it" } +
-        jsAlsoShipped.keys.map { "jsAlsoShipped.$it" } + skillOverrides.keys.map { "skills.$it" } + fileOverrides.keys.map { "files.$it" }).filter { it !in used }
+        jsAlsoShipped.keys.map { "jsAlsoShipped.$it" } + skillOverrides.keys.map { "skills.$it" } + fileOverrides.keys.map { "files.$it" })
+        .filter { it !in used && (forOneTarget || it !in targetOnly) }
     if (unrecorded.isNotEmpty() || stale.isNotEmpty()) {
         throw GradleException(buildString {
             if (unrecorded.isNotEmpty()) appendLine("${unrecorded.size} bundled component(s) have no recorded license:").also { unrecorded.forEach { appendLine("  - $it") } }

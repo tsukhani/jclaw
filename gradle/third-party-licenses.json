@@ -1,5 +1,5 @@
 {
-  "comment": "Licenses gradle/third-party-notices.gradle.kts cannot read from a POM, a package or the component itself. Each entry must match something the bundle ships, or the build fails as stale.",
+  "comment": "Licenses gradle/third-party-notices.gradle.kts cannot read from a POM, a package or the component itself. Each entry must match something the bundle ships, or the build fails as stale; a jars entry marked targetOnly is checked only in a bundle built for one -PtargetArch.",
   "jars": {
     "play-*.jar": {
       "name": "Play Framework 1.x (tsukhani/play1 fork)",
@@ -31,6 +31,16 @@
       "license": "BSD-3-Clause",
       "source": "https://jregex.sourceforge.net",
       "licenseEntry": "docs/license.txt"
+    },
+    "sherpa-onnx-native-lib-*.jar": {
+      "name": "sherpa-onnx native library, with ONNX Runtime",
+      "license": ["Apache-2.0", "MIT"],
+      "source": "https://github.com/k2-fsa/sherpa-onnx",
+      "copyright": [
+        "Copyright (c) Microsoft Corporation"
+      ],
+      "note": "The jar holds sherpa-onnx's JNI library (Apache 2.0, like sherpa-onnx itself) and ONNX Runtime 1.27.0 (MIT, https://github.com/microsoft/onnxruntime); its POM declares no license. Only a bundle built for one platform ships it, as the Docker image does.",
+      "targetOnly": true
     }
   },
   "modules": {
