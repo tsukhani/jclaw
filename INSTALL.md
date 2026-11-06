@@ -87,11 +87,14 @@ If it finds neither, it still installs JClaw, and then tells you how to run it.
 
 ### How the installer checks the download
 
-Releases after 0.19.25 are signed.
+Releases after 0.19.25 are signed, but the installers do not check the signature.
 
-- `install.sh` refuses a bundle if its signature or checksum fails the check. On a machine without
-  `openssl`, it warns you, and then installs the bundle without the check.
-- `install.ps1` cannot check the signature yet. It tells you so after the download.
+- `install.sh` checks the bundle's SHA-256 against the release's `SHA256SUMS`. It refuses a bundle that
+  does not match. If the release has no `SHA256SUMS`, or the machine has neither `shasum` nor
+  `sha256sum`, it warns you and installs without the check. This catches a damaged download. It does
+  not prove who published the release.
+- `install.ps1` does not check the download. It tells you so after the download.
+- `jclaw upgrade` checks the signature on every release after 0.19.25.
 
 ### Installer options
 
@@ -108,7 +111,7 @@ You can change what the installer does with these environment variables. All of 
 | `JCLAW_NO_RC_EDIT` | — | Set to `1` to make the completion scripts without editing your shell's startup (rc) file. |
 | `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install with a new one. **This deletes its database, workspace and credentials.** Without it, the installer upgrades an existing install in place. |
 | `JCLAW_BIN_DIR` | `~/.local/bin` | Where the installer puts the `jclaw` command (`install.sh` only). |
-| `JCLAW_BUNDLE_URL` | — | Install from this bundle URL (`file://` works too) instead of GitHub Releases. This skips the release-signature check (`install.sh` only). |
+| `JCLAW_BUNDLE_URL` | — | Install from this bundle URL (`file://` works too) instead of GitHub Releases. This skips the checksum check (`install.sh` only). |
 
 For example, this command installs version v0.14.7 and does not start it:
 

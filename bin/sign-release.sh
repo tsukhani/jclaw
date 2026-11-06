@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sign a release file (SHA256SUMS, IMAGE_DIGEST) with the private key file named by $SIGNING_KEY, then
 # verify the result under the public key jclaw.sh pins, with both verifiers a client
-# uses: openssl (install.sh) and the precompiled utils.ReleaseSignature this build is
+# uses: openssl (docker-pull-verified.sh) and the precompiled utils.ReleaseSignature this build is
 # about to ship (jclaw.sh upgrade). A credential that no longer matches the pinned key,
 # or a verifier class that cannot run on the JDK alone, fails the release here rather
 # than on every installed client — those refuse a signature they cannot verify.
