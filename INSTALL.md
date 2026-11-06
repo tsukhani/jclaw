@@ -252,7 +252,7 @@ Custom agents always run their shell commands inside the sandbox. To check that 
 in your container, run:
 
 ```bash
-docker compose exec jclaw bwrap --ro-bind / / true && echo sandbox ok
+docker compose exec jclaw bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok
 ```
 
 You can also open **Settings → Shell Execution**. When the sandbox cannot start, the panel says

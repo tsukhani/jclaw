@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 import play.Play;
 import play.test.UnitTest;
+import tools.HarnessSandbox;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -67,5 +68,14 @@ class DockerSandboxConfigTest extends UnitTest {
         expected.add("names", bwrapRule);
         expected.addProperty("action", "SCMP_ACT_ALLOW");
         assertEquals(expected, matches.getFirst(), "the rule carries no conditions");
+    }
+
+    /** A weaker check than JClaw's probe could print "ok" on a container where custom agents' exec is still refused. */
+    @Test
+    void installsSandboxCheckIsTheReadinessProbe() throws Exception {
+        var install = Files.readString(root().resolve("INSTALL.md"));
+        var checks = install.lines().filter(l -> l.startsWith("docker compose exec jclaw bwrap")).toList();
+        assertEquals(List.of("docker compose exec jclaw " + String.join(" ", HarnessSandbox.BWRAP_PROBE)
+                + " && echo sandbox ok"), checks);
     }
 }

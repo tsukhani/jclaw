@@ -102,8 +102,11 @@ public final class HarnessSandbox {
     private static final List<String> DENY_READ_HOME = List.of(
             ".ssh", ".aws", ".gnupg", ".config/gcloud", ".kube", ".netrc");
 
-    /** The probe {@link #bwrapLaunchFailure} runs: the smallest sandbox {@link #linuxArgv} builds on. */
-    private static final List<String> BWRAP_PROBE = List.of(
+    /**
+     * The probe {@link #bwrapLaunchFailure} runs: the smallest sandbox {@link #linuxArgv} builds on.
+     * INSTALL.md's sandbox check gives operators this exact command, so its "ok" means JClaw's probe passes.
+     */
+    public static final List<String> BWRAP_PROBE = List.of(
             BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true");
 
     private static final int PROBE_LINE_LIMIT = 200;
