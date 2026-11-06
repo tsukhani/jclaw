@@ -13,15 +13,16 @@ import java.util.regex.Pattern;
 
 
 /**
- * Jenkins signs each release's {@code SHA256SUMS}, and {@code jclaw.sh upgrade} pins the public key and
- * refuses a release it cannot verify; {@code docker-pull-verified.sh} does the same for {@code IMAGE_DIGEST}.
- * A pin that drifts from the other, or from the signing credential, is a release nobody can install or
- * pull; this fails the build first.
+ * Jenkins signs each release's {@code SHA256SUMS}, and {@code jclaw.sh upgrade} and {@code install.sh}
+ * each pin the public key and refuse a release they cannot verify. A pin that drifts from the other,
+ * or from the signing credential, is therefore a release nobody can install; this fails the build first.
  */
 class ReleaseSigningConformanceTest extends UnitTest {
 
     private static final Pattern UPGRADER_KEY = Pattern.compile("(?m)^UPGRADE_RELEASE_PUBKEY='([^']+)'");
-    private static final Pattern DOCKER_KEY = Pattern.compile("(?m)^RELEASE_PUBKEY='([^']+)'");
+    private static final Pattern INSTALLER_KEY = Pattern.compile("(?m)^RELEASE_PUBKEY='([^']+)'");
+    private static final Pattern UPGRADER_FLOOR = Pattern.compile("(?m)^UPGRADE_LAST_UNSIGNED=\"([0-9.]+)\"");
+    private static final Pattern INSTALLER_FLOOR = Pattern.compile("(?m)^LAST_UNSIGNED_RELEASE=\"([0-9.]+)\"");
 
     // Signed on the Jenkins host by the private key now held in the jclaw-release-signing-key
     // credential. Rotating the key means re-making this pair with the new one.
@@ -45,18 +46,24 @@ class ReleaseSigningConformanceTest extends UnitTest {
     }
 
     @Test
+    void theInstallerAndTheUpgraderPinTheSameKey() throws IOException {
+        assertEquals(pinned("jclaw.sh", UPGRADER_KEY), pinned("install.sh", INSTALLER_KEY),
+                "jclaw.sh and install.sh pin different release-signing keys");
+    }
+
+    @Test
     void theKeyDockerUsersVerifyWithIsThePinnedKey() throws IOException {
         var pinned = pinned("jclaw.sh", UPGRADER_KEY);
         assertEquals(pinned, read("release-signing.pub").strip(),
                 "release-signing.pub is not the key jclaw.sh pins, so a signed IMAGE_DIGEST would not verify under it");
-        assertEquals(pinned, pinned("docker-pull-verified.sh", DOCKER_KEY),
+        assertEquals(pinned, pinned("docker-pull-verified.sh", INSTALLER_KEY),
                 "docker-pull-verified.sh pins a different key, so it would refuse every release's IMAGE_DIGEST");
     }
 
     @Test
-    void theInstallerPinsNoKey() throws IOException {
-        assertFalse(read("install.sh").contains("RELEASE_PUBKEY"),
-                "install.sh pins a release key again: it checks the bundle by checksum only, so a key there is a fourth copy to keep equal");
+    void theInstallerAndTheUpgraderAgreeOnTheLastUnsignedRelease() throws IOException {
+        assertEquals(pinned("jclaw.sh", UPGRADER_FLOOR), pinned("install.sh", INSTALLER_FLOOR),
+                "jclaw.sh and install.sh disagree on which releases must carry a signature");
     }
 
     @Test

@@ -308,7 +308,7 @@ try {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     Die "download failed: $($_.Exception.Message)"
 }
-Warn 'this installer does not check the bundle, so it is installed unverified.'
+Warn 'this installer cannot check the release signature, so the bundle is installed unverified.'
 
 Step "Installing to $AppDir"
 New-Item -ItemType Directory -Path $JclawHome -Force | Out-Null

@@ -10,8 +10,8 @@
 #
 #   JCLAW_VERSION   release tag, e.g. v0.20.0 (default: latest)
 #
-# A machine with no openssl is warned and pulls the published digest unverified;
-# a signature that is missing or wrong is fatal.
+# A machine with no openssl is warned and pulls the published digest unverified, as
+# install.sh does; a signature that is missing or wrong is fatal.
 #
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
 set -eu
