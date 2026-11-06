@@ -8,6 +8,7 @@ import services.TaskLifecycleEvents;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
@@ -27,8 +28,12 @@ class TaskLifecycleEventsBusTest extends UnitTest {
         unsubs.clear();
     }
 
-    private void subscribe(Consumer<String> listener) {
-        unsubs.add(NotificationBus.subscribe(listener));
+    /** Hears only {@code task.*} events for {@code taskId}: any turn in a class running beside this one publishes too. */
+    private void subscribe(long taskId, Consumer<String> listener) {
+        unsubs.add(NotificationBus.subscribe(sse -> {
+            var id = "\"taskId\":" + taskId;
+            if (sse.contains("\"type\":\"task.") && (sse.contains(id + ",") || sse.contains(id + "}"))) listener.accept(sse);
+        }));
     }
 
     private static Task task(long id, String name) {
@@ -47,8 +52,8 @@ class TaskLifecycleEventsBusTest extends UnitTest {
 
     @Test
     void recordStartedPublishesTaskStartedWithIds() {
-        var received = new ArrayList<String>();
-        subscribe(received::add);
+        var received = new CopyOnWriteArrayList<String>();
+        subscribe(100L, received::add);
 
         TaskLifecycleEvents.recordStarted(task(100L, "t"), run(200L));
 
@@ -61,8 +66,8 @@ class TaskLifecycleEventsBusTest extends UnitTest {
 
     @Test
     void recordCompletedPublishesTaskCompleted() {
-        var received = new ArrayList<String>();
-        subscribe(received::add);
+        var received = new CopyOnWriteArrayList<String>();
+        subscribe(101L, received::add);
 
         TaskLifecycleEvents.recordCompleted(task(101L, "t2"), run(201L), 1234L);
 
@@ -73,8 +78,8 @@ class TaskLifecycleEventsBusTest extends UnitTest {
 
     @Test
     void recordLostPublishesTaskLostWithoutRunId() {
-        var received = new ArrayList<String>();
-        subscribe(received::add);
+        var received = new CopyOnWriteArrayList<String>();
+        subscribe(102L, received::add);
 
         TaskLifecycleEvents.recordLost(task(102L, "t3"), 90L);
 

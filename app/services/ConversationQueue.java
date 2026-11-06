@@ -16,6 +16,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -116,9 +117,12 @@ public class ConversationQueue {
          */
         volatile long lastActivityMs = System.currentTimeMillis();
 
-        synchronized void finishProcessing() {
+        /** @return whether the conversation was busy until now */
+        synchronized boolean finishProcessing() {
+            boolean wasProcessing = processing;
             processing = false;
             ownerCancel = null;
+            return wasProcessing;
         }
 
         synchronized boolean isProcessing() {
@@ -163,10 +167,11 @@ public class ConversationQueue {
         // We only DECIDE under the lock; the EventLogger emits (synchronous file-append
         // + a batched DB flush) happen AFTER releasing it, mirroring the "Message queued"
         // log below — never hold the ingress lock across that I/O.
-        boolean interrupted;
+        boolean interrupted = false;
         boolean droppedOverflow = false;
         @Nullable RuntimeException storeFailure = null;
         AtomicBoolean interruptedFlag = state.cancelled;
+        long acquired = NOT_ACQUIRED;
         synchronized (state) {
             state.mode = mode;
             state.lastActivityMs = System.currentTimeMillis();
@@ -175,35 +180,40 @@ public class ConversationQueue {
                 state.processing = true;
                 state.ownerCancel = ownerCancel;
                 state.generation = GENERATIONS.incrementAndGet();
-                return state.generation;
-            }
-
-            interrupted = "interrupt".equals(mode);
-            var dropped = new ArrayList<QueuedMessage>();
-            if (interrupted) {
-                // Signal the in-flight processor to cancel, then queue this message
-                // so drain() will pick it up after the current run finishes.
-                interruptedFlag = state.cancelled;
-                interruptedFlag.set(true);
-                dropped.addAll(state.pending);
-                state.pending.clear();
-            } else if (state.pending.size() >= MAX_QUEUE_SIZE) {
-                // Queue and collect modes: drop the oldest
-                var oldest = state.pending.pollFirst();
-                if (oldest != null) dropped.add(oldest);
-                droppedOverflow = true;
-            }
-            // Written under the lock, so no drain can take the message before its row commits.
-            var queued = message;
-            discardPending(pendingIdsOf(dropped));
-            if (isStored(message)) {
-                try {
-                    queued = message.withPendingId(insertPending(conversationId, message));
-                } catch (RuntimeException e) {
-                    storeFailure = e;
+                acquired = state.generation;
+            } else {
+                interrupted = "interrupt".equals(mode);
+                var dropped = new ArrayList<QueuedMessage>();
+                if (interrupted) {
+                    // Signal the in-flight processor to cancel, then queue this message
+                    // so drain() will pick it up after the current run finishes.
+                    interruptedFlag = state.cancelled;
+                    interruptedFlag.set(true);
+                    dropped.addAll(state.pending);
+                    state.pending.clear();
+                } else if (state.pending.size() >= MAX_QUEUE_SIZE) {
+                    // Queue and collect modes: drop the oldest
+                    var oldest = state.pending.pollFirst();
+                    if (oldest != null) dropped.add(oldest);
+                    droppedOverflow = true;
                 }
+                // Written under the lock, so no drain can take the message before its row commits.
+                var queued = message;
+                discardPending(pendingIdsOf(dropped));
+                if (isStored(message)) {
+                    try {
+                        queued = message.withPendingId(insertPending(conversationId, message));
+                    } catch (RuntimeException e) {
+                        storeFailure = e;
+                    }
+                }
+                state.pending.addLast(queued);
             }
-            state.pending.addLast(queued);
+        }
+
+        if (acquired != NOT_ACQUIRED) {
+            announceBusy(conversationId, true);
+            return acquired;
         }
 
         if (storeFailure != null) {
@@ -267,6 +277,7 @@ public class ConversationQueue {
                     "Queue overflow for conversation %d, dropped %d oldest message(s)"
                             .formatted(conversationId, dropped.size()));
         }
+        if (acquired != NOT_ACQUIRED) announceBusy(conversationId, true);
         return acquired;
     }
 
@@ -318,6 +329,7 @@ public class ConversationQueue {
                     .formatted(conversationId, markerFailure.getMessage()));
         }
         TurnCancellation.cancel(stopped);
+        announceBusy(conversationId, false);
         return true;
     }
 
@@ -435,37 +447,34 @@ public class ConversationQueue {
         var state = queues.get(conversationId);
         if (state == null) return List.of();
 
+        boolean released;
         synchronized (state) {
             if (state.generation != generation) return List.of();
             // A fresh flag, not a reset: a stopped channel turn still holds the old one and must stay canceled.
             if (state.cancelled.get()) state.cancelled = new AtomicBoolean(false);
             state.lastActivityMs = System.currentTimeMillis();
 
-            if (state.pending.isEmpty()) {
-                // Nothing to do — release ownership and return. The next
-                // inbound message will re-acquire via tryAcquire.
-                state.finishProcessing();
-                return List.of();
-            }
-
-            // Ownership transfers to the caller — processing stays true — and a drained
-            // run registers no cancel flag of its own.
-            state.ownerCancel = null;
-            if ("collect".equals(state.mode)) {
-                var all = new ArrayList<>(state.pending);
-                state.pending.clear();
-                return all;
-            }
-
-            // Queue mode
-            var next = state.pending.pollFirst();
-            if (next == null) {
-                // Shouldn't happen given the isEmpty check, but be defensive.
-                state.finishProcessing();
-                return List.of();
-            }
-            return List.of(next);
+            if (!state.pending.isEmpty()) return handOver(state);
+            // Nothing to do — release ownership. The next inbound message will re-acquire via tryAcquire.
+            released = state.finishProcessing();
         }
+        if (released) announceBusy(conversationId, false);
+        return List.of();
+    }
+
+    /**
+     * Under the state lock, with a message pending: the message(s) the drain returns, all of them in
+     * collect mode. Ownership transfers to the caller — processing stays true — and a drained run
+     * registers no cancel flag of its own.
+     */
+    private static List<QueuedMessage> handOver(QueueState state) {
+        state.ownerCancel = null;
+        if ("collect".equals(state.mode)) {
+            var all = new ArrayList<>(state.pending);
+            state.pending.clear();
+            return all;
+        }
+        return List.of(state.pending.removeFirst());
     }
 
     /**
@@ -482,11 +491,13 @@ public class ConversationQueue {
     public static void releaseOwnership(Long conversationId, long generation) {
         var state = queues.get(conversationId);
         if (state == null) return;
+        boolean released;
         synchronized (state) {
             if (state.generation != generation) return;
             state.lastActivityMs = System.currentTimeMillis();
-            state.finishProcessing();
+            released = state.finishProcessing();
         }
+        if (released) announceBusy(conversationId, false);
     }
 
     /** Unfenced {@link #drain(Long, long)} against the current generation; tests only. */
@@ -502,6 +513,22 @@ public class ConversationQueue {
     /** Drops the conversation's in-memory state as a restart does, its owner and pending messages included; tests only. */
     public static void forgetForTest(Long conversationId) {
         queues.remove(conversationId);
+    }
+
+    /**
+     * Publish {@link NotificationBus#BUS_CONVERSATION_BUSY} for a transition the caller recorded under the
+     * state lock and has since released: a stalled SSE client holds a publish for up to
+     * {@link NotificationBus#LISTENER_TIMEOUT_MS}.
+     */
+    private static void announceBusy(Long conversationId, boolean busy) {
+        try {
+            NotificationBus.publish(NotificationBus.BUS_CONVERSATION_BUSY,
+                    Map.of("conversationId", conversationId, "busy", busy));
+        } catch (RuntimeException e) {
+            // The transition stands; a caller that saw this throw would never release what it acquired.
+            EventLogger.warn(QUEUE, "Conversation %d going %s not announced: %s"
+                    .formatted(conversationId, busy ? "busy" : "idle", e.getMessage()));
+        }
     }
 
     /** The rows of {@code messages} that carry one. */

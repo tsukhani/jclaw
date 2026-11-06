@@ -30,6 +30,13 @@ class NotificationBusTest extends UnitTest {
         return unsub;
     }
 
+    /** {@code listener} on {@code type}'s events alone: every turn in a class running beside this one publishes too. */
+    private Runnable subscribe(String type, java.util.function.Consumer<String> listener) {
+        return subscribe(msg -> {
+            if (msg.contains("\"type\":\"" + type + "\"")) listener.accept(msg);
+        });
+    }
+
     // --- typed event listeners ---
 
     @Test
@@ -93,8 +100,8 @@ class NotificationBusTest extends UnitTest {
 
     @Test
     void publishDeliversToSubscriber() {
-        var received = new ArrayList<String>();
-        subscribe(received::add);
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe("test.event", received::add);
 
         NotificationBus.publish("test.event", Map.of("key", "value"));
 
@@ -105,10 +112,10 @@ class NotificationBusTest extends UnitTest {
 
     @Test
     void publishDeliversToMultipleSubscribers() {
-        var received1 = new ArrayList<String>();
-        var received2 = new ArrayList<String>();
-        subscribe(received1::add);
-        subscribe(received2::add);
+        var received1 = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var received2 = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe("multi.event", received1::add);
+        subscribe("multi.event", received2::add);
 
         NotificationBus.publish("multi.event", "msg", "hello");
 
@@ -118,8 +125,8 @@ class NotificationBusTest extends UnitTest {
 
     @Test
     void publishFormatsAsSsePayload() {
-        var received = new ArrayList<String>();
-        subscribe(received::add);
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe("sse.test", received::add);
 
         NotificationBus.publish("sse.test", Map.of("data", "payload"));
 
@@ -188,7 +195,7 @@ class NotificationBusTest extends UnitTest {
         // Slow listener: sleeps well past the per-listener timeout. Tracked too — even though
         // publish() will remove it, the unsubscribe handle is a safe no-op if already gone.
         var slowEntered = new java.util.concurrent.CountDownLatch(1);
-        subscribe(msg -> {
+        subscribe("timeout.test", msg -> {
             slowEntered.countDown();
             try {
                 Thread.sleep(NotificationBus.LISTENER_TIMEOUT_MS + 2_000L);
@@ -284,7 +291,7 @@ class NotificationBusTest extends UnitTest {
     private long publishPastTheTimeout(int count, String event,
                                        java.util.concurrent.CountDownLatch entered) {
         for (int i = 0; i < count; i++) {
-            subscribe(msg -> {
+            subscribe(event, msg -> {
                 if (entered != null) entered.countDown();
                 try {
                     Thread.sleep(NotificationBus.LISTENER_TIMEOUT_MS + 5_000L);

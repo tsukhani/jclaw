@@ -28,6 +28,8 @@ Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inser
 
 The reply streams in real time. While the model is generating, the **Send** button turns into a **Stop generating** button. Click it to interrupt the current generation.
 
+Some turns run without streaming to the page: the agent picking up again after a subagent it waited for with `subagent_yield`, a message that waited in the queue while the agent was busy, or a message sent through the API. While one of these runs in the open conversation, **Working…** shows under the messages. Its tool calls and its reply appear as the agent saves them, with no need to reload. Such a turn has no **Stop generating** button. A message you send meanwhile follows the agent's [Queue Mode](/guide#agents-queue-mode): by default it waits in the queue and runs when the turn ends.
+
 Replies render as Markdown, and math the model writes in TeX is typeset with KaTeX: `$…$` and `\(…\)` inline, `$$…$$` and `\[…\]` as a display equation. The equation scrolls inside the bubble when it is too wide. A dollar amount in prose stays text: `$` opens math only when a non-space follows it, and closes only after a non-space and before anything but a digit. So "$5 and $10" is left alone. Malformed TeX shows as an inline error rather than breaking the reply.
 
 Ask for a Lewis structure and the model writes a fenced code block with the language hint `lewis` holding one SMILES string. The chat draws it as an electron-dot structure, with every atom labeled and its lone pairs and radicals marked. Rings must be in Kekulé form (`C1=CC=CC=C1`, not `c1ccccc1`), and only main-group elements are drawn. The block shows as code until the drawing has loaded. A SMILES that cannot be drawn keeps its code block, with a one-line reason under it.
@@ -173,7 +175,7 @@ The agent keeps seeing its checklist after older turns are summarized or drop ou
 
 ## Subagent transcripts are read-only
 
-If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once. So a running subagent's transcript shows the messages as of when you opened it. To follow a run live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
+If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. While the subagent is still working, the full page shows **Working…** under the transcript and adds its messages as it writes them. A run on an [external coding harness](/guide#subagents-acp-harness) is different: the full page shows its messages as of when you opened it. To follow one live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
 
 ## Where to go next
 

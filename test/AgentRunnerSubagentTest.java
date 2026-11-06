@@ -418,6 +418,71 @@ class AgentRunnerSubagentTest extends UnitTest {
     }
 
     @Test
+    void aResumedTurnAnnouncesEachCommittedRoundAndItsReplyThenGoesIdle() throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        var provider = "resume-announce-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        try {
+            // The reply is chosen by how many tool results the request carries: one datetime round, then the answer.
+            startLlmServer(exchange -> {
+                var request = com.google.gson.JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+                boolean answered = false;
+                for (var m : request.getAsJsonArray("messages")) {
+                    answered |= "tool".equals(m.getAsJsonObject().get("role").getAsString());
+                }
+                LlmReplyFixture.send(exchange, answered ? simpleResponse("Done after one round.") : """
+                        {"choices":[{"index":0,"message":{"role":"assistant","content":"Checking the time.",
+                        "tool_calls":[{"id":"call_1","type":"function","function":{"name":"datetime","arguments":"{\\"action\\":\\"now\\"}"}}]},
+                        "finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}""");
+            });
+            configureProvider(provider);
+            var parentAgent = createAgent("resume-announce-parent", provider, "test-model");
+            var parentConv = ConversationService.create(parentAgent, "web", "u-resume-announce");
+            ConversationService.appendUserMessage(parentConv, "find out, then tell me");
+            Tx.run(() -> ConversationService.appendMessage((Conversation) Conversation.findById(parentConv.id),
+                    MessageRole.USER, "[subagent reply] child's findings", null, null, null));
+            JPA.em().getTransaction().commit();
+            JPA.em().getTransaction().begin();
+
+            var heard = new java.util.concurrent.CopyOnWriteArrayList<String>();
+            var unsubscribe = services.NotificationBus.subscribeEvents((type, data) -> {
+                if (!parentConv.id.equals(data.get("conversationId"))) return;
+                if (services.NotificationBus.BUS_CONVERSATION_UPDATED.equals(type)) heard.add("updated");
+                if (services.NotificationBus.BUS_CONVERSATION_BUSY.equals(type)) heard.add("busy=" + data.get("busy"));
+            });
+            var resultRef = new AtomicReference<AgentRunner.RunResult>();
+            var errorRef = new AtomicReference<Exception>();
+            try {
+                var thread = Thread.ofVirtual().start(() -> {
+                    try {
+                        var a = Tx.run(() -> (Agent) Agent.findById(parentAgent.id));
+                        var c = Tx.run(() -> (Conversation) Conversation.findById(parentConv.id));
+                        resultRef.set(AgentRunner.runYieldResume(a, c));
+                    } catch (Exception e) {
+                        errorRef.set(e);
+                    }
+                });
+                thread.join(30_000);
+                assertFalse(thread.isAlive(), "runYieldResume must complete within 30s");
+            } finally {
+                unsubscribe.run();
+            }
+            if (errorRef.get() != null) throw errorRef.get();
+
+            assertEquals("Done after one round.", resultRef.get().response());
+            assertEquals(java.util.List.of("busy=true", "updated", "updated", "busy=false"), heard,
+                    "one event for the round's rows, one for the reply, and the release last");
+        } finally {
+            ConfigService.delete("provider." + provider + ".baseUrl");
+            ConfigService.delete("provider." + provider + ".apiKey");
+            ConfigService.delete("provider." + provider + ".models");
+            llm.ProviderRegistry.refresh();
+            utils.CircuitBreakers.remove(llm.LlmResilience.breakerName(provider));
+            ToolRegistrySync.release();
+        }
+    }
+
+    @Test
     void runYieldResumeReturnsCannedQueuedResponseWhenAnotherTurnHoldsQueue() {
         // Queue-busy path: if a concurrent turn already holds the
         // conversation queue when runYieldResume is invoked, the resume is
@@ -608,9 +673,13 @@ class AgentRunnerSubagentTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        configureProvider("test-provider");
+    }
+
+    private void configureProvider(String provider) {
+        ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+        ConfigService.set("provider." + provider + ".models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }

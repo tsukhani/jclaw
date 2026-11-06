@@ -4,8 +4,8 @@ import java.io.File;
 
 /**
  * Web (in-app SPA) channel. The web UI has no outbound push: an agent's reply
- * is persisted to the DB by {@link agents.AgentRunner#run} and the browser
- * picks it up on the next conversation load / refresh. There is no socket to
+ * is persisted to the DB by {@link agents.AgentRunner#run}, and an open chat
+ * page fetches it once the event bus says it committed. There is no socket to
  * deliver through, so the {@link Channel} send methods here are intentional
  * no-ops that report success — the message has already been "delivered" (to
  * the DB) by the time dispatch would run.

@@ -1160,4 +1160,165 @@ class ConversationQueueTest extends UnitTest {
                 "inline child rows neither answer nor replace the parent's request");
         assertEquals(1, markers(conv.id));
     }
+
+    // ── conversation.busy: each idle↔busy transition is announced once ──
+
+    @Test
+    void aTurnTakingAnIdleConversationAnnouncesItBusy() {
+        long convId = 16001L;
+        var gen = new long[1];
+        var heard = busyAnnouncedWhile(convId, () -> gen[0] = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), null));
+
+        assertEquals(List.of(busy(convId, true)), heard);
+        ConversationQueue.releaseOwnership(convId, gen[0]);
+    }
+
+    @Test
+    void aMessageQueuedBehindARunningTurnAnnouncesNothing() {
+        long convId = 16002L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+
+        var heard = busyAnnouncedWhile(convId, () -> assertFalse(ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent))));
+
+        assertEquals(List.of(), heard);
+        ConversationQueue.drain(convId, gen);
+        ConversationQueue.drain(convId, gen);
+    }
+
+    @Test
+    void aDrainThatHandsTheConversationToAQueuedMessageAnnouncesNothing() {
+        long convId = 16003L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        var heard = busyAnnouncedWhile(convId,
+                () -> assertEquals("B", ConversationQueue.drain(convId, gen).getFirst().text()));
+
+        assertEquals(List.of(), heard);
+        assertTrue(ConversationQueue.isBusy(convId));
+        ConversationQueue.drain(convId, gen);
+    }
+
+    @Test
+    void aDrainThatFindsNothingQueuedAnnouncesTheConversationIdle() {
+        long convId = 16004L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+
+        var heard = busyAnnouncedWhile(convId, () -> assertEquals(List.of(), ConversationQueue.drain(convId, gen)));
+
+        assertEquals(List.of(busy(convId, false)), heard);
+    }
+
+    @Test
+    void aReleaseAnnouncesIdleOnceAndAReleaseOfAnIdleConversationNothing() {
+        long convId = 16005L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+
+        var heard = busyAnnouncedWhile(convId, () -> {
+            ConversationQueue.releaseOwnership(convId, gen);
+            ConversationQueue.releaseOwnership(convId, gen);
+            ConversationQueue.drain(convId, gen);
+        });
+
+        assertEquals(List.of(busy(convId, false)), heard);
+    }
+
+    @Test
+    void aStaleGenerationsDrainAndReleaseAnnounceNothing() {
+        long convId = 16006L;
+        var stale = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+        ConversationQueue.stop(convId);
+        var fresh = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("B", "web", "admin", agent), null);
+
+        var heard = busyAnnouncedWhile(convId, () -> {
+            ConversationQueue.drain(convId, stale);
+            ConversationQueue.releaseOwnership(convId, stale);
+        });
+
+        assertEquals(List.of(), heard);
+        assertTrue(ConversationQueue.isBusy(convId), "the new owner keeps the conversation");
+        ConversationQueue.releaseOwnership(convId, fresh);
+    }
+
+    @Test
+    void aStopAnnouncesTheConversationIdleAndARefusedStopNothing() {
+        long convId = 16007L;
+        var uncancellable = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), null);
+        var refused = busyAnnouncedWhile(convId, () -> assertFalse(ConversationQueue.stop(convId)));
+        ConversationQueue.releaseOwnership(convId, uncancellable);
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("B", "web", "admin", agent),
+                new AtomicBoolean());
+
+        var stopped = busyAnnouncedWhile(convId, () -> assertTrue(ConversationQueue.stop(convId)));
+
+        assertEquals(List.of(), refused);
+        assertEquals(List.of(busy(convId, false)), stopped);
+    }
+
+    @Test
+    void aRestoredMessageThatTakesTheConversationAnnouncesItBusyAndOneThatQueuesNothing() {
+        long idle = 16008L;
+        long held = 16009L;
+        var heldGen = ConversationQueue.tryAcquireOwnership(held, new QueuedMessage("A", "web", "admin", agent), null);
+        var restored = List.of(new QueuedMessage("R", "telegram", "peer", agent));
+        var gen = new long[1];
+
+        var heardIdle = busyAnnouncedWhile(idle, () -> gen[0] = ConversationQueue.tryAcquireRestored(idle, restored));
+        var heardHeld = busyAnnouncedWhile(held, () -> assertEquals(ConversationQueue.NOT_ACQUIRED,
+                ConversationQueue.tryAcquireRestored(held, restored)));
+
+        assertEquals(List.of(busy(idle, true)), heardIdle);
+        assertEquals(List.of(), heardHeld);
+        ConversationQueue.releaseOwnership(idle, gen[0]);
+        ConversationQueue.drain(held, heldGen);
+        ConversationQueue.drain(held, heldGen);
+    }
+
+    @Test
+    void theBusyChangeGoesOutOverTheEventStreamInTheShapeThePageReads() {
+        long convId = 16010L;
+        var lines = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var unsubscribe = services.NotificationBus.subscribe(line -> {
+            if (line.contains("\"conversationId\":" + convId + ",") || line.contains("\"conversationId\":" + convId + "}")) {
+                lines.add(line);
+            }
+        });
+        long gen;
+        try {
+            gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+        } finally {
+            unsubscribe.run();
+        }
+
+        assertEquals(List.of(com.google.gson.JsonParser.parseString(
+                        "{\"type\":\"conversation.busy\",\"data\":{\"conversationId\":" + convId + ",\"busy\":true}}")),
+                lines.stream().map(line -> {
+                    assertTrue(line.startsWith("data: ") && line.endsWith("\n\n"), line);
+                    return com.google.gson.JsonParser.parseString(line.substring("data: ".length()).strip());
+                }).toList());
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    /** The {@code conversation.busy} payloads published for {@code convId} while {@code body} runs. */
+    private static List<java.util.Map<String, Object>> busyAnnouncedWhile(long convId, Runnable body) {
+        var heard = new java.util.concurrent.CopyOnWriteArrayList<java.util.Map<String, Object>>();
+        var unsubscribe = services.NotificationBus.subscribeEvents((type, data) -> {
+            if (services.NotificationBus.BUS_CONVERSATION_BUSY.equals(type)
+                    && Long.valueOf(convId).equals(data.get("conversationId"))) heard.add(data);
+        });
+        try {
+            body.run();
+        } finally {
+            unsubscribe.run();
+        }
+        return List.copyOf(heard);
+    }
+
+    private static java.util.Map<String, Object> busy(long convId, boolean busy) {
+        return java.util.Map.of("conversationId", convId, "busy", busy);
+    }
 }

@@ -38,6 +38,7 @@ import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatConversation, type ChatConversationLoadHooks } from '~/composables/useChatConversation'
 import { useAgentModel } from '~/composables/useAgentModel'
 import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
+import { useChatBackgroundTurn } from '~/composables/useChatBackgroundTurn'
 import { SCRAPE_JOB_REPLY_GRACE_MS, scrapeJobEndedKey } from '~/composables/useScrapeJobChat'
 import { mcpAppHostKey } from '~/composables/useMcpAppBridge'
 import { useChatSubagents } from '~/composables/useChatSubagents'
@@ -316,6 +317,10 @@ const {
   keepPollingFor,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState, appendRows: appendFollowing })
 provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
+
+// A turn the server runs with no stream to this tab (a yield resume, a queued message): its rows arrive on
+// conversation.updated through the poller above, and this flag drives the "Working…" line until it ends.
+const { backgroundBusy } = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce })
 
 const {
   chips: subagentChips,
@@ -1043,6 +1048,28 @@ function exportConversation() {
                 class="text-sm tabular-nums"
                 aria-hidden="true"
               >{{ streamProgressElapsed }}</span>
+            </div>
+            <!--
+              A turn the server runs with no stream to this tab. No timer: the page cannot know when it
+              started. No Stop: a yield resume, a drained queued message and POST /api/chat/send register
+              no cancel flag for ConversationQueue.stop to flip.
+            -->
+            <div
+              v-if="backgroundBusy && !streaming"
+              class="flex items-center gap-2 text-base text-fg-muted"
+              data-testid="background-turn-progress"
+            >
+              <img
+                src="/clawdia-micro.webp"
+                alt=""
+                width="16"
+                height="16"
+                class="h-4 w-4 shrink-0 select-none"
+              >
+              <span
+                class="animate-pulse"
+                role="status"
+              >Working…</span>
             </div>
             <ChatBrowserSetupBar
               v-if="streaming && browserSetupTurnKey && browserSetup?.active"

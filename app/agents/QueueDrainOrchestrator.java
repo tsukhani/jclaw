@@ -70,8 +70,8 @@ public final class QueueDrainOrchestrator {
      * method's {@link ConversationQueue#drain} call). For external
      * channels (Telegram, Slack, WhatsApp), the response is dispatched
      * back through the channel via {@link AgentRunner#dispatchToChannel}.
-     * For web, the response is persisted to the DB and the user sees it
-     * on next conversation load.
+     * For web, the response is persisted to the DB, and an open chat page
+     * fetches it once it commits.
      *
      * <p>Called from the {@code finally} block of both
      * {@link AgentRunner#run} and {@link AgentRunner#runStreaming} (via

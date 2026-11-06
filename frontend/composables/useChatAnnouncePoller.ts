@@ -10,9 +10,9 @@ import type { Message } from '~/types/api'
  * JCLAW-270 async-spawn announce poller (JCLAW-690 stage 5b; behaviour
  * extracted verbatim from pages/chat.vue). After the parent's streaming turn
  * ends, the {@code subagent_announce} Message that closes an async spawn can
- * arrive seconds (or minutes) later — the SSE stream is already closed by
- * then, so the chat view has no reactive path to learn about it. Without a
- * refresh the announce sits in the DB and the user has to manually reload.
+ * arrive seconds (or minutes) later, after the chat stream has closed. The
+ * event bus's conversation.updated and conversation.busy bring it in; this
+ * poll is the fallback for while the bus is down.
  *
  * Mirror {@code /subagents}'s "auto-refresh while RUNNING" pattern: while
  * the open conversation has at least one tool result reporting
@@ -37,9 +37,9 @@ const ANNOUNCE_POLL_INTERVAL_MS = 5000
  * Keep polling for this long after the most recent subagent_announce row
  * lands, even though {@link hasPendingAsyncAnnounce} flips false. Covers
  * the gap where {@link AgentRunner#runYieldResume} runs the parent's
- * resumed turn on the backend with no SSE stream to the chat tab — any
- * `message` tool calls or sync sub-agent activity inside the resumed
- * turn would otherwise sit in the DB until the user reloads. Three
+ * resumed turn on the backend with no SSE stream to the chat tab. The
+ * event bus's conversation.updated and conversation.busy bring that turn's
+ * rows in; this window is the fallback for while the bus is down. Three
  * minutes accommodates a typical Phase 4 import (Radarr scan + verify
  * + transmission cleanup, ~30-180s) plus headroom; long enough that
  * the user sees the full workflow inline, short enough that idle

@@ -27,13 +27,6 @@ interface StreamingMessage extends Message {
   _thinkingInProgress?: boolean
 }
 
-// Queue status from GET /api/conversations/:id/queue — keeps the "agent busy"
-// banner showing after a stream completes.
-interface ConversationQueueStatus {
-  busy: boolean
-  [key: string]: unknown
-}
-
 interface ToolCallEvent {
   id: string
   name: string
@@ -93,7 +86,6 @@ export interface UseChatStream {
   streamContent: Ref<string>
   streamStatus: Ref<string>
   streamingMessageKey: Ref<string | null>
-  agentBusy: Ref<boolean>
   streamContentHtml: Ref<string>
   streamReasoningHtml: Ref<string>
   sendMessage: () => Promise<void>
@@ -159,7 +151,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   // streamReasoningHtml (throttled markdown render) instead of running the full
   // renderMarkdown pipeline on every token mutation.
   const streamingMessageKey = ref<string | null>(null)
-  const agentBusy = ref(false)
   const streamContent = ref('')
   const abortController = ref<AbortController | null>(null)
 
@@ -510,16 +501,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
-  // Whether the agent is still processing queued messages.
-  async function refreshAgentBusy() {
-    if (!selectedConvoId.value) return
-    try {
-      const status = await $fetch<ConversationQueueStatus>(`/api/conversations/${selectedConvoId.value}/queue`)
-      agentBusy.value = status.busy
-    }
-    catch { agentBusy.value = false }
-  }
-
   async function sendMessage() {
     if (streaming.value || !selectedAgentId.value) return
     // Subagent transcripts are read-only — the user reached this view via a
@@ -608,7 +589,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // reflects the final layout, then pin to the bottom.
       nextTick().then(scrollToBottom)
       focusInput()
-      await refreshAgentBusy()
       // Fire the refresh twice. Immediate: catches the common case where the
       // backend persist already landed by the time onComplete fires. Delayed:
       // catches the race where the SSE `complete` frame beat the persist Tx
@@ -642,7 +622,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamContent,
     streamStatus,
     streamingMessageKey,
-    agentBusy,
     streamContentHtml,
     streamReasoningHtml,
     sendMessage,

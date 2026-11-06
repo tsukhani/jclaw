@@ -242,8 +242,8 @@ final class ChannelInboundDispatcher {
 
     /**
      * Best-effort delivery of a response to an external channel. Web channel
-     * responses are already persisted to the DB by {@link AgentRunner#run} — the user sees
-     * them on next conversation load or refresh. External channels need explicit
+     * responses are already persisted to the DB by {@link AgentRunner#run}, and an open chat
+     * page fetches them as they commit. External channels need explicit
      * dispatch because there is no persistent connection to push through.
      *
      * <p>JCLAW-141: resolves the right {@link channels.Channel} via

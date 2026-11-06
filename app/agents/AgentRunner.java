@@ -691,8 +691,8 @@ public class AgentRunner {
         // to write into task_run_message. Constructed at the boundary
         // where AgentRunner takes responsibility for the conversation.
         // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
-        final var sink = fenced ? new ConversationSink(conversation, generation, null, pendingIds)
-                : new ConversationSink(conversation);
+        // Announcing: no tab streams this sink's rows, an inline child's inside a streamed parent turn included.
+        final var sink = ConversationSink.announcing(conversation, fenced, generation, pendingIds);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally
         // skipped. Every other segment is captured, which is why
@@ -1053,8 +1053,8 @@ public class AgentRunner {
 
     /**
      * Best-effort delivery of a response to an external channel. Web channel
-     * responses are already persisted to the DB by {@link #run} — the user sees
-     * them on next conversation load or refresh. External channels need explicit
+     * responses are already persisted to the DB by {@link #run}, and an open chat
+     * page fetches them as they commit. External channels need explicit
      * dispatch because there is no persistent connection to push through.
      *
      * <p>JCLAW-141: resolves the right {@link channels.Channel} via

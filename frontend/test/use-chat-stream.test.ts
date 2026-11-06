@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref, shallowRef } from 'vue'
@@ -51,10 +51,6 @@ function streamOpenThen(conversationId: number | null, laterFrames: string[] = [
     return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   })
 }
-
-beforeEach(() => {
-  registerEndpoint('/api/conversations/42/queue', () => ({ busy: false }))
-})
 
 afterEach(() => {
   vi.restoreAllMocks()
