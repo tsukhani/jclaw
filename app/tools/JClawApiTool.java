@@ -247,34 +247,15 @@ public class JClawApiTool implements ToolRegistry.Tool {
             return "Error: method must be one of " + ALLOWED_METHODS + " -- got: " + methodRaw;
         }
         var origin = DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
-        var fields = bodyFields(method, args);
-        var asked = callLabel(method, withoutQuery(path)) + fields;
-        if (!path.startsWith(API_PREFIX)) {
-            logCall(agent, origin, asked + ": refused, not an /api/ path", false);
-            return "Error: path must start with /api/ -- got: " + path;
-        }
-        var unnormalized = unnormalizedReason(path);
-        if (unnormalized != null) {
-            logCall(agent, origin, asked + ": refused, the path contains " + unnormalized, false);
-            return "Error: path contains %s and cannot be invoked through jclaw_api -- pass the resolved path. Got: %s"
-                    .formatted(unnormalized, path);
-        }
-
-        var url = buildUrl(path, args);
-        if (url == null) {
-            logCall(agent, origin, asked + ": refused, not a valid URL", false);
-            return "Error: could not construct URL for path: " + path;
-        }
-        // Gate the path that will actually be sent, not the one the model typed: HttpUrl
-        // resolves dot-segments while parsing (JCLAW-1227).
-        var gatedPath = url.encodedPath();
-        var call = callLabel(method, gatedPath) + fields;
-        // Default-deny, the same set `discover` advertises; AgentAccessGate re-checks it.
-        if (!isCallable(method, gatedPath)) {
-            logCall(agent, origin, call + ": refused, not callable through jclaw_api", false);
-            return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is operator-only). "
-                    .formatted(method, gatedPath)
-                    + "Use action=\"discover\" to list the callable endpoints.";
+        var plan = plan(method, path, args);
+        var call = plan.label() + bodyFields(method, args);
+        HttpUrl url;
+        switch (plan) {
+            case Refuse refused -> {
+                logCall(agent, origin, call + ": refused, " + refused.reason(), false);
+                return refused.error();
+            }
+            case Send send -> url = send.url();
         }
 
         var requestBuilder = new Request.Builder()
@@ -324,7 +305,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         }
     }
 
-    /** The method and path, so the gate's prompt and log lines name the endpoint a write reaches. */
+    /** The endpoint the request reaches, or the one asked for and why it is refused, as {@link #plan} decides. */
     @Override
     public @Nullable String describeCall(String argsJson) {
         JsonObject args;
@@ -337,7 +318,54 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var method = stringField(args, KEY_METHOD);
         var path = stringField(args, KEY_PATH);
         if ((action != null && ACTION_DISCOVER.equalsIgnoreCase(action)) || method == null || path == null) return null;
-        return callLabel(method.toUpperCase(Locale.ROOT), withoutQuery(path));
+        return switch (plan(method.toUpperCase(Locale.ROOT), path, args)) {
+            case Send send -> send.label();
+            case Refuse refused -> refused.label() + " (refused: " + refused.reason() + ")";
+        };
+    }
+
+    /**
+     * Where a call goes: the request it sends, or why it is refused before anything is sent. {@link #execute}, its
+     * log line and {@link #describeCall} read the same plan, so the approval prompt names the endpoint the request
+     * reaches: the path {@link HttpUrl} resolved, which the gate reads too, never the string the model wrote, where
+     * {@code /api/agents/7/%2e%2e/%2e%2e/mcp-servers} would read as an agent edit.
+     */
+    private sealed interface Plan permits Send, Refuse {
+        String label();
+    }
+
+    private record Send(String label, HttpUrl url) implements Plan {}
+
+    /** {@code reason} is for the log and the prompt, {@code error} for the model. */
+    private record Refuse(String label, String reason, String error) implements Plan {}
+
+    private static Plan plan(String method, String path, JsonObject args) {
+        var asked = callLabel(method, withoutQuery(path));
+        if (!path.startsWith(API_PREFIX)) {
+            return new Refuse(asked, "not an /api/ path", "Error: path must start with /api/ -- got: " + path);
+        }
+        var unnormalized = unnormalizedReason(path);
+        if (unnormalized != null) {
+            return new Refuse(asked, "the path contains " + unnormalized,
+                    "Error: path contains %s and cannot be invoked through jclaw_api -- pass the resolved path. Got: %s"
+                            .formatted(unnormalized, path));
+        }
+        var url = buildUrl(path, args);
+        if (url == null) {
+            return new Refuse(asked, "not a valid URL", "Error: could not construct URL for path: " + path);
+        }
+        // Gate the path that will actually be sent, not the one the model typed: HttpUrl
+        // resolves dot-segments while parsing (JCLAW-1227).
+        var gatedPath = url.encodedPath();
+        var call = callLabel(method, gatedPath);
+        // Default-deny, the same set `discover` advertises; AgentAccessGate re-checks it.
+        if (!isCallable(method, gatedPath)) {
+            return new Refuse(call, "not callable through jclaw_api",
+                    "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is operator-only). "
+                            .formatted(method, gatedPath)
+                            + "Use action=\"discover\" to list the callable endpoints.");
+        }
+        return new Send(call, url);
     }
 
     /**
@@ -354,8 +382,11 @@ public class JClawApiTool implements ToolRegistry.Tool {
         }
     }
 
+    /** A long path keeps both ends: the start names the route, the end the row or file it reaches. */
     private static String callLabel(String method, String path) {
-        return method + " " + (path.length() <= MAX_LOGGED_PATH ? path : path.substring(0, MAX_LOGGED_PATH) + "…");
+        if (path.length() <= MAX_LOGGED_PATH) return method + " " + path;
+        var half = MAX_LOGGED_PATH / 2;
+        return method + " " + path.substring(0, half) + "…" + path.substring(path.length() - half);
     }
 
     private static String withoutQuery(String path) {

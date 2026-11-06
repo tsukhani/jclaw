@@ -376,12 +376,36 @@ class JClawApiToolTest extends UnitTest {
         assertNull(tool.describeCall("not json"));
     }
 
+    /** The prompt's Call: line must name where the request goes, which the model's string need not say. */
     @Test
-    void describeCallCutsAPathPastTwoHundredCharacters() {
-        var twoHundred = "/api/" + "a".repeat(195);
+    void describeCallNamesTheEndpointTheRequestReachesAndTheLogAgrees() {
+        var disguised = "{\"method\":\"POST\",\"path\":\"/api/agents/7/%2e%2e/%2e%2e/mcp-servers\",\"body\":{\"name\":\"x\"}}";
 
-        assertEquals("GET " + twoHundred, tool.describeCall("{\"method\":\"GET\",\"path\":\"" + twoHundred + "\"}"));
-        assertEquals("GET " + twoHundred + "…", tool.describeCall("{\"method\":\"GET\",\"path\":\"" + twoHundred + "b\"}"));
+        assertEquals("POST /api/mcp-servers", tool.describeCall(disguised));
+        assertEquals(List.of("INFO POST /api/mcp-servers (body: name): HTTP 200"),
+                loggedCalls(replying(new AtomicReference<>(), 200, "{}"), disguised));
+        assertEquals("PUT /api/router/models/reason%20ing",
+                tool.describeCall("{\"method\":\"PUT\",\"path\":\"/api/router/models/reason ing\"}"),
+                "the percent-encoded path is the one sent");
+    }
+
+    @Test
+    void describeCallSaysWhenTheCallWillBeRefused() {
+        assertEquals("GET /api/logs (refused: not callable through jclaw_api)",
+                tool.describeCall("{\"method\":\"GET\",\"path\":\"/api/skills/x/files/%2e%2e/%2e%2e/%2e%2e/logs\"}"));
+        assertEquals("GET /api/skills/x/../../logs (refused: the path contains a dot-segment)",
+                tool.describeCall("{\"method\":\"GET\",\"path\":\"/api/skills/x/../../logs\"}"));
+        assertEquals("GET /logs (refused: not an /api/ path)", tool.describeCall("{\"method\":\"GET\",\"path\":\"/logs\"}"));
+    }
+
+    @Test
+    void aPathPastTwoHundredCharactersKeepsBothEnds() {
+        var twoHundred = "/api/router/models/" + "a".repeat(181);
+        var twoHundredOne = twoHundred + "z";
+
+        assertEquals("PUT " + twoHundred, tool.describeCall("{\"method\":\"PUT\",\"path\":\"" + twoHundred + "\"}"));
+        assertEquals("PUT " + twoHundredOne.substring(0, 100) + "…" + twoHundredOne.substring(101),
+                tool.describeCall("{\"method\":\"PUT\",\"path\":\"" + twoHundredOne + "\"}"));
     }
 
     /** The jclaw_api lines one owner's call with {@code argsJson} wrote through {@code client}, as "LEVEL message". */

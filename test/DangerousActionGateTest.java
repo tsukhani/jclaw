@@ -527,10 +527,11 @@ class DangerousActionGateTest extends UnitTest {
     }
 
     @Test
-    void theTelegramPromptForAJclawApiWriteNamesTheCallEscaped() throws Exception {
+    void theTelegramPromptNamesTheEndpointTheWriteReaches() throws Exception {
+        // The path the model wrote reads as an agent edit; the one HttpUrl resolves, and sends, is an MCP create.
         var agent = boundAgent("gate-jclaw-prompt");
         var convId = telegramConvId(agent);
-        var args = "{\"method\":\"PUT\",\"path\":\"/api/agents/<7>\",\"body\":{\"modelId\":\"m\"}}";
+        var args = "{\"path\":\"/api/agents/<7>/%2e%2e/%2e%2e/mcp-servers\",\"method\":\"POST\"}";
 
         var verdict = runGateAsync(agent, convId, JCLAW_API, args);
         var approvalId = awaitPromptAndExtractId();
@@ -538,8 +539,8 @@ class DangerousActionGateTest extends UnitTest {
 
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS));
         assertEquals("⚠ <b>Approval required</b>\nThe agent wants to run the <b>jclaw_api</b> action:\n"
-                + "<b>Call:</b> PUT /api/agents/&lt;7&gt;\n"
-                + "<pre>{\"method\":\"PUT\",\"path\":\"/api/agents/&lt;7&gt;\",\"body\":{\"modelId\":\"m\"}}</pre>",
+                + "<b>Call:</b> POST /api/mcp-servers\n"
+                + "<pre>{\"path\":\"/api/agents/&lt;7&gt;/%2e%2e/%2e%2e/mcp-servers\",\"method\":\"POST\"}</pre>",
                 promptTextFor(approvalId));
     }
 
@@ -551,9 +552,10 @@ class DangerousActionGateTest extends UnitTest {
 
         assertEquals("The agent wants to run the *jclaw_api* action:\n*Call:* POST /api/mcp-servers\n```"
                 + MUTATION_ARGS + "```", buildSlackPrompt.invoke(null, JCLAW_API, MUTATION_ARGS));
-        assertEquals("The agent wants to run the *jclaw_api* action:\n*Call:* GET /api/a&lt;b&gt;`\u200b\n```"
-                + "{\"method\":\"GET\",\"path\":\"/api/a&lt;b&gt;`\u200b\"}```",
-                buildSlackPrompt.invoke(null, JCLAW_API, "{\"method\":\"GET\",\"path\":\"/api/a<b>`\"}"));
+        // Inside /api/ HttpUrl percent-encodes these; a path it refuses before parsing keeps them raw.
+        assertEquals("The agent wants to run the *jclaw_api* action:\n*Call:* GET x&lt;b&gt;`\u200b (refused: not an /api/ "
+                + "path)\n```{\"method\":\"GET\",\"path\":\"x&lt;b&gt;`\u200b\"}```",
+                buildSlackPrompt.invoke(null, JCLAW_API, "{\"method\":\"GET\",\"path\":\"x<b>`\"}"));
     }
 
     // ── Session/Always scope suppresses re-prompt ──────────────────────
