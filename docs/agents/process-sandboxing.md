@@ -56,7 +56,7 @@ boundary, plus its canonical path when that differs and is also below `<home>`.
 **Readiness is a launch, not a lookup.** `HarnessSandbox.availability()` is the one check behind
 `GET /api/sandbox`, every key-confined `wrap` and `wrapCustomAgentShell`. On Linux it runs
 `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true` (`ExecutableProbeSupport.probeCapturing`'s
-argv overload; `--unshare-user` goes after `bwrap` when the process runs as root, which is how the container
+argv overload; `--unshare-user --cap-drop ALL` goes after `bwrap` when the process runs as root, which is how the container
 runs — a root bwrap makes no user namespace of its own and needs CAP_SYS_ADMIN, which Docker drops; `linuxArgv` adds it too)
 and reports bwrap's first output line, trimmed to 200 characters, plus a pointer to
 the compose seccomp profile under `JCLAW_CONTAINER=1`; a success is cached for the JVM's life, a

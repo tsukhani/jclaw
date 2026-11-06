@@ -411,9 +411,9 @@ class HarnessSandboxTest extends UnitTest {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
         var asRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/root", List.of(), false, true);
         var notRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), false, false);
-        assertEquals(List.of("bwrap", "--unshare-user", "--ro-bind", "/", "/"), asRoot.subList(0, 5));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--ro-bind", "/", "/"), asRoot.subList(0, 7));
         assertEquals(List.of("bwrap", "--ro-bind", "/", "/"), notRoot.subList(0, 4));
-        assertEquals(List.of("bwrap", "--unshare-user", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
                 "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE_AS_ROOT);
         assertEquals(List.of("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
                 "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE);

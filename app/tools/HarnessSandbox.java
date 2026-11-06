@@ -110,9 +110,17 @@ public final class HarnessSandbox {
             BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true");
 
     /**
+     * What a root bwrap needs and gets: its own user namespace, and no capabilities in it. A process that keeps
+     * them could, with a full bounding set (a root JClaw outside Docker), unmount the tmpfs that hides $HOME
+     * and the state folders.
+     */
+    private static final List<String> ROOT_FLAGS = List.of("--unshare-user", "--cap-drop", "ALL");
+
+    /**
      * {@link #BWRAP_PROBE} for a process running as root. Started as root, bwrap makes no user namespace of its
      * own and needs CAP_SYS_ADMIN for the mount namespace, which Docker drops; {@code --unshare-user} makes it
-     * create one, and the container's seccomp profile allows that. The container runs as root, so INSTALL.md
+     * create one, which the container's seccomp profile allows, and {@code --cap-drop ALL} leaves the process
+     * none of its capabilities. The container runs as root, so INSTALL.md
      * gives operators this command.
      */
     public static final List<String> BWRAP_PROBE_AS_ROOT = withUserNamespace(BWRAP_PROBE);
@@ -130,7 +138,7 @@ public final class HarnessSandbox {
 
     private static List<String> withUserNamespace(List<String> bwrapCommand) {
         var out = new ArrayList<String>(bwrapCommand);
-        out.add(1, "--unshare-user");
+        out.addAll(1, ROOT_FLAGS);
         return List.copyOf(out);
     }
 
@@ -558,7 +566,7 @@ public final class HarnessSandbox {
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
                                          String home, List<Path> hidden, boolean denyNetwork, boolean asRoot) {
         var out = new ArrayList<String>(List.of(BWRAP));
-        if (asRoot) out.add("--unshare-user");
+        if (asRoot) out.addAll(ROOT_FLAGS);
         if (denyNetwork) out.add("--unshare-net");
         out.addAll(List.of(
                 "--ro-bind", "/", "/",
