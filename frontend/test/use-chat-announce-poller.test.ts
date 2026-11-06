@@ -3,6 +3,7 @@ import { mockNuxtImport, mountSuspended, registerEndpoint } from '@nuxt/test-uti
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref, shallowRef } from 'vue'
 import type { Message } from '~/types/api'
+import { serveConversation } from './conversation-endpoint'
 import {
   useChatAnnouncePoller,
   type UseChatAnnouncePoller,
@@ -112,14 +113,141 @@ describe('useChatAnnouncePoller', () => {
     expect(stale.api.hasRecentTaskCreate()).toBe(false)
   })
 
-  it('pollForAnnounce appends newly-arrived rows by id and re-runs the collapse init', async () => {
+  it('pollForAnnounce appends newly-arrived rows by id', async () => {
     const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'hi' })])
-    const initSubagentCollapsedState = vi.fn()
-    const { api } = await mountPoller({ messages, selectedConvoId: ref(5), initSubagentCollapsedState })
+    const { api } = await mountPoller({ messages, selectedConvoId: ref(5) })
     await api.pollForAnnounce()
     expect(messages.value).toHaveLength(2) // id 2 appended
     expect(messages.value[1]).toMatchObject({ id: 2, messageKind: 'subagent_announce' })
-    expect(initSubagentCollapsedState).toHaveBeenCalled()
+  })
+
+  it('applies the subagent-run default to the rows of a run the merge adds, and leaves a run already shown alone', async () => {
+    const at = '2026-11-06T10:00:00Z'
+    serveConversation(7, [
+      { id: 1, role: 'user', content: 'go', createdAt: at },
+      { id: 2, role: 'assistant', content: 'Spawning subagent: scout', subagentRunId: 9, createdAt: at },
+      { id: 3, role: 'assistant', content: 'Subagent completed', subagentRunId: 9, createdAt: at },
+      { id: 4, role: 'assistant', content: 'Spawning subagent: fetch', subagentRunId: 10, createdAt: at },
+    ])
+    const messages = shallowRef<Message[]>([
+      msg({ id: 1, role: 'user', content: 'go', createdAt: at }),
+      msg({ id: 2, role: 'assistant', content: 'Spawning subagent: scout', subagentRunId: 9, createdAt: at }),
+    ])
+    const initSubagentCollapsedState = vi.fn()
+    const { api } = await mountPoller({ messages, selectedConvoId: ref(7), initSubagentCollapsedState })
+
+    await api.pollForAnnounce()
+
+    expect(messages.value.map(m => m.id)).toEqual([1, 2, 3, 4])
+    expect(initSubagentCollapsedState.mock.calls.map(([rows]) => (rows as Message[]).map(m => m.id))).toEqual([[4]])
+  })
+
+  describe('a shown row the window hydrates differently', () => {
+    const at = '2026-11-06T10:00:00Z'
+
+    function callRow(id: number, callId: string) {
+      return { id, role: 'assistant', content: null, createdAt: at,
+        toolCalls: [{ id: callId, type: 'function', function: { name: 'exec', arguments: '{}' } }] }
+    }
+
+    function resultRow(id: number, callId: string) {
+      return { id, role: 'tool', content: `${callId} done`, createdAt: at, toolResults: callId }
+    }
+
+    function shownCall(callId: string, resultText: string | null) {
+      return { id: callId, name: 'exec', icon: 'wrench', arguments: '{}', resultText, resultStructured: null }
+    }
+
+    /** Each row that holds tool calls, as its id and its calls' ids and results. */
+    function owners(messages: Message[]) {
+      return messages.filter(m => m.toolCalls?.length).map(m => [m.id, m.toolCalls!.map(tc => `${tc.id}: ${tc.resultText}`)])
+    }
+
+    it('takes a call\'s result that committed after the call, keeping the row and its open block', async () => {
+      serveConversation(7, [{ id: 1, role: 'user', content: 'go', createdAt: at }, callRow(2, 'a'), resultRow(3, 'a')])
+      const owner = msg({ id: 2, role: 'assistant', content: null, createdAt: at, toolCalls: [shownCall('a', null)], toolCallsCollapsed: false })
+      const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'go', createdAt: at }), owner])
+      const { api } = await mountPoller({ messages, selectedConvoId: ref(7) })
+
+      await api.pollForAnnounce()
+
+      expect(messages.value.map(m => m.id)).toEqual([1, 2, 3])
+      expect(messages.value[1]).toBe(owner)
+      expect(owners(messages.value)).toEqual([[2, ['a: a done']]])
+      expect(owner.toolCallsCollapsed).toBe(false)
+      expect(owner.toolCalls!.map(tc => tc._expanded)).toEqual([true])
+    })
+
+    it('gives the shown row a call a round that committed late adds, and shows no call twice', async () => {
+      serveConversation(7, [
+        { id: 1, role: 'user', content: 'go', createdAt: at },
+        callRow(2, 'a'), resultRow(3, 'a'),
+        callRow(4, 'b'), resultRow(5, 'b'),
+        callRow(6, 'c'), resultRow(7, 'c'),
+      ])
+      // As the page holds them once rounds a and c have merged: both calls hang on row 6.
+      const messages = shallowRef<Message[]>([
+        msg({ id: 1, role: 'user', content: 'go', createdAt: at }),
+        msg({ id: 2, role: 'assistant', content: null, createdAt: at }),
+        msg({ id: 3, role: 'tool', content: 'a done', createdAt: at }),
+        msg({ id: 6, role: 'assistant', content: null, createdAt: at,
+          toolCalls: [shownCall('a', 'a done'), shownCall('c', 'c done')], toolCallsCollapsed: true }),
+        msg({ id: 7, role: 'tool', content: 'c done', createdAt: at }),
+      ])
+      const { api } = await mountPoller({ messages, selectedConvoId: ref(7) })
+
+      await api.pollForAnnounce()
+
+      expect(messages.value.map(m => m.id)).toEqual([1, 2, 3, 6, 7, 4, 5])
+      expect(owners(messages.value)).toEqual([[6, ['a: a done', 'b: b done', 'c: c done']]])
+    })
+
+    it('drops the older of two overlapping polls when it lands last, so its window changes nothing', async () => {
+      const older = [{ id: 1, role: 'user', content: 'go', createdAt: at }, callRow(2, 'a'), resultRow(3, 'a')]
+      const newer = [...older, callRow(4, 'b'), resultRow(5, 'b')]
+      let reads = 0
+      let releaseOlder!: () => void
+      const olderHeld = new Promise<void>((resolve) => {
+        releaseOlder = resolve
+      })
+      registerEndpoint('/api/conversations/8/messages', async () => {
+        reads += 1
+        if (reads === 1) {
+          await olderHeld
+          return structuredClone(older)
+        }
+        return structuredClone(newer)
+      })
+      const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'go', createdAt: at })])
+      const { api } = await mountPoller({ messages, selectedConvoId: ref(8) })
+
+      const first = api.pollForAnnounce()
+      await vi.waitFor(() => expect(reads).toBe(1))
+      await api.pollForAnnounce()
+      const merged = messages.value
+      expect(owners(merged)).toEqual([[4, ['a: a done', 'b: b done']]])
+
+      releaseOlder()
+      await first
+
+      expect(messages.value).toBe(merged)
+      expect(owners(messages.value)).toEqual([[4, ['a: a done', 'b: b done']]])
+    })
+
+    it('changes nothing and merges nothing when the window holds what the page shows', async () => {
+      serveConversation(7, [{ id: 1, role: 'user', content: 'go', createdAt: at }, callRow(2, 'a'), resultRow(3, 'a')])
+      const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'go', createdAt: at })])
+      const appendRows = vi.fn((append: () => void) => append())
+      const { api } = await mountPoller({ messages, selectedConvoId: ref(7), appendRows })
+
+      await api.pollForAnnounce()
+      const merged = messages.value
+      await api.pollForAnnounce()
+
+      expect(appendRows).toHaveBeenCalledTimes(1)
+      expect(messages.value).toBe(merged)
+      expect(owners(messages.value)).toEqual([[2, ['a: a done']]])
+    })
   })
 
   it('hands each merge of new rows to appendRows, so the page can follow them down', async () => {

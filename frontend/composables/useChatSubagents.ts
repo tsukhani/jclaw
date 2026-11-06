@@ -104,8 +104,9 @@ export function useChatSubagents(
    * Initialize the collapsed state: every run in displayMessages starts
    * collapsed UNLESS its boundary-end marker indicates a non-completed terminal
    * status (failed / timed out) — operators want failed runs expanded by
-   * default so the error is visible without a click. Idempotent: re-running
-   * preserves the operator's per-run toggle state for runs already in the set.
+   * default so the error is visible without a click. A run already in the set
+   * stays collapsed, but a run not in it, expanded by the operator or by its
+   * failure, is decided again, so pass only the rows of runs not yet decided.
    */
   function initSubagentCollapsedState(msgs: Message[]): void {
     const seen = new Set<number>()

@@ -41,10 +41,11 @@ import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
 // CRITICAL reactivity contract: `messages` in the parent is a shallowRef mutated
 // in-place and forced with triggerRef, so the Message objects here are PLAIN
 // (non-reactive) objects. Nested-field mutations (msg.thinkingCollapsed,
-// msg.toolCallsCollapsed, tc._expanded, att.deleted) would be swallowed across
-// the component boundary because the `msg` prop reference is unchanged. The
-// parent therefore also passes `renderToken` — a string digest of those mutable
-// fields — which changes whenever any of them does, forcing this child to
+// msg.toolCallsCollapsed, each tool call's id, _expanded and result, each
+// attachment's uuid and deleted) would be swallowed across the component
+// boundary because the `msg` prop reference is unchanged. The parent therefore
+// also passes `renderToken` (messageRenderToken) — a string digest of those
+// mutable fields — which changes whenever any of them does, forcing this child to
 // re-render in lockstep with the inline original. It is deliberately unused in
 // the template; do NOT use it as a `:key`.
 //

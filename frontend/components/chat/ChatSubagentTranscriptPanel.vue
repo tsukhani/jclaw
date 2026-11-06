@@ -5,7 +5,7 @@ import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 import { useSubagentTranscript } from '~/composables/useSubagentTranscript'
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
-import type { Message } from '~/types/api'
+import { messageRenderToken } from '~/utils/message-reconcile'
 
 // JCLAW-1205: a subagent run's child transcript, read-only, inside its expanded chip.
 const props = defineProps<{
@@ -36,13 +36,6 @@ const {
   sendMessage: () => {},
   autoResize: () => {},
 })
-
-// chat.vue's messageRenderKey, plus call results and attachments, which a poll can change on a row already shown.
-function renderToken(msg: Message): string {
-  const calls = (msg.toolCalls ?? []).map(t => `${t._expanded ? 1 : 0}${t.resultText == null ? 0 : 1}`).join('')
-  const attachments = (msg.attachments ?? []).map(a => a.uuid).join(',')
-  return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${calls}|${attachments}`
-}
 
 const BOTTOM_SLACK_PX = 24
 const scrollEl = ref<HTMLElement | null>(null)
@@ -133,7 +126,7 @@ async function onRetry(event: Event) {
           :key="msg.id ?? msg._key"
           :msg="msg"
           :msg-idx="msgIdx"
-          :render-token="renderToken(msg)"
+          :render-token="messageRenderToken(msg)"
           :agent-id="agentId"
           :streaming="false"
           :copied-message-id="copiedMessageId"

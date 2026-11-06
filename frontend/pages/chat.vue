@@ -28,6 +28,7 @@ import { formatSize } from '~/utils/format'
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
 // suppression rule closes.
 import { isBackgroundSubagentAnnounce, shouldDisplayMessage } from '~/utils/display-message-filter'
+import { messageRenderToken } from '~/utils/message-reconcile'
 
 import type { Agent, AgentSkill, AgentTool, ChatQuote, ChecklistItem, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
@@ -88,20 +89,6 @@ const voiceModeActive = ref(false)
 // Extract configured providers and their models from config
 const configDataRef = computed(() => configData.value ?? null)
 const { providers } = useProviders(configDataRef)
-
-/**
- * JCLAW-690: per-message render digest passed to <ChatMessage :render-token>.
- * `messages` is a shallowRef whose Message objects are mutated in-place then
- * forced with triggerRef, so nested-field changes (thinkingCollapsed,
- * toolCallsCollapsed, each tool call's _expanded, each attachment's deleted)
- * carry no reference change on the `:msg` prop and would be swallowed across
- * the component boundary. This digest changes whenever any of those mutable
- * fields does, so the child re-renders in lockstep with the old inline v-for.
- * Not a `:key` — the row identity stays `msg.id ?? msg._key`.
- */
-function messageRenderKey(msg: Message): string {
-  return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${(msg.toolCalls ?? []).map(t => t._expanded ? 1 : 0).join('')}|${(msg.attachments ?? []).map(a => a.deleted ? 1 : 0).join('')}|${msg._route?.model ?? ''}${msg._route?.failover ? '!' : ''}`
-}
 
 /** Broken images inside a rendered markdown body collapse instead of showing
  *  the browser's broken-image icon + alt text. Markdown is injected via v-html
@@ -308,7 +295,8 @@ convHooks.afterPrepend = older => initSubagentCollapsedState(older)
 
 // Async-spawn announce / task-delivery poller (JCLAW-270/326) lives in
 // useChatAnnouncePoller. Conversation-refresh, not display — it merges
-// late-arriving rows into messages and re-runs the subagent-collapse init.
+// late-arriving rows into messages and applies the subagent-collapse default
+// to the runs a merge adds.
 // Owns its own 5s poll timer; placed after useChatSubagents for that init dep.
 const {
   hasPendingAsyncAnnounce,
@@ -1003,7 +991,7 @@ function exportConversation() {
               :key="msg.id ?? msg._key"
               :msg="msg"
               :msg-idx="msgIdx"
-              :render-token="messageRenderKey(msg)"
+              :render-token="messageRenderToken(msg)"
               :agent-id="effectiveDisplayAgentId"
               :streaming="streaming"
               :copied-message-id="copiedMessageId"

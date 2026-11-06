@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { Message } from '~/types/api'
+import type { Message, ToolCall } from '~/types/api'
 import {
   collectLocalTakenIds,
   groupUnpairedServerIdsByRole,
   indexFreshById,
   backfillServerIds,
+  reconcileWindow,
 } from '~/utils/message-reconcile'
 
 function m(over: Partial<Message>): Message {
@@ -119,5 +120,138 @@ describe('backfillServerIds', () => {
     const local = [m({ role: 'user', content: 'hi' })]
     backfillServerIds(local, [m({ id: 7, role: 'user', content: 'hi (server)' })])
     expect(local[0]!.content).toBe('hi')
+  })
+})
+
+describe('reconcileWindow', () => {
+  /** A saved row as the messages endpoint returns it, with a call in its persisted shape. */
+  function callRow(id: number, callId: string, content: string | null = null): Message {
+    return m({ id, role: 'assistant', content,
+      toolCalls: [{ id: callId, type: 'function', function: { name: 'exec', arguments: '{}' } }] as unknown as ToolCall[] })
+  }
+
+  function resultRow(id: number, callId: string): Message {
+    return m({ id, role: 'tool', content: `${callId} done`, toolResults: callId } as Partial<Message>)
+  }
+
+  function shownCall(callId: string, expanded: boolean): ToolCall {
+    return { id: callId, name: 'exec', icon: 'wrench', arguments: '{}', resultText: `${callId} done`, resultStructured: null, _expanded: expanded }
+  }
+
+  /** Each row that holds tool calls, as its id and its calls' ids. */
+  function owners(rows: Message[]) {
+    return rows.filter(r => r.toolCalls?.length).map(r => [r.id, r.toolCalls!.map(tc => tc.id)])
+  }
+
+  it('gives a call the window hydrates onto one row to no other row', () => {
+    const shown = [
+      m({ id: 1, role: 'assistant', content: 'Starting.' }),
+      m({ id: 2, role: 'assistant', content: null, toolCalls: [shownCall('a', true)], toolCallsCollapsed: true }),
+      m({ id: 3, role: 'tool', content: 'a done' }),
+    ]
+    const fresh = [callRow(2, 'a'), resultRow(3, 'a'), m({ id: 4, role: 'assistant', content: 'Halfway.' }), callRow(5, 'b'), resultRow(6, 'b')]
+
+    const merged = reconcileWindow(shown, fresh, true)
+
+    expect(owners(merged.rows)).toEqual([[4, ['a']], [5, ['b']]])
+    expect(merged.rows[0]).toBe(shown[1])
+    expect(merged.rows[1]).toBe(shown[2])
+    expect(shown[1]!.toolCalls).toEqual([])
+    expect(merged.additions.map(r => r.id)).toEqual([4, 5, 6])
+    expect(merged.changed).toBe(true)
+  })
+
+  it.each([
+    { collapsed: false, state: 'open' },
+    { collapsed: true, state: 'closed' },
+  ])('leaves the row that takes the calls of a block left $state as it was, each call too, and a block that keeps its calls as it is', ({ collapsed }) => {
+    const shown = [
+      m({ id: 10, role: 'assistant', content: 'Done before.', toolCalls: [shownCall('x', true)], toolCallsCollapsed: false }),
+      m({ id: 11, role: 'tool', content: 'x done' }),
+      m({ id: 12, role: 'user', content: 'again' }),
+      m({ id: 13, role: 'assistant', content: null, toolCalls: [shownCall('a', false)], toolCallsCollapsed: collapsed }),
+      m({ id: 14, role: 'tool', content: 'a done' }),
+    ]
+    const fresh = [callRow(10, 'x', 'Done before.'), resultRow(11, 'x'), m({ id: 12, role: 'user', content: 'again' }),
+      callRow(13, 'a'), resultRow(14, 'a'), callRow(15, 'b'), resultRow(16, 'b')]
+
+    const merged = reconcileWindow(shown, fresh, true)
+
+    expect(owners(merged.rows)).toEqual([[10, ['x']], [15, ['a', 'b']]])
+    const taker = merged.rows.find(r => r.id === 15)!
+    expect(taker.toolCallsCollapsed).toBe(collapsed)
+    expect(taker.toolCalls!.map(tc => tc._expanded)).toEqual([false, true])
+    expect(shown[0]!.toolCallsCollapsed).toBe(false)
+    expect(shown[0]!.toolCalls!.map(tc => tc._expanded)).toEqual([true])
+  })
+
+  it('opens only the last call of a block whose calls moved through three rounds the operator left alone', () => {
+    const server = [m({ id: 1, role: 'user', content: 'go' })]
+    let shown: Message[] = []
+    for (const [id, callId] of [[2, 'a'], [4, 'b'], [6, 'c']] as const) {
+      server.push(callRow(id, callId), resultRow(id + 1, callId))
+      shown = [...shown, ...reconcileWindow(shown, structuredClone(server), false).additions]
+    }
+
+    expect(shown.filter(r => r.toolCalls?.length).map(r => [r.id, r.toolCalls!.map(tc => `${tc.id}: ${tc._expanded}`)]))
+      .toEqual([[6, ['a: false', 'b: false', 'c: true']]])
+  })
+
+  it('keeps the calls the operator opened and closed on a row that keeps its calls while a pending result lands', () => {
+    const calls = [
+      { id: 'a', type: 'function', function: { name: 'exec', arguments: '{}' } },
+      { id: 'b', type: 'function', function: { name: 'exec', arguments: '{}' } },
+    ] as unknown as ToolCall[]
+    const owner = m({ id: 2, role: 'assistant', content: 'Running both.', toolCallsCollapsed: false,
+      toolCalls: [shownCall('a', true), { ...shownCall('b', false), resultText: null }] })
+    const shown = [m({ id: 1, role: 'user', content: 'go' }), owner, m({ id: 3, role: 'tool', content: 'a done' })]
+    const fresh = [m({ id: 1, role: 'user', content: 'go' }), m({ id: 2, role: 'assistant', content: 'Running both.', toolCalls: calls }),
+      resultRow(3, 'a'), resultRow(4, 'b')]
+
+    const merged = reconcileWindow(shown, fresh, false)
+
+    expect(owner.toolCalls!.map(tc => `${tc.id}: ${tc._expanded}, ${tc.resultText}`)).toEqual(['a: true, a done', 'b: false, b done'])
+    expect(owner.toolCallsCollapsed).toBe(false)
+    expect(merged.changed).toBe(true)
+  })
+
+  it('shows an attachment a merge gives a shown row on that row, once', () => {
+    const image = { uuid: 'img-1', originalFilename: 'cat.png', mimeType: 'image/png', sizeBytes: 10, kind: 'IMAGE' as const, generated: true }
+    const reply = m({ id: 4, role: 'assistant', content: 'Here it is.' })
+    const shown = [m({ id: 1, role: 'user', content: 'draw a cat' }), reply]
+    const fresh = [m({ id: 1, role: 'user', content: 'draw a cat' }), { ...callRow(2, 'a'), attachments: [image] }, resultRow(3, 'a'),
+      m({ id: 4, role: 'assistant', content: 'Here it is.' })]
+
+    const merged = reconcileWindow(shown, fresh, false)
+
+    expect(merged.rows.filter(r => r.attachments?.length).map(r => [r.id, r.attachments!.map(a => a.uuid)])).toEqual([[4, ['img-1']]])
+    expect(merged.rows[3]).toBe(reply)
+    expect(merged.changed).toBe(true)
+  })
+
+  it('moves a shown row\'s calls to the newer row a whole window hangs them on', () => {
+    const shown = [
+      m({ id: 1, role: 'user', content: 'go' }),
+      m({ id: 2, role: 'assistant', content: null, toolCalls: [shownCall('a', true)], toolCallsCollapsed: true }),
+      m({ id: 3, role: 'tool', content: 'a done' }),
+    ]
+    const fresh = [m({ id: 1, role: 'user', content: 'go' }), callRow(2, 'a'), resultRow(3, 'a'), callRow(4, 'b'), resultRow(5, 'b')]
+
+    const merged = reconcileWindow(shown, fresh, false)
+
+    expect(owners(merged.rows)).toEqual([[4, ['a', 'b']]])
+    expect(merged.additions.map(r => r.id)).toEqual([4, 5])
+  })
+
+  it('leaves a row with no server id alone, and changes nothing when the window holds what is shown', () => {
+    const streaming = m({ _key: 'k', role: 'assistant', content: 'Working on it', toolCalls: [shownCall('s', true)] })
+    const shown = [m({ id: 1, role: 'user', content: 'go' }), streaming]
+
+    const merged = reconcileWindow(shown, [m({ id: 1, role: 'user', content: 'go' }), m({ role: 'assistant', content: 'unsaved' })], true)
+
+    expect(merged.rows).toEqual([shown[0]])
+    expect(merged.additions).toEqual([])
+    expect(merged.changed).toBe(false)
+    expect(streaming.toolCalls!.map(tc => tc.id)).toEqual(['s'])
   })
 })

@@ -356,3 +356,146 @@ describe('Chat page — the tab streaming its own turn', () => {
     expect(announcer(component).text()).toBe('Working…')
   })
 })
+
+describe('Chat page — tool calls a turn the page is not streaming adds', () => {
+  type ToolRow = { id: number, role: string, content: string | null, createdAt: string, reasoning?: string, toolCalls?: unknown[], toolResults?: string }
+
+  const at = (id: number) => `2026-11-06T10:00:${String(id).padStart(2, '0')}Z`
+
+  function said(id: number, role: string, content: string): ToolRow {
+    return { id, role, content, createdAt: at(id) }
+  }
+
+  /** The assistant row a round saves first, carrying the call. */
+  function callRow(id: number, callId: string): ToolRow {
+    return { id, role: 'assistant', content: null, createdAt: at(id),
+      toolCalls: [{ id: callId, type: 'function', function: { name: 'exec', arguments: `{"command":"run ${callId}"}` } }] }
+  }
+
+  /** The tool row that saves the call's result. */
+  function resultRow(id: number, callId: string): ToolRow {
+    return { id, role: 'tool', content: `${callId} done`, createdAt: at(id), toolResults: callId }
+  }
+
+  /** One saved round: the call, then its result. */
+  function round(id: number, callId: string): ToolRow[] {
+    return [callRow(id, callId), resultRow(id + 1, callId)]
+  }
+
+  /** The tool-calls blocks the page shows, oldest first, each as its header text and whether it is open. */
+  function blocks(component: VueWrapper) {
+    return component.findAll('button[title$="tool calls"]').map(b =>
+      `${b.text().replace(/\s+/g, ' ').trim()}, ${b.attributes('title') === 'Collapse tool calls' ? 'open' : 'closed'}`)
+  }
+
+  /** The results of the calls shown expanded, oldest first. */
+  function openResults(component: VueWrapper) {
+    return component.findAll('pre').map(p => p.text())
+  }
+
+  async function busyConversation(rows: ToolRow[]) {
+    serveConversation(5, rows)
+    busy[5] = true
+    serveQueue(5)
+    const component = await openConversation(5)
+    await vi.waitFor(() => expect(backgroundLine(component).exists()).toBe(true))
+    return component
+  }
+
+  function commit(rows: ToolRow[], ...added: ToolRow[]) {
+    rows.push(...added)
+    emitBus('conversation.updated', { conversationId: 5 })
+  }
+
+  function finish(rows: ToolRow[], reply: ToolRow) {
+    rows.push(reply)
+    busy[5] = false
+    emitBus('conversation.busy', { conversationId: 5, busy: false })
+  }
+
+  it('shows each call once, on one collapsed block that grows, and the block a reload shows once the reply lands', async () => {
+    const rows = [said(1, 'user', 'run it three times')]
+    const component = await busyConversation(rows)
+
+    commit(rows, ...round(2, 'call_a'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, closed']))
+    commit(rows, ...round(4, 'call_b'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['2 tool calls, closed']))
+    commit(rows, ...round(6, 'call_c'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['3 tool calls, closed']))
+
+    finish(rows, said(8, 'assistant', 'All three runs are done.'))
+    await vi.waitFor(() => expect(component.text()).toContain('All three runs are done.'))
+    expect(blocks(component)).toEqual(['3 tool calls, closed'])
+    component.unmount()
+
+    const reloaded = await openConversation(5)
+    expect(blocks(reloaded)).toEqual(['3 tool calls, closed'])
+  })
+
+  it('keeps a block the operator opened open on the row that takes its calls, through a round and the reply', async () => {
+    const rows = [said(1, 'user', 'run it twice'), ...round(2, 'call_a')]
+    const component = await busyConversation(rows)
+    await component.find('button[title="Expand tool calls"]').trigger('click')
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, open']))
+
+    commit(rows, ...round(4, 'call_b'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['2 tool calls, open']))
+
+    finish(rows, said(6, 'assistant', 'Both runs are done.'))
+    await vi.waitFor(() => expect(component.text()).toContain('Both runs are done.'))
+    expect(blocks(component)).toEqual(['2 tool calls, open'])
+  })
+
+  it('keeps each call open or closed as the operator left it when its block moves', async () => {
+    const rows = [said(1, 'user', 'run it three times'), ...round(2, 'call_a'), ...round(4, 'call_b')]
+    const component = await busyConversation(rows)
+    await component.find('button[title="Expand tool calls"]').trigger('click')
+    await vi.waitFor(() => expect(openResults(component)).toEqual(['call_b done']))
+    await component.find('button[title="Expand this call"]').trigger('click')
+    await vi.waitFor(() => expect(openResults(component)).toEqual(['call_a done', 'call_b done']))
+    await component.findAll('button[title="Collapse this call"]')[1]!.trigger('click')
+    await vi.waitFor(() => expect(openResults(component)).toEqual(['call_a done']))
+
+    commit(rows, ...round(6, 'call_c'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['3 tool calls, open']))
+    expect(openResults(component)).toEqual(['call_a done', 'call_c done'])
+  })
+
+  it('opens no new block for a block the operator opened on an earlier reply', async () => {
+    const rows = [
+      said(1, 'user', 'run it'), ...round(2, 'call_a'), said(4, 'assistant', 'The run is done.'),
+      said(5, 'user', 'run it again'),
+    ]
+    const component = await busyConversation(rows)
+    await component.find('button[title="Expand tool calls"]').trigger('click')
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, open']))
+
+    commit(rows, ...round(6, 'call_b'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, open', '1 tool call, closed']))
+  })
+
+  it('shows a call\'s result when it commits after the call', async () => {
+    const rows = [said(1, 'user', 'run it'), callRow(2, 'call_a')]
+    const component = await busyConversation(rows)
+    await component.find('button[title="Expand tool calls"]').trigger('click')
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, open']))
+    expect(openResults(component)).toEqual([])
+
+    commit(rows, resultRow(3, 'call_a'))
+    await vi.waitFor(() => expect(openResults(component)).toEqual(['call_a done']))
+    expect(blocks(component)).toEqual(['1 tool call, open'])
+  })
+
+  it('keeps a reasoning card the operator opened open across a merge', async () => {
+    const rows = [said(1, 'user', 'run it'), { ...said(2, 'assistant', 'Starting on it.'), reasoning: 'Plan the run first.' }]
+    const component = await busyConversation(rows)
+    await component.find('button[title="Expand reasoning"]').trigger('click')
+    await vi.waitFor(() => expect(component.find('[data-reasoning-body]').exists()).toBe(true))
+
+    commit(rows, ...round(3, 'call_a'))
+    await vi.waitFor(() => expect(blocks(component)).toEqual(['1 tool call, closed']))
+    expect(component.find('button[title="Collapse reasoning"]').exists()).toBe(true)
+    expect(component.find('[data-reasoning-body]').text()).toBe('Plan the run first.')
+  })
+})

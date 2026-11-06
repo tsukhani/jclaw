@@ -1,14 +1,13 @@
 import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
 import { fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages'
-import { hydrateToolCalls } from '~/utils/tool-calls'
-import { initCollapsedState } from '~/utils/thinking'
-import { backfillServerIds } from '~/utils/message-reconcile'
+import { backfillServerIds, reconcileWindow } from '~/utils/message-reconcile'
 import { useEventBus } from '~/composables/useEventBus'
+import { useLatestRequest } from '~/composables/useLatestRequest'
 import type { Message } from '~/types/api'
 
 /**
- * JCLAW-270 async-spawn announce poller (JCLAW-690 stage 5b; behaviour
- * extracted verbatim from pages/chat.vue). After the parent's streaming turn
+ * JCLAW-270 async-spawn announce poller (JCLAW-690 stage 5b; extracted from
+ * pages/chat.vue). After the parent's streaming turn
  * ends, the {@code subagent_announce} Message that closes an async spawn can
  * arrive seconds (or minutes) later, after the chat stream has closed. The
  * event bus's conversation.updated and conversation.busy bring it in; this
@@ -28,8 +27,8 @@ import type { Message } from '~/types/api'
  * regardless, so within one cadence of stream end the loop kicks in.
  *
  * This is conversation-refresh, not display — a separate concern from
- * useChatSubagents (whose initSubagentCollapsedState it calls after merging
- * newly-arrived rows). Owns its own poll timer lifecycle.
+ * useChatSubagents (whose initSubagentCollapsedState it calls on the rows of
+ * each run a merge adds). Owns its own poll timer lifecycle.
  */
 const ANNOUNCE_POLL_INTERVAL_MS = 5000
 
@@ -137,9 +136,9 @@ export interface UseChatAnnouncePollerDeps {
   messages: ShallowRef<Message[]>
   selectedConvoId: Ref<number | null>
   streaming: Ref<boolean>
-  /** From useChatSubagents — re-run after merging newly-arrived rows. */
+  /** From useChatSubagents — run on the rows of each subagent run a merge adds. */
   initSubagentCollapsedState: (msgs: Message[]) => void
-  /** Runs the merge of newly-arrived rows; the chat page's follows them down (useChatScroll.appendFollowing). */
+  /** Runs each merge that changes the rows; the chat page's follows them down (useChatScroll.appendFollowing). */
   appendRows?: (append: () => void) => void
 }
 
@@ -161,6 +160,8 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
 
   let announcePollTimer: ReturnType<typeof setInterval> | undefined
   let pollUntil = 0
+  // The tick and conversation.updated can overlap; an older window landing last would hang moved calls back on a shown row.
+  const polls = useLatestRequest()
 
   /**
    * True when the open conversation has at least one async-spawn tool result
@@ -230,20 +231,23 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
   }
 
   /**
-   * Refetch the open conversation's messages and append any rows whose server
-   * id isn't already present locally. Preserves client-only state on existing
-   * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
-   * never mutating or replacing them.
+   * Refetch the open conversation's newer rows and merge them through
+   * {@link reconcileWindow}: rows whose server id isn't present locally are
+   * appended, and a row already shown is brought to what the server holds
+   * for it (its tool calls, their results, its attachments) in place, keeping
+   * its other client-only state (thinkingCollapsed, _key on optimistic
+   * placeholders, etc.). Collapse defaults apply to the appended rows alone.
    *
-   * Backfills server ids onto id-less optimistic rows BEFORE computing the
-   * additions set: without that step the server-side copies of those rows
-   * (which carry ids the local set doesn't yet have) sail past the
-   * id-membership filter and get appended as duplicates, producing the
-   * "user prompt rendered twice" symptom on async-spawn turns.
+   * Backfills server ids onto id-less optimistic rows BEFORE reconciling:
+   * without that step the server-side copies of those rows (which carry ids
+   * the local set doesn't yet have) sail past the id match and get appended
+   * as duplicates, producing the "user prompt rendered twice" symptom on
+   * async-spawn turns.
    */
   async function pollForAnnounce() {
     const convoId = selectedConvoId.value
     if (!convoId) return
+    const poll = polls.begin()
     let fresh: Message[]
     try {
       fresh = await fetchMessagesAfter(convoId, newRowsCursor(messages.value))
@@ -252,32 +256,24 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
       console.error('Failed to poll for announce:', e)
       return
     }
-    // A tick can land after the operator switched conversations; its rows belong to the old one.
-    if (selectedConvoId.value !== convoId) return
+    // A tick can land after the operator switched conversations, whose rows belong to the old one, or after a send,
+    // whose optimistic rows the stream owns.
+    if (!polls.isCurrent(poll) || selectedConvoId.value !== convoId || streaming.value) return
     if (!fresh.length) return
-    backfillServerIds(messages.value, fresh)
-    const knownIds = new Set<number>()
+    const backfilled = backfillServerIds(messages.value, fresh)
+    const shownRuns = new Set<number>()
     for (const m of messages.value) {
-      if (typeof m.id === 'number') knownIds.add(m.id)
+      if (m.subagentRunId != null) shownRuns.add(m.subagentRunId)
     }
-    const additions = fresh.filter(m => typeof m.id === 'number' && !knownIds.has(m.id))
-    if (!additions.length) return
-    // Hydrate tool-role rows into the preceding assistant message's toolCalls
-    // array on the additions before pushing (mirrors loadConversation). Pass
-    // the full fresh list so hydrateToolCalls can match tool rows against
-    // their owning assistant turn, then drop everything but additions.
-    hydrateToolCalls(fresh as unknown as Array<Record<string, unknown>>)
-    for (const m of additions) {
-      if (!m.toolCalls?.length) continue
-      (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
-      for (let i = 0; i < m.toolCalls.length; i++) {
-        m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
-      }
-    }
+    // The window holds a running turn's earlier rounds too, and hydrating it hangs all their calls on its newest row:
+    // the shown row that held them after the last merge must give them up, or each merge leaves one more block behind.
+    // Not partial: newRowsCursor starts the window after a settled row or before every shown one, so it hydrates whole.
+    const { additions, changed } = reconcileWindow(messages.value, fresh, false)
+    if (!additions.length && !changed && !backfilled) return
+    const addedRuns = additions.filter(m => m.subagentRunId != null && !shownRuns.has(m.subagentRunId))
     appendRows(() => {
-      messages.value = [...messages.value, ...additions]
-      initCollapsedState(messages.value)
-      initSubagentCollapsedState(messages.value)
+      if (additions.length) messages.value = [...messages.value, ...additions]
+      if (addedRuns.length) initSubagentCollapsedState(addedRuns)
       triggerRef(messages)
     })
   }

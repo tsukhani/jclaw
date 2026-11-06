@@ -9,7 +9,7 @@ import {
 } from '~/utils/conversation-messages'
 import { hydrateToolCalls, turnWindowStart } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
-import { backfillServerIds } from '~/utils/message-reconcile'
+import { applyToolCallDefaults, backfillServerIds } from '~/utils/message-reconcile'
 import type { Agent, Conversation, Message } from '~/types/api'
 
 /**
@@ -197,18 +197,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
   // historical turns — same UX as the thinking card.
   function prepareHistorical(rows: Message[]) {
     hydrateToolCalls(rows as unknown as Array<Record<string, unknown>>)
-    for (const m of rows) {
-      if (!m.toolCalls?.length) continue
-      // Outer accordion: collapsed by default on historical turns to keep the
-      // transcript dense; users click "N tool calls" to drill in.
-      (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
-      // Per-call expansion: pre-expand the LAST call so opening the accordion
-      // surfaces its chip grid immediately. Earlier calls stay collapsed —
-      // user can expand them individually if they want to compare results.
-      for (let i = 0; i < m.toolCalls.length; i++) {
-        m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
-      }
-    }
+    rows.forEach(applyToolCallDefaults)
     initCollapsedState(rows)
   }
 
