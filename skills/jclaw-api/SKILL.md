@@ -1,9 +1,9 @@
 ---
 name: jclaw-api
 description: >-
-  Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
+  Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.2"
+  version: "1.1.3"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -24,7 +24,7 @@ The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endp
    - `body`: a JSON object matching the operation's request shape (POST/PUT/PATCH only)
    - `query`: optional, only when an operation documents query parameters
 
-The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response usually carries a JSON `error` field that tells you what to correct.
+The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response carries a JSON `code` and a `message` that tells you what to correct.
 
 ## Common operations (quick reference)
 
@@ -33,6 +33,7 @@ These staples don't need a discover round-trip first; run `action="discover"` fo
 - **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update).
 - **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`. `PUT /api/mcp-servers/{id}` changes only what it carries: send just the fields to change, and in `env`/`headers` just the keys to change, with `null` to remove one.
 - **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
+- **Model router lists** — read a class's list with `GET /api/config/router.<class>.models`; replace it with `PUT /api/router/models/{class}` body `models` (`[{"provider": "…", "model": "…"}]`, tried in that order; `[]` clears it, and the class then uses the chat list). The classes are `chat`, `summarize`, `agentic`, `reasoning` and `coding`. To add, remove or reorder one model, read the list, change it, and send the whole list back. Only the `main` agent may write it (any other agent gets 403 `agent_scope`), and only a model registered under a configured provider is accepted (`GET /api/providers/{name}/models`). Every other router setting is operator-only.
 
 ## Off-limits
 
@@ -57,4 +58,4 @@ If the user requests an operation that resolves to one of these, refuse explicit
 
 - Read before write. For "update X", first `GET` the resource, show the user the relevant before-state, then propose the change.
 - Echo the result. After a successful mutation, read the response body and summarize what changed (the new id, the new connected-status) so the user has explicit confirmation.
-- If JClaw returns 4xx, read the `error` field and either correct the request or report the constraint plainly. Never silently retry the same call.
+- If JClaw returns 4xx, read the `message` field and either correct the request or report the constraint plainly. Never silently retry the same call.

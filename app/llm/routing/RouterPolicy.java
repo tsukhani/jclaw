@@ -322,6 +322,20 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         return List.copyOf(out);
     }
 
+    /**
+     * A list's entries in order, each once where it first appears, as {@link #load} would read them; null when an
+     * entry is not a provider and model pair, which the lenient read would drop without a word.
+     */
+    public static @Nullable List<Candidate> entriesOf(JsonArray array) {
+        var out = new ArrayList<Candidate>(array.size());
+        for (var entry : array) {
+            var candidate = candidateOf(entry);
+            if (candidate == null) return null;
+            if (!out.contains(candidate)) out.add(candidate);
+        }
+        return List.copyOf(out);
+    }
+
     private static @Nullable Candidate candidateOf(JsonElement entry) {
         if (!entry.isJsonObject()) return null;
         var provider = nonBlank(entry.getAsJsonObject(), "provider");

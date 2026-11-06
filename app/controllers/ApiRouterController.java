@@ -3,6 +3,7 @@ package controllers;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -12,18 +13,24 @@ import llm.routing.TaskClass;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.ConfigService;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
-/** The model router's live state for Settings > Model Router (JCLAW-1222). */
+/**
+ * The model router's live state for Settings > Model Router (JCLAW-1222), and the main agent's way to change its
+ * model lists. Every other router setting stays on the operator-only {@code POST /api/config}.
+ */
 @With(AuthCheck.class)
 public class ApiRouterController extends Controller {
 
@@ -109,5 +116,54 @@ public class ApiRouterController extends Controller {
             return;
         }
         renderJSON(GSON.toJson(CloudUsageResponse.of(OLLAMA_CLOUD, span, SubscriptionUsage.history(OLLAMA_CLOUD, span))));
+    }
+
+    /** @param models the list in the order the router tries it; empty clears it, and the class then uses the chat list */
+    public record RouterModelsRequest(List<RouterPolicy.Candidate> models) {}
+
+    /** @param models the list as stored, each model once */
+    public record RouterModelsResponse(String taskClass, List<RouterPolicy.Candidate> models) {}
+
+    /**
+     * PUT /api/router/models/{taskClass} — replace one class's model list. Writes the key Settings > Model Router
+     * writes, through the same validation, and clears it on an empty list as the panel does.
+     */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RouterModelsRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RouterModelsResponse.class)))
+    @Operation(summary = "Replace a task class's model router list, tried in the order given: models is "
+            + "[{provider, model}], [] clears it; taskClass is chat, summarize, agentic, reasoning or coding. "
+            + "The operator and the main agent only")
+    @AgentAccess(value = OPEN, reason = "writes only the five router.<class>.models keys, through RouterPolicy's "
+            + "validation, and refuses every agent but main (RequestPrincipal.isOperatorOrMainAgent)")
+    public static void updateModels(String taskClass) {
+        // Before anything else, so an agent that may not write learns only that.
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may change the model router's lists.");
+        }
+        var target = TaskClass.fromId(taskClass);
+        if (target == null) {
+            var classes = Arrays.stream(TaskClass.values()).map(TaskClass::id).collect(Collectors.joining(", "));
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "taskClass must be one of %s; got '%s'.".formatted(classes, taskClass));
+            throw ApiResponses.unreachable();
+        }
+        var body = JsonBodyReader.readJsonBody();
+        var listed = body != null && body.has("models") && body.get("models").isJsonArray()
+                ? RouterPolicy.entriesOf(body.getAsJsonArray("models")) : null;
+        if (listed == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "models must be a JSON array of {\"provider\":\"…\",\"model\":\"…\"} objects; send [] to clear the list.");
+            throw ApiResponses.unreachable();
+        }
+        var key = RouterPolicy.modelsKey(target);
+        if (listed.isEmpty()) {
+            ConfigService.deleteWithSideEffects(key);
+        } else {
+            var rejection = ConfigService.setWithSideEffects(key, GSON.toJson(listed));
+            // A 400, not POST /api/config's 403, so an agent tells a list to fix from a write it may not make.
+            if (rejection != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
+        }
+        renderJSON(GSON.toJson(new RouterModelsResponse(target.id(), listed)));
     }
 }

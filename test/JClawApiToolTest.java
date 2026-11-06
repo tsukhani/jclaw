@@ -701,6 +701,7 @@ class JClawApiToolTest extends UnitTest {
             PUT /api/conversations/{id}/thinking-override
             PUT /api/mcp-servers/{id}
             PUT /api/prompts/{id}
+            PUT /api/router/models/{taskClass}
             WS /api/voice""".split("\n")));
 
         assertEquals(expected, callableSurface(),
