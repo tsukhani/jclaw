@@ -1,6 +1,7 @@
 package services;
 
 import agents.DangerousActionGate;
+import agents.SystemPromptAssembler;
 import agents.ToolResultPruner;
 import channels.TelegramSettings;
 import jakarta.persistence.PersistenceException;
@@ -408,8 +409,10 @@ public class ConfigService {
             atLeast(SessionCompactor.TRIGGER_TOKENS_KEY, 0, " must be a whole number of tokens; 0 turns the token cap off."),
             (key, value) -> key.equals(SessionCompactor.TRIGGER_PERCENT_KEY) && !isIntBetween(value, 0, 100)
                     ? key + " must be a whole number from 0 to 100; 0 turns the window share off." : null,
-            (key, value) -> key.equals(SessionCompactor.ON_ROW_LIMIT_KEY) && !"true".equalsIgnoreCase(value.trim())
-                    && !"false".equalsIgnoreCase(value.trim()) ? key + " must be 'true' or 'false'." : null,
+            (key, value) -> key.equals(SessionCompactor.ON_ROW_LIMIT_KEY) && !isTrueOrFalse(value)
+                    ? key + " must be 'true' or 'false'." : null,
+            (key, value) -> key.equals(SystemPromptAssembler.VISUAL_ENABLED_KEY) && !value.isBlank()
+                    && !isTrueOrFalse(value) ? key + " must be 'true' or 'false'." : null,
             atLeast(SessionCompactor.SUMMARY_BUDGET_KEY, SessionCompactor.MIN_SUMMARY_BUDGET,
                     " must be a whole number of tokens, at least " + SessionCompactor.MIN_SUMMARY_BUDGET + "."),
             atLeast(SessionCompactor.TOOL_RESULT_CHARS_KEY, 0,
@@ -436,6 +439,10 @@ public class ConfigService {
             (key, value) -> key.equals(SubagentSpawnTool.ACP_MODE_KEY) ? SubagentSpawnTool.modeRejectionFor(value) : null,
             // A relative path would put coding runs under the server's own directory.
             (key, value) -> key.equals(SubagentSpawnTool.ACP_WORKDIR_KEY) ? CodingRunFolders.parentRejection(value) : null);
+
+    private static boolean isTrueOrFalse(String value) {
+        return "true".equalsIgnoreCase(value.trim()) || "false".equalsIgnoreCase(value.trim());
+    }
 
     private static KeyRule under(String prefix, KeyRule rule) {
         return (key, value) -> key.startsWith(prefix) ? rule.rejectionFor(key, value) : null;

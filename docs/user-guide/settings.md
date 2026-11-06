@@ -737,6 +737,8 @@ The **Context savings** box holds ways to make each request smaller. The first t
 | **Merge summaries past (tokens)** | `chat.compaction.summaryBudgetTokens` | 20000 | Each summary is kept as it was written, and the agent reads them all, oldest first, each under the dates of the messages it covers. When together they pass this many tokens, the oldest are merged into one, which keeps their names, file paths, links, commits, numbers and open items. Merged summaries stay in the database. At least 1000. |
 | **Tool results in a catch-up (characters)** | `chat.compaction.toolResultChars` | 600 | When older messages are summarized from a copy of the chat, as a long catch-up is, each tool result in the copy is cut to this many characters with its full length noted, and so are tool-call arguments longer than that. Your messages and the agent's replies are sent whole. 0 sends only the length. |
 
+The **Visuals** box holds **Draw visuals in chat** (`visual.enabled`, on). On, the charts, stepped diagrams and slider figures the model writes as a `visual` block are drawn in the chat, and the model is told it can write them. Off, the block shows as JSON and the model is not told.
+
 An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys and `compression.firstViewMaxTokens` below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`, `chat.compression.firstViewMaxTokens`) have no row in the panel; set them with `POST /api/config`.
 
 | Key                          | Default | Meaning                                                                                                 |

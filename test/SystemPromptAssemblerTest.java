@@ -461,6 +461,7 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "a Telegram chat can be a group, so its static guidance must not claim privacy");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
         assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
+        assertFalse(prompt.contains("language hint visual"), "only web chat draws the visual fence");
     }
 
     @Test
@@ -477,6 +478,22 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "web guidance must teach the lewis fence the chat draws");
         assertTrue(prompt.contains("language hint structure"),
                 "web guidance must teach the structure fence the chat draws in 3D");
+        assertTrue(prompt.contains("language hint visual"),
+                "web guidance must teach the visual fence while visual.enabled is absent");
+    }
+
+    @Test
+    void visualParagraphLeavesTheWebPromptWhenTheKeyIsFalse() {
+        var agent = newAgent("spa-channel-web-visual");
+        for (var off : List.of("false", "FALSE")) {
+            ConfigService.set(SystemPromptAssembler.VISUAL_ENABLED_KEY, off);
+            var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+            assertFalse(prompt.contains("language hint visual"), "visual.enabled=" + off + " must drop the paragraph");
+            assertTrue(prompt.contains("language hint structure"), "the rest of the web guidance stays");
+        }
+        ConfigService.set(SystemPromptAssembler.VISUAL_ENABLED_KEY, "true");
+        assertTrue(SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt()
+                .contains("language hint visual"));
     }
 
     @Test
@@ -500,6 +517,7 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "voice must NOT get the web-UI markdown guidance");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
         assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
+        assertFalse(prompt.contains("language hint visual"), "only web chat draws the visual fence");
     }
 
     @Test
@@ -510,6 +528,7 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "slack has no registered guidance — section must be omitted");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
         assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
+        assertFalse(prompt.contains("language hint visual"), "only web chat draws the visual fence");
     }
 
     @Test
@@ -519,6 +538,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertFalse(prompt.contains("Channel Guidance"));
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
         assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
+        assertFalse(prompt.contains("language hint visual"), "only web chat draws the visual fence");
     }
 
     @Test

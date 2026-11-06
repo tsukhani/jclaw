@@ -3,16 +3,21 @@ import {
   ArrowDownTrayIcon,
   ChatBubbleOvalLeftEllipsisIcon,
 } from '@heroicons/vue/24/outline'
-import type { Conversation, Message } from '~/types/api'
+import type { ConfigResponse, Conversation, Message } from '~/types/api'
 import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription } from '~/utils/model-route'
 import { renderMarkdown } from '~/utils/chat-markdown'
 import { vStructureViewers } from '~/utils/structure/directive'
+import { vVisualFigures } from '~/utils/visual/directive'
+import { syncVisualEnabled } from '~/utils/visual/spec'
 
 const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
+
+const { data: configData } = useFetch<ConfigResponse>('/api/config')
+watch(configData, syncVisualEnabled, { immediate: true })
 
 const conversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
@@ -367,6 +372,7 @@ function exportConversation() {
             <div
               v-if="msg.role === 'assistant' && msg.content"
               v-structure-viewers="conversation?.agentId ?? null"
+              v-visual-figures
               class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary overflow-x-auto"
               data-testid="message-body-rendered"
               v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"

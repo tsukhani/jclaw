@@ -20,6 +20,7 @@ import katex, { type KatexOptions } from 'katex'
 import 'katex/contrib/mhchem'
 import { ensureLewisLoaded, isLewisLoaded, lewisVersion, renderLewis } from '~/utils/lewis'
 import { parseStructureFence } from '~/utils/structure/fence'
+import { parseVisualSpec, visualEnabled } from '~/utils/visual/spec'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
 
@@ -59,6 +60,8 @@ function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
+const attr = (text: string) => escapeHtml(text).replaceAll('"', '&quot;')
+
 // Until SmilesDrawer has loaded, a lewis fence stays a code block; the load bumps lewisVersion, which re-renders it.
 function lewisBlock(token: Tokens.Code): string {
   if (!isLewisLoaded()) {
@@ -82,7 +85,18 @@ function structureBlock(token: Tokens.Code): string {
   const caption = spec.caption ? `<figcaption>${escapeHtml(spec.caption)}</figcaption>` : ''
   return parsingStream
     ? `<figure class="structure-view structure-pending">${codeBlock(token)}${caption}<p class="structure-note">The 3D view appears when the reply is complete.</p></figure>`
-    : `<figure class="structure-view" data-info="${escapeHtml(token.lang ?? '').replaceAll('"', '&quot;')}">${codeBlock(token)}${caption}</figure>`
+    : `<figure class="structure-view" data-info="${attr(token.lang ?? '')}">${codeBlock(token)}${caption}</figure>`
+}
+
+// As with structure, the figure keeps its code block: utils/visual/directive.ts reads the spec back from it.
+function visualBlock(token: Tokens.Code): string {
+  if (!visualEnabled.value) return codeBlock(token)
+  const spec = parseVisualSpec(token.text)
+  if ('error' in spec) return `${codeBlock(token)}<p class="visual-error">${escapeHtml(spec.error)}</p>`
+  const caption = `<figcaption>${escapeHtml(spec.caption ?? spec.title)}</figcaption>`
+  return parsingStream
+    ? `<figure class="visual-view visual-pending">${codeBlock(token)}${caption}<p class="visual-note">The visual appears when the reply is complete.</p></figure>`
+    : `<figure class="visual-view" data-info="${attr(token.lang ?? '')}">${codeBlock(token)}${caption}</figure>`
 }
 
 // Marked keeps the whole info string in `lang`, so ```Lewis water still names the lewis fence.
@@ -91,6 +105,7 @@ chatRenderer.code = (token: Tokens.Code) => {
   if (!fenceIsClosed(token.raw)) return codeBlock(token)
   if (hint === 'lewis') return lewisBlock(token)
   if (hint === 'structure') return structureBlock(token)
+  if (hint === 'visual') return visualBlock(token)
   return codeBlock(token)
 }
 
@@ -183,6 +198,7 @@ export function normalizeMarkdownLinks(text: string): string {
 const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
 let cachedLewisVersion = 0
+let cachedVisualEnabled = true
 
 /** The sanitizing pass every rendered message goes through, for a caller that changes the HTML afterwards. */
 export function sanitizeRenderedHtml(html: string): string {
@@ -203,12 +219,14 @@ export function renderMarkdown(text: string, agentId: number | null = null): str
   if (!text) return ''
   // Read reactively, so a caller's render re-runs once SmilesDrawer loads and its lewis fences can draw.
   const version = lewisVersion.value
+  const visual = visualEnabled.value
   // The cache stops adding at its bound rather than evicting, so entries from before the load would hold slots forever.
-  if (version !== cachedLewisVersion) {
+  if (version !== cachedLewisVersion || visual !== cachedVisualEnabled) {
     markdownCache.clear()
     cachedLewisVersion = version
+    cachedVisualEnabled = visual
   }
-  const cacheKey = `${version}:${agentId}:${text}`
+  const cacheKey = `${version}:${visual}:${agentId}:${text}`
   const cached = markdownCache.get(cacheKey)
   if (cached) return cached
 

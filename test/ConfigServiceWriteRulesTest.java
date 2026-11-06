@@ -1,3 +1,4 @@
+import agents.SystemPromptAssembler;
 import agents.ToolResultPruner;
 import channels.TelegramSettings;
 import llm.LlmResilience;
@@ -250,6 +251,17 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         }
         for (var value : List.of("true", "false", "TRUE")) {
             assertAccepted(SessionCompactor.ON_ROW_LIMIT_KEY, value);
+        }
+    }
+
+    @Test
+    void theVisualSwitchMustBeTrueOrFalseOrBlank() {
+        var key = SystemPromptAssembler.VISUAL_ENABLED_KEY;
+        for (var value : List.of("yes", "1")) {
+            assertRefused("visual.enabled must be 'true' or 'false'.", key, value);
+        }
+        for (var value : List.of("true", "false", " TRUE ", "FALSE", "")) {
+            assertAccepted(key, value);
         }
     }
 

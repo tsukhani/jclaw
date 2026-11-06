@@ -57,6 +57,7 @@ import ChatChecklist from '~/components/chat/ChatChecklist.vue'
 import McpElicitationForm from '~/components/chat/McpElicitationForm.vue'
 import { useMcpElicitations } from '~/composables/useMcpElicitations'
 import { hasOpenItem } from '~/utils/checklist'
+import { syncVisualEnabled } from '~/utils/visual/spec'
 
 // Issued before either await so the two round trips overlap — in an SPA Nuxt
 // starts a useFetch at its call site, not at the await.
@@ -64,6 +65,7 @@ const agentsFetch = useFetch<Agent[]>('/api/agents')
 const configFetch = useFetch<ConfigResponse>('/api/config')
 const { data: agents, refresh: refreshAgents } = await agentsFetch
 const { data: configData } = await configFetch
+watch(configData, syncVisualEnabled, { immediate: true })
 
 // Seed selectedAgentId synchronously from the agents we just loaded so the
 // conversations useFetch below has a valid agentId on its first render. If we
