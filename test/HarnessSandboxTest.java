@@ -265,6 +265,36 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /** An entry through a symlink adds its canonical path when that is also below home, and only then. */
+    /** The operator's folders join PATH's under the same rule: strictly below home, once each, PATH first. */
+    @Test
+    void homeReadReopensTakesTheOperatorsFoldersAfterPathUnderTheSameRule() {
+        assertEquals(List.of("/h/x/.local/bin", "/h/x/.local/share/uv"),
+                HarnessSandbox.homeReadReopens("/h/x/.local/bin:/usr/bin", "/h/x",
+                        List.of("/h/x/.local/share/uv", "/h/x", "/etc", "/h/x/.local/share/uv")));
+        assertEquals(List.of("/h/x/tools"), HarnessSandbox.homeReadReopens(null, "/h/x", List.of("/h/x/tools")));
+    }
+
+    /** shell.sandbox.homeReads takes folders inside home and says why it refuses anything else. */
+    @Test
+    void theHomeReadsKeyTakesFoldersInsideHomeOnly() {
+        var key = HarnessSandbox.HOME_READS_KEY;
+        var home = System.getProperty("user.home");
+        assertNull(HarnessSandbox.rejectionFor(key, ""));
+        assertNull(HarnessSandbox.rejectionFor(key, "~/.local/share/uv, " + home + "/tools,"));
+        assertEquals("shell.sandbox.homeReads: 'tools' is not an absolute folder: start it with / or ~/.",
+                HarnessSandbox.rejectionFor(key, "tools"));
+        assertEquals("shell.sandbox.homeReads: '/etc' is not a folder inside your home folder (" + home + ").",
+                HarnessSandbox.rejectionFor(key, "~/ok, /etc"));
+        assertEquals("shell.sandbox.homeReads: '~/../x' is not a folder inside your home folder (" + home + ").",
+                HarnessSandbox.rejectionFor(key, "~/../x"));
+        assertEquals("shell.sandbox.homeReads: '" + home + "' is not a folder inside your home folder (" + home + ").",
+                HarnessSandbox.rejectionFor(key, home));
+        assertEquals("shell.sandbox.homeReads: '~/.ssh/keys' is inside ~/.ssh, which sandboxed commands never read.",
+                HarnessSandbox.rejectionFor(key, "~/.ssh/keys"));
+        assertEquals("shell.sandbox.homeReads: '~/a\"b' has a quote, a backslash or a control character.",
+                HarnessSandbox.rejectionFor(key, "~/a\"b"));
+    }
+
     @Test
     void homeReadReopensAddsACanonicalPathBelowHome() throws Exception {
         var base = SandboxHiddenRoots.canonical(session);

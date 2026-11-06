@@ -34,6 +34,13 @@ confining every shell command. Neither key is seeded into the Config DB — an a
 means "off", so both are documented in `conf/application.conf` and left unset. A third,
 `shell.sandbox.network` (`allow`, the default, or `deny`), cuts the network of a run `shell.sandbox`
 confines (`--unshare-net`; `(deny network*)`), and every custom agent's `exec` even while `shell.sandbox` is off; it never reaches a coding harness, which needs its model's API.
+A fourth, `shell.sandbox.homeReads` (unset by default), lists folders under `$HOME`, comma-separated, that a
+custom agent's `exec` may read read-only, for a toolchain whose files sit outside the `PATH` folders (a `python3`
+wrapper in `~/.local/bin` over `~/.local/share/uv`): `HarnessSandbox.extraHomeReads` feeds them to
+`homeReadReopens` on macOS and to `linuxArgv`'s `--ro-bind-try` allowances on Linux. The secret folders and
+JClaw's own directories stay denied last, and `rejectionFor` refuses a value that is relative, outside `$HOME` or inside a
+secret folder. Nothing is reopened by following a `PATH` entry's symlink or wrapper; the operator names the folder
+(the model of Claude Code's `allowRead` inside a `denyRead` and Codex's per-path `read` entries).
 
 **Custom agents are always confined (JF-165).** `ShellExecTool.confinement` walks the agent's
 `parentAgent` chain with `WorkspaceFiles.workspaceOwner` (32 hops). Only a walk that ends at a

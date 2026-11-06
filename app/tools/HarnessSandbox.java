@@ -95,6 +95,14 @@ public final class HarnessSandbox {
      */
     public static final String SHELL_NETWORK_KEY = "shell.sandbox.network";
 
+    /**
+     * {@code shell.sandbox.homeReads} — extra folders under {@code $HOME}, comma-separated ({@code ~/} allowed),
+     * that a custom agent's {@code exec} may read, read-only, though its home folder is hidden: a toolchain
+     * whose real files sit outside the {@code PATH} folders, such as {@code ~/.local/share/uv}. Empty by default.
+     * The secret folders and JClaw's own directories stay denied whatever it lists.
+     */
+    public static final String HOME_READS_KEY = "shell.sandbox.homeReads";
+
     private static final String BWRAP = "bwrap";
     private static final String SANDBOX_EXEC = "sandbox-exec";
 
@@ -289,11 +297,12 @@ public final class HarnessSandbox {
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
         if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
-        if (ready.mechanism().equals(BWRAP)) return linuxArgv(argv, writeRoot, List.of(), SHELL_SANDBOX_KEY);
         var home = System.getProperty("user.home", "");
+        var extraReads = extraHomeReads(home);
+        if (ready.mechanism().equals(BWRAP)) return linuxArgv(argv, writeRoot, extraReads, SHELL_SANDBOX_KEY);
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
         var profile = macosProfile(writeRoot, List.of(), home, SandboxHiddenRoots.current(),
-                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(SubprocessEnv.filteredHostEnv().get("PATH"), home));
+                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(SubprocessEnv.filteredHostEnv().get("PATH"), home, extraReads));
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
         out.addAll(argv);
         return List.copyOf(out);
@@ -323,11 +332,23 @@ public final class HarnessSandbox {
      * and is also below {@code home}, once each in PATH order.
      */
     public static List<String> homeReadReopens(@Nullable String pathEnv, String home) {
-        if (pathEnv == null || home.isBlank()) return List.of();
+        return homeReadReopens(pathEnv, home, List.of());
+    }
+
+    /**
+     * {@link #homeReadReopens(String, String)} with the operator's {@link #HOME_READS_KEY} folders after the
+     * {@code PATH} ones, each held to the same rule: strictly below {@code home}, plus its canonical path when
+     * that is also below it.
+     */
+    public static List<String> homeReadReopens(@Nullable String pathEnv, String home, List<String> extra) {
+        if (home.isBlank()) return List.of();
         var homePath = SandboxHiddenRoots.lexical(home);
         if (homePath == null) return List.of();
+        var entries = new ArrayList<String>();
+        if (pathEnv != null) entries.addAll(List.of(pathEnv.split(File.pathSeparator)));
+        entries.addAll(extra);
         var out = new LinkedHashSet<String>();
-        for (var entry : pathEnv.split(File.pathSeparator)) {
+        for (var entry : entries) {
             var p = SandboxHiddenRoots.lexical(entry);
             if (entry.isEmpty() || p == null || !p.isAbsolute() || !strictlyBelow(p, homePath)) continue;
             out.add(p.toString());
@@ -396,10 +417,66 @@ public final class HarnessSandbox {
     }
 
     /**
+     * The folders {@link #HOME_READS_KEY} lists, absolute and valid: an entry {@link #homeReadsRejection} would
+     * refuse is skipped, so a value stored before a rule tightened opens nothing it should not.
+     */
+    public static List<String> extraHomeReads(String home) {
+        var value = ConfigService.get(HOME_READS_KEY, "");
+        var out = new ArrayList<String>();
+        for (var entry : value.split(",")) {
+            var path = entry.strip();
+            if (path.isEmpty() || homeReadsRejection(path, home) != null) continue;
+            var absolute = expandHome(path, home);
+            if (absolute != null) out.add(absolute);
+        }
+        return List.copyOf(out);
+    }
+
+    /** {@code path} made absolute (a leading {@code ~/} is {@code home}) and normalized, or null when it is no valid path. */
+    private static @Nullable String expandHome(String path, String home) {
+        var homePath = SandboxHiddenRoots.lexical(home);
+        var expanded = path.startsWith("~/")
+                ? (homePath == null ? null : homePath.resolve(path.substring(2)).normalize())
+                : SandboxHiddenRoots.lexical(path);
+        return expanded == null ? null : expanded.toString();
+    }
+
+    /** Why one {@link #HOME_READS_KEY} entry is refused, or null when it is a folder strictly below {@code home}. */
+    static @Nullable String homeReadsRejection(String entry, String home) {
+        if (!entry.startsWith("/") && !entry.startsWith("~/")) {
+            return "'%s' is not an absolute folder: start it with / or ~/".formatted(entry);
+        }
+        if (entry.chars().anyMatch(Character::isISOControl) || entry.contains("\"") || entry.contains("\\")) {
+            return "'%s' has a quote, a backslash or a control character".formatted(entry);
+        }
+        var homePath = SandboxHiddenRoots.lexical(home);
+        var expanded = expandHome(entry, home);
+        var path = expanded == null ? null : SandboxHiddenRoots.lexical(expanded);
+        if (homePath == null || path == null || !strictlyBelow(path, homePath)) {
+            return "'%s' is not a folder inside your home folder (%s)".formatted(entry, home);
+        }
+        for (var secret : DENY_READ_HOME) {
+            if (path.startsWith(homePath.resolve(secret))) {
+                return "'%s' is inside %s, which sandboxed commands never read".formatted(entry, "~/" + secret);
+            }
+        }
+        return null;
+    }
+
+    /**
      * The refusal for a write of {@code value} to one of the sandbox keys, or null when the key is none of
      * them or the value is one its reader understands as intended.
      */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
+        if (key.equals(HOME_READS_KEY)) {
+            if (value == null || value.isBlank()) return null;
+            var home = System.getProperty("user.home", "");
+            for (var entry : value.split(",")) {
+                var rejected = entry.isBlank() ? null : homeReadsRejection(entry.strip(), home);
+                if (rejected != null) return key + ": " + rejected + ".";
+            }
+            return null;
+        }
         if (!key.equals(SHELL_SANDBOX_KEY) && !key.equals(ACP_SANDBOX_KEY) && !key.equals(SHELL_NETWORK_KEY)) {
             return null;
         }

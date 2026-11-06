@@ -522,7 +522,7 @@ class ShellExecSandboxTest extends UnitTest {
     @Test
     @EnabledOnOs(OS.MAC)
     void onMacACustomAgentCannotReadTheHomeFolderButItsToolsRun() throws IOException {
-        ConfigService.set("shell.allowlist", "echo,cat,ls,true,git,python3");
+        ConfigService.set("shell.allowlist", "echo,cat,ls,true,git");
         var secret = homeFile("jf165-home-secret");
         try {
             assertEquals("HOME_DENIED", run(agent, "cat '%s' 2>/dev/null || echo HOME_DENIED".formatted(secret))
@@ -532,7 +532,7 @@ class ShellExecSandboxTest extends UnitTest {
             assertEquals("ws-readable", run(agent, "cat ws.txt").get("output").getAsString());
             assertEquals(0, run(agent, "ls").get("exitCode").getAsInt());
             assertEquals(0, run(agent, "/usr/bin/true").get("exitCode").getAsInt());
-            for (var probe : List.of("git --version", "python3 --version")) {
+            for (var probe : List.of("git --version")) {
                 var unconfined = run(main(), probe);
                 assumeTrue(unconfined.get("exitCode").getAsInt() == 0, probe + " does not run here: " + unconfined);
                 var confined = run(agent, probe);
@@ -541,6 +541,44 @@ class ShellExecSandboxTest extends UnitTest {
         } finally {
             deleteDir(secret.getParent());
         }
+    }
+
+    /** A folder the operator lists in shell.sandbox.homeReads is readable to a custom agent; one they do not list is not. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacAListedHomeFolderIsReadableAndAnUnlistedOneIsNot() throws IOException {
+        ConfigService.set("shell.allowlist", "echo,cat");
+        var listed = homeFile("jf165-listed");
+        var unlisted = homeFile("jf165-unlisted");
+        try {
+            ConfigService.set(HarnessSandbox.HOME_READS_KEY, listed.getParent().toString());
+            assertEquals("jf165-listed", run(agent, "cat '%s' 2>/dev/null || echo HOME_DENIED".formatted(listed))
+                    .get("output").getAsString());
+            assertEquals("HOME_DENIED", run(agent, "cat '%s' 2>/dev/null || echo HOME_DENIED".formatted(unlisted))
+                    .get("output").getAsString());
+        } finally {
+            deleteDir(listed.getParent());
+            deleteDir(unlisted.getParent());
+        }
+    }
+
+    /**
+     * python3 is often a wrapper over an interpreter installed elsewhere under $HOME (uv, pyenv), outside the PATH
+     * folders. Where it is, listing that folder in shell.sandbox.homeReads is what makes it run for a custom agent.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacAPythonInstalledUnderHomeRunsOnceItsFolderIsListed() {
+        ConfigService.set("shell.allowlist", "python3");
+        var unconfined = run(main(), "python3 -c 'import sys; print(sys.base_prefix)'");
+        assumeTrue(unconfined.get("exitCode").getAsInt() == 0, "python3 does not run here: " + unconfined);
+        var prefix = Path.of(unconfined.get("output").getAsString().strip());
+        var home = Path.of(System.getProperty("user.home"));
+        if (prefix.startsWith(home) && !prefix.equals(home)) {
+            ConfigService.set(HarnessSandbox.HOME_READS_KEY, prefix.toString());
+        }
+        var confined = run(agent, "python3 --version");
+        assertEquals(0, confined.get("exitCode").getAsInt(), "python3 under " + prefix + ": " + confined);
     }
 
     /** A PATH the model passes in exec's env reaches the command but reopens nothing: only JClaw's own PATH does. */
