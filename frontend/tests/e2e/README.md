@@ -62,6 +62,7 @@ and the eval suites.
 | UAT-21 Error page | `error-page.uat.spec.ts` | Branded 404 with a way home |
 | UAT-23 Decision Providers | `decision-providers.uat.spec.ts` | JEV portrait and clip served as media (not the SPA fallback), clip fetched only on click and played, badge on hover, keyboard focus and no-hover screens; writes blocked |
 | UAT-24 WhatsApp cards | `whatsapp.uat.spec.ts` | Stubbed bindings: Meta subscription warning and Subscribe, this month's replies bar, delivery-failure line; writes blocked. The two routes' 401 and 404 run live |
+| UAT-25 Chat visuals | `visuals.uat.spec.ts` | A staged transcript on a conversation id no install has: chart, diagram and explorer draw with their JSON hidden, a slider move makes no request, diagram stepping, a malformed spec keeps its JSON and names the fault, reduced motion, twenty figures never more than four drawn, `visual.enabled` off leaves plain JSON; writes blocked |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 
