@@ -52,6 +52,34 @@ describe('parseVisualSpec (JF-195)', () => {
     expect(errorOf(withValue(10))).toBeNull()
   })
 
+  it('refuses a param range, step or frame that cannot be drawn', () => {
+    const param = (over: object) => ({ ...EXPLORE, params: [{ ...EXPLORE.params[0], ...over }] })
+    expect(errorOf(param({ min: 10, max: 10, value: 10 }))).toBe('Param "rate" needs a min below its max.')
+    expect(errorOf(param({ step: 0 }))).toBe('Param "rate" needs a step above 0.')
+    expect(errorOf(param({ step: -1 }))).toBe('Param "rate" needs a step above 0.')
+    expect(errorOf(param({ step: 0.5 }))).toBeNull()
+    const frames = [EXPLORE.frames[0], { params: { rate: 10, fee: 1 }, points: EXPLORE.frames[1]!.points }]
+    expect(errorOf({ ...EXPLORE, frames })).toBe('Frame 2 must set exactly the params rate.')
+    expect(errorOf({ ...EXPLORE, frames: [EXPLORE.frames[0], { params: {}, points: EXPLORE.frames[1]!.points }] }))
+      .toBe('Frame 2 must set exactly the params rate.')
+  })
+
+  it('holds 1 to 3 params and at most 80 edges', () => {
+    const params = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, label: `P${i}`, min: 0, max: 1, step: 1, value: 0 }))
+    const withParams = (n: number) => ({
+      ...EXPLORE,
+      params: params(n),
+      frames: [{ params: Object.fromEntries(params(n).map(p => [p.id, 0])), points: [[0, 1], [1, 2]] }],
+    })
+    expect(errorOf(withParams(1))).toBeNull()
+    expect(errorOf(withParams(3))).toBeNull()
+    expect(errorOf(withParams(0))!.startsWith('params: ')).toBe(true)
+    expect(errorOf(withParams(4))!.startsWith('params: ')).toBe(true)
+    const edges = (n: number) => Array.from({ length: n }, () => ({ from: 'in', to: 'run' }))
+    expect(errorOf({ ...DIAGRAM, edges: edges(80) })).toBeNull()
+    expect(errorOf({ ...DIAGRAM, edges: edges(81) })!.startsWith('edges: ')).toBe(true)
+  })
+
   it('refuses a duplicate node id, an edge to an undeclared node and a step focusing one', () => {
     expect(errorOf({ ...DIAGRAM, nodes: [...DIAGRAM.nodes, { id: 'run', label: 'Again' }] }))
       .toBe('Node id "run" is declared twice.')

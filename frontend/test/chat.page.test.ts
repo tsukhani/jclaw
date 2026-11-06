@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
+import { visualEnabled } from '~/utils/visual/spec'
 import { serveConversation } from './conversation-endpoint'
 
 // A page left mounted shares the router, so it follows a later test's ?conversation= and fetches for it too.
@@ -411,6 +412,32 @@ describe('Chat page — an MCP server\'s question', () => {
     }
     finally {
       off()
+    }
+  })
+})
+
+describe('Chat page — visual.enabled (JF-195)', () => {
+  it('draws no visual while /api/config turns visual.enabled off', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/config', () => ({ entries: [{ key: 'visual.enabled', value: 'false' }] }))
+    registerEndpoint('/api/conversations', () => [
+      { id: 43, agentId: 1, agentName: 'streaming-agent', channelType: 'web', peerId: 'admin',
+        messageCount: 1, preview: 'Visual', createdAt: '2026-04-22T10:00:00Z', updatedAt: '2026-04-22T10:00:00Z' },
+    ])
+    const fence = '```visual\n' + JSON.stringify({ kind: 'chart', title: 'T', series: [{ name: 'A', points: [[1, 2], [2, 3]] }] }) + '\n```\n'
+    serveConversation(43, [
+      { id: 200, role: 'assistant', content: fence, createdAt: '2026-04-22T10:00:01Z' },
+    ])
+    try {
+      const component = await mountSuspended(Chat)
+      await flushPromises()
+      await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(43)
+      await flushPromises()
+      expect(component.find('code.language-visual').exists()).toBe(true)
+      expect(component.find('figure.visual-view').exists()).toBe(false)
+    }
+    finally {
+      visualEnabled.value = true
     }
   })
 })

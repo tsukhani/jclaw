@@ -19,7 +19,9 @@ export interface DiagramLayout { nodes: PlacedNode[], edges: PlacedEdge[], width
 export function wrapLabel(label: string, max = LABEL_CHARS): string[] {
   const lines: string[] = []
   let line = ''
-  for (const word of label.split(/\s+/).filter(Boolean)) {
+  // A word longer than a line (an identifier) is cut into line-long chunks rather than overflowing the node.
+  const words = label.split(/\s+/).filter(Boolean).flatMap(w => w.match(new RegExp(`.{1,${max}}`, 'g')) ?? [])
+  for (const word of words) {
     if (line && line.length + 1 + word.length > max) {
       lines.push(line)
       line = word
@@ -90,7 +92,8 @@ function place(spec: DiagramSpec, nodeH: number, layerOf: Map<string, number>): 
     const ry = Math.max(nodeH * 1.5, rx * 0.55)
     return spec.nodes.map((n, i) => {
       const a = -Math.PI / 2 + (2 * Math.PI * i) / count
-      return { ...base(n), x: rx + rx * Math.cos(a) - NODE_W / 2, y: ry + ry * Math.sin(a) - nodeH / 2 }
+      // Centred at (rx + NODE_W/2, ry + nodeH/2), so the leftmost and topmost nodes start at 0.
+      return { ...base(n), x: rx + rx * Math.cos(a), y: ry + ry * Math.sin(a) }
     })
   }
   const index = new Map<number, number>()
@@ -170,7 +173,13 @@ export function niceTicks(min: number, max: number, count = 5): number[] {
   const mag = 10 ** Math.floor(Math.log10(raw))
   const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw)!
   const ticks: number[] = []
-  for (let t = Math.floor(min / step) * step; t <= max + step * 1e-9; t += step) ticks.push(Number(t.toFixed(10)))
+  const start = Math.floor(min / step) * step
+  // Multiplied, not accumulated: a step below the values' ulp would never advance `t += step`.
+  for (let k = 0; k <= 100; k++) {
+    const t = start + k * step
+    if (t > max + step * 1e-9) break
+    ticks.push(Number(t.toFixed(10)))
+  }
   if (ticks.at(-1)! < max) ticks.push(Number((ticks.at(-1)! + step).toFixed(10)))
   return ticks
 }

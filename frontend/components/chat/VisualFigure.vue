@@ -69,38 +69,64 @@ const explore = computed(() => {
     />
     <details class="visual-data">
       <summary>Data</summary>
-      <table v-if="spec.kind === 'chart'">
-        <thead>
-          <tr>
-            <th scope="col">
-              Series
-            </th>
-            <th scope="col">
-              {{ axisHeader(spec.x, 'x') }}
-            </th>
-            <th scope="col">
-              {{ axisHeader(spec.y, 'y') }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <template
-            v-for="s in spec.series"
-            :key="s.name"
-          >
+      <template v-if="spec.kind === 'chart'">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">
+                Series
+              </th>
+              <th scope="col">
+                {{ axisHeader(spec.x, 'x') }}
+              </th>
+              <th scope="col">
+                {{ axisHeader(spec.y, 'y') }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <template
+              v-for="(s, si) in spec.series"
+              :key="si"
+            >
+              <tr
+                v-for="(p, i) in s.points"
+                :key="i"
+              >
+                <th scope="row">
+                  {{ s.name }}
+                </th>
+                <td>{{ p[0] }}</td>
+                <td>{{ p[1] }}</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <table v-if="spec.marks?.length">
+          <caption>Marks</caption>
+          <thead>
+            <tr>
+              <th scope="col">
+                Mark
+              </th>
+              <th scope="col">
+                {{ axisHeader(spec.x, 'x') }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
             <tr
-              v-for="(p, i) in s.points"
+              v-for="(m, i) in spec.marks"
               :key="i"
             >
               <th scope="row">
-                {{ s.name }}
+                {{ m.label ?? '' }}
               </th>
-              <td>{{ p[0] }}</td>
-              <td>{{ p[1] }}</td>
+              <td>{{ m.x }}</td>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </template>
       <template v-else-if="spec.kind === 'diagram'">
         <table>
           <caption>Nodes</caption>

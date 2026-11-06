@@ -32,7 +32,13 @@ const x = computed(() => isBar.value
   ? linearScale([xs.value[0]! - band.value / 2, xs.value.at(-1)! + band.value / 2], [box.left, box.right], { nice: false })
   : linearScale([...xs.value, ...(props.spec.marks ?? []).map(m => m.x)], [box.left, box.right]))
 const y = computed(() => linearScale(ys.value, [box.bottom, box.top], { zero: isBar.value }))
-const xTicks = computed(() => isBar.value || xs.value.length <= 12 ? xs.value : x.value.ticks)
+const MAX_X_LABELS = 12
+const xTicks = computed(() => {
+  if (xs.value.length <= MAX_X_LABELS) return xs.value
+  if (!isBar.value) return x.value.ticks
+  const every = Math.ceil(xs.value.length / MAX_X_LABELS)
+  return xs.value.filter((_, i) => i % every === 0)
+})
 
 const series = computed(() => props.spec.series.map((s, i) => {
   const pts = s.points.map(([px, py]) => [x.value(px), y.value(py)] as [number, number])
@@ -43,7 +49,7 @@ const series = computed(() => props.spec.series.map((s, i) => {
     dash: DASHES[i % DASHES.length]!,
     shape,
     hollow: isHollow(shape),
-    path: linePath(pts),
+    path: linePath([...pts].sort((a, b) => a[0] - b[0])),
     markers: props.spec.chartType === 'scatter' || pts.length <= MAX_LINE_MARKERS
       ? pts.map(([px, py]) => markerPath(shape, px, py)).join(' ')
       : '',
@@ -56,10 +62,10 @@ const bars = computed(() => {
   const full = Math.abs(x.value(band.value) - x.value(0)) * 0.8
   const each = full / count
   const base = y.value(Math.max(y.value.domain[0], Math.min(0, y.value.domain[1])))
-  return props.spec.series.flatMap((s, i) => s.points.map(([px, py]) => {
+  return props.spec.series.flatMap((s, i) => s.points.map(([px, py], j) => {
     const top = y.value(py)
     return {
-      key: `${i}-${px}`,
+      key: `${i}-${j}`,
       series: i,
       x: x.value(px) - full / 2 + i * each,
       y: Math.min(top, base),
@@ -127,8 +133,8 @@ const marks = computed(() => (props.spec.marks ?? []).map(m => ({ x: x.value(m.x
         :clip-path="`url(#${clipId})`"
       >
         <g
-          v-for="s in series"
-          :key="s.name"
+          v-for="(s, i) in series"
+          :key="i"
           class="visual-series"
         >
           <path
@@ -167,8 +173,8 @@ const marks = computed(() => (props.spec.marks ?? []).map(m => ({ x: x.value(m.x
     </svg>
     <ul class="visual-legend">
       <li
-        v-for="s in series"
-        :key="s.name"
+        v-for="(s, i) in series"
+        :key="i"
       >
         <svg
           width="34"

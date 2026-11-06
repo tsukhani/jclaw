@@ -78,7 +78,8 @@ function scan(el: HTMLElement, binding: DirectiveBinding<void>) {
   }
   for (const figureEl of el.querySelectorAll<HTMLElement>('figure.visual-view:not(.visual-pending):not([data-visual-claimed])')) {
     const code = figureEl.querySelector<HTMLElement>(':scope > .code-block')
-    const spec = parseVisualSpec(figureEl.querySelector('code')?.textContent ?? '')
+    // Marked ends a code block's text with a newline the fence body did not have; it would count against the limit.
+    const spec = parseVisualSpec((figureEl.querySelector('code')?.textContent ?? '').replace(/\n$/, ''))
     if (!code || 'error' in spec) continue
     figureEl.dataset.visualClaimed = ''
     const host = document.createElement('div')

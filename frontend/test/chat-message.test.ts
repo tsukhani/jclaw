@@ -64,6 +64,24 @@ describe('ChatMessage (JCLAW-690)', () => {
     expect(body.html()).toContain('Big Heading')
   })
 
+  it('claims a finished reply\'s visual figure and hides its code block', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    try {
+      const fence = '```visual\n' + JSON.stringify({ kind: 'chart', title: 'T', series: [{ name: 'A', points: [[1, 2], [2, 3]] }] }) + '\n```\n'
+      const c = await mountSuspended(ChatMessage, { props: props(msg({ role: 'assistant', content: fence })) })
+      const figure = c.find('figure.visual-view')
+      expect(figure.attributes('data-visual-claimed')).toBe('')
+      expect((figure.find(':scope > .code-block').element as HTMLElement).hidden).toBe(true)
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders a ChatToolCalls block when the message carries tool calls', async () => {
     const withTools = msg({ role: 'assistant', content: 'done', toolCalls: [{ id: 't1', name: 'web_search', icon: 'search', arguments: JSON.stringify({ query: 'cats' }) }] })
     const c = await mountSuspended(ChatMessage, { props: props(withTools) })

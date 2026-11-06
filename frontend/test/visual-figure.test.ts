@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VisualFigure from '~/components/chat/VisualFigure.vue'
 import { interpolateFrames, snapParam } from '~/utils/visual/explore'
-import { layoutDiagram } from '~/utils/visual/layout'
+import { layoutDiagram, niceTicks, wrapLabel } from '~/utils/visual/layout'
 import { parseVisualSpec, type DiagramSpec, type ExploreSpec, type VisualSpec } from '~/utils/visual/spec'
 import { CHART, DIAGRAM, EXPLORE } from './visual-fixtures'
 
@@ -45,12 +45,28 @@ describe('VisualFigure (JF-195)', () => {
   it('lists every plotted number in the Data table, with row and column headers', () => {
     const wrapper = mountFigure(CHART)
     expect(wrapper.find('details.visual-data > summary').text()).toBe('Data')
-    expect(wrapper.findAll('details table thead th').map(th => th.text())).toEqual(['Series', 'Sprint', 'Points (pts)'])
-    const rows = wrapper.findAll('details table tbody tr').map(tr => [tr.find('th[scope="row"]').text(), ...tr.findAll('td').map(td => td.text())])
+    const [points, marks] = wrapper.findAll('details table')
+    expect(points!.findAll('thead th').map(th => th.text())).toEqual(['Series', 'Sprint', 'Points (pts)'])
+    const rows = points!.findAll('tbody tr').map(tr => [tr.find('th[scope="row"]').text(), ...tr.findAll('td').map(td => td.text())])
     expect(rows).toEqual([
       ['Committed', '1', '34'], ['Committed', '2', '38'], ['Committed', '3', '41'],
       ['Delivered', '1', '30'], ['Delivered', '2', '37'], ['Delivered', '3', '40'],
     ])
+    expect(marks!.find('caption').text()).toBe('Marks')
+    expect(marks!.findAll('thead th').map(th => th.text())).toEqual(['Mark', 'Sprint'])
+    expect(marks!.findAll('tbody tr').map(tr => [tr.find('th[scope="row"]').text(), tr.find('td').text()]))
+      .toEqual([['release', '3']])
+  })
+
+  it('leaves the Marks table out when the chart has no marks', () => {
+    expect(mountFigure({ ...CHART, marks: undefined }).findAll('details table')).toHaveLength(1)
+  })
+
+  it('draws a mark as a labelled line, and a scatter chart as markers alone', () => {
+    expect(mountFigure(CHART).findAll('g.visual-mark text').map(t => t.text())).toEqual(['release'])
+    const scatter = mountFigure({ ...CHART, chartType: 'scatter' })
+    expect(scatter.findAll('path.visual-line')).toHaveLength(0)
+    expect(scatter.findAll('path.visual-marker')).toHaveLength(2)
   })
 
   it('omits the title above the drawing when the figcaption already holds it', () => {
@@ -213,10 +229,42 @@ describe('diagram layout (JF-195)', () => {
     expect(laid.edges[2]!.labelY > bottom).toBe(true)
   })
 
+  it.each([4, 7])('keeps every node of a %i-node cycle inside the drawing', (count) => {
+    const ids = Array.from({ length: count }, (_, i) => `n${i}`)
+    const laid = layoutDiagram(spec<DiagramSpec>({
+      kind: 'diagram',
+      layout: 'cycle',
+      title: 'Ring',
+      nodes: ids.map(id => ({ id, label: id })),
+      edges: ids.map((id, i) => ({ from: id, to: ids[(i + 1) % count] })),
+    }))
+    for (const n of laid.nodes) {
+      expect(n.x >= 0 && n.y >= 0, n.id).toBe(true)
+      expect(n.x + n.w <= laid.width && n.y + n.h <= laid.height, n.id).toBe(true)
+    }
+  })
+
+  it('cuts a word longer than a line into line-long chunks', () => {
+    expect(wrapLabel('Calls ConfigService.setWithSideEffects now')).toEqual(['Calls', 'ConfigService.setWit', 'hSideEffects now'])
+  })
+
   it('stacks a tree top down, and puts a cycle\'s nodes on an ellipse with no back edges', () => {
     const tree = layoutDiagram(cyclic('tree'))
     const y = Object.fromEntries(tree.nodes.map(n => [n.id, n.y]))
     expect(y.in! < y.run! && y.run! < y.out!).toBe(true)
     expect(layoutDiagram(cyclic('cycle')).edges.some(e => e.back)).toBe(false)
+  })
+})
+
+describe('chart ticks (JF-195)', () => {
+  it('returns a bounded list when the step is below the values\' precision', () => {
+    const ticks = niceTicks(1e17, 1e17 + 16)
+    expect(ticks.length > 0 && ticks.length <= 102).toBe(true)
+    expect(ticks.every(Number.isFinite)).toBe(true)
+  })
+
+  it('covers an ordinary range with round steps', () => {
+    expect(niceTicks(0, 10)).toEqual([0, 2, 4, 6, 8, 10])
+    expect(niceTicks(30, 41)).toEqual([30, 32.5, 35, 37.5, 40, 42.5])
   })
 })

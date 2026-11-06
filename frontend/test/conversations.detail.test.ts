@@ -3,6 +3,7 @@ import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-uti
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import ConversationDetail from '~/pages/conversations/[id].vue'
+import { visualEnabled } from '~/utils/visual/spec'
 
 /**
  * The conversation detail page: the aggregated usage header, the mid-conversation
@@ -108,6 +109,22 @@ describe('Conversation detail page', () => {
     expect(rendered[0]!.html()).toContain('<strong>Proof.</strong>')
     expect(rendered[0]!.find('.katex').exists()).toBe(true)
     expect(c.text()).toContain('**not bold** and $x_1$')
+  })
+
+  it('draws no visual while /api/config turns visual.enabled off', async () => {
+    registerEndpoint('/api/config', () => ({ entries: [{ key: 'visual.enabled', value: 'false' }] }))
+    const fence = '```visual\n' + JSON.stringify({ kind: 'chart', title: 'T', series: [{ name: 'A', points: [[1, 2], [2, 3]] }] }) + '\n```\n'
+    setupApi({ messages: [msg({ id: 2, role: 'assistant', content: fence })] })
+    try {
+      const c = await mountPage()
+      const rendered = c.find('[data-testid="message-body-rendered"]')
+      expect(rendered.find('figure.visual-view').exists()).toBe(false)
+      expect(rendered.find('code.language-visual').exists()).toBe(true)
+    }
+    finally {
+      visualEnabled.value = true
+      registerEndpoint('/api/config', () => ({ entries: [] }))
+    }
   })
 
   it('renders a placeholder for a conversation with no peer', async () => {

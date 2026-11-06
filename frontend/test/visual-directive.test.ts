@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref, withDirectives } from 'vue'
 import { mount } from '@vue/test-utils'
 import { renderMarkdown, renderMarkdownStreaming } from '~/utils/chat-markdown'
+import { MAX_VISUAL_CHARS } from '~/utils/visual/spec'
 import { CHART, DIAGRAM } from './visual-fixtures'
 
 interface Rendered { props: Record<string, unknown>, emit: (event: string, ...args: unknown[]) => void }
@@ -79,6 +80,15 @@ describe('v-visual-figures (JF-195)', () => {
     FakeObserver.last.fire(el, false)
     await nextTick()
     expect(el.querySelector('.stub-figure')).toBeNull()
+  })
+
+  it('claims a figure whose body is exactly the size limit', () => {
+    const json = JSON.stringify(CHART)
+    const body = json.slice(0, -1) + ' '.repeat(MAX_VISUAL_CHARS - json.length) + '}'
+    expect(body.length).toBe(MAX_VISUAL_CHARS)
+    const { figure } = mountWith(renderMarkdown(`\`\`\`visual\n${body}\n\`\`\`\n`))
+    expect(figure().hasAttribute('data-visual-claimed')).toBe(true)
+    expect(FakeObserver.last.targets.has(figure())).toBe(true)
   })
 
   it('leaves a pending figure and an invalid fence alone', () => {
