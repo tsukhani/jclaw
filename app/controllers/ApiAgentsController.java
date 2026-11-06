@@ -48,7 +48,6 @@ import java.util.regex.Pattern;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
-import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -473,15 +472,15 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Update an agent by id")
-    @AgentAccess(value = OWN_ONLY, reason = "an agent changes only its own row, main any (mayReachAgentScopedRow); "
-            + "acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for the agent principal, a model "
-            + "it picks must be registered, and tool grants live on operator-only routes")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (RequestPrincipal.isOperatorOrMainAgent); "
+            + "acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for main too, a model it picks "
+            + "must be registered, and tool grants live on operator-only routes")
     public static void update(Long id) {
-        var agent = requireAgent(id);
-        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Agent " + id + " is another agent: an agent changes only "
-                    + "its own settings, and the main agent any agent's.");
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Only the operator or the main agent may change an agent's "
+                    + "settings.");
         }
+        var agent = requireAgent(id);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -553,16 +552,15 @@ public class ApiAgentsController extends Controller {
         }
     }
 
-    /** Saved, a model no provider registers switches the agent off ({@link AgentService#update}), and only the
-     *  operator or main can add one, so an agent picking it could not undo the pick. The operator keeps the old
-     *  behaviour; an unchanged echo is no pick. */
+    /** Saved, a model no provider registers switches the agent off ({@link AgentService#update}), which main would
+     *  learn of only from a later turn of that agent failing. The operator keeps the old behaviour; an unchanged
+     *  echo is no pick. */
     private static void requireRegisteredModelForAgent(Agent agent, String modelProvider, String modelId) {
         if (!RequestPrincipal.isAgentOriginated()) return;
         if (modelProvider.equals(agent.modelProvider) && modelId.equals(agent.modelId)) return;
         if (AgentService.isProviderConfigured(modelProvider, modelId)) return;
-        ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ("Model '%s' is not registered on provider '%s'. It must "
-                + "be added to the provider first, which only the main agent or the operator can do.")
-                .formatted(modelId, modelProvider));
+        ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ("Model '%s' is not registered on provider '%s'. Add it "
+                + "to the provider first (POST /api/providers/%s/models).").formatted(modelId, modelProvider, modelProvider));
     }
 
     /** A type switch deletes or creates USER.md and BOOTSTRAP.md, and the routes that write a

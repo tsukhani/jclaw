@@ -86,8 +86,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         return requestWithToken(AuthFixture.seedBearerToken());
     }
 
-    /** The bearer as {@code JClawApiTool} sends it for {@code agentId}: PUT /api/agents/{id} reaches only the
-     *  caller's own row, so a per-field guard there is reached only by the agent editing itself. */
+    /** The bearer as {@code JClawApiTool} sends it for {@code agentId}. */
     private static Http.Request agentRequestAs(Long agentId) {
         var request = agentRequest();
         request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
@@ -280,24 +279,11 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id,
                 "application/json", "{\"acpAllowed\":true}"));
 
+        // Refused at the door: only the operator and main change an agent's settings.
         assertStatus(403, resp);
-        assertTrue(getContent(resp).contains("operator_only"),
-                "expected the operator_only error code; got: " + getContent(resp));
+        assertTrue(getContent(resp).contains("agent_scope"),
+                "expected the agent_scope error code; got: " + getContent(resp));
         assertFalse(acpAllowedFor(id), "the rejected PUT must not have flipped acpAllowed");
-    }
-
-    /** CONTROL — passes with the guard reverted; pins that the gate is on the acpAllowed
-     *  change alone, so an agent's ordinary edits (here a description, with the flag echoed
-     *  back unchanged) are not collateral. */
-    @Test
-    void agentPrincipalKeepsNonPrivilegedAgentUpdates() {
-        var id = createAgent("operator-only-acp-echo");
-
-        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id, "application/json",
-                "{\"description\":\"written-by-the-agent\",\"acpAllowed\":false}"));
-
-        assertIsOk(resp);
-        assertTrue(getContent(resp).contains("written-by-the-agent"), getContent(resp));
     }
 
     /** CONTROL — passes with the guard reverted; pins that the operator can still grant acp. */
@@ -324,24 +310,11 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
                 "application/json", "{\"serviceAgent\":true}"));
 
         assertStatus(403, resp);
-        assertTrue(getContent(resp).contains("operator_only"),
-                "expected the operator_only error code; got: " + getContent(resp));
+        assertTrue(getContent(resp).contains("agent_scope"),
+                "expected the agent_scope error code; got: " + getContent(resp));
         assertFalse(serviceAgentFor(id), "the rejected PUT must not have switched the type");
         assertTrue(Files.exists(AgentService.workspacePath("operator-only-type-switch").resolve("USER.md")),
                 "the rejected PUT must not have deleted USER.md");
-    }
-
-    /** CONTROL — passes with the guard reverted; pins that an unchanged type echoed back with an
-     *  ordinary edit is no switch, so a read-modify-write of the agent JSON keeps working. */
-    @Test
-    void agentPrincipalMayEchoAnUnchangedType() {
-        var id = createAgent("operator-only-type-echo");
-
-        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id, "application/json",
-                "{\"description\":\"written-by-the-agent\",\"serviceAgent\":false}"));
-
-        assertIsOk(resp);
-        assertTrue(getContent(resp).contains("written-by-the-agent"), getContent(resp));
     }
 
     // --- POST /api/agents/{id}/skills/{name}/copy ---
