@@ -20,7 +20,8 @@ import java.util.regex.Pattern;
 class AotCacheScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("port_answers", "upgrade_install_kind", "aot_cache_file",
-            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used",
+            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare",
+            "system_out_size", "aot_check_used",
             "restart_status", "restart_phase_end", "restart_phase");
 
     private static final String JAVA_STUB = """
@@ -267,13 +268,23 @@ class AotCacheScriptTest extends UnitTest {
     }
 
     @Test
+    void aFreshInstallsFirstStartReadsItsMissingSystemOutSilently() throws Exception {
+        var home = gradleHome();
+        assertFalse(Files.exists(home.resolve("logs/system.out")));
+        assertEquals("[]\n", run(home, Map.of(), "echo \"[$(system_out_size)]\""));
+
+        Files.writeString(Files.createDirectories(home.resolve("logs")).resolve("system.out"), "12345\n");
+        assertEquals("[6]\n", run(home, Map.of(), "echo \"[$(system_out_size)]\""));
+    }
+
+    @Test
     void everyProductionLaunchKeepsTheCacheCurrentFirst() throws Exception {
         var script = Files.readString(repo().resolve("jclaw.sh"));
         int prepare = script.indexOf("    aot_prepare --http.port=\"$BACKEND_PORT\" \"${jvm_opts[@]}\"\n");
         int start = script.indexOf("    play start --%prod --http.port=\"$BACKEND_PORT\" \"${jvm_opts[@]}\"\n");
         int ready = script.indexOf("    wait_for_backend_ready || return 1\n    aot_check_used \"${system_out_from:-0}\"\n");
         assertTrue(prepare > 0 && prepare < start && start < ready, "do_start_prod trains with the start's own arguments, then checks the cache was used");
-        int mark = script.indexOf("    system_out_from=$(wc -c < \"$SCRIPT_DIR/logs/system.out\" 2>/dev/null | tr -d ' ' || true)\n");
+        int mark = script.indexOf("    system_out_from=$(system_out_size)\n");
         assertTrue(mark > prepare && mark < start, "system.out's size is taken just before play start, so the check reads only this start's output");
 
         var dockerfile = Files.readString(repo().resolve("Dockerfile"));

@@ -3291,12 +3291,18 @@ aot_prepare() {
 # drop it, so the next start trains a new one. The JVM reports a refusal at the error level. $1 is
 # system.out's size before this start: Play appends to the file at every start, so reading all of it
 # let one old refusal drop every later start's freshly trained cache (JF-194).
+# Bytes in logs/system.out; empty when a fresh install has none yet. The stderr redirect comes first because
+# the shell reports a failed `<` itself, past a `2>/dev/null` written after it, into the installer's output.
+system_out_size() {
+    wc -c 2>/dev/null < "$SCRIPT_DIR/logs/system.out" | tr -d ' ' || true
+}
+
 aot_check_used() {
     local cache store out="$SCRIPT_DIR/logs/system.out" from="${1:-0}" size fresh
     cache=$(aot_cache_file)
     store=$(aot_store_dir)
     [[ -f "$cache" ]] || return 0
-    size=$(wc -c < "$out" 2>/dev/null | tr -d ' ' || true)
+    size=$(system_out_size)
     # Shorter than the mark means rotated or truncated, so all of it is this start's.
     (( ${size:-0} >= from )) || from=0
     fresh=$(tail -c +"$((from + 1))" "$out" 2>/dev/null || true)
@@ -4047,7 +4053,7 @@ do_start_prod() {
         exit 1
     fi
     local system_out_from
-    system_out_from=$(wc -c < "$SCRIPT_DIR/logs/system.out" 2>/dev/null | tr -d ' ' || true)
+    system_out_from=$(system_out_size)
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     # `play start` forks, so this banner used to announce a server that was not
