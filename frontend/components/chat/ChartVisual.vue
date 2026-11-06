@@ -21,7 +21,7 @@ const xs = computed(() => [...new Set(props.spec.series.flatMap(s => s.points.ma
 const ys = computed(() => props.spec.series.flatMap(s => s.points.map(([, y]) => y)))
 const isBar = computed(() => props.spec.chartType === 'bar')
 
-// Bars sit in bands around each x; the band is the narrowest gap between neighbouring x values.
+// Bars sit in bands around each x; the band is the narrowest gap between neighboring x values.
 const band = computed(() => {
   const v = xs.value
   const gaps = v.slice(1).map((x, i) => x - v[i]!)
@@ -118,7 +118,7 @@ const marks = computed(() => (props.spec.marks ?? []).map(m => ({ x: x.value(m.x
           :stroke="series[b.series]!.color"
           fill-opacity="0.8"
         />
-        <!-- The series marker caps each bar, so bars are told apart without their colour. -->
+        <!-- The series marker caps each bar, so bars are told apart without their color. -->
         <path
           v-for="b in bars"
           :key="`m${b.key}`"

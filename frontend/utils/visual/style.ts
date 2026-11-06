@@ -1,6 +1,6 @@
 /**
- * Series encodings beyond colour (JF-195): each index gets its own dash pattern and marker, so a series is told apart
- * in greyscale and the legend can name it by shape.
+ * Series encodings beyond color (JF-195): each index gets its own dash pattern and marker, so a series is told apart
+ * in grayscale and the legend can name it by shape.
  */
 import type { ChartSpec } from './spec'
 
@@ -13,7 +13,7 @@ export function seriesColor(i: number): string {
   return `var(--visual-series-${(i % 6) + 1})`
 }
 
-/** A marker centred on (x, y), as path data; `ring` and `cross` are drawn unfilled. */
+/** A marker centered on (x, y), as path data; `ring` and `cross` are drawn unfilled. */
 export function markerPath(shape: MarkerShape, x: number, y: number, r = 3.5): string {
   switch (shape) {
     case 'circle':

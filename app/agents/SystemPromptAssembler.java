@@ -665,7 +665,7 @@ public class SystemPromptAssembler {
               {"label", "unit"}, label up to 60 characters and unit up to 20; "series" of
               1 to 6 {"name", "points"}, names up to 60, each points array 2 to 400
               [x, y] number pairs; optional "marks", at most 20 {"x", "label"}, draw
-              labelled vertical lines.
+              labeled vertical lines.
             - kind "diagram": "layout" flow (the default), tree or cycle; "nodes" of at most
               40 {"id", "label", "detail"}, labels up to 60, detail optional up to 300;
               "edges" of at most 80 {"from", "to", "label"} naming declared ids; optional

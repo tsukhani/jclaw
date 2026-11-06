@@ -82,6 +82,34 @@ describe('v-visual-figures (JF-195)', () => {
     expect(el.querySelector('.stub-figure')).toBeNull()
   })
 
+  it('holds a drawn figure\'s height after it unmounts, and lets go of it on the next mount', async () => {
+    const { figure } = mountWith(renderMarkdown(fence(CHART)))
+    const el = figure()
+    const host = el.querySelector<HTMLElement>('.visual-host')!
+    expect(host.style.minHeight).toBe('')
+    FakeObserver.last.fire(el, true)
+    await nextTick()
+    Object.defineProperty(host, 'offsetHeight', { configurable: true, value: 412 })
+    FakeObserver.last.fire(el, false)
+    await nextTick()
+    expect(host.childElementCount).toBe(0)
+    expect(host.style.minHeight).toBe('412px')
+    FakeObserver.last.fire(el, true)
+    await nextTick()
+    expect(host.querySelector('.stub-figure')).not.toBeNull()
+    expect(host.style.minHeight).toBe('')
+  })
+
+  it('reserves no measured height for a figure that never laid out', async () => {
+    const { figure } = mountWith(renderMarkdown(fence(CHART)))
+    const el = figure()
+    FakeObserver.last.fire(el, true)
+    await nextTick()
+    FakeObserver.last.fire(el, false)
+    await nextTick()
+    expect(el.querySelector<HTMLElement>('.visual-host')!.style.minHeight).toBe('')
+  })
+
   it('claims a figure whose body is exactly the size limit', () => {
     const json = JSON.stringify(CHART)
     const body = json.slice(0, -1) + ' '.repeat(MAX_VISUAL_CHARS - json.length) + '}'

@@ -31,7 +31,7 @@ describe('VisualFigure (JF-195)', () => {
     document.body.innerHTML = ''
   })
 
-  it('draws each series of a line chart with its own dash pattern, labelled by its title', () => {
+  it('draws each series of a line chart with its own dash pattern, labeled by its title', () => {
     const wrapper = mountFigure(CHART)
     const svg = wrapper.find('svg[role="img"]')
     expect(svg.attributes('aria-label')).toBe('Sprint velocity')
@@ -62,7 +62,7 @@ describe('VisualFigure (JF-195)', () => {
     expect(mountFigure({ ...CHART, marks: undefined }).findAll('details table')).toHaveLength(1)
   })
 
-  it('draws a mark as a labelled line, and a scatter chart as markers alone', () => {
+  it('draws a mark as a labeled line, and a scatter chart as markers alone', () => {
     expect(mountFigure(CHART).findAll('g.visual-mark text').map(t => t.text())).toEqual(['release'])
     const scatter = mountFigure({ ...CHART, chartType: 'scatter' })
     expect(scatter.findAll('path.visual-line')).toHaveLength(0)

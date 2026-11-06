@@ -70,13 +70,13 @@ export function layers(spec: DiagramSpec, back: Set<number>): Map<string, number
   return layer
 }
 
-function centre(n: PlacedNode) {
+function center(n: PlacedNode) {
   return { cx: n.x + n.w / 2, cy: n.y + n.h / 2 }
 }
 
-// Where the segment from a node's centre towards (tx, ty) leaves its rectangle.
+// Where the segment from a node's center towards (tx, ty) leaves its rectangle.
 function boundary(n: PlacedNode, tx: number, ty: number) {
-  const { cx, cy } = centre(n)
+  const { cx, cy } = center(n)
   const dx = tx - cx
   const dy = ty - cy
   if (dx === 0 && dy === 0) return { x: cx, y: cy }
@@ -92,7 +92,7 @@ function place(spec: DiagramSpec, nodeH: number, layerOf: Map<string, number>): 
     const ry = Math.max(nodeH * 1.5, rx * 0.55)
     return spec.nodes.map((n, i) => {
       const a = -Math.PI / 2 + (2 * Math.PI * i) / count
-      // Centred at (rx + NODE_W/2, ry + nodeH/2), so the leftmost and topmost nodes start at 0.
+      // Centered at (rx + NODE_W/2, ry + nodeH/2), so the leftmost and topmost nodes start at 0.
       return { ...base(n), x: rx + rx * Math.cos(a), y: ry + ry * Math.sin(a) }
     })
   }
@@ -128,8 +128,8 @@ function route(spec: DiagramSpec, a: PlacedNode, b: PlacedNode, back: boolean, b
     const ty = b.y + b.h / 2
     return { path: `M${a.x + a.w},${sy} H${x} V${ty} H${b.x + b.w}`, labelX: x + 4, labelY: (sy + ty) / 2 }
   }
-  const to = centre(b)
-  const from = centre(a)
+  const to = center(b)
+  const from = center(a)
   const p = boundary(a, to.cx, to.cy)
   const q = boundary(b, from.cx, from.cy)
   return { path: `M${p.x},${p.y} L${q.x},${q.y}`, labelX: (p.x + q.x) / 2, labelY: (p.y + q.y) / 2 - 4 }

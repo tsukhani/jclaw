@@ -119,7 +119,7 @@ figure.structure-view figcaption, .structure-note, .structure-error { font-size:
 .structure-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.5rem; font-size: 0.75rem; }
 .structure-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Visual fences: the series palette is a pair per theme; dash patterns and markers carry identity without colour. */
+/* Visual fences: the series palette is a pair per theme; dash patterns and markers carry identity without color. */
 .prose-chat {
   --visual-series-1: #2563eb; --visual-series-2: #d97706; --visual-series-3: #059669;
   --visual-series-4: #db2777; --visual-series-5: #7c3aed; --visual-series-6: #525252;
@@ -131,6 +131,9 @@ html.dark .prose-chat {
 }
 figure.visual-view { margin: 0.75em 0; max-width: 42rem; }
 figure.visual-view > [hidden] { display: none; }
+
+/* A figure not yet drawn holds roughly a chart's height, so twenty of them cannot all sit near the viewport at once. */
+.visual-host:empty { min-height: 18rem; }
 figure.visual-view figcaption, .visual-note, .visual-error { font-size: 0.875em; color: var(--fg-muted); margin-top: 0.35em; }
 .visual-title { font-weight: 600; margin: 0 0 0.35em; }
 .visual-figure svg { display: block; width: 100%; height: auto; overflow: visible; }

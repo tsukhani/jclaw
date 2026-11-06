@@ -26,11 +26,16 @@ function mount(state: Container, el: HTMLElement, figure: Figure) {
   })
   vnode.appContext = state.appContext
   render(vnode, figure.host)
+  figure.host.style.minHeight = ''
 }
 
 function unmount(figure: Figure) {
   if (!figure.live) return
   figure.live = false
+  // An emptied host would collapse to nothing: the transcript would jump, and every collapsed figure would fall
+  // inside the observer's margin and mount at once.
+  const height = figure.host.offsetHeight
+  if (height > 0) figure.host.style.minHeight = `${height}px`
   render(null, figure.host)
 }
 
