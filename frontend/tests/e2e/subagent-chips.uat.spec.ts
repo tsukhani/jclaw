@@ -92,8 +92,12 @@ async function stubChat(page: Page, request: APIRequestContext, stub: ChatStub) 
   await page.route(url => /^\/api\/conversations\/990\d{3}(\/|$)/.test(url.pathname), (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     const url = new URL(route.request().url())
-    const [, rawId, suffix] = /^\/api\/conversations\/(\d+)(\/messages)?$/.exec(url.pathname) ?? []
+    const [, rawId, suffix] = /^\/api\/conversations\/(\d+)(\/messages|\/queue)?$/.exec(url.pathname) ?? []
     const id = Number(rawId)
+    // The page reads whether a turn it isn't streaming holds the conversation; no stubbed one is busy.
+    if (suffix === '/queue' && (id === stub.parentId || stub.transcripts.has(id))) {
+      return fulfillJson(route, { busy: false, queueSize: 0 })
+    }
     if (id === stub.parentId && !suffix) {
       return fulfillJson(route, {
         id,
