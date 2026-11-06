@@ -494,6 +494,28 @@ class ShellExecSandboxTest extends UnitTest {
         }
     }
 
+    /** A PATH the model passes in exec's env reaches the command but reopens nothing: only JClaw's own PATH does. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacAModelSuppliedPathOpensNothing() throws IOException {
+        ConfigService.set("shell.allowlist", "echo,cat");
+        var secret = homeFile("jf165-model-path-secret");
+        try {
+            var args = new JsonObject();
+            args.addProperty("command", "echo \"$PATH\"; /bin/cat '%s' 2>/dev/null || echo HOME_DENIED".formatted(secret));
+            var env = new JsonObject();
+            env.addProperty("PATH", secret.getParent() + ":/usr/bin:/bin");
+            args.add("env", env);
+
+            var result = JsonParser.parseString(tool.execute(args.toString(), agent)).getAsJsonObject();
+
+            assertEquals(secret.getParent() + ":/usr/bin:/bin\nHOME_DENIED", result.get("output").getAsString(),
+                    result.toString());
+        } finally {
+            deleteDir(secret.getParent());
+        }
+    }
+
     /** main under shell.sandbox=true keeps today's profile, in which the home folder stays readable. */
     @Test
     @EnabledOnOs(OS.MAC)
