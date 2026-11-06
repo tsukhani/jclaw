@@ -113,7 +113,7 @@ describe('v-visual-figures (JF-195)', () => {
   it('claims a figure whose body is exactly the size limit', () => {
     const json = JSON.stringify(CHART)
     const body = json.slice(0, -1) + ' '.repeat(MAX_VISUAL_CHARS - json.length) + '}'
-    expect(body.length).toBe(MAX_VISUAL_CHARS)
+    expect(body).toHaveLength(MAX_VISUAL_CHARS)
     const { figure } = mountWith(renderMarkdown(`\`\`\`visual\n${body}\n\`\`\`\n`))
     expect(figure().hasAttribute('data-visual-claimed')).toBe(true)
     expect(FakeObserver.last.targets.has(figure())).toBe(true)

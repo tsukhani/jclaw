@@ -92,7 +92,7 @@ describe('parseVisualSpec (JF-195)', () => {
   it('draws a body of exactly the limit and refuses one character more', () => {
     const exact = JSON.stringify(CHART)
     const padded = exact.slice(0, -1) + ' '.repeat(MAX_VISUAL_CHARS - exact.length) + '}'
-    expect(padded.length).toBe(MAX_VISUAL_CHARS)
+    expect(padded).toHaveLength(MAX_VISUAL_CHARS)
     expect('error' in parseVisualSpec(padded)).toBe(false)
     const over = padded.slice(0, -1) + ' }'
     expect(parseVisualSpec(over)).toEqual({

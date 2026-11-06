@@ -27,7 +27,10 @@ onErrorCaptured((err) => {
 })
 
 const paramText = (spec: ExploreSpec, values: Record<string, number>) =>
-  spec.params.map(p => `${p.label} ${formatNumber(values[p.id]!)}${p.unit ? ` ${p.unit}` : ''}`).join(', ')
+  spec.params.map((p) => {
+    const unit = p.unit ? ` ${p.unit}` : ''
+    return `${p.label} ${formatNumber(values[p.id]!)}${unit}`
+  }).join(', ')
 
 const explore = computed(() => {
   const spec = props.spec
