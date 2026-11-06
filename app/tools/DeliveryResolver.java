@@ -38,9 +38,11 @@ public final class DeliveryResolver {
      * "The conversation I'm operating on": the one the calling chat turn runs in
      * ({@link #callingConversation}), else {@link #mostRecentConversation}. Recency
      * alone picks whichever of the agent's chats was touched last, not the one it is
-     * answering (JCLAW-1211).
+     * answering (JCLAW-1211). Empty in a turn with no parent chat ({@link ToolContext#noParentChat}),
+     * where the latest chat belongs to a turn this one has nothing to do with.
      */
     public static Optional<Conversation> operatingConversation(Agent agent) {
+        if (ToolContext.noParentChat()) return Optional.empty();
         return callingConversation(agent).or(() -> mostRecentConversation(agent));
     }
 

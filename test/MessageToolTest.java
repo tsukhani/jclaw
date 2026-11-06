@@ -234,9 +234,127 @@ class MessageToolTest extends UnitTest {
         assertEquals(0L, subagentSendCount(newer.id));
     }
 
+    // ──────── JF-158: a turn with no parent chat (an eval capture, a task fire) ────────
+
+    @Test
+    void aCaptureTurnsSendWithNoChannelDeliversNothingToTheLatestChat() throws Exception {
+        var latest = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInScope(agent.id, null, null, "{\"action\":\"send\",\"message\":\"hi\"}");
+
+        assertEquals("Error: no active conversation for agent 'msg-test'; pass explicit 'channel' and 'target' "
+                + "to send anyway.", result);
+        assertEquals(0L, subagentSendCount(latest.id));
+    }
+
+    @Test
+    void aTaskFiresSendWithNoChannelDeliversNothingToTheLatestChat() throws Exception {
+        var latest = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInScope(agent.id, null, 4242L, "{\"action\":\"send\",\"message\":\"hi\"}");
+
+        assertEquals("Error: no active conversation for agent 'msg-test'; pass explicit 'channel' and 'target' "
+                + "to send anyway.", result);
+        assertEquals(0L, subagentSendCount(latest.id));
+    }
+
+    @Test
+    void aCaptureTurnsWebSendWithNoTargetIsRefused() throws Exception {
+        var latest = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInScope(agent.id, null, null,
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"web\"}");
+
+        assertEquals(MessageTool.NO_PARENT_CHAT_WEB_TARGET, result);
+        assertEquals(0L, subagentSendCount(latest.id));
+    }
+
+    @Test
+    void aCaptureTurnsWebSendWithANonNumericTargetIsRefused() throws Exception {
+        var latest = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInScope(agent.id, null, null,
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"web\",\"target\":\"admin\"}");
+
+        assertEquals(MessageTool.NO_PARENT_CHAT_WEB_TARGET, result);
+        assertEquals(0L, subagentSendCount(latest.id));
+    }
+
+    @Test
+    void aCaptureTurnsWebSendToANamedConversationIsDelivered() throws Exception {
+        var named = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+        Thread.sleep(10);
+        var latest = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInScope(agent.id, null, null,
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"web\",\"target\":\"" + named.id + "\"}");
+
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("sent", parsed.get("action").getAsString(), result);
+        assertEquals(String.valueOf(named.id), parsed.get("target").getAsString());
+        assertEquals(1L, subagentSendCount(named.id));
+        assertEquals(0L, subagentSendCount(latest.id));
+    }
+
+    @Test
+    void aCaptureTurnsSlackSendSkipsTheLatestSlackChat() throws Exception {
+        Tx.run(() -> ConversationService.create(agent, "slack", "C-LATEST"));
+
+        var result = invokeToolInScope(agent.id, null, null,
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"slack\"}");
+
+        assertEquals("Error: no Slack destination configured for agent 'msg-test'. Set the owner on the agent's "
+                + "Slack binding (Channels settings), or pass an explicit 'target' (Slack channel or user id).", result);
+    }
+
+    @Test
+    void aCaptureTurnsTelegramSendStillReachesTheBinding() throws Exception {
+        seedTelegramBindingAndConversation();
+
+        var result = invokeToolInScope(agent.id, null, null,
+                "{\"action\":\"send\",\"message\":\"briefing\",\"channel\":\"telegram\"}");
+
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("sent", parsed.get("action").getAsString(), result);
+        assertEquals("u-1", parsed.get("target").getAsString(), "the binding's chat, not a conversation peer");
+        assertEquals(1, server.countRequests("sendMessage"));
+    }
+
+    @Test
+    void aCaptureTurnsTelegramActionInfersNoChatFromTheLatestConversation() throws Exception {
+        seedTelegramBindingAndConversation();
+
+        var result = invokeToolInScope(agent.id, null, null, "{\"action\":\"delete\",\"message_id\":7}");
+
+        assertEquals("Error: no Telegram chat 'target' was passed and none could be inferred from the active "
+                + "conversation.", result);
+        assertEquals(0, server.countRequests("deleteMessage"), "no chat id was picked by recency");
+    }
+
     private static long subagentSendCount(Long conversationId) {
         return Tx.run(() -> models.Message.count("conversation.id = ?1 AND messageKind = ?2",
                 conversationId, "subagent_send"));
+    }
+
+    /** {@link #invokeTool} under the scope ParallelToolExecutor binds: both ids null is a capture turn's. */
+    private String invokeToolInScope(Long callerAgentId, Long conversationId, Long taskRunId, String argsJson)
+            throws Exception {
+        commitAndReopen();
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
+                resultRef.set(agents.ToolContext.withScope(conversationId, taskRunId,
+                        () -> new MessageTool().execute(argsJson, caller)));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(10_000);
+        assertFalse(thread.isAlive(), "message tool must complete within 10s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
     }
 
     /** {@link #invokeTool} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */

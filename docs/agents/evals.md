@@ -36,6 +36,12 @@ whatever was last clicked in the agent editor. Only `__evaltest__` is calibrated
 this way — an agent you configured yourself is never rewritten. Deleting the eval
 agent cleans up everything a sweep created.
 
+A capture turn has no parent chat, so no tool stands the agent's latest chat in
+for one: `subagent_spawn` files its run under no conversation and runs `inline`
+as `session`, and `message` refuses a destination it would have picked by recency
+(no `channel`, or `web` without a numeric conversation id). Before JF-158 a
+capture against `main` ran an inline child inside the operator's newest chat.
+
 Related, and not eval-specific: per-agent tool config used to be schema-only —
 it hid a tool from the model but did not stop it running, so a model that guessed
 a real tool name bypassed the operator's configuration. JCLAW-883 added the

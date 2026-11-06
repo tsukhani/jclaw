@@ -121,7 +121,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     static final String FIELD_NOTE = "note";
     static final String INLINE_RAN_AS_SESSION =
-            "mode=\"inline\" ran as mode=\"session\": a task fire has no conversation to embed the child into.";
+            "mode=\"inline\" ran as mode=\"session\": this turn has no conversation to embed the child into.";
     static final String ASYNC_RAN_IN_FOREGROUND =
             "async ran in the foreground: this chat is a group or a guest's, where a background result would "
                     + "reach it unedited. Relay the reply yourself; there is nothing to collect with subagent_yield. "
@@ -427,7 +427,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (requested.error() != null) return requested.error();
         // Not refused: the fire gets the same reply either way, and an unattended run that loses a
         // round to an error can lose the run with it.
-        final boolean inlineRanAsSession = ToolContext.taskRunId() != null && MODE_INLINE.equals(requested.resolvedMode());
+        final boolean inlineRanAsSession = ToolContext.noParentChat() && MODE_INLINE.equals(requested.resolvedMode());
         final var parsed = inlineRanAsSession ? requested.asSession() : requested;
         // JCLAW-499: validate the runtime (native | acp) before any DB work.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);
@@ -450,11 +450,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // the lookup is wrapped in a Tx to dodge detached-entity issues on
         // VT-dispatched tool calls.
         var parentAgentId = parentAgent.id;
-        // A task fire runs in no conversation: its runs record the task run, never a chat picked by recency.
+        // A task fire or an eval capture runs in no conversation: a fire's runs record the task run, a
+        // capture's record neither, and never a chat picked by recency.
         var parentTaskRunId = ToolContext.taskRunId();
-        var parentConv = parentTaskRunId != null ? null
+        var noParentChat = ToolContext.noParentChat();
+        var parentConv = noParentChat ? null
                 : Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
-        if (parentConv == null && parentTaskRunId == null) {
+        if (parentConv == null && !noParentChat) {
             return "Error: Could not resolve a parent conversation for agent '%s'."
                     .formatted(parentAgent.name);
         }
@@ -665,9 +667,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
         final var parentAgentId = parentAgent.id;
         final var parentTaskRunId = ToolContext.taskRunId();
-        var parentConv = parentTaskRunId != null ? null
+        final var noParentChat = ToolContext.noParentChat();
+        var parentConv = noParentChat ? null
                 : Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
-        if (parentConv == null && parentTaskRunId == null) {
+        if (parentConv == null && !noParentChat) {
             return "Error: Could not resolve a parent conversation for agent '%s'.".formatted(parentAgent.name);
         }
         final var parentConvIdFinal = parentConv == null ? null : parentConv.id;

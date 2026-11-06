@@ -555,7 +555,7 @@ final class SubagentChildBootstrap {
         if (parent == null) return null;
         // The spawning turn's own conversation, else the most recently updated one. A subagent
         // calling spawn nests under its own child conversation, which is itself an existing
-        // Conversation row, so no special case is needed. A task fire never reaches here.
+        // Conversation row, so no special case is needed. A turn with no parent chat (ToolContext.noParentChat) never reaches here.
         return DeliveryResolver.operatingConversation(parent).orElse(null);
     }
 }

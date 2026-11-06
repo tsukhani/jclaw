@@ -1,6 +1,7 @@
 package tools;
 
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import channels.TelegramChannel;
 import channels.TelegramSettings;
@@ -88,6 +89,9 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String PARAM_OPEN_PERIOD = "open_period";
 
     private static final String ERR_CALLING_AGENT = "Error: calling agent ";
+    public static final String NO_PARENT_CHAT_WEB_TARGET =
+            "Error: this turn runs in no conversation, so a web message needs an explicit numeric "
+                    + "'target' conversation id.";
     private static final String ERR_NOT_FOUND = " not found.";
 
     // Channel discriminators used in the schema enum + per-channel target resolution.
@@ -459,7 +463,7 @@ public class MessageTool implements ToolRegistry.Tool {
                         .orElse(null);
                 if (calling != null) {
                     target = "web".equalsIgnoreCase(channel) ? String.valueOf(calling.id) : calling.peerId;
-                } else {
+                } else if (!ToolContext.noParentChat()) {
                     var cConv = (Conversation) Conversation.find(
                             "agent = ?1 AND channelType = ?2 ORDER BY updatedAt DESC", agent, channel).first();
                     if (cConv != null) target = cConv.peerId;
@@ -480,6 +484,10 @@ public class MessageTool implements ToolRegistry.Tool {
         if (needsTarget && (target == null || target.isBlank())) {
             return noDestinationError(agent, channel);
         }
+        // The dispatcher sends a web message without a conversation id to the agent's latest chat.
+        if ("web".equalsIgnoreCase(channel) && ToolContext.noParentChat() && !isConversationId(target)) {
+            return NO_PARENT_CHAT_WEB_TARGET;
+        }
         if (!DeliveryDispatcher.isSupported(channel)) {
             return "Error: channel '" + channel + "' is not a deliverable channel "
                     + "(supported: telegram, slack, whatsapp, web).";
@@ -494,6 +502,10 @@ public class MessageTool implements ToolRegistry.Tool {
             return GsonHolder.GSON.toJson(payload, Map.class);
         }
         return "Error: " + result.reason();
+    }
+
+    private static boolean isConversationId(@Nullable String target) {
+        return target != null && target.trim().matches("\\d+");
     }
 
     /**

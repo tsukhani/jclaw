@@ -36,7 +36,7 @@ The child's messages get folded into the parent's conversation as a collapsible 
 
 **Use when:** the child's work is part of the conversational flow and you want to read everything in one place without navigating away. Best for short, focused subtasks.
 
-Inline needs a conversation to fold the child into. A [task fire](/guide#subagents-task-fires) has none, so there an inline request runs as `session`.
+Inline needs a conversation to fold the child into. A [task fire](/guide#subagents-task-fires) has none, and neither does an eval capture, so there an inline request runs as `session` and the child never writes into one of your chats.
 
 ### `mode=async`
 

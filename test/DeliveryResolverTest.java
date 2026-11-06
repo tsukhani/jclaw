@@ -118,6 +118,35 @@ class DeliveryResolverTest extends UnitTest {
                 "a bound conversation belonging to another agent must not be used");
     }
 
+    @Test
+    void aTurnWithNoConversationResolvesNoOperatingConversation() {
+        persistConversation("telegram", "999");
+
+        assertTrue(agents.ToolContext.withScope(null, null,
+                        () -> DeliveryResolver.operatingConversation(agent)).isEmpty(),
+                "an eval capture's turn has no parent chat, so the latest one is not stood in (JF-158)");
+        assertTrue(agents.ToolContext.withScope(null, 4242L,
+                        () -> DeliveryResolver.operatingConversation(agent)).isEmpty(),
+                "nor in a task fire's turn");
+        assertEquals("telegram:999", DeliveryResolver.inferSpec(agent).orElse(null),
+                "outside a tool dispatch the most recently updated conversation still wins");
+    }
+
+    @Test
+    void aTurnWithNoConversationInfersNoDeliverySpec() {
+        persistConversation("telegram", "999");
+
+        assertNull(agents.ToolContext.withScope(null, null, () -> DeliveryResolver.inferSpec(agent).orElse(null)));
+    }
+
+    @Test
+    void aChatTurnStillResolvesItsOwnConversation() {
+        var calling = persistConversation("web", "admin");
+
+        assertEquals(calling.id, agents.ToolContext.withConversation(calling.id,
+                () -> DeliveryResolver.operatingConversation(agent).orElseThrow().id));
+    }
+
     // === Helpers ===
 
     private Agent persistAgent(String name) {

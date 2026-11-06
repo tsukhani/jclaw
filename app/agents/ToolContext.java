@@ -22,7 +22,8 @@ import java.util.function.Supplier;
  *       Conversation with a null id, so there is no conversation to scope to).</li>
  * </ul>
  *
- * <p>Exactly one of the two is set per run. The dispatcher
+ * <p>At most one of the two is set per run: an eval capture runs through the same unsaved stub as a
+ * task fire but has no task run, so it binds neither. The dispatcher
  * ({@link ParallelToolExecutor}) sets/clears this on the tool's own virtual
  * thread around the call, so it can't leak between concurrent tools.
  */
@@ -31,7 +32,7 @@ public final class ToolContext {
     private ToolContext() {}
 
     /**
-     * The scope ids visible to a tool during its dispatch; exactly one id is set. {@code cancel}
+     * The scope ids visible to a tool during its dispatch; at most one id is set. {@code cancel}
      * reads the turn's stop signals (Stop in chat, a subagent kill), or is null when it has none;
      * {@code turnCancel} is the turn's own cancel flag, which {@link #onCancel} registers against.
      */
@@ -75,6 +76,17 @@ public final class ToolContext {
     public static @Nullable Long conversationId() {
         var s = SCOPE.get();
         return s == null ? null : s.conversationId();
+    }
+
+    /**
+     * True inside a tool dispatch whose turn has no saved conversation: every
+     * {@link AgentRunner#runForTask} turn, a task fire or an eval capture alike, since its stub
+     * conversation is never saved. Such a turn has no parent chat, so a tool must not stand one in
+     * by recency: the agent's latest chat is someone else's (JF-158). False outside a dispatch.
+     */
+    public static boolean noParentChat() {
+        var s = SCOPE.get();
+        return s != null && s.conversationId() == null;
     }
 
     /** The active task-run id (task-fire path), or {@code null} outside a task tool dispatch. */
