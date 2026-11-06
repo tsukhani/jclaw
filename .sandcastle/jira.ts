@@ -1,7 +1,7 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey } from "./jira-intake.ts";
+import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
 import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
 
@@ -156,6 +156,10 @@ export const jira: Tracker = {
   blocked: async (key) => {
     await addLabel(key, "afk-blocked");
     await removeLabel(key, "afk-running");
+  },
+  unblocked: async (key) => {
+    const { status, labels } = (await api(`/rest/api/2/issue/${key}?fields=status,labels`)).fields;
+    return unblockedStory({ status, labels });
   },
   requeued: async (key) => {
     await transitionTo(key, "To Do");

@@ -371,8 +371,24 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     // The first line only: BMAD's halts append its questions, which quote the ticket.
     board.set(key, { state: "blocked", reason: reason.split("\n")[0] });
     await tracker.blocked(key);
-    await tracker.comment(key, `${tracker.header} gave up\nBranch ${m.code(branch)} (local). ${reason}\n\nRemove the ${m.code("afk-blocked")} label to let the factory retry.`);
+    await tracker.comment(key, `${tracker.header} gave up\nBranch ${m.code(branch)} (local). ${reason}\n\nRemove the ${m.code("afk-blocked")} label, and on its next poll the factory moves the story back to To Do and tries again.`);
     throw error;
+  }
+};
+
+// A story the operator cleared with `afk-blocked` removed goes back to intake. One poll that cannot read a story leaves it
+// blocked for the next.
+const requeueUnblocked = async () => {
+  for (const key of board.keys("blocked")) {
+    const tracker = trackerFor(key);
+    try {
+      if (!(await tracker.unblocked?.(key))) continue;
+      await tracker.requeued(key);
+      board.set(key, { state: "waiting", reason: "afk-blocked was removed; queued again" });
+      console.log(`[${key} requeued] afk-blocked was removed`);
+    } catch (error) {
+      note("unblock", `[factory] could not check whether ${key} was unblocked: ${errorText(error)}`);
+    }
   }
 };
 
@@ -792,6 +808,7 @@ while (true) {
         // Landing first: a story it merges is Done, which can unblock a candidate in the same round.
         const landings = ONE_ROUND ? [] : await landAll();
         const unread = new Set<Tracker>();
+        if (!PINNED) await requeueUnblocked();
         const candidates = PINNED
           ? await Promise.all(PINNED.map((k) => trackerFor(k).snapshotToState(k)))
           : await fromAll("afk stories", (t) => t.intake(), unread);

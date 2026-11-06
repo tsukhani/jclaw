@@ -47,6 +47,9 @@ export interface Tracker {
   reviewing(key: string): Promise<void>;
   blocked(key: string): Promise<void>;
   requeued(key: string): Promise<void>;
+  // A story the factory gave up on that the operator has since cleared for another try. A source whose intake already
+  // reads the labels (GitHub) has no status to reset and omits it.
+  unblocked?(key: string): Promise<boolean>;
   // The factory merged the story's branch into the checkout's main.
   merged(key: string): Promise<void>;
   // The story is Done (Jira) or closed (GitHub), by whoever moved it.

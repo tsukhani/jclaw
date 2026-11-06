@@ -10,7 +10,7 @@ import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
 import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
-import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey } from "./jira-intake.ts";
+import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
@@ -307,6 +307,12 @@ check("a story back in intake after the factory's won't-do was overruled",
   overruled(ticket(`${JIRA}: won't do\nIt is about another product.`, "it is not, build it"), JIRA), true);
 check("GitHub's header counts the same way",
   overruled({ ...ticket(), comments: [{ author: OWNER, body: "### AFK factory: won't do\nGibberish." }] }, "### AFK factory"), true);
+
+const gaveUp = (status: string, labels: string[]) => unblocked({ status: { name: status }, labels });
+check("a story the factory gave up on is requeued once afk-blocked is gone, and not before",
+  [gaveUp("In Progress", ["afk", "afk-blocked"]), gaveUp("In Progress", ["afk"]), gaveUp("In Progress", [])], [false, true, true]);
+check("only an In Progress story is requeued: To Do is already in intake, Review and Done are not the factory's to move",
+  [gaveUp("To Do", ["afk"]), gaveUp("Review", ["afk"]), gaveUp("Done", ["afk"])], [false, false, false]);
 
 check("the factory owns Free's JF keys and refuses Pro's JCLAW ones and another tracker's",
   ["JF-1", "JF-191", "JCLAW-1594", "GH-15", "JF-", "xJF-1", "JF-1a"].map(ownsKey), [true, true, false, false, false, false, false]);

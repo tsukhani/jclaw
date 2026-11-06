@@ -30,6 +30,11 @@ export const notCandidate = async (s: { labels: string[]; status: string }, epic
   return "outside intake";
 };
 
+// The factory leaves a story it gave up on In Progress, labelled `afk-blocked`; once the operator removes the label, it
+// is queued again. To Do is already in intake, and Review and Done are not the factory's to move.
+export const unblocked = (fields: { status: { name: string }; labels: string[] }): boolean =>
+  fields.status.name === "In Progress" && !fields.labels.includes("afk-blocked");
+
 // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B". Jira's payload is read field by field.
 export const blockersOf = (links: any[] | undefined): Snapshot["blockedBy"] =>
   (links ?? [])
