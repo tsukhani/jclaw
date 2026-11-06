@@ -230,6 +230,23 @@ class ShellExecSandboxTest extends UnitTest {
                 mainCache.resolve("pip")), mainResult.get("output").getAsString(), mainResult.toString());
     }
 
+    /** A hidden home makes git's read of ~/.gitconfig fail fatally on macOS, so a custom agent has no global git config; main keeps its own. */
+    @Test
+    void aCustomAgentHasNoGlobalGitConfigAndMainKeepsItsOwn() {
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
+        var command = """
+                {"command": "echo \\"$GIT_CONFIG_GLOBAL|$XDG_CONFIG_HOME\\""}
+                """;
+        var config = AgentService.workspacePath(AGENT).toAbsolutePath().normalize().resolve(".config");
+        var custom = JsonParser.parseString(tool.execute(command, agent)).getAsJsonObject();
+        assertEquals("/dev/null|" + config, custom.get("output").getAsString(), custom.toString());
+
+        var host = System.getenv();
+        var mainResult = JsonParser.parseString(tool.execute(command, main())).getAsJsonObject();
+        assertEquals(host.getOrDefault("GIT_CONFIG_GLOBAL", "") + "|" + host.getOrDefault("XDG_CONFIG_HOME", ""),
+                mainResult.get("output").getAsString(), mainResult.toString());
+    }
+
     /** An unconfined run keeps the host's cache locations, so it shares the caches it always used. */
     @Test
     void anUnconfinedRunKeepsTheHostCacheLocations() {
@@ -452,7 +469,7 @@ class ShellExecSandboxTest extends UnitTest {
         var outside = outsideProbe();
         var kept = workspace.resolve("kept-" + UUID.randomUUID() + ".txt");
         try {
-            var result = run(who, "echo escaped > '%s' 2>/dev/null; echo inside > '%s'; cat '%s'"
+            var result = run(who, "echo escaped 2>/dev/null > '%s'; echo inside > '%s'; cat '%s'"
                     .formatted(outside, kept.getFileName(), kept.getFileName()));
             assertEquals("inside", result.get("output").getAsString(), result.toString());
             assertFalse(Files.exists(outside), "the write outside the workspace must not land: " + result);

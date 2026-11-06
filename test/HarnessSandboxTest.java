@@ -405,6 +405,20 @@ class HarnessSandboxTest extends UnitTest {
         }
     }
 
+    /** Started as root (the container), bwrap makes no user namespace and needs CAP_SYS_ADMIN, which Docker drops: it must be asked for one. */
+    @Test
+    void aRootBwrapAsksForItsOwnUserNamespace() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
+        var asRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/root", List.of(), false, true);
+        var notRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), false, false);
+        assertEquals(List.of("bwrap", "--unshare-user", "--ro-bind", "/", "/"), asRoot.subList(0, 5));
+        assertEquals(List.of("bwrap", "--ro-bind", "/", "/"), notRoot.subList(0, 4));
+        assertEquals(List.of("bwrap", "--unshare-user", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE_AS_ROOT);
+        assertEquals(List.of("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE);
+    }
+
     /** A write root above data/ (a coding run continuing in the checkout itself) is bound first, so data/'s tmpfs still covers it. */
     @Test
     void linuxHidesStateInsideAnAncestorWriteRoot() {

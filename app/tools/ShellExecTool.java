@@ -712,8 +712,23 @@ public class ShellExecTool implements ToolRegistry.Tool {
         if (confinement != Confinement.NONE) {
             pb.environment().putAll(confinedCaches(workspace));
         }
+        if (confinement == Confinement.CUSTOM_AGENT) {
+            pb.environment().putAll(customAgentConfig(workspace));
+        }
         pb.environment().put(OUTPUT_ENV, output.toString());
         return pb.start();
+    }
+
+    /**
+     * Where a custom agent's tools look for configuration. On macOS the home folder is unreadable to it, and a
+     * denied read fails with EPERM, which git treats as fatal where a missing file it ignores: even
+     * {@code git --version} dies on {@code ~/.gitconfig}. So git is told it has no global config, and the
+     * XDG config directory (git's ignore file, among others) is the workspace's, where nothing is denied.
+     */
+    private static Map<String, String> customAgentConfig(Path workspace) {
+        return Map.of(
+                "GIT_CONFIG_GLOBAL", "/dev/null",
+                "XDG_CONFIG_HOME", workspace.resolve(".config").toString());
     }
 
     /**

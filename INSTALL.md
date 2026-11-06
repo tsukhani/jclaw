@@ -252,11 +252,14 @@ Custom agents always run their shell commands inside the sandbox. To check that 
 in your container, run:
 
 ```bash
-docker compose exec jclaw bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok
+docker compose exec jclaw bwrap --unshare-user --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok
 ```
 
 You can also open **Settings → Shell Execution**. When the sandbox cannot start, the panel says
 "This host has no sandbox mechanism (…)", with the cause in the brackets.
+
+The container runs as root, and a root `bwrap` makes no user namespace of its own unless asked, so the
+command includes `--unshare-user`; JClaw adds the same flag whenever it runs as root.
 
 If the check fails, custom agents' shell commands are refused, and the refusal names the cause.
 JClaw never runs them outside the sandbox. The main agent is not affected while `shell.sandbox` is

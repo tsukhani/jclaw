@@ -70,12 +70,15 @@ class DockerSandboxConfigTest extends UnitTest {
         assertEquals(expected, matches.getFirst(), "the rule carries no conditions");
     }
 
-    /** A weaker check than JClaw's probe could print "ok" on a container where custom agents' exec is still refused. */
+    /**
+     * A weaker check than JClaw's probe could print "ok" on a container where custom agents' exec is still refused,
+     * and the container runs as root, where bwrap needs {@code --unshare-user} (a plain probe fails there on Docker).
+     */
     @Test
     void installsSandboxCheckIsTheReadinessProbe() throws Exception {
         var install = Files.readString(root().resolve("INSTALL.md"));
         var checks = install.lines().filter(l -> l.startsWith("docker compose exec jclaw bwrap")).toList();
-        assertEquals(List.of("docker compose exec jclaw " + String.join(" ", HarnessSandbox.BWRAP_PROBE)
+        assertEquals(List.of("docker compose exec jclaw " + String.join(" ", HarnessSandbox.BWRAP_PROBE_AS_ROOT)
                 + " && echo sandbox ok"), checks);
     }
 }

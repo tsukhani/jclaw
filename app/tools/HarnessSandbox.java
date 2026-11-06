@@ -109,6 +109,16 @@ public final class HarnessSandbox {
     public static final List<String> BWRAP_PROBE = List.of(
             BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true");
 
+    /**
+     * {@link #BWRAP_PROBE} for a process running as root. Started as root, bwrap makes no user namespace of its
+     * own and needs CAP_SYS_ADMIN for the mount namespace, which Docker drops; {@code --unshare-user} makes it
+     * create one, and the container's seccomp profile allows that. The container runs as root, so INSTALL.md
+     * gives operators this command.
+     */
+    public static final List<String> BWRAP_PROBE_AS_ROOT = withUserNamespace(BWRAP_PROBE);
+
+    private static final boolean RUNS_AS_ROOT = detectRoot();
+
     private static final int PROBE_LINE_LIMIT = 200;
 
     /** Only a success is kept: a host whose namespaces are fixed later is re-probed rather than refused for the JVM's life. */
@@ -117,6 +127,22 @@ public final class HarnessSandbox {
     private static volatile CustomAgentOverride customAgentOverride = CustomAgentOverride.NONE;
 
     private HarnessSandbox() {}
+
+    private static List<String> withUserNamespace(List<String> bwrapCommand) {
+        var out = new ArrayList<String>(bwrapCommand);
+        out.add(1, "--unshare-user");
+        return List.copyOf(out);
+    }
+
+    /** bwrap is Linux-only, so no other OS asks; {@code UnixSystem} reads the uid without touching a path. */
+    private static boolean detectRoot() {
+        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) return false;
+        try {
+            return new com.sun.security.auth.module.UnixSystem().getUid() == 0;
+        } catch (LinkageError | RuntimeException _) {
+            return false;
+        }
+    }
 
     /** JCLAW-709: how broadly the OS sandbox applies, from {@link #ACP_SANDBOX_KEY}. */
     public enum Scope {
@@ -339,7 +365,7 @@ public final class HarnessSandbox {
      */
     private static @Nullable String bwrapLaunchFailure() {
         if (bwrapLaunched) return null;
-        var probe = ExecutableProbeSupport.probeCapturing(BWRAP_PROBE, "");
+        var probe = ExecutableProbeSupport.probeCapturing(RUNS_AS_ROOT ? BWRAP_PROBE_AS_ROOT : BWRAP_PROBE, "");
         if (probe.available()) {
             bwrapLaunched = true;
             return null;
@@ -522,7 +548,17 @@ public final class HarnessSandbox {
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
                                          String home, List<Path> hidden, boolean denyNetwork) {
+        return linuxArgv(argv, writeRoot, allowances, home, hidden, denyNetwork, RUNS_AS_ROOT);
+    }
+
+    /**
+     * {@link #linuxArgv(List, File, List, String, List, boolean)} with whether the process runs as root given:
+     * a root bwrap gets {@code --unshare-user}, see {@link #BWRAP_PROBE_AS_ROOT}.
+     */
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
+                                         String home, List<Path> hidden, boolean denyNetwork, boolean asRoot) {
         var out = new ArrayList<String>(List.of(BWRAP));
+        if (asRoot) out.add("--unshare-user");
         if (denyNetwork) out.add("--unshare-net");
         out.addAll(List.of(
                 "--ro-bind", "/", "/",
