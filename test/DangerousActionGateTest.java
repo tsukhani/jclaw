@@ -516,6 +516,29 @@ class DangerousActionGateTest extends UnitTest {
     }
 
     @Test
+    void aStandingGrantIsLoggedOnTheChannelOfTheTurnThatSpentIt() {
+        // The grant's own provenance says telegram; the line must name the turn's origin instead.
+        var agent = unboundAgent("gate-grant-channel");
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, JCLAW_API, "telegram", TG_USER); return null; });
+        var webConv = webConvId(agent);
+        var slackConv = slackConvId(agent);
+
+        var logged = EventLogger.captureForTest(() -> {
+            DangerousActionGate.guard(agent, webConv, JCLAW_API, MUTATION_ARGS);
+            DangerousActionGate.withOwnerInitiated(true,
+                    () -> DangerousActionGate.guard(agent, slackConv, JCLAW_API, MUTATION_ARGS));
+        }).stream()
+                .filter(e -> "tool".equals(e.category()) && e.message().startsWith("Dangerous tool"))
+                .map(e -> e.channel() + " | " + e.message())
+                .toList();
+
+        assertEquals(List.of(
+                "web | Dangerous tool 'jclaw_api' (POST /api/mcp-servers) pre-approved for this agent; skipping prompt",
+                "slack | Dangerous tool 'jclaw_api' (POST /api/mcp-servers) pre-approved for this agent; skipping prompt"),
+                logged);
+    }
+
+    @Test
     void aToolThatNamesNoCallKeepsItsBareNameInTheLog() {
         var agent = unboundAgent("gate-log-plain");
         var convId = webConvId(agent);
@@ -756,6 +779,14 @@ class DangerousActionGateTest extends UnitTest {
         return commitInFreshTx(() -> {
             Agent a = Agent.findById(agent.id);
             return ConversationService.create(a, "web", null).id;
+        });
+    }
+
+    /** A committed Slack conversation for {@code agent} (channelType="slack"). */
+    private Long slackConvId(Agent agent) {
+        return commitInFreshTx(() -> {
+            Agent a = Agent.findById(agent.id);
+            return ConversationService.create(a, "slack", "C0GATETEST").id;
         });
     }
 

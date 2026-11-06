@@ -313,7 +313,7 @@ public final class DangerousActionGate {
         // may spend it. Honoring it before the origin was resolved meant an "Always" tap in
         // the owner's DM also covered a group guest's turn on that same (agent, tool).
         if (operatorTurn(ownerInitiated, channelType) && hasStandingGrant(agent, toolName)) {
-            EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
+            EventLogger.info(LOG_CATEGORY, agent.name, originLabel(channelType),
                     "Dangerous tool %s pre-approved for this agent; skipping prompt".formatted(subject(toolName, argsJson)));
             return Decision.PROCEED;
         }
@@ -377,7 +377,7 @@ public final class DangerousActionGate {
     private static Decision offChannelDecision(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                               @Nullable String channelType,
                                               ChannelOriginTrust.Trust trust) {
-        var chan = channelType == null ? "none" : channelType;
+        var chan = originLabel(channelType);
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
 
         // Only a trusted operator origin gets the permissive "allow" default. An external
@@ -692,6 +692,11 @@ public final class DangerousActionGate {
     }
 
     /** The tool for a log line, with the call it makes when the tool names one ({@code jclaw_api}: method and path). */
+    /** The turn's origin as a decision line's channel; a prompt's own lines name the channel it went to instead. */
+    private static String originLabel(@Nullable String channelType) {
+        return channelType == null ? "none" : channelType;
+    }
+
     private static String subject(@Nullable String toolName, @Nullable String argsJson) {
         var call = ToolRegistry.describeCall(toolName, argsJson);
         return call == null ? "'" + toolName + "'" : "'%s' (%s)".formatted(toolName, call);
