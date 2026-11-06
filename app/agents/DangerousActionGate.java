@@ -691,12 +691,12 @@ public final class DangerousActionGate {
         return null;
     }
 
-    /** The tool for a log line, with the call it makes when the tool names one ({@code jclaw_api}: method and path). */
     /** The turn's origin as a decision line's channel; a prompt's own lines name the channel it went to instead. */
     private static String originLabel(@Nullable String channelType) {
         return channelType == null ? "none" : channelType;
     }
 
+    /** The tool for a log line, with the call it makes when the tool names one ({@code jclaw_api}: method and path). */
     private static String subject(@Nullable String toolName, @Nullable String argsJson) {
         var call = ToolRegistry.describeCall(toolName, argsJson);
         return call == null ? "'" + toolName + "'" : "'%s' (%s)".formatted(toolName, call);
