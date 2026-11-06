@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConversationService;
+import services.EventLogger;
 import tools.JClawApiTool;
 import utils.HttpFactories;
 
@@ -283,6 +284,126 @@ class JClawApiToolTest extends UnitTest {
         run.task = task;
         run.save();
         return run.id;
+    }
+
+    // ==================== every call is logged ====================
+
+    @Test
+    void aWriteIsLoggedWithItsEndpointTheFieldsItSentAndTheStatus() {
+        var agent = AgentService.create("api-log-" + java.util.UUID.randomUUID(), "openrouter", "gpt-4.1");
+        var chat = ConversationService.create(agent, "web", null).id;
+
+        var lines = EventLogger.captureForTest(() -> HttpFactories.callWith(replying(new AtomicReference<>(), 200, "{}"),
+                () -> ToolContext.withConversation(chat, () -> asOwner("{\"method\":\"PUT\",\"path\":"
+                        + "\"/api/router/models/reasoning\",\"body\":{\"models\":[{\"provider\":\"p\",\"model\":\"m\"}]}}",
+                        agent)))).stream().filter(e -> JClawApiTool.LOG_CATEGORY.equals(e.category())).toList();
+
+        assertEquals(1, lines.size(), lines.toString());
+        var line = lines.getFirst();
+        assertEquals(List.of("INFO", agent.name, "web", "PUT /api/router/models/reasoning (body: models): HTTP 200"),
+                List.of(line.level(), line.agentId(), line.channel(), line.message()));
+    }
+
+    @Test
+    void aReadIsLoggedWithoutItsQueryOrABody() {
+        // A GET sends no body, so a body the model attached is not what the call set.
+        assertEquals(List.of("INFO GET /api/agents: HTTP 200"), loggedCalls(replying(new AtomicReference<>(), 200, "[]"),
+                "{\"method\":\"GET\",\"path\":\"/api/agents?limit=5\",\"body\":{\"ignored\":true}}"));
+    }
+
+    @Test
+    void aCallJClawRefusesIsLoggedAsAWarningWithItsErrorCode() {
+        var refusal = "{\"type\":\"error\",\"code\":\"agent_scope\",\"message\":\"Only the operator or the main agent may "
+                + "change an agent's settings.\"}";
+
+        assertEquals(List.of("WARN PUT /api/agents/7 (body: modelId): HTTP 403 agent_scope"),
+                loggedCalls(replying(new AtomicReference<>(), 403, refusal),
+                        "{\"method\":\"PUT\",\"path\":\"/api/agents/7\",\"body\":{\"modelId\":\"m\"}}"));
+    }
+
+    @Test
+    void anErrorWithoutACodeIsLoggedWithItsStatusAlone() {
+        assertEquals(List.of("WARN POST /api/tasks/5/run: HTTP 500"),
+                loggedCalls(replying(new AtomicReference<>(), 500, "Internal Server Error"),
+                        "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}"));
+    }
+
+    @Test
+    void aCallTheToolRefusesIsLoggedAndNothingIsSent() {
+        var sent = new AtomicReference<Request>();
+        var client = replying(sent, 200, "{}");
+
+        assertEquals(List.of("WARN DELETE /api/conversations: refused, not callable through jclaw_api"),
+                loggedCalls(client, "{\"method\":\"DELETE\",\"path\":\"/api/conversations\"}"));
+        assertEquals(List.of("WARN GET /api/skills/x/../../logs: refused, the path contains a dot-segment"),
+                loggedCalls(client, "{\"method\":\"GET\",\"path\":\"/api/skills/x/../../logs\"}"));
+        assertEquals(List.of("WARN GET /logs: refused, not an /api/ path"),
+                loggedCalls(client, "{\"method\":\"GET\",\"path\":\"/logs\"}"));
+        assertNull(sent.get(), "a refused call sends nothing");
+    }
+
+    @Test
+    void aRequestThatNeverArrivesIsLoggedAsFailed() {
+        Interceptor down = chain -> {
+            throw new java.io.IOException("connection refused");
+        };
+
+        assertEquals(List.of("WARN POST /api/tasks/5/run: failed, connection refused"),
+                loggedCalls(new OkHttpClient.Builder().addInterceptor(down).build(),
+                        "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}"));
+    }
+
+    @Test
+    void theLogNamesUpToTwelveBodyFieldsAndCountsTheRest() {
+        var twelve = new StringBuilder();
+        for (var i = 1; i <= 12; i++) twelve.append(i == 1 ? "" : ",").append("\"f").append(i).append("\":1");
+        var client = replying(new AtomicReference<>(), 200, "{}");
+
+        assertEquals(List.of("INFO POST /api/tasks/5/run (body: f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12): HTTP 200"),
+                loggedCalls(client, "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\",\"body\":{" + twelve + "}}"));
+        assertEquals(List.of("INFO POST /api/tasks/5/run (body: f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, +1 more): "
+                + "HTTP 200"), loggedCalls(client,
+                "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\",\"body\":{" + twelve + ",\"f13\":1}}"));
+    }
+
+    @Test
+    void describeCallNamesTheMethodAndPathAlone() {
+        assertEquals("PUT /api/router/models/reasoning", tool.describeCall(
+                "{\"method\":\"put\",\"path\":\"/api/router/models/reasoning?dryRun=1\",\"body\":{\"models\":[]}}"));
+        assertNull(tool.describeCall("{\"action\":\"discover\",\"method\":\"GET\",\"path\":\"/api/agents\"}"));
+        assertNull(tool.describeCall("{\"method\":\"POST\"}"));
+        assertNull(tool.describeCall("{\"path\":\"/api/agents\"}"));
+        assertNull(tool.describeCall("not json"));
+    }
+
+    @Test
+    void describeCallCutsAPathPastTwoHundredCharacters() {
+        var twoHundred = "/api/" + "a".repeat(195);
+
+        assertEquals("GET " + twoHundred, tool.describeCall("{\"method\":\"GET\",\"path\":\"" + twoHundred + "\"}"));
+        assertEquals("GET " + twoHundred + "…", tool.describeCall("{\"method\":\"GET\",\"path\":\"" + twoHundred + "b\"}"));
+    }
+
+    /** The jclaw_api lines one owner's call with {@code argsJson} wrote through {@code client}, as "LEVEL message". */
+    private static List<String> loggedCalls(OkHttpClient client, String argsJson) {
+        return EventLogger.captureForTest(() -> HttpFactories.callWith(client, () -> asOwner(argsJson, null))).stream()
+                .filter(e -> JClawApiTool.LOG_CATEGORY.equals(e.category()))
+                .map(e -> e.level() + " " + e.message())
+                .toList();
+    }
+
+    private static OkHttpClient replying(AtomicReference<Request> sent, int code, String body) {
+        Interceptor reply = chain -> {
+            sent.set(chain.request());
+            return new Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("status " + code)
+                    .body(ResponseBody.create(body, null))
+                    .build();
+        };
+        return new OkHttpClient.Builder().addInterceptor(reply).build();
     }
 
     private static OkHttpClient canned(AtomicReference<Request> sent, String note) {

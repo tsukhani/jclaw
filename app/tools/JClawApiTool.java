@@ -21,6 +21,7 @@ import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.ActionInvoker;
 import play.mvc.Router;
+import services.EventLogger;
 import services.InternalApiTokenService;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -73,6 +74,11 @@ import java.util.Set;
 public class JClawApiTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "jclaw_api";
+
+    /** The Logs page category of the line every call writes ({@link #logCall}). */
+    public static final String LOG_CATEGORY = TOOL_NAME;
+    private static final int MAX_LOGGED_PATH = 200;
+    private static final int MAX_LOGGED_FIELDS = 12;
 
     /** JF-148: what a call gets on a turn the tool is not offered on. */
     private static final String NOT_AN_OWNER_TURN = "jclaw_api is not available in a conversation the owner didn't start.";
@@ -240,24 +246,32 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (!ALLOWED_METHODS.contains(method)) {
             return "Error: method must be one of " + ALLOWED_METHODS + " -- got: " + methodRaw;
         }
+        var origin = DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
+        var fields = bodyFields(method, args);
+        var asked = callLabel(method, withoutQuery(path)) + fields;
         if (!path.startsWith(API_PREFIX)) {
+            logCall(agent, origin, asked + ": refused, not an /api/ path", false);
             return "Error: path must start with /api/ -- got: " + path;
         }
         var unnormalized = unnormalizedReason(path);
         if (unnormalized != null) {
+            logCall(agent, origin, asked + ": refused, the path contains " + unnormalized, false);
             return "Error: path contains %s and cannot be invoked through jclaw_api -- pass the resolved path. Got: %s"
                     .formatted(unnormalized, path);
         }
 
         var url = buildUrl(path, args);
         if (url == null) {
+            logCall(agent, origin, asked + ": refused, not a valid URL", false);
             return "Error: could not construct URL for path: " + path;
         }
         // Gate the path that will actually be sent, not the one the model typed: HttpUrl
         // resolves dot-segments while parsing (JCLAW-1227).
         var gatedPath = url.encodedPath();
+        var call = callLabel(method, gatedPath) + fields;
         // Default-deny, the same set `discover` advertises; AgentAccessGate re-checks it.
         if (!isCallable(method, gatedPath)) {
+            logCall(agent, origin, call + ": refused, not callable through jclaw_api", false);
             return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is operator-only). "
                     .formatted(method, gatedPath)
                     + "Use action=\"discover\" to list the callable endpoints.";
@@ -276,7 +290,6 @@ public class JClawApiTool implements ToolRegistry.Tool {
         }
         // JCLAW-1021: a task this call creates or edits is judged by the turn that asked for it,
         // exactly as task_manager records it; no origin means no header, which reads as UNKNOWN.
-        var origin = DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
         if (origin != null) {
             requestBuilder.header(RequestPrincipal.CALLER_ORIGIN_HEADER, origin);
         }
@@ -295,6 +308,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         try (var response = HttpFactories.general().newCall(requestBuilder.build()).execute()) {
             var status = response.code();
             var text = response.body().string();
+            logCall(agent, origin, call + ": HTTP " + status + (status >= 400 ? errorCode(text) : ""), status < 400);
             if (text.length() > MAX_RESPONSE_CHARS) {
                 text = text.substring(0, MAX_RESPONSE_CHARS)
                         + "\n\n[Truncated: response exceeds %d characters]"
@@ -305,7 +319,67 @@ public class JClawApiTool implements ToolRegistry.Tool {
                     ? "HTTP %d\n%s".formatted(status, text)
                     : "HTTP %d\nNote: %s\n%s".formatted(status, note.strip(), text);
         } catch (IOException e) {
+            logCall(agent, origin, call + ": failed, " + e.getMessage(), false);
             return "Error: HTTP request failed: " + e.getMessage();
+        }
+    }
+
+    /** The method and path, so the gate's prompt and log lines name the endpoint a write reaches. */
+    @Override
+    public @Nullable String describeCall(String argsJson) {
+        JsonObject args;
+        try {
+            args = JsonParser.parseString(argsJson).getAsJsonObject();
+        } catch (RuntimeException _) {
+            return null;
+        }
+        var action = stringField(args, KEY_ACTION);
+        var method = stringField(args, KEY_METHOD);
+        var path = stringField(args, KEY_PATH);
+        if ((action != null && ACTION_DISCOVER.equalsIgnoreCase(action)) || method == null || path == null) return null;
+        return callLabel(method.toUpperCase(Locale.ROOT), withoutQuery(path));
+    }
+
+    /**
+     * One line per call, reads and refusals included: a standing grant covers every jclaw_api write, so this is
+     * where the operator sees which actions an agent took. The body's values stay out of it, since an MCP
+     * server's env or a provider's key would land in the log; the field names say what the call set.
+     */
+    private static void logCall(@Nullable Agent agent, @Nullable String origin, String message, boolean ok) {
+        var agentName = agent == null ? null : agent.name;
+        if (ok) {
+            EventLogger.info(LOG_CATEGORY, agentName, origin, message);
+        } else {
+            EventLogger.warn(LOG_CATEGORY, agentName, origin, message);
+        }
+    }
+
+    private static String callLabel(String method, String path) {
+        return method + " " + (path.length() <= MAX_LOGGED_PATH ? path : path.substring(0, MAX_LOGGED_PATH) + "…");
+    }
+
+    private static String withoutQuery(String path) {
+        int q = path.indexOf('?');
+        return q >= 0 ? path.substring(0, q) : path;
+    }
+
+    /** {@code " (body: a, b)"} for what a call sends, or "" for none: a GET sends no body ({@link #requestBodyFor}). */
+    private static String bodyFields(String method, JsonObject args) {
+        if ("GET".equals(method) || !args.has(KEY_BODY) || !args.get(KEY_BODY).isJsonObject()) return "";
+        var keys = List.copyOf(args.getAsJsonObject(KEY_BODY).keySet());
+        if (keys.isEmpty()) return "";
+        var shown = String.join(", ", keys.subList(0, Math.min(keys.size(), MAX_LOGGED_FIELDS)));
+        return " (body: " + shown + (keys.size() > MAX_LOGGED_FIELDS ? ", +" + (keys.size() - MAX_LOGGED_FIELDS) + " more" : "")
+                + ")";
+    }
+
+    /** The {@code code} a JClaw error body carries ({@code agent_scope}, {@code invalid_request}), or "". */
+    private static String errorCode(String text) {
+        try {
+            var code = JsonParser.parseString(text).getAsJsonObject().get("code");
+            return code != null && code.isJsonPrimitive() ? " " + code.getAsString() : "";
+        } catch (RuntimeException _) {
+            return "";
         }
     }
 
@@ -319,8 +393,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      */
     private static @Nullable String unnormalizedReason(String path) {
         if (path.indexOf('#') >= 0) return "a '#'";
-        int q = path.indexOf('?');
-        var pathPart = q >= 0 ? path.substring(0, q) : path;
+        var pathPart = withoutQuery(path);
         if (pathPart.indexOf('\\') >= 0) return "a backslash";
         if (pathPart.contains("//")) return "an empty path segment ('//')";
         for (var segment : pathPart.split("/", -1)) {

@@ -278,6 +278,11 @@ public class ToolRegistry {
          *  will receive, so the classification matches the call that would run. */
         default boolean dangerous(String argsJson) { return dangerous(); }
 
+        /** The specific call {@code argsJson} makes, in a few words, for the approval prompt and the gate's log
+         *  lines; {@code null} when the tool's name says enough. A standing grant covers the whole tool, so for a
+         *  tool that reaches many different actions ({@code jclaw_api}) this is what says which one the gate let by. */
+        default @Nullable String describeCall(String argsJson) { return null; }
+
         /** Whether this call's result is a catalog the model picks from across rounds (an MCP
          *  server's action list, the API's endpoint list) and must therefore reach it whole every
          *  time: {@link CompressionPipeline} would cut such a list to its first entries. */
@@ -457,6 +462,12 @@ public class ToolRegistry {
     public static boolean isDangerous(@Nullable String toolName, String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous(argsJson);
+    }
+
+    /** {@link Tool#describeCall} of the registered tool, or {@code null} when there is none or no args. */
+    public static @Nullable String describeCall(@Nullable String toolName, @Nullable String argsJson) {
+        var tool = toolName == null ? null : tools.get(toolName);
+        return tool == null || argsJson == null ? null : tool.describeCall(argsJson);
     }
 
     /** JF-136: {@link Tool#readsOutsideContent} by name; {@code true} for a name no tool has, the safe side. */

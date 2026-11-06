@@ -7,6 +7,7 @@ import agents.ToolRegistry;
 import channels.TelegramApprovalCallback;
 import channels.TelegramApprovalService;
 import channels.TelegramChannel;
+import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
@@ -23,6 +24,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
+import services.EventLogger;
 import services.Tx;
 
 import java.util.ArrayList;
@@ -481,6 +483,79 @@ class DangerousActionGateTest extends UnitTest {
                 "a bound-Telegram jclaw_api mutation must raise an approve/deny prompt");
     }
 
+    // ── One standing grant covers every jclaw_api write, so the gate names each call it decides. ──
+
+    @Test
+    void aJclawApiWriteThatRunsUnpromptedNamesItsCallInTheLog() {
+        var agent = unboundAgent("gate-jclaw-log-web");
+        var convId = webConvId(agent);
+
+        var logged = gateLines(() -> assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, JCLAW_API, MUTATION_ARGS)));
+
+        assertEquals(List.of("Dangerous tool 'jclaw_api' (POST /api/mcp-servers) on trusted origin 'web' — proceeding "
+                + "ungated (tool.approval.offChannelPolicy=allow)"), logged);
+    }
+
+    @Test
+    void aStandingJclawApiGrantNamesEachCallItLetsThrough() {
+        var agent = unboundAgent("gate-jclaw-log-grant");
+        var convId = webConvId(agent);
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, JCLAW_API, "telegram", TG_USER); return null; });
+
+        var logged = gateLines(() -> {
+            DangerousActionGate.guard(agent, convId, JCLAW_API, MUTATION_ARGS);
+            DangerousActionGate.guard(agent, convId, JCLAW_API,
+                    "{\"method\":\"PUT\",\"path\":\"/api/router/models/reasoning\",\"body\":{\"models\":[]}}");
+        });
+
+        assertEquals(List.of(
+                "Dangerous tool 'jclaw_api' (POST /api/mcp-servers) pre-approved for this agent; skipping prompt",
+                "Dangerous tool 'jclaw_api' (PUT /api/router/models/reasoning) pre-approved for this agent; skipping prompt"),
+                logged);
+    }
+
+    @Test
+    void aToolThatNamesNoCallKeepsItsBareNameInTheLog() {
+        var agent = unboundAgent("gate-log-plain");
+        var convId = webConvId(agent);
+
+        var logged = gateLines(() -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
+
+        assertEquals(List.of("Dangerous tool 'danger_tool' on trusted origin 'web' — proceeding ungated "
+                + "(tool.approval.offChannelPolicy=allow)"), logged);
+    }
+
+    @Test
+    void theTelegramPromptForAJclawApiWriteNamesTheCallEscaped() throws Exception {
+        var agent = boundAgent("gate-jclaw-prompt");
+        var convId = telegramConvId(agent);
+        var args = "{\"method\":\"PUT\",\"path\":\"/api/agents/<7>\",\"body\":{\"modelId\":\"m\"}}";
+
+        var verdict = runGateAsync(agent, convId, JCLAW_API, args);
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.DENY, TG_USER);
+
+        assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS));
+        assertEquals("⚠ <b>Approval required</b>\nThe agent wants to run the <b>jclaw_api</b> action:\n"
+                + "<b>Call:</b> PUT /api/agents/&lt;7&gt;\n"
+                + "<pre>{\"method\":\"PUT\",\"path\":\"/api/agents/&lt;7&gt;\",\"body\":{\"modelId\":\"m\"}}</pre>",
+                promptTextFor(approvalId));
+    }
+
+    @Test
+    void theSlackPromptForAJclawApiWriteNamesTheCallEscaped() throws Exception {
+        var buildSlackPrompt = DangerousActionGate.class.getDeclaredMethod(
+                "buildSlackPrompt", String.class, String.class);
+        buildSlackPrompt.setAccessible(true);
+
+        assertEquals("The agent wants to run the *jclaw_api* action:\n*Call:* POST /api/mcp-servers\n```"
+                + MUTATION_ARGS + "```", buildSlackPrompt.invoke(null, JCLAW_API, MUTATION_ARGS));
+        assertEquals("The agent wants to run the *jclaw_api* action:\n*Call:* GET /api/a&lt;b&gt;`\u200b\n```"
+                + "{\"method\":\"GET\",\"path\":\"/api/a&lt;b&gt;`\u200b\"}```",
+                buildSlackPrompt.invoke(null, JCLAW_API, "{\"method\":\"GET\",\"path\":\"/api/a<b>`\"}"));
+    }
+
     // ── Session/Always scope suppresses re-prompt ──────────────────────
 
     @Test
@@ -599,6 +674,23 @@ class DangerousActionGateTest extends UnitTest {
         finally {
             ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "allow");
         }
+    }
+
+    /** What the gate logged while {@code body} ran on this thread. */
+    private static List<String> gateLines(Runnable body) {
+        return EventLogger.captureForTest(body).stream()
+                .filter(e -> "tool".equals(e.category()) && e.message().startsWith("Dangerous tool"))
+                .map(EventLogger.Captured::message)
+                .toList();
+    }
+
+    /** The text of the prompt whose keyboard carries {@code approvalId}, as the Bot API received it. */
+    private String promptTextFor(String approvalId) {
+        return server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage") && r.body().contains(approvalId))
+                .map(r -> JsonParser.parseString(r.body()).getAsJsonObject().get("text").getAsString())
+                .findFirst()
+                .orElseThrow();
     }
 
     /** Poll the mock server until the approval prompt's sendMessage lands, then

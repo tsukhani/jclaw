@@ -139,7 +139,7 @@ JClaw masks credentials before it writes an event. An agent often puts a key on 
 
 Three filters sit across the top:
 
-- **Category**: restricts to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable. Examples: `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`, `router` (the Auto router's choices and failovers), and `OPERATOR_ALERT` (an alert that could not be delivered). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`), and **MCP** (`MCP_*`). A group appears once one of its categories has an event. The list reloads each time you focus the filter, so a category first written while the page is open shows up without a reload.
+- **Category**: restricts to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable. Examples: `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`, `router` (the Auto router's choices and failovers), `jclaw_api` (every call an agent made through that tool), and `OPERATOR_ALERT` (an alert that could not be delivered). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`), and **MCP** (`MCP_*`). A group appears once one of its categories has an event. The list reloads each time you focus the filter, so a category first written while the page is open shows up without a reload.
 - **Level**: `ERROR`, `WARN`, or `INFO`.
 - **Search**: free-text match on the message body.
 

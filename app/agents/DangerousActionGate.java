@@ -314,7 +314,7 @@ public final class DangerousActionGate {
         // the owner's DM also covered a group guest's turn on that same (agent, tool).
         if (operatorTurn(ownerInitiated, channelType) && hasStandingGrant(agent, toolName)) {
             EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                    "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
+                    "Dangerous tool %s pre-approved for this agent; skipping prompt".formatted(subject(toolName, argsJson)));
             return Decision.PROCEED;
         }
 
@@ -388,8 +388,8 @@ public final class DangerousActionGate {
                 return askViaTelegram(agent, toolName, argsJson, chan);
             }
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,
-                    "Dangerous tool '%s' from %s origin '%s' has no approval surface — denying (fail-closed)"
-                            .formatted(toolName, trust, chan));
+                    "Dangerous tool %s from %s origin '%s' has no approval surface — denying (fail-closed)"
+                            .formatted(subject(toolName, argsJson), trust, chan));
             return Decision.ABORT;
         }
 
@@ -397,16 +397,16 @@ public final class DangerousActionGate {
         // default "allow" preserves the pre-JCLAW-423 behavior.
         if ("deny".equalsIgnoreCase(policy)) {
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,
-                    "Dangerous tool '%s' on trusted origin '%s' has no approval surface — denying (%s=deny)"
-                            .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+                    "Dangerous tool %s on trusted origin '%s' has no approval surface — denying (%s=deny)"
+                            .formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY));
             return Decision.ABORT;
         }
         if ("ask".equalsIgnoreCase(policy)) {
             return askViaTelegram(agent, toolName, argsJson, chan);
         }
         EventLogger.info(LOG_CATEGORY, agent.name, chan,
-                "Dangerous tool '%s' on trusted origin '%s' — proceeding ungated (%s=allow)"
-                        .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+                "Dangerous tool %s on trusted origin '%s' — proceeding ungated (%s=allow)"
+                        .formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY));
         return Decision.PROCEED;
     }
 
@@ -424,13 +424,13 @@ public final class DangerousActionGate {
         var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
         if (binding != null && binding.enabled) {
             EventLogger.info(LOG_CATEGORY, agent.name, chan,
-                    "Dangerous tool '%s' on off-channel '%s' — confirming on the bound Telegram DM (%s=ask)"
-                            .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+                    "Dangerous tool %s on off-channel '%s' — confirming on the bound Telegram DM (%s=ask)"
+                            .formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY));
             return promptAndAwait(agent, toolName, argsJson, binding);
         }
         EventLogger.warn(LOG_CATEGORY, agent.name, chan,
-                ("Dangerous tool '%s' on off-channel '%s' but no Telegram binding to confirm on — denying "
-                        + "(%s=ask, fail-closed)").formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+                ("Dangerous tool %s on off-channel '%s' but no Telegram binding to confirm on — denying "
+                        + "(%s=ask, fail-closed)").formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY));
         return Decision.ABORT;
     }
 
@@ -502,8 +502,8 @@ public final class DangerousActionGate {
         // A bot token that did not decrypt reads as null (JCLAW-1455): nobody can be asked, and the send would throw.
         if (binding.botToken == null) {
             EventLogger.warn(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                    "Dangerous tool '%s' cannot be confirmed — denying (fail-closed): %s"
-                            .formatted(toolName, TelegramBinding.unreadableBotToken(binding.agent.name)));
+                    "Dangerous tool %s cannot be confirmed — denying (fail-closed): %s"
+                            .formatted(subject(toolName, argsJson), TelegramBinding.unreadableBotToken(binding.agent.name)));
             return Decision.ABORT;
         }
         // The bound user's private chat: in a Telegram private chat
@@ -513,7 +513,7 @@ public final class DangerousActionGate {
         var prompt = buildPrompt(toolName, argsJson);
 
         EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                "Dangerous tool '%s' requires approval; prompting user %s".formatted(toolName, chatId));
+                "Dangerous tool %s requires approval; prompting user %s".formatted(subject(toolName, argsJson), chatId));
 
         var future = TelegramApprovalService.request(
                 binding.botToken, chatId, binding.telegramUserId, prompt, true);
@@ -531,7 +531,7 @@ public final class DangerousActionGate {
             }
             case DENIED, TIMED_OUT, EXPIRED -> {
                 EventLogger.warn(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                        "Dangerous tool '%s' not approved (%s) — aborting".formatted(toolName, outcome));
+                        "Dangerous tool %s not approved (%s) — aborting".formatted(subject(toolName, argsJson), outcome));
                 yield Decision.ABORT;
             }
         };
@@ -548,8 +548,8 @@ public final class DangerousActionGate {
         var prompt = buildSlackPrompt(toolName, argsJson);
 
         EventLogger.info(LOG_CATEGORY, agent.name, SLACK_CHANNEL,
-                "Dangerous tool '%s' requires approval; prompting owner %s in %s"
-                        .formatted(toolName, binding.ownerUserId, channelId));
+                "Dangerous tool %s requires approval; prompting owner %s in %s"
+                        .formatted(subject(toolName, argsJson), binding.ownerUserId, channelId));
 
         var future = SlackApprovalService.request(
                 binding.botToken, channelId, null, binding.ownerUserId, prompt, true);
@@ -567,7 +567,7 @@ public final class DangerousActionGate {
             }
             case DENIED, TIMED_OUT, EXPIRED -> {
                 EventLogger.warn(LOG_CATEGORY, agent.name, SLACK_CHANNEL,
-                        "Dangerous tool '%s' not approved (%s) — aborting".formatted(toolName, outcome));
+                        "Dangerous tool %s not approved (%s) — aborting".formatted(subject(toolName, argsJson), outcome));
                 yield Decision.ABORT;
             }
         };
@@ -632,12 +632,14 @@ public final class DangerousActionGate {
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
         }
+        var call = ToolRegistry.describeCall(toolName, argsJson);
+        var callLine = call == null ? "" : "<b>Call:</b> " + TelegramMarkdownFormatter.escapeHtml(call) + "\n";
         var why = extractWhy(argsJson);
         var whyLine = why == null ? ""
                 : "<b>Why:</b> " + TelegramMarkdownFormatter.escapeHtml(why) + "\n";
         return "⚠ <b>Approval required</b>\n"
                 + "The agent wants to run the <b>" + TelegramMarkdownFormatter.escapeHtml(toolName)
-                + "</b> action:\n" + whyLine + "<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
+                + "</b> action:\n" + callLine + whyLine + "<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
     }
 
     /**
@@ -651,10 +653,12 @@ public final class DangerousActionGate {
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
         }
+        var call = ToolRegistry.describeCall(toolName, argsJson);
+        var callLine = call == null ? "" : "*Call:* " + slackSafe(call) + "\n";
         var why = extractWhy(argsJson);
         var whyLine = why == null ? "" : "*Why:* " + slackSafe(why) + "\n";
         return "The agent wants to run the *" + slackSafe(toolName) + "* action:\n"
-                + whyLine + "```" + slackSafe(args) + "```";
+                + callLine + whyLine + "```" + slackSafe(args) + "```";
     }
 
     /**
@@ -685,6 +689,12 @@ public final class DangerousActionGate {
             // malformed / non-object JSON — fall back to the raw-args-only prompt
         }
         return null;
+    }
+
+    /** The tool for a log line, with the call it makes when the tool names one ({@code jclaw_api}: method and path). */
+    private static String subject(@Nullable String toolName, @Nullable String argsJson) {
+        var call = ToolRegistry.describeCall(toolName, argsJson);
+        return call == null ? "'" + toolName + "'" : "'%s' (%s)".formatted(toolName, call);
     }
 
     /** The {@link #GRANTS} key. {@link #revokeGrantsForAgent} prefix-matches on {@code agentId + ":"}. */
