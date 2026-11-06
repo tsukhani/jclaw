@@ -91,15 +91,16 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     /**
-     * The sink of a turn no chat tab streams: each commit that writes publishes
-     * {@link NotificationBus#BUS_CONVERSATION_UPDATED} once its rows commit, so an open chat page fetches them.
-     * When {@code fenced}, it writes only while the turn still owns {@code conversation} at {@code generation}.
+     * The sink of a turn no chat tab streams, one streamed to a channel or to voice included: each commit that
+     * writes publishes {@link NotificationBus#BUS_CONVERSATION_UPDATED} once its rows commit, so an open chat page
+     * fetches them. When {@code fenced}, it writes only while the turn still owns {@code conversation} at
+     * {@code generation} and {@code turnCancel} (when non-null) is unset.
      *
      * @param pendingIds the stored rows of the queued messages it carries, deleted with its user-message append
      */
     public static ConversationSink announcing(Conversation conversation, boolean fenced, long generation,
-                                              List<Long> pendingIds) {
-        return new ConversationSink(conversation, fenced, generation, null, pendingIds, true);
+                                              @Nullable AtomicBoolean turnCancel, List<Long> pendingIds) {
+        return new ConversationSink(conversation, fenced, generation, turnCancel, pendingIds, true);
     }
 
     private ConversationSink(Conversation conversation, boolean fenced, long generation,
@@ -137,10 +138,11 @@ public class ConversationSink implements AgentExecutionSink {
         return false;
     }
 
-    // Outside commitIfOwner's lock, which a stalled SSE client would otherwise hold for up to 3 s.
+    // Outside commitIfOwner's lock, since the bus's own listeners run on this thread; detached, so the turn never
+    // waits on an SSE client.
     private void announce() {
         if (announces) {
-            NotificationBus.publishAfterCommit(NotificationBus.BUS_CONVERSATION_UPDATED,
+            NotificationBus.publishDetachedAfterCommit(NotificationBus.BUS_CONVERSATION_UPDATED,
                     Map.of("conversationId", conversation.id));
         }
     }

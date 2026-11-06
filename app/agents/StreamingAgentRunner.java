@@ -278,8 +278,12 @@ final class StreamingAgentRunner {
         generationRef[0] = generation;
         conversationIdRef[0] = conversation.id;
 
-        // Every write of the turn goes through this one sink, fenced on the ownership just acquired.
-        var sink = new ConversationSink(conversation, generation, isCancelled);
+        // Every write of the turn goes through this one sink, fenced on the ownership just acquired. A turn streamed to
+        // a channel or to voice announces its commits: a chat page open on the conversation has no stream of it. The
+        // surface decides, not the conversation's channel: a tab streams its own turn in whatever conversation it opened.
+        var sink = ChannelType.WEB.value.equals(channelType)
+                ? new ConversationSink(conversation, generation, isCancelled)
+                : ConversationSink.announcing(conversation, true, generation, isCancelled, List.of());
         sinkRef[0] = sink;
         sink.commit(() -> sink.appendUserMessage(userMessage, attachments));
 

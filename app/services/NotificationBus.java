@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
@@ -31,6 +32,11 @@ import static utils.GsonHolder.GSON;
  * from the first {@code get}) regardless of listener count — so a
  * slow/stalled SSE writer can never block the fan-out for other subscribers.
  * SSE listeners that throw or time out are removed.
+ *
+ * <p>{@link #publishDetached} hands that fan-out, wait included, to one bus-owned platform thread, for a
+ * publisher on every turn's path that must not wait on a client. Those fan-outs run one at a time, so there a
+ * client slow on every write delays later detached events for all clients, until it stalls past the deadline
+ * and is dropped.
  */
 public class NotificationBus {
 
@@ -73,6 +79,17 @@ public class NotificationBus {
     private static final ExecutorService EXECUTOR = Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("notification-bus-", 0).factory());
 
+    // One thread runs the detached fan-outs in submission order, so each client gets them in the order they were
+    // made. A platform thread, so the timed wait on a stalled client parks it and not a turn's virtual thread
+    // (JDK-8373224). Daemon and never shut down, as RetryScheduler's is. It serves every sender's events, so it
+    // inherits no InheritableThreadLocal from the turn that first publishes, and carries no trace context: SSE
+    // writes are not traced.
+    private static final ExecutorService DISPATCHER = Executors.newSingleThreadExecutor(Thread.ofPlatform()
+            .daemon()
+            .name("jclaw-notification-dispatcher")
+            .inheritInheritableThreadLocals(false)
+            .factory());
+
     /** Subscribe to receive SSE-formatted event strings. Returns an unsubscribe handle. */
     public static Runnable subscribe(Consumer<String> listener) {
         listeners.add(listener);
@@ -91,6 +108,36 @@ public class NotificationBus {
 
     /** Publish an event to all connected listeners. */
     public static void publish(String type, Map<String, Object> data) {
+        notifyEventListeners(type, data);
+        var ssePayload = ssePayload(type, data);
+        if (listeners.isEmpty()) return;
+        fanOut(ssePayload);
+    }
+
+    /**
+     * Publish as {@link #publish} does, but return once the {@link #subscribeEvents} listeners have heard it: the SSE
+     * clients get it afterwards, in submission order, on the bus's dispatcher thread, which waits on each for up to
+     * {@link #LISTENER_TIMEOUT_MS} and drops one that stalls, so a stalled client delays later detached events and
+     * never the caller. A failure is logged and never reaches the caller.
+     */
+    public static void publishDetached(String type, Map<String, Object> data) {
+        try {
+            notifyEventListeners(type, data);
+            var ssePayload = ssePayload(type, data);
+            if (listeners.isEmpty()) return;
+            DISPATCHER.execute(() -> {
+                try {
+                    fanOut(ssePayload);
+                } catch (RuntimeException e) {
+                    Logger.warn(e, "NotificationBus: delivering %s failed", type);
+                }
+            });
+        } catch (RuntimeException e) {
+            Logger.warn(e, "NotificationBus: publishing %s failed", type);
+        }
+    }
+
+    private static void notifyEventListeners(String type, Map<String, Object> data) {
         for (var listener : eventListeners) {
             try {
                 listener.accept(type, data);
@@ -98,10 +145,13 @@ public class NotificationBus {
                 Logger.warn(e, "NotificationBus: a listener failed on %s", type);
             }
         }
-        var event = gson.toJson(Map.of("type", type, "data", data));
-        var ssePayload = "data: %s\n\n".formatted(event);
-        if (listeners.isEmpty()) return;
+    }
 
+    private static String ssePayload(String type, Map<String, Object> data) {
+        return "data: %s\n\n".formatted(gson.toJson(Map.of("type", type, "data", data)));
+    }
+
+    private static void fanOut(String ssePayload) {
         var pairs = new ArrayList<Map.Entry<Consumer<String>, CompletableFuture<Void>>>();
         for (var listener : listeners) {
             var future = CompletableFuture.runAsync(() -> {
@@ -154,17 +204,38 @@ public class NotificationBus {
      * never told about a row it cannot read yet. A failure is logged and never reaches the caller.
      */
     public static void publishAfterCommit(String type, Map<String, Object> data) {
-        Runnable publish = () -> {
+        afterCommit(type, () -> publish(type, data));
+    }
+
+    /** {@link #publishDetached} once the ambient transaction commits, or now when there is none; a rollback sends nothing. */
+    public static void publishDetachedAfterCommit(String type, Map<String, Object> data) {
+        afterCommit(type, () -> publishDetached(type, data));
+    }
+
+    private static void afterCommit(String type, Runnable publish) {
+        Runnable guarded = () -> {
             try {
-                publish(type, data);
+                publish.run();
             } catch (RuntimeException e) {
                 Logger.warn(e, "NotificationBus: publishing %s failed", type);
             }
         };
         try {
-            Tx.afterCommit(publish);
+            Tx.afterCommit(guarded);
         } catch (RuntimeException e) {
             Logger.warn(e, "NotificationBus: could not schedule %s after commit", type);
+        }
+    }
+
+    /** Wait until every detached fan-out submitted before this call has finished; tests only. */
+    public static void awaitDetachedForTest() {
+        try {
+            DISPATCHER.submit(() -> {}).get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        } catch (ExecutionException | TimeoutException | RejectedExecutionException e) {
+            throw new IllegalStateException("the bus's dispatcher did not drain", e);
         }
     }
 

@@ -75,6 +75,114 @@ class NotificationBusTest extends UnitTest {
         Assertions.assertEquals(1, heard.get());
     }
 
+    // --- detached publish: the caller never waits on an SSE client ---
+
+    @Test
+    void aDetachedPublishReturnsWhileAClientIsBlockedAndTheClientStaysSubscribedOnceItFrees() throws Exception {
+        var type = "test.detached-" + System.nanoTime();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe(type, msg -> {
+            entered.countDown();
+            try {
+                release.await();
+                received.add(msg);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        try {
+            NotificationBus.publishDetached(type, Map.of("n", 1));
+            // Released only once the call is back: a call that waited would reach its deadline and drop the client.
+            // The budget is well above the bus's own: another class's blocked client can hold the dispatcher first.
+            assertTrue(entered.await(30, java.util.concurrent.TimeUnit.SECONDS),
+                    "the client is written to after the call returns");
+            assertEquals(java.util.List.of(), received, "the call returned while the client's write was still blocked");
+        } finally {
+            release.countDown();
+        }
+        NotificationBus.publishDetached(type, Map.of("n", 2));
+        NotificationBus.awaitDetachedForTest();
+
+        assertEquals(java.util.List.of(event(type, 1), event(type, 2)), payloads(received));
+    }
+
+    @Test
+    void aStalledClientIsDroppedWithoutHoldingTheCallerAndLaterEventsStillReachTheOthers() {
+        var type = "test.detached-stalled-" + System.nanoTime();
+        var healthy = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var stalled = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        // A cancelled CompletableFuture does not interrupt its write, so the stalled one is freed here at the end.
+        var unstall = new java.util.concurrent.CountDownLatch(1);
+        subscribe(type, healthy::add);
+        subscribe(type, msg -> {
+            stalled.add(msg);
+            try {
+                unstall.await();
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        long callerMs;
+        try {
+            long start = System.nanoTime();
+            NotificationBus.publishDetached(type, Map.of("n", 1));
+            NotificationBus.publishDetached(type, Map.of("n", 2));
+            callerMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            NotificationBus.awaitDetachedForTest();
+        } finally {
+            unstall.countDown();
+        }
+
+        assertTrue(callerMs < NotificationBus.LISTENER_TIMEOUT_MS / 2,
+                "the caller waited " + callerMs + " ms on a stalled client");
+        assertEquals(java.util.List.of(event(type, 1), event(type, 2)), payloads(healthy));
+        // Still subscribed, it would have been handed the second event while it sat on the first.
+        assertEquals(java.util.List.of(event(type, 1)), payloads(stalled),
+                "the stalled client is dropped as a synchronous publish drops it");
+    }
+
+    @Test
+    void detachedPublishesReachAClientInTheOrderTheyWereMade() {
+        var type = "test.detached-order-" + System.nanoTime();
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe(type, msg -> {
+            // The first write is slow, so a later event dispatched beside it would overtake it.
+            if (msg.contains("\"n\":1}")) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            received.add(msg.substring(msg.indexOf("\"n\":") + 4, msg.indexOf('}')));
+        });
+
+        for (int n = 1; n <= 5; n++) NotificationBus.publishDetached(type, Map.of("n", n));
+        NotificationBus.awaitDetachedForTest();
+
+        assertEquals(java.util.List.of("1", "2", "3", "4", "5"), received);
+    }
+
+    @Test
+    void aDetachedPublishIsHeardByEventListenersBeforeItReturnsAndOneThatThrowsReachesNoCaller() {
+        var type = "test.detached-typed-" + System.nanoTime();
+        var heard = new java.util.concurrent.CopyOnWriteArrayList<Object>();
+        unsubscribers.add(NotificationBus.subscribeEvents((t, d) -> {
+            if (t.equals(type)) throw new IllegalStateException("listener failure");
+        }));
+        unsubscribers.add(NotificationBus.subscribeEvents((t, d) -> {
+            if (t.equals(type)) heard.add(d.get("runId"));
+        }));
+
+        NotificationBus.publishDetached(type, Map.of("runId", 7));
+
+        assertEquals(java.util.List.of(7), heard);
+    }
+
     // --- subscribe / unsubscribe lifecycle ---
 
     @Test
@@ -304,5 +412,17 @@ class NotificationBusTest extends UnitTest {
         var start = System.currentTimeMillis();
         NotificationBus.publish(event, Map.of("k", "v"));
         return System.currentTimeMillis() - start;
+    }
+
+    private static com.google.gson.JsonElement event(String type, int n) {
+        return com.google.gson.JsonParser.parseString("{\"type\":\"" + type + "\",\"data\":{\"n\":" + n + "}}");
+    }
+
+    /** Each SSE line's event, parsed: the order of its keys is not fixed. */
+    private static java.util.List<com.google.gson.JsonElement> payloads(java.util.List<String> lines) {
+        return lines.stream().map(line -> {
+            assertTrue(line.startsWith("data: ") && line.endsWith("\n\n"), line);
+            return com.google.gson.JsonParser.parseString(line.substring("data: ".length()).strip());
+        }).toList();
     }
 }

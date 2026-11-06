@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 import { visualEnabled } from '~/utils/visual/spec'
 import { serveConversation } from './conversation-endpoint'
@@ -65,9 +65,12 @@ describe('Chat page — streaming state machine', () => {
     const html = component.html()
     expect(html).not.toContain('stream-progress')
     expect(html).not.toContain('Prefilling')
+    expect(html).not.toContain('Generating')
     expect(html).not.toContain('streaming...')
     expect(html).not.toContain('Thinking...')
-    expect(html).not.toContain('Generating...')
+    // Mounted and empty before any turn, so the text a turn puts in it is announced.
+    expect(announcer(component).exists()).toBe(true)
+    expect(announcer(component).text()).toBe('')
   })
 
   it('keeps the send button enabled when an agent is selected and no stream is in flight', async () => {
@@ -89,9 +92,35 @@ describe('Chat page — streaming state machine', () => {
   })
 })
 
+function announcer(component: VueWrapper) {
+  return component.find('[data-testid="chat-progress-announcer"]')
+}
+
+/** A stream the test feeds: the init frame now, then whatever it enqueues. */
+function feedStream(...initial: string[]) {
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+  const encoder = new TextEncoder()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c
+      for (const frame of initial) c.enqueue(encoder.encode(`data: ${frame}\n`))
+    },
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+  return {
+    send(frame: string) {
+      controller!.enqueue(encoder.encode(`data: ${frame}\n`))
+    },
+    close() {
+      controller!.close()
+    },
+  }
+}
+
 describe('Chat page — stream progress line', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // The local-model case serves its own /api/config, which useFetch would hand the next mount.
+    clearNuxtData()
   })
 
   it('leads the progress line with Clawdia while the turn streams, and drops both when it ends', async () => {
@@ -119,14 +148,44 @@ describe('Chat page — stream progress line', () => {
     const sprite = progress.find('img')
     expect(progress.element.firstElementChild).toBe(sprite.element)
     expect(sprite.attributes('src')).toBe('/clawdia-micro.webp')
-    // Decorative: the status span alone is announced.
+    // Decorative: the page's announcer speaks the label, from outside the line.
     expect(sprite.attributes('alt')).toBe('')
-    expect(progress.find('[role="status"]').text()).toBe('Generating…')
+    expect(progress.find('[role="status"]').exists()).toBe(false)
+    expect(announcer(component).text()).toBe('Generating…')
 
     stream!.enqueue(encoder.encode('data: {"type":"complete","content":"Hello"}\n'))
     stream!.close()
     await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
     expect(component.find('img[src="/clawdia-micro.webp"]').exists()).toBe(false)
+    expect(announcer(component).text()).toBe('')
+  })
+
+  it('announces Prefilling… and then Generating… for a local model, never its timer', async () => {
+    clearNuxtData()
+    setupBaseChatApi()
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'http://localhost:11434/v1' },
+        { key: 'provider.ollama-cloud.local', value: 'true' },
+        { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":false}]' },
+      ],
+    }))
+    const stream = feedStream('{"type":"init","conversationId":971}')
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
+    await component.find('form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(announcer(component).text()).toBe('Prefilling…'))
+
+    stream.send('{"type":"token","content":"Hel"}')
+    await vi.waitFor(() => expect(announcer(component).text()).toBe('Generating…'))
+    expect(component.find('[data-testid="stream-progress"] [aria-hidden="true"]').text()).toMatch(/^\d+:\d{2}$/)
+
+    stream.send('{"type":"complete","content":"Hello"}')
+    stream.close()
+    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
+    expect(announcer(component).text()).toBe('')
   })
 })
 

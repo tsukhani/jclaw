@@ -1290,6 +1290,8 @@ class ConversationQueueTest extends UnitTest {
         long gen;
         try {
             gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            // A client's copy goes out on the bus's dispatcher, after the acquire returns.
+            services.NotificationBus.awaitDetachedForTest();
         } finally {
             unsubscribe.run();
         }
@@ -1301,6 +1303,46 @@ class ConversationQueueTest extends UnitTest {
                     return com.google.gson.JsonParser.parseString(line.substring("data: ".length()).strip());
                 }).toList());
         ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    @Test
+    void neitherTheAcquireNorTheReleaseWaitsForAnEventClientWhoseWritesBlock() throws Exception {
+        long convId = 16011L;
+        var unblock = new CountDownLatch(1);
+        var lines = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var unsubscribe = services.NotificationBus.subscribe(line -> {
+            if (!line.contains("\"conversationId\":" + convId + ",") && !line.contains("\"conversationId\":" + convId + "}")) {
+                return;
+            }
+            try {
+                unblock.await();
+                lines.add(line);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        long callerMs;
+        try {
+            long start = System.nanoTime();
+            long gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.releaseOwnership(convId, gen);
+            callerMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            unblock.countDown();
+            services.NotificationBus.awaitDetachedForTest();
+        } finally {
+            unblock.countDown();
+            unsubscribe.run();
+        }
+
+        assertTrue(callerMs < services.NotificationBus.LISTENER_TIMEOUT_MS / 2,
+                "the acquire and release waited " + callerMs + " ms on a blocked client");
+        assertEquals(List.of(
+                        com.google.gson.JsonParser.parseString(
+                                "{\"type\":\"conversation.busy\",\"data\":{\"conversationId\":" + convId + ",\"busy\":true}}"),
+                        com.google.gson.JsonParser.parseString(
+                                "{\"type\":\"conversation.busy\",\"data\":{\"conversationId\":" + convId + ",\"busy\":false}}")),
+                lines.stream().map(line -> com.google.gson.JsonParser.parseString(
+                        line.substring("data: ".length()).strip())).toList());
     }
 
     /** The {@code conversation.busy} payloads published for {@code convId} while {@code body} runs. */

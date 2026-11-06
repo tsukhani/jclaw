@@ -1,4 +1,6 @@
 import agents.ConversationSink;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import models.Conversation;
 import models.Message;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -31,7 +35,7 @@ class ConversationSinkAnnounceTest extends UnitTest {
             onItsOwnThread(() -> {
                 var gen = acquire(conversation);
                 try {
-                    var sink = ConversationSink.announcing(conversation, true, gen, List.of());
+                    var sink = ConversationSink.announcing(conversation, true, gen, null, List.of());
                     assertTrue(sink.commit(() -> sink.appendAssistantMessage("round one", null)));
                 } finally {
                     ConversationQueue.releaseOwnership(conversation.id, gen);
@@ -53,7 +57,7 @@ class ConversationSinkAnnounceTest extends UnitTest {
         var unsubscribe = listen(conversation.id, heard);
         try {
             onItsOwnThread(() -> {
-                var sink = ConversationSink.announcing(conversation, false, 0, List.of());
+                var sink = ConversationSink.announcing(conversation, false, 0, null, List.of());
                 assertTrue(sink.commit(() -> sink.appendAssistantMessage("first", null)));
                 assertTrue(sink.commit(() -> sink.appendAssistantMessage("second", null)));
                 return null;
@@ -73,7 +77,7 @@ class ConversationSinkAnnounceTest extends UnitTest {
         var heard = new CopyOnWriteArrayList<Map<String, Object>>();
         var unsubscribe = listen(conversation.id, heard);
         try {
-            var sink = ConversationSink.announcing(conversation, false, 0, List.of());
+            var sink = ConversationSink.announcing(conversation, false, 0, null, List.of());
             assertTrue(sink.commit(() -> sink.appendAssistantMessage("inside", null)));
             assertEquals(List.of(), heard, "a row the page cannot read yet is not announced");
 
@@ -95,7 +99,7 @@ class ConversationSinkAnnounceTest extends UnitTest {
             onItsOwnThread(() -> {
                 var gen = acquire(conversation);
                 ConversationQueue.releaseOwnership(conversation.id, gen);
-                var sink = ConversationSink.announcing(conversation, true, gen, List.of());
+                var sink = ConversationSink.announcing(conversation, true, gen, null, List.of());
                 assertFalse(sink.commit(() -> sink.appendAssistantMessage("late", null)));
                 assertFalse(sink.commit(() -> sink.appendAssistantMessage("later", null)));
                 return null;
@@ -109,7 +113,129 @@ class ConversationSinkAnnounceTest extends UnitTest {
     }
 
     @Test
-    void theStreamedTurnsSinkIsNotAnnounced() {
+    void aCommitAfterTheTurnWasStoppedIsRefusedAndNotAnnounced() {
+        var conversation = seed("announce-stopped");
+        var heard = new CopyOnWriteArrayList<Map<String, Object>>();
+        var unsubscribe = listen(conversation.id, heard);
+        var turnCancel = new AtomicBoolean();
+        try {
+            onItsOwnThread(() -> {
+                var gen = acquire(conversation);
+                try {
+                    var sink = ConversationSink.announcing(conversation, true, gen, turnCancel, List.of());
+                    assertTrue(sink.commit(() -> sink.appendAssistantMessage("before the stop", null)));
+                    turnCancel.set(true);
+                    assertFalse(sink.commit(() -> sink.appendAssistantMessage("after the stop", null)));
+                } finally {
+                    ConversationQueue.releaseOwnership(conversation.id, gen);
+                }
+                return null;
+            });
+        } finally {
+            unsubscribe.run();
+        }
+
+        assertEquals(List.of(Map.of("conversationId", conversation.id)), heard);
+        assertEquals(1L, rowsIn(conversation.id));
+    }
+
+    @Test
+    void anEventClientIsToldOfACommitOnlyOnceItsTransactionCommits() {
+        var conversation = seed("announce-sse");
+        var lines = new CopyOnWriteArrayList<String>();
+        var unsubscribe = NotificationBus.subscribe(line -> {
+            if (line.contains("\"type\":\"" + NotificationBus.BUS_CONVERSATION_UPDATED + "\"")
+                    && line.contains("\"conversationId\":" + conversation.id + "}")) {
+                lines.add(line);
+            }
+        });
+        try {
+            var sink = ConversationSink.announcing(conversation, false, 0, null, List.of());
+            assertTrue(sink.commit(() -> sink.appendAssistantMessage("inside", null)));
+            NotificationBus.awaitDetachedForTest();
+            assertEquals(List.of(), lines, "a row the page cannot read yet is not announced");
+
+            JPA.em().getTransaction().commit();
+            JPA.em().getTransaction().begin();
+            NotificationBus.awaitDetachedForTest();
+        } finally {
+            unsubscribe.run();
+        }
+
+        assertEquals(List.of(updatedEvent(conversation.id)), events(lines));
+    }
+
+    @Test
+    void aCommitDoesNotWaitForAnEventClientWhoseWritesBlock() {
+        var conversation = seed("announce-blocked-client");
+        var unblock = new CountDownLatch(1);
+        var lines = new CopyOnWriteArrayList<String>();
+        var unsubscribe = NotificationBus.subscribe(line -> {
+            if (!line.contains("\"type\":\"" + NotificationBus.BUS_CONVERSATION_UPDATED + "\"")
+                    || !line.contains("\"conversationId\":" + conversation.id + "}")) {
+                return;
+            }
+            try {
+                unblock.await();
+                lines.add(line);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        long commitMs;
+        try {
+            commitMs = onItsOwnThread(() -> {
+                var gen = acquire(conversation);
+                try {
+                    var sink = ConversationSink.announcing(conversation, true, gen, null, List.of());
+                    long start = System.nanoTime();
+                    assertTrue(sink.commit(() -> sink.appendAssistantMessage("round one", null)));
+                    return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                } finally {
+                    ConversationQueue.releaseOwnership(conversation.id, gen);
+                }
+            });
+            unblock.countDown();
+            NotificationBus.awaitDetachedForTest();
+        } finally {
+            unblock.countDown();
+            unsubscribe.run();
+        }
+
+        assertTrue(commitMs < NotificationBus.LISTENER_TIMEOUT_MS / 2,
+                "the commit waited " + commitMs + " ms on a blocked client");
+        assertEquals(List.of(updatedEvent(conversation.id)), events(lines));
+    }
+
+    @Test
+    void aCommitWhoseTransactionRollsBackIsNeverAnnounced() {
+        var conversation = seed("announce-rollback");
+        var heard = new CopyOnWriteArrayList<Map<String, Object>>();
+        var lines = new CopyOnWriteArrayList<String>();
+        var unsubscribe = listen(conversation.id, heard);
+        var unsubscribeClient = NotificationBus.subscribe(line -> {
+            if (line.contains("\"conversationId\":" + conversation.id + "}")) lines.add(line);
+        });
+        try {
+            var sink = ConversationSink.announcing(conversation, false, 0, null, List.of());
+            assertTrue(sink.commit(() -> sink.appendAssistantMessage("rolled back", null)));
+
+            JPA.em().getTransaction().rollback();
+            JPA.em().clear();
+            JPA.em().getTransaction().begin();
+            NotificationBus.awaitDetachedForTest();
+        } finally {
+            unsubscribe.run();
+            unsubscribeClient.run();
+        }
+
+        assertEquals(List.of(), heard);
+        assertEquals(List.of(), lines);
+        assertEquals(0L, rowsIn(conversation.id));
+    }
+
+    @Test
+    void theWebStreamedTurnsSinkIsNotAnnounced() {
         var conversation = seed("announce-streamed");
         var heard = new CopyOnWriteArrayList<Map<String, Object>>();
         var unsubscribe = listen(conversation.id, heard);
@@ -138,6 +264,19 @@ class ConversationSinkAnnounceTest extends UnitTest {
                 heard.add(data);
             }
         });
+    }
+
+    private static JsonElement updatedEvent(Long conversationId) {
+        return JsonParser.parseString(
+                "{\"type\":\"conversation.updated\",\"data\":{\"conversationId\":" + conversationId + "}}");
+    }
+
+    /** Each SSE line's event, parsed: the order of its keys is not fixed. */
+    private static List<JsonElement> events(List<String> lines) {
+        return lines.stream().map(line -> {
+            assertTrue(line.startsWith("data: ") && line.endsWith("\n\n"), line);
+            return JsonParser.parseString(line.substring("data: ".length()).strip());
+        }).toList();
     }
 
     private static long acquire(Conversation conversation) {

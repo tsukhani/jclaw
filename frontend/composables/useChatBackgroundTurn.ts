@@ -15,7 +15,7 @@ export interface UseChatBackgroundTurnDeps {
 
 /**
  * Whether a turn this tab is not streaming holds the open conversation: a yield resume, a drained
- * queued message, a follow-up, or POST /api/chat/send. It is read from GET /api/conversations/{id}/queue
+ * queued message, a follow-up, POST /api/chat/send, or a turn streamed to a channel or to voice. It is read from GET /api/conversations/{id}/queue
  * on open, on each reconnect, after the tab's own stream and on each `conversation.busy` event. The event
  * is only a cue to read: two threads' transitions can publish out of order. When such a turn ends, the
  * rows it wrote last, its reply among them, are fetched.

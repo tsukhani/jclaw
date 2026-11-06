@@ -516,19 +516,14 @@ public class ConversationQueue {
     }
 
     /**
-     * Publish {@link NotificationBus#BUS_CONVERSATION_BUSY} for a transition the caller recorded under the
-     * state lock and has since released: a stalled SSE client holds a publish for up to
-     * {@link NotificationBus#LISTENER_TIMEOUT_MS}.
+     * Publish {@link NotificationBus#BUS_CONVERSATION_BUSY} for a transition the caller recorded under the state
+     * lock and has since released, since the bus's own listeners run on this thread. Detached: every turn acquires
+     * and releases, and its thread must not wait on an SSE client. The publish never throws, so a caller always
+     * reaches the release of what it acquired.
      */
     private static void announceBusy(Long conversationId, boolean busy) {
-        try {
-            NotificationBus.publish(NotificationBus.BUS_CONVERSATION_BUSY,
-                    Map.of("conversationId", conversationId, "busy", busy));
-        } catch (RuntimeException e) {
-            // The transition stands; a caller that saw this throw would never release what it acquired.
-            EventLogger.warn(QUEUE, "Conversation %d going %s not announced: %s"
-                    .formatted(conversationId, busy ? "busy" : "idle", e.getMessage()));
-        }
+        NotificationBus.publishDetached(NotificationBus.BUS_CONVERSATION_BUSY,
+                Map.of("conversationId", conversationId, "busy", busy));
     }
 
     /** The rows of {@code messages} that carry one. */

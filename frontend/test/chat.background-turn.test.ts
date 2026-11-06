@@ -99,6 +99,10 @@ function backgroundLine(component: VueWrapper) {
   return component.find('[data-testid="background-turn-progress"]')
 }
 
+function announcer(component: VueWrapper) {
+  return component.find('[data-testid="chat-progress-announcer"]')
+}
+
 describe('Chat page — a turn the page is not streaming', () => {
   it('shows Working… while such a turn holds the open conversation', async () => {
     serveConversation(5, [row(1, 'user', 'find the report'), row(2, 'assistant', 'Starting on it.')])
@@ -109,7 +113,8 @@ describe('Chat page — a turn the page is not streaming', () => {
 
     await vi.waitFor(() => expect(backgroundLine(component).exists()).toBe(true))
     const line = backgroundLine(component)
-    expect(line.find('[role="status"]').text()).toBe('Working…')
+    expect(announcer(component).text()).toBe('Working…')
+    expect(line.find('[role="status"]').exists()).toBe(false)
     expect(line.text()).toBe('Working…')
     expect(line.element.firstElementChild).toBe(line.find('img').element)
     expect(line.find('img').attributes('alt')).toBe('')
@@ -122,6 +127,7 @@ describe('Chat page — a turn the page is not streaming', () => {
     const idle = await openConversation(5)
     expect(queueReads[5]).toBe(1)
     expect(backgroundLine(idle).exists()).toBe(false)
+    expect(announcer(idle).text()).toBe('')
     idle.unmount()
 
     serveConversation(6, [row(1, 'user', 'hello')])
@@ -151,6 +157,7 @@ describe('Chat page — a turn the page is not streaming', () => {
     emitBus('conversation.busy', { conversationId: 5, busy: false })
 
     await vi.waitFor(() => expect(backgroundLine(component).exists()).toBe(false))
+    expect(announcer(component).text()).toBe('')
     await vi.waitFor(() => expect(component.text()).toContain('The report is ready.'))
     expect(component.text().split('The report is ready.')).toHaveLength(2)
   })
@@ -319,6 +326,7 @@ describe('Chat page — the tab streaming its own turn', () => {
     await vi.waitFor(() => expect(vmOf(component).backgroundBusy).toBe(true))
     expect(queueReads[5]).toBe(2)
     expect(backgroundLine(component).exists()).toBe(false)
+    expect(announcer(component).text()).toBe('Generating…')
 
     // The release precedes the stream's complete frame.
     busy[5] = false
@@ -345,5 +353,6 @@ describe('Chat page — the tab streaming its own turn', () => {
 
     await vi.waitFor(() => expect(backgroundLine(component).exists()).toBe(true))
     expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false)
+    expect(announcer(component).text()).toBe('Working…')
   })
 })

@@ -318,8 +318,9 @@ const {
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState, appendRows: appendFollowing })
 provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
 
-// A turn the server runs with no stream to this tab (a yield resume, a queued message): its rows arrive on
-// conversation.updated through the poller above, and this flag drives the "Working…" line until it ends.
+// A turn the server runs with no stream to this tab (a yield resume, a queued message, a turn streamed to a channel
+// or to voice): its rows arrive on conversation.updated through the poller above, and this flag drives the
+// "Working…" line until it ends.
 const { backgroundBusy } = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce })
 
 const {
@@ -623,6 +624,12 @@ const noToolsNotice = computed(() => {
   }
 })
 const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStreamProgress(streaming, streamProducing, streamIsLocal)
+// Read by the progress lines' live region: a role="status" inserted together with its text is often never announced,
+// so the region stays mounted and only this text changes. The label reads "Generating…" at idle, hence the gate.
+const progressAnnouncement = computed(() => {
+  if (streaming.value) return streamProgressLabel.value
+  return backgroundBusy.value ? 'Working…' : ''
+})
 
 // Composer-local interaction glue (/model autocomplete, textarea keyboard +
 // resize handlers, drop/paste/file-input routing, and the empty↔active FLIP
@@ -762,6 +769,18 @@ function exportConversation() {
       main shrinks it, and the old viewport-height calc overflowed main by the banner's
       height, leaving a hidden scroll range and the composer's bottom off-screen.
     -->
+    <!--
+      The progress lines' one live region, mounted for the page's life and outside the message
+      list, which unmounts on an empty chat. This root is positioned, so sr-only stays inside it.
+    -->
+    <p
+      data-testid="chat-progress-announcer"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    >
+      {{ progressAnnouncement }}
+    </p>
     <!--
       Chat area takes the full main-content width now that the in-page
       Conversations sidebar has been removed. Multi-select delete + bulk
@@ -1025,8 +1044,8 @@ function exportConversation() {
                 • "Generating…" — the first reasoning or content delta landed.
               The reasoning card / markdown body render independently in the
               message above; this line only adds the phase + elapsed affordance.
-              a11y: only the phase label is a live region (role="status") — the
-              per-second timer is aria-hidden so it doesn't spam announcements.
+              a11y: the page's progress announcer speaks the phase label; the
+              per-second timer is aria-hidden so browsing past it reads no clock.
             -->
             <div
               v-if="streaming"
@@ -1040,10 +1059,7 @@ function exportConversation() {
                 height="16"
                 class="h-4 w-4 shrink-0 select-none"
               >
-              <span
-                class="animate-pulse"
-                role="status"
-              >{{ streamProgressLabel }}</span>
+              <span class="animate-pulse">{{ streamProgressLabel }}</span>
               <span
                 class="text-sm tabular-nums"
                 aria-hidden="true"
@@ -1051,8 +1067,7 @@ function exportConversation() {
             </div>
             <!--
               A turn the server runs with no stream to this tab. No timer: the page cannot know when it
-              started. No Stop: a yield resume, a drained queued message and POST /api/chat/send register
-              no cancel flag for ConversationQueue.stop to flip.
+              started. No Stop for any turn shown here yet: JF-197 tracks it.
             -->
             <div
               v-if="backgroundBusy && !streaming"
@@ -1066,10 +1081,7 @@ function exportConversation() {
                 height="16"
                 class="h-4 w-4 shrink-0 select-none"
               >
-              <span
-                class="animate-pulse"
-                role="status"
-              >Working…</span>
+              <span class="animate-pulse">Working…</span>
             </div>
             <ChatBrowserSetupBar
               v-if="streaming && browserSetupTurnKey && browserSetup?.active"

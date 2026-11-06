@@ -692,7 +692,7 @@ public class AgentRunner {
         // where AgentRunner takes responsibility for the conversation.
         // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
         // Announcing: no tab streams this sink's rows, an inline child's inside a streamed parent turn included.
-        final var sink = ConversationSink.announcing(conversation, fenced, generation, pendingIds);
+        final var sink = ConversationSink.announcing(conversation, fenced, generation, null, pendingIds);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally
         // skipped. Every other segment is captured, which is why
