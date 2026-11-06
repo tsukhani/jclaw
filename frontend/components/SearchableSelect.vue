@@ -48,6 +48,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<(e: 'update:modelValue', value: string) => void>()
 
 const open = ref(false)
+const listId = useId()
 
 const selected = computed(() => props.options.find(o => o.value === props.modelValue) ?? null)
 
@@ -74,11 +75,14 @@ function pick(option: SearchableOption) {
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
       <!-- A select-only combobox: the label names it and its text is its value, as a native select's are. -->
-      <!-- eslint-disable-next-line vuejs-accessibility/role-has-required-aria-props -- PopoverTrigger sets aria-expanded, and aria-controls while open, through as-child, where the rule cannot see them -->
+      <!-- Stated here because Sonar's S6807 cannot see what PopoverTrigger sets through as-child. These win that merge, and
+           reka's popup id wins over one passed to PopoverContent, so aria-controls names the list, whose id is ours. -->
       <button
         v-bind="$attrs"
         type="button"
         role="combobox"
+        :aria-expanded="open"
+        :aria-controls="open ? listId : undefined"
         :aria-label="label"
         :data-value="modelValue"
         :disabled="disabled"
@@ -101,7 +105,7 @@ function pick(option: SearchableOption) {
           :placeholder="searchLabel"
           :aria-label="searchLabel"
         />
-        <CommandList>
+        <CommandList :id="listId">
           <CommandEmpty>{{ emptyText }}</CommandEmpty>
           <CommandGroup
             v-for="[group, items] in groups"

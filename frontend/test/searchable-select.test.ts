@@ -134,6 +134,21 @@ describe('SearchableSelect', () => {
     expect(c.emitted('update:modelValue')).toBeUndefined()
   })
 
+  it('names the list it opens as the element it controls, and nothing while closed', async () => {
+    const c = await mountSelect()
+    expect(picker(c, LABEL).attributes('aria-expanded')).toBe('false')
+    expect(picker(c, LABEL).attributes('aria-controls')).toBeUndefined()
+    const popover = await openPicker(c, LABEL)
+    const lists = popover.querySelectorAll('[role="listbox"]')
+    expect(lists).toHaveLength(1)
+    expect(lists[0]!.id).not.toBe('')
+    expect(picker(c, LABEL).attributes('aria-expanded')).toBe('true')
+    expect(picker(c, LABEL).attributes('aria-controls')).toBe(lists[0]!.id)
+    await closePicker(popover)
+    expect(picker(c, LABEL).attributes('aria-expanded')).toBe('false')
+    expect(picker(c, LABEL).attributes('aria-controls')).toBeUndefined()
+  })
+
   it('does not open while disabled', async () => {
     const c = await mountSelect({ disabled: true })
     await picker(c, LABEL).trigger('click')
