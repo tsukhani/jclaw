@@ -29,6 +29,8 @@ Click **New Agent** at the top of the page, or click an existing agent's name to
 | **Fallback Provider** | Optional. When the default provider's circuit breaker refuses a turn, or the default provider is no longer configured, the turn goes here. Pick any configured provider other than the default. Leave it at **None**, and such a turn fails instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
 | **Fallback Model** | The model to use on the fallback provider. You choose it. It is not the default model's id, because the fallback need not offer the same models. Set it together with the provider. |
 
+An agent can change these settings for itself too. Ask it in your own chat, for example to switch to another model. Each change is a write through its `jclaw_api` tool, so it waits for your approval unless you have given that tool a standing approval. An agent changes only its own settings, and only to a model registered under LLM Providers: JClaw refuses any other model, where saving it would switch the agent off. The Main Agent can change any agent's settings, and it is the only agent that can add a model to a provider. The agent type and access to coding harnesses stay yours to change.
+
 ### System prompt
 
 There is no free-form prompt field. The platform assembles what the model sees before every turn from this agent's workspace files (see "Workspace file contents" below), its skills, its core memories, and the platform's own standing context. Set the agent's voice, role, constraints, and any context that does not change between conversations in those files. `AGENT.md` and `SOUL.md` are the usual places.

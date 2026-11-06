@@ -1,3 +1,4 @@
+import controllers.RequestPrincipal;
 import models.Agent;
 import models.AgentSkillConfig;
 import models.AgentToolConfig;
@@ -83,6 +84,15 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
     /** A request carrying the internal bearer token — indistinguishable from a jclaw_api call. */
     private static Http.Request agentRequest() {
         return requestWithToken(AuthFixture.seedBearerToken());
+    }
+
+    /** The bearer as {@code JClawApiTool} sends it for {@code agentId}: PUT /api/agents/{id} reaches only the
+     *  caller's own row, so a per-field guard there is reached only by the agent editing itself. */
+    private static Http.Request agentRequestAs(Long agentId) {
+        var request = agentRequest();
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        return request;
     }
 
     private static Http.Request requestWithToken(String token) {
@@ -267,7 +277,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         // shell allowlist entirely.
         var id = createAgent("operator-only-acp-grant");
 
-        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id,
+        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id,
                 "application/json", "{\"acpAllowed\":true}"));
 
         assertStatus(403, resp);
@@ -283,7 +293,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
     void agentPrincipalKeepsNonPrivilegedAgentUpdates() {
         var id = createAgent("operator-only-acp-echo");
 
-        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id, "application/json",
+        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id, "application/json",
                 "{\"description\":\"written-by-the-agent\",\"acpAllowed\":false}"));
 
         assertIsOk(resp);
@@ -310,7 +320,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         // workspace file is operator-only: this one must not be the way around them.
         var id = createAgent("operator-only-type-switch");
 
-        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id,
+        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id,
                 "application/json", "{\"serviceAgent\":true}"));
 
         assertStatus(403, resp);
@@ -327,7 +337,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
     void agentPrincipalMayEchoAnUnchangedType() {
         var id = createAgent("operator-only-type-echo");
 
-        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id, "application/json",
+        var resp = asAgent(() -> PUT(agentRequestAs(id), "/api/agents/" + id, "application/json",
                 "{\"description\":\"written-by-the-agent\",\"serviceAgent\":false}"));
 
         assertIsOk(resp);

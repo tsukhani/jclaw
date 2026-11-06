@@ -297,8 +297,13 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AddModelResponse.class)))
     @Operation(summary = "Add a model to a provider by id")
     @AgentAccess(value = OPEN,
-            reason = "extends a provider's model list; the baseUrl it dials stays behind SsrfGuard")
+            reason = "extends a provider's model list, which every model picker shows: the operator and main only "
+                    + "(RequestPrincipal.isOperatorOrMainAgent); the baseUrl it dials stays behind SsrfGuard")
     public static void addModel(String name) {
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may add a model to a provider.");
+        }
         requireConfiguredProvider(name);
 
         var body = JsonBodyReader.readJsonBody();

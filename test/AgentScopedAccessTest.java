@@ -1,5 +1,6 @@
 import com.google.gson.JsonParser;
 import controllers.RequestPrincipal;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.ConfigService;
 import services.Tx;
 import utils.AppClock;
 
@@ -16,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -128,6 +131,122 @@ class AgentScopedAccessTest extends FunctionalTest {
                 "{\"name\":\"scope-test-http\",\"transport\":\"HTTP\",\"url\":\"https://example.invalid/mcp\"}"));
         assertFalse(getContent(resp).contains(AGENT_SCOPE),
                 "an HTTP transport must not hit the STDIO guard; got: " + getContent(resp));
+    }
+
+    // --- agents: an agent changes its own settings, main any agent's ------------------------
+
+    @Test
+    void aCustomAgentChangesItsOwnModelButNotAnotherAgents() {
+        Long callerId = callerAgentId;
+        Long alienId = alienAgentId;
+        var alienBefore = commit(() -> modelOf(alienId));
+        withRegisteredModel("scope-test-own-choice", provider -> {
+            var choice = "{\"modelProvider\":\"" + provider + "\",\"modelId\":\"scope-test-own-choice\",\"enabled\":true}";
+
+            var own = asAgent(() -> PUT(agentRequest(callerId), "/api/agents/" + callerId, "application/json", choice));
+            assertIsOk(own);
+            var view = JsonParser.parseString(getContent(own)).getAsJsonObject();
+            assertEquals(List.of(provider, "scope-test-own-choice", "true"), List.of(view.get("modelProvider").getAsString(),
+                    view.get("modelId").getAsString(), view.get("enabled").getAsString()));
+
+            var alien = asAgent(() -> PUT(agentRequest(callerId), "/api/agents/" + alienId, "application/json", choice));
+            assertStatus(403, alien);
+            assertEquals(AGENT_SCOPE, field(alien, "code"));
+            assertEquals("Agent " + alienId + " is another agent: an agent changes only its own settings, and the main "
+                    + "agent any agent's.", field(alien, "message"));
+            assertEquals(alienBefore, commit(() -> modelOf(alienId)));
+        });
+    }
+
+    @Test
+    void aCustomAgentCannotPickAModelNoProviderRegisters() {
+        // Saved, the pick would switch the agent off (AgentService.update), and it could not add the model itself.
+        Long callerId = callerAgentId;
+        var before = commit(() -> modelOf(callerId));
+
+        var resp = asAgent(() -> PUT(agentRequest(callerId), "/api/agents/" + callerId, "application/json",
+                "{\"modelProvider\":\"scope-test-nowhere\",\"modelId\":\"scope-test-unregistered\"}"));
+
+        assertStatus(400, resp);
+        assertEquals("Model 'scope-test-unregistered' is not registered on provider 'scope-test-nowhere'. It must be "
+                + "added to the provider first, which only the main agent or the operator can do.", field(resp, "message"));
+        assertEquals(before, commit(() -> modelOf(callerId)));
+    }
+
+    @Test
+    void aCustomAgentMayEchoItsStoredModelWithAnOrdinaryEdit() {
+        // The permission half: a read-modify-write of the agent JSON carries the stored pair back, registered or not.
+        Long callerId = callerAgentId;
+        var before = commit(() -> modelOf(callerId));
+
+        var resp = asAgent(() -> PUT(agentRequest(callerId), "/api/agents/" + callerId, "application/json",
+                "{\"modelProvider\":\"" + before.get(0) + "\",\"modelId\":\"" + before.get(1)
+                        + "\",\"description\":\"scope-test-echo\"}"));
+
+        assertIsOk(resp);
+        assertEquals("scope-test-echo", field(resp, "description"));
+    }
+
+    @Test
+    void aBearerNamingNoAgentCannotUpdateAnAgent() {
+        Long callerId = callerAgentId;
+        var resp = asAgent(() -> PUT(bareBearerRequest(), "/api/agents/" + callerId, "application/json",
+                "{\"description\":\"scope-test-unnamed\"}"));
+        assertStatus(403, resp);
+        assertEquals(AGENT_SCOPE, field(resp, "code"));
+    }
+
+    // --- providers: a new model in a provider's list is main's to add -----------------------
+
+    @Test
+    void aCustomAgentCannotAddAModelToAProvider() {
+        // Every model picker lists a provider's models, so the list is instance-wide. The operator's half is
+        // ApiProvidersControllerTest's; main's is the isOperatorOrMain matrix in RequestPrincipalPolicyTest.
+        withRegisteredModel("m1", provider -> {
+            var modelsKey = "provider." + provider + ".models";
+            var before = commit(() -> ConfigService.get(modelsKey));
+
+            var resp = asAgent(() -> POST(agentRequest(callerAgentId), "/api/providers/" + provider + "/models",
+                    "application/json", "{\"id\":\"m2\"}"));
+
+            assertStatus(403, resp);
+            assertEquals(AGENT_SCOPE, field(resp, "code"));
+            assertEquals("Only the operator or the main agent may add a model to a provider.", field(resp, "message"));
+            assertEquals(before, commit(() -> ConfigService.get(modelsKey)));
+        });
+    }
+
+    /** Runs {@code body} with a provider of this class's own registering {@code model}, then removes it. */
+    private static void withRegisteredModel(String model, Consumer<String> body) {
+        var provider = "scope-test-" + UUID.randomUUID().toString().substring(0, 8);
+        var keys = List.of("baseUrl", "apiKey", "models");
+        commit(() -> {
+            ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:1/v1");
+            ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+            ConfigService.set("provider." + provider + ".models",
+                    "[{\"id\":\"" + model + "\",\"name\":\"" + model + "\",\"contextWindow\":1000}]");
+            return null;
+        });
+        try {
+            for (var i = 0; i < 50 && ProviderRegistry.get(provider) == null; i++) ProviderRegistry.refresh();
+            assertNotNull(ProviderRegistry.get(provider), "test precondition: the provider must register");
+            body.accept(provider);
+        } finally {
+            commit(() -> {
+                for (var key : keys) ConfigService.delete("provider." + provider + "." + key);
+                return null;
+            });
+            ProviderRegistry.refresh();
+        }
+    }
+
+    private static List<String> modelOf(Long agentId) {
+        Agent agent = Agent.findById(agentId);
+        return List.of(agent.modelProvider, agent.modelId, String.valueOf(agent.enabled));
+    }
+
+    private static String field(Http.Response resp, String name) {
+        return JsonParser.parseString(getContent(resp)).getAsJsonObject().get(name).getAsString();
     }
 
     // --- subagent runs: an agent owns what it spawned ----------------------------------------

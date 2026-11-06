@@ -48,6 +48,7 @@ import java.util.regex.Pattern;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -468,9 +469,15 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Update an agent by id")
-    @AgentAccess(value = OPEN, reason = "model config only; acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for the agent principal, and tool grants live on operator-only routes")
+    @AgentAccess(value = OWN_ONLY, reason = "an agent changes only its own row, main any (mayReachAgentScopedRow); "
+            + "acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for the agent principal, a model "
+            + "it picks must be registered, and tool grants live on operator-only routes")
     public static void update(Long id) {
         var agent = requireAgent(id);
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Agent " + id + " is another agent: an agent changes only "
+                    + "its own settings, and the main agent any agent's.");
+        }
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -488,6 +495,7 @@ public class ApiAgentsController extends Controller {
 
         var modelProvider = optStringOr(body, KEY_MODEL_PROVIDER, agent.modelProvider);
         var modelId = optStringOr(body, KEY_MODEL_ID, agent.modelId);
+        requireRegisteredModelForAgent(agent, modelProvider, modelId);
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
         // The main agent cannot be disabled. Service-layer enforcement would also
         // catch this, but we reject at the API boundary so the operator sees an
@@ -539,6 +547,18 @@ public class ApiAgentsController extends Controller {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "acpAllowed is operator-only; an agent cannot grant itself or another agent the ACP runtime.");
         }
+    }
+
+    /** Saved, a model no provider registers switches the agent off ({@link AgentService#update}), and only the
+     *  operator or main can add one, so an agent picking it could not undo the pick. The operator keeps the old
+     *  behaviour; an unchanged echo is no pick. */
+    private static void requireRegisteredModelForAgent(Agent agent, String modelProvider, String modelId) {
+        if (!RequestPrincipal.isAgentOriginated()) return;
+        if (modelProvider.equals(agent.modelProvider) && modelId.equals(agent.modelId)) return;
+        if (AgentService.isProviderConfigured(modelProvider, modelId)) return;
+        ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ("Model '%s' is not registered on provider '%s'. It must "
+                + "be added to the provider first, which only the main agent or the operator can do.")
+                .formatted(modelId, modelProvider));
     }
 
     /** A type switch deletes or creates USER.md and BOOTSTRAP.md, and the routes that write a
