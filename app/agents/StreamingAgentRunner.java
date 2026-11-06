@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -62,6 +63,7 @@ final class StreamingAgentRunner {
      * @param cb             event callbacks for SSE / streaming transports
      * @param acceptedAtNs   {@code System.nanoTime()} at process entry, or {@code null}
      * @param attachments    per-file metadata the frontend roundtripped, or {@code null}
+     * @param admission      completed with how the turn was taken in, before the model is called; or {@code null}
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
     static void runStreaming(Agent agent, @Nullable Long conversationId, String channelType, String peerId,
@@ -69,10 +71,9 @@ final class StreamingAgentRunner {
                              AtomicBoolean isCancelled,
                              AgentRunner.StreamingCallbacks cb,
                              @Nullable Long acceptedAtNs,
-                             @Nullable List<AttachmentService.Input> attachments) {
-        // The request thread's span (JCLAW-34) does not follow a new virtual thread by
-        // itself; the wrap is what makes the turn a child of the HTTP server span.
-        Thread.ofVirtual().name("agent-stream").start(Context.current().wrap(() -> {
+                             @Nullable List<AttachmentService.Input> attachments,
+                             @Nullable CompletableFuture<AgentRunner.TurnStart> admission) {
+        Runnable turnBody = () -> {
             final Long[] conversationIdRef = {null};
             // GH-12: the queue generation acquired with, so a release after an operator stop is a no-op.
             final long[] generationRef = {0};
@@ -99,7 +100,7 @@ final class StreamingAgentRunner {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
-                        isCancelled, conversationIdRef, generationRef, sinkRef, broadcast);
+                        isCancelled, conversationIdRef, generationRef, sinkRef, broadcast, admission);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 trace.conversationId(conversation.id);
@@ -137,6 +138,16 @@ final class StreamingAgentRunner {
                 // exception paths that returned without invoking any
                 // terminal callback.
                 QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
+            }
+        };
+        // The request thread's span (JCLAW-34) does not follow a new virtual thread by
+        // itself; the wrap is what makes the turn a child of the HTTP server span.
+        Thread.ofVirtual().name("agent-stream").start(Context.current().wrap(() -> {
+            try {
+                turnBody.run();
+            } finally {
+                // A no-op once the turn was taken in; a caller awaiting it must never wait on a turn that died first.
+                if (admission != null) admission.complete(AgentRunner.TurnStart.FAILED);
             }
         }));
     }
@@ -261,7 +272,8 @@ final class StreamingAgentRunner {
      * {@code isCancelled} is registered as the owner's flag for an operator stop,
      * the conversation id and acquired generation are written to {@code conversationIdRef[0]}
      * and {@code generationRef[0]} before anything else can throw, the turn begins on
-     * {@code broadcast}, and its fenced sink goes to {@code sinkRef[0]}.
+     * {@code broadcast}, and its fenced sink goes to {@code sinkRef[0]}. {@code admission}, when
+     * given, learns the outcome: not found, queued, or started once the user's message is saved.
      */
     @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag, slots for its ownership and sink, and its broadcast
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
@@ -269,7 +281,8 @@ final class StreamingAgentRunner {
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments,
             AtomicBoolean isCancelled, Long[] conversationIdRef, long[] generationRef,
-            ConversationSink[] sinkRef, TurnBroadcast broadcast) {
+            ConversationSink[] sinkRef, TurnBroadcast broadcast,
+            @Nullable CompletableFuture<AgentRunner.TurnStart> admission) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -282,6 +295,7 @@ final class StreamingAgentRunner {
         });
 
         if (conversation == null) {
+            if (admission != null) admission.complete(AgentRunner.TurnStart.NOT_FOUND);
             cb.onError().accept(new RuntimeException("Conversation not found"));
             return Optional.empty();
         }
@@ -290,6 +304,11 @@ final class StreamingAgentRunner {
                 userMessage, channelType, peerId, agent, attachments);
         long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, isCancelled);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
+            if (admission != null) {
+                // Read after the enqueue, so the turn ahead may have taken the message already: it is next either way.
+                int position = Math.max(1, ConversationQueue.getQueueSize(conversation.id));
+                admission.complete(AgentRunner.TurnStart.queued(conversation.id, position));
+            }
             cb.onInit().accept(conversation);
             cb.onComplete().accept(AgentRunner.QUEUED_MESSAGE_RESPONSE);
             return Optional.empty();
@@ -309,6 +328,7 @@ final class StreamingAgentRunner {
         sink.commit(() -> sink.appendUserMessage(userMessage, attachments));
 
         cb.onInit().accept(conversation);
+        if (admission != null) admission.complete(AgentRunner.TurnStart.started(conversation.id));
         return Optional.of(conversation);
     }
 

@@ -47,7 +47,7 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
- * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
+ * Chat dispatch endpoints: sync send, SSE streaming, turn start, and file upload.
  * Conversation management (list, get messages, delete, title gen) lives
  * in {@link ApiConversationsController}.
  */
@@ -78,6 +78,7 @@ public class ApiChatController extends Controller {
     // JSON body keys (request input + per-attachment metadata) and SSE/response payload keys.
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_CONVERSATION_ID = "conversationId";
+    private static final String KEY_STATUS = "status";
     private static final String KEY_QUOTE = "quote";
     private static final String KEY_ATTACHMENTS = "attachments";
     private static final String KEY_ATTACHMENT_ID = "attachmentId";
@@ -108,7 +109,7 @@ public class ApiChatController extends Controller {
         sse.sendRaw(TurnFrames.chunk(SSE_DATA, kind, content, SSE_FRAME_END));
     }
 
-    /** Validated prologue shared by send() and streamChat(). */
+    /** Validated prologue shared by send(), streamChat() and startTurn(). */
     private record ChatContext(Agent agent, String message, @Nullable Long conversationId, String username,
                                 List<AttachmentService.Input> attachments, @Nullable PendingOverrides overrides) {}
 
@@ -283,22 +284,8 @@ public class ApiChatController extends Controller {
     public static void send() {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
-        // JCLAW-26: intercept slash commands before the LLM round. The
-        // handler owns conversation creation (/new) or context-reset state
-        // (/reset). Unknown slash-prefixed input falls through as normal text.
-        var slashCmd = Commands.parse(ctx.message());
-        if (slashCmd.isPresent()) {
-            var current = resolveSlashConversation(slashCmd.get(), ctx.agent(), ctx.conversationId(), ctx.username());
-            // JCLAW-111: thread the user's typed arguments through the
-            // args-aware execute overload so /model status, /model reset,
-            // and /model NAME don't silently fall through to the no-args
-            // summary branch on web. Telegram got this fix in JCLAW-109 via
-            // AgentRunner.processInboundForAgentStreaming; the web path
-            // needs the same treatment.
-            // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
-            var slashResult = Commands.execute(
-                    slashCmd.get(), ctx.agent(), "web", ctx.username(), current,
-                    Commands.extractArgs(ctx.message()), true);
+        var slashResult = runSlashCommand(ctx.agent(), ctx.message(), ctx.conversationId(), ctx.username());
+        if (slashResult != null) {
             var slashResp = new HashMap<String, Object>();
             slashResp.put(KEY_CONVERSATION_ID,
                     slashResult.conversation() != null ? slashResult.conversation().id : null);
@@ -380,6 +367,8 @@ public class ApiChatController extends Controller {
      * {@code cancelled} flag is bridged from {@code sse.onClose} so SSE
      * disconnect and {@code POST /api/conversations/{id}/stop} (which flips the same
      * flag via {@link services.ConversationQueue#stop}) reach AgentRunner through one signal.
+     * The turn is tied to this request; {@link #startTurn} starts one that is not (JF-202).
+     * This route stays as it is while the chat page and the load-test harness drive it.
      *
      * <p>JCLAW-199: {@code @NoTransaction} opts out of Play 1.x's per-request
      * JPA transaction wrapper. Without this, the framework's TransactionalFilter
@@ -405,11 +394,7 @@ public class ApiChatController extends Controller {
         var agent = ctx.agent();
         var messageText = ctx.message();
         var username = ctx.username();
-        // A fresh chat's picks land on the conversation before the stream opens, so a bad
-        // pick is an ordinary 400 rather than an error frame.
-        var conversationId = ctx.overrides() != null && ctx.conversationId() == null
-                ? createWithOverrides(agent, username, ctx.overrides()).id
-                : ctx.conversationId();
+        var conversationId = conversationFor(ctx);
 
         // Heartbeat well inside the fork's 30 s QUIC idle window, so an HTTP/3 connection
         // survives a silent tool call (JCLAW-1204).
@@ -454,10 +439,97 @@ public class ApiChatController extends Controller {
     }
 
     /**
-     * JCLAW-26: slash-command intercept. /new creates a fresh conversation
-     * (init frame carries the new id so the frontend switches); /reset +
-     * /help mutate/query the current conversation. Unknown /foo falls
-     * through as normal text. Emits SSE frames directly; never calls
+     * POST /api/chat/turn — start a turn and answer once it has started or queued, before the model is called
+     * (JF-202). The body is {@link #streamChat}'s. The turn's frames go only to its conversation's stream
+     * ({@code GET /api/conversations/{id}/stream}), and it runs until it ends or an operator stops it
+     * ({@code POST /api/conversations/{id}/stop}): no request holds it, so a closed tab does not cancel it and no idle
+     * timer cuts it. A queued send publishes nothing until it drains. A slash command answers its reply here, with the
+     * conversation it ran in, as the chat stream's {@code init} and {@code complete} carry them.
+     *
+     * <p>{@code @NoTransaction}, as {@link #streamChat}: the turn's own thread reads the conversation this request may
+     * create, so nothing may wait on a request transaction's commit.
+     */
+    @SuppressWarnings("java:S2259")
+    @NoTransaction
+    @AgentAccess(value = OPERATOR_ONLY, reason = "the same recursion as send, started without a stream")
+    public static void startTurn() {
+        var acceptedAtNs = LatencyTrace.acceptedAtNsFromCurrentRequest();
+        var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
+        var conversationId = conversationFor(ctx);
+
+        var slashResult = runSlashCommand(ctx.agent(), ctx.message(), conversationId, ctx.username());
+        if (slashResult != null) {
+            var answer = new HashMap<String, Object>();
+            answer.put(KEY_STATUS, "command");
+            answer.put(KEY_CONVERSATION_ID, slashResult.conversation() != null ? slashResult.conversation().id : null);
+            answer.put("content", slashResult.responseText());
+            renderJSON(gson.toJson(answer));
+        }
+
+        var start = await(AgentRunner.startStreaming(ctx.agent(), conversationId, ctx.username(), ctx.message(),
+                startedTurnCallbacks(ctx.agent()), acceptedAtNs, ctx.attachments()));
+        var answer = new HashMap<String, Object>();
+        answer.put(KEY_CONVERSATION_ID, start.conversationId());
+        switch (start.outcome()) {
+            case STARTED -> answer.put(KEY_STATUS, "started");
+            case QUEUED -> {
+                answer.put(KEY_STATUS, "queued");
+                answer.put("position", start.position());
+            }
+            case NOT_FOUND -> {
+                notFound();
+                throw ApiResponses.unreachable();
+            }
+            case FAILED -> {
+                ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "The turn could not start.");
+                throw ApiResponses.unreachable();
+            }
+        }
+        renderJSON(gson.toJson(answer));
+    }
+
+    /**
+     * A started turn's own callbacks. Its frames reach its watchers through the runner, so they send nothing; a
+     * failure is logged as the chat stream logs one.
+     */
+    private static AgentRunner.StreamingCallbacks startedTurnCallbacks(Agent agent) {
+        return new AgentRunner.StreamingCallbacks(_ -> { }, _ -> { }, _ -> { }, _ -> { }, _ -> { }, _ -> { },
+                error -> EventLogger.error("channel", agent.name, "web",
+                        "Chat turn error: %s".formatted(error.getMessage())),
+                () -> { });
+    }
+
+    /**
+     * The conversation a chat request runs in: the one it names, else none yet (the runner creates one), else, for a
+     * fresh chat with model or thinking picks, one created now carrying them, so a bad pick is an ordinary 400.
+     */
+    private static @Nullable Long conversationFor(ChatContext ctx) {
+        var overrides = ctx.overrides();
+        return overrides != null && ctx.conversationId() == null
+                ? createWithOverrides(ctx.agent(), ctx.username(), overrides).id
+                : ctx.conversationId();
+    }
+
+    /**
+     * JCLAW-26: run {@code messageText} as a slash command, or return null when it is none, so it runs as normal
+     * text. /new creates a fresh conversation; /reset and /help mutate or query the current one. The model is never
+     * called.
+     */
+    private static Commands.@Nullable Result runSlashCommand(Agent agent, String messageText,
+                                                             @Nullable Long conversationId, String username) {
+        var slashCmd = Commands.parse(messageText);
+        if (slashCmd.isEmpty()) return null;
+        var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
+        // JCLAW-111: the typed arguments go through the args-aware execute overload, so /model status, /model reset
+        // and /model NAME don't fall through to the no-args summary branch on web, as JCLAW-109 fixed for Telegram.
+        // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
+        return Commands.execute(slashCmd.get(), agent, "web", username, slashConv,
+                Commands.extractArgs(messageText), true);
+    }
+
+    /**
+     * JCLAW-26: slash-command intercept on the chat stream: the init frame carries the conversation the command ran
+     * in (a fresh one for /new, so the frontend switches), and the complete frame its reply. Never calls
      * runStreaming, so the model isn't invoked at all.
      *
      * @return true when the command was handled (caller must return); false
@@ -466,15 +538,8 @@ public class ApiChatController extends Controller {
      */
     private static boolean handleStreamingSlashCommand(SseStream sse, Agent agent, String messageText,
                                                        @Nullable Long conversationId, String username) {
-        var slashCmd = Commands.parse(messageText);
-        if (slashCmd.isEmpty()) return false;
-
-        var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
-        // JCLAW-111: args-aware execute so /model status etc. work via SSE.
-        // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
-        var slashResult = Commands.execute(
-                slashCmd.get(), agent, "web", username, slashConv,
-                Commands.extractArgs(messageText), true);
+        var slashResult = runSlashCommand(agent, messageText, conversationId, username);
+        if (slashResult == null) return false;
         if (slashResult.conversation() != null) {
             sse.send(TurnFrames.init(slashResult.conversation().id));
         }

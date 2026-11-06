@@ -271,6 +271,7 @@ DELETE  /api/logging/levels/{logger}            ApiLoggingController.delete
 # Chat API
 POST    /api/chat/send                          ApiChatController.send
 POST    /api/chat/stream                        ApiChatController.streamChat
+POST    /api/chat/turn                          ApiChatController.startTurn
 POST    /api/chat/upload                        ApiChatController.uploadChatFiles
 
 # Persisted attachment downloads (JCLAW-279)

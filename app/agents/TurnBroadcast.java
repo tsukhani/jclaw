@@ -5,9 +5,12 @@ import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.ConversationTurnStream;
 import services.EventLogger;
+import utils.AppClock;
 
+import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -15,17 +18,18 @@ import java.util.function.Supplier;
  * that cannot be built or published is logged and dropped: watching a turn must never break it.
  *
  * <p>An owning broadcast is the turn's own: it begins the turn when the turn acquires its conversation and publishes
- * its one terminal frame. A joining one adds frames to the turn already open in the conversation, an inline subagent's
- * in its parent's, and never ends it. Once the turn's cancel flag is set, its next frame of any kind ends it as
- * stopped instead: what it had not committed is gone, and a reply after the flag is one the fenced sink dropped.
+ * its one terminal frame, and its {@code init} carries when it began, for a view that joins the turn late (JF-202). A
+ * joining one adds frames to the turn open in the conversation when it was made, an inline subagent's in its parent's
+ * or a coding run's in the turn that started it, and never ends it; once that turn ends it publishes nothing, so a
+ * later turn never gets its frames. Once the turn's cancel flag is set, its next frame of any kind ends it as stopped
+ * instead: what it had not committed is gone, and a reply after the flag is one the fenced sink dropped.
  */
 public final class TurnBroadcast {
-
-    private static final byte[] NO_BYTES = new byte[0];
 
     private final boolean owns;
     private final @Nullable AtomicBoolean cancelled;
     private volatile ConversationTurnStream.@Nullable Turn turn;
+    private volatile @Nullable Instant startedAt;
 
     private TurnBroadcast(boolean owns, @Nullable AtomicBoolean cancelled) {
         this.owns = owns;
@@ -83,6 +87,7 @@ public final class TurnBroadcast {
 
     /** Begin the turn as it acquires {@code conversationId} at {@code generation}, before it writes anything. */
     void acquired(Long conversationId, long generation) {
+        startedAt = AppClock.now();
         try {
             turn = ConversationTurnStream.begin(conversationId, generation);
         } catch (RuntimeException e) {
@@ -92,25 +97,28 @@ public final class TurnBroadcast {
     }
 
     public void init(Agent agent, Conversation conversation) {
-        if (owns) publish(open -> TurnFrames.json(TurnFrames.init(agent, conversation)));
+        // Read once the turn is open, which only acquired opens after setting it; a queued turn's init reaches here too.
+        if (owns) publish(open -> open.publishInit(TurnFrames.json(
+                TurnFrames.init(agent, conversation, Objects.requireNonNull(startedAt)))));
     }
 
     public void token(String content) {
-        publish(open -> open.claimFirstToken()
-                ? TurnFrames.json(TurnFrames.firstToken(content))
-                : TurnFrames.chunk(NO_BYTES, TurnFrames.Chunk.TOKEN, content, NO_BYTES));
+        publish(open -> {
+            if (open.claimFirstToken()) open.publish(TurnFrames.json(TurnFrames.firstToken(content)));
+            else open.publishDelta(TurnFrames.Chunk.TOKEN, content);
+        });
     }
 
     public void reasoning(String content) {
-        publish(open -> TurnFrames.chunk(NO_BYTES, TurnFrames.Chunk.REASONING, content, NO_BYTES));
+        publish(open -> open.publishDelta(TurnFrames.Chunk.REASONING, content));
     }
 
     public void status(String content) {
-        publish(open -> TurnFrames.json(TurnFrames.status(content)));
+        publish(open -> open.publish(TurnFrames.json(TurnFrames.status(content))));
     }
 
     public void toolCall(AgentRunner.ToolCallEvent event) {
-        publish(open -> TurnFrames.json(TurnFrames.toolCall(event)));
+        publish(open -> open.publish(TurnFrames.json(TurnFrames.toolCall(event))));
     }
 
     public void complete(String content) {
@@ -142,6 +150,11 @@ public final class TurnBroadcast {
         else complete(result.yielded() ? "" : result.response());
     }
 
+    /** Whether the turn this publishes to is still open; a joining broadcast made with none open never is. */
+    public boolean isOpen() {
+        return openTurn() != null;
+    }
+
     /** A streamed turn that reached no terminal callback still ends, so no view waits on it. */
     void endIfOpen() {
         if (owns && openTurn() != null) error(new IllegalStateException("the turn ended without a reply"));
@@ -151,7 +164,7 @@ public final class TurnBroadcast {
         return cancelled != null && cancelled.get();
     }
 
-    private void publish(Function<ConversationTurnStream.Turn, byte[]> frame) {
+    private void publish(Consumer<ConversationTurnStream.Turn> frame) {
         var open = openTurn();
         if (open == null) return;
         if (cancelled()) {
@@ -159,7 +172,7 @@ public final class TurnBroadcast {
             return;
         }
         try {
-            open.publish(frame.apply(open));
+            frame.accept(open);
         } catch (RuntimeException e) {
             EventLogger.warn("turn-stream", "A frame of a turn could not be published: %s".formatted(e.getMessage()));
         }

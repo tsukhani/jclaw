@@ -10,6 +10,7 @@ import llm.routing.ModelRouter;
 import llm.routing.RoutedTurn;
 import memory.MemoryAutoCapture;
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
 import models.SubagentRun;
 import models.TaskRun;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -203,6 +205,27 @@ public class AgentRunner {
             Consumer<Exception> onError,
             Runnable onCancel
     ) {
+    }
+
+    /**
+     * How a turn {@link #startStreaming} started was taken in, known before the model is called (JF-202): it acquired
+     * its conversation and saved the user's message, so its frames now reach the conversation's stream; it queued,
+     * {@code position} in line behind the turn running there; its conversation does not exist; or it failed first.
+     */
+    public record TurnStart(Outcome outcome, @Nullable Long conversationId, int position) {
+
+        public enum Outcome { STARTED, QUEUED, NOT_FOUND, FAILED }
+
+        static final TurnStart NOT_FOUND = new TurnStart(Outcome.NOT_FOUND, null, 0);
+        static final TurnStart FAILED = new TurnStart(Outcome.FAILED, null, 0);
+
+        static TurnStart started(Long conversationId) {
+            return new TurnStart(Outcome.STARTED, conversationId, 0);
+        }
+
+        static TurnStart queued(Long conversationId, int position) {
+            return new TurnStart(Outcome.QUEUED, conversationId, position);
+        }
     }
 
     /**
@@ -912,7 +935,24 @@ public class AgentRunner {
                                     @Nullable Long acceptedAtNs,
                                     @Nullable List<AttachmentService.Input> attachments) {
         StreamingAgentRunner.runStreaming(agent, conversationId, channelType, peerId, userMessage,
-                isCancelled, cb, acceptedAtNs, attachments);
+                isCancelled, cb, acceptedAtNs, attachments, null);
+    }
+
+    /**
+     * Start a web chat turn that no request holds (JF-202). It runs as {@link #runStreaming} runs a web turn, and its
+     * frames reach its conversation's {@link services.ConversationTurnStream} the same way, but its cancel flag is its
+     * own, so only an operator stop ({@link ConversationQueue#stop}) ends it early. The future completes once the turn
+     * has started or queued, before the model is called, or once it has failed to.
+     *
+     * @param cb the turn's own callbacks, which its frames reach as well
+     */
+    public static CompletableFuture<TurnStart> startStreaming(
+            Agent agent, @Nullable Long conversationId, String peerId, String userMessage, StreamingCallbacks cb,
+            @Nullable Long acceptedAtNs, @Nullable List<AttachmentService.Input> attachments) {
+        var admission = new CompletableFuture<TurnStart>();
+        StreamingAgentRunner.runStreaming(agent, conversationId, ChannelType.WEB.value, peerId, userMessage,
+                new AtomicBoolean(false), cb, acceptedAtNs, attachments, admission);
+        return admission;
     }
 
     /**

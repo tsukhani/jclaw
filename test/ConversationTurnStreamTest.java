@@ -1,3 +1,6 @@
+import agents.TurnBroadcast;
+import agents.TurnFrames;
+import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConversationTurnStream;
@@ -571,7 +574,230 @@ class ConversationTurnStreamTest extends UnitTest {
         unsubscribe.run();
     }
 
+    // --- JF-202: the replay rebuilds a long turn ---
+
+    @Test
+    void aFreshViewerOfALongTurnGetsItsInitThenItsMergedTextThenLiveWithNoResync() {
+        long conversation = conversation();
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        broadcast.token("It ");
+        var text = new StringBuilder();
+        for (int i = 0; i < 10_000; i++) {
+            broadcast.token("w" + i + " ");
+            text.append('w').append(i).append(' ');
+        }
+
+        var sink = new RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        broadcast.token("live");
+        broadcast.complete("done");
+
+        var heard = data(sink.awaitData(complete("done")));
+        assertEquals(5, heard.size(), "init, the first token, the merged text, the live token, the end: " + heard.size());
+        assertEquals("init", type(heard.get(0)));
+        assertEquals("It ", com.google.gson.JsonParser.parseString(heard.get(1)).getAsJsonObject().get("content").getAsString());
+        assertEquals(delta(TurnFrames.Chunk.TOKEN, text.toString()), heard.get(2));
+        assertEquals(delta(TurnFrames.Chunk.TOKEN, "live"), heard.get(3));
+        unsubscribe.run();
+    }
+
+    @Test
+    void aSubscriberWatchingLiveGetsEveryDeltaOfALongTurn() {
+        long conversation = conversation();
+        var sink = new RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.token("It ");
+        for (int i = 0; i < 10_000; i++) {
+            broadcast.token("w" + i + " ");
+            if (i % 1_000 == 999) sink.awaitCount(i + 2);
+        }
+        broadcast.complete("done");
+
+        var heard = data(sink.awaitData(complete("done")));
+        assertEquals(10_002, heard.size());
+        assertEquals(delta(TurnFrames.Chunk.TOKEN, "w0 "), heard.get(1));
+        assertEquals(delta(TurnFrames.Chunk.TOKEN, "w9999 "), heard.get(10_000));
+        unsubscribe.run();
+    }
+
+    @Test
+    void theReplayMergesADeltaOnlyIntoTheFrameBeforeItOfItsOwnKindAndNeverIntoInitOrTheFirstToken() {
+        long conversation = conversation();
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        broadcast.token("a");
+        broadcast.token("b");
+        broadcast.token("c");
+        broadcast.reasoning("r");
+        broadcast.reasoning("s");
+        broadcast.status("Using tool: datetime");
+        broadcast.token("d");
+        broadcast.token("e");
+
+        var sink = new RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        broadcast.complete("done");
+
+        var heard = data(sink.awaitData(complete("done")));
+        assertEquals(List.of("init", "token", "token", "reasoning", "status", "token", "complete"),
+                heard.stream().map(ConversationTurnStreamTest::type).toList());
+        assertEquals("a", com.google.gson.JsonParser.parseString(heard.get(1)).getAsJsonObject().get("content").getAsString());
+        assertEquals(List.of(delta(TurnFrames.Chunk.TOKEN, "bc"), delta(TurnFrames.Chunk.REASONING, "rs"),
+                status("Using tool: datetime"), delta(TurnFrames.Chunk.TOKEN, "de")), heard.subList(2, 6));
+        unsubscribe.run();
+    }
+
+    @Test
+    void aLastIdMergedIntoALaterFrameResyncsThenGetsTheKeptFramesWhileTheMergedFramesOwnIdGetsNone() {
+        long conversation = conversation();
+        var watching = new RecordingSink();
+        var unsubscribeWatching = ConversationTurnStream.subscribe(conversation, null, watching);
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        broadcast.token("a");
+        broadcast.token("b");
+        broadcast.token("c");
+        var live = watching.awaitData(delta(TurnFrames.Chunk.TOKEN, "c"));
+
+        var merged = new RecordingSink();
+        var unsubscribeMerged = ConversationTurnStream.subscribe(conversation, live.get(2).id(), merged);
+        var upToDate = new RecordingSink();
+        var unsubscribeUpToDate = ConversationTurnStream.subscribe(conversation, live.get(3).id(), upToDate);
+        broadcast.complete("done");
+
+        var resynced = merged.awaitData(complete("done"));
+        assertEquals(List.of(RESYNC, live.get(0).data(), live.get(1).data(), delta(TurnFrames.Chunk.TOKEN, "bc"),
+                complete("done")), data(resynced));
+        assertIncreasing(resynced);
+        assertEquals(live.get(3).id(), resynced.get(3).id(), "the merged frame carries the id of the last delta in it");
+        assertEquals(List.of(complete("done")), data(upToDate.awaitData(complete("done"))));
+        unsubscribeMerged.run();
+        unsubscribeUpToDate.run();
+        unsubscribeWatching.run();
+    }
+
+    @Test
+    void initOutlivesTheReplayCapAndTheResyncSitsWhereTheDroppedFramesWere() {
+        long conversation = conversation();
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        int frames = ConversationTurnStream.MAX_REPLAY_FRAMES + 10;
+        for (int i = 0; i < frames; i++) broadcast.status("s" + i);
+        var last = status("s" + (frames - 1));
+
+        var opened = new RecordingSink();
+        var unsubscribeOpened = ConversationTurnStream.subscribe(conversation, null, opened);
+        var heard = opened.awaitData(last);
+
+        assertEquals(ConversationTurnStream.MAX_REPLAY_FRAMES + 1, heard.size(), "init, the resync, and every frame kept");
+        assertEquals("init", type(heard.get(0).data()));
+        assertEquals(RESYNC, heard.get(1).data());
+        assertEquals(status("s11"), heard.get(2).data(), "the oldest frames after init went first");
+        assertIncreasing(heard);
+        var fromInit = new RecordingSink();
+        var unsubscribeFromInit = ConversationTurnStream.subscribe(conversation, heard.get(0).id(), fromInit);
+        assertEquals(heard, fromInit.awaitData(last), "a client that saw only init missed the dropped frames");
+        var fromResync = new RecordingSink();
+        var unsubscribeFromResync = ConversationTurnStream.subscribe(conversation, heard.get(1).id(), fromResync);
+        assertEquals(heard.subList(2, heard.size()), fromResync.awaitData(last), "one that saw the resync missed nothing kept");
+        broadcast.complete("done");
+        unsubscribeOpened.run();
+        unsubscribeFromInit.run();
+        unsubscribeFromResync.run();
+    }
+
+    @Test
+    void aMergedRunJustUnderTheReplayCapIsKeptWholeForAFreshViewer() {
+        long conversation = conversation();
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        broadcast.token("It ");
+        var text = new StringBuilder();
+        for (int i = 0; i < 2_000; i++) {
+            broadcast.token(thousandBytes(i));
+            text.append(thousandBytes(i));
+        }
+
+        var sink = new RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        broadcast.complete("done");
+
+        var heard = data(sink.awaitData(complete("done")));
+        var caughtUp = heard.subList(0, heard.size() - 1);
+        assertEquals("init", type(caughtUp.get(0)));
+        assertEquals("It ", content(caughtUp.get(1)), "the first token is kept as it came");
+        assertEquals(List.of("token"), caughtUp.subList(2, caughtUp.size()).stream()
+                .map(ConversationTurnStreamTest::type).distinct().toList(), "no resync, only the run's text");
+        assertEquals(text.toString(), String.join("", caughtUp.subList(2, caughtUp.size()).stream()
+                .map(ConversationTurnStreamTest::content).toList()), "the whole run, in order");
+        unsubscribe.run();
+    }
+
+    @Test
+    void aMergedRunPastTheReplayCapKeepsItsNewestTextUnderTheCapAfterInitAndAResync() {
+        long conversation = conversation();
+        var broadcast = TurnBroadcast.owning(conversation, generation());
+        broadcast.init(new Agent(), row(conversation));
+        broadcast.token("It ");
+        var text = new StringBuilder();
+        for (int i = 0; i < 2_600; i++) {
+            broadcast.token(thousandBytes(i));
+            text.append(thousandBytes(i));
+        }
+
+        var sink = new RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        broadcast.complete("done");
+
+        var heard = data(sink.awaitData(complete("done")));
+        var caughtUp = heard.subList(0, heard.size() - 1);
+        assertEquals("init", type(caughtUp.get(0)));
+        assertEquals(RESYNC, caughtUp.get(1));
+        var kept = caughtUp.subList(2, caughtUp.size());
+        assertEquals(List.of("token"), kept.stream().map(ConversationTurnStreamTest::type).distinct().toList());
+        var keptText = String.join("", kept.stream().map(ConversationTurnStreamTest::content).toList());
+        assertTrue(text.toString().endsWith(keptText), "what is kept is the run's newest text");
+        assertTrue(keptText.length() > ConversationTurnStream.MAX_REPLAY_BYTES / 2,
+                "most of the cap still holds text: " + keptText.length());
+        long replayed = caughtUp.get(0).length() + kept.stream().mapToLong(String::length).sum();
+        assertTrue(replayed <= ConversationTurnStream.MAX_REPLAY_BYTES, "the replay is held under its cap: " + replayed);
+        unsubscribe.run();
+    }
+
     // --- helpers ---
+
+    /** A delta of 1,000 ASCII bytes that names its place in the run. */
+    private static String thousandBytes(int i) {
+        return String.format("%06d", i) + "x".repeat(994);
+    }
+
+    private static String content(String frame) {
+        return com.google.gson.JsonParser.parseString(frame).getAsJsonObject().get("content").getAsString();
+    }
+
+    private static models.Conversation row(long conversationId) {
+        var conversation = new models.Conversation();
+        conversation.id = conversationId;
+        return conversation;
+    }
+
+    private static String delta(TurnFrames.Chunk kind, String content) {
+        return new String(TurnFrames.chunk(new byte[0], kind, content, new byte[0]), StandardCharsets.UTF_8);
+    }
+
+    private static String complete(String content) {
+        return new String(TurnFrames.json(TurnFrames.complete(content)), StandardCharsets.UTF_8);
+    }
+
+    private static String status(String content) {
+        return new String(TurnFrames.json(TurnFrames.status(content)), StandardCharsets.UTF_8);
+    }
+
+    private static String type(String frame) {
+        return com.google.gson.JsonParser.parseString(frame).getAsJsonObject().get("type").getAsString();
+    }
 
     record Event(long id, String data) {}
 

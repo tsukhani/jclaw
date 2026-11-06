@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,9 +30,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * has (an operator stop released its conversation before it began) publishes nothing, so its frames can never end the
  * turn that replaced it.
  *
- * <p>The frames of the turn in progress are kept for a reconnecting client, up to {@link #MAX_REPLAY_FRAMES} and
- * {@link #MAX_REPLAY_BYTES}; past either, the oldest go, and a client that missed one of them gets a
- * {@code resync} frame first. A conversation with no turn running and no subscriber holds no state.
+ * <p>The frames of the turn in progress are kept for a client that opens or reconnects during it. A token or reasoning
+ * delta merges into the kept frame before it when that frame is a delta of the same kind (JF-202), up to 64 KiB a
+ * frame, so a long reply is kept as a few frames per run of text and a late view can rebuild it; a live subscriber
+ * still gets every delta. The turn's {@code init} is kept however long the turn runs; past {@link #MAX_REPLAY_FRAMES} or
+ * {@link #MAX_REPLAY_BYTES}, the oldest other frames go. A client whose last id is no longer kept, because its frame
+ * went or merged into a later one, gets a {@code resync} frame where the frames it cannot have went, then the kept
+ * frames. A conversation with no turn running and no subscriber holds no state.
  *
  * <p>A publish never waits on a client: it numbers the frame, keeps it and offers it to each subscriber's bounded
  * queue under the lock, and a subscriber whose queue is full is closed and dropped. Each subscriber's frames are
@@ -41,7 +46,7 @@ public final class ConversationTurnStream {
 
     private ConversationTurnStream() {}
 
-    /** Frames of the turn in progress kept for a reconnecting client. */
+    /** Frames of the turn in progress kept for a reconnecting client, a merged run of deltas counting as one. */
     public static final int MAX_REPLAY_FRAMES = 8_192;
     /** Bytes of the turn in progress kept for a reconnecting client. */
     public static final long MAX_REPLAY_BYTES = 2L * 1024 * 1024;
@@ -52,6 +57,13 @@ public final class ConversationTurnStream {
 
     private static final byte[] STOPPED = TurnFrames.json(TurnFrames.stopped());
     private static final byte[] RESYNC = TurnFrames.json(TurnFrames.resync());
+    private static final byte[] NO_BYTES = new byte[0];
+
+    /**
+     * Past this, a run of deltas goes on in a new kept frame of its kind, so a long reply is evicted from its oldest
+     * text a frame at a time, and no one frame copied under the lock on a catch-up outgrows it by more than a delta.
+     */
+    private static final long MAX_MERGED_FRAME_BYTES = 64L * 1024;
 
     private static final AtomicLong IDS = new AtomicLong(AppClock.now().toEpochMilli() * 1_000L);
 
@@ -67,6 +79,54 @@ public final class ConversationTurnStream {
     private record Frame(long id, byte[] json) {}
 
     private static final Frame POISON = new Frame(-1, new byte[0]);
+
+    /**
+     * A frame the replay keeps. A delta keeps its text rather than its JSON, so the later deltas merged into it cost
+     * an append, and its JSON is built once per client that catches up; it carries the id of the last delta merged in.
+     */
+    private static final class Kept {
+        long id;
+        private final byte @Nullable [] json;
+        private final TurnFrames.@Nullable Chunk kind;
+        private final @Nullable StringBuilder text;
+        /** What it counts against {@link #MAX_REPLAY_BYTES}: the length of its JSON. */
+        long bytes;
+
+        private Kept(Frame frame, TurnFrames.@Nullable Chunk kind, @Nullable String content) {
+            this.id = frame.id();
+            this.json = kind == null ? frame.json() : null;
+            this.kind = kind;
+            this.text = content == null ? null : new StringBuilder(content);
+            this.bytes = frame.json().length;
+        }
+
+        boolean takes(TurnFrames.Chunk delta) {
+            return kind == delta;
+        }
+
+        /** Merge the next delta of its kind, {@code frame} carrying {@code content}; returns the bytes it adds. */
+        long merge(Frame frame, String content) {
+            Objects.requireNonNull(text).append(content);
+            id = frame.id();
+            long added = frame.json().length - Objects.requireNonNull(kind).overhead();
+            bytes += added;
+            return added;
+        }
+
+        /** Under the channel's lock: what a catching-up client gets, its text copied as it stands now. */
+        Snapshot snapshot() {
+            return json != null ? new Snapshot(id, json, null, null)
+                    : new Snapshot(id, null, kind, Objects.requireNonNull(text).toString());
+        }
+    }
+
+    /** A kept frame as a catching-up client gets it; a merged delta's JSON is built on the client's writer, off the lock. */
+    private record Snapshot(long id, byte @Nullable [] json, TurnFrames.@Nullable Chunk kind, @Nullable String text) {
+        byte[] bytes() {
+            return json != null ? json
+                    : TurnFrames.chunk(NO_BYTES, Objects.requireNonNull(kind), Objects.requireNonNull(text), NO_BYTES);
+        }
+    }
 
     /**
      * Start the turn that acquired {@code conversationId} at queue ownership {@code generation}. A turn still open there
@@ -122,14 +182,16 @@ public final class ConversationTurnStream {
     }
 
     /**
-     * Subscribe {@code sink} to {@code conversationId}: the frames of the turn in progress after {@code lastEventId}
-     * (all of them when it is null), then every frame live. A {@code resync} frame comes first when some frame after
-     * {@code lastEventId} is no longer kept. Returns the unsubscribe handle, which is idempotent.
+     * Subscribe {@code sink} to {@code conversationId}: the kept frames of the turn in progress after
+     * {@code lastEventId} (all of them when it is null), its deltas merged, then every frame live. When some frame the
+     * client cannot have is gone, dropped or merged into a later one, a {@code resync} frame stands where it was:
+     * after the turn's {@code init} when that precedes the gap, with the kept frames after it. Returns the unsubscribe
+     * handle, which is idempotent.
      */
     public static Runnable subscribe(Long conversationId, @Nullable Long lastEventId, Sink sink) {
         var subscriber = new Subscriber(sink);
         var channel = lockChannel(conversationId);
-        List<Frame> catchUp;
+        List<Snapshot> catchUp;
         try {
             catchUp = channel.catchUp(lastEventId);
             channel.subscribers.add(subscriber);
@@ -201,12 +263,30 @@ public final class ConversationTurnStream {
 
         /** Publish one frame's JSON; dropped once the turn has ended. */
         public void publish(byte[] json) {
+            append(json, false, null, null);
+        }
+
+        /** Publish the turn's {@code init}, which the replay keeps for as long as the turn runs. */
+        public void publishInit(byte[] json) {
+            append(json, true, null, null);
+        }
+
+        /**
+         * Publish one token or reasoning delta. Every subscriber gets it as its own frame; the replay merges it into
+         * the frame before it when that is a delta of the same kind.
+         */
+        public void publishDelta(TurnFrames.Chunk kind, String content) {
+            if (!open) return;
+            append(TurnFrames.chunk(NO_BYTES, kind, content, NO_BYTES), false, kind, content);
+        }
+
+        private void append(byte[] json, boolean pinned, TurnFrames.@Nullable Chunk delta, @Nullable String content) {
             if (!open) return;
             List<Subscriber> dropped;
             channel.lock.lock();
             try {
                 if (!open) return;
-                dropped = channel.append(json);
+                dropped = channel.append(json, pinned, delta, content);
             } finally {
                 channel.lock.unlock();
             }
@@ -235,10 +315,12 @@ public final class ConversationTurnStream {
 
         /** Under the channel's lock. The replay goes with the turn; retiring the channel is the caller's call. */
         private List<Subscriber> endLocked(byte[] json) {
-            var dropped = channel.append(json);
+            var dropped = channel.append(json, false, null, null);
             open = false;
             channel.turn = null;
             channel.replay.clear();
+            channel.init = null;
+            channel.newest = null;
             channel.replayBytes = 0;
             channel.coveredFrom = channel.lastIssued;
             return dropped;
@@ -253,9 +335,17 @@ public final class ConversationTurnStream {
         @Nullable Turn turn;
         /** The newest generation a turn has begun with here. */
         long latestGeneration = Long.MIN_VALUE;
-        final ArrayDeque<Frame> replay = new ArrayDeque<>();
+        /** The turn's {@code init}, kept apart from {@link #replay} so no cap evicts it. */
+        @Nullable Kept init;
+        /** The kept frames other than {@link #init}, oldest first. */
+        final ArrayDeque<Kept> replay = new ArrayDeque<>();
+        /** The frame kept last, the only one a delta can merge into. */
+        @Nullable Kept newest;
         long replayBytes;
-        /** Every frame of this conversation with a larger id is in {@link #replay}. */
+        /**
+         * Every frame of this conversation with a larger id is kept, in {@link #replay} or as {@link #init}, or merged
+         * into a later frame there.
+         */
         long coveredFrom;
         long lastIssued;
         final List<Subscriber> subscribers = new ArrayList<>();
@@ -267,17 +357,14 @@ public final class ConversationTurnStream {
             this.coveredFrom = lastIssued;
         }
 
-        /** Number, keep and fan out one frame; returns the subscribers it dropped, still to be closed. */
-        List<Subscriber> append(byte[] json) {
+        /**
+         * Number, keep and fan out one frame: {@code pinned} for the turn's {@code init}, a {@code delta} of that kind
+         * carrying {@code content}, or neither. Returns the subscribers it dropped, still to be closed.
+         */
+        List<Subscriber> append(byte[] json, boolean pinned, TurnFrames.@Nullable Chunk delta, @Nullable String content) {
             var frame = new Frame(IDS.incrementAndGet(), json);
             lastIssued = frame.id();
-            replay.addLast(frame);
-            replayBytes += json.length;
-            while (replay.size() > 1 && (replay.size() > MAX_REPLAY_FRAMES || replayBytes > MAX_REPLAY_BYTES)) {
-                var evicted = replay.removeFirst();
-                replayBytes -= evicted.json().length;
-                coveredFrom = evicted.id();
-            }
+            keep(frame, pinned, delta, content);
             List<Subscriber> dropped = null;
             for (var it = subscribers.iterator(); it.hasNext(); ) {
                 var subscriber = it.next();
@@ -294,29 +381,79 @@ public final class ConversationTurnStream {
             return dropped == null ? List.of() : dropped;
         }
 
-        /** The frames a new subscriber starts with: what it missed of the turn in progress, after a resync if needed. */
-        List<Frame> catchUp(@Nullable Long lastEventId) {
-            if (lastEventId == null) {
-                if (turn == null) return List.of();
-                return coveredFrom > turn.startedAfter ? resyncThenReplay() : List.copyOf(replay);
+        private void keep(Frame frame, boolean pinned, TurnFrames.@Nullable Chunk delta, @Nullable String content) {
+            var last = newest;
+            if (delta != null && content != null && last != null && last.takes(delta)
+                    && last.bytes < MAX_MERGED_FRAME_BYTES) {
+                replayBytes += last.merge(frame, content);
+            } else {
+                var kept = new Kept(frame, delta, content);
+                if (pinned && init == null) init = kept;
+                else replay.addLast(kept);
+                newest = kept;
+                replayBytes += kept.bytes;
             }
-            long last = lastEventId;
-            // Ids are process-wide, so only an id this conversation issued and still accounts for proves the rest kept.
-            boolean known = last == coveredFrom || last == lastIssued
-                    || replay.stream().anyMatch(frame -> frame.id() == last);
-            if (!known) return resyncThenReplay();
-            var missed = new ArrayList<Frame>();
-            for (var frame : replay) {
-                if (frame.id() > last) missed.add(frame);
+            // The newest frame always stays, and init is never in the replay to be evicted.
+            while (replay.size() > 1
+                    && (replay.size() + (init == null ? 0 : 1) > MAX_REPLAY_FRAMES || replayBytes > MAX_REPLAY_BYTES)) {
+                var evicted = replay.removeFirst();
+                replayBytes -= evicted.bytes;
+                coveredFrom = evicted.id;
             }
-            return missed;
         }
 
-        private List<Frame> resyncThenReplay() {
-            var frames = new ArrayList<Frame>(replay.size() + 1);
-            frames.add(new Frame(coveredFrom, RESYNC));
-            frames.addAll(replay);
+        /** The frames a new subscriber starts with: what it missed of the turn in progress, with a resync if needed. */
+        List<Snapshot> catchUp(@Nullable Long lastEventId) {
+            if (lastEventId == null) {
+                if (turn == null) return List.of();
+                return keptAfter(Long.MIN_VALUE, coveredFrom > turn.startedAfter);
+            }
+            long last = lastEventId;
+            // Ids are process-wide, and a delta's id goes when a later delta merges into its frame, so only an id this
+            // conversation issued and still accounts for proves the rest kept. Below the floor only init is kept, and
+            // a client that last saw it missed the frames dropped after it.
+            boolean known = last >= coveredFrom && (last == coveredFrom || last == lastIssued || keeps(last));
+            return known ? keptAfter(last, false) : keptAfter(Long.MIN_VALUE, true);
+        }
+
+        private boolean keeps(long id) {
+            var pinned = init;
+            if (pinned != null && pinned.id == id) return true;
+            for (var kept : replay) {
+                if (kept.id == id) return true;
+            }
+            return false;
+        }
+
+        /**
+         * The kept frames after {@code last} in id order. With {@code resync}, a resync frame goes where the frames
+         * that are gone were, carrying the floor's id: after a pinned init that precedes them, so ids still increase.
+         */
+        private List<Snapshot> keptAfter(long last, boolean resync) {
+            var frames = new ArrayList<Snapshot>(replay.size() + 2);
+            boolean resyncDue = resync;
+            var pinned = init;
+            for (var kept : replay) {
+                if (pinned != null && pinned.id < kept.id) {
+                    resyncDue = add(frames, pinned, last, resyncDue);
+                    pinned = null;
+                }
+                resyncDue = add(frames, kept, last, resyncDue);
+            }
+            if (pinned != null) resyncDue = add(frames, pinned, last, resyncDue);
+            if (resyncDue) frames.add(new Snapshot(coveredFrom, RESYNC, null, null));
             return frames;
+        }
+
+        /** Add {@code kept} if it follows {@code last}, after the resync if that is due before it; returns if it still is. */
+        private boolean add(List<Snapshot> frames, Kept kept, long last, boolean resyncDue) {
+            boolean due = resyncDue;
+            if (due && kept.id > coveredFrom) {
+                frames.add(new Snapshot(coveredFrom, RESYNC, null, null));
+                due = false;
+            }
+            if (kept.id > last) frames.add(kept.snapshot());
+            return due;
         }
 
         void retireIfIdle() {
@@ -392,17 +529,17 @@ public final class ConversationTurnStream {
     }
 
     /** The subscriber's writer thread: its catch-up frames, then its queue until the pill. Never interrupted. */
-    private static void write(Subscriber subscriber, List<Frame> catchUp) {
+    private static void write(Subscriber subscriber, List<Snapshot> catchUp) {
         try {
             for (var frame : catchUp) {
                 if (subscriber.closed) return;
-                subscriber.sink.write(event(frame));
+                subscriber.sink.write(event(frame.id(), frame.bytes()));
             }
             while (true) {
                 var frame = subscriber.queue.take();
                 if (frame == POISON || subscriber.closed) return;
                 subscriber.queuedBytes.addAndGet(-frame.json().length);
-                subscriber.sink.write(event(frame));
+                subscriber.sink.write(event(frame.id(), frame.json()));
             }
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -414,9 +551,8 @@ public final class ConversationTurnStream {
     }
 
     /** {@code id: N\ndata: <json>\n\n} in one array, so the id and its data reach the client in one chunk. */
-    private static byte[] event(Frame frame) {
-        var head = ("id: " + frame.id() + "\ndata: ").getBytes(StandardCharsets.UTF_8);
-        var json = frame.json();
+    private static byte[] event(long id, byte[] json) {
+        var head = ("id: " + id + "\ndata: ").getBytes(StandardCharsets.UTF_8);
         var event = new byte[head.length + json.length + 2];
         System.arraycopy(head, 0, event, 0, head.length);
         System.arraycopy(json, 0, event, head.length, json.length);

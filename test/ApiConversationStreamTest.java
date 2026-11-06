@@ -258,6 +258,77 @@ class ApiConversationStreamTest extends FunctionalTest {
         }
     }
 
+    @Test
+    void aViewerOpeningOnAStartedTurnMidWayGetsItsInitAndItsTextSoFarThenItLive() throws Exception {
+        login();
+        var watching = new ConversationTurnStreamTest.RecordingSink();
+        Runnable unsubscribeWatching = () -> { };
+        // Three deltas, then the rest once the viewer is open.
+        try (var model = new HeldModel((held, exchange, request) -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                for (var piece : new String[] {"It", " is", " now"}) {
+                    out.write(deltaChunk(piece));
+                    out.flush();
+                }
+                held.awaitRelease();
+                out.write(deltaChunk("."));
+                out.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+            }
+        })) {
+            long[] ids = inFreshTx(() -> {
+                var agent = new Agent();
+                agent.name = "started-agent-" + UUID.randomUUID().toString().substring(0, 8);
+                agent.modelProvider = model.provider;
+                agent.modelId = HeldModel.MODEL;
+                agent.enabled = true;
+                agent.save();
+                var row = new Conversation();
+                row.agent = agent;
+                row.channelType = "web";
+                row.peerId = "admin";
+                row.save();
+                return new long[] {agent.id, row.id};
+            });
+            long conversation = ids[1];
+            // Watching from before the turn, so it hears each delta as it comes.
+            unsubscribeWatching = ConversationTurnStream.subscribe(conversation, null, watching);
+            var answer = JsonParser.parseString(getContent(POST("/api/chat/turn", "application/json",
+                    "{\"agentId\": " + ids[0] + ", \"conversationId\": " + conversation
+                            + ", \"message\": \"What time is it?\"}"))).getAsJsonObject();
+            assertEquals("started", answer.get("status").getAsString(), answer.toString());
+            watching.awaitData(token(" now"));
+            var releasing = Thread.ofPlatform().start(() -> {
+                awaitSubscribers(conversation, 2);
+                model.release();
+            });
+
+            var chunks = read(conversation, "", Map.of(), heard -> heard.getLast().contains("\"complete\""));
+
+            var live = watching.awaitUntil(events -> events.getLast().data().contains("\"complete\""), "heard the end");
+            var init = JsonParser.parseString(live.get(0).data()).getAsJsonObject();
+            assertEquals("init", init.get("type").getAsString());
+            assertDoesNotThrow(() -> java.time.Instant.parse(init.get("startedAt").getAsString()));
+            assertEquals(token(" now"), live.get(3).data(), "test precondition: three deltas before the viewer opened");
+            var expected = new java.util.ArrayList<String>();
+            expected.add(OPEN);
+            expected.add(event(live.get(0)));
+            expected.add(event(live.get(1)));
+            expected.add("id: " + live.get(3).id() + "\ndata: " + token(" is now") + "\n\n");
+            for (var event : live.subList(4, live.size())) expected.add(event(event));
+            assertEquals(expected, chunks);
+            join(releasing);
+        } finally {
+            unsubscribeWatching.run();
+        }
+    }
+
+    private static byte[] deltaChunk(String content) {
+        return ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"}}]}\n\n")
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
     // --- helpers ---
 
     private void login() {

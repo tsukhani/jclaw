@@ -1,3 +1,8 @@
+import agents.QueueDrainOrchestrator;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -5,12 +10,21 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.ConfigService;
+import services.ConversationQueue;
+import services.ConversationTurnStream;
 import services.Tx;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -23,7 +37,9 @@ import java.util.function.Supplier;
  * <p>Real LLM dispatch is intentionally avoided — every send/streamChat path
  * exercised here either short-circuits via slash-command interception or fails
  * before the LLM round (missing agent, missing fields). That keeps the suite
- * deterministic and free of provider configuration coupling.
+ * deterministic and free of provider configuration coupling. The {@code /api/chat/turn}
+ * tests (JF-202) are the exception: a started turn is only visible on its conversation's
+ * stream, so they run it against a {@link HeldModel}.
  */
 class ApiChatControllerTest extends FunctionalTest {
 
@@ -77,7 +93,7 @@ class ApiChatControllerTest extends FunctionalTest {
      * keep the auth gate uniform across send / stream / upload.
      */
     @ParameterizedTest(name = "{0} requires auth")
-    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/upload"})
+    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/turn", "/api/chat/upload"})
     void chatEndpointsRequireAuth(String endpoint) {
         var response = POST(endpoint, "application/json", "{}");
         assertEquals(401, response.status.intValue());
@@ -89,7 +105,7 @@ class ApiChatControllerTest extends FunctionalTest {
      * the agentId param (controller badRequest).
      */
     @ParameterizedTest(name = "emptyBodyRejected[{0}]")
-    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/upload"})
+    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/turn", "/api/chat/upload"})
     void emptyBodyReturns400(String endpoint) {
         login();
         var response = POST(endpoint, "application/json", "{}");
@@ -117,7 +133,8 @@ class ApiChatControllerTest extends FunctionalTest {
     @CsvSource(delimiter = '|', value = {
             "sendMissingAgentId400      | /api/chat/send   | {\"message\": \"hello\"}                       | 400",
             "sendUnknownAgent404        | /api/chat/send   | {\"agentId\": 999999, \"message\": \"hello\"} | 404",
-            "streamUnknownAgent404      | /api/chat/stream | {\"agentId\": 999999, \"message\": \"hello\"} | 404"
+            "streamUnknownAgent404      | /api/chat/stream | {\"agentId\": 999999, \"message\": \"hello\"} | 404",
+            "turnUnknownAgent404        | /api/chat/turn   | {\"agentId\": 999999, \"message\": \"hello\"} | 404"
     })
     void chatBodyRejection(String label, String endpoint, String body, int expectedStatus) {
         login();
@@ -873,13 +890,15 @@ class ApiChatControllerTest extends FunctionalTest {
         assertEquals("gpt-4.1", agent.modelId);
     }
 
-    /** A bad pick is a 400 before anything is created — on send and, before the SSE opens, on stream. */
+    /** A bad pick is a 400 before anything is created — on send, on turn and, before the SSE opens, on stream. */
     @ParameterizedTest(name = "{0}")
     @CsvSource(delimiter = '|', value = {
             "sendUnknownModel      | /api/chat/send   | \"modelProvider\": \"openrouter\", \"modelId\": \"no-such-model\"",
             "sendHalfAPick         | /api/chat/send   | \"modelProvider\": \"openrouter\"",
             "streamUnknownModel    | /api/chat/stream | \"modelProvider\": \"openrouter\", \"modelId\": \"no-such-model\"",
-            "streamBadThinkingMode | /api/chat/stream | \"thinkingMode\": \"maximum-overdrive\""
+            "streamBadThinkingMode | /api/chat/stream | \"thinkingMode\": \"maximum-overdrive\"",
+            "turnUnknownModel      | /api/chat/turn   | \"modelProvider\": \"openrouter\", \"modelId\": \"no-such-model\"",
+            "turnHalfAPick         | /api/chat/turn   | \"modelProvider\": \"openrouter\""
     })
     void aBadFreshChatPickIsRejectedWithNothingCreated(String label, String endpoint, String fields) {
         login();
@@ -889,6 +908,532 @@ class ApiChatControllerTest extends FunctionalTest {
         assertEquals(400, response.status.intValue(), getContent(response));
         Long created = commitInFreshTx(() -> models.Conversation.count("agent.id = ?1", Long.valueOf(agentId)));
         assertEquals(0L, created, "a rejected pick must not leave a conversation behind");
+    }
+
+    // =====================
+    // JF-202: POST /api/chat/turn — a turn no request holds, rendered from the conversation's stream
+    // =====================
+
+    private static final String TURN_REPLY = HeldModel.REPLY;
+    private static final String COMPLETE_REPLY =
+            new String(agents.TurnFrames.json(agents.TurnFrames.complete(TURN_REPLY)), StandardCharsets.UTF_8);
+    private static final String STOPPED = "{\"type\":\"stopped\"}";
+    private static final String MARK = "{\"type\":\"status\",\"content\":\"marker turn\"}";
+
+    @Test
+    void aStartedTurnIsAnsweredBeforeTheModelRepliesWithItsMessageSavedAndItsWatchersGetItFromInitToComplete()
+            throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                var response = POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?"));
+
+                assertIsOk(response);
+                assertEquals(Map.of("status", "started", "conversationId", chat.conversationId()), flat(json(response)));
+                assertEquals(List.of("What time is it?"), userMessages(chat.conversationId()),
+                        "the user's message is saved by the time the turn is answered started");
+                assertEquals(List.of(), sink.raw().stream().filter(e -> e.contains("\"complete\"")).toList(),
+                        "the answer came while the model was still held");
+                model.release();
+                var heard = ConversationTurnStreamTest.data(sink.awaitData(COMPLETE_REPLY));
+                var init = JsonParser.parseString(heard.getFirst()).getAsJsonObject();
+                assertEquals(java.util.Set.of("type", "conversationId", "startedAt"), init.keySet());
+                assertEquals("init", init.get("type").getAsString());
+                assertEquals(chat.conversationId(), init.get("conversationId").getAsLong());
+                assertDoesNotThrow(() -> Instant.parse(init.get("startedAt").getAsString()));
+                assertEquals(TURN_REPLY, JsonParser.parseString(heard.get(1)).getAsJsonObject().get("content").getAsString());
+                assertEquals(1, heard.stream().filter(ApiChatControllerTest::isTerminal).count(), "one terminal: " + heard);
+            } finally {
+                model.release();
+                awaitIdle(chat.conversationId());
+                unsubscribe.run();
+            }
+        }
+    }
+
+    @Test
+    void aStartedTurnPublishesTheFramesAChatStreamTurnPublishes() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var started = seedWebChat(model);
+            var streamed = anotherWebChat(started);
+            var startedSink = new ConversationTurnStreamTest.RecordingSink();
+            var streamedSink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribeStarted = ConversationTurnStream.subscribe(started.conversationId(), null, startedSink);
+            var unsubscribeStreamed = ConversationTurnStream.subscribe(streamed.conversationId(), null, streamedSink);
+            try {
+                assertIsOk(POST("/api/chat/turn", "application/json", turnBody(started, "What time is it?")));
+                assertIsOk(POST("/api/chat/stream", "application/json", turnBody(streamed, "What time is it?")));
+
+                var fromStart = ConversationTurnStreamTest.data(startedSink.awaitData(COMPLETE_REPLY));
+                var fromStream = ConversationTurnStreamTest.data(streamedSink.awaitData(COMPLETE_REPLY));
+                assertEquals(normalized(fromStream), normalized(fromStart));
+            } finally {
+                awaitIdle(started.conversationId());
+                awaitIdle(streamed.conversationId());
+                unsubscribeStarted.run();
+                unsubscribeStreamed.run();
+            }
+        }
+    }
+
+    @Test
+    void aTurnStartedWithNoConversationCreatesOneAndAnswersItsId() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var body = "{\"agentId\": " + chat.agentId() + ", \"message\": \"What time is it?\"}";
+
+            var response = POST("/api/chat/turn", "application/json", body);
+
+            assertIsOk(response);
+            var answer = json(response);
+            long created = answer.get("conversationId").getAsLong();
+            assertEquals(Map.of("status", "started", "conversationId", created), flat(answer));
+            assertNotEquals(chat.conversationId(), created, "a send with no conversation starts a new one");
+            awaitIdle(created);
+            var row = commitInFreshTx(() -> {
+                models.Conversation c = models.Conversation.findById(created);
+                return java.util.List.of(c.agent.id, c.channelType, c.peerId);
+            });
+            assertEquals(List.of(chat.agentId(), "web", "admin"), row);
+            assertEquals(TURN_REPLY, assistantReply(created));
+        }
+    }
+
+    @Test
+    void aFreshChatsModelPickLandsOnTheConversationItsStartedTurnCreatesAndNeverOnTheAgent() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var body = "{\"agentId\": %d, \"message\": \"What time is it?\", \"modelProvider\": \"%s\", \"modelId\": \"%s\"}"
+                    .formatted(chat.agentId(), model.provider, HeldModel.OTHER_MODEL);
+
+            var answer = json(POST("/api/chat/turn", "application/json", body));
+
+            long created = answer.get("conversationId").getAsLong();
+            assertEquals(Map.of("status", "started", "conversationId", created), flat(answer));
+            awaitIdle(created);
+            var picks = commitInFreshTx(() -> {
+                models.Conversation c = models.Conversation.findById(created);
+                return java.util.Arrays.asList(c.modelProviderOverride, c.modelIdOverride, c.thinkingModeOverride);
+            });
+            assertEquals(java.util.Arrays.asList(model.provider, HeldModel.OTHER_MODEL, null), picks);
+            models.Agent agent = commitInFreshTx(() -> models.Agent.findById(chat.agentId()));
+            assertEquals(HeldModel.MODEL, agent.modelId, "the agent's default is never written from the chat page");
+        }
+    }
+
+    @Test
+    void aTurnStartedOnABusyConversationQueuesPublishingNothingUntilItDrainsAsABackgroundTurn() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            long held = holdConversation(chat);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                var response = POST("/api/chat/turn", "application/json", turnBody(chat, "And now?"));
+
+                assertIsOk(response);
+                assertEquals(Map.of("status", "queued", "conversationId", chat.conversationId(), "position", 1L),
+                        flat(json(response)));
+                assertEquals(0, model.calls.get(), "a queued send does not reach the model");
+
+                QueueDrainOrchestrator.runOwned(chat.conversationId(), held,
+                        ConversationQueue.drain(chat.conversationId(), held));
+                var heard = ConversationTurnStreamTest.data(sink.awaitData(COMPLETE_REPLY));
+                assertEquals(List.of("init", "complete"), types(heard),
+                        "the queued send published nothing of its own, and it drained as a background turn: " + heard);
+            } finally {
+                awaitIdle(chat.conversationId());
+                unsubscribe.run();
+            }
+        }
+    }
+
+    @Test
+    void twoTurnsStartedOnABusyConversationAnswerTheirPlacesInLine() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            holdConversation(chat);
+            try {
+                var first = POST("/api/chat/turn", "application/json", turnBody(chat, "And now?"));
+                var second = POST("/api/chat/turn", "application/json", turnBody(chat, "And after that?"));
+
+                assertEquals(Map.of("status", "queued", "conversationId", chat.conversationId(), "position", 1L),
+                        flat(json(first)));
+                assertEquals(Map.of("status", "queued", "conversationId", chat.conversationId(), "position", 2L),
+                        flat(json(second)));
+                assertEquals(0, model.calls.get(), "neither queued send reaches the model");
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aTurnThatFailsAfterItsAcquireAnswers500ReleasesItsConversationAndEndsItsWatchersOnOneError() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            // A staged upload that is not there: the user message's save throws once the turn holds the conversation.
+            var body = """
+                    {"agentId": %d, "conversationId": %d, "message": "with a stale attachment",
+                     "attachments": [{"attachmentId": "no-such-staged-upload-%s", "originalFilename": "a.png",
+                                      "mimeType": "image/png", "sizeBytes": 1, "kind": "image"}]}"""
+                    .formatted(chat.agentId(), chat.conversationId(), UUID.randomUUID());
+            try {
+                var response = POST("/api/chat/turn", "application/json", body);
+
+                assertEquals(500, response.status.intValue());
+                var template = utils.ErrorTemplates.forCode(utils.ApiResponses.INTERNAL_ERROR);
+                var parts = new java.util.LinkedHashMap<String, Object>();
+                parts.put("whatBroke", template.whatBroke());
+                parts.put("whatToCheck", template.whatToCheck());
+                parts.put("howToRetry", template.howToRetry());
+                var expected = new java.util.LinkedHashMap<String, Object>();
+                expected.put("type", "error");
+                expected.put("code", utils.ApiResponses.INTERNAL_ERROR);
+                expected.put("message", "The turn could not start.");
+                expected.put("template", parts);
+                assertEquals(JsonParser.parseString(utils.GsonHolder.GSON.toJson(expected)), json(response));
+                awaitIdle(chat.conversationId());
+                assertFalse(ConversationQueue.isBusy(chat.conversationId()), "the failed turn released its conversation");
+                marker(chat.conversationId());
+                var heard = ConversationTurnStreamTest.data(sink.awaitData(MARK));
+                assertEquals(List.of("error", "status"), types(heard), "one error, then the marker: " + heard);
+                assertEquals(0, model.calls.get(), "the turn failed before the model");
+            } finally {
+                unsubscribe.run();
+            }
+        }
+    }
+
+    @Test
+    void aSlashCommandStartedAsATurnAnswersWhatTheChatStreamAnswers() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+
+            var started = POST("/api/chat/turn", "application/json", turnBody(chat, "/help"));
+            var streamed = POST("/api/chat/stream", "application/json", turnBody(chat, "/help"));
+
+            assertIsOk(started);
+            assertEquals(Map.of("status", "command", "conversationId", chat.conversationId(),
+                    "content", slash.Commands.HELP_TEXT), flat(json(started)));
+            var frames = getContent(streamed).lines().filter(l -> l.startsWith("data: "))
+                    .map(l -> JsonParser.parseString(l.substring("data: ".length())).getAsJsonObject()).toList();
+            assertEquals(chat.conversationId(), frames.get(0).get("conversationId").getAsLong());
+            assertEquals(slash.Commands.HELP_TEXT, frames.get(1).get("content").getAsString());
+            assertEquals(0, model.calls.get(), "a command never reaches the model");
+        }
+    }
+
+    @Test
+    void aNewCommandStartedAsATurnAnswersTheConversationItCreated() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+
+            var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/new")));
+
+            long created = answer.get("conversationId").getAsLong();
+            assertNotEquals(chat.conversationId(), created);
+            assertEquals(Map.of("status", "command", "conversationId", created, "content", slash.Commands.NEW_TEXT),
+                    flat(answer));
+        }
+    }
+
+    @Test
+    void aTurnStartedOnAConversationThatDoesNotExistIsNotFound() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var missing = new Seeded(chat.agentId(), chat.conversationId() + 1_000);
+
+            var response = POST("/api/chat/turn", "application/json", turnBody(missing, "What time is it?"));
+
+            assertEquals(404, response.status.intValue());
+            assertEquals(0, model.calls.get());
+            assertFalse(ConversationQueue.isBusy(missing.conversationId()));
+        }
+    }
+
+    @Test
+    void anAgentPrincipalCannotStartATurn() {
+        var request = newRequest();
+        request.headers.put("authorization",
+                new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+
+        var response = POST(request, "/api/chat/turn", "application/json", "{\"agentId\": 1, \"message\": \"hi\"}");
+
+        assertStatus(403, response);
+    }
+
+    @Test
+    void anOperatorStopEndsAStartedTurnAsStoppedOnItsStream() throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                assertIsOk(POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?")));
+                assertTrue(model.called.await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+
+                var stop = POST("/api/conversations/" + chat.conversationId() + "/stop", "application/json", "{}");
+
+                assertIsOk(stop);
+                assertTrue(json(stop).get("stopped").getAsBoolean(), "the stop found the started turn");
+                var heard = ConversationTurnStreamTest.data(sink.awaitData(STOPPED));
+                assertEquals("init", types(heard).getFirst());
+                model.release();
+                awaitIdle(chat.conversationId());
+                marker(chat.conversationId());
+                var after = ConversationTurnStreamTest.data(sink.awaitData(MARK));
+                assertEquals(List.of(STOPPED, MARK), after.subList(after.size() - 2, after.size()),
+                        "nothing of the stopped turn follows its stopped frame: " + after);
+                assertEquals(1, after.stream().filter(ApiChatControllerTest::isTerminal).count(),
+                        "one terminal, the stop: " + after);
+            } finally {
+                model.release();
+                unsubscribe.run();
+            }
+        }
+    }
+
+    @Test
+    void aStartedTurnOutlivesTheTabThatWatchedItAndRunsToItsReply() throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            var tab = new ConversationTurnStreamTest.RecordingSink();
+            var closeTab = ConversationTurnStream.subscribe(chat.conversationId(), null, tab);
+            assertIsOk(POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?")));
+            assertTrue(model.called.await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+            var seen = tab.awaitUntil(events -> !events.isEmpty(), "heard the turn begin");
+            assertEquals("init", types(ConversationTurnStreamTest.data(seen)).getFirst());
+
+            closeTab.run();
+            model.release();
+
+            awaitIdle(chat.conversationId());
+            assertEquals(TURN_REPLY, assistantReply(chat.conversationId()), "nothing read the turn, and it still replied");
+        }
+    }
+
+    @Test
+    void aCodingRunInAChatStreamTurnStreamsItsStepsToTheTabAndOnceToTheConversationsWatchers() throws Exception {
+        var turn = runATurnThatSpawnsACodingRun("/api/chat/stream");
+
+        var steps = List.of(turn.nonce() + "-0", turn.nonce() + "-1", turn.nonce() + "-2");
+        assertEquals(steps, statusesOf(turn.tab(), turn.nonce()), "the tab shows the run's steps live: " + turn.tab());
+        assertEquals(steps, statusesOf(turn.watched(), turn.nonce()), "and its watchers get each step once");
+    }
+
+    @Test
+    void aCodingRunInAStartedTurnStreamsItsStepsOnceToTheConversationsWatchers() throws Exception {
+        var turn = runATurnThatSpawnsACodingRun("/api/chat/turn");
+
+        assertEquals(List.of(turn.nonce() + "-0", turn.nonce() + "-1", turn.nonce() + "-2"),
+                statusesOf(turn.watched(), turn.nonce()), "the watchers get each step once: " + turn.watched());
+    }
+
+    // --- JF-202 helpers ---
+
+    /** A turn whose model spawns a coding run: the frames its chat stream tab got (none for a started turn), and its watchers'. */
+    private record SpawningTurn(String nonce, List<String> tab, List<String> watched) {}
+
+    private SpawningTurn runATurnThatSpawnsACodingRun(String route) throws Exception {
+        login();
+        var nonce = "coding-" + UUID.randomUUID().toString().substring(0, 8);
+        var harness = Files.createTempFile("jclaw-chat-harness-", ".sh");
+        var script = new StringBuilder("#!/bin/sh\ncat >/dev/null\n");
+        for (int i = 0; i < 3; i++) script.append("printf '%s\\n' '").append(nonce).append('-').append(i).append("'\n");
+        Files.writeString(harness, script.toString());
+        assertTrue(harness.toFile().setExecutable(true, false));
+        ToolRegistrySync.canonicalForTest();
+        try (var model = HeldModel.replying(ApiChatControllerTest::spawnACodingRunThenReply)) {
+            commitInFreshTx(() -> {
+                ConfigService.set(tools.SubagentSpawnTool.ACP_COMMAND_KEY, harness.toString());
+                ConfigService.set(tools.SubagentSpawnTool.ACP_HARNESS_KEY, "generic");
+                ConfigService.set(tools.SubagentSpawnTool.ACP_MODE_KEY, "json");
+                return null;
+            });
+            var chat = seedWebChat(model, true);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                var response = POST(route, "application/json", turnBody(chat, "Write it with the coding harness."));
+                assertIsOk(response);
+                var tab = "/api/chat/stream".equals(route)
+                        ? getContent(response).lines().filter(l -> l.startsWith("data: "))
+                                .map(l -> l.substring("data: ".length())).toList()
+                        : List.<String>of();
+                var watched = ConversationTurnStreamTest.data(sink.awaitData(COMPLETE_REPLY));
+                return new SpawningTurn(nonce, tab, watched);
+            } finally {
+                awaitIdle(chat.conversationId());
+                unsubscribe.run();
+            }
+        } finally {
+            ToolRegistrySync.release();
+            commitInFreshTx(() -> {
+                for (var key : new String[] {tools.SubagentSpawnTool.ACP_COMMAND_KEY,
+                        tools.SubagentSpawnTool.ACP_HARNESS_KEY, tools.SubagentSpawnTool.ACP_MODE_KEY}) {
+                    ConfigService.delete(key);
+                }
+                return null;
+            });
+            Files.deleteIfExists(harness);
+        }
+    }
+
+    /** Round one spawns a coding run; once its result is in, the reply. */
+    private static String spawnACodingRunThenReply(JsonObject request) {
+        var messages = request.getAsJsonArray("messages");
+        var last = messages.get(messages.size() - 1).getAsJsonObject();
+        if ("tool".equals(last.get("role").getAsString())) return HeldModel.replyCompletion();
+        return """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"",
+                "tool_calls":[{"id":"call_spawn","type":"function","function":{"name":"subagent_spawn",
+                "arguments":"{\\"task\\":\\"write it\\",\\"runtime\\":\\"acp\\"}"}}]},
+                "finish_reason":"tool_calls"}],
+                "usage":{"prompt_tokens":100,"completion_tokens":5,"total_tokens":105}}""";
+    }
+
+    /** The contents of the status frames among {@code frames} that name {@code nonce}, in order. */
+    private static List<String> statusesOf(List<String> frames, String nonce) {
+        return frames.stream().map(f -> JsonParser.parseString(f).getAsJsonObject())
+                .filter(f -> "status".equals(f.get("type").getAsString()) && f.get("content").getAsString().contains(nonce))
+                .map(f -> f.get("content").getAsString()).toList();
+    }
+
+    /**
+     * Frames as JSON trees, with what differs between two runs of one turn set aside: the conversation id, the first
+     * token's and the turn's start stamps, a status's timings (dropped, since a zero one is left out) and every other
+     * number it reports, token counts and context size alike.
+     */
+    private static List<JsonElement> normalized(List<String> frames) {
+        var trees = new java.util.ArrayList<JsonElement>();
+        for (var frame : frames) {
+            var tree = JsonParser.parseString(frame).getAsJsonObject();
+            for (var stamp : new String[] {"timestamp", "startedAt"}) {
+                if (tree.has(stamp)) {
+                    assertDoesNotThrow(() -> Instant.parse(tree.get(stamp).getAsString()));
+                    tree.addProperty(stamp, "stamped");
+                }
+            }
+            if (tree.has("conversationId")) tree.addProperty("conversationId", 0);
+            var content = tree.get("content");
+            if ("status".equals(tree.get("type").getAsString()) && content.getAsString().startsWith("{")) {
+                tree.add("content", measuresSetAside(JsonParser.parseString(content.getAsString())));
+            }
+            trees.add(tree);
+        }
+        return trees;
+    }
+
+    private static JsonElement measuresSetAside(JsonElement element) {
+        if (element.isJsonObject()) {
+            var out = new JsonObject();
+            for (var entry : element.getAsJsonObject().entrySet()) {
+                if (!entry.getKey().endsWith("Ms")) out.add(entry.getKey(), measuresSetAside(entry.getValue()));
+            }
+            return out;
+        }
+        if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isNumber()) return new JsonPrimitive(0);
+        return element;
+    }
+
+    private record Seeded(long agentId, long conversationId) {}
+
+    private static Seeded seedWebChat(HeldModel model) {
+        return seedWebChat(model, false);
+    }
+
+    private static Seeded seedWebChat(HeldModel model, boolean acpAllowed) {
+        return commitInFreshTx(() -> {
+            var agent = services.AgentService.create(
+                    "chat-turn-agent-" + UUID.randomUUID().toString().substring(0, 8), model.provider, HeldModel.MODEL);
+            agent.enabled = true;
+            agent.acpAllowed = acpAllowed;
+            agent.save();
+            var conversation = services.ConversationService.create(agent, "web", "admin");
+            return new Seeded(agent.id, conversation.id);
+        });
+    }
+
+    /** A second web chat of {@code chat}'s agent, so two turns share its prompt. */
+    private static Seeded anotherWebChat(Seeded chat) {
+        return commitInFreshTx(() -> {
+            models.Agent agent = models.Agent.findById(chat.agentId());
+            return new Seeded(agent.id, services.ConversationService.create(agent, "web", "admin").id);
+        });
+    }
+
+    /** Hold {@code chat}'s conversation as a running turn would, so sends queue; returns the generation held. */
+    private static long holdConversation(Seeded chat) {
+        models.Agent agent = commitInFreshTx(() -> models.Agent.findById(chat.agentId()));
+        long held = ConversationQueue.tryAcquireOwnership(chat.conversationId(),
+                new ConversationQueue.QueuedMessage("holding", "web", "admin", agent), null);
+        assertTrue(held >= 0, "test precondition: the test holds the conversation");
+        return held;
+    }
+
+    private static String turnBody(Seeded chat, String message) {
+        return "{\"agentId\": %d, \"conversationId\": %d, \"message\": %s}"
+                .formatted(chat.agentId(), chat.conversationId(), new com.google.gson.Gson().toJson(message));
+    }
+
+    private JsonObject json(play.mvc.Http.Response response) {
+        return JsonParser.parseString(getContent(response)).getAsJsonObject();
+    }
+
+    private static List<String> types(List<String> frames) {
+        return frames.stream().map(f -> JsonParser.parseString(f).getAsJsonObject().get("type").getAsString()).toList();
+    }
+
+    private static boolean isTerminal(String frame) {
+        var type = JsonParser.parseString(frame).getAsJsonObject().get("type").getAsString();
+        return "complete".equals(type) || "error".equals(type) || "stopped".equals(type);
+    }
+
+    /** A turn after the test's, newer than any generation the queue issues, whose one frame closes what a test waits on. */
+    private static void marker(long conversationId) {
+        ConversationTurnStream.begin(conversationId, Long.MAX_VALUE).end(MARK.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static @org.jspecify.annotations.Nullable String assistantReply(long conversationId) {
+        return commitInFreshTx(() -> {
+            List<models.Message> rows = models.Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id DESC",
+                    conversationId, "assistant").fetch();
+            return rows.isEmpty() ? null : rows.getFirst().content;
+        });
+    }
+
+    private static List<String> userMessages(long conversationId) {
+        return commitInFreshTx(() -> {
+            List<models.Message> rows = models.Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id",
+                    conversationId, "user").fetch();
+            return rows.stream().map(m -> m.content).toList();
+        });
+    }
+
+    /** A started turn's answer comes before it ends; its thread may still be running, or in its finally. */
+    private static void awaitIdle(long conversationId) throws InterruptedException {
+        for (int i = 0; i < 300 && (ConversationQueue.isBusy(conversationId)
+                || ConversationTurnStream.current(conversationId) != null); i++) {
+            Thread.sleep(50);
+        }
+        assertFalse(ConversationQueue.isBusy(conversationId), "the turn released its conversation");
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {

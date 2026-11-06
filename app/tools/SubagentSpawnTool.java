@@ -548,9 +548,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
         // idle and ceiling budgets.
-        // JCLAW-661: for an acp coding run, bridge the open chat SSE (if any) to
-        // this run so the harness's live steps stream into the turn that spawned
-        // it; always unbind in the finally so a finished run can't leak callbacks.
+        // JCLAW-661: for an acp coding run, bridge the turn that spawned it to this
+        // run so the harness's live steps stream into it: through its chat stream
+        // tab's callbacks when one holds it, else straight to the conversation's
+        // watchers (JF-202). Always unbind in the finally so a finished run can't
+        // leak callbacks.
         if (acpBridged) SubagentChatBridge.bindChatCallbacksToRun(runId);
         SyncRunOutcome runOutcome;
         try {

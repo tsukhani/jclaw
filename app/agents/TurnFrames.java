@@ -11,6 +11,7 @@ import utils.ErrorRendering;
 import utils.GsonHolder;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,6 +39,11 @@ public final class TurnFrames {
         Chunk(String type) {
             this.open = ("{\"type\":\"" + type + "\",\"content\":").getBytes(StandardCharsets.UTF_8);
         }
+
+        /** The bytes a frame of this kind adds to its escaped content: its opening, the content's quotes, its closing brace. */
+        public int overhead() {
+            return open.length + 3;
+        }
     }
 
     /** {@code init}: the conversation, and the thinking mode the turn's model runs with. */
@@ -51,6 +57,13 @@ public final class TurnFrames {
             var mode = ModelResolver.resolveThinkingMode(agent, conversation, provider);
             if (mode != null) initData.put("thinkingMode", mode);
         }
+        return initData;
+    }
+
+    /** {@code init} as a conversation's watchers get it, carrying when the turn started for a view that joins it late. */
+    public static Map<String, Object> init(Agent agent, Conversation conversation, Instant startedAt) {
+        var initData = new HashMap<>(init(agent, conversation));
+        initData.put("startedAt", startedAt.toString());
         return initData;
     }
 
@@ -133,7 +146,11 @@ public final class TurnFrames {
         return Map.of(TYPE, "stopped");
     }
 
-    /** {@code resync}: frames the client missed are no longer kept, so it reloads the conversation first. */
+    /**
+     * {@code resync}: frames the client cannot have are gone where it stands, dropped from the replay or merged into a
+     * later frame, so it reloads the conversation's rows and rebuilds the turn from its {@code init} and the frames
+     * after the resync.
+     */
     public static Map<String, Object> resync() {
         return Map.of(TYPE, "resync");
     }

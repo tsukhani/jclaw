@@ -21,11 +21,14 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.ConversationTurnStream;
 import services.SubagentRegistry;
+import utils.AppClock;
 import utils.CircuitBreakers;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -133,6 +136,8 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
         var heard = first.awaitData(expected.getLast());
         assertEquals(normalized(expected), normalized(ConversationTurnStreamTest.data(heard)));
         assertEquals("init", type(heard.getFirst().data()));
+        assertNull(field(expected.getFirst(), "startedAt"), "the tab's own init is as it was");
+        assertDoesNotThrow(() -> Instant.parse(field(heard.getFirst().data(), "startedAt")));
         assertEquals(json(TurnFrames.complete(REPLY)), heard.getLast().data());
         for (int i = 1; i < heard.size(); i++) assertTrue(heard.get(i).id() > heard.get(i - 1).id());
         assertEquals(heard, second.awaitData(expected.getLast()));
@@ -333,7 +338,8 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
         assertEquals(REPLY, result.response());
         var heard = ConversationTurnStreamTest.data(sink.awaitData(json(TurnFrames.complete(REPLY))));
         assertEquals(List.of("init", "status", "tool_call", "complete"), heard.stream().map(StreamingAgentRunnerTurnStreamTest::type).toList());
-        assertEquals(json(TurnFrames.init(convo.agent, convo)), heard.get(0));
+        assertEquals(normalized(List.of(json(TurnFrames.init(convo.agent, convo)))), normalized(heard.subList(0, 1)));
+        assertDoesNotThrow(() -> Instant.parse(field(heard.get(0), "startedAt")));
         assertEquals(json(TurnFrames.status("Using tool: datetime")), heard.get(1));
         assertEquals("datetime", field(heard.get(2), "name"));
         unsubscribe.run();
@@ -526,6 +532,27 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
     }
 
     @Test
+    void aViewerJoiningMidTurnGetsAnInitCarryingTheTimeTheTurnStarted() throws Exception {
+        long conversation = ThreadLocalRandom.current().nextLong(1L << 50, 1L << 52);
+        var started = Instant.parse("2026-11-07T09:30:00Z");
+        var broadcast = AppClock.callWith(Clock.fixed(started, ZoneOffset.UTC),
+                () -> TurnBroadcast.owning(conversation, ConversationTurnStreamTest.generation()));
+        var row = new Conversation();
+        row.id = conversation;
+        broadcast.init(new Agent(), row);
+        broadcast.token("It ");
+
+        var sink = new ConversationTurnStreamTest.RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(conversation, null, sink);
+        broadcast.complete(REPLY);
+
+        var heard = ConversationTurnStreamTest.data(sink.awaitData(json(TurnFrames.complete(REPLY))));
+        assertEquals(JsonParser.parseString("{\"type\":\"init\",\"conversationId\":" + conversation
+                + ",\"startedAt\":\"2026-11-07T09:30:00Z\"}"), JsonParser.parseString(heard.getFirst()));
+        unsubscribe.run();
+    }
+
+    @Test
     void aJoiningBroadcastAddsToTheOpenTurnAndNeverEndsIt() {
         long conversation = ThreadLocalRandom.current().nextLong(1L << 50, 1L << 52);
         var sink = new ConversationTurnStreamTest.RecordingSink();
@@ -616,7 +643,10 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
 
     private static final String STOPPED = "{\"type\":\"stopped\"}";
 
-    /** Frames as JSON trees, the first token's timestamp replaced: the tab and the broadcast each stamp their own. */
+    /**
+     * Frames as JSON trees, the first token's timestamp replaced: the tab and the broadcast each stamp their own. The
+     * watchers' init also carries when the turn started (JF-202), which the tab's never does; it goes too.
+     */
     private static List<JsonElement> normalized(List<String> frames) {
         var trees = new ArrayList<JsonElement>();
         for (var frame : frames) {
@@ -624,6 +654,10 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
             if (tree.has("timestamp")) {
                 assertDoesNotThrow(() -> Instant.parse(tree.get("timestamp").getAsString()));
                 tree.addProperty("timestamp", "stamped");
+            }
+            if (tree.has("startedAt")) {
+                assertDoesNotThrow(() -> Instant.parse(tree.get("startedAt").getAsString()));
+                tree.remove("startedAt");
             }
             trees.add(tree);
         }

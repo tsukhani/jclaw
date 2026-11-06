@@ -554,11 +554,14 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
-     * GET /api/conversations/{id}/stream — every turn the conversation runs, live, as SSE (JF-201): the frames the
-     * chat stream sends, each with an {@code id:} line, from {@link ConversationTurnStream}. A client that names the
-     * last id it saw gets what it missed of the turn in progress first, or a {@code resync} frame when that is no
-     * longer kept. The id comes in the {@code Last-Event-ID} header an EventSource sends on reconnect, or in the
-     * {@code lastEventId} parameter, since a new EventSource cannot set headers; the header wins.
+     * GET /api/conversations/{id}/stream — every turn the conversation runs, live, as SSE (JF-201): the chat stream's
+     * frames, each with an {@code id:} line, from {@link ConversationTurnStream}, the turn's {@code init} also carrying
+     * its {@code startedAt}. A client gets what it missed of the turn in progress first, after the last id it names,
+     * with the deltas merged. When frames it cannot have are gone (dropped, or an id merged into a later frame), a
+     * {@code resync} frame stands where they were, after the turn's {@code init} when that precedes them: the client
+     * reloads the conversation's rows and rebuilds the turn from that {@code init} and the frames after the resync. The
+     * id comes in the {@code Last-Event-ID} header an EventSource sends on reconnect, or in the {@code lastEventId}
+     * parameter, since a new EventSource cannot set headers; the header wins.
      *
      * <p>{@code @NoTransaction}: the subscription lasts as long as the page stays open, and the request's
      * transaction would hold a connection for all of it.
