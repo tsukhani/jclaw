@@ -11,7 +11,7 @@ import play.mvc.Controller;
 import services.Tx;
 import services.evals.EvalCapture;
 import services.evals.EvalDatasetLoader;
-import services.evals.EvalRunner;
+import services.evals.EvalFanOut;
 import services.evals.EvalSuite;
 import services.evals.MemoryEvalPaths;
 import utils.ApiResponses;
@@ -109,7 +109,7 @@ public class ApiEvalsController extends Controller {
 
         var suite = resolveSuite(suiteId, body != null && body.has("local")
                 && body.get("local").getAsBoolean());
-        int concurrency = Math.clamp(readInt(body, "concurrency", EvalRunner.DEFAULT_CONCURRENCY),
+        int concurrency = Math.clamp(readInt(body, "concurrency", EvalFanOut.DEFAULT_CONCURRENCY),
                 1, MAX_CONCURRENCY);
 
         renderJSON(GSON.toJson(EvalCapture.run(suite, agent, concurrency)));

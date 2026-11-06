@@ -1,3 +1,6 @@
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.evals.EvalCase;
@@ -7,16 +10,17 @@ import services.evals.EvalRunner;
 import services.evals.EvalScorer;
 import services.evals.EvalSuite;
 
-import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+
 /**
- * Runner and report behaviour (JCLAW-875): fan-out, per-case latency and call
+ * Runner and report behaviour (JCLAW-875): suite order, per-case latency and call
  * counts, failure isolation, and the JSON round-trip that lets one run become the
  * next run's regression baseline.
  */
@@ -143,87 +147,73 @@ class EvalRunnerTest extends UnitTest {
     }
 
     @Test
-    void fanOutRespectsTheConcurrencyCeiling() {
-        // Six cases, ceiling of 2: the semaphore must keep the peak at 2 no matter
-        // how many virtual threads the pool creates.
-        var cases = IntStream.range(0, 6).mapToObj(i -> caseSaying("case-" + i, "ok")).toList();
-        var suite = new EvalSuite("bounded", "fixture", cases);
+    void scoringReplaysTheCasesOneAtATimeInSuiteOrder() {
+        // Recorded answers are pure computation, so scoring forks nothing (JF-157).
+        var cases = IntStream.range(0, 5).mapToObj(i -> caseSaying("case-" + i, "ok")).toList();
+        var suite = new EvalSuite("serial", "fixture", cases);
         var inFlight = new AtomicInteger();
         var peak = new AtomicInteger();
+        var order = new ArrayList<String>();
+        var caller = Thread.currentThread();
 
         var report = EvalRunner.run(suite, testCase -> {
             peak.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
             try {
-                Thread.sleep(50);
+                assertSame(caller, Thread.currentThread(), "a case ran on a forked thread");
+                order.add(testCase.id());
+                return new EvalScorer.Response("ok", List.of(), 1);
             } finally {
                 inFlight.decrementAndGet();
             }
-            return new EvalScorer.Response("ok", List.of(), 1);
-        }, 2);
+        });
 
-        assertEquals(6, report.results().size());
-        assertEquals(1.0, report.passRate(), 0.0001);
-        assertTrue(peak.get() <= 2, "expected at most 2 cases in flight, peaked at " + peak.get());
+        assertEquals(List.of("case-0", "case-1", "case-2", "case-3", "case-4"), order);
+        assertEquals(order, report.results().stream().map(EvalReport.CaseResult::caseId).toList());
+        assertEquals(1, peak.get());
+        assertEquals(5, report.passed());
     }
 
     @Test
-    void casesRunConcurrently() {
-        // Overlap, not wall time: a loaded host delays every wakeup, while only a serial run peaks at 1.
-        var cases = IntStream.range(0, 8)
-                .mapToObj(i -> caseSaying("case-" + i, "ok"))
-                .toList();
-        var suite = new EvalSuite("slow", "fixture", cases);
-        var inFlight = new AtomicInteger();
-        var peak = new AtomicInteger();
+    void perCaseLatencyReflectsTheResponder() {
+        var report = EvalRunner.run(new EvalSuite("slow", "fixture", List.of(caseSaying("slow", "ok"))),
+                testCase -> {
+                    Thread.sleep(200);
+                    return new EvalScorer.Response("ok", List.of(), 1);
+                });
 
-        var report = EvalRunner.run(suite, testCase -> {
-            peak.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
-            try {
-                Thread.sleep(200);
-            } finally {
-                inFlight.decrementAndGet();
-            }
-            return new EvalScorer.Response("ok", List.of(), 1);
-        });
-
-        assertEquals(8, report.results().size());
-        assertEquals(1.0, report.passRate(), 0.0001);
-        assertTrue(peak.get() > 1, "expected cases in flight together, peaked at " + peak.get());
         assertTrue(report.results().getFirst().latencyMs() >= 150,
                 "per-case latency should reflect the responder, got " + report.results().getFirst().latencyMs());
     }
 
     @Test
-    void aCaseFailingOutsideScoringCancelsTheCasesStillInFlight() {
-        // score() swallows responder exceptions, so this failure mode is only
-        // reachable through the shared fan-out — which is the seam EvalCapture uses.
-        var blocked = new CountDownLatch(1);
-        var interrupted = new AtomicBoolean();
-        var cases = List.of(caseSaying("blocker", "ok"), caseSaying("bomb", "ok"));
+    void anEmptySuiteScoresNoCases() {
+        var report = EvalRunner.run(new EvalSuite("empty", "fixture", List.of()), testCase -> {
+            throw new AssertionError("no case to answer");
+        });
 
-        // Preemptive: a fan-out that failed to cancel would park forever rather than
-        // fail, and a hung test in a 7-minute suite tells nobody anything.
-        var thrown = assertTimeoutPreemptively(Duration.ofSeconds(15), () ->
-                assertThrows(IllegalStateException.class, () ->
-                    EvalRunner.mapCasesBounded(cases, 2, testCase -> {
-                        if ("bomb".equals(testCase.id())) {
-                            // Let the blocker reach its park first, so there is something
-                            // running for the failure to cancel.
-                            await(blocked);
-                            throw new IllegalStateException("boom");
-                        }
-                        blocked.countDown();
-                        try {
-                            new CountDownLatch(1).await();
-                        } catch (InterruptedException _) {
-                            interrupted.set(true);
-                            Thread.currentThread().interrupt();
-                        }
-                        return "unreachable";
-                    })));
+        assertEquals(List.of(), report.results());
+        assertEquals(0.0, report.passRate(), 0.0001);
+    }
 
-        assertEquals("boom", thrown.getCause().getMessage());
-        assertTrue(interrupted.get(), "the blocked case must be cancelled, not left running");
+    // ==================== The standalone guarantee jclaw.sh relies on ====================
+
+    /** Every class {@code ./jclaw.sh evals} loads when it validates or scores offline. */
+    public static final String OFFLINE_CLASSES =
+            "services\\.evals\\.(EvalRunner|EvalDatasetLoader|EvalSuite|EvalCase|EvalCheck|EvalScorer|EvalReport|EvalJson)(\\$.*)?";
+
+    @Test
+    void theOfflineScorerStandsAlone() {
+        // jclaw.sh runs EvalRunner as a plain java -cp over the compiled classes and the
+        // framework's lib/ (for Gson) — nothing from the app's dependency tree. A reference
+        // outside that set fails as a NoClassDefFoundError in the operator's command, as
+        // TaskScope's OpenTelemetry wrap did for seven weeks (JF-157).
+        ArchRule rule = classes().that().haveNameMatching(OFFLINE_CLASSES)
+                .should().onlyDependOnClassesThat(
+                        resideInAnyPackage("java..", "com.google.gson..", "org.jspecify..")
+                                .or(DescribedPredicate.describe("are offline eval classes",
+                                        (JavaClass c) -> c.getBaseComponentType().getName().matches(OFFLINE_CLASSES))))
+                .because("jclaw.sh runs the offline eval CLI on the framework's lib/ alone (JF-157)");
+        rule.check(ArchitectureTest.APP_CLASSES);
     }
 
     // ==================== Report persistence and regressions ====================
@@ -280,14 +270,5 @@ class EvalRunnerTest extends UnitTest {
         assertTrue(summary.contains("missing \"beta\""), summary);
         assertTrue(summary.contains("1/2 passed (50%)"), summary);
         assertFalse(summary.contains("errored"), "no case errored, so the totals line stays clean: " + summary);
-    }
-
-    private static void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
     }
 }

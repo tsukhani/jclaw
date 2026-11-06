@@ -5,7 +5,7 @@ try-with-resources scope over a virtual-thread executor where the first task to 
 siblings, `join()` rethrows that failure as an `ExecutionException`, and `close()` cancels
 whatever is still running so no forked task outlives the block. It is homogeneous — every task
 in a scope returns the same type — which covers the fan-out shape the codebase actually has;
-heterogeneous fan-out still uses plain futures. `EvalRunner.mapCasesBounded` is the reference
+heterogeneous fan-out still uses plain futures. `EvalFanOut.mapCasesBounded` is the reference
 call site.
 
 The JDK's own `java.util.concurrent.StructuredTaskScope` is deliberately **not** used. JCLAW-1155

@@ -1,7 +1,6 @@
 package services.evals;
 
 import com.google.gson.Gson;
-import utils.GsonHolder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -63,10 +62,8 @@ public record EvalReport(String suiteId, String fingerprint, List<CaseResult> re
         }
     }
 
-    // Derived from the app's shared serializer so the report inherits its contract
-    // (serializeNulls, Instant adapter, no HTML escaping); pretty-printed on top
-    // because a report file is read by people and diffed between runs.
-    private static final Gson GSON = GsonHolder.GSON.newBuilder().setPrettyPrinting().create();
+    // Pretty-printed because a report file is read by people and diffed between runs.
+    private static final Gson GSON = EvalJson.GSON.newBuilder().setPrettyPrinting().create();
 
     public EvalReport {
         results = results == null ? List.of() : List.copyOf(results);

@@ -264,7 +264,7 @@ public final class EvalCapture {
      * is simply the one that supplies the real agent run.
      */
     public static Capture run(EvalSuite suite, Agent agent, int maxConcurrency, TurnRunner turns) {
-        var captured = EvalRunner.mapCasesBounded(suite.cases(), maxConcurrency,
+        var captured = EvalFanOut.mapCasesBounded(suite.cases(), maxConcurrency,
                 testCase -> Map.entry(testCase.id(), captureOne(testCase, agent, turns)));
 
         // LinkedHashMap so the recorded file keeps suite order and two captures of

@@ -1,19 +1,14 @@
 package services.evals;
 
 import com.google.gson.JsonParseException;
-import utils.GsonHolder;
-import utils.TaskScope;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
-import java.util.function.Function;
 
 /**
  * Runs an {@link EvalSuite} against a responder and scores it (JCLAW-875).
@@ -40,15 +35,6 @@ public final class EvalRunner {
         EvalScorer.Response respond(EvalCase testCase) throws Exception;
     }
 
-    /**
-     * Cases allowed in front of a model at once when the caller does not say
-     * (JCLAW-883). Four is deliberately modest: a sweep is a background quality
-     * check, not a throughput test, and a provider that rate-limits under it
-     * would turn agent quality into a function of how many cases the suite
-     * happens to contain.
-     */
-    public static final int DEFAULT_CONCURRENCY = 4;
-
     private static final String DEFAULT_SUITE_DIR = "evals/suites";
     private static final String OPT_SUITES = "--suites";
     private static final String OPT_RESPONSES = "--responses";
@@ -57,62 +43,21 @@ public final class EvalRunner {
 
     private EvalRunner() {}
 
-    /** Fans out at {@link #DEFAULT_CONCURRENCY}. */
+    /**
+     * Scores every case in {@code suite} in suite order, so two runs of the same suite
+     * diff line by line.
+     *
+     * <p>Sequential on purpose (JF-157): every caller hands this recorded or stubbed
+     * answers, so replaying them is pure computation and a fan-out buys nothing, while
+     * {@code utils.TaskScope} would pull OpenTelemetry onto the offline CLI's classpath.
+     * Capture, which does put a model behind each case, fans out in {@link EvalFanOut}.
+     */
     public static EvalReport run(EvalSuite suite, Responder responder) {
-        return run(suite, responder, DEFAULT_CONCURRENCY);
-    }
-
-    /**
-     * Scores every case in {@code suite}, fanning out across virtual threads — the
-     * cases are independent and each one blocks on a model, so the sweep costs about
-     * as long as its slowest case rather than the sum. Results keep suite order so
-     * two runs of the same suite diff line by line.
-     *
-     * <p>{@code maxConcurrency} bounds how many cases may be in front of a model at
-     * once (JCLAW-883). Every case still gets its own virtual thread — those are
-     * cheap and the ordering guarantee depends on them — but the semaphore caps the
-     * concurrent model calls. An unbounded sweep would contradict the NFR the suite
-     * exists to police: it would hammer a provider into rate-limiting, and the
-     * resulting retries and timeouts would score as agent failures.
-     */
-    public static EvalReport run(EvalSuite suite, Responder responder, int maxConcurrency) {
-        var results = mapCasesBounded(suite.cases(), maxConcurrency, testCase -> score(testCase, responder));
-        return new EvalReport(suite.id(), suite.fingerprint(), results);
-    }
-
-    /**
-     * Apply {@code fn} to every case on its own virtual thread, with at most
-     * {@code maxConcurrency} running at once, preserving suite order in the result.
-     * A case whose {@code fn} throws cancels the cases still in flight: the sweep is
-     * already lost at that point, and the survivors would only spend model calls on a
-     * report nobody receives.
-     *
-     * <p>Shared with {@link EvalCapture} so the ceiling is defined once: capture and
-     * live scoring are the two paths that put a model behind {@code fn}, and a bound
-     * that only one of them honored would be no bound at all. Public because Play's
-     * tests live in the default package.
-     */
-    public static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
-        var permits = new Semaphore(Math.max(1, maxConcurrency));
-        try (var scope = new TaskScope<T>()) {
-            var futures = cases.stream()
-                    .map(testCase -> scope.fork(() -> {
-                        permits.acquire();
-                        try {
-                            return fn.apply(testCase);
-                        } finally {
-                            permits.release();
-                        }
-                    }))
-                    .toList();
-            scope.join();
-            return futures.stream().map(Future::resultNow).toList();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Eval run interrupted", e);
-        } catch (ExecutionException e) {
-            throw new IllegalStateException("Eval case failed outside scoring", e.getCause());
+        var results = new ArrayList<EvalReport.CaseResult>(suite.cases().size());
+        for (var testCase : suite.cases()) {
+            results.add(score(testCase, responder));
         }
+        return new EvalReport(suite.id(), suite.fingerprint(), results);
     }
 
     private static EvalReport.CaseResult score(EvalCase testCase, Responder responder) {
@@ -218,7 +163,7 @@ public final class EvalRunner {
 
     private static int scoreRecordedRun(List<EvalSuite> suites, Map<String, String> opts, Path responsesPath)
             throws IOException {
-        var recorded = GsonHolder.GSON.fromJson(Files.readString(responsesPath), ResponseFile.class);
+        var recorded = EvalJson.GSON.fromJson(Files.readString(responsesPath), ResponseFile.class);
         if (recorded == null || recorded.suite() == null || recorded.responses() == null) {
             System.out.println(responsesPath + ": expected {\"suite\":…, \"fingerprint\":…, \"responses\":{…}}");
             return 1;
