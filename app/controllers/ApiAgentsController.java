@@ -344,8 +344,12 @@ public class ApiAgentsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Create an agent")
     @AgentAccess(value = OPEN,
-            reason = "creates a model-config-only agent; tool grants and acpAllowed stay on operator-only routes")
+            reason = "creates a model-config-only agent, for the operator and main only "
+                    + "(RequestPrincipal.isOperatorOrMainAgent); tool grants and acpAllowed stay on operator-only routes")
     public static void create() {
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Only the operator or the main agent may create an agent.");
+        }
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();

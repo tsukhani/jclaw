@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.AgentService;
 import services.ConfigService;
 import services.Tx;
 import utils.AppClock;
@@ -194,6 +195,36 @@ class AgentScopedAccessTest extends FunctionalTest {
                 "{\"description\":\"scope-test-unnamed\"}"));
         assertStatus(403, resp);
         assertEquals(AGENT_SCOPE, field(resp, "code"));
+    }
+
+    @Test
+    void aCustomAgentCannotCreateAnAgent() {
+        // The operator's half is ApiAgentsControllerTest's; main's is the isOperatorOrMain matrix.
+        assertCreateRefused(agentRequest(callerAgentId), "Only the operator or the main agent may create an agent.");
+    }
+
+    @Test
+    void aBearerNamingNoAgentCannotCreateAnAgent() {
+        assertCreateRefused(bareBearerRequest(), "Only the operator or the main agent may create an agent.");
+    }
+
+    private void assertCreateRefused(Http.Request request, String message) {
+        var name = "scope-test-created-" + UUID.randomUUID().toString().substring(0, 8);
+        try {
+            var resp = asAgent(() -> POST(request, "/api/agents", "application/json",
+                    "{\"name\":\"" + name + "\",\"modelProvider\":\"openrouter\",\"modelId\":\"gpt-4.1\"}"));
+
+            assertStatus(403, resp);
+            assertEquals(AGENT_SCOPE, field(resp, "code"));
+            assertEquals(message, field(resp, "message"));
+            assertNull(commit(() -> Agent.findByName(name)), "the refused create must leave no agent");
+        } finally {
+            commit(() -> {
+                var created = Agent.findByName(name);
+                if (created != null) AgentService.delete(created);
+                return null;
+            });
+        }
     }
 
     // --- providers: a new model in a provider's list is main's to add -----------------------
