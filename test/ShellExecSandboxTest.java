@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -219,6 +220,14 @@ class ShellExecSandboxTest extends UnitTest {
                 result.get("output").getAsString(), result.toString());
         assertTrue(Files.exists(cache.resolve("uv").resolve("probe")),
                 "a write to the uv cache must land in the workspace; got: " + result);
+
+        // main's key-confined run redirects its caches to its own workspace the same way.
+        var mainCache = AgentService.workspacePath(Agent.MAIN_AGENT_NAME).toAbsolutePath().normalize().resolve(".cache");
+        var mainResult = JsonParser.parseString(tool.execute("""
+                {"command": "echo \\"$XDG_CACHE_HOME|$UV_CACHE_DIR|$npm_config_cache|$PIP_CACHE_DIR\\""}
+                """, main())).getAsJsonObject();
+        assertEquals("%s|%s|%s|%s".formatted(mainCache, mainCache.resolve("uv"), mainCache.resolve("npm"),
+                mainCache.resolve("pip")), mainResult.get("output").getAsString(), mainResult.toString());
     }
 
     /** An unconfined run keeps the host's cache locations, so it shares the caches it always used. */
@@ -377,26 +386,49 @@ class ShellExecSandboxTest extends UnitTest {
                 "test: no sandbox")), result);
     }
 
-    /** main keeps today's abort when its key confines and no sandbox can start: the override never reaches it. */
+    /**
+     * main keeps today's behaviour under its key whatever the custom-agent override says: where no sandbox
+     * starts, its exec throws the same SandboxUnavailableException; where one does, the argv is the one the
+     * real sandbox builds.
+     */
     @Test
     void mainIgnoresTheCustomAgentOverride() {
-        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"));
-        var mainRun = run(main(), "echo hi");
-        assertEquals("hi", mainRun.get("output").getAsString(), mainRun.toString());
-
-        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
         ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
         var argv = List.of("/bin/sh", "-c", "echo hi");
-        assertNotEquals(argv, wrapOrNull(argv), "PASSTHROUGH must not unwrap main's key-confined run");
+        var root = AgentService.workspacePath(AGENT).toFile();
+        if (!HarnessSandbox.availability().available()) {
+            var unaided = assertThrows(HarnessSandbox.SandboxUnavailableException.class, () -> run(main(), "echo hi"));
+            for (var override : List.of(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"),
+                    HarnessSandbox.CustomAgentOverride.PASSTHROUGH)) {
+                HarnessSandbox.setCustomAgentOverrideForTest(override);
+                var e = assertThrows(HarnessSandbox.SandboxUnavailableException.class, () -> run(main(), "echo hi"),
+                        "override " + override);
+                assertEquals(unaided.getMessage(), e.getMessage(), "override " + override);
+            }
+            return;
+        }
+        var real = HarnessSandbox.wrap(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, true);
+        for (var override : List.of(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"),
+                HarnessSandbox.CustomAgentOverride.PASSTHROUGH)) {
+            HarnessSandbox.setCustomAgentOverrideForTest(override);
+            assertEquals(real, HarnessSandbox.wrap(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, true),
+                    "override " + override);
+        }
     }
 
-    private static List<String> wrapOrNull(List<String> argv) {
-        try {
-            return HarnessSandbox.wrap(argv, AgentService.workspacePath(AGENT).toFile(), List.of(),
-                    HarnessSandbox.SHELL_SANDBOX_KEY, true);
-        } catch (HarnessSandbox.SandboxUnavailableException _) {
-            return null;
-        }
+    /** With no override, a host whose sandbox cannot start refuses a custom agent's command with the probe's reason. */
+    @Test
+    void theRealReadinessProbeRefusesACustomAgent() {
+        var availability = HarnessSandbox.availability();
+        assumeFalse(availability.available(), "this host has a working sandbox");
+        var args = new JsonObject();
+        args.addProperty("command", "echo x > marker");
+
+        var result = tool.execute(args.toString(), agent);
+
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.shellSandboxUnavailable("echo x > marker",
+                HarnessSandbox.availability().reason())), result);
+        assertFalse(Files.exists(AgentService.workspacePath(AGENT).resolve("marker")), "the command must not have run");
     }
 
     /** With shell.sandbox unset, a custom agent's write outside its workspace never lands; one inside it does. */

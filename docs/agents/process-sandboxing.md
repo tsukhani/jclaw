@@ -102,9 +102,10 @@ operator-side mitigation `ShellExecTool`'s security-posture Javadoc already name
 `ShellExecTool.execute`, and play1 runs test classes concurrently. Any test that flips it, or
 runs `exec`, must take `ShellSandboxSync.acquire()` / `release()`, the sibling of `LuceneTestSync` and
 `LoadTestHarnessSync`. A class whose subject is how `exec` behaves rather than confinement takes
-`acquireUnconfined()`, which sets `HarnessSandbox.setCustomAgentOverrideForTest(PASSTHROUGH)` so a
-custom agent's run is not refused on a host without a working sandbox; `UNAVAILABLE(reason)` stands in
-for a failed readiness probe, and `release()` resets it to `NONE`. The override is read only by
+`acquireUnconfined()`, which sets `HarnessSandbox.setCustomAgentOverrideForTest(CustomAgentOverride.PASSTHROUGH)`
+so a custom agent's run is not refused on a host without a working sandbox;
+`CustomAgentOverride.unavailable(reason)` stands in for a failed readiness probe, and `release()`
+resets it to `CustomAgentOverride.NONE`. The override is read only by
 `wrapCustomAgentShell`, never by `main`'s path or a coding harness's. A real confined run needs
 `@EnabledOnOs(OS.MAC)`, or Linux with `assumeTrue(HarnessSandbox.availability().available())`, and
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants

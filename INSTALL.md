@@ -217,9 +217,11 @@ Docker Compose is the simplest way to run JClaw on a server for everyday use. Th
 - It sets `restart: unless-stopped`. **Restart** under **Settings → System → Maintenance** stops the
   container, and this restart policy starts it again. A plain `docker run` needs `--restart unless-stopped`.
 - It starts the container with the seccomp profile `seccomp-bwrap.json`. This is Docker's default
-  profile with one rule added: it lets the sandbox tool `bwrap` create its namespaces, and nothing
-  more. So custom agents' shell commands run inside the sandbox. The file has to sit beside
-  `docker-compose.yml`; the release download already puts it there.
+  profile with one rule added: it allows the five system calls (`clone`, `unshare`, `mount`,
+  `umount2` and `pivot_root`) that the sandbox tool `bwrap` needs to create its namespaces, for the
+  container's processes, and nothing else beyond Docker's default. So custom agents' shell commands
+  run inside the sandbox. The file has to sit beside `docker-compose.yml`; the release download
+  already puts it there. A plain `docker run` needs `--security-opt seccomp=seccomp-bwrap.json` as well.
 
 ```bash
 # Start in the background

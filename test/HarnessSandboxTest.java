@@ -155,6 +155,28 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.availability());
     }
 
+    /** On Linux a custom agent's run is linuxArgv under shell.sandbox's network rule, with the key itself unset. */
+    @Test
+    void linuxCustomAgentWrapIsTheShellArgvUnderTheNetworkRule() {
+        var a = HarnessSandbox.availability();
+        org.junit.jupiter.api.Assumptions.assumeTrue(a.available() && a.mechanism().equals("bwrap"),
+                "no working bwrap here: " + a);
+        ShellSandboxSync.acquire();
+        try {
+            var argv = List.of("/bin/sh", "-c", "true");
+            var root = session.toFile();
+            for (var network : List.of("deny", "allow")) {
+                ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, network);
+                var wrapped = HarnessSandbox.wrapCustomAgentShell(argv, root);
+                assertEquals(HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY), wrapped,
+                        "network=" + network);
+                assertEquals(network.equals("deny"), wrapped.contains("--unshare-net"), "network=" + network);
+            }
+        } finally {
+            ShellSandboxSync.release();
+        }
+    }
+
     /** main's profile, byte for byte as before JF-165: the home folder stays readable. */
     @Test
     void macProfileForMainIsUnchanged() {
