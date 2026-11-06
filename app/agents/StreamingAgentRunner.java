@@ -88,8 +88,9 @@ final class StreamingAgentRunner {
             final var queueReleased = new AtomicBoolean(false);
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+            var broadcast = TurnBroadcast.forStreamedTurn(isCancelled);
             var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, generationRef, queueReleased,
-                    isCancelled);
+                    isCancelled, agent, broadcast);
             // JCLAW-882: bind the turn to this virtual thread so every provider
             // dispatch on it — round 1, each tool-loop continuation, the empty-
             // continuation retry, any prologue compaction call — counts against
@@ -98,7 +99,7 @@ final class StreamingAgentRunner {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
-                        isCancelled, conversationIdRef, generationRef, sinkRef);
+                        isCancelled, conversationIdRef, generationRef, sinkRef, broadcast);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 trace.conversationId(conversation.id);
@@ -128,6 +129,7 @@ final class StreamingAgentRunner {
                     logDroppedRows(agent, channelType, sink);
                 }
                 EventLogger.flush();
+                broadcast.endIfOpen();
                 // Defense-in-depth: if a terminal callback already drained
                 // the queue (the normal happy / error / cancel paths via
                 // the wrapper's releaseQueueOnce), the CAS inside
@@ -173,20 +175,30 @@ final class StreamingAgentRunner {
      * read {@code conversationIdRef[0]} lazily — null means the queue
      * acquire never succeeded (e.g. the canned-queued response path),
      * so there's nothing to release.
+     *
+     * <p>Every frame is also published to the conversation's watchers through {@code broadcast}, which the acquire
+     * begins, so the queued and not-found paths publish nothing. The terminal goes out before the release: a drained
+     * next turn's frames must not overtake it.
      */
+    @SuppressWarnings("java:S107") // the trace, the queue ownership slots, the cancel flag, and the broadcast
     private static AgentRunner.StreamingCallbacks wrapCallbacksWithTrace(AgentRunner.StreamingCallbacks cb, LatencyTrace trace,
                                                               Long[] conversationIdRef,
                                                               long[] generationRef,
                                                               AtomicBoolean queueReleased,
-                                                              AtomicBoolean isCancelled) {
+                                                              AtomicBoolean isCancelled,
+                                                              Agent agent, TurnBroadcast broadcast) {
         var firstTokenSeen = new AtomicBoolean(false);
         return new AgentRunner.StreamingCallbacks(
-                cb.onInit(),
+                conversation -> {
+                    broadcast.init(agent, conversation);
+                    cb.onInit().accept(conversation);
+                },
                 token -> {
                     if (firstTokenSeen.compareAndSet(false, true)) {
                         trace.mark(LatencyTrace.FIRST_TOKEN);
                     }
                     trace.mark(LatencyTrace.FIRST_SIGNAL);
+                    broadcast.token(token);
                     cb.onToken().accept(token);
                 },
                 reasoning -> {
@@ -194,26 +206,34 @@ final class StreamingAgentRunner {
                     // prefill clock even though the reader sees nothing yet.
                     trace.mark(LatencyTrace.FIRST_SIGNAL);
                     trace.noteReasoning();
+                    broadcast.reasoning(reasoning);
                     cb.onReasoning().accept(reasoning);
                 },
-                cb.onStatus(),
+                status -> {
+                    broadcast.status(status);
+                    cb.onStatus().accept(status);
+                },
                 toolCall -> {
                     trace.mark(LatencyTrace.FIRST_SIGNAL);
+                    broadcast.toolCall(toolCall);
                     cb.onToolCall().accept(toolCall);
                 },
                 content -> {
                     if (isCancelled.get()) writeStopMarker(conversationIdRef, generationRef, queueReleased);
+                    broadcast.complete(content);
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 error -> {
+                    broadcast.error(error);
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onError().accept(error); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 () -> {
                     writeStopMarker(conversationIdRef, generationRef, queueReleased);
+                    broadcast.stopped();
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
@@ -240,16 +260,16 @@ final class StreamingAgentRunner {
      * errored (in which case callbacks have already been invoked). On acquire,
      * {@code isCancelled} is registered as the owner's flag for an operator stop,
      * the conversation id and acquired generation are written to {@code conversationIdRef[0]}
-     * and {@code generationRef[0]} before anything else can throw, and the turn's
-     * fenced sink to {@code sinkRef[0]}.
+     * and {@code generationRef[0]} before anything else can throw, the turn begins on
+     * {@code broadcast}, and its fenced sink goes to {@code sinkRef[0]}.
      */
-    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and slots for its ownership and sink
+    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag, slots for its ownership and sink, and its broadcast
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments,
             AtomicBoolean isCancelled, Long[] conversationIdRef, long[] generationRef,
-            ConversationSink[] sinkRef) {
+            ConversationSink[] sinkRef, TurnBroadcast broadcast) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -277,6 +297,7 @@ final class StreamingAgentRunner {
         // JCLAW-1386: recorded before the user-message save, so a save that throws is still released.
         generationRef[0] = generation;
         conversationIdRef[0] = conversation.id;
+        broadcast.acquired(conversation.id, generation);
 
         // Every write of the turn goes through this one sink, fenced on the ownership just acquired. A turn streamed to
         // a channel or to voice announces its commits: a chat page open on the conversation has no stream of it. The

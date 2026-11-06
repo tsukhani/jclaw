@@ -285,6 +285,7 @@ GET     /api/conversations/{id}/messages        ApiConversationsController.getMe
 GET     /api/conversations/{id}/usage           ApiConversationsController.getUsage
 DELETE  /api/conversations/{id}/messages/{mid}  ApiConversationsController.deleteMessage
 GET     /api/conversations/{id}/queue           ApiConversationsController.getQueueStatus
+GET     /api/conversations/{id}/stream          ApiConversationsController.stream
 POST    /api/conversations/{id}/stop            ApiConversationsController.stopTurn
 GET     /api/conversations/{id}                 ApiConversationsController.getConversation
 DELETE  /api/conversations/{id}                 ApiConversationsController.deleteConversation

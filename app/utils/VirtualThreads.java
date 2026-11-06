@@ -61,6 +61,16 @@ public final class VirtualThreads {
         throw new IllegalStateException(first);
     }
 
+    /**
+     * Start {@code task} on a virtual thread named {@code name} that inherits no {@code InheritableThreadLocal}, for work
+     * that serves no one turn: the turn that happens to start it must not lend it its sender's trust. A new thread
+     * starts with no trace context of its own accord, since OTel's {@code Context} is a plain {@code ThreadLocal};
+     * this adds no wrap that would carry one over.
+     */
+    public static Thread startUnbound(String name, Runnable task) {
+        return Thread.ofVirtual().name(name).inheritInheritableThreadLocals(false).start(task);
+    }
+
     /** Create a single-thread scheduled executor backed by a virtual thread. */
     public static @NonNull ScheduledExecutorService newSingleThreadScheduledExecutor() {
         return Executors.newSingleThreadScheduledExecutor(r -> Thread.ofVirtual().unstarted(r));

@@ -76,7 +76,9 @@ class CredentialReadGateConformanceTest extends UnitTest {
      * could be declared today; they are left because the credential-bearing surfaces (bindings,
      * providers, config, MCP) all declare already and are checked, so annotating the rest is
      * mostly OpenAPI hygiene and a mis-typed annotation would point the gate at the wrong class.
-     * The two that cannot be declared at all render an anonymous {@code Map.of}.
+     * Two cannot be declared at all because they render an anonymous {@code Map.of}, and two are
+     * SSE streams with no response body to declare ({@code /api/events} and
+     * {@code /api/conversations/{id}/stream}).
      */
     private static final Set<String> UNCHECKABLE_GET_ROUTES = Set.of(
             "GET /api/agents/{agentId}/core-migration",
@@ -92,6 +94,7 @@ class CredentialReadGateConformanceTest extends UnitTest {
             "GET /api/attachments/{uuid}",
             "GET /api/channels/whatsapp/bindings/{id}/qr",
             "GET /api/conversations/channels",
+            "GET /api/conversations/{id}/stream",
             "GET /api/events",
             "GET /api/imagegen/capability",
             "GET /api/imagegen/models",

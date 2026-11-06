@@ -7,6 +7,7 @@ import channels.WhatsAppCobaltRunner;
 import mcp.McpConnectionManager;
 import play.jobs.Job;
 import play.jobs.OnApplicationStop;
+import services.ConversationTurnStream;
 import services.EventLogger;
 import services.FetchSidecarManager;
 import services.StealthSidecarManager;
@@ -105,6 +106,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("slack-socket-mode", SlackSocketModeRunner::stop),
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
+                new Component("conversation-turn-stream", ConversationTurnStream::shutdown),
                 new Component("asr-sidecar", AsrSidecarManager::stop),
                 new Component("diarize-sidecar", DiarizeSidecarManager::stop),
                 new Component("tts-sidecar", TtsSidecarManager::stop),

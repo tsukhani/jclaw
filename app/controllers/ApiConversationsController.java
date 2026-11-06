@@ -22,10 +22,12 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
+import play.mvc.SseStream;
 import play.mvc.With;
 import services.AttachmentService;
 import services.ConversationQueue;
 import services.ConversationService;
+import services.ConversationTurnStream;
 import services.EventLogger;
 import services.ModelOverrideResolver;
 import services.Tx;
@@ -36,6 +38,7 @@ import utils.ApiResponses;
 import utils.JpqlFilter;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -548,6 +551,52 @@ public class ApiConversationsController extends Controller {
                     "Stopped the turn in conversation %d, dropped %d pending message(s)".formatted(id, pending));
         }
         renderJSON(gson.toJson(new StopTurnResponse(stopped)));
+    }
+
+    /**
+     * GET /api/conversations/{id}/stream — every turn the conversation runs, live, as SSE (JF-201): the frames the
+     * chat stream sends, each with an {@code id:} line, from {@link ConversationTurnStream}. A client that names the
+     * last id it saw gets what it missed of the turn in progress first, or a {@code resync} frame when that is no
+     * longer kept. The id comes in the {@code Last-Event-ID} header an EventSource sends on reconnect, or in the
+     * {@code lastEventId} parameter, since a new EventSource cannot set headers; the header wins.
+     *
+     * <p>{@code @NoTransaction}: the subscription lasts as long as the page stays open, and the request's
+     * transaction would hold a connection for all of it.
+     */
+    @NoTransaction
+    @AgentAccess(OPERATOR_ONLY)
+    public static void stream(Long id, @Nullable String lastEventId) {
+        Tx.run(() -> requireConversation(id));
+        var header = request.headers.get("last-event-id");
+        var lastSeen = parseEventId(header != null ? header.value() : lastEventId);
+        // Heartbeat well inside the fork's 30 s QUIC idle window, as the chat stream does (JCLAW-1204).
+        SseStream sse = openSSE().heartbeat(Duration.ofSeconds(15)).timeout(Duration.ofHours(24));
+        // The fork sends the response headers with the first chunk, so without this the browser's open event waits for a heartbeat.
+        sse.sendComment("open");
+        sse.onClose(ConversationTurnStream.subscribe(id, lastSeen, new SseSink(sse)));
+        await(sse.completion());
+    }
+
+    /** An id that is not a number names no frame, so the client is treated as having seen none. */
+    private static @Nullable Long parseEventId(@Nullable String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return Long.parseLong(raw.strip());
+        } catch (NumberFormatException _) {
+            return null;
+        }
+    }
+
+    private record SseSink(SseStream sse) implements ConversationTurnStream.Sink {
+        @Override
+        public void write(byte[] event) {
+            sse.sendRaw(event);
+        }
+
+        @Override
+        public void close() {
+            sse.close();
+        }
     }
 
     /**

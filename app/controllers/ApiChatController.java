@@ -1,12 +1,12 @@
 package controllers;
 
 import agents.AgentRunner;
-import agents.ModelResolver;
+import agents.TurnBroadcast;
 import agents.TurnCancellation;
+import agents.TurnFrames;
 import channels.QuotedReply;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -24,15 +24,11 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
-import services.ModelOverrideResolver;
 import services.Tx;
 import services.UploadStaging;
 import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
-import utils.AppClock;
-import utils.ChannelErrorTemplates;
-import utils.ErrorRendering;
 import utils.InactivityTimer;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
@@ -41,9 +37,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -88,7 +84,6 @@ public class ApiChatController extends Controller {
     private static final String KEY_ORIGINAL_FILENAME = "originalFilename";
     private static final String KEY_MIME_TYPE = "mimeType";
     private static final String KEY_SIZE_BYTES = "sizeBytes";
-    private static final String KEY_CONTENT = "content";
 
     /**
      * Pre-built SSE-frame fragments for the per-chunk callbacks fired by
@@ -97,29 +92,20 @@ public class ApiChatController extends Controller {
      * {@code sse.send(Map.of(...))} path was the dominant allocator on
      * the hot path (one HashMap per chunk, plus Gson's StringBuilder /
      * JsonWriter / intermediate strings, plus a fresh byte[] for the
-     * formatted frame). The bytes here are immutable shared prefixes;
-     * the only per-frame allocation is the JSON-escaped content string
-     * and the final concatenated byte array.
+     * formatted frame). These bytes and {@link TurnFrames.Chunk}'s openings
+     * are immutable shared prefixes; the only per-frame allocation is the
+     * JSON-escaped content string and the final concatenated byte array.
      *
      * <p>Newlines in the token content are NOT a framing hazard:
      * {@code gson.toJson(String)} escapes {@code \n} to {@code \\n}, so
      * the resulting JSON is a single line and the only literal newlines
      * in the frame are the spec-mandated {@code \n\n} terminator.
      */
-    private static final byte[] SSE_TOKEN_PREFIX =
-            "data: {\"type\":\"token\",\"content\":".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] SSE_REASONING_PREFIX =
-            "data: {\"type\":\"reasoning\",\"content\":".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] SSE_FRAME_SUFFIX =
-            "}\n\n".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] SSE_DATA = "data: ".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] SSE_FRAME_END = "\n\n".getBytes(StandardCharsets.UTF_8);
 
-    private static void sendChunkFrame(SseStream sse, byte[] prefix, String content) {
-        var contentBytes = gson.toJson(content).getBytes(StandardCharsets.UTF_8);
-        var frame = new byte[prefix.length + contentBytes.length + SSE_FRAME_SUFFIX.length];
-        System.arraycopy(prefix, 0, frame, 0, prefix.length);
-        System.arraycopy(contentBytes, 0, frame, prefix.length, contentBytes.length);
-        System.arraycopy(SSE_FRAME_SUFFIX, 0, frame, prefix.length + contentBytes.length, SSE_FRAME_SUFFIX.length);
-        sse.sendRaw(frame);
+    private static void sendChunkFrame(SseStream sse, TurnFrames.Chunk kind, String content) {
+        sse.sendRaw(TurnFrames.chunk(SSE_DATA, kind, content, SSE_FRAME_END));
     }
 
     /** Validated prologue shared by send() and streamChat(). */
@@ -490,9 +476,9 @@ public class ApiChatController extends Controller {
                 slashCmd.get(), agent, "web", username, slashConv,
                 Commands.extractArgs(messageText), true);
         if (slashResult.conversation() != null) {
-            sse.send(Map.of("type", "init", KEY_CONVERSATION_ID, slashResult.conversation().id));
+            sse.send(TurnFrames.init(slashResult.conversation().id));
         }
-        sse.send(Map.of("type", "complete", KEY_CONTENT, slashResult.responseText()));
+        sse.send(TurnFrames.complete(slashResult.responseText()));
         sse.close();
         // Slash commands are synthetic turns — no LLM, no prologue → intentionally
         // not instrumented so they don't skew the Chat Performance histograms.
@@ -538,23 +524,28 @@ public class ApiChatController extends Controller {
         // immediately; only steady-state tokens batch.
         final int coalesceChars = Math.max(0, ConfigService.getInt(TokenCoalescer.CONFIG_KEY, 0));
         var tokenCoalescer = new TokenCoalescer(coalesceChars,
-                s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
+                s -> sendChunkFrame(sse, TurnFrames.Chunk.TOKEN, s));
         var reasoningCoalescer = new TokenCoalescer(coalesceChars,
-                s -> sendChunkFrame(sse, SSE_REASONING_PREFIX, s));
+                s -> sendChunkFrame(sse, TurnFrames.Chunk.REASONING, s));
 
         // JCLAW-661: bridge this SSE to any acp coding run spawned during the turn.
         // Register the callbacks under the resolved conversation id (known only once
         // onInit fires) so SubagentSpawnTool can promote them onto the run's id, and
         // unregister on completion/error. convIdRef also gates the unregister; cbRef
-        // threads the record's self-reference into its own onInit handler.
+        // threads the record's self-reference into its own onInit handler. What reaches
+        // the tab through that registration bypasses the turn's own callbacks, so the
+        // registered set also publishes it to the turn's watchers (JF-200).
         var convIdRef = new AtomicReference<Long>();
         var cbRef = new AtomicReference<AgentRunner.StreamingCallbacks>();
+        var bridgeRef = new AtomicReference<AgentRunner.StreamingCallbacks>();
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
                     idle.touch();
-                    sendInitFrame(sse, agent, conversation);
+                    sse.send(TurnFrames.init(agent, conversation));
                     convIdRef.set(conversation.id);
-                    SubagentSpawnTool.registerChatCallbacks(conversation.id, cbRef.get());
+                    var bridge = TurnBroadcast.alsoPublishing(conversation.id, Objects.requireNonNull(cbRef.get()));
+                    bridgeRef.set(bridge);
+                    SubagentSpawnTool.registerChatCallbacks(conversation.id, bridge);
                 },
                 token -> {
                     idle.touch();
@@ -563,8 +554,7 @@ public class ApiChatController extends Controller {
                         // visualization. Fires once per turn, so the extra
                         // HashMap allocation isn't worth the pre-built-frame
                         // dance the steady-state path uses.
-                        sse.send(Map.of("type", "token", KEY_CONTENT, token,
-                                "timestamp", AppClock.now().toString()));
+                        sse.send(TurnFrames.firstToken(token));
                     } else {
                         tokenCoalescer.accept(token);
                     }
@@ -575,11 +565,11 @@ public class ApiChatController extends Controller {
                 },
                 status -> {
                     idle.touch();
-                    sse.send(Map.of("type", "status", KEY_CONTENT, status));
+                    sse.send(TurnFrames.status(status));
                 },
                 ev -> {
                     idle.touch();
-                    sendToolCallFrame(sse, ev);
+                    sse.send(TurnFrames.toolCall(ev));
                 },
                 content -> {
                     // JCLAW-200: drain coalescer buffers before the terminal
@@ -587,15 +577,15 @@ public class ApiChatController extends Controller {
                     // coalescing is disabled (buffers stay empty).
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), bridgeRef.get());
                     close.finished().set(true);
-                    sse.send(Map.of("type", "complete", KEY_CONTENT, content));
+                    sse.send(TurnFrames.complete(content));
                     sse.close();
                 },
                 error -> {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), bridgeRef.get());
                     close.finished().set(true);
                     // JCLAW-1133: the raw throwable text goes only to the EventLogger line below.
                     sse.send(webErrorFrame(error));
@@ -609,62 +599,18 @@ public class ApiChatController extends Controller {
                 // It still fires on the SSE-close path (where onComplete/onError do
                 // not), so JCLAW-661 uses it to drop the coding-run bridge for a
                 // tab that closed mid-turn.
-                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get())
+                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), bridgeRef.get())
         );
         cbRef.set(callbacks);
         return callbacks;
     }
 
-    private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {
-        var initData = new HashMap<>(Map.of("type", "init", KEY_CONVERSATION_ID, conversation.id));
-        // The same resolution AgentRunner applies — conversation override, then agent default,
-        // gated by the effective model's capability — so the UI reflects what the LLM receives.
-        var providerName = ModelOverrideResolver.provider(conversation, agent);
-        var provider = providerName != null ? ProviderRegistry.get(providerName) : null;
-        if (provider != null) {
-            var mode = ModelResolver.resolveThinkingMode(agent, conversation, provider);
-            if (mode != null) initData.put("thinkingMode", mode);
-        }
-        sse.send(initData);
-    }
-
     /**
-     * JCLAW-170: tool-call frame. structuredJson rides as a raw
-     * JsonElement (not a nested string) so the frontend can parse
-     * it as an object tree — search-style tools embed a
-     * {provider, results:[...]} payload that the UI turns into
-     * clickable result chips.
-     */
-    private static void sendToolCallFrame(SseStream sse, AgentRunner.ToolCallEvent ev) {
-        var payload = new LinkedHashMap<String, Object>();
-        payload.put("type", "tool_call");
-        payload.put("id", ev.id());
-        payload.put("name", ev.name());
-        payload.put("icon", ev.icon());
-        payload.put("arguments", ev.arguments());
-        payload.put("resultText", ev.resultText() == null ? "" : ev.resultText());
-        if (ev.resultStructuredJson() != null) {
-            payload.put("resultStructured",
-                    JsonParser.parseString(ev.resultStructuredJson()));
-        }
-        // JCLAW-228/562: the tool produced inline attachments (image / voice clips); ship their
-        // metadata so the chat UI renders them live on the streaming bubble rather than only
-        // after a reload.
-        if (ev.generatedAttachmentsJson() != null) {
-            payload.put("generatedAttachments",
-                    JsonParser.parseString(ev.generatedAttachmentsJson()));
-        }
-        sse.send(payload);
-    }
-
-    /**
-     * The SSE frame a web reader sees when a turn fails (JCLAW-1133): the 3-part template, rich
-     * because the chat renders Markdown. Never the throwable's own message — that goes to
-     * event_log alongside. Extracted so the choice is testable without driving a real LLM stream,
-     * which this controller's tests deliberately avoid.
+     * The SSE frame a web reader sees when a turn fails (JCLAW-1133): {@link TurnFrames#error}.
+     * Extracted so the choice is testable without driving a real LLM stream, which this
+     * controller's tests deliberately avoid.
      */
     public static Map<String, Object> webErrorFrame(Throwable error) {
-        return Map.of("type", "error", KEY_CONTENT,
-                ErrorRendering.RICH.render(ChannelErrorTemplates.forTurnFailure(error)));
+        return TurnFrames.error(error);
     }
 }

@@ -305,6 +305,7 @@ public class ConversationQueue {
         var state = queues.get(conversationId);
         if (state == null) return false;
         AtomicBoolean stopped;
+        long stoppedGeneration;
         @Nullable RuntimeException markerFailure = null;
         synchronized (state) {
             // An owner with no flag of its own (a drained or sync run) could not be told to stop.
@@ -321,9 +322,12 @@ public class ConversationQueue {
             if (stopped == state.cancelled) state.cancelled = new AtomicBoolean(false);
             discardPending(pendingIdsOf(List.copyOf(state.pending)));
             state.pending.clear();
+            stoppedGeneration = state.generation;
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
         }
+        // The watchers' turn ends now, not when the stopped turn next looks at its flag.
+        ConversationTurnStream.stop(conversationId, stoppedGeneration);
         if (markerFailure != null) {
             EventLogger.warn(QUEUE, "Stop marker not written for conversation %d: %s"
                     .formatted(conversationId, markerFailure.getMessage()));

@@ -102,6 +102,11 @@ class ArchitectureTest extends UnitTest {
         assertTrue(streamChat.isAnnotationPresent(NoTransaction.class),
                 "ApiChatController.streamChat must carry @NoTransaction — without it Play holds a "
                         + "JPA connection for the entire SSE stream (JCLAW-772)");
+        var turnStream = Class.forName("controllers.ApiConversationsController")
+                .getDeclaredMethod("stream", Long.class, String.class);
+        assertTrue(turnStream.isAnnotationPresent(NoTransaction.class),
+                "ApiConversationsController.stream must carry @NoTransaction — a page holds it open for as "
+                        + "long as it shows the conversation (JF-201)");
     }
 
     /** Actions deliberately reachable with no interceptor: the unauthenticated health probe the

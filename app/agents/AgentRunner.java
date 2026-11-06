@@ -701,35 +701,23 @@ public class AgentRunner {
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
         trace.conversationId(conversationId);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+        @Nullable TurnBroadcast broadcast = null;
+        @Nullable RunResult result = null;
+        @Nullable RuntimeException failure = null;
 
         // JCLAW-882: bind the turn to this thread so every provider dispatch below
         // — the tool loop's rounds, plus any compaction/summarization call the
         // prologue makes — counts against this turn's llm_call_count. The binding
         // closes before the finally block ends the trace.
         try (var _ = LatencyTrace.bind(trace)) {
-            // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
-            // boundary. If a /subagent kill landed between queue acquire and now,
-            // bail before we burn any LLM budget or persist any state. Inside the
-            // try so a RunCancelledException still runs the finally that releases
-            // queue ownership (trace end/flush/processQueueDrain).
-            checkSubagentCancel(conversation);
-
-            // JCLAW-1222: a conversation on the model router gets its model first, bound for the whole turn.
-            var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType);
-            if (route == null && TurnRouting.usesRouter(agent, conversation)) {
-                Tx.run(() -> {
-                    if (!skipUserAppend) sink.appendUserMessage(userMessage, attachments);
-                    sink.appendAssistantMessage(TurnRouting.ROUTER_UNAVAILABLE_ERROR, null);
-                });
-                return new RunResult(TurnRouting.ROUTER_UNAVAILABLE_ERROR,
-                        Tx.run(() -> ConversationService.findById(conversationId)));
-            }
-            if (route == null) {
-                return FallbackTurn.run(agent, conversation,
-                        () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace));
-            }
-            return RoutedTurn.callWith(route, conversation,
-                    () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace));
+            // Until this path streams (JF-203), its watchers get the turn's start, each round's tool frames and its
+            // end, never tokens: the sync loop retries after output. An inline child's frames join its parent's turn.
+            broadcast = releases ? TurnBroadcast.owning(conversationId, generation) : TurnBroadcast.joining(conversationId);
+            result = runBoundTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace, broadcast);
+            return result;
+        } catch (RuntimeException e) {
+            failure = e;
+            throw e;
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
@@ -737,14 +725,51 @@ public class AgentRunner {
                 StreamingAgentRunner.logDroppedRows(agent, conversation.channelType, sink);
             }
             EventLogger.flush();
+            if (broadcast != null) broadcast.endWith(result, failure);
             if (releases) QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
         }
     }
 
+    /** {@link #runAfterAcquire}'s turn, inside its trace binding. */
+    @SuppressWarnings("java:S107") // the turn's inputs, its sink and trace, and where its frames go
+    private static RunResult runBoundTurn(Agent agent, Conversation conversation, String userMessage,
+                                          @Nullable List<AttachmentService.Input> attachments, boolean skipUserAppend,
+                                          AgentExecutionSink sink, LatencyTrace trace, TurnBroadcast broadcast) {
+        final Long conversationId = conversation.id;
+        // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
+        // boundary. If a /subagent kill landed between queue acquire and now,
+        // bail before we burn any LLM budget or persist any state. Inside
+        // runAfterAcquire's try so a RunCancelledException still runs the finally
+        // that releases queue ownership (trace end/flush/processQueueDrain).
+        checkSubagentCancel(conversation);
+
+        // JCLAW-1222: a conversation on the model router gets its model first, bound for the whole turn.
+        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType);
+        if (route == null && TurnRouting.usesRouter(agent, conversation)) {
+            Tx.run(() -> {
+                if (!skipUserAppend) sink.appendUserMessage(userMessage, attachments);
+                sink.appendAssistantMessage(TurnRouting.ROUTER_UNAVAILABLE_ERROR, null);
+            });
+            broadcast.init(agent, conversation);
+            return new RunResult(TurnRouting.ROUTER_UNAVAILABLE_ERROR,
+                    Tx.run(() -> ConversationService.findById(conversationId)));
+        }
+        if (route == null) {
+            return FallbackTurn.run(agent, conversation,
+                    () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
+                            broadcast));
+        }
+        return RoutedTurn.callWith(route, conversation,
+                () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
+                        broadcast));
+    }
+
     /** The sync turn from prologue to persisted reply; {@link #runAfterAcquire} owns the trace and the queue. */
+    @SuppressWarnings("java:S107") // runBoundTurn's call surface
     private static RunResult runPreparedTurn(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
-                                             boolean skipUserAppend, AgentExecutionSink sink, LatencyTrace trace) {
+                                             boolean skipUserAppend, AgentExecutionSink sink, LatencyTrace trace,
+                                             TurnBroadcast broadcast) {
         final Long conversationId = conversation.id;
 
         // Short setup transaction: persist user message, assemble prompt, resolve provider.
@@ -754,6 +779,8 @@ public class AgentRunner {
         // would throw PersistentObjectException on save().
         var preparedOpt = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
                 skipUserAppend, conversationId, sink, trace);
+        // After the user row commits, as a streamed turn's init is, so a watcher that reloads on it sees the row.
+        broadcast.init(agent, conversation);
 
         if (preparedOpt.isEmpty()) {
             return new RunResult(missingProviderError(ModelResolver.effectiveModelProvider(agent, conversation)),
@@ -772,11 +799,12 @@ public class AgentRunner {
         long loopStartNs = System.nanoTime();
         var turnUsage = new LlmProvider.TurnUsage();
         var loopInput = prepared;
+        var frames = new ToolCallLoopRunner.RoundFrames(broadcast::status, broadcast::toolCall);
         // LLM call loop — no transaction open, JDBC connection back in pool
         var outcome = LlmProvider.callCountingRounds(turnUsage, () -> ToolCallLoopRunner.callWithToolLoop(agent,
                 conversation, conversationId, loopInput.messages(), loopInput.tools(), loopInput.primary(),
                 loopInput.fallback(), loopInput.audioBearers(), loopInput.imageBearers(), sink,
-                null));  // JCLAW-414: chat path is not task-cancellable
+                null, maxToolRounds(), frames));  // JCLAW-414: chat path is not task-cancellable
         var response = outcome.content();
         var truncated = outcome.truncated();
         trace.mark(LatencyTrace.STREAM_BODY_END);
