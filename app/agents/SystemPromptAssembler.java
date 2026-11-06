@@ -558,11 +558,17 @@ public class SystemPromptAssembler {
     private static Optional<String> channelGuidanceFor(@Nullable String channelType) {
         if (channelType == null) return Optional.empty();
         return switch (channelType.toLowerCase()) {
-            case "web" -> Optional.of(WEB_CHANNEL_GUIDANCE);
+            case "web" -> Optional.of(webChannelGuidance());
             case "telegram" -> Optional.of(TELEGRAM_CHANNEL_GUIDANCE);
             case "voice" -> Optional.of(VOICE_CHANNEL_GUIDANCE);
             default -> Optional.empty();
         };
+    }
+
+    private static String webChannelGuidance() {
+        return ConfigService.getBoolean(VISUAL_ENABLED_KEY, true)
+                ? WEB_CHANNEL_GUIDANCE + "\n" + VISUAL_GUIDANCE
+                : WEB_CHANNEL_GUIDANCE;
     }
 
     /** Web and voice say they are private in their channel guidance. */
@@ -640,6 +646,44 @@ public class SystemPromptAssembler {
             Crystallography Open Database or an SDF from PubChem, never from memory. The
             UI draws a rotatable 3D view, with unit-cell, supercell and coordination
             polyhedron controls for a CIF.
+            """;
+
+    /** Gates both the web chat's visual renderer and {@link #VISUAL_GUIDANCE}; absent means on. */
+    public static final String VISUAL_ENABLED_KEY = "visual.enabled";
+
+    private static final String VISUAL_GUIDANCE = """
+            To draw an interactive figure, write a fenced code block with the
+            language hint visual holding one JSON object. Reach for it for a relationship
+            between quantities, a process with ordered stages, or a quantity worth
+            exploring as a parameter changes. Not for a table of facts, and not when two
+            sentences do the job. Every spec needs "kind" and "title" (at most 120
+            characters); "caption" is optional, at most 300. The whole block stays under
+            20000 characters. Ids, for nodes and params alike, are lowercase letters,
+            digits and hyphens, up to 32 characters.
+
+            - kind "chart": "chartType" line (the default), bar or scatter; "x" and "y" as
+              {"label", "unit"}, label up to 60 characters and unit up to 20; "series" of
+              1 to 6 {"name", "points"}, names up to 60, each points array 2 to 400
+              [x, y] number pairs; optional "marks", at most 20 {"x", "label"}, draw
+              labeled vertical lines.
+            - kind "diagram": "layout" flow (the default), tree or cycle; "nodes" of at most
+              40 {"id", "label", "detail"}, labels up to 60, detail optional up to 300;
+              "edges" of at most 80 {"from", "to", "label"} naming declared ids; optional
+              "steps", at most 20 {"title", "body", "focus": [node ids]}, titles up to 80
+              and bodies up to 500, add a step-through strip.
+            - kind "explore": "x" and "y" as for a chart; "params" of 1 to 3 {"id", "label",
+              "unit", "min", "max", "step", "value"}, min below max, step above 0, value
+              within the range; "frames", at most 100, of {"params": {id: value},
+              "points"}, the curve you computed at those parameter values. Each frame sets
+              exactly the declared params, and carries the same x values as the first
+              frame, in the same order, 2 to 400 points. The slider of the first param
+              interpolates between frames; every other param picks the frames nearest its
+              slider. There is no formula.
+
+            You compute the numbers. Never invent a series to fill the shape of a chart; if
+            you do not have the data, say so instead of drawing. Draw at most one visual per
+            reply unless the reader asks for more: a wall of charts explains less than one
+            good one.
             """;
 
     private static final String TELEGRAM_CHANNEL_GUIDANCE = """

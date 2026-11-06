@@ -218,6 +218,22 @@ async function saveChatField(configKey: string, value: string) {
       </div>
     </div>
 
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 text-xs text-fg-muted border-b border-border">
+        <span class="font-medium">Visuals</span>
+      </div>
+      <div class="divide-y divide-border">
+        <SettingsConfigField
+          config-key="visual.enabled"
+          label="Draw visuals in chat"
+          kind="boolean"
+          fallback="true"
+          label-width="w-80"
+          tip="Charts, stepped diagrams and parameter sliders the model writes as a visual block are drawn in the chat, and the model is told it can write them. Off, the block shows as JSON and the model is not told. Default: on."
+        />
+      </div>
+    </div>
+
     <!-- Advanced — context window & compaction. Collapsed by default; these
          knobs trade off conversational continuity against context-budget
          safety, and the defaults are deliberately conservative. Surface them

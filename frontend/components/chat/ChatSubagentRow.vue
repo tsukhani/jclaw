@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ExclamationTriangleIcon, UsersIcon } from '@heroicons/vue/24/outline'
 import { renderMarkdown } from '~/utils/chat-markdown'
+import { vVisualFigures } from '~/utils/visual/directive'
 import type { Message } from '~/types/api'
 
 // JCLAW-291: the subagent_announce completion card — the SYSTEM-role row that
@@ -77,6 +78,7 @@ function subagentAnnounceTruncated(m: Message): boolean {
         </div>
         <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify before returning. -->
         <div
+          v-visual-figures
           class="prose-chat px-3 py-2 text-sm text-fg-strong overflow-x-auto break-words"
           v-html="renderMarkdown(subagentAnnounceReply(msg), agentId)"
         />

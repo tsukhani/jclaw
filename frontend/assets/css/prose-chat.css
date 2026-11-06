@@ -119,6 +119,74 @@ figure.structure-view figcaption, .structure-note, .structure-error { font-size:
 .structure-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.5rem; font-size: 0.75rem; }
 .structure-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Visual fences: the series palette is a pair per theme; dash patterns and markers carry identity without color. */
+.prose-chat {
+  --visual-series-1: #2563eb; --visual-series-2: #d97706; --visual-series-3: #059669;
+  --visual-series-4: #db2777; --visual-series-5: #7c3aed; --visual-series-6: #525252;
+}
+
+html.dark .prose-chat {
+  --visual-series-1: #60a5fa; --visual-series-2: #fbbf24; --visual-series-3: #34d399;
+  --visual-series-4: #f472b6; --visual-series-5: #a78bfa; --visual-series-6: #d4d4d4;
+}
+figure.visual-view { margin: 0.75em 0; max-width: 42rem; }
+figure.visual-view > [hidden] { display: none; }
+
+/* A figure not yet drawn holds roughly a chart's height, so twenty of them cannot all sit near the viewport at once. */
+.visual-host:empty { min-height: 18rem; }
+figure.visual-view figcaption, .visual-note, .visual-error { font-size: 0.875em; color: var(--fg-muted); margin-top: 0.35em; }
+.visual-title { font-weight: 600; margin: 0 0 0.35em; }
+.visual-figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+.visual-figure text { fill: currentcolor; font-size: 11px; }
+.visual-grid { stroke: currentcolor; stroke-opacity: 0.08; }
+.visual-axis { stroke: currentcolor; stroke-opacity: 0.45; }
+.visual-tick { fill-opacity: 0.7; }
+.visual-figure .visual-axis-title { font-size: 12px; }
+.visual-line { stroke-width: 2; stroke-linejoin: round; }
+.visual-marker { stroke-width: 1.5; }
+.visual-mark line { stroke: currentcolor; stroke-opacity: 0.5; stroke-dasharray: 3 3; }
+.visual-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; padding: 0; margin: 0.35em 0 0; font-size: 0.8em; }
+.visual-legend li { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; }
+.visual-legend svg { width: 34px; display: inline; }
+.visual-node rect { fill: var(--surface); stroke: currentcolor; stroke-opacity: 0.5; stroke-width: 1.25; }
+.visual-node, .visual-edge { transition: opacity 200ms; }
+.visual-node.visual-focus rect { stroke: var(--visual-series-1); stroke-opacity: 1; stroke-width: 2.5; }
+.visual-dim { opacity: 0.3; }
+.visual-edge path { stroke: currentcolor; stroke-opacity: 0.6; stroke-width: 1.25; }
+.visual-edge.visual-back path { stroke-dasharray: 5 3; }
+.visual-arrow { fill: currentcolor; fill-opacity: 0.6; }
+.visual-figure .visual-edge-label { font-size: 10px; fill-opacity: 0.8; }
+.visual-detail, .visual-step-body { font-size: 0.875em; margin: 0.35em 0; }
+.visual-steps, .visual-params { margin-top: 0.5rem; font-size: 0.8125rem; }
+.visual-step-controls { display: flex; gap: 0.5rem; }
+.visual-step-list { display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; padding: 0; margin: 0.5rem 0 0; list-style: none; counter-reset: none; }
+.visual-step-list li { margin: 0; }
+.visual-figure button { border: 1px solid var(--border, rgb(0,0,0,15%)); padding: 0.1rem 0.5rem; }
+.visual-figure button[aria-current="step"], .visual-figure button[aria-pressed="true"] { background: var(--accent); font-weight: 600; }
+.visual-figure button:disabled { opacity: 0.4; cursor: not-allowed; }
+.visual-param, .visual-param-label { display: flex; align-items: center; gap: 0.75rem; }
+.visual-param-label { flex: 1; }
+.visual-param-value { min-width: 4rem; }
+.visual-param input[type="range"] { flex: 1; accent-color: var(--visual-series-1); }
+.visual-data { margin-top: 0.5rem; font-size: 0.8125rem; }
+.visual-data summary { cursor: pointer; color: var(--fg-muted); }
+.visual-data caption { text-align: left; font-weight: 600; padding-top: 0.35em; }
+
+.visual-figure button:focus-visible, .visual-figure input:focus-visible, .visual-data summary:focus-visible {
+  outline: 2px solid var(--visual-series-1); outline-offset: 2px;
+}
+.visual-draw-in .visual-clip-rect { transform-box: fill-box; transform-origin: left; animation: visual-reveal 600ms ease-out both; }
+.visual-draw-in .visual-bar { transform-box: fill-box; transform-origin: bottom; animation: visual-grow 600ms ease-out both; }
+
+@keyframes visual-reveal { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@keyframes visual-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .visual-draw-in .visual-clip-rect, .visual-draw-in .visual-bar { animation: none; }
+  .visual-node, .visual-edge { transition: none; }
+}
+
 .prose-chat table {
   /* Auto layout — each table sizes its columns from its own content. The
      prior approach pinned the first column to 14em + nowrap so a tools
