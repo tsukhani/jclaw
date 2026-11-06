@@ -168,8 +168,12 @@ pipeline {
                 script {
                     if (env.ALREADY_TESTED == 'true') {
                         echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
-                        // This build carries no Sonar link of its own, so the job page shows none.
-                        echo 'Sonar result for this commit: https://sonar.abundent.com/dashboard?id=abundent%3Ajclaw'
+                        // The Sonar plugin badges only a build that ran the analysis, so give this one the same
+                        // badge (Badge plugin). Its tooltip is escaped twice, so it must hold no apostrophe.
+                        def sonarDashboard = 'https://sonar.abundent.com/dashboard?id=abundent%3Ajclaw'
+                        addBadge(icon: '/plugin/sonar/images/SonarQube_Mark.png', link: sonarDashboard, target: '_blank',
+                                 text: 'Analyzed by SonarQube in the push build of this commit')
+                        echo "Sonar result for this commit: ${sonarDashboard}"
                     }
                 }
                 // A release is cut only from the version's signed tag, which
