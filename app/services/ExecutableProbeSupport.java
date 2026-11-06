@@ -6,6 +6,7 @@ import play.Logger;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -59,7 +60,20 @@ public final class ExecutableProbeSupport {
      * @param notFoundHint trailing hint appended to the "not found on PATH" reason
      */
     public static CapturedResult probeCapturing(String binary, String versionArg, String notFoundHint) {
-        var pb = new ProcessBuilder(binary, versionArg);
+        return probeCapturing(List.of(binary, versionArg), notFoundHint);
+    }
+
+    /**
+     * {@link #probeCapturing(String, String, String)} for a command line of any length, with the same
+     * timeout and classification; the reasons name the whole command line.
+     *
+     * @param argv         the command, its executable first, looked up on PATH
+     * @param notFoundHint trailing hint appended to the "not found on PATH" reason
+     */
+    public static CapturedResult probeCapturing(List<String> argv, String notFoundHint) {
+        var binary = argv.getFirst();
+        var commandLine = String.join(" ", argv);
+        var pb = new ProcessBuilder(argv);
         pb.redirectErrorStream(true);
         try {
             var p = pb.start();
@@ -77,14 +91,14 @@ public final class ExecutableProbeSupport {
                 p.destroyForcibly();
                 drainer.join(Duration.ofSeconds(1));
                 return new CapturedResult(false,
-                        "%s %s did not exit within %ds".formatted(binary, versionArg, PROBE_TIMEOUT_SECONDS),
+                        "%s did not exit within %ds".formatted(commandLine, PROBE_TIMEOUT_SECONDS),
                         captured.get());
             }
             drainer.join();
             int code = p.exitValue();
             if (code != 0) {
                 return new CapturedResult(false,
-                        "%s %s exited %d".formatted(binary, versionArg, code), captured.get());
+                        "%s exited %d".formatted(commandLine, code), captured.get());
             }
             Logger.info("ExecutableProbeSupport: %s available on PATH".formatted(binary));
             return new CapturedResult(true, "available", captured.get());

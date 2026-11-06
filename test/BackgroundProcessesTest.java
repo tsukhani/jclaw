@@ -39,7 +39,7 @@ class BackgroundProcessesTest extends UnitTest {
     @BeforeEach
     void setup() {
         // shell.sandbox is process-global and read on every exec.
-        ShellSandboxSync.acquire();
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         deleteDir(AgentService.workspacePath(AGENT));
         tool = new ShellExecTool();

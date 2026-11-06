@@ -110,9 +110,12 @@ async function stopProcess(pid: number) {
     <p class="text-xs text-fg-muted">
       Allowlist and timeout for the shell tool. Per-agent enable/disable
       lives on the Tools page; this section configures the shared
-      execution policy. <span class="font-mono">sandbox</span> confines what a
-      command can write to the agent's workspace, and
-      <span class="font-mono">sandbox.network</span> can take away its network.
+      execution policy. Custom agents' commands always run in the OS sandbox
+      and cannot read the home folder outside their workspace.
+      <span class="font-mono">sandbox</span> sets the same confinement for the
+      main agent's commands, and
+      <span class="font-mono">sandbox.network</span> can take away a confined
+      command's network.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -218,7 +221,7 @@ async function stopProcess(pid: number) {
               label="About sandbox"
               content-class="w-72 font-mono"
             >
-              Confines what exec can write to the agent's workspace, and the audio ffmpeg runs to the temp directory, with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves the operator's own web chat and voice mode unconfined.
+              Confines what the main agent's exec can write to its workspace, and the audio ffmpeg runs to the temp directory, with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Custom agents' exec is always confined, whatever this says. Untrusted channels only leaves the operator's own web chat and voice mode unconfined.
             </InfoTip>
           </span>
           <div class="flex-1 min-w-0 space-y-1">
@@ -243,7 +246,7 @@ async function stopProcess(pid: number) {
               data-testid="sandbox-unavailable"
               class="text-xs text-amber-800 dark:text-amber-400"
             >
-              This host has no sandbox mechanism ({{ sandboxData.reason }}). With this on, runs are refused rather than run unconfined.
+              This host has no sandbox mechanism ({{ sandboxData.reason }}). Custom agents' shell commands are refused here, and with this on, the main agent's are too.
             </p>
           </div>
         </div>
@@ -255,7 +258,7 @@ async function stopProcess(pid: number) {
               label="About sandbox.network"
               content-class="w-72 font-mono"
             >
-              Whether a run the sandbox confines can use the network. Deny cuts every connection, even to this machine, so a command cannot send the workspace out. Coding harnesses keep theirs. Does nothing while sandbox is Off.
+              Whether a run the sandbox confines can use the network. Deny cuts every connection, even to this machine, so a command cannot send the workspace out. Coding harnesses keep theirs. For the main agent it does nothing while sandbox is Off.
             </InfoTip>
           </span>
           <div class="flex-1 min-w-0">

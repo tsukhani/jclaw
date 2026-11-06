@@ -34,6 +34,7 @@ public final class ToolErrorTemplates {
     public static final String SHELL_EXIT_NONZERO = "shell_exit_nonzero";
     public static final String SHELL_TIMED_OUT = "shell_timed_out";
     public static final String SHELL_STOPPED = "shell_stopped";
+    public static final String SHELL_SANDBOX_UNAVAILABLE = "shell_sandbox_unavailable";
 
     public static final String FS_PATH_MISSING = "fs_path_missing";
     public static final String FS_PATH_REFUSED = "fs_path_refused";
@@ -134,6 +135,14 @@ public final class ToolErrorTemplates {
                 "This is a failure to launch the process at all, not a failure of the command — "
                         + "an unreadable working directory or an exhausted process table look like this.",
                 "Retry once. If it fails the same way, the host cannot run commands right now; stop and report it.");
+    }
+
+    public static ErrorTemplate shellSandboxUnavailable(String command, String reason) {
+        return new ErrorTemplate(SHELL_SANDBOX_UNAVAILABLE,
+                ("`%s` did not run: every agent except main runs shell commands inside the OS sandbox, "
+                        + "and this host cannot start one (%s).").formatted(command, reason),
+                "JClaw refuses the command rather than run it unconfined.",
+                "Do not retry. Tell the operator that this host's sandbox is not working.");
     }
 
     public static ErrorTemplate shellInterrupted(String command) {

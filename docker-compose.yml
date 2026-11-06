@@ -43,6 +43,12 @@ services:
       # (or otherwise CA-trusted) cert here.
       - ./certs:/app/certs
     restart: unless-stopped
+    # Custom agents' exec always runs inside bwrap, and Docker's default seccomp profile refuses the
+    # system calls bwrap creates its namespaces with. seccomp-bwrap.json is that default profile
+    # (moby/profiles seccomp/default.json at 4b8214fc4971e06172938a1f1554ccff6647ee80) plus one rule
+    # allowing clone, unshare, mount, umount2 and pivot_root; it must sit beside this file.
+    security_opt:
+      - seccomp=./seccomp-bwrap.json
     # Readiness probe via curl against ApiController.status. curl is already
     # in the runtime image (the Dockerfile's runtime RUN block installs it to
     # fetch Azul's apt key), so this adds nothing to the image

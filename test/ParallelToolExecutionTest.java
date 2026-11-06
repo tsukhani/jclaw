@@ -599,7 +599,7 @@ class ParallelToolExecutionTest extends UnitTest {
     @Test
     void aCommandAndAFileAppendInOneMessageRunInDeclaredOrder() throws Exception {
         // exec sleeps before it appends, so a filesystem append scheduled beside it would land first.
-        ShellSandboxSync.acquire();
+        ShellSandboxSync.acquireUnconfined();
         try {
             ConfigService.set("shell.allowlist", "echo,sleep");
             ToolRegistry.publish(List.of(new ShellExecTool(), new FileSystemTools()));

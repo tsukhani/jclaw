@@ -14,6 +14,8 @@ import services.AgentService;
 import services.ConfigService;
 import tools.HarnessSandbox;
 import tools.ShellExecTool;
+import tools.ShellExecTool.Confinement;
+import utils.ToolErrorTemplates;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -25,12 +27,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 /**
- * JCLAW-1153: {@code exec}'s opt-in OS sandbox — the tri-state is its own key, the
- * shipped default leaves the launch unwrapped, an unavailable mechanism fails closed,
- * and (on macOS, with sandbox-exec present) a real confined run denies the write the
- * allowlist cannot: {@code echo hi; …} still runs both statements, but the second one
- * can no longer land outside the workspace.
+ * JCLAW-1153 and JF-165: {@code exec}'s OS sandbox. {@code main} and its copies follow the
+ * {@code shell.sandbox} tri-state, whose shipped default leaves the launch unwrapped; every other
+ * agent is always confined, refused where no sandbox can start, and on macOS cannot read the home
+ * folder outside its workspace. {@code echo hi; …} still runs both statements, but the second one can
+ * no longer land outside the workspace.
  */
 class ShellExecSandboxTest extends UnitTest {
 
@@ -59,6 +63,40 @@ class ShellExecSandboxTest extends UnitTest {
     @AfterAll
     static void cleanupTestAgent() {
         deleteDir(AgentService.workspacePath(AGENT));
+    }
+
+    /**
+     * {@code main}, unsaved: it is provisioned by code and {@code Fixtures.deleteDatabase} has removed its row.
+     * The id matches no row, so the allowlist is the global one.
+     */
+    private static Agent main() {
+        var main = new Agent();
+        main.id = Long.MAX_VALUE;
+        main.name = Agent.MAIN_AGENT_NAME;
+        return main;
+    }
+
+    private static Agent unsaved(String name, Agent parent) {
+        var agent = new Agent();
+        agent.name = name;
+        agent.parentAgent = parent;
+        return agent;
+    }
+
+    private JsonObject run(Agent who, String command) {
+        var args = new JsonObject();
+        args.addProperty("command", command);
+        return JsonParser.parseString(tool.execute(args.toString(), who)).getAsJsonObject();
+    }
+
+    private static Path outsideProbe() {
+        return Path.of(System.getProperty("user.home"), "jclaw-jf165-" + UUID.randomUUID() + ".txt");
+    }
+
+    /** On Linux, a host whose bwrap cannot create namespaces (this build host's) runs none of the real-run tests. */
+    private static void assumeWorkingSandbox() {
+        var availability = HarnessSandbox.availability();
+        assumeTrue(availability.available(), "no working sandbox here: " + availability.reason());
     }
 
     /** The shell key is a tri-state of its own — confining a coding harness is a
@@ -96,11 +134,9 @@ class ShellExecSandboxTest extends UnitTest {
                         HarnessSandbox.SHELL_SANDBOX_KEY, true),
                 "an unset shell.sandbox must be a passthrough");
 
-        var result = tool.execute("""
-                {"command": "echo hi"}
-                """, agent);
-        assertTrue(result.contains("hi"), "got: " + result);
-        assertTrue(result.contains("\"exitCode\":0"), "got: " + result);
+        var result = run(main(), "echo hi");
+        assertEquals("hi", result.get("output").getAsString(), result.toString());
+        assertEquals(0, result.get("exitCode").getAsInt(), result.toString());
     }
 
     /** Fail closed: with the flag on and no resolvable write root the launch throws
@@ -190,7 +226,7 @@ class ShellExecSandboxTest extends UnitTest {
     void anUnconfinedRunKeepsTheHostCacheLocations() {
         var result = JsonParser.parseString(tool.execute("""
                 {"command": "echo \\"$XDG_CACHE_HOME|$UV_CACHE_DIR|$npm_config_cache|$PIP_CACHE_DIR\\""}
-                """, agent)).getAsJsonObject();
+                """, main())).getAsJsonObject();
 
         var host = System.getenv();
         assertEquals("%s|%s|%s|%s".formatted(host.getOrDefault("XDG_CACHE_HOME", ""),
@@ -233,14 +269,14 @@ class ShellExecSandboxTest extends UnitTest {
             args.addProperty("command", probe.toString());
             var command = args.toString();
 
-            var control = tool.execute(command, agent);
+            var control = tool.execute(command, main());
             assertTrue(control.contains(secret), "unconfined, exec must reach the sentinels or the test proves nothing; got: " + control);
             for (int i = 0; i < real.size(); i++) {
                 assertTrue(control.contains("READABLE_" + i), "unconfined, exec must read " + real.get(i) + "; got: " + control);
             }
 
             ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
-            var confined = tool.execute(command, agent);
+            var confined = tool.execute(command, main());
             assertFalse(confined.contains(secret), "data/, certs/ and logs/ must be unreadable; got: " + confined);
             assertTrue(confined.contains("STATE_DENIED"), "got: " + confined);
             for (int i = 0; i < real.size(); i++) {
@@ -251,11 +287,233 @@ class ShellExecSandboxTest extends UnitTest {
         }
     }
 
-    /** Runs exec, sandboxed under {@code network}, connecting to {@code server} and writing in the workspace; returns its output. */
+    private static final List<String> KEY_VALUES = List.of("", "false", "true", "untrusted");
+
+    /** Every agent whose chain does not end at main is confined whatever the key and the origin. */
+    @Test
+    void aCustomAgentAndItsCopiesAreAlwaysConfined() {
+        var root = unsaved("custom-root", null);
+        var child = unsaved("custom-root-sub-1", root);
+        var grandchild = unsaved("custom-root-sub-1-sub-2", child);
+        for (var value : KEY_VALUES) {
+            ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, value);
+            for (var trusted : List.of(true, false)) {
+                for (var who : List.of(root, child, grandchild)) {
+                    assertEquals(Confinement.CUSTOM_AGENT, ShellExecTool.confinement(who, trusted),
+                            who.name + " under shell.sandbox='" + value + "', trusted=" + trusted);
+                }
+            }
+        }
+    }
+
+    /** main and a copy of main follow the key exactly: unset and false never confine, untrusted only an untrusted origin. */
+    @Test
+    void mainAndItsCopiesFollowTheKey() {
+        var main = main();
+        var copy = unsaved("main-sub-abc", main);
+        for (var who : List.of(main, copy)) {
+            for (var trusted : List.of(true, false)) {
+                for (var value : KEY_VALUES) {
+                    ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, value);
+                    var expected = switch (value) {
+                        case "true" -> Confinement.KEY;
+                        case "untrusted" -> trusted ? Confinement.NONE : Confinement.KEY;
+                        default -> Confinement.NONE;
+                    };
+                    assertEquals(expected, ShellExecTool.confinement(who, trusted),
+                            who.name + " under shell.sandbox='" + value + "', trusted=" + trusted);
+                }
+            }
+        }
+    }
+
+    /** The parent walk stops after 32 hops: a chain that reaches main within them is main's, one longer is custom. */
+    @Test
+    void aParentChainLongerThanTheWalkIsConfined() {
+        var reachesMain = main();
+        for (int i = 0; i < 32; i++) reachesMain = unsaved("main-sub-" + i, reachesMain);
+        assertEquals(Confinement.NONE, ShellExecTool.confinement(reachesMain, true), "32 hops reach main");
+
+        var tooLong = unsaved("main-sub-extra", reachesMain);
+        assertEquals(Confinement.CUSTOM_AGENT, ShellExecTool.confinement(tooLong, true),
+                "33 hops end at an agent with a parent");
+    }
+
+    /** No sandbox here: a custom agent's command is refused and nothing runs or stays behind; main runs. */
+    @Test
+    void withNoSandboxACustomAgentIsRefusedAndMainStillRuns() throws IOException {
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"));
+        var workspace = AgentService.workspacePath(AGENT);
+        var args = new JsonObject();
+        args.addProperty("command", "echo x > marker");
+
+        var result = tool.execute(args.toString(), agent);
+
+        assertEquals("Error: `echo x > marker` did not run: every agent except main runs shell commands inside the "
+                        + "OS sandbox, and this host cannot start one (test: no sandbox).\n\n"
+                        + "What to check: JClaw refuses the command rather than run it unconfined.\n\n"
+                        + "How to retry: Do not retry. Tell the operator that this host's sandbox is not working.",
+                result);
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.shellSandboxUnavailable("echo x > marker",
+                "test: no sandbox")), result);
+        assertFalse(Files.exists(workspace.resolve("marker")), "the command must not have run");
+        try (var left = Files.list(workspace.resolve(".exec"))) {
+            assertEquals(List.of(), left.toList(), "no output file may stay behind");
+        }
+
+        var mainRun = run(main(), "echo hi");
+        assertEquals("hi", mainRun.get("output").getAsString(), mainRun.toString());
+        assertEquals(0, mainRun.get("exitCode").getAsInt(), mainRun.toString());
+    }
+
+    /** The background form is refused the same way, naming the command the model sent. */
+    @Test
+    void withNoSandboxABackgroundCommandIsRefusedToo() {
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"));
+        var result = tool.execute("""
+                {"command": "echo hi", "background": true}
+                """, agent);
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.shellSandboxUnavailable("echo hi",
+                "test: no sandbox")), result);
+    }
+
+    /** main keeps today's abort when its key confines and no sandbox can start: the override never reaches it. */
+    @Test
+    void mainIgnoresTheCustomAgentOverride() {
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"));
+        var mainRun = run(main(), "echo hi");
+        assertEquals("hi", mainRun.get("output").getAsString(), mainRun.toString());
+
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
+        ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+        var argv = List.of("/bin/sh", "-c", "echo hi");
+        assertNotEquals(argv, wrapOrNull(argv), "PASSTHROUGH must not unwrap main's key-confined run");
+    }
+
+    private static List<String> wrapOrNull(List<String> argv) {
+        try {
+            return HarnessSandbox.wrap(argv, AgentService.workspacePath(AGENT).toFile(), List.of(),
+                    HarnessSandbox.SHELL_SANDBOX_KEY, true);
+        } catch (HarnessSandbox.SandboxUnavailableException _) {
+            return null;
+        }
+    }
+
+    /** With shell.sandbox unset, a custom agent's write outside its workspace never lands; one inside it does. */
+    @Test
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    void aCustomAgentWritesOnlyInsideItsWorkspace() throws IOException {
+        assumeWorkingSandbox();
+        assertWritesOnlyInside(agent, AgentService.workspacePath(AGENT));
+    }
+
+    /** A subagent_spawn copy of a custom agent is confined the same way, to its root's workspace. */
+    @Test
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    void aCopyOfACustomAgentWritesOnlyInsideItsRootsWorkspace() throws IOException {
+        assumeWorkingSandbox();
+        var child = AgentService.create(AGENT + "-sub-1", "openrouter", "gpt-4.1", null, null, false, agent);
+        assertWritesOnlyInside(child, AgentService.workspacePath(AGENT));
+    }
+
+    private void assertWritesOnlyInside(Agent who, Path workspace) throws IOException {
+        var outside = outsideProbe();
+        var kept = workspace.resolve("kept-" + UUID.randomUUID() + ".txt");
+        try {
+            var result = run(who, "echo escaped > '%s' 2>/dev/null; echo inside > '%s'; cat '%s'"
+                    .formatted(outside, kept.getFileName(), kept.getFileName()));
+            assertEquals("inside", result.get("output").getAsString(), result.toString());
+            assertFalse(Files.exists(outside), "the write outside the workspace must not land: " + result);
+            assertEquals("inside\n", Files.readString(kept));
+        } finally {
+            Files.deleteIfExists(outside);
+            Files.deleteIfExists(kept);
+        }
+    }
+
+    /** A custom agent's ls of JClaw's data/ and certs/ shows none of their files; main's unconfined ls does. */
+    @Test
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    void aCustomAgentCannotListJClawState() throws IOException {
+        assumeWorkingSandbox();
+        var appRoot = Play.applicationPath.toPath();
+        var sentinels = new ArrayList<Path>();
+        try {
+            for (var dir : List.of("data", "certs")) {
+                var sentinel = Files.createDirectories(appRoot.resolve(dir))
+                        .resolve("jclaw-jf165-sentinel-" + UUID.randomUUID() + ".txt");
+                Files.writeString(sentinel, "x");
+                sentinels.add(sentinel);
+            }
+            var command = "ls '%s' '%s' 2>&1; true".formatted(appRoot.resolve("data"), appRoot.resolve("certs"));
+
+            var control = run(main(), command).get("output").getAsString();
+            for (var s : sentinels) {
+                assertTrue(control.contains(s.getFileName().toString()), "unconfined, ls must list " + s + ": " + control);
+            }
+            var confined = run(agent, command).get("output").getAsString();
+            for (var s : sentinels) {
+                assertFalse(confined.contains(s.getFileName().toString()), s + " must be hidden: " + confined);
+            }
+        } finally {
+            for (var s : sentinels) Files.deleteIfExists(s);
+        }
+    }
+
+    /** A file under the home folder outside the workspace, deleted with its folder by the caller. */
+    private static Path homeFile(String content) throws IOException {
+        var dir = Files.createDirectories(Path.of(System.getProperty("user.home"), "jclaw-jf165-" + UUID.randomUUID()));
+        return Files.writeString(dir.resolve("secret.txt"), content);
+    }
+
+    /**
+     * macOS hides the home folder from a custom agent except its workspace and JClaw's PATH directories,
+     * so the toolchain still runs: its workspace, ls, true, git and python3 work, a home file does not.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacACustomAgentCannotReadTheHomeFolderButItsToolsRun() throws IOException {
+        ConfigService.set("shell.allowlist", "echo,cat,ls,true,git,python3");
+        var secret = homeFile("jf165-home-secret");
+        try {
+            assertEquals("HOME_DENIED", run(agent, "cat '%s' 2>/dev/null || echo HOME_DENIED".formatted(secret))
+                    .get("output").getAsString());
+
+            Files.writeString(AgentService.workspacePath(AGENT).resolve("ws.txt"), "ws-readable");
+            assertEquals("ws-readable", run(agent, "cat ws.txt").get("output").getAsString());
+            assertEquals(0, run(agent, "ls").get("exitCode").getAsInt());
+            assertEquals(0, run(agent, "/usr/bin/true").get("exitCode").getAsInt());
+            for (var probe : List.of("git --version", "python3 --version")) {
+                var unconfined = run(main(), probe);
+                assumeTrue(unconfined.get("exitCode").getAsInt() == 0, probe + " does not run here: " + unconfined);
+                var confined = run(agent, probe);
+                assertEquals(0, confined.get("exitCode").getAsInt(), probe + ": " + confined);
+            }
+        } finally {
+            deleteDir(secret.getParent());
+        }
+    }
+
+    /** main under shell.sandbox=true keeps today's profile, in which the home folder stays readable. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacMainUnderTheKeyStillReadsTheHomeFolder() throws IOException {
+        var secret = homeFile("jf165-home-readable");
+        try {
+            ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+            assertEquals("jf165-home-readable", run(main(), "cat '%s'".formatted(secret)).get("output").getAsString());
+        } finally {
+            deleteDir(secret.getParent());
+        }
+    }
+
+    /**
+     * Runs a custom agent's exec, confined with {@code shell.sandbox} unset and the network under {@code network},
+     * connecting to {@code server} and writing in the workspace; returns its output.
+     */
     private String connectFromTheSandbox(ServerSocket server, String network) {
         ConfigService.set("shell.allowlist", "nc,echo,cat");
         // Set right before the run: another class's table wipe can clear a key.
-        ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
         ConfigService.set(NETWORK_KEY, network);
         var args = new JsonObject();
         args.addProperty("command", ("/usr/bin/nc -z -w 2 127.0.0.1 %d 2>/dev/null && echo NET_CONNECTED || echo NET_BLOCKED; "

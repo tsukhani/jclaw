@@ -39,7 +39,7 @@ class ApiProcessesControllerTest extends FunctionalTest {
     @BeforeEach
     void seed() throws Exception {
         // shell.sandbox and the allowlist are process-global and read on every exec.
-        ShellSandboxSync.acquire();
+        ShellSandboxSync.acquireUnconfined();
         AuthFixture.seedAdminPassword("changeme");
         var suffix = String.valueOf(System.nanoTime() % 1_000_000_000L);
         var callerName = "procapi-caller-" + suffix;

@@ -16,6 +16,7 @@ import services.EventLogger;
 import services.SubagentRegistry;
 import services.TaskRunRegistry;
 import services.Tx;
+import services.WorkspaceFiles;
 import utils.ErrorTemplate;
 import utils.SubprocessEnv;
 import utils.ToolErrorTemplates;
@@ -55,9 +56,9 @@ import java.util.stream.Collectors;
 /**
  * Shell execution tool for agent-invoked commands.
  *
- * <h2>Security posture (JCLAW-146, JCLAW-1153)</h2>
+ * <h2>Security posture (JCLAW-146, JCLAW-1153, JF-165)</h2>
  *
- * <p><strong>By default this tool is not a sandbox.</strong> It invokes commands via
+ * <p><strong>The shell grammar is not gated.</strong> This tool invokes commands via
  * {@code /bin/sh -c}, which means the full shell grammar is available:
  * composition ({@code ;}, {@code &&}, {@code ||}), pipes ({@code |}), command
  * substitution ({@code $(...)}, backticks), redirection ({@code > < >>}),
@@ -66,28 +67,24 @@ import java.util.stream.Collectors;
  * {@code shell.allowlist}. A command like {@code echo hi; rm -rf foo} passes
  * the allowlist (first token is {@code echo}) and runs both the echo and the rm.
  *
- * <p>That default is <strong>intentional</strong>, not a gap. The rationale:
+ * <p>That is <strong>intentional</strong>, not a gap. The rationale:
  * <ul>
- *   <li>The agent runs with the same OS privileges as the Play process. A
- *       hostile prompt that reaches this tool at all has already breached the
+ *   <li>A hostile prompt that reaches this tool at all has already breached the
  *       prompt-injection perimeter — further per-token gating just moves the
  *       goalposts, not the defensive line. Legitimate shell composition
  *       ({@code cd build && make}, {@code git log | head}, shell-redirect into
  *       a file) is load-bearing for real agent workflows.</li>
- *   <li>Sandboxing happens at two layers <em>below</em> this one:
+ *   <li>Containment happens at layers <em>below</em> this one:
  *       (1) the {@code resolveWorkdir} path-containment check, which confines
  *       the working directory to the agent's workspace unless
  *       {@code agent.main.shell.allowGlobalPaths=true} is explicitly set for
- *       the main agent; and (2) the environment-variable filter that strips
- *       sensitive keys before handing the map to {@link ProcessBuilder}.
- *       Both bound where the command <em>starts</em>, not where it can write —
- *       that is what {@code shell.sandbox} below adds.</li>
+ *       the main agent; (2) the environment-variable filter that strips
+ *       sensitive keys before handing the map to {@link ProcessBuilder}; and
+ *       (3) the OS sandbox below, which bounds where the command can write.</li>
  *   <li>The {@link #validateAllowlist(String, Agent)} check exists for <em>UX
  *       guardrails</em> — catching accidental LLM misfires on obvious bad
  *       commands ({@code rm -rf /}) — not as a
- *       metacharacter-hardened sandbox. Anyone who needs metacharacter-level
- *       isolation must wrap this tool in an external sandbox
- *       (firejail, Docker, etc.) at the platform-operator layer.</li>
+ *       metacharacter-hardened sandbox.</li>
  * </ul>
  *
  * <p>Regression tests in {@code ShellExecToolTest} pin this posture —
@@ -95,49 +92,42 @@ import java.util.stream.Collectors;
  * {@code echo hi; echo world} executes both statements, so any future attempt
  * to harden the allowlist into per-token gating will fail loudly.
  *
- * <h3>The opt-in OS sandbox: {@code shell.sandbox}</h3>
+ * <h3>The OS sandbox</h3>
  *
- * <p>JCLAW-1153: the tri-state {@code shell.sandbox} — {@code false} (shipped
- * default) | {@code true} (confine every run) | {@code untrusted} (confine only
- * runs whose origin channel is not the operator's own web chat or voice mode) — launches the
- * command through {@link HarnessSandbox}, the same macOS Seatbelt / Linux bwrap
- * profile builders the coding harness uses, granting writes to the agent's
- * resolved workspace root and nothing else.
+ * <p>{@link #confinement} decides each run from the root of the agent's parent chain. Every agent
+ * except {@code main} and its copies always runs through {@link HarnessSandbox#wrapCustomAgentShell}:
+ * writes are limited to its resolved workspace and, on macOS, the home folder is unreadable except that
+ * workspace and the home directories on JClaw's own PATH (on Linux bwrap already hides it). Where no
+ * sandbox can start, its command is refused with {@link ToolErrorTemplates#shellSandboxUnavailable} and
+ * nothing runs.
  *
- * <p>It bounds <em>reach</em>, not grammar. {@code echo hi; rm -rf ~/Documents}
- * still passes the allowlist and still runs both statements; the {@code rm} now
- * fails on every path outside the workspace. Metacharacter gating remains
- * explicitly not the defense — filesystem confinement is.
+ * <p>{@code main} follows JCLAW-1153's tri-state {@code shell.sandbox} — {@code false} (shipped
+ * default) | {@code true} (confine every run) | {@code untrusted} (confine only runs whose origin channel
+ * is not the operator's own web chat or voice mode) — through the same macOS Seatbelt / Linux bwrap
+ * profile builders the coding harness uses, granting writes to the workspace root and nothing else. With
+ * the key on and no usable mechanism, the launch throws {@link HarnessSandbox.SandboxUnavailableException}
+ * and the run aborts rather than falling back to an unconfined process.
  *
- * <p>{@code shell.sandbox.network=deny} also takes the confined run's network,
- * so a command that can read the workspace cannot send it anywhere.
- *
- * <p>It fails closed: with the flag on and no usable sandbox mechanism (native
- * Windows, or a host missing {@code sandbox-exec}/{@code bwrap}), the launch
- * throws {@link HarnessSandbox.SandboxUnavailableException} and the run aborts
- * rather than falling back to an unconfined process.
+ * <p>The sandbox bounds <em>reach</em>, not grammar. {@code echo hi; rm -rf ~/Documents}
+ * still passes the allowlist and still runs both statements; the {@code rm} fails on every path
+ * outside the workspace. {@code shell.sandbox.network=deny} also takes a confined run's network, so a
+ * command that can read the workspace cannot send it anywhere.
  *
  * <h3>The configuration to avoid: {@code exec} alongside a web-reading tool</h3>
  *
- * <p>The reasoning above rests on "a hostile prompt that reaches this tool has already
- * breached the prompt-injection perimeter." That perimeter is thinner than it sounds.
- * Grant one agent both {@code exec} and any tool that pulls in text the operator did not
+ * <p>Grant one agent both {@code exec} and any tool that pulls in text the operator did not
  * write — {@code web_fetch}, {@code web_search}, {@code browser}, or an MCP
  * server that reads issues, pages or email — and a single turn can ingest
- * attacker-controlled instructions and reach a shell with the Play process's privileges.
- * No operator mistake is required for that; enabling two individually reasonable tools is
- * enough.
+ * attacker-controlled instructions and reach a shell. No operator mistake is required for that;
+ * enabling two individually reasonable tools is enough.
  *
  * <p>There is no in-process fix, which is precisely why this is documented rather than
  * gated: any guard that could distinguish "content the model read" from "instruction the
  * operator gave" would be the prompt-injection solution itself. The mitigations are
- * operator-side and all real: keep {@code exec} on agents that do not read the open
- * web (a build agent and a research agent, not one agent doing both), turn on
- * {@code shell.sandbox} so a shell reached by injection can only write inside the
- * workspace, or run the whole process inside an external sandbox (firejail, a
- * container) so the blast radius is bounded no matter what reaches the shell. The
- * first two leave the Play process itself unconfined; only the third bounds a tool
- * other than {@code exec}.
+ * operator-side: keep {@code exec} on agents that do not read the open web (a build agent and a
+ * research agent, not one agent doing both), turn on {@code shell.sandbox} for {@code main}, or run the
+ * whole process inside an external sandbox (firejail, a container) so the blast radius is bounded no
+ * matter what reaches the shell. Only the last bounds a tool other than {@code exec}.
  */
 public class ShellExecTool implements ToolRegistry.Tool {
 
@@ -526,6 +516,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         Path output = null;
         FileChannel outputChannel = null;
         boolean keepOutput = false;
+        var trustedOrigin = HarnessSandbox.nativeToolTrustedOrigin();
+        var confinement = confinement(agent, trustedOrigin);
         try {
             output = newOutputFile(workspace, ToolContext.conversationId());
             // CREATE_NEW never follows a link: this descriptor is the file just made, and the call
@@ -535,7 +527,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // By inode, before any command runs: a file anyone later moves or links into the folder is never recorded.
             BackgroundProcesses.recordOutputFile(output);
             // A background command runs as a subshell the shell does not wait for, so the call returns at once.
-            var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output);
+            var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output,
+                    confinement, trustedOrigin);
             var sentinel = new Sentinel(process);
 
             // isAlive() is false after the read either way, so this flag is what tells a watchdog
@@ -609,6 +602,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         } catch (IOException e) {
             return ToolErrorTemplates.render(
                     ToolErrorTemplates.shellSpawnFailed(command, String.valueOf(e.getMessage())));
+        } catch (HarnessSandbox.SandboxUnavailableException e) {
+            return customAgentRefusal(command, confinement, e);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
@@ -617,6 +612,35 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // A process the command left behind unforeseen keeps writing to the deleted file without failing.
             if (!keepOutput && output != null) deleteOutput(output);
         }
+    }
+
+    /** A custom agent's run that cannot be confined is refused; {@code main}'s keeps today's abort. */
+    private static String customAgentRefusal(String command, Confinement confinement,
+                                             HarnessSandbox.SandboxUnavailableException e) {
+        if (confinement != Confinement.CUSTOM_AGENT) throw e;
+        return ToolErrorTemplates.render(
+                ToolErrorTemplates.shellSandboxUnavailable(command, String.valueOf(e.getMessage())));
+    }
+
+    /** How {@code exec} confines a run. */
+    public enum Confinement {
+        /** Unconfined: a main-rooted agent while {@code shell.sandbox} does not apply. */
+        NONE,
+        /** A main-rooted agent under {@code shell.sandbox}. */
+        KEY,
+        /** Any other agent, whatever {@code shell.sandbox} says. */
+        CUSTOM_AGENT
+    }
+
+    /**
+     * The confinement of {@code agent}'s {@code exec}. An agent is main-rooted only when its parent chain
+     * ends at a parentless {@code main}; a chain the walk gives up on counts as custom, so it fails closed.
+     */
+    public static Confinement confinement(Agent agent, boolean trustedOrigin) {
+        var root = WorkspaceFiles.workspaceOwner(agent);
+        if (root.parentAgent != null || !root.isMain()) return Confinement.CUSTOM_AGENT;
+        return HarnessSandbox.confines(HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin)
+                ? Confinement.KEY : Confinement.NONE;
     }
 
     /** Names the file and pids of what a command left running, or says a background command has already exited. */
@@ -665,8 +689,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * {@link HarnessSandbox.SandboxUnavailableException} from the wrap is left to
      * propagate: the run must abort, never launch unconfined.
      */
-    private static Process startProcess(String command, Path workdir, Path workspace,
-                                        Map<String, String> env, Path output) throws IOException {
+    private static Process startProcess(String command, Path workdir, Path workspace, Map<String, String> env,
+                                        Path output, Confinement confinement, boolean trustedOrigin)
+            throws IOException {
         // The shell opens its own output file, inside any sandbox, so a link planted at that path leads
         // only where the command could already write; a JVM-side redirect would follow it unconfined.
         // Append mode lets the JVM empty the file mid-write. The pipe, kept on fd 3 and written by no
@@ -675,15 +700,16 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // whatever they did with their own output.
         var script = "exec 3>&1 " + BackgroundProcesses.HELD_FD + "<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV
                 + "\" 2>&1\n" + command;
-        var trustedOrigin = HarnessSandbox.nativeToolTrustedOrigin();
-        var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), workspace.toFile(),
-                List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
+        var shell = List.of("/bin/sh", "-c", script);
+        var argv = confinement == Confinement.CUSTOM_AGENT
+                ? HarnessSandbox.wrapCustomAgentShell(shell, workspace.toFile())
+                : HarnessSandbox.wrap(shell, workspace.toFile(), List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
         var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();
         pb.environment().putAll(env);
-        if (HarnessSandbox.confines(HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin)) {
+        if (confinement != Confinement.NONE) {
             pb.environment().putAll(confinedCaches(workspace));
         }
         pb.environment().put(OUTPUT_ENV, output.toString());

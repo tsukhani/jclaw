@@ -33,7 +33,7 @@ class ShellExecToolTest extends UnitTest {
     void setup() {
         // JCLAW-1153: shell.sandbox is process-global and read on every execute(),
         // so these runs must not overlap ShellExecSandboxTest turning it on.
-        ShellSandboxSync.acquire();
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         cleanupTestAgent();
         tool = new ShellExecTool();

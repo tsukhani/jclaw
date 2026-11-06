@@ -5,6 +5,7 @@ import play.Play;
 import services.database.DatabaseService;
 
 import java.io.IOException;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -54,6 +55,15 @@ public final class SandboxHiddenRoots {
         var c = canonical(path);
         if (hidden.stream().anyMatch(r -> r.startsWith(c))) return null;
         return hidden.stream().anyMatch(c::startsWith) ? c : null;
+    }
+
+    /** {@code path} normalized without touching the filesystem, or null when it is not a valid path. */
+    public static @Nullable Path lexical(String path) {
+        try {
+            return Path.of(path).normalize();
+        } catch (InvalidPathException _) {
+            return null;
+        }
     }
 
     /** {@link #canonical(Path)} of a path given as a string. */

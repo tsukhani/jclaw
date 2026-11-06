@@ -103,17 +103,182 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(e.getMessage().contains("session working directory"), e.getMessage());
     }
 
+    /**
+     * On Linux, available means a real bwrap launch succeeds, not that bwrap is on PATH: a kernel without
+     * unprivileged user namespaces, or Docker's default seccomp profile, lets bwrap start and then refuses it.
+     */
     @Test
-    void availabilityNamesThePlatformsMechanism() {
+    void availabilityNamesThePlatformsMechanism() throws Exception {
         var a = HarnessSandbox.availability();
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("linux")) assertEquals("bwrap", a.mechanism());
         if (os.contains("mac")) assertEquals("sandbox-exec", a.mechanism());
         if (!a.available()) assertFalse(a.reason().isBlank(), "an unavailable mechanism must say why");
-        if (!a.mechanism().isEmpty()) {
+        if (os.contains("linux")) {
+            assertEquals(bwrapLaunches(), a.available(), () -> "reported " + a);
+        } else if (!a.mechanism().isEmpty()) {
             var onPath = Arrays.stream(System.getenv().getOrDefault("PATH", "").split(File.pathSeparator))
                     .anyMatch(dir -> !dir.isEmpty() && Files.isExecutable(Path.of(dir, a.mechanism())));
             assertEquals(onPath, a.available(), () -> a.mechanism() + " on PATH=" + onPath + ", reported " + a);
+        }
+    }
+
+    private static boolean bwrapLaunches() throws Exception {
+        try {
+            var proc = new ProcessBuilder("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                    "--tmpfs", "/tmp", "true").redirectErrorStream(true).start();
+            proc.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+            assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the probe finished");
+            return proc.exitValue() == 0;
+        } catch (java.io.IOException _) {
+            return false;
+        }
+    }
+
+    /** A host whose bwrap cannot start says so with bwrap's own first line, so the operator sees the cause. */
+    @Test
+    void anUnavailableBwrapReportsItsOwnFirstLine() throws Exception {
+        var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        org.junit.jupiter.api.Assumptions.assumeTrue(os.contains("linux") && !bwrapLaunches(),
+                "bwrap launches here, or this is not Linux");
+        var proc = new ProcessBuilder("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                "--tmpfs", "/tmp", "true").redirectErrorStream(true).start();
+        var first = new String(proc.getInputStream().readAllBytes()).strip().lines().findFirst().orElse("").strip();
+        proc.waitFor();
+        org.junit.jupiter.api.Assumptions.assumeFalse(first.isEmpty(), "bwrap printed nothing");
+        var expected = first.length() > 200 ? first.substring(0, 200) : first;
+        var suffix = "1".equals(System.getenv("JCLAW_CONTAINER"))
+                ? "; in Docker, start the container with the seccomp profile docker-compose.yml names"
+                        + " (seccomp-bwrap.json), as INSTALL.md describes"
+                : "";
+        assertEquals(new HarnessSandbox.Availability(false, "bwrap", "'bwrap' is not available: " + expected + suffix),
+                HarnessSandbox.availability());
+    }
+
+    /** main's profile, byte for byte as before JF-165: the home folder stays readable. */
+    @Test
+    void macProfileForMainIsUnchanged() {
+        var profile = HarnessSandbox.macosProfile(new File("/h/u/jc/workspace/a"), List.of(".claude"), "/h/u",
+                List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs")), false);
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/h/u/jc/workspace/a"))
+                (allow file-write* (subpath "/private/tmp"))
+                (allow file-write* (subpath "/private/var/folders"))
+                (allow file-write* (subpath "/dev"))
+                (allow file-write* (subpath "/h/u/.claude"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data"))
+                (deny file-read* file-write* (subpath "/h/u/jc/certs"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                """, profile);
+        assertEquals(profile, HarnessSandbox.macosProfile(new File("/h/u/jc/workspace/a"), List.of(".claude"), "/h/u",
+                List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs")), false, null));
+    }
+
+    /**
+     * A custom agent's profile denies $HOME after the write grants, reopens the workspace and the PATH
+     * directories, gives back the metadata between, and only then hides JClaw's state and the $HOME secrets:
+     * a reopen above data/ or above .config/gcloud reopens neither.
+     */
+    @Test
+    void macProfileForACustomAgentHidesTheHomeFolder() {
+        var profile = HarnessSandbox.macosProfile(new File("/h/u/jc/workspace/a"), List.of(), "/h/u",
+                List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs")), false,
+                List.of("/h/u/.local/bin", "/h/u/jc", "/h/u/.config"));
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/h/u/jc/workspace/a"))
+                (allow file-write* (subpath "/private/tmp"))
+                (allow file-write* (subpath "/private/var/folders"))
+                (allow file-write* (subpath "/dev"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/h/u/jc/workspace/a"))
+                (allow file-read* (subpath "/h/u/.local/bin"))
+                (allow file-read* (subpath "/h/u/jc"))
+                (allow file-read* (subpath "/h/u/.config"))
+                (allow file-read-metadata (literal "/h/u"))
+                (allow file-read-metadata (literal "/h/u/jc"))
+                (allow file-read-metadata (literal "/h/u/jc/workspace"))
+                (allow file-read-metadata (literal "/h/u/.local"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data"))
+                (deny file-read* file-write* (subpath "/h/u/jc/certs"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                """, profile);
+    }
+
+    /** Beneath a hidden root, a custom agent's profile reopens its write root and nothing else. */
+    @Test
+    void macProfileForACustomAgentReopensOnlyTheWriteRootBeneathAHiddenRoot() {
+        var profile = HarnessSandbox.macosProfile(new File("/h/u/jc/data/run"), List.of("/h/u/jc/data/allow"), "/h/u",
+                List.of(Path.of("/h/u/jc/data")), false, List.of());
+        var deny = profile.indexOf("(deny file-read* file-write* (subpath \"/h/u/jc/data\"))\n");
+        var reopen = profile.indexOf("(allow file-read* file-write* (subpath \"/h/u/jc/data/run\"))\n");
+        assertTrue(deny >= 0 && reopen > deny, profile);
+        assertFalse(profile.contains("(allow file-read* file-write* (subpath \"/h/u/jc/data/allow\"))"), profile);
+    }
+
+    /** Only absolute entries strictly below home on a segment boundary are reopened, once each. */
+    @Test
+    void homeReadReopensKeepsOnlyEntriesBelowHome() {
+        assertEquals(List.of("/h/x/.local/bin"),
+                HarnessSandbox.homeReadReopens("/h/x/.local/bin:/h/x:/h/xy/bin:bin::/h/x/.local/bin:/usr/bin", "/h/x"));
+        assertEquals(List.of("/h/x/.local/bin"), HarnessSandbox.homeReadReopens("/h/x/:/h/x/.local/bin/", "/h/x/"));
+        assertEquals(List.of(), HarnessSandbox.homeReadReopens("/h/x/../y/bin", "/h/x"), "normalized first");
+        assertEquals(List.of(), HarnessSandbox.homeReadReopens("", "/h/x"));
+        assertEquals(List.of(), HarnessSandbox.homeReadReopens(null, "/h/x"));
+    }
+
+    /** An entry through a symlink adds its canonical path when that is also below home, and only then. */
+    @Test
+    void homeReadReopensAddsACanonicalPathBelowHome() throws Exception {
+        var base = SandboxHiddenRoots.canonical(session);
+        var home = Files.createDirectories(base.resolve("home"));
+        var real = Files.createDirectories(home.resolve("real/bin"));
+        Files.createSymbolicLink(home.resolve("link"), real.getParent());
+        var outside = Files.createDirectories(base.resolve("outside/bin"));
+        Files.createSymbolicLink(home.resolve("away"), outside.getParent());
+
+        assertEquals(List.of(home.resolve("link/bin").toString(), real.toString(), home.resolve("away/bin").toString()),
+                HarnessSandbox.homeReadReopens(home.resolve("link/bin") + ":" + real + ":" + home.resolve("away/bin"),
+                        home.toString()));
+    }
+
+    /** A script in a $HOME directory on PATH still runs under a custom agent's profile, which hides the rest of $HOME. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macCustomAgentProfileRunsAScriptFromAHomePathEntry() throws Exception {
+        var home = System.getProperty("user.home");
+        var scratch = Files.createDirectories(Path.of(home, "jclaw-jf165-" + java.util.UUID.randomUUID()));
+        try {
+            var bin = Files.createDirectories(scratch.resolve("bin"));
+            var script = Files.writeString(bin.resolve("probe.sh"), "#!/bin/sh\necho ran\n");
+            assertTrue(script.toFile().setExecutable(true));
+            var hiddenFile = Files.writeString(scratch.resolve("hidden.txt"), "hidden");
+            var profile = HarnessSandbox.macosProfile(session.toFile(), List.of(), home, SandboxHiddenRoots.current(),
+                    false, HarnessSandbox.homeReadReopens(bin + ":/usr/bin:/bin", home));
+            var proc = new ProcessBuilder("sandbox-exec", "-p", profile, "/bin/sh", "-c",
+                    "'%s' && { cat '%s' 2>/dev/null || echo HIDDEN; }".formatted(script, hiddenFile))
+                    .directory(session.toFile()).redirectErrorStream(true).start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the run finished");
+            assertEquals(0, proc.exitValue(), out);
+            assertEquals("ran\nHIDDEN\n", out);
+        } finally {
+            deleteTree(scratch);
         }
     }
 

@@ -9,12 +9,14 @@ import services.ExecutableProbeSupport;
 import services.database.DatabaseService;
 import utils.ChannelOriginTrust;
 import utils.SandboxHiddenRoots;
+import utils.SubprocessEnv;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -42,9 +44,10 @@ import java.util.Locale;
  *       load-bearing — see {@link #linuxArgv}.</li>
  * </ul>
  *
- * <p><b>Fails closed.</b> When the sandbox is enabled but this platform has no
- * supported mechanism (native Windows, WSL1) or its binary is missing from PATH,
- * {@link #wrap} throws — the caller aborts the run rather than launching unsandboxed.
+ * <p><b>Fails closed.</b> When the sandbox applies but cannot start here (native Windows, WSL1,
+ * {@code sandbox-exec} missing from PATH, or a {@code bwrap} that cannot create its namespaces —
+ * {@link #availability} launches it to find out), {@link #wrap} throws and the caller aborts the run
+ * rather than launching unsandboxed.
  *
  * <p>A coding harness keeps the network, since it needs its model API. A native tool's run loses it
  * under {@link #SHELL_NETWORK_KEY}{@code =deny}: bwrap's {@code --unshare-net}, or a Seatbelt
@@ -55,6 +58,10 @@ import java.util.Locale;
  * and the {@code allowances}-taking {@link #wrap} overload. Those callers pass an
  * explicit allowance list instead of a {@link HarnessAdapter}; everything below
  * the key is shared, so the two boundaries cannot drift apart.
+ *
+ * <p>JF-165: an agent whose parent chain does not end at {@code main} runs {@code exec} through
+ * {@link #wrapCustomAgentShell} whatever the key says, and on macOS its profile hides {@code $HOME}
+ * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}.
  */
 public final class HarnessSandbox {
 
@@ -73,8 +80,8 @@ public final class HarnessSandbox {
 
     /**
      * {@code shell.sandbox} — JCLAW-1153: the same tri-state, same {@code false}
-     * default, for native tools that spawn processes ({@code exec}, and
-     * {@code diarize_audio}'s ffmpeg extraction). Deliberately a SECOND key rather
+     * default, for native tools that spawn processes ({@code main}'s {@code exec} — a custom
+     * agent's is always confined — and the {@code diarize_audio} and {@code LlmAudio} ffmpeg runs). Deliberately a SECOND key rather
      * than a reuse of {@link #ACP_SANDBOX_KEY}: an operator confining a coding
      * harness has not thereby asked to confine every shell command, and a shell run
      * writes to the agent workspace where a harness run writes to a session dir.
@@ -83,8 +90,8 @@ public final class HarnessSandbox {
 
     /**
      * {@code shell.sandbox.network} — {@code allow} (also absent or blank) or {@code deny}. Read only for a
-     * run confined under {@link #SHELL_SANDBOX_KEY}: a native tool needs no network, and with it a guest's
-     * {@code exec} could send the workspace out.
+     * run confined under {@link #SHELL_SANDBOX_KEY} or by {@link #wrapCustomAgentShell}: a native tool needs
+     * no network, and with it a guest's {@code exec} could send the workspace out.
      */
     public static final String SHELL_NETWORK_KEY = "shell.sandbox.network";
 
@@ -94,6 +101,17 @@ public final class HarnessSandbox {
     /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final List<String> DENY_READ_HOME = List.of(
             ".ssh", ".aws", ".gnupg", ".config/gcloud", ".kube", ".netrc");
+
+    /** The probe {@link #bwrapLaunchFailure} runs: the smallest sandbox {@link #linuxArgv} builds on. */
+    private static final List<String> BWRAP_PROBE = List.of(
+            BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true");
+
+    private static final int PROBE_LINE_LIMIT = 200;
+
+    /** Only a success is kept: a host whose namespaces are fixed later is re-probed rather than refused for the JVM's life. */
+    private static volatile boolean bwrapLaunched;
+
+    private static volatile CustomAgentOverride customAgentOverride = CustomAgentOverride.NONE;
 
     private HarnessSandbox() {}
 
@@ -219,10 +237,81 @@ public final class HarnessSandbox {
                         .formatted(configKey, System.getProperty("os.name")));
     }
 
+    /**
+     * Wrap a custom agent's {@code exec} run: confined whatever {@link #SHELL_SANDBOX_KEY} says, with
+     * writes limited to {@code writeRoot} and the network cut under {@link #SHELL_NETWORK_KEY}{@code =deny}.
+     * On macOS the profile also hides {@code $HOME} except the write root and the {@code $HOME} directories
+     * on JClaw's own PATH ({@link #homeReadReopens}); on Linux it is {@link #linuxArgv}, which already
+     * hides {@code $HOME}.
+     *
+     * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
+     */
+    public static List<String> wrapCustomAgentShell(List<String> argv, File writeRoot) {
+        var override = customAgentOverride;
+        if (override == CustomAgentOverride.PASSTHROUGH) return argv;
+        if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
+        var ready = availability();
+        if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
+        if (ready.mechanism().equals(BWRAP)) return linuxArgv(argv, writeRoot, List.of(), SHELL_SANDBOX_KEY);
+        var home = System.getProperty("user.home", "");
+        if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
+        var profile = macosProfile(writeRoot, List.of(), home, SandboxHiddenRoots.current(),
+                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(SubprocessEnv.filteredHostEnv().get("PATH"), home));
+        var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
+        out.addAll(argv);
+        return List.copyOf(out);
+    }
+
+    /**
+     * What a test puts in place of the sandbox for {@link #wrapCustomAgentShell} alone: the binary
+     * ({@link #PASSTHROUGH}, the argv unwrapped) or the readiness probe ({@link #unavailable}).
+     */
+    public record CustomAgentOverride(boolean passthrough, @Nullable String unavailableReason) {
+        public static final CustomAgentOverride NONE = new CustomAgentOverride(false, null);
+        public static final CustomAgentOverride PASSTHROUGH = new CustomAgentOverride(true, null);
+
+        public static CustomAgentOverride unavailable(String reason) {
+            return new CustomAgentOverride(false, reason);
+        }
+    }
+
+    /** Test seam: ShellSandboxSync sets it while it holds its lock and resets it to {@link CustomAgentOverride#NONE}. */
+    public static void setCustomAgentOverrideForTest(CustomAgentOverride override) {
+        customAgentOverride = override;
+    }
+
+    /**
+     * The directories of {@code pathEnv} a hidden-home profile reopens for reading: each absolute entry
+     * strictly below {@code home} on a path-segment boundary, then its canonical path when that differs
+     * and is also below {@code home}, once each in PATH order.
+     */
+    public static List<String> homeReadReopens(@Nullable String pathEnv, String home) {
+        if (pathEnv == null || home.isBlank()) return List.of();
+        var homePath = SandboxHiddenRoots.lexical(home);
+        if (homePath == null) return List.of();
+        var out = new LinkedHashSet<String>();
+        for (var entry : pathEnv.split(File.pathSeparator)) {
+            var p = SandboxHiddenRoots.lexical(entry);
+            if (entry.isEmpty() || p == null || !p.isAbsolute() || !strictlyBelow(p, homePath)) continue;
+            out.add(p.toString());
+            var canonical = SandboxHiddenRoots.canonical(p);
+            if (strictlyBelow(canonical, homePath)) out.add(canonical.toString());
+        }
+        return List.copyOf(out);
+    }
+
+    private static boolean strictlyBelow(Path p, Path home) {
+        return p.startsWith(home) && !p.equals(home);
+    }
+
     /** Whether this host has the OS sandbox mechanism {@link #wrap} would use, and why not when it lacks one. */
     public record Availability(boolean available, String mechanism, String reason) {}
 
-    /** Probe the platform's sandbox binary the way {@link #wrap} does, without wrapping anything. */
+    /**
+     * Whether the sandbox can start on this host: on Linux a real {@code bwrap} launch, on macOS the
+     * {@code sandbox-exec} lookup. The one readiness check behind {@code GET /api/sandbox} and every
+     * {@link #wrap} that confines.
+     */
     public static Availability availability() {
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String binary;
@@ -234,10 +323,33 @@ public final class HarnessSandbox {
             return new Availability(false, "",
                     "this platform (%s) has no supported sandbox".formatted(System.getProperty("os.name")));
         }
-        var missing = missingBinary(binary);
-        return missing == null
+        var failure = binary.equals(BWRAP) ? bwrapLaunchFailure() : missingSandboxExec();
+        return failure == null
                 ? new Availability(true, binary, "")
-                : new Availability(false, binary, "'%s' is not available: %s".formatted(binary, missing.reason()));
+                : new Availability(false, binary, "'%s' is not available: %s".formatted(binary, failure));
+    }
+
+    /**
+     * Why {@code bwrap} cannot start a sandbox here, or null when it can. {@code bwrap} on PATH is not
+     * enough: a kernel without unprivileged user namespaces, or Docker's default seccomp profile, lets
+     * it start and then refuses its namespaces.
+     */
+    private static @Nullable String bwrapLaunchFailure() {
+        if (bwrapLaunched) return null;
+        var probe = ExecutableProbeSupport.probeCapturing(BWRAP_PROBE, "");
+        if (probe.available()) {
+            bwrapLaunched = true;
+            return null;
+        }
+        var output = probe.output() == null ? "" : probe.output().strip();
+        var firstLine = output.lines().findFirst().orElse("").strip();
+        var reason = firstLine.isEmpty() ? probe.reason()
+                : firstLine.length() > PROBE_LINE_LIMIT ? firstLine.substring(0, PROBE_LINE_LIMIT) : firstLine;
+        if ("1".equals(System.getenv("JCLAW_CONTAINER"))) {
+            reason += "; in Docker, start the container with the seccomp profile docker-compose.yml names"
+                    + " (seccomp-bwrap.json), as INSTALL.md describes";
+        }
+        return reason;
     }
 
     /** Whether a run confined under {@code configKey} loses the network: only a native tool's, and only on {@code deny}. */
@@ -267,23 +379,22 @@ public final class HarnessSandbox {
         return key + " must be 'false', 'untrusted' or 'true' (any case); blank means off.";
     }
 
-    /** The failed probe when {@code binary} is missing from PATH, or null when it is present. */
-    private static ExecutableProbeSupport.@Nullable Result missingBinary(String binary) {
-        var probe = ExecutableProbeSupport.probeOnPath(
-                binary, binary.equals(BWRAP) ? "--version" : "-p", "harness-sandbox", "");
+    /** Why {@code sandbox-exec} is unusable, or null when it is on PATH. */
+    private static @Nullable String missingSandboxExec() {
+        var probe = ExecutableProbeSupport.probeOnPath(SANDBOX_EXEC, "-p", "harness-sandbox", "");
         // sandbox-exec has no --version and exits non-zero on a bare -p; treat a
         // clean "not found on PATH" as the only fatal signal for it.
-        return !probe.available() && probe.reason().contains("not found on PATH") ? probe : null;
+        return !probe.available() && probe.reason().contains("not found on PATH") ? probe.reason() : null;
     }
 
     private static void requireBinary(String binary, String configKey) {
-        var probe = missingBinary(binary);
-        if (probe != null) {
+        var failure = binary.equals(BWRAP) ? bwrapLaunchFailure() : missingSandboxExec();
+        if (failure != null) {
             throw new SandboxUnavailableException(
                     ("%s is enabled but '%s' is not available (%s). On WSL2 this often "
                             + "means unprivileged user namespaces are disabled (kernel.unprivileged_userns_clone). "
                             + "Install/enable it or disable the sandbox — the run is aborted rather than launched "
-                            + "unsandboxed.").formatted(configKey, binary, probe.reason()));
+                            + "unsandboxed.").formatted(configKey, binary, failure));
         }
     }
 
@@ -298,14 +409,26 @@ public final class HarnessSandbox {
         return List.copyOf(out);
     }
 
+    /** {@link #macosProfile(File, List, String, List, boolean, List)} with {@code $HOME} readable. */
+    public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden,
+                                      boolean denyNetwork) {
+        return macosProfile(writeRoot, allowances, home, hidden, denyNetwork, null);
+    }
+
     /**
      * The Seatbelt profile, public so a test can pin its rule order on any host. The last
      * matching rule wins, so each {@code hidden} root is denied after every write grant (hiding
      * it even inside a grant above it), a grant beneath one is reopened after that, and the
      * {@code $HOME} secrets come last so no reopen can reach them.
+     *
+     * @param homeReads null keeps {@code $HOME} readable. Otherwise {@code $HOME} is denied for reading
+     *                  after the write grants, then the write root and these directories are reopened, and
+     *                  {@code $HOME} and each directory between it and a reopen get their metadata back so
+     *                  {@code getcwd} and {@code realpath} resolve; only the write root is reopened beneath a
+     *                  hidden root.
      */
     public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden,
-                                      boolean denyNetwork) {
+                                      boolean denyNetwork, @Nullable List<String> homeReads) {
         var sb = new StringBuilder("(version 1)\n(allow default)\n");
         if (denyNetwork) sb.append("(deny network*)\n");
         sb.append("(deny file-write* (subpath \"/\"))\n");
@@ -320,10 +443,11 @@ public final class HarnessSandbox {
             sb.append(writeAllow(abs));
             grants.add(abs);
         }
+        if (homeReads != null) appendHiddenHome(sb, writeRoot.getAbsolutePath(), home, homeReads);
         for (var root : hidden) {
             sb.append(rule("deny", "file-read* file-write*", root.toString()));
         }
-        for (var g : grants) {
+        for (var g : homeReads == null ? grants : List.of(writeRoot.getAbsolutePath())) {
             var reopened = SandboxHiddenRoots.beneath(g, hidden);
             if (reopened != null) sb.append(rule("allow", "file-read* file-write*", reopened.toString()));
         }
@@ -331,6 +455,33 @@ public final class HarnessSandbox {
             sb.append(rule("deny", "file-read*", absHome(home, s)));
         }
         return sb.toString();
+    }
+
+    private static void appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
+        var homePath = SandboxHiddenRoots.lexical(home);
+        if (homePath == null) throw new SandboxUnavailableException("sandbox: the home folder is not a valid path: " + home);
+        sb.append(rule("deny", "file-read*", homePath.toString()));
+        sb.append(rule("allow", "file-read*", workspace));
+        for (var r : homeReads) {
+            sb.append(rule("allow", "file-read*", r));
+        }
+        var metadata = new LinkedHashSet<String>();
+        metadata.add(homePath.toString());
+        var reopened = new ArrayList<String>();
+        reopened.add(workspace);
+        reopened.addAll(homeReads);
+        for (var r : reopened) {
+            var p = SandboxHiddenRoots.lexical(r);
+            if (p == null || !strictlyBelow(p, homePath)) continue;
+            var between = new ArrayList<String>();
+            for (var dir = p.getParent(); dir != null && strictlyBelow(dir, homePath); dir = dir.getParent()) {
+                between.addFirst(dir.toString());
+            }
+            metadata.addAll(between);
+        }
+        for (var dir : metadata) {
+            sb.append("(allow file-read-metadata (literal \"").append(escapeSeatbelt(dir)).append("\"))\n");
+        }
     }
 
     /**

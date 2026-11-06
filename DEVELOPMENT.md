@@ -354,7 +354,7 @@ The implementation is entirely original — no code is shared with any of them. 
 - 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page and installable as desktop PWAs
 - 📁 **Workspace Manager** — Browse each agent's workspace with sizes from the Agents page, download a file or a folder as a zip, back up the whole workspace, and delete entries, with Standing Orders files protected
 - 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, an MCP server is moved to the Handshake protocol, stored credentials do not decrypt at boot, or a recurring task's occurrence fails for good
-- 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; opt-in OS sandboxing (`shell.sandbox`, `subagent.acp.sandbox`) confines what those processes can write and read
+- 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; custom agents' shell commands always run in the OS sandbox, and opt-in OS sandboxing (`shell.sandbox` for the main agent, `subagent.acp.sandbox`) confines what the other processes can write and read
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 
 ### Backend (Play 1.x + Java)

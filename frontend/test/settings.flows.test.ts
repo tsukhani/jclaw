@@ -1388,12 +1388,12 @@ describe('Settings page — Shell Execution', () => {
     expect(component.find('[data-testid="sandbox-unavailable"]').exists()).toBe(false)
 
     clearNuxtData()
-    registerEndpoint('/api/sandbox', () => ({ available: false, mechanism: 'bwrap', reason: '\'bwrap\' is not available: bwrap not found on PATH' }))
+    registerEndpoint('/api/sandbox', () => ({ available: false, mechanism: 'bwrap', reason: '\'bwrap\' is not available: bwrap: No permissions to create a new namespace' }))
     component = await mountSettingsSection('shell')
     await flushPromises()
     const note = component.find('[data-testid="sandbox-unavailable"]')
     expect(note.exists()).toBe(true)
-    expect(note.text()).toContain('bwrap not found on PATH')
+    expect(note.text()).toBe('This host has no sandbox mechanism (\'bwrap\' is not available: bwrap: No permissions to create a new namespace). Custom agents\' shell commands are refused here, and with this on, the main agent\'s are too.')
   })
 })
 

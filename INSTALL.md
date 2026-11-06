@@ -216,6 +216,10 @@ Docker Compose is the simplest way to run JClaw on a server for everyday use. Th
   conversations survive a restart. `certs/` holds the generated secret and the TLS files.
 - It sets `restart: unless-stopped`. **Restart** under **Settings → System → Maintenance** stops the
   container, and this restart policy starts it again. A plain `docker run` needs `--restart unless-stopped`.
+- It starts the container with the seccomp profile `seccomp-bwrap.json`. This is Docker's default
+  profile with one rule added: it lets the sandbox tool `bwrap` create its namespaces, and nothing
+  more. So custom agents' shell commands run inside the sandbox. The file has to sit beside
+  `docker-compose.yml`; the release download already puts it there.
 
 ```bash
 # Start in the background
@@ -239,6 +243,27 @@ and then `docker compose up`.
 The container runs JClaw in production mode. The image already contains the built web interface
 (the Nuxt SPA). So the host does not need Node.js, pnpm or the Play tools. When the container is
 healthy, open `http://localhost:9000`, or your own port.
+
+### Check the sandbox
+
+Custom agents always run their shell commands inside the sandbox. To check that the sandbox works
+in your container, run:
+
+```bash
+docker compose exec jclaw bwrap --ro-bind / / true && echo sandbox ok
+```
+
+You can also open **Settings → Shell Execution**. When the sandbox cannot start, the panel says
+"This host has no sandbox mechanism (…)", with the cause in the brackets.
+
+If the check fails, custom agents' shell commands are refused, and the refusal names the cause.
+JClaw never runs them outside the sandbox. The main agent is not affected while `shell.sandbox` is
+off.
+
+On Ubuntu and Debian hosts, AppArmor may also block the `mount` calls the sandbox needs. To see
+whether it does, run the check above, then run `sudo dmesg | grep apparmor` on the host. A line
+with `apparmor="DENIED"` and `operation="mount"` means AppArmor is the cause. Custom agents'
+commands then stay refused; JClaw does not fall back to running them outside the sandbox.
 
 ### Keep the secret with your data
 

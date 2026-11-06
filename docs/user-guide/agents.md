@@ -117,7 +117,7 @@ Whether a dangerous action (such as `exec`) runs at all when nobody can be asked
 
 ### Shell Exec Privileges (Main Agent only)
 
-Two toggles govern how strictly the Main Agent's shell tools enforce safety. Custom agents do not see this section. They inherit the standard policy.
+Two toggles govern how strictly the Main Agent's shell tools enforce safety. Custom agents do not see this section. They inherit the standard policy, and their shell commands always run in the OS sandbox and cannot read the home folder outside their workspace. A subagent copy of an agent follows the agent it was copied from.
 
 | Setting | Default | Effect |
 |------------------------|---------|--------------------------------------------------------------------------------------------|
@@ -128,7 +128,7 @@ Two toggles govern how strictly the Main Agent's shell tools enforce safety. Cus
 **Bypass allowlist** removes the safety floor. Enable it only on a Main Agent you trust, on a machine where you are comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).
 :::
 
-Neither toggle loosens the OS sandbox. With `shell.sandbox` set by the **sandbox** control in [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
+Neither toggle loosens the OS sandbox. With `shell.sandbox` set by the **sandbox** control in [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run of the Main Agent can write only inside its workspace, whatever these privileges say. That control governs only the Main Agent; custom agents' commands are confined whatever it says, and are refused on a host that cannot start a sandbox.
 
 ### Shell Allowlist (effective view)
 
