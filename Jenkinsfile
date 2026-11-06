@@ -168,6 +168,8 @@ pipeline {
                 script {
                     if (env.ALREADY_TESTED == 'true') {
                         echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
+                        // This build carries no Sonar link of its own, so the job page shows none.
+                        echo 'Sonar result for this commit: https://sonar.abundent.com/dashboard?id=abundent%3Ajclaw'
                     }
                 }
                 // A release is cut only from the version's signed tag, which
