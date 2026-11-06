@@ -173,9 +173,34 @@ class SubagentSpawnToolTest extends UnitTest {
         JPA.em().clear();
         SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
         assertNull(run.parentConversation);
+        assertEquals(taskRunId, run.parentTaskRun.id, "the run still traces to the task run that started it");
         assertNotEquals(chat.id, run.childConversation.id, "the child has a conversation of its own");
         assertEquals(0L, Message.count("conversation.id = ?1", chat.id),
                 "nothing is written into a chat the fire has nothing to do with");
+    }
+
+    // The other side of noParentChat: a chat turn binds its conversation, so inline still embeds there.
+    @Test
+    void anInlineSpawnInAChatTurnStillRunsInsideThatChat() throws Exception {
+        startLlmServer(simpleResponse("child done"));
+        configureProvider();
+        var parent = createAgent("p-chat-inline", "spawn-provider", "test-model");
+        var chat = ConversationService.create(parent, "web", "u-chat-inline");
+        Thread.sleep(10);
+        var newer = ConversationService.create(parent, "web", "u-chat-inline-newer");
+        commitAndReopen();
+
+        var json = JsonParser.parseString(invokeOnVirtualThreadInConversation(parent.id, chat.id,
+                "{\"task\":\"do work\",\"mode\":\"inline\"}")).getAsJsonObject();
+
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        assertFalse(json.has("note"), json.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertEquals(chat.id, run.parentConversation.id, "the calling chat, not the newer one");
+        assertEquals(chat.id, run.childConversation.id, "inline embeds in the calling chat");
+        assertNull(run.parentTaskRun);
+        assertEquals(0L, Message.count("conversation.id = ?1", newer.id));
     }
 
     @Test
