@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""typolint.py - fail-the-build typographic lint for print brochures.
+
+Usage: python3 typolint.py out.pdf [options]
+
+Checks (FAIL = build broken, WARN = advisory):
+  RASTER          no text layer (page was rasterized)
+  TYPE_SCALE      more distinct type sizes than a modular scale allows
+  TEXT_TOO_SMALL  a real volume of text below the print legibility floor
+  MEASURE_WIDE    body column too many characters per line
+  MEASURE_NARROW  single wide column carrying too few characters per line
+  LEADING_TIGHT   body line pitch below 1.25 em
+  LEADING_LOOSE   body line pitch above 1.75 em
+  FAMILIES        more than two type families
+  ORPHAN_HEADING  page ends on a display heading with no body under it
+  PLACEHOLDER     lorem/TODO/{{ survived into the render
+  FONT_EMBED      font referenced but not embedded
+
+Exit 0 = pass, 1 = at least one FAIL.
+"""
+import sys, re, json, argparse
+from collections import Counter, defaultdict
+
+try:
+    import fitz
+except ImportError:
+    sys.exit("typolint: PyMuPDF required (pip install pymupdf)")
+
+FOLIO_RE = re.compile(r'^\s*(?:\d{1,3}\s*(?:/|of)\s*\d{1,3}|\d{1,3})\s*$')
+PLACEHOLDERS = ("lorem ipsum", "todo", "xxx", "{{", "}}", "[insert", "tbd")
+MM = 25.4 / 72.0
+
+WEIGHT_RE = re.compile(
+    r'[-_ ]?(bold|black|heavy|medium|light|thin|italic|oblique|roman|regular|'
+    r'semibold|demibold|extrabold|ultra|book|condensed|narrow|expanded)$', re.I)
+
+
+def norm_family(font):
+    f = font.split('+')[-1]
+    return WEIGHT_RE.sub('', f).lower()
+
+
+def get_lines(page):
+    out = []
+    for blk in page.get_text("dict")["blocks"]:
+        if blk["type"] != 0:
+            continue
+        for ln in blk["lines"]:
+            spans = [s for s in ln["spans"] if s["text"].strip()]
+            if not spans:
+                continue
+            text = "".join(s["text"] for s in spans).strip()
+            if FOLIO_RE.match(text):
+                continue
+            x0, y0, x1, y1 = ln["bbox"]
+            out.append({
+                "text": text, "size": round(max(s["size"] for s in spans), 2),
+                "font": spans[0]["font"], "bbox": ln["bbox"],
+                "block": blk["number"],
+                "x0mm": x0 * MM, "x1mm": x1 * MM,
+                "wmm": (x1 - x0) * MM,
+            })
+    return out
+
+
+def cluster_sizes(size_chars, tol=0.5, min_chars=100):
+    """Group near-identical sizes into one step; drop incidental fragments."""
+    sig = {s: c for s, c in size_chars.items() if c >= min_chars}
+    if not sig:
+        sig = dict(size_chars)
+    order = sorted(sig, key=lambda s: -sig[s])
+    clusters = []
+    for s in order:
+        for c in clusters:
+            if abs(s - c["rep"]) <= tol:
+                c["members"].append(s)
+                c["chars"] += sig[s]
+                break
+        else:
+            clusters.append({"rep": s, "members": [s], "chars": sig[s]})
+    return sorted(c["rep"] for c in clusters)
+
+
+def measure_stats(lines, body_size):
+    """Characters per line and physical width for real body lines.
+
+    Column counting is unreliable (indents, hanging captions and right-aligned
+    stats all fake extra starts), so judge the measure physically instead: a
+    narrow column legitimately holds few characters because it is narrow. The
+    defect is a *wide* column carrying too few characters, or any column
+    carrying too many.
+    """
+    body = [l for l in lines if abs(l["size"] - body_size) <= 0.6 and len(l["text"]) > 20]
+    if not body:
+        return None
+    chars = sorted(len(l["text"]) for l in body)
+    widths = sorted(l["wmm"] for l in body)
+    return {
+        "n": len(body),
+        "med": chars[len(chars) // 2],
+        "p90": chars[int(len(chars) * 0.9)],
+        "max": chars[-1],
+        "medw": widths[len(widths) // 2],
+        "maxw": widths[-1],
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("pdf")
+    ap.add_argument("--body-min", type=float, default=9.0)
+    ap.add_argument("--max-sizes", type=int, default=10)
+    ap.add_argument("--measure-min", type=int, default=45)
+    ap.add_argument("--measure-max", type=int, default=90)
+    ap.add_argument("--footnote-min", type=float, default=7.0,
+                    help="absolute floor for footnote/source blocks")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--budget", metavar="WORDS", type=int, nargs="+",
+                    help="per-page body-word budget, one integer per page "
+                         "(use 0 to skip a page). Reports pages over budget.")
+    a = ap.parse_args()
+
+    doc = fitz.open(a.pdf)
+    fails, warns, notes = [], [], []
+
+    if not len(doc):
+        print("RESULT: FAIL"); print("  FAIL EMPTY: zero pages"); sys.exit(1)
+
+    per_page = [get_lines(p) for p in doc]
+    all_lines = [l for pg in per_page for l in pg]
+
+    if not all_lines:
+        fails.append(("RASTER", "no text layer - the page was rasterized, so text "
+                                "cannot be searched, copied or accessibility-checked"))
+
+    size_chars = Counter()
+    for l in all_lines:
+        size_chars[l["size"]] += len(l["text"])
+    if not size_chars:
+        print(f"typolint: {a.pdf}"); print("  pages", len(doc))
+        for c, d in fails:
+            print(f"  FAIL {c}: {d}")
+        print("RESULT: FAIL"); sys.exit(1)
+
+    body_size = size_chars.most_common(1)[0][0]
+    families = {norm_family(l["font"]) for l in all_lines}
+
+    # 1. type scale
+    steps = cluster_sizes(size_chars)
+    if len(steps) > a.max_sizes:
+        fails.append(("TYPE_SCALE", f"{len(steps)} distinct type sizes, limit {a.max_sizes} "
+                                    f"- a modular scale has few steps: {[round(s,1) for s in steps]}"))
+
+    # 2. legibility floor
+    if body_size < a.body_min:
+        fails.append(("BODY_SIZE", f"body text is {body_size}pt, below the {a.body_min}pt floor "
+                                  f"- unreadable on paper"))
+    for s, c in sorted(size_chars.items()):
+        if s >= a.body_min - 0.05 or c < 200:
+            continue
+        if s < a.footnote_min - 0.05:
+            fails.append(("TEXT_TOO_SMALL", f"{s}pt carries {c} characters - below the absolute "
+                                            f"{a.footnote_min}pt floor"))
+        else:
+            warns.append(f"{s}pt carries {c} characters across the document "
+                         f"(footnote/source blocks are acceptable, body copy is not)")
+
+    # 3. measure
+    ms = measure_stats(all_lines, body_size)
+    if ms:
+        notes.append(f"measure: median {ms['med']} chars over {ms['medw']:.0f} mm "
+                     f"(p90 {ms['p90']}, max {ms['max']})")
+        if ms["p90"] > a.measure_max:
+            fails.append(("MEASURE_WIDE", f"body measure p90 {ms['p90']} chars, max {ms['max']}, "
+                                          f"limit {a.measure_max} - the eye loses the line return"))
+        if ms["med"] < a.measure_min and ms["medw"] > 110:
+            fails.append(("MEASURE_NARROW", f"body column {ms['medw']:.0f} mm wide but only "
+                                            f"{ms['med']} chars per line - the type is too large "
+                                            f"or the tracking is wrong"))
+        elif ms["med"] < a.measure_min:
+            notes.append(f"narrow column ({ms['medw']:.0f} mm) holds {ms['med']} chars - correct "
+                         f"for a multi-column grid")
+
+    # 4. leading on body runs
+    ratios = []
+    for pg in per_page:
+        by_block = defaultdict(list)
+        for l in pg:
+            by_block[l["block"]].append(l)
+        for blk in by_block.values():
+            blk.sort(key=lambda l: l["bbox"][1])
+            for x, y in zip(blk, blk[1:]):
+                if abs(x["size"] - y["size"]) < 0.2 and abs(x["size"] - body_size) < 0.6:
+                    dy = y["bbox"][1] - x["bbox"][1]
+                    if 0 < dy < x["size"] * 4:
+                        ratios.append(dy / x["size"])
+    if len(ratios) >= 10:
+        ratios.sort()
+        med_r = ratios[len(ratios)//2]
+        if med_r < 1.25:
+            fails.append(("LEADING_TIGHT", f"body leading {med_r:.2f} em, below 1.25 - lines collide"))
+        elif med_r > 1.75:
+            fails.append(("LEADING_LOOSE", f"body leading {med_r:.2f} em, above 1.75 - paragraphs "
+                                           f"disintegrate"))
+        else:
+            notes.append(f"body leading {med_r:.2f} em")
+
+    # 5. families
+    if len(families) > 2:
+        fails.append(("FAMILIES", f"{len(families)} type families {sorted(families)} - the limit is 2"))
+    else:
+        notes.append(f"families {sorted(families)}")
+
+    # 6. orphan heading
+    for pi, pg in enumerate(per_page):
+        if not pg:
+            continue
+        last = max(pg, key=lambda l: l["bbox"][3])
+        if last["size"] >= body_size * 1.5 and len(last["text"].split()) <= 12:
+            fails.append(("ORPHAN_HEADING", f"page {pi+1} ends on a {last['size']}pt heading "
+                                            f"({last['text'][:40]!r}) with no body beneath it"))
+
+    # 7. placeholders
+    full = "\n".join(l["text"] for l in all_lines).lower()
+    for ph in PLACEHOLDERS:
+        if ph in full:
+            fails.append(("PLACEHOLDER", f"placeholder {ph!r} survived into the render"))
+            break
+    # 8. embedding
+    BASE14 = {"Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Times-Roman",
+              "Times-Bold", "Times-Italic", "Courier", "Courier-Bold",
+              "Symbol", "ZapfDingbats"}
+    hard, soft = set(), set()
+    for p in doc:
+        for f in p.get_fonts():
+            if not f[1] or f[1] == "n/a":
+                (soft if f[3] in BASE14 else hard).add(f[3])
+    if hard:
+        fails.append(("FONT_EMBED", f"referenced but not embedded: {sorted(hard)} - "
+                                    f"these will not render correctly at a print shop"))
+    if soft:
+        warns.append(f"base-14 font(s) not embedded: {sorted(soft)} - valid PDF, but a print "
+                     f"shop may substitute the face")
+
+    # 9. per-page word budget (stage 3), when supplied
+    if a.budget:
+        if len(a.budget) != len(doc):
+            fails.append(("BUDGET_ARITY", f"--budget lists {len(a.budget)} pages but "
+                                           f"the PDF has {len(doc)}"))
+        else:
+            over = []
+            for pi, (pg, cap) in enumerate(zip(per_page, a.budget), 1):
+                if not cap:
+                    continue
+                words = sum(len(l["text"].split()) for l in pg
+                            if 9.0 <= l["size"] <= 12.5)
+                pct = 100.0 * words / cap if cap else 0
+                if words > cap:
+                    over.append(f"page {pi}: {words} body words over a {cap}-word budget")
+                elif pct >= 90:
+                    warns.append(f"page {pi} uses {pct:.0f}% of its {cap}-word budget")
+                notes.append(f"page {pi} budget: {words}/{cap} words ({pct:.0f}%)")
+            for o in over:
+                fails.append(("OVER_BUDGET", o + " - cut copy or move it, never shrink the type"))
+
+    # report
+    if a.json:
+        print(json.dumps({"pdf": a.pdf, "pages": len(doc), "body_size": body_size,
+                          "type_steps": len(steps), "step_values": [round(s, 1) for s in steps],
+                          "families": sorted(families),
+                          "fails": [{"code": c, "detail": d} for c, d in fails],
+                          "warns": warns, "notes": notes,
+                          "result": "FAIL" if fails else "PASS"}, indent=2))
+    else:
+        print(f"typolint: {a.pdf}")
+        print(f"  pages {len(doc)} | body {body_size}pt | {len(steps)} type steps | "
+              f"families {sorted(families)}")
+        for c, d in fails:
+            print(f"  FAIL {c}: {d}")
+        for w in warns:
+            print(f"  WARN {w}")
+        for n in notes:
+            print(f"  note {n}")
+        print("RESULT:", "FAIL" if fails else "PASS")
+
+    sys.exit(1 if fails else 0)
+
+
+if __name__ == "__main__":
+    main()
