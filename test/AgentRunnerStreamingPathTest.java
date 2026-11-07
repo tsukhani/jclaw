@@ -873,6 +873,58 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 "persisted assistant content must match the streamed payload");
     }
 
+    @Test
+    void onCompleteRunsOnTheTurnsThreadOnlyAfterTheReplysSaveHasReturned() throws Exception {
+        // The chat page merges the saved rows on the terminal frame, which this callback publishes (JF-202). The test
+        // database reads uncommitted rows (LOCK_MODE=0), so the read below cannot tell committed from written. What
+        // this pins is the order on the turn's own thread: no transaction is open there when onComplete runs, so the
+        // reply's save, a Tx.run of its own, has returned, and the row is there.
+        startSseServer("""
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Hello "}}]}
+
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"world!"},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+        configureProvider();
+        var agent = persistAgent("stream-commit-first", "test-provider", "test-model");
+        var convo = persistConversation(agent, "web", "u-commit-first");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var terminal = new AtomicReference<String>();
+        var seenAtComplete = new AtomicReference<String>();
+        var insideATransaction = new AtomicBoolean(true);
+        var done = new CountDownLatch(1);
+        var cb = new AgentRunner.StreamingCallbacks(
+                _ -> { }, _ -> { }, _ -> { }, _ -> { }, _ -> { },
+                _ -> {
+                    terminal.set("complete");
+                    insideATransaction.set(JPA.isInsideTransaction());
+                    seenAtComplete.set(services.Tx.run(() -> {
+                        List<Message> rows = Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id DESC",
+                                convo.id, MessageRole.ASSISTANT.value).fetch(1);
+                        return rows.isEmpty() ? null : rows.getFirst().content;
+                    }));
+                    done.countDown();
+                },
+                error -> {
+                    terminal.set("error: " + error.getMessage());
+                    done.countDown();
+                },
+                () -> {
+                    terminal.set("cancel");
+                    done.countDown();
+                });
+        AgentRunner.runStreaming(agent, convo.id, "web", "u-commit-first", "say hi", new AtomicBoolean(false), cb, null);
+
+        assertTrue(done.await(60, TimeUnit.SECONDS), "the turn must reach a terminal callback");
+        assertEquals("complete", terminal.get());
+        assertFalse(insideATransaction.get(), "no transaction is open on the turn's thread when onComplete runs");
+        assertEquals("Hello world!", seenAtComplete.get());
+    }
+
     // ─── JCLAW-1188: a breaker's refusal is not a transient 5xx ─────────
 
     @Test

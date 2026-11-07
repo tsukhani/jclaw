@@ -173,6 +173,7 @@ const {
   onModelKeyChange,
   currentThinkingLevel,
   pendingOverrides,
+  applyPick,
   overrideError,
 } = useAgentModel({
   agents,
@@ -312,6 +313,7 @@ const {
   hasRecentTaskCreate,
   pollForAnnounce,
   mergeSavedRows,
+  holdingRows,
   keepPollingFor,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState, appendRows: appendFollowing })
 provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
@@ -418,10 +420,11 @@ if (deepLinkConvoId) {
   onUnmounted(() => stopDeepLink())
 }
 else {
-  // No deep-link — mark init done after first tick so agent watcher works normally
-  watch(conversations, () => {
-    if (initializing.value) initializing.value = false
-  }, { once: true })
+  // No deep-link — mark init done once mounted so the agent watcher works normally: the first agent change clears the
+  // chat even before the conversation list next refreshes.
+  onMounted(() => {
+    initializing.value = false
+  })
 }
 
 // Land the cursor in the composer textarea so the user can start typing
@@ -586,12 +589,14 @@ const {
   startBrowserSetupPolling,
   startVideoPolling,
   mergeSavedRows,
+  holdingRows,
   readQueue,
   showQueued: showQueuedAndAnnounce,
   clearStoppable,
   refreshConversations,
   refreshAgents,
   pendingOverrides,
+  applyPick,
   quote: pendingQuote,
   liveChecklist,
 })

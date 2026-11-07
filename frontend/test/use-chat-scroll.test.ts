@@ -211,6 +211,43 @@ describe('useChatScroll', () => {
     expect(el.scrollTop).toBe(1300)
   })
 
+  it('leaves a reader who scrolls up between a token and its frame where they went', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+
+    api.followToBottom()
+    layout({ scrollTop: 300, scrollHeight: 1100, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    flushRaf()
+
+    expect(el.scrollTop).toBe(300)
+  })
+
+  it('follows a new message list\'s first turn though the reader had scrolled up in the list before it', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const first = viewportWithContent()
+    api.messagesEl.value = first.el
+    await nextTick()
+    first.layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })
+    first.el.dispatchEvent(new Event('scroll'))
+
+    // New Chat unmounts the list; the first turn of the next chat mounts a fresh one.
+    const next = viewportWithContent()
+    api.messagesEl.value = next.el
+    await nextTick()
+    next.layout({ scrollTop: 0, scrollHeight: 400, clientHeight: 200 })
+    api.followToBottom()
+    flushRaf()
+
+    expect(next.el.scrollTop).toBe(400)
+  })
+
   it('keeps a reader at the bottom when the viewport shrinks, and leaves one reading above it alone', async () => {
     const resize = stubResizeObserver()
     const { api } = mountScroll()

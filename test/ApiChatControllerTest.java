@@ -1230,17 +1230,506 @@ class ApiChatControllerTest extends FunctionalTest {
             var flag = new java.util.concurrent.atomic.AtomicBoolean();
             ConversationQueue.tryAcquireOwnership(chat.conversationId(), running(chat.agentId(), "web"), flag);
             ConversationQueue.tryAcquire(chat.conversationId(), running(chat.agentId(), "web"));
+            String agentName = commitInFreshTx(() -> ((models.Agent) models.Agent.findById(chat.agentId())).name);
             try {
-                var answer = json(POST("/api/chat/turn", "application/json",
-                        "{\"agentId\": %d, \"message\": \"/stop\"}".formatted(chat.agentId())));
+                var heard = new java.util.ArrayList<services.EventLogger.Captured>();
+                var answer = new JsonObject[1];
+                services.EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+                    answer[0] = json(POST("/api/chat/turn", "application/json",
+                            "{\"agentId\": %d, \"message\": \"/stop\"}".formatted(chat.agentId())));
+                    heard.addAll(seen);
+                });
 
-                assertEquals(JsonParser.parseString(
-                        "{\"status\":\"command\",\"conversationId\":null,\"content\":\"Nothing to stop.\",\"saved\":false}"),
-                        answer);
+                assertEquals(List.of(new services.EventLogger.Captured("INFO", "SLASH_COMMAND", agentName, "web",
+                        "/stop with no current conversation", null)), heard);
+                assertEquals(JsonParser.parseString("{\"status\":\"command\",\"conversationId\":null,"
+                        + "\"content\":\"No active conversation. Nothing to stop.\",\"saved\":false}"), answer[0]);
                 assertEquals(new ConversationQueue.Snapshot(true, 1, true,
                                 List.of(new ConversationQueue.PendingView("running", List.of(), 1))),
                         ConversationQueue.snapshot(chat.conversationId(), "web"));
                 assertFalse(flag.get(), "the running turn was not told to stop");
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aStopTypedInANewChatWithAModelPickCreatesNoConversation() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/stop", model.provider, HeldModel.OTHER_MODEL,
+                    null));
+
+            assertEquals(commandAnswer("No active conversation. Nothing to stop.", null), answer);
+        }
+    }
+
+    // A command typed in an empty New conversation acts on that chat, never on the agent's web conversation (JF-202).
+
+    @Test
+    void aModelPickTypedInANewChatAnswersThePickAndWritesNothing() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model " + model.provider + "/" + HeldModel.OTHER_MODEL));
+
+            assertEquals(commandAnswer("This New conversation will use `" + model.provider + "/" + HeldModel.OTHER_MODEL
+                    + "`.\nAgent default (" + model.provider + "/" + HeldModel.MODEL + ") is unchanged.",
+                    "{\"of\":\"model\",\"modelProvider\":\"" + model.provider + "\",\"modelId\":\"" + HeldModel.OTHER_MODEL
+                            + "\",\"thinkingMode\":null}"), answer);
+        }
+    }
+
+    @Test
+    void aModelPickOfAnUnknownModelTypedInANewChatSaysWhyAndPicksNothing() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model " + model.provider + "/no-such"));
+
+            assertEquals(commandAnswer("Provider `" + model.provider + "` has no model with id `no-such`. Run `/model` "
+                    + "to see the current model or check Settings → Providers for the available list.", null), answer);
+        }
+    }
+
+    @Test
+    void aThinkingPickTypedInANewChatAnswersThePickAndWritesNothing() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/think off"));
+
+            assertEquals(commandAnswer("Thinking is off for this New conversation.\nAgent default (off) is unchanged.",
+                    "{\"of\":\"thinking\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":\"off\"}"), answer);
+        }
+    }
+
+    @Test
+    void aThinkingLevelTypedInANewChatThatTheModelPickedThereOffersIsPickedLowercased() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/think HIGH", model.provider,
+                    HeldModel.THINKING_MODEL, null));
+
+            assertEquals(commandAnswer("Thinking effort for this New conversation is `high`.\nAgent default (off) is "
+                    + "unchanged.", "{\"of\":\"thinking\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":\"high\"}"),
+                    answer);
+        }
+    }
+
+    @Test
+    void aModelResetTypedInANewChatClearsTheModelPickedThere() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/model reset", model.provider,
+                    HeldModel.OTHER_MODEL, null));
+
+            assertEquals(commandAnswer("Cleared the model picked for this New conversation. The agent default ("
+                    + model.provider + "/" + HeldModel.MODEL + ") applies.",
+                    "{\"of\":\"model\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":null}"), answer);
+        }
+    }
+
+    @Test
+    void aThinkResetTypedInANewChatClearsTheThinkingLevelPickedThere() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/think reset", null, null, "off"));
+
+            assertEquals(commandAnswer("Cleared the thinking level picked for this New conversation. The agent default "
+                    + "(off) applies.", "{\"of\":\"thinking\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":null}"),
+                    answer);
+        }
+    }
+
+    @Test
+    void aModelResetTypedInANewChatWithNothingPickedSaysSo() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model reset"));
+
+            assertEquals(commandAnswer("This New conversation has no model picked. The agent default ("
+                    + model.provider + "/" + HeldModel.MODEL + ") applies.",
+                    "{\"of\":\"model\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":null}"), answer);
+        }
+    }
+
+    @Test
+    void aThinkResetTypedInANewChatWithNothingPickedSaysSo() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/think reset"));
+
+            assertEquals(commandAnswer("This New conversation has no thinking level picked. The agent default (off) "
+                    + "applies.", "{\"of\":\"thinking\",\"modelProvider\":null,\"modelId\":null,\"thinkingMode\":null}"),
+                    answer);
+        }
+    }
+
+    @Test
+    void aMalformedModelTypedInANewChatSaysHowToNameOne() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model nonsense"));
+
+            assertEquals(commandAnswer("Unrecognized model format. Use `/model provider/model-id` (for example "
+                    + "`/model openrouter/google-flash-preview`) or `/model reset` to revert to the agent default.", null),
+                    answer);
+        }
+    }
+
+    @Test
+    void aModelOfAnUnconfiguredProviderTypedInANewChatSaysSo() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model no-such-provider/x"));
+
+            assertEquals(commandAnswer("Provider `no-such-provider` is not configured. Available providers appear under "
+                    + "Settings → Providers; add one there before switching to it.", null), answer);
+        }
+    }
+
+    @Test
+    void aThinkingLevelTypedInANewChatIsCheckedAgainstTheModelPickedThere() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+            var body = "{\"agentId\": %d, \"message\": \"/think high\", \"modelProvider\": \"%s\", \"modelId\": \"%s\"}"
+                    .formatted(chat.agentId(), model.provider, HeldModel.OTHER_MODEL);
+
+            var answer = sentFromANewChat(model, chat, body);
+
+            assertEquals(commandAnswer("Model '" + HeldModel.OTHER_MODEL + "' does not support thinking. "
+                    + "Use `/think off` or `/think <level>`; `/model` lists the levels.", null), answer);
+        }
+    }
+
+    @Test
+    void aResetTypedInANewChatAsksForAMessageFirst() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/reset"));
+
+            assertEquals(commandAnswer("Nothing to reset yet. Send a message first.", null), answer);
+        }
+    }
+
+    @Test
+    void aCompactTypedInANewChatAsksForAMessageFirst() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/compact"));
+
+            assertEquals(commandAnswer("Nothing to compact yet. Send a message first.", null), answer);
+        }
+    }
+
+    @Test
+    void aModelTypedInANewChatDescribesTheAgentsModel() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model"));
+
+            assertEquals(commandAnswer(agentsModel(chat), null), answer);
+        }
+    }
+
+    @Test
+    void aModelTypedInANewChatWithAModelPickedThereDescribesThatModel() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/model", model.provider, HeldModel.OTHER_MODEL,
+                    null));
+
+            var picked = new models.Conversation();
+            picked.modelProviderOverride = model.provider;
+            picked.modelIdOverride = HeldModel.OTHER_MODEL;
+            String described = commitInFreshTx(() -> slash.Commands.buildModelResponse(
+                    models.Agent.findById(chat.agentId()), picked));
+            var head = "Model: " + model.provider + "/" + HeldModel.OTHER_MODEL + "\n(Picked for this New conversation — "
+                    + "agent default is " + model.provider + "/" + HeldModel.MODEL + ")\n";
+            assertEquals(commandAnswer(described.replace("(Conversation override active", "(Picked for this New conversation"),
+                    null), answer);
+            assertTrue(answer.get("content").getAsString().startsWith(head), answer.get("content").getAsString());
+        }
+    }
+
+    @Test
+    void aThinkTypedInANewChatWithALevelPickedThereDescribesThatLevel() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, pickedBody(chat, "/think", model.provider,
+                    HeldModel.THINKING_MODEL, "high"));
+
+            assertEquals(commandAnswer("Thinking: effort high\nLevels: low, high\n(Picked for this New conversation — "
+                    + "agent default is off)\nUse `/think off`, `/think <level>` or `/think reset`.", null), answer);
+        }
+    }
+
+    @Test
+    void aModelStatusTypedInANewChatDescribesTheAgentsModel() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/model status"));
+
+            assertEquals(commandAnswer(agentsModel(chat), null), answer);
+        }
+    }
+
+    @Test
+    void aThinkTypedInANewChatDescribesTheAgentsThinking() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/think"));
+
+            assertEquals(commandAnswer("Thinking: not supported by " + model.provider + "/" + HeldModel.MODEL
+                    + "\nUse `/think off`, `/think <level>` or `/think reset`.", null), answer);
+        }
+    }
+
+    @Test
+    void aUsageTypedInANewChatSaysNothingIsUsedYet() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/usage"));
+
+            assertEquals(commandAnswer("Nothing used yet. Send a message first.", null), answer);
+        }
+    }
+
+    @Test
+    void aHelpTypedInANewChatListsTheCommands() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/help"));
+
+            assertEquals(commandAnswer(slash.Commands.HELP_TEXT, null), answer);
+        }
+    }
+
+    @Test
+    void aPromptTypedInANewChatAnswersThePromptItNames() throws Exception {
+        login();
+        var title = "new-chat-prompt-" + UUID.randomUUID().toString().substring(0, 8);
+        commitInFreshTx(() -> {
+            var prompt = new models.Prompt();
+            prompt.title = title;
+            prompt.content = "Draft the reply.";
+            prompt.category = models.Prompt.Category.CUSTOM;
+            prompt.save();
+            return null;
+        });
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/prompt " + title));
+
+            assertEquals(commandAnswer("**" + title + "**\n\n```\nDraft the reply.\n```", null), answer);
+        } finally {
+            commitInFreshTx(() -> models.Prompt.delete("title = ?1", title));
+        }
+    }
+
+    @Test
+    void aSubagentTypedInANewChatSaysItHasNoRuns() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+
+            var answer = sentFromANewChat(model, chat, newChatBody(chat, "/subagent"));
+
+            assertEquals(commandAnswer("No subagent runs in this conversation.", null), answer);
+        }
+    }
+
+    @Test
+    void aNewTypedInANewChatHoldingPicksStartsItsConversationWithThem() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+            Supplier<Long> conversations = () -> commitInFreshTx(
+                    () -> models.Conversation.count("agent.id = ?1", chat.agentId()));
+            long before = conversations.get();
+
+            var answer = json(POST("/api/chat/turn", "application/json",
+                    pickedBody(chat, "/new", model.provider, HeldModel.OTHER_MODEL, "off")));
+
+            long created = answer.get("conversationId").getAsLong();
+            assertEquals(Map.of("status", "command", "conversationId", created, "content", slash.Commands.NEW_TEXT,
+                    "saved", "true"), flat(answer));
+            assertEquals(before + 1, conversations.get(), "one conversation, the one /new started");
+            var picks = commitInFreshTx(() -> {
+                models.Conversation c = models.Conversation.findById(created);
+                return java.util.Arrays.asList(c.modelProviderOverride, c.modelIdOverride, c.thinkingModeOverride);
+            });
+            assertEquals(java.util.Arrays.asList(model.provider, HeldModel.OTHER_MODEL, "off"), picks);
+        }
+    }
+
+    @Test
+    void aResetSentThroughTheSyncRouteWithNoConversationStillResetsTheAgentsWebConversation() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedLivedInWebChat(model);
+            String agentName = commitInFreshTx(() -> ((models.Agent) models.Agent.findById(chat.agentId())).name);
+
+            var answer = json(POST("/api/chat/send", "application/json", newChatBody(chat, "/reset")));
+
+            assertEquals(Map.of("conversationId", chat.conversationId(), "response", slash.Commands.RESET_TEXT,
+                    "agentId", chat.agentId(), "agentName", agentName), flat(answer));
+            Instant cut = commitInFreshTx(
+                    () -> ((models.Conversation) models.Conversation.findById(chat.conversationId())).contextSince);
+            assertNotNull(cut, "/reset stamped the context cut on the agent's web conversation");
+        }
+    }
+
+    /** The agent's web chat with the operator, given rows and both overrides, so a command that reached it would show. */
+    private static Seeded seedLivedInWebChat(HeldModel model) {
+        var chat = seedWebChat(model);
+        commitInFreshTx(() -> {
+            models.Conversation c = models.Conversation.findById(chat.conversationId());
+            services.ConversationService.appendUserMessage(c, "What time is it?");
+            services.ConversationService.appendAssistantMessage(c, HeldModel.REPLY, null);
+            services.ConversationService.setModelOverride(c, model.provider, HeldModel.OTHER_MODEL);
+            services.ConversationService.setThinkingOverride(c, "off");
+            return null;
+        });
+        return chat;
+    }
+
+    /** What a command could change on a conversation: its overrides, context cut, checklist and rows. */
+    private static List<Object> stateOf(long conversationId) {
+        return commitInFreshTx(() -> {
+            models.Conversation c = models.Conversation.findById(conversationId);
+            List<models.Message> rows = models.Message.find("conversation = ?1 ORDER BY id", c).fetch();
+            return java.util.Arrays.asList(c.modelProviderOverride, c.modelIdOverride, c.thinkingModeOverride,
+                    c.contextSince, c.checklist, rows.stream().map(m -> m.id + " " + m.role + ": " + m.content).toList());
+        });
+    }
+
+    /** POST {@code body}, a command from an empty New conversation, and check it created nothing and left {@code chat} alone. */
+    private JsonObject sentFromANewChat(HeldModel model, Seeded chat, String body) {
+        Supplier<Long> conversations = () -> commitInFreshTx(
+                () -> models.Conversation.count("agent.id = ?1", chat.agentId()));
+        long before = conversations.get();
+        var was = stateOf(chat.conversationId());
+
+        var answer = json(POST("/api/chat/turn", "application/json", body));
+
+        assertEquals(before, conversations.get(), "no conversation is created");
+        assertEquals(was, stateOf(chat.conversationId()), "the agent's web conversation is untouched");
+        assertEquals(0, model.calls.get(), "a command never reaches the model");
+        return answer;
+    }
+
+    private static String newChatBody(Seeded chat, String message) {
+        return "{\"agentId\": %d, \"message\": %s}".formatted(chat.agentId(), new com.google.gson.Gson().toJson(message));
+    }
+
+    /** A New conversation's message carrying the picks held there; a null pick is left out. */
+    private static String pickedBody(Seeded chat, String message, String provider, String modelId, String thinkingMode) {
+        var body = new JsonObject();
+        body.addProperty("agentId", chat.agentId());
+        body.addProperty("message", message);
+        if (provider != null) body.addProperty("modelProvider", provider);
+        if (modelId != null) body.addProperty("modelId", modelId);
+        if (thinkingMode != null) body.addProperty("thinkingMode", thinkingMode);
+        return body.toString();
+    }
+
+    /** A command's answer in a New conversation: no conversation, nothing saved, and the pick it made, if any. */
+    private static JsonObject commandAnswer(String content, String pick) {
+        var answer = new JsonObject();
+        answer.addProperty("status", "command");
+        answer.add("conversationId", com.google.gson.JsonNull.INSTANCE);
+        answer.addProperty("content", content);
+        answer.addProperty("saved", false);
+        if (pick != null) answer.add("pick", JsonParser.parseString(pick));
+        return answer;
+    }
+
+    /** {@code /model}'s description of the agent's own model, with no conversation's override. */
+    private static String agentsModel(Seeded chat) {
+        return commitInFreshTx(() -> slash.Commands.buildModelResponse(models.Agent.findById(chat.agentId()), null));
+    }
+
+    @Test
+    void aStopSentThroughTheChatStreamStopsTheConversationsStoppableTurn() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var flag = new java.util.concurrent.atomic.AtomicBoolean();
+            ConversationQueue.tryAcquireOwnership(chat.conversationId(), running(chat.agentId(), "web"), flag);
+            try {
+                var streamed = POST("/api/chat/stream", "application/json", turnBody(chat, "/stop"));
+
+                var frames = getContent(streamed).lines().filter(l -> l.startsWith("data: "))
+                        .map(l -> JsonParser.parseString(l.substring("data: ".length()))).toList();
+                assertEquals(List.of(
+                        JsonParser.parseString("{\"type\":\"init\",\"conversationId\":" + chat.conversationId() + "}"),
+                        JsonParser.parseString("{\"type\":\"complete\",\"content\":\"Stopped.\"}")), frames);
+                assertTrue(flag.get(), "the running turn was told to stop");
+                assertFalse(ConversationQueue.isBusy(chat.conversationId()));
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aStopSentThroughTheSyncRouteWithNoConversationStillStopsTheAgentsWebConversation() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            // POST /api/chat/send with no id addresses the agent's web conversation with the operator, as it always has.
+            var chat = seedWebChat(model);
+            var flag = new java.util.concurrent.atomic.AtomicBoolean();
+            ConversationQueue.tryAcquireOwnership(chat.conversationId(), running(chat.agentId(), "web"), flag);
+            try {
+                var answer = json(POST("/api/chat/send", "application/json",
+                        "{\"agentId\": %d, \"message\": \"/stop\"}".formatted(chat.agentId())));
+
+                assertEquals("Stopped.", answer.get("response").getAsString());
+                assertEquals(chat.conversationId(), answer.get("conversationId").getAsLong());
+                assertTrue(flag.get(), "the running turn was told to stop");
+                assertFalse(ConversationQueue.isBusy(chat.conversationId()));
             } finally {
                 ConversationQueue.forgetForTest(chat.conversationId());
             }

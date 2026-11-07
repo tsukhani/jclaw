@@ -444,7 +444,8 @@ public class ApiChatController extends Controller {
      * ({@code GET /api/conversations/{id}/stream}), and it runs until it ends or an operator stops it
      * ({@code POST /api/conversations/{id}/stop}): no request holds it, so a closed tab does not cancel it and no idle
      * timer cuts it. A queued send publishes nothing until it drains. A slash command answers its reply here, with the
-     * conversation it ran in, as the chat stream's {@code init} and {@code complete} carry them.
+     * conversation it ran in, as the chat stream's {@code init} and {@code complete} carry them; one typed in an empty
+     * New conversation runs in none ({@link #commandInNewChat}), and answers a model or thinking pick as {@code pick}.
      *
      * <p>{@code @NoTransaction}, as {@link #streamChat}: the turn's own thread reads the conversation this request may
      * create, so nothing may wait on a request transaction's commit.
@@ -455,9 +456,10 @@ public class ApiChatController extends Controller {
     public static void startTurn() {
         var acceptedAtNs = LatencyTrace.acceptedAtNsFromCurrentRequest();
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
-        var conversationId = conversationFor(ctx);
+        var slashResult = commandInNewChat(ctx);
+        var conversationId = slashResult != null ? null : conversationFor(ctx);
 
-        var slashResult = runSlashCommand(ctx.agent(), ctx.message(), conversationId, ctx.username());
+        if (slashResult == null) slashResult = runSlashCommand(ctx.agent(), ctx.message(), conversationId, ctx.username());
         if (slashResult != null) {
             var answer = new HashMap<String, Object>();
             answer.put(KEY_STATUS, "command");
@@ -465,6 +467,7 @@ public class ApiChatController extends Controller {
             answer.put("content", slashResult.responseText());
             // Whether the reply is a saved row the page may pair its copy with (JF-202).
             answer.put("saved", slashResult.saved());
+            if (slashResult.pick() != null) answer.put("pick", slashResult.pick());
             renderJSON(gson.toJson(answer));
         }
 
@@ -513,18 +516,39 @@ public class ApiChatController extends Controller {
     }
 
     /**
+     * A command typed in the chat page's empty New conversation, which names no conversation (JF-202): it acts on that
+     * conversation ({@link Commands#executeInNewChat}), so it runs with none and creates none, reading the picks held
+     * there; {@code /new} starts its conversation with them, as a first message would. Resolved as
+     * {@link #runSlashCommand} resolves a missing id, it would act on the agent's newest web conversation:
+     * {@code /reset} would clear that one's context, {@code /model} change its model and {@code /stop} end its turn.
+     * Null for a message that is no command, or one naming a conversation.
+     */
+    private static Commands.@Nullable Result commandInNewChat(ChatContext ctx) {
+        if (ctx.conversationId() != null) return null;
+        var command = Commands.parse(ctx.message());
+        if (command.isEmpty()) return null;
+        var picked = ctx.overrides();
+        if (command.get() == Commands.Command.NEW && picked != null) {
+            return Commands.executeNewIn(ctx.agent(), ctx.username(),
+                    createWithOverrides(ctx.agent(), ctx.username(), picked));
+        }
+        var held = picked == null ? Commands.Picks.NONE
+                : new Commands.Picks(picked.modelProvider(), picked.modelId(), picked.thinkingMode());
+        // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
+        return Commands.executeInNewChat(command.get(), ctx.agent(), ctx.username(), Commands.extractArgs(ctx.message()),
+                held, true);
+    }
+
+    /**
      * JCLAW-26: run {@code messageText} as a slash command, or return null when it is none, so it runs as normal
-     * text. /new creates a fresh conversation; /reset and /help mutate or query the current one. The model is never
-     * called.
+     * text. A missing {@code conversationId} addresses the agent's web conversation with {@code username}, created if
+     * there is none, except for /new, which creates a fresh one; the others mutate or query that conversation. The
+     * model is never called.
      */
     private static Commands.@Nullable Result runSlashCommand(Agent agent, String messageText,
                                                              @Nullable Long conversationId, String username) {
         var slashCmd = Commands.parse(messageText);
         if (slashCmd.isEmpty()) return null;
-        // A New Chat has no turn to stop; resolving one would stop the agent's existing web conversation's (JF-202).
-        if (slashCmd.get() == Commands.Command.STOP && conversationId == null) {
-            return new Commands.Result(null, Commands.NOTHING_TO_STOP, Commands.Command.STOP);
-        }
         var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
         // JCLAW-111: the typed arguments go through the args-aware execute overload, so /model status, /model reset
         // and /model NAME don't fall through to the no-args summary branch on web, as JCLAW-109 fixed for Telegram.

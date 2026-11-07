@@ -1,3 +1,4 @@
+import { splitQuotedReply } from '~/utils/quoted-reply'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
@@ -250,21 +251,36 @@ export interface MergedRows {
   additions: Message[]
   /** Whether a shown row changed, a row was added, or the order moved. */
   changed: boolean
+  /** Whether a fetched row was held back for a send not yet answered, which a merge after the answer shows. */
+  held: boolean
 }
 
 /**
- * Merges `fresh`, the server's rows after some message, into the shown list as a reload would show them. An id-less
- * row that `pairable` allows first takes the id of its saved copy ({@link backfillServerIds}); the rows with a server
- * id then go in id order, the order the messages endpoint's cursor reads return, so a row that commits below a shown
- * one lands where a reload puts it, each the shown copy where one exists. A `_sending` row pairs with nothing until
- * its send is answered. A `_local` row, which nothing pairs with,
- * stays after the saved row it followed; the other rows still without an id, which wait on their save or stream, come
- * last, in their order. A row the window does not hold keeps its place.
+ * Merges `fresh`, the server's rows after some message, into the shown list as a reload would show them. A `_sending`
+ * row pairs with nothing until its send is answered, since the send may be queued rather than saved; for each, newest
+ * first, the newest fetched user row no shown row has and with its typed words (a quoted reply's words after its
+ * quote) is held back as its saved copy, so the message never shows twice, and the merge after the answer pairs them.
+ * The other id-less rows that `pairable` allows then take the ids of their saved copies among the rest
+ * ({@link backfillServerIds}). The rows with a server id go in id order, the order the messages endpoint's cursor
+ * reads return, so a row that commits below a shown one lands where a reload puts it, each the shown copy where one
+ * exists. A `_local` row, which nothing pairs with, stays after the saved row it followed; the other rows still
+ * without an id, which wait on their save or stream, come last, in their order. A row the window does not hold keeps
+ * its place.
  */
 export function mergeNewRows(shown: Message[], fresh: Message[], pairable: (m: Message) => boolean = () => true): MergedRows {
-  const backfilled = backfillServerIds(
-    shown.filter(m => typeof m.id === 'number' || (!m._local && !m._sending && pairable(m))), fresh)
-  const window = reconcileWindow(shown, fresh, false)
+  const unpaired = shown.filter(m => typeof m.id !== 'number')
+  const taken = new Set(shown.map(m => m.id).filter((id): id is number => typeof id === 'number'))
+  const held = new Set<number>()
+  for (const s of shown.filter(m => m._sending && !m._local).reverse()) {
+    const copy = fresh.findLast(r => typeof r.id === 'number' && r.role === 'user' && !taken.has(r.id) && !held.has(r.id)
+      && (s._quote ? splitQuotedReply(r.content)?.reply : r.content) === s.content)
+    if (copy) held.add(copy.id!)
+  }
+  // A held copy is no other row's to pair with.
+  const kept = held.size ? fresh.filter(r => !held.has(r.id!)) : fresh
+  backfillServerIds(shown.filter(m => typeof m.id === 'number' || (!m._local && !m._sending && pairable(m))), kept)
+  const backfilled = unpaired.some(m => typeof m.id === 'number')
+  const window = reconcileWindow(shown, kept, false)
   const byId = new Map<number, Message>()
   const localAfter = new Map<number | null, Message[]>()
   const unsaved: Message[] = []
@@ -282,7 +298,7 @@ export function mergeNewRows(shown: Message[], fresh: Message[], pairable: (m: M
   for (const m of [...byId.values()].sort((a, b) => a.id! - b.id!)) rows.push(m, ...localAfter.get(m.id!) ?? [])
   rows.push(...unsaved)
   const moved = rows.length !== shown.length || rows.some((m, i) => m !== shown[i])
-  return { rows, additions: window.additions, changed: backfilled || window.changed || moved }
+  return { rows, additions: window.additions, changed: backfilled || window.changed || moved, held: held.size > 0 }
 }
 
 /**

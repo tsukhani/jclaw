@@ -1,11 +1,12 @@
 import { nextTick, onUnmounted, ref, triggerRef, watch, type Ref, type ShallowRef } from 'vue'
-import type { PendingOverrides } from '~/composables/useAgentModel'
+import type { CommandPick, PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
 import type { MergeSavedRowsOptions } from '~/composables/useChatAnnouncePoller'
 import type { ConversationQueueStatus, QueuedMessageView } from '~/composables/useChatBackgroundTurn'
 import { useConversationStream, type TurnFrame } from '~/composables/useConversationStream'
 import { useEventBus } from '~/composables/useEventBus'
+import { apiErrorDetails } from '~/composables/useApiMutation'
 import type { ChatQuote, ChecklistItem, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
 import { checklistFromCall } from '~/utils/checklist'
 import type { MessageRoute } from '~/utils/usage-cost'
@@ -50,6 +51,8 @@ interface TurnAnswer {
   content?: string
   /** A command's reply is a saved row the page may pair its copy with. */
   saved?: boolean
+  /** The pick a command typed in a fresh chat made, which that chat holds until its first message. */
+  pick?: CommandPick
 }
 
 /** The turn the stream has open: its bubble, and the SSE id of its `init`, which a replay of the same turn repeats. */
@@ -94,10 +97,14 @@ export interface UseChatStreamDeps {
   readQueue: (opts?: { init?: boolean }) => Promise<ConversationQueueStatus | null>
   /** Shows a message the server just queued until the next queue read lists it. */
   showQueued: (message: QueuedMessageView) => void
+  /** Whether the last merge held back a saved row for a send not yet answered (useChatAnnouncePoller). */
+  holdingRows?: () => boolean
   /** Hides Stop until a new turn's own queue read says whether it applies (useChatBackgroundTurn). */
   clearStoppable?: () => void
   /** JCLAW-1196: picks made on a fresh chat, carried by the message that creates its conversation. */
   pendingOverrides?: { readonly value: PendingOverrides | null }
+  /** Holds a command's pick for the fresh chat, as the picker does (useAgentModel). */
+  applyPick?: (pick: CommandPick) => void
   /** JCLAW-1299: the message the next send replies to; cleared once sent. */
   quote?: Ref<ChatQuote | null>
   refreshConversations: () => Promise<void> | void
@@ -215,8 +222,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   let viewGen = 0
   // Sends whose answer has not come: a turn's rows wait for them, so the optimistic row is paired, never doubled.
   const sends = new Set<Promise<unknown>>()
-  // A New Chat's send awaiting the conversation it creates, which a second send from that chat goes to.
-  let newChatSend: Promise<number | null> | null = null
+  // A New Chat's send, settled with the conversation it created once its answer is applied, a load it started included;
+  // a second send from that chat goes there. `left` once the operator leaves that chat, after which nothing from it is
+  // placed.
+  let newChatSend: { conversation: Promise<number | null>, left: boolean } | null = null
 
   const stream = useConversationStream({ onFrame: dispatchFrame, onOpen: () => void settleIfIdle(), onGiveUp: giveUpTurn })
   watch(stream.up, (up) => {
@@ -248,6 +257,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
 
   function closeView() {
     viewGen++
+    // Whatever closed the view, a send from it places nothing and holds up no later one.
+    if (newChatSend) newChatSend.left = true
+    newChatSend = null
     if (turn) {
       dropTurn()
       clearStreamBuffers()
@@ -605,6 +617,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   function giveUpTurn() {
     dropUnseenTurn()
     void mergeRows()
+    void readQueue()
   }
 
   /** Frames the page cannot have are gone: reload the rows and rebuild the turn from the frames after this one. */
@@ -701,9 +714,28 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       createdAt: new Date().toISOString(), _local: true }
     const elsewhere = answer.conversationId != null && answer.conversationId !== sentConversationId
     if (elsewhere && openConversation) {
-      // /new made a conversation (JCLAW-26), or a New Chat's command ran in the agent's existing one: shown as a load
-      // shows it, with a reply that was not saved after its rows.
-      await openConversation(answer.conversationId!)
+      // /new made a conversation (JCLAW-26): shown as a load shows it, with a reply that was not saved after its rows.
+      const id = answer.conversationId!
+      try {
+        await openConversation(id)
+      }
+      catch (e) {
+        console.error('Failed to open the conversation a command ran in:', e)
+        if (selectedConvoId.value !== id) return
+        // The command ran; only showing its conversation failed. Why goes after the message, with a reply no row
+        // saved, and the conversation's stream and saved rows come as after a load.
+        const failed: Message = { _key: crypto.randomUUID(), role: 'assistant', content: 'Error: ' + apiErrorDetails(e).message,
+          createdAt: new Date().toISOString(), _local: true }
+        const rows = messages.value.includes(sent) ? messages.value : [...messages.value, sent]
+        const after = rows.indexOf(sent) + 1
+        messages.value = [...rows.slice(0, after), ...(answer.saved ? [] : [reply]), failed, ...rows.slice(after)]
+        triggerRef(messages)
+        follow(id)
+        if (answer.saved) await mergeRows()
+        return
+      }
+      // The operator opened another conversation while this one loaded.
+      if (selectedConvoId.value !== id) return
       if (!answer.saved) {
         messages.value = [...messages.value, sent, reply]
         triggerRef(messages)
@@ -712,6 +744,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       return
     }
     if (elsewhere) follow(answer.conversationId!)
+    if (answer.pick) deps.applyPick?.(answer.pick)
     if (answer.saved) {
       // The reply committed before the answer: the merge puts it where the server did.
       await mergeRows()
@@ -721,6 +754,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       triggerRef(messages)
     }
     nextTick().then(scrollToBottom)
+    // A /stop typed here ended the open turn, whose stopped frame may never arrive: an idle read ends it on the page.
+    if (turn) await settleIfIdle()
   }
 
   async function sendMessage() {
@@ -761,45 +796,86 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     scrollToBottom()
     focusInput()
 
-    // A New Chat creates its conversation with its first send; a second one, sent before that answer, goes there too.
+    // The message goes out as the agent it was typed under, and with the picks held then or made by a command ahead.
+    const agentId = selectedAgentId.value
+    let overrides = deps.pendingOverrides?.value ?? {}
+    // A New Chat creates its conversation with its first message; one sent before that has settled goes there too.
     let sentConversationId = selectedConvoId.value
-    if (sentConversationId === null && newChatSend) sentConversationId = await newChatSend
-    const gen = viewGen
+    let gen = viewGen
+    const waited = sentConversationId === null && newChatSend != null
+    for (let ahead = sentConversationId === null ? newChatSend : null; ahead;) {
+      sentConversationId = await ahead.conversation
+      // An answer following its conversation moved the view; leaving the chat did not.
+      if (ahead.left) break
+      gen = viewGen
+      // A command makes no conversation: the send that went out after it may.
+      ahead = sentConversationId === null && newChatSend !== ahead ? newChatSend : null
+    }
+    if (waited && gen === viewGen) {
+      // No send ahead made a conversation, so this one does, with the picks held now: a /model or /think ahead may
+      // have changed them.
+      if (sentConversationId === null) overrides = deps.pendingOverrides?.value ?? {}
+      // A load that answer started replaced the rows this message showed in.
+      if (selectedConvoId.value === sentConversationId && !messages.value.includes(sent)) {
+        messages.value = [...messages.value, sent]
+        triggerRef(messages)
+      }
+    }
     const post = useApiMutation()
     const request = post.mutate<TurnAnswer>('/api/chat/turn', {
       method: 'POST',
       body: {
-        agentId: selectedAgentId.value,
+        agentId,
         conversationId: sentConversationId,
         message: text,
         attachments: uploaded,
         ...(quote ? { quote } : {}),
-        ...(sentConversationId == null ? (deps.pendingOverrides?.value ?? {}) : {}),
+        ...(sentConversationId == null ? overrides : {}),
       },
     })
     sends.add(request)
-    const created = sentConversationId === null ? request.then(a => a?.conversationId ?? null) : null
-    if (created) newChatSend = created
-    let answer: TurnAnswer | null
+    let settle: (conversationId: number | null) => void = () => {}
+    const created = sentConversationId === null
+      ? {
+          conversation: new Promise<number | null>((resolve) => {
+            settle = resolve
+          }),
+          left: false,
+        }
+      : null
+    // A message from a chat the operator left must not hold up the next chat's sends.
+    if (created && gen === viewGen) newChatSend = created
+    let answer: TurnAnswer | null = null
     try {
-      answer = await request
+      try {
+        answer = await request
+      }
+      finally {
+        sends.delete(request)
+        delete sent._sending
+      }
+      refreshConversations()
+      // A row the last merge held back for a send not yet answered shows now, whatever the answer.
+      if (deps.holdingRows?.()) void mergeRows()
+      // The operator left the view the message was sent from; the turn runs on and shows wherever its conversation opens.
+      if (gen !== viewGen || selectedConvoId.value !== sentConversationId) return
+      // Its own answer may follow its conversation, which closes the view: that is not leaving it.
+      if (created && newChatSend === created) newChatSend = null
+      if (!answer) {
+        sent._local = true
+        const refused: Message = { _key: crypto.randomUUID(), role: 'assistant', content: 'Error: ' + (post.error.value || 'Failed to get response'), createdAt: new Date().toISOString(), _local: true }
+        messages.value = [...messages.value, refused]
+        triggerRef(messages)
+        return
+      }
+      await applyAnswer(answer, sent, sentConversationId, uploaded)
     }
     finally {
-      sends.delete(request)
-      if (created && newChatSend === created) newChatSend = null
-      delete sent._sending
+      if (created) {
+        if (newChatSend === created) newChatSend = null
+        settle(answer?.conversationId ?? null)
+      }
     }
-    refreshConversations()
-    // The operator left the view the message was sent from; the turn runs on and shows wherever its conversation opens.
-    if (gen !== viewGen || selectedConvoId.value !== sentConversationId) return
-    if (!answer) {
-      sent._local = true
-      const refused: Message = { _key: crypto.randomUUID(), role: 'assistant', content: 'Error: ' + (post.error.value || 'Failed to get response'), createdAt: new Date().toISOString(), _local: true }
-      messages.value = [...messages.value, refused]
-      triggerRef(messages)
-      return
-    }
-    await applyAnswer(answer, sent, sentConversationId, uploaded)
   }
 
   onUnmounted(closeView)

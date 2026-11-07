@@ -1,7 +1,6 @@
 import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
-import { fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages'
+import { beforeOldestRow, fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages'
 import { mergeNewRows } from '~/utils/message-reconcile'
-import { latestTurnWindowStart } from '~/utils/tool-calls'
 import { useEventBus } from '~/composables/useEventBus'
 import { useLatestRequest } from '~/composables/useLatestRequest'
 import type { Message } from '~/types/api'
@@ -147,7 +146,7 @@ export interface UseChatAnnouncePollerDeps {
 export interface MergeSavedRowsOptions {
   /** Which id-less rows may take a saved row's id; the running turn's bubble may not. */
   pairable?: (m: Message) => boolean
-  /** A resync's reload: fetch from the window that holds the newest turn, rather than from the newest settled row. */
+  /** A resync's reload: fetch from before the oldest shown row, rather than from the newest settled one. */
   full?: boolean
 }
 
@@ -157,6 +156,8 @@ export interface UseChatAnnouncePoller {
   pollForAnnounce: () => Promise<void>
   /** {@link pollForAnnounce} while the conversation stream reports a turn, whose rows it fetches on init and after its end. */
   mergeSavedRows: (opts?: MergeSavedRowsOptions) => Promise<void>
+  /** Whether the last merge held back a saved row for a send not yet answered. */
+  holdingRows: () => boolean
   /**
    * Poll for {@code ms} from now whatever else holds. A background scrape job's card calls it when the
    * job ends (JCLAW-1273): the completion message and the agent's reply to it land with no SSE
@@ -165,21 +166,13 @@ export interface UseChatAnnouncePoller {
   keepPollingFor: (ms: number) => void
 }
 
-/** The cursor a resync's reload fetches after: just before the window that holds the newest turn, else every shown row. */
-function turnWindowCursor(shown: Message[]): number | null {
-  const saved = shown.filter(m => typeof m.id === 'number')
-  const start = latestTurnWindowStart(saved)
-  if (start > 0) return saved[start - 1]!.id!
-  const oldest = saved[0]?.id
-  return oldest == null ? null : oldest - 1
-}
-
 export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatAnnouncePoller {
   const { messages, selectedConvoId, streaming, initSubagentCollapsedState } = deps
   const appendRows = deps.appendRows ?? ((append: () => void) => append())
 
   let announcePollTimer: ReturnType<typeof setInterval> | undefined
   let pollUntil = 0
+  let holding = false
   // The tick and conversation.updated can overlap; an older window landing last would hang moved calls back on a shown row.
   const polls = useLatestRequest()
 
@@ -270,7 +263,10 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     const poll = polls.begin()
     let fresh: Message[]
     try {
-      fresh = await fetchMessagesAfter(convoId, opts.full ? turnWindowCursor(messages.value) : newRowsCursor(messages.value))
+      // The full reload starts before every shown row: a window worked out from rows already hydrated can open after a
+      // round whose calls a later row holds, and hydrating it alone would take those calls off that row.
+      const after = opts.full ? beforeOldestRow(messages.value) : newRowsCursor(messages.value)
+      fresh = await fetchMessagesAfter(convoId, after)
     }
     catch (e) {
       console.error('Failed to poll for announce:', e)
@@ -279,6 +275,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     // A tick can land after the operator switched conversations, whose rows belong to the old one, or after a turn
     // began, whose rows the stream's own fetches bring in.
     if (!polls.isCurrent(poll) || selectedConvoId.value !== convoId || (!duringTurn && streaming.value)) return
+    holding = false
     if (!fresh.length) return
     const shownRuns = new Set<number>()
     for (const m of messages.value) {
@@ -287,7 +284,8 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     // The window holds a running turn's earlier rounds too, and hydrating it hangs all their calls on its newest row:
     // the shown row that held them after the last merge must give them up, or each merge leaves one more block behind.
     // Not partial: newRowsCursor starts the window after a settled row or before every shown one, so it hydrates whole.
-    const { rows, additions, changed } = mergeNewRows(messages.value, fresh, opts.pairable)
+    const { rows, additions, changed, held } = mergeNewRows(messages.value, fresh, opts.pairable)
+    holding = held
     if (!changed) return
     const addedRuns = additions.filter(m => m.subagentRunId != null && !shownRuns.has(m.subagentRunId))
     appendRows(() => {
@@ -351,6 +349,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     hasRecentTaskCreate,
     pollForAnnounce,
     mergeSavedRows: opts => fetchAndMerge(true, opts),
+    holdingRows: () => holding,
     keepPollingFor,
   }
 }

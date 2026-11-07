@@ -377,58 +377,326 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(queuedRows(component)).toEqual([])
   })
 
-  it('places nothing from a New Chat send whose answer lands after New Chat was clicked again', async () => {
+  /** Holds the first send's answer (conversation 42) and answers every later send as started in conversation 43. */
+  function holdFirstNewChatSend() {
     serveConversation(42, [])
+    serveConversation(43, [])
     serveQueue(42)
+    serveQueue(43)
     let answer!: () => void
     const answered = new Promise<void>((resolve) => {
       answer = resolve
     })
-    serveTurnStart(async () => {
+    const bodies = serveTurnStart(async (body) => {
+      if (body.message !== 'first question') return { status: 'started', conversationId: 43 }
       await answered
       return { status: 'started', conversationId: 42 }
     })
+    return { bodies, answer }
+  }
+
+  const sentTo = (bodies: Array<Record<string, unknown>>) => bodies.map(b => [b.message, b.agentId, b.conversationId])
+
+  it('places nothing from a New Chat send whose answer lands after New Chat was clicked again, and sends the next one anew', async () => {
+    const { bodies, answer } = holdFirstNewChatSend()
     const component = await mountSuspended(Chat)
     await flushPromises()
     await type(component, 'first question')
 
     await component.find('button[title="New conversation"]').trigger('click')
+    await type(component, 'second question')
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['first question', 1, null], ['second question', 1, null]]))
     answer()
     for (let i = 0; i < 5; i++) await flushPromises()
 
-    expect(useRouter().currentRoute.value.query.conversation).toBeUndefined()
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('43'))
     expect(openStreamsOn(42)).toEqual([])
-    expect(shown(component)).toEqual([])
+    expect(shown(component)).toEqual(['user: second question'])
   })
 
-  it('places nothing from a New Chat send whose answer lands after the operator picked another agent', async () => {
+  it('places nothing from a New Chat send whose answer lands after the operator picked another agent, and sends the next one as that agent', async () => {
     registerEndpoint('/api/agents', () => [
       { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
         enabled: true, isMain: true, thinkingMode: null, providerConfigured: true },
       { id: 2, name: 'helper', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
         enabled: true, isMain: false, thinkingMode: null, providerConfigured: true },
     ])
-    serveConversation(42, [])
-    serveQueue(42)
-    let answer!: () => void
-    const answered = new Promise<void>((resolve) => {
-      answer = resolve
-    })
-    serveTurnStart(async () => {
-      await answered
-      return { status: 'started', conversationId: 42 }
-    })
+    const { bodies, answer } = holdFirstNewChatSend()
     const component = await mountSuspended(Chat)
     await flushPromises()
     await type(component, 'first question')
 
     await component.find('select').setValue('2')
     await flushPromises()
+    await type(component, 'second question')
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['first question', 1, null], ['second question', 2, null]]))
     answer()
     for (let i = 0; i < 5; i++) await flushPromises()
 
-    expect(useRouter().currentRoute.value.query.conversation).toBeUndefined()
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('43'))
     expect(openStreamsOn(42)).toEqual([])
+    expect(shown(component)).toEqual(['user: second question'])
+  })
+
+  it('sends a second New Chat message as the agent it was typed under, though the operator picked another before the first answer', async () => {
+    registerEndpoint('/api/agents', () => [
+      { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+        enabled: true, isMain: true, thinkingMode: null, providerConfigured: true },
+      { id: 2, name: 'helper', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+        enabled: true, isMain: false, thinkingMode: null, providerConfigured: true },
+    ])
+    const { bodies, answer } = holdFirstNewChatSend()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await type(component, 'first question')
+    await type(component, 'second question')
+
+    await component.find('select').setValue('2')
+    await flushPromises()
+    answer()
+
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['first question', 1, null], ['second question', 1, 42]]))
+    for (let i = 0; i < 5; i++) await flushPromises()
+    expect(shown(component)).toEqual([])
+  })
+
+  it('shows why a second New Chat message was refused, after the first one\'s /new opened its conversation', async () => {
+    serveQueue(5)
+    serveConversation(5, [row(1, 'assistant', 'What would you like to discuss?')])
+    let answerFirst!: () => void
+    const firstHeld = new Promise<void>((resolve) => {
+      answerFirst = resolve
+    })
+    const bodies: Array<Record<string, unknown>> = []
+    registerEndpoint('/api/chat/turn', {
+      method: 'POST',
+      handler: async (event) => {
+        const { readBody, setResponseStatus } = await import('h3')
+        const body = await readBody<Record<string, unknown>>(event)
+        bodies.push(body)
+        if (body.message === '/new') {
+          await firstHeld
+          return { status: 'command', conversationId: 5, content: 'What would you like to discuss?', saved: true }
+        }
+        setResponseStatus(event, 500)
+        return { code: 'internal_error', message: 'The turn could not start.' }
+      },
+    })
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await type(component, '/new')
+    await type(component, 'second question')
+
+    answerFirst()
+
+    await vi.waitFor(() => expect(component.text()).toContain('Error: The turn could not start.'))
+    expect(sentTo(bodies)).toEqual([['/new', 1, null], ['second question', 1, 5]])
+    expect(shown(component)).toEqual(['assistant: What would you like to discuss?', 'user: second question',
+      'assistant: Error: The turn could not start.'])
+  })
+
+  it('shows why a New Chat /new conversation failed to load, then its saved reply once, from its stream and rows', async () => {
+    // The load's reads fail, retry included; a merge's read, after a cursor, finds the saved reply.
+    registerEndpoint('/api/conversations/5/messages', async (event) => {
+      const { getQuery, setResponseStatus } = await import('h3')
+      if (getQuery(event).after != null) return [row(1, 'assistant', 'What would you like to discuss?')]
+      setResponseStatus(event, 500)
+      return { code: 'internal_error', message: 'The conversation could not load.' }
+    })
+    serveQueue(5)
+    serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'What would you like to discuss?', saved: true }))
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    await type(component, '/new')
+
+    await vi.waitFor(() => expect(shown(component)).toEqual(['user: /new', 'assistant: Error: The conversation could not load.',
+      'assistant: What would you like to discuss?']))
+    expect(times(component, 'What would you like to discuss?')).toBe(1)
+    expect(openStreamsOn(5)).toHaveLength(1)
+  })
+
+  const PICKABLE = '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":false},'
+    + '{"id":"glm-5","name":"GLM 5","supportsThinking":false}]'
+
+  /** The config's one provider offering `models`; the agent's own is kimi-k2.5. */
+  function serveModels(models = PICKABLE) {
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
+        { key: 'provider.ollama-cloud.models', value: models },
+      ],
+    }))
+  }
+
+  type Pick = { of: 'model' | 'thinking', modelProvider: string | null, modelId: string | null, thinkingMode: string | null }
+  const modelPick = (modelId: string | null): Pick =>
+    ({ of: 'model', modelProvider: modelId && 'ollama-cloud', modelId, thinkingMode: null })
+  const thinkingPick = (thinkingMode: string | null): Pick => ({ of: 'thinking', modelProvider: null, modelId: null, thinkingMode })
+
+  /** Answers each command `picks` names with its pick, once `held` resolves, and any other message as started in 42. */
+  function servePicks(picks: Record<string, Pick>, held: Promise<void> = Promise.resolve()) {
+    serveConversation(42, [])
+    serveQueue(42)
+    return serveTurnStart(async (body) => {
+      const pick = picks[body.message as string]
+      if (!pick) return { status: 'started', conversationId: 42 }
+      await held
+      return { status: 'command', conversationId: null, content: 'Picked.', saved: false, pick }
+    })
+  }
+
+  /** Each message sent, with the picks it carried. */
+  const carried = (bodies: Array<Record<string, unknown>>) =>
+    bodies.map(b => [b.message, b.modelProvider ?? null, b.modelId ?? null, b.thinkingMode ?? null])
+
+  async function typeInNewConversation(...messages: string[]) {
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    for (const message of messages) await type(component, message)
+    return component
+  }
+
+  it('sends a message typed before a New conversation /model answer with the model it picked', async () => {
+    serveModels()
+    let answer!: () => void
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    const bodies = servePicks({ '/model ollama-cloud/glm-5': modelPick('glm-5') }, held)
+    await typeInNewConversation('/model ollama-cloud/glm-5', 'hello')
+
+    answer()
+
+    await vi.waitFor(() => expect(carried(bodies)).toEqual([['/model ollama-cloud/glm-5', null, null, null],
+      ['hello', 'ollama-cloud', 'glm-5', null]]))
+  })
+
+  it('sends every message typed behind a New conversation command to the one conversation the first of them makes', async () => {
+    let answer!: () => void
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    serveConversation(42, [])
+    serveQueue(42)
+    const bodies = serveTurnStart(async (body) => {
+      if (body.message !== '/help') return { status: 'started', conversationId: 42 }
+      await held
+      return { status: 'command', conversationId: null, content: 'Commands.', saved: false }
+    })
+    await typeInNewConversation('/help', 'first', 'second')
+
+    answer()
+
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['/help', 1, null], ['first', 1, null], ['second', 1, 42]]))
+  })
+
+  it('clears a New conversation\'s model pick on /model reset, so the first message carries none', async () => {
+    serveModels()
+    const bodies = servePicks({ '/model ollama-cloud/glm-5': modelPick('glm-5'), '/model reset': modelPick(null) })
+    const component = await typeInNewConversation('/model ollama-cloud/glm-5')
+    const picker = () => component.findComponent({ name: 'ChatModelCombobox' }).props('modelKey')
+    await vi.waitFor(() => expect(picker()).toBe('ollama-cloud::glm-5'))
+
+    await type(component, '/model reset')
+    await vi.waitFor(() => expect(picker()).toBe('ollama-cloud::kimi-k2.5'))
+    await type(component, 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies).at(-1)).toEqual(['hello', null, null, null]))
+  })
+
+  it('holds /think off in a New conversation as the Think pill would, and the first message carries it', async () => {
+    serveModels('[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","high"]}]')
+    const bodies = servePicks({ '/think off': thinkingPick('off') })
+
+    await typeInNewConversation('/think off', 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies)).toEqual([['/think off', null, null, null], ['hello', null, null, 'off']]))
+  })
+
+  it('holds a /think level in a New conversation, which the Think pill turns off and back on, and the first message carries it', async () => {
+    serveModels('[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","high"]}]')
+    const bodies = servePicks({ '/think high': thinkingPick('high') })
+
+    const component = await typeInNewConversation('/think high')
+    const pill = () => component.find('button[title^="Thinking "]')
+    await vi.waitFor(() => expect(pill().attributes('title')).toBe('Thinking on — click to turn off, or hover to pick a level'))
+    await pill().trigger('click')
+    await vi.waitFor(() => expect(pill().attributes('title')).toBe('Thinking off — click to turn on'))
+    await pill().trigger('click')
+    await type(component, 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies)).toEqual([['/think high', null, null, null], ['hello', null, null, 'high']]))
+  })
+
+  it('holds a /think level the server accepted though the page\'s model list says the model does not think', async () => {
+    serveModels()
+    const bodies = servePicks({ '/think high': thinkingPick('high') })
+
+    await typeInNewConversation('/think high', 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies)).toEqual([['/think high', null, null, null], ['hello', null, null, 'high']]))
+  })
+
+  it('turns thinking off when /model reset leaves a level the agent\'s own model does not offer', async () => {
+    serveModels('[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":false},'
+      + '{"id":"glm-5","name":"GLM 5","supportsThinking":true,"thinkingLevels":["low","high"]}]')
+    const bodies = servePicks({ '/model ollama-cloud/glm-5': modelPick('glm-5'), '/think high': thinkingPick('high'),
+      '/model reset': modelPick(null) })
+
+    await typeInNewConversation('/model ollama-cloud/glm-5', '/think high', '/model reset', 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies).at(-1)).toEqual(['hello', null, null, 'off']))
+  })
+
+  it('places nothing from a message waiting behind a New conversation command once the operator opened another, nor makes the next New conversation wait on it', async () => {
+    serveConversation(5, [row(1, 'user', 'earlier')])
+    serveQueue(5)
+    serveConversation(43, [])
+    serveQueue(43)
+    serveConversation(44, [])
+    serveQueue(44)
+    let answerHelp!: () => void
+    const helpHeld = new Promise<void>((resolve) => {
+      answerHelp = resolve
+    })
+    let answerFirst!: () => void
+    const firstHeld = new Promise<void>((resolve) => {
+      answerFirst = resolve
+    })
+    const bodies = serveTurnStart(async (body) => {
+      if (body.message === '/help') {
+        await helpHeld
+        return { status: 'command', conversationId: null, content: 'Commands.', saved: false }
+      }
+      if (body.message === 'first') {
+        await firstHeld
+        return { status: 'started', conversationId: 43 }
+      }
+      return { status: 'started', conversationId: 44 }
+    })
+    const component = await typeInNewConversation('/help', 'first')
+
+    await vmOf(component).loadConversation(5)
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('5'))
+    await component.find('button[title="New conversation"]').trigger('click')
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBeUndefined())
+    answerHelp()
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['/help', 1, null], ['first', 1, null]]))
+    await type(component, 'later')
+    answerFirst()
+
+    await vi.waitFor(() => expect(sentTo(bodies)).toEqual([['/help', 1, null], ['first', 1, null], ['later', 1, null]]))
+    expect(shown(component)).toEqual(['user: later'])
+  })
+
+  it('clears a New conversation\'s thinking pick on /think reset, so the first message carries none', async () => {
+    serveModels('[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","high"]}]')
+    const bodies = servePicks({ '/think off': thinkingPick('off'), '/think reset': thinkingPick(null) })
+
+    await typeInNewConversation('/think off', '/think reset', 'hello')
+
+    await vi.waitFor(() => expect(carried(bodies).at(-1)).toEqual(['hello', null, null, null]))
   })
 
   it('pairs no saved row with a send still unanswered, so a queued answer removes only its own row', async () => {
@@ -455,6 +723,34 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
 
     await vi.waitFor(() => expect(queuedRows(component)).toEqual(['mine | Queued, position 1']))
     expect(shown(component)).toEqual(['user: long job', 'user: from another tab'])
+  })
+
+  it('shows a saved message with a waiting send\'s text once that send is answered as queued', async () => {
+    const rows = [row(1, 'user', 'long job')]
+    serveConversation(5, rows)
+    serveQueue(5, { busy: true, stoppable: true })
+    let answer!: () => void
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    serveTurnStart(async () => {
+      await answered
+      setQueue(5, { queueSize: 1, pending: [{ text: 'again', attachmentNames: [], position: 1 }] })
+      return { status: 'queued', conversationId: 5, position: 1 }
+    })
+    const { component } = await openConversation(5)
+    await type(component, 'again')
+
+    // Another tab sent the same words first; until this send is answered, that row may be its saved copy.
+    rows.push(row(2, 'user', 'again'))
+    await vmOf(component).pollForAnnounce()
+    for (let i = 0; i < 5; i++) await flushPromises()
+    expect(shown(component)).toEqual(['user: long job', 'user: again'])
+    answer()
+
+    await vi.waitFor(() => expect(queuedRows(component)).toEqual(['again | Queued, position 1']))
+    await vi.waitFor(() => expect(vmOf(component).messages.map(m => m.id)).toEqual([1, 2]))
+    expect(shown(component)).toEqual(['user: long job', 'user: again'])
   })
 
   it('shows a saved command reply typed mid-turn once, where the server saved it, a later round after it', async () => {
@@ -634,6 +930,68 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(progressLine(component).exists()).toBe(true)
     stream.send({ type: 'token', content: ', and more' })
     await vi.waitFor(() => expect(component.text()).toContain('Still writing, and more'))
+  })
+
+  it('leaves a reader who scrolled up during a turn where they are while its frames arrive', async () => {
+    // jsdom has neither: the page's scroll tracking needs a ResizeObserver, and frames run when the test says.
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    let frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const runFrames = () => {
+      const due = frames
+      frames = []
+      for (const cb of due) cb(0)
+    }
+    serveConversation(5, [row(1, 'user', 'write a long story')])
+    serveQueue(5, { busy: true, stoppable: true })
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5 })
+    stream.send({ type: 'token', content: 'Once upon a time' })
+    await vi.waitFor(() => expect(component.text()).toContain('Once upon a time'))
+    runFrames()
+
+    const list = component.find('[data-testid="chat-messages-scroll"]').element as HTMLElement
+    for (const [key, value] of Object.entries({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })) {
+      Object.defineProperty(list, key, { configurable: true, writable: true, value })
+    }
+    list.dispatchEvent(new Event('scroll'))
+    stream.send({ type: 'reasoning', content: 'and then' })
+    stream.send({ type: 'token', content: ', there was a parser.' })
+    stream.send({ type: 'tool_call', id: 'tc1', name: 'exec', arguments: '{}', resultText: 'ok' })
+    await flushPromises()
+    runFrames()
+
+    expect(list.scrollTop).toBe(300)
+  })
+
+  it('drops a Queued row the queue no longer lists once the stream gives up, when no init will come', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true, queueSize: 1,
+      pending: [{ text: 'and then this', attachmentNames: [], position: 1 }] })
+    const { component, stream } = await openConversation(5)
+    await vi.waitFor(() => expect(queuedRows(component)).toEqual(['and then this | Queued, position 1']))
+
+    // Its turn takes it from the queue while the stream is failing; the turn's init will never arrive here.
+    setQueue(5, { queueSize: 0, pending: [] })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      stream.fail()
+      for (const delay of [5, 10, 20, 40, 60, 60, 60, 60, 60, 60]) {
+        await vi.advanceTimersByTimeAsync(delay * 1000)
+        streamOn(5).fail()
+      }
+    }
+    finally {
+      vi.useRealTimers()
+    }
+
+    await vi.waitFor(() => expect(queuedRows(component)).toEqual([]))
+    expect(openStreamsOn(5)).toEqual([])
   })
 
   it('queued, reloaded: a page opened while messages wait shows them as Queued rows, with their places', async () => {

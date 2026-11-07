@@ -305,15 +305,12 @@ describe('useChatAnnouncePoller', () => {
     expect(messages.value.map(m => m.id)).toEqual([1, 2])
   })
 
-  it('fetches a resync\'s full reload from the window that holds the newest turn, not every shown row', async () => {
+  it('fetches a resync\'s full reload from just before the oldest shown row, not from the newest settled one', async () => {
     const at = (s: number) => new Date(Date.parse('2026-11-07T10:00:00Z') + s * 1000).toISOString()
-    // Within a minute of each other, so the usual cursor fetches the whole shown window.
     const rows = [
       { id: 10, role: 'user', content: 'first', createdAt: at(0) },
       { id: 11, role: 'assistant', content: 'reply', createdAt: at(1) },
-      { id: 12, role: 'user', content: 'second', createdAt: at(2) },
-      { id: 13, role: 'assistant', content: 'reply again', createdAt: at(3) },
-      { id: 14, role: 'user', content: 'the open turn', createdAt: at(4) },
+      { id: 12, role: 'user', content: 'much later', createdAt: at(300) },
     ]
     const asked = serveConversation(9, rows)
     const messages = shallowRef<Message[]>(rows.map(r => msg({ ...r } as Partial<Message>)))
@@ -322,7 +319,29 @@ describe('useChatAnnouncePoller', () => {
     await api.mergeSavedRows()
     await api.mergeSavedRows({ full: true })
 
-    expect(asked.map(q => q.after)).toEqual(['9', '13'])
+    expect(asked.map(q => q.after)).toEqual(['11', '9'])
+  })
+
+  it('keeps a reply\'s calls through a resync\'s reload after a tool-only round and a user row saved mid-turn', async () => {
+    const at = '2026-11-07T10:00:00Z'
+    serveConversation(9, [
+      { id: 1, role: 'user', content: 'go', createdAt: at },
+      { id: 2, role: 'assistant', content: 'Sure, checking.', createdAt: at },
+      { id: 3, role: 'assistant', content: null, createdAt: at,
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'exec', arguments: '{}' } }] },
+      { id: 4, role: 'tool', content: 'c1 done', createdAt: at, toolResults: 'c1' },
+      { id: 5, role: 'user', content: 'a note saved mid-turn', createdAt: at },
+      { id: 6, role: 'assistant', content: 'Here it is.', createdAt: at },
+    ])
+    const messages = shallowRef<Message[]>([])
+    const { api } = await mountPoller({ messages, selectedConvoId: ref(9), streaming: ref(true) })
+    await api.mergeSavedRows()
+    const reply = () => messages.value.find(m => m.id === 6)!
+    expect(reply().toolCalls!.map(tc => tc.id)).toEqual(['c1'])
+
+    await api.mergeSavedRows({ full: true })
+
+    expect(reply().toolCalls!.map(tc => tc.id)).toEqual(['c1'])
   })
 
   it('merges the rows a streaming turn asks for, leaving its bubble unpaired and last', async () => {

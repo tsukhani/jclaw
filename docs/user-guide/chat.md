@@ -26,7 +26,7 @@ If you do not have any agents yet, [Agents](/guide#agents) is the next stop. Com
 
 Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a newline without sending.
 
-The reply streams in real time. Under it, **Generating…** and a timer show how long the turn has run.
+The reply streams in real time. Under it, **Generating…** and a timer show how long the turn has run. Chat keeps the newest text in view. If you scroll up to read while a reply streams, it leaves you where you are. Scroll back to the bottom and it follows again.
 
 The message box stays open while the agent works, with **Send** beside **Stop generating** (the red square). A message you send during a turn follows the agent's [Queue Mode](/guide#agents-queue-mode). By default it waits in the queue: it shows under the reply with a **Queued** label and its place in line, for example "Queued, position 1", and runs when the turn ends. Every open tab of the conversation shows the queued messages at once, and after a reload too.
 
@@ -87,19 +87,21 @@ For a hands-free spoken conversation, click **Voice mode** (the voice button nea
 
 Type `/` at the start of a message to open the built-in commands. A menu opens listing every command with a one-line description. Keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one. Then press Enter again to send. They work in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp). Telegram surfaces the same list in its native autocomplete dropdown. On Slack, type them with `!` instead of `/` (`!help`, `!model <provider>/<id>`), because Slack will not deliver `/` commands inside threads. `/prompt` is the one whose shape differs by channel. The web has a box to drop text into; other channels do not. So on those, it replies with the prompt for you to copy instead.
 
+After you click **New conversation**, a command you type before your first message acts on that conversation, never on another one. `/model <provider>/<id>` and `/think <level>` set its model or thinking pick, as the model picker and the **Think** pill do, and `/model reset` and `/think reset` clear the pick. Your first message carries the pick. `/model` and `/think` show the model and thinking the conversation will use. `/reset` and `/compact` ask you to send a message first, `/usage` says nothing is used yet, and `/subagent` lists no subagent runs. `/stop` answers "No active conversation. Nothing to stop." `/new` starts a fresh conversation that keeps your picks.
+
 On an external channel, `/subagent`, `/prompt`, and the `/model` forms that change the model (`/model <provider>/<id>`, `/model reset`) answer only the binding's owner: the Telegram user id on the binding, or the Slack binding's owner user id. Anyone else gets "Only the operator can use this command.", and that includes every WhatsApp sender and everyone on a Slack binding with no owner set. The other commands, plain `/model` and `/model status` included, work for everyone.
 
 | Command | What it does |
 |-------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| `/new` | Start a fresh conversation in a new thread. |
-| `/reset` | Clear the model's memory for the current conversation while keeping the thread. |
-| `/compact` | Summarize older turns to free context. Optional focus hint: `/compact focus on the auth refactor`. |
+| `/new` | Start a fresh conversation in a new thread. From a **New conversation**, the fresh one keeps the model and thinking picks you made there. |
+| `/reset` | Clear the model's memory for the current conversation while keeping the thread. Before the first message of a **New conversation**, it asks you to send a message first. |
+| `/compact` | Summarize older turns to free context. Optional focus hint: `/compact focus on the auth refactor`. Before the first message of a **New conversation**, it asks you to send a message first. |
 | `/help` | Show the list of available commands. |
-| `/model` | Show the current model and its capabilities. `/model <provider>/<id>` sets a per-conversation override. `/model reset` clears the override. |
-| `/think` | Show the reasoning effort in force for this conversation. `/think off`, `/think <level>` (one the model advertises) set a per-conversation override; `/think reset` clears it. The agent's default is untouched. |
-| `/usage` | Show how much of the model's context window the current conversation occupies. |
+| `/model` | Show the current model and its capabilities. `/model <provider>/<id>` sets a per-conversation override. `/model reset` clears the override. Before the first message of a **New conversation**, `/model <provider>/<id>` sets that conversation's model pick, as the model picker does, `/model reset` clears it, and `/model` shows the model it will use. |
+| `/think` | Show the reasoning effort in force for this conversation. `/think off`, `/think <level>` (one the model advertises) set a per-conversation override; `/think reset` clears it. The agent's default is untouched. Before the first message of a **New conversation**, `/think off` or `/think <level>` sets that conversation's thinking pick, as the **Think** pill does, `/think reset` clears it, and `/think` shows the level it will use. |
+| `/usage` | Show how much of the model's context window the current conversation occupies. Before the first message of a **New conversation**, it says nothing is used yet. |
 | `/stop` | Interrupt the current generation. In web chat on a web conversation it works like the **Stop generating** button: it drops the messages queued behind the turn, and on a turn that cannot be stopped yet it replies "This turn can't be stopped from chat yet." On a Telegram, Slack or WhatsApp conversation it leaves the queue alone. |
-| `/subagent` | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). |
+| `/subagent` | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). Before the first message of a **New conversation**, `/subagent` and `/subagent list` say there are no runs; `info`, `log` and `kill` still reach any run by its id. |
 | `/prompt` | Search your [Prompts Library](/guide#prompts): `/prompt code review`. In the web composer the prompt's text drops straight into the box; on other channels JClaw replies with it so you can copy and edit it (for the binding's owner only). `/prompt` on its own lists what you have saved. |
 
 :::tip /compact when context fills up

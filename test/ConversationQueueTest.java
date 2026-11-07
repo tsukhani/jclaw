@@ -1167,49 +1167,98 @@ class ConversationQueueTest extends UnitTest {
     void anOperatorStopFindsAConversationWithNoTurnIdle() {
         long unknown = 17001L;
         long released = 17002L;
-        var gen = ConversationQueue.tryAcquireOwnership(released, new QueuedMessage("A", "web", "admin", agent),
-                new AtomicBoolean());
-        ConversationQueue.releaseOwnership(released, gen);
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(released, new QueuedMessage("A", "web", "admin", agent),
+                    new AtomicBoolean());
+            ConversationQueue.releaseOwnership(released, gen);
 
-        assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(unknown, "web"));
-        assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(released, "web"));
+            assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(unknown, "web"));
+            assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(released, "web"));
+        } finally {
+            ConversationQueue.forgetForTest(unknown);
+            ConversationQueue.forgetForTest(released);
+        }
     }
 
     @Test
     void anOperatorStopLeavesATurnWithNoCancelFlagOfItsOwnRunningWithItsQueue() {
         long convId = 17003L;
-        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
 
-        assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(convId, "web"));
-        assertTrue(ConversationQueue.isBusy(convId));
-        assertEquals(1, ConversationQueue.getQueueSize(convId));
-        ConversationQueue.forgetForTest(convId);
+            assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(convId, "web"));
+            assertTrue(ConversationQueue.isBusy(convId));
+            assertEquals(1, ConversationQueue.getQueueSize(convId));
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
     }
 
     @Test
     void anOperatorStopLeavesAChannelConversationsTurnRunningThoughItHoldsAFlag() {
         long convId = 17004L;
         var flag = new AtomicBoolean();
-        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), flag);
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), flag);
 
-        assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(convId, "telegram"));
-        assertTrue(ConversationQueue.isBusy(convId));
-        assertFalse(flag.get());
-        ConversationQueue.forgetForTest(convId);
+            assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram"));
+            assertTrue(ConversationQueue.isBusy(convId));
+            assertFalse(flag.get());
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
     }
 
     @Test
     void anOperatorStopEndsAWebTurnHoldingItsOwnFlagDropsItsQueueAndReleasesIt() {
         long convId = 17005L;
         var flag = new AtomicBoolean();
-        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
 
-        assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
-        assertTrue(flag.get());
-        assertFalse(ConversationQueue.isBusy(convId));
-        assertEquals(0, ConversationQueue.getQueueSize(convId));
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
+            assertTrue(flag.get());
+            assertFalse(ConversationQueue.isBusy(convId));
+            assertEquals(0, ConversationQueue.getQueueSize(convId));
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void anOperatorStopEndsTheTurnOnItsStreamAsStoppedBeforeItReturns() throws Exception {
+        // The chat page ends the turn on the stop's answer, so the stopped frame must already be published by then.
+        long convId = 17008L;
+        var sink = new ConversationTurnStreamTest.RecordingSink();
+        var unsubscribe = services.ConversationTurnStream.subscribe(convId, null, sink);
+        services.ConversationTurnStream.Turn turn = null;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent),
+                    new AtomicBoolean());
+            turn = services.ConversationTurnStream.begin(convId, gen);
+
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
+
+            assertNull(services.ConversationTurnStream.current(convId), "the turn ended on the stream before the return");
+            assertEquals(List.of("{\"type\":\"stopped\"}"),
+                    ConversationTurnStreamTest.data(sink.awaitData("{\"type\":\"stopped\"}")));
+
+            turn.stop();
+            // A subscriber hears frames in order, written off this thread: once a later turn's frame lands, a second
+            // stopped frame would have landed before it.
+            services.ConversationTurnStream.begin(convId, gen + 1).end("{\"type\":\"complete\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(List.of("{\"type\":\"stopped\"}", "{\"type\":\"complete\"}"),
+                    ConversationTurnStreamTest.data(sink.awaitData("{\"type\":\"complete\"}")),
+                    "a turn the operator's stop already ended drops a second terminal");
+        } finally {
+            // Ends the turn when an assertion above failed before it did.
+            if (turn != null) turn.stop();
+            unsubscribe.run();
+            ConversationQueue.forgetForTest(convId);
+        }
     }
 
     @Test

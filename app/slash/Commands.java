@@ -64,6 +64,9 @@ public final class Commands {
     // Suffix appended to log messages when a conversation id is in scope; the
     // call sites concatenate ` for conversation ` + current.id to keep grep-able.
     private static final String FOR_CONVERSATION_SUFFIX = " for conversation ";
+    private static final String IN_A_NEW_CONVERSATION = " in a New conversation";
+    private static final String CONVERSATION_OVERRIDE = "Conversation override active";
+    private static final String PICKED_FOR_NEW_CONVERSATION = "Picked for this New conversation";
 
     // Capability-display tokens used in the /model output and reused across vision/audio/thinking.
     private static final String CAP_SUPPORTED = "supported";
@@ -148,6 +151,14 @@ public final class Commands {
 
             I no longer remember our earlier exchange in this conversation.""";
 
+    private static final String NO_SUBAGENT_RUNS = "No subagent runs in this conversation.";
+
+    /** {@code /stop}'s reply when the conversation runs no turn. */
+    public static final String NOTHING_TO_STOP = "Nothing to stop.";
+
+    /** A reply and whether it was saved as the conversation's assistant row. */
+    private record Canned(String text, boolean saved) {}
+
     /**
      * Outcome of handling a slash command.
      *
@@ -161,17 +172,48 @@ public final class Commands {
      * @param command       which {@link Command} the input parsed as
      * @param saved         whether {@code responseText} was also saved as the conversation's assistant row, which
      *                      the chat page may then pair with the reply it shows (JF-202)
+     * @param pick          the model or thinking pick a command typed in an empty New conversation answered with,
+     *                      for the page to hold as that conversation's pick ({@link #executeInNewChat}); null otherwise
      */
-    /** {@code /stop}'s reply when no turn runs, and when web chat sends it from a New Chat (JF-202). */
-    public static final String NOTHING_TO_STOP = "Nothing to stop.";
+    public record Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved,
+                         @Nullable Pick pick) {
+        public Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved) {
+            this(conversation, responseText, command, saved, null);
+        }
 
-    /** A reply and whether it was saved as the conversation's assistant row. */
-    private record Canned(String text, boolean saved) {}
-
-    public record Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved) {
         /** A reply delivered but not saved. */
         public Result(@Nullable Conversation conversation, String responseText, Command command) {
-            this(conversation, responseText, command, false);
+            this(conversation, responseText, command, false, null);
+        }
+    }
+
+    /**
+     * A pick for the chat page to hold for an empty New conversation until its first message carries it, as its
+     * model picker and Think pill hold one. {@code of} names what it sets, {@code "model"} or {@code "thinking"}; with
+     * that value null it clears the one held, so the agent's default applies.
+     */
+    public record Pick(String of, @Nullable String modelProvider, @Nullable String modelId,
+                       @Nullable String thinkingMode) {
+        static Pick model(@Nullable String provider, @Nullable String modelId) {
+            return new Pick("model", provider, modelId, null);
+        }
+
+        static Pick thinking(@Nullable String mode) {
+            return new Pick("thinking", null, null, mode);
+        }
+    }
+
+    /** The picks an empty New conversation holds when a command is typed there: the model's pair, or neither. */
+    public record Picks(@Nullable String modelProvider, @Nullable String modelId, @Nullable String thinkingMode) {
+        public static final Picks NONE = new Picks(null, null, null);
+
+        /** The conversation these picks will make, never saved, for the replies that describe one. */
+        Conversation asConversation() {
+            var picked = new Conversation();
+            picked.modelProviderOverride = modelProvider;
+            picked.modelIdOverride = modelId;
+            picked.thinkingModeOverride = thinkingMode;
+            return picked;
         }
     }
 
@@ -335,6 +377,88 @@ public final class Commands {
         };
     }
 
+    /**
+     * A command typed in the chat page's empty New conversation, which has no conversation yet (JF-202): it acts on
+     * that conversation, never on another one, so it runs with none and creates none, {@code /new} aside. {@code
+     * /model <provider>/<id>} and {@code /think <level>} are checked as the picker checks a pick, and their {@code
+     * reset} forms clear one; each answers with its {@link Result#pick} and writes nothing. Bare {@code /model},
+     * {@code /model status} and {@code /think} describe the model and thinking {@code held} would give it.
+     *
+     * <p>Only for a web chat message that names no conversation. {@code ownerInitiated} is whether its sender is the
+     * operator, as {@link #execute} takes it; the chat page's routes sit behind AuthCheck, so theirs pass true.
+     */
+    public static Result executeInNewChat(Command cmd, Agent agent, String peerId, @Nullable String args, Picks held,
+                                          boolean ownerInitiated) {
+        boolean picks = cmd == Command.MODEL || cmd == Command.THINK;
+        if (!picks || (!ownerInitiated && ownerOnly(cmd, args))) {
+            return execute(cmd, agent, ChannelType.WEB.value, peerId, null, args, ownerInitiated);
+        }
+        var form = args == null ? "" : args.strip();
+        boolean describes = form.isEmpty() || cmd == Command.MODEL && form.equalsIgnoreCase("status");
+        if (describes) {
+            var text = Tx.run(() -> cmd == Command.MODEL
+                    ? buildModelResponse(agent, held.asConversation(), PICKED_FOR_NEW_CONVERSATION)
+                    : buildThinkResponse(agent, held.asConversation(), PICKED_FOR_NEW_CONVERSATION));
+            logInNewConversation(agent, cmd, form);
+            return new Result(null, text, cmd);
+        }
+        if (form.equalsIgnoreCase("reset")) {
+            logInNewConversation(agent, cmd, form);
+            return cmd == Command.MODEL ? clearModelPick(agent, held) : clearThinkingPick(agent, held);
+        }
+        if (cmd == Command.MODEL) return pickModel(agent, form);
+        boolean modelHeld = held.modelProvider() != null;
+        return pickThinking(agent, form.toLowerCase(Locale.ROOT),
+                modelHeld ? held.modelProvider() : agent.modelProvider, modelHeld ? held.modelId() : agent.modelId);
+    }
+
+    private static void logInNewConversation(Agent agent, Command cmd, String form) {
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent.name, ChannelType.WEB.value,
+                cmd.literal + (form.isEmpty() ? "" : " " + form) + IN_A_NEW_CONVERSATION);
+    }
+
+    private static Result pickModel(Agent agent, String args) {
+        var result = switch (Tx.run(() -> chooseModel(args))) {
+            case RefusedModel(var why) -> new Result(null, why, Command.MODEL);
+            case ChosenModel(var provider, var modelId, var _) -> new Result(null,
+                    "This New conversation will use `" + provider + "/" + modelId + "`.\nAgent default ("
+                            + agent.modelProvider + "/" + agent.modelId + ") is unchanged.",
+                    Command.MODEL, false, Pick.model(provider, modelId));
+        };
+        logInNewConversation(agent, Command.MODEL, args);
+        return result;
+    }
+
+    private static Result pickThinking(Agent agent, String mode, @Nullable String provider, @Nullable String modelId) {
+        var rejection = Tx.run(() -> ConversationService.thinkingOverrideRejection(provider, modelId, mode));
+        logInNewConversation(agent, Command.THINK, mode);
+        if (rejection != null) {
+            return new Result(null, rejection + " Use `/think off` or `/think <level>`; `/model` lists the levels.",
+                    Command.THINK);
+        }
+        var what = Conversation.THINKING_OFF.equals(mode)
+                ? "Thinking is off for this New conversation."
+                : "Thinking effort for this New conversation is `" + mode + "`.";
+        return new Result(null, what + "\nAgent default (" + describeAgentThinking(agent) + ") is unchanged.",
+                Command.THINK, false, Pick.thinking(mode));
+    }
+
+    private static Result clearModelPick(Agent agent, Picks held) {
+        var agentDefault = "The agent default (" + agent.modelProvider + "/" + agent.modelId + ") applies.";
+        var text = held.modelProvider() != null
+                ? "Cleared the model picked for this New conversation. " + agentDefault
+                : "This New conversation has no model picked. " + agentDefault;
+        return new Result(null, text, Command.MODEL, false, Pick.model(null, null));
+    }
+
+    private static Result clearThinkingPick(Agent agent, Picks held) {
+        var agentDefault = "The agent default (" + describeAgentThinking(agent) + ") applies.";
+        var text = held.thinkingMode() != null
+                ? "Cleared the thinking level picked for this New conversation. " + agentDefault
+                : "This New conversation has no thinking level picked. " + agentDefault;
+        return new Result(null, text, Command.THINK, false, Pick.thinking(null));
+    }
+
     /** {@code /subagent} reaches every run on the instance and {@code /prompt} returns the
      *  operator's library; of the {@code /model} forms only the writes (NAME, reset) qualify —
      *  bare and {@code status} just read. */
@@ -347,8 +471,20 @@ public final class Commands {
     }
 
     private static Result executeNew(Agent agent, String channelType, String peerId) {
+        return greetNew(agent, channelType, peerId, () -> ConversationService.create(agent, channelType, peerId));
+    }
+
+    /**
+     * {@code /new} typed in the chat page's empty New conversation that holds picks (JF-202): its greeting, in
+     * {@code created}, the conversation the caller just made for it carrying those picks.
+     */
+    public static Result executeNewIn(Agent agent, String peerId, Conversation created) {
+        return greetNew(agent, ChannelType.WEB.value, peerId, () -> Conversation.findById(created.id));
+    }
+
+    private static Result greetNew(Agent agent, String channelType, String peerId, Supplier<Conversation> conversation) {
         var newConv = Tx.run(() -> {
-            var conv = ConversationService.create(agent, channelType, peerId);
+            var conv = conversation.get();
             ConversationService.appendAssistantMessage(conv, NEW_TEXT, null);
             return conv;
         });
@@ -386,7 +522,7 @@ public final class Commands {
 
     private static Result executeReset(Agent agent, String channelType, @Nullable Conversation current) {
         if (current == null) {
-            var fallback = "No active conversation to reset.";
+            var fallback = "Nothing to reset yet. Send a message first.";
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/reset with no current conversation");
             return new Result(null, fallback, Command.RESET);
@@ -496,7 +632,7 @@ public final class Commands {
     private static Result executeCompact(Agent agent, String channelType, @Nullable Conversation current,
                                           @Nullable String args) {
         if (current == null) {
-            var fallback = "No active conversation to compact.";
+            var fallback = "Nothing to compact yet. Send a message first.";
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/compact with no current conversation");
             return new Result(null, fallback, Command.COMPACT);
@@ -519,7 +655,7 @@ public final class Commands {
         if (turn == null) {
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/compact on conversation %d, which is gone".formatted(current.id));
-            return new Result(null, "No active conversation to compact.", Command.COMPACT);
+            return new Result(null, "Nothing to compact: this conversation was deleted.", Command.COMPACT);
         }
         var result = SessionCompactor.compact(current.id, summary.first().label(), turn, summary, /*force*/ true, args,
                 summary.callTokens(), Integer.MAX_VALUE);
@@ -806,6 +942,10 @@ public final class Commands {
     }
 
     static String buildThinkResponse(Agent agent, @Nullable Conversation current) {
+        return buildThinkResponse(agent, current, CONVERSATION_OVERRIDE);
+    }
+
+    private static String buildThinkResponse(Agent agent, @Nullable Conversation current, String overridden) {
         var model = resolveModel(agent, current);
         var effective = ModelOverrideResolver.thinkingMode(current, agent);
         var sb = new StringBuilder("Thinking: ");
@@ -818,7 +958,7 @@ public final class Commands {
             if (!levels.isEmpty()) sb.append("\nLevels: ").append(String.join(", ", levels));
         }
         if (ModelOverrideResolver.hasThinkingOverride(current)) {
-            sb.append("\n(Conversation override active — agent default is ")
+            sb.append("\n(").append(overridden).append(" — agent default is ")
                     .append(describeAgentThinking(agent)).append(')');
         }
         sb.append("\nUse `/think off`, `/think <level>` or `/think reset`.");
@@ -890,6 +1030,11 @@ public final class Commands {
     }
 
     public static String buildModelResponse(Agent agent, @Nullable Conversation current) {
+        return buildModelResponse(agent, current, CONVERSATION_OVERRIDE);
+    }
+
+    /** {@code overridden} heads the line that says {@code current} overrides the agent's model. */
+    private static String buildModelResponse(Agent agent, @Nullable Conversation current, String overridden) {
         if (agent == null) return "No agent bound to this conversation.";
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
@@ -901,7 +1046,8 @@ public final class Commands {
         }
         var m = model.get();
         var thinkingLine = m.supportsThinking()
-                ? CAP_SUPPORTED + renderThinkingSelection(agent, current, m)
+                ? CAP_SUPPORTED + renderThinkingSelection(agent, current, m, CONVERSATION_OVERRIDE.equals(overridden)
+                        ? ", conversation override" : ", picked for this New conversation")
                 : CAP_NOT_SUPPORTED;
         var sb = new StringBuilder();
         sb.append("Model: ").append(providerName).append('/').append(modelId).append('\n');
@@ -909,7 +1055,7 @@ public final class Commands {
             // Make the scope explicit — users coming from OpenClaw expect
             // session-scoped switches; JClaw's override is conversation-scoped
             // and a /model reset returns to the agent default.
-            sb.append("(Conversation override active — agent default is ")
+            sb.append('(').append(overridden).append(" — agent default is ")
                     .append(agent.modelProvider).append('/').append(agent.modelId)
                     .append(")\n");
         }
@@ -941,33 +1087,53 @@ public final class Commands {
         if (agent == null) {
             return "No agent bound to this conversation — cannot switch models.";
         }
+        return switch (chooseModel(args)) {
+            case RefusedModel(var why) -> why;
+            case ChosenModel(var newProvider, var newModelId, var model) ->
+                    switchModel(agent, current, newProvider, newModelId, model);
+        };
+    }
+
+    /** What {@code /model <args>} names: a configured model, or the reply saying why it names none. */
+    private sealed interface ModelChoice permits ChosenModel, RefusedModel {}
+
+    private record ChosenModel(String provider, String modelId, ModelInfo model) implements ModelChoice {}
+
+    private record RefusedModel(String why) implements ModelChoice {}
+
+    /** Read {@code args} as {@code provider/model-id} and check it names a configured model. Caller owns the tx. */
+    private static ModelChoice chooseModel(String args) {
         int slash = args.indexOf('/');
         if (slash <= 0 || slash == args.length() - 1) {
-            return "Unrecognized model format. Use `/model provider/model-id` "
+            return new RefusedModel("Unrecognized model format. Use `/model provider/model-id` "
                     + "(for example `/model openrouter/google-flash-preview`) "
-                    + "or `/model reset` to revert to the agent default.";
+                    + "or `/model reset` to revert to the agent default.");
         }
-        var newProvider = args.substring(0, slash).strip();
-        var newModelId = args.substring(slash + 1).strip();
-        if (newProvider.isEmpty() || newModelId.isEmpty()) {
-            return "Unrecognized model format. Use `/model provider/model-id` "
-                    + "(for example `/model openrouter/google-flash-preview`).";
+        var provider = args.substring(0, slash).strip();
+        var modelId = args.substring(slash + 1).strip();
+        if (provider.isEmpty() || modelId.isEmpty()) {
+            return new RefusedModel("Unrecognized model format. Use `/model provider/model-id` "
+                    + "(for example `/model openrouter/google-flash-preview`).");
         }
-        if (!ModelRouter.PROVIDER.equals(newProvider) && ProviderRegistry.get(newProvider) == null) {
-            return "Provider `%s` is not configured. Available providers appear under Settings → Providers; "
-                    .formatted(newProvider)
-                    + "add one there before switching to it.";
+        if (!ModelRouter.PROVIDER.equals(provider) && ProviderRegistry.get(provider) == null) {
+            return new RefusedModel("Provider `%s` is not configured. Available providers appear under Settings → Providers; "
+                    .formatted(provider)
+                    + "add one there before switching to it.");
         }
-        var resolved = ModelRouter.findModel(newProvider, newModelId);
+        var resolved = ModelRouter.findModel(provider, modelId);
         if (resolved.isEmpty()) {
-            return "Provider `%s` has no model with id `%s`. Run `/model` to see the current model "
-                    .formatted(newProvider, newModelId)
-                    + "or check Settings → Providers for the available list.";
+            return new RefusedModel("Provider `%s` has no model with id `%s`. Run `/model` to see the current model "
+                    .formatted(provider, modelId)
+                    + "or check Settings → Providers for the available list.");
         }
+        return new ChosenModel(provider, modelId, resolved.get());
+    }
 
+    private static String switchModel(Agent agent, Conversation current, String newProvider, String newModelId,
+                                      ModelInfo model) {
         // Warn if the new model's context window is smaller than the estimated
         // current context size — the next turn's trim will drop oldest messages.
-        var shrinkage = computeShrinkageWarning(resolved.get(), current);
+        var shrinkage = computeShrinkageWarning(model, current);
 
         // Reload the persistence-context entity so the save() below writes to
         // the managed instance, not a detached copy.
@@ -1030,9 +1196,10 @@ public final class Commands {
                 + "Older messages will be trimmed on the next turn.";
     }
 
-    private static String renderThinkingSelection(Agent agent, @Nullable Conversation current, ModelInfo m) {
+    private static String renderThinkingSelection(Agent agent, @Nullable Conversation current, ModelInfo m,
+                                                  String overridden) {
         var mode = ModelOverrideResolver.thinkingMode(current, agent);
-        var scope = ModelOverrideResolver.hasThinkingOverride(current) ? ", conversation override" : "";
+        var scope = ModelOverrideResolver.hasThinkingOverride(current) ? overridden : "";
         if (mode == null || mode.isBlank()) return " (not currently enabled" + scope + ")";
         var levels = m.thinkingLevels();
         if (levels != null && !levels.isEmpty() && !levels.contains(mode)) {
@@ -1065,7 +1232,7 @@ public final class Commands {
     }
 
     static String buildUsageResponse(Agent agent, @Nullable Conversation current) {
-        if (current == null) return "No active conversation — no usage to report.";
+        if (current == null) return "Nothing used yet. Send a message first.";
         // JCLAW-108: resolveModel honors the conversation override; the Model
         // line below also reflects the effective id so switching mid-chat
         // shows the new model in subsequent /usage output.
@@ -1250,9 +1417,7 @@ public final class Commands {
     }
 
     private static String renderSubagentList(@Nullable Conversation current) {
-        if (current == null) {
-            return "No active conversation — /subagent list requires a parent conversation.";
-        }
+        if (current == null) return NO_SUBAGENT_RUNS;
         // AC: scoped to the current parent conversation. RUNNING first, then
         // most recent. JPQL doesn't allow enum literals in ORDER BY, so we
         // fetch with a startedAt-DESC sort and re-sort in Java to lift the
@@ -1263,7 +1428,7 @@ public final class Commands {
                 "parentConversation = ?1 ORDER BY startedAt DESC",
                 current).fetch(50);
         if (runs.isEmpty()) {
-            return "No subagent runs in this conversation.";
+            return NO_SUBAGENT_RUNS;
         }
         runs = new ArrayList<>(runs);
         runs.sort((a, b) -> {

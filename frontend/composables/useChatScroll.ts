@@ -117,6 +117,9 @@ export function useChatScroll(
       })
   let observedContent: Element | null = null
   watch(messagesEl, (el, prev) => {
+    // A new list (an empty chat's first turn mounts one) starts with its reader at the bottom.
+    pinnedToBottom = true
+    readerAbove = false
     if (!resizeObserver) return
     if (prev instanceof HTMLElement) {
       prev.removeEventListener('scroll', trackPinned)
@@ -139,12 +142,19 @@ export function useChatScroll(
     if (follow) scrollToBottom()
   }
 
+  // Checked again when the frame runs: a reader scrolling up between a token and its frame stays where they went.
+  let followRaf: number | null = null
   function followToBottom() {
-    if (!readerAbove) scrollToBottom()
+    if (readerAbove || followRaf != null) return
+    followRaf = requestAnimationFrame(() => {
+      followRaf = null
+      if (!readerAbove && messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    })
   }
 
   onUnmounted(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf)
+    if (followRaf) cancelAnimationFrame(followRaf)
     if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
     resizeObserver?.disconnect()
     if (messagesEl.value instanceof HTMLElement) messagesEl.value.removeEventListener('scroll', trackPinned)

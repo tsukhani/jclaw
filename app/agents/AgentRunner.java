@@ -941,8 +941,8 @@ public class AgentRunner {
     /**
      * Start a web chat turn that no request holds (JF-202). It runs as {@link #runStreaming} runs a web turn, and its
      * frames reach its conversation's {@link services.ConversationTurnStream} the same way, but its cancel flag is its
-     * own, so only an operator stop ({@link ConversationQueue#stop}) ends it early. The future completes once the turn
-     * has started or queued, before the model is called, or once it has failed to.
+     * own, so only an operator stop ({@link ConversationQueue#stopOperatorTurn}) ends it early. The future completes
+     * once the turn has started or queued, before the model is called, or once it has failed to.
      *
      * @param cb the turn's own callbacks, which its frames reach as well
      */

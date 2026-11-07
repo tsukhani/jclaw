@@ -301,6 +301,87 @@ describe('mergeNewRows', () => {
     expect(merged.rows[3]).toBe(sent)
   })
 
+  it('holds back the saved row an unanswered send would pair with, and pairs them once the send is answered', () => {
+    const sent = m({ _key: 'sent', role: 'user', content: 'hello', _sending: true })
+    const shown = [m({ id: 1, role: 'assistant', content: 'Earlier.' }), sent]
+
+    const merged = mergeNewRows(shown, [m({ id: 2, role: 'user', content: 'hello' })])
+    expect(ids(merged.rows)).toEqual([1, 'sent'])
+    expect(merged.additions).toEqual([])
+    expect(sent.id).toBeUndefined()
+
+    delete sent._sending
+    const answered = mergeNewRows(merged.rows, [m({ id: 2, role: 'user', content: 'hello' })])
+    expect(ids(answered.rows)).toEqual([1, 2])
+    expect(answered.rows[1]).toBe(sent)
+  })
+
+  it('shows another tab\'s message saved while a send waits on its answer, holding back nothing', () => {
+    const sent = m({ _key: 'sent', role: 'user', content: 'mine', _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), sent],
+      [m({ id: 2, role: 'user', content: 'from another tab' })])
+
+    expect(ids(merged.rows)).toEqual([1, 2, 'sent'])
+    expect(merged.held).toBe(false)
+    expect(sent.id).toBeUndefined()
+  })
+
+  it('holds back the saved copy of a quoted send, whose stored text carries the quote first', () => {
+    const sent = m({ _key: 'sent', role: 'user', content: 'yes', _quote: { kind: 'assistant', text: 'Earlier.' }, _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), sent],
+      [m({ id: 2, role: 'user', content: '[Replying to the agent]\n> Earlier.\n\nyes' })])
+
+    expect(ids(merged.rows)).toEqual([1, 'sent'])
+    expect(merged.held).toBe(true)
+  })
+
+  it('holds back the newest saved copy of a waiting send\'s words, showing an older one', () => {
+    const sent = m({ _key: 'sent', role: 'user', content: 'again', _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), sent],
+      [m({ id: 2, role: 'user', content: 'again' }), m({ id: 3, role: 'user', content: 'again' })])
+
+    expect(ids(merged.rows)).toEqual([1, 2, 'sent'])
+    expect(merged.held).toBe(true)
+  })
+
+  it('holds back one saved copy for each of two waiting sends with the same words', () => {
+    const first = m({ _key: 'first', role: 'user', content: 'ok', _sending: true })
+    const second = m({ _key: 'second', role: 'user', content: 'ok', _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), first, second],
+      [m({ id: 2, role: 'user', content: 'ok' }), m({ id: 3, role: 'user', content: 'ok' })])
+
+    expect(ids(merged.rows)).toEqual([1, 'first', 'second'])
+    expect(merged.held).toBe(true)
+  })
+
+  it('gives a row waiting on its save none of the saved copies held back for a waiting send', () => {
+    const waiting = m({ _key: 'waiting', role: 'user', content: 'first' })
+    const sent = m({ _key: 'sent', role: 'user', content: 'again', _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), waiting, sent],
+      [m({ id: 2, role: 'user', content: 'again' })])
+
+    expect(ids(merged.rows)).toEqual([1, 'waiting', 'sent'])
+    expect(waiting.id).toBeUndefined()
+    expect(merged.held).toBe(true)
+  })
+
+  it('pairs a row waiting on its save before a send waiting on its answer can take that row\'s id', () => {
+    const waiting = m({ _key: 'waiting', role: 'user', content: 'first' })
+    const sent = m({ _key: 'sent', role: 'user', content: 'second', _sending: true })
+
+    const merged = mergeNewRows([m({ id: 1, role: 'assistant', content: 'Earlier.' }), waiting, sent],
+      [m({ id: 2, role: 'user', content: 'first' })])
+
+    expect(ids(merged.rows)).toEqual([1, 2, 'sent'])
+    expect(merged.rows[1]).toBe(waiting)
+    expect(merged.held).toBe(false)
+  })
+
   it('changes nothing, and keeps every shown row, when the window holds what is shown', () => {
     const shown = [m({ id: 1, role: 'user', content: 'go' }), m({ id: 2, role: 'assistant', content: 'Done.' })]
 

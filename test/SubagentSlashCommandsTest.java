@@ -117,10 +117,10 @@ class SubagentSlashCommandsTest extends UnitTest {
     }
 
     @Test
-    void listWithoutConversationReturnsErrorMessage() {
+    void listWithoutConversationSaysThereAreNoRuns() {
+        // The chat page's empty New conversation lists its runs this way (JF-202): it has none yet.
         var result = Commands.handle("/subagent list", parentAgent, "web", "u", null).orElseThrow();
-        assertTrue(result.responseText().contains("requires a parent conversation"),
-                "null conversation must surface an explanatory message, got: " + result.responseText());
+        assertEquals("No subagent runs in this conversation.", result.responseText());
     }
 
     @Test

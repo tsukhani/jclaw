@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
@@ -15,6 +16,7 @@ import slash.Commands;
 
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -119,12 +121,11 @@ class SlashCommandsTest extends UnitTest {
     // ── /compact ──────────────────────────────────────────────────────
 
     @Test
-    void compactWithNoConversationReturnsFallback() {
+    void compactWithNoConversationAsksForAMessageFirst() {
         var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", null);
         assertEquals(Commands.Command.COMPACT, result.command());
         assertNull(result.conversation());
-        assertTrue(result.responseText().contains("No active conversation"),
-                "got: " + result.responseText());
+        assertEquals("Nothing to compact yet. Send a message first.", result.responseText());
     }
 
     @Test
@@ -337,13 +338,12 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    void resetWithoutCurrentConversationIsSafe() {
-        // Defensive: caller may pass a null conversation (e.g. channel hasn't
-        // resolved one yet). Should not throw; returns a fallback response.
+    void resetWithoutCurrentConversationAsksForAMessageFirst() {
+        // The chat page's empty New conversation runs /reset with none (JF-202).
         var result = Commands.execute(
                 Commands.Command.RESET, agent, "web", "admin", null);
         assertNull(result.conversation());
-        assertNotNull(result.responseText());
+        assertEquals("Nothing to reset yet. Send a message first.", result.responseText());
     }
 
     // ── /help ──────────────────────────────────────────────────────────
@@ -755,38 +755,92 @@ class SlashCommandsTest extends UnitTest {
 
     @ParameterizedTest(name = "{0} {1} on {2}")
     @CsvSource(nullValues = "-", value = {
-            "HELP,     -,      web,      true",
-            "MODEL,    -,      web,      true",
-            "MODEL,    status, web,      true",
-            "THINK,    -,      web,      true",
-            "USAGE,    -,      web,      true",
-            "PROMPT,   -,      web,      true",
-            "SUBAGENT, -,      web,      true",
-            "COMPACT,  -,      web,      true",
-            "RESET,    -,      web,      false",
-            "STOP,     -,      telegram, false",
+            "HELP,     -,                     web,      true",
+            "NEW,      -,                     web,      true",
+            "MODEL,    -,                     web,      true",
+            "MODEL,    status,                web,      true",
+            "MODEL,    reset,                 web,      true",
+            "MODEL,    openrouter/no-such,    web,      true",
+            "THINK,    -,                     web,      true",
+            "THINK,    off,                   web,      true",
+            "THINK,    reset,                 web,      true",
+            "USAGE,    -,                     web,      true",
+            "PROMPT,   -,                     web,      true",
+            "PROMPT,   code review,           web,      true",
+            "SUBAGENT, -,                     web,      true",
+            "SUBAGENT, list,                  web,      true",
+            "COMPACT,  -,                     web,      true",
+            "COMPACT,  focus on the parser,   web,      true",
+            "RESET,    -,                     web,      false",
+            "STOP,     -,                     web,      false",
+            "STOP,     -,                     telegram, false",
     })
-    void aCommandSaysItsReplyWasSavedExactlyWhenItAddedAnAssistantRow(Commands.Command command, String args,
-                                                                       String channelType, boolean saved) {
+    void aCommandSaysItSavedItsReplyExactlyWhenItAddedARowHoldingIt(Commands.Command command, String args,
+                                                                    String channelType, boolean saved) {
         // No provider is configured, so /compact answers with its no-provider reply, which it saves.
         var convo = ConversationService.findOrCreate(agent, channelType, "admin");
         var before = Message.count("conversation = ?1", convo);
 
         var result = Commands.execute(command, agent, channelType, "admin", convo, args, true);
 
+        // /new answers in the conversation it creates; every other command in the one it was given.
+        var answeredIn = result.conversation() != null ? result.conversation() : convo;
+        List<Message> added = Message.find("conversation = ?1 ORDER BY id", answeredIn).fetch();
+        if (answeredIn.id.equals(convo.id)) added = added.subList((int) before, added.size());
         assertEquals(saved, result.saved(), result.responseText());
-        assertEquals(saved ? before + 1 : before, Message.count("conversation = ?1", convo));
+        assertEquals(saved ? List.of(result.responseText()) : List.of(), added.stream().map(m -> m.content).toList());
     }
 
     @Test
-    void aCommandWhoseConversationIsGoneSaysItSavedNothing() {
+    void aWebStopOnARunningTurnAddsItsStopMarkerAndSavesNoReply() {
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendUserMessage(convo, "run the long job");
+        var before = Message.count("conversation = ?1", convo);
+        services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("run the long job", "web", "admin", agent),
+                new java.util.concurrent.atomic.AtomicBoolean());
+        try {
+            var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo, null, true);
+
+            assertEquals("Stopped.", result.responseText());
+            assertFalse(result.saved());
+            List<Message> rows = Message.find("conversation = ?1 ORDER BY id", convo).fetch();
+            assertEquals(List.of(ConversationService.MESSAGE_KIND_STOP_MARKER),
+                    rows.subList((int) before, rows.size()).stream().map(m -> m.messageKind).toList());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    // NEW is left out: it never answers in the conversation it was given, but in the one it creates. COMPACT is
+    // too: with no provider its no-provider reply answers before it looks for the conversation, and with one it says
+    // the conversation was deleted, which a live one never answers (the test below).
+    @ParameterizedTest
+    @ValueSource(strings = {"HELP", "MODEL", "THINK", "USAGE", "PROMPT", "SUBAGENT", "RESET", "STOP"})
+    void aCommandWhoseConversationIsGoneGivesItsUsualReplyAndSavesNothing(Commands.Command command) {
+        var live = ConversationService.create(agent, "web", "twin");
+        var usual = Commands.execute(command, agent, "web", "twin", live, null, true).responseText();
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         convo.delete();
 
-        var result = Commands.execute(Commands.Command.HELP, agent, "web", "admin", convo, null, true);
+        var result = Commands.execute(command, agent, "web", "admin", convo, null, true);
 
-        assertEquals(Commands.HELP_TEXT, result.responseText());
+        assertEquals(usual, result.responseText());
         assertFalse(result.saved(), "the conversation was deleted, so no row holds the reply");
+    }
+
+    @Test
+    void aCompactWhoseConversationIsGoneSaysItWasDeletedAndSavesNothing() {
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"name\":\"GPT-4.1\",\"contextWindow\":1000000,\"maxTokens\":32768}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        convo.delete();
+
+        var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "admin", convo, null, true);
+
+        assertEquals("Nothing to compact: this conversation was deleted.", result.responseText());
+        assertNull(result.conversation());
+        assertFalse(result.saved());
     }
 
     @Test
@@ -989,14 +1043,11 @@ class SlashCommandsTest extends UnitTest {
     // --- /usage end-to-end ---
 
     @Test
-    void usageReturnsFallbackWhenNoConversation() {
-        // executeUsage path with current=null. buildUsageResponse short-
-        // circuits to the "No active conversation" fallback.
+    void usageWithNoConversationSaysNothingIsUsedYet() {
         var result = Commands.handle("/usage", agent, "web", "admin", null);
         assertTrue(result.isPresent());
         assertEquals(Commands.Command.USAGE, result.get().command());
-        assertTrue(result.get().responseText().contains("No active conversation"),
-                "fallback message present: " + result.get().responseText());
+        assertEquals("Nothing used yet. Send a message first.", result.get().responseText());
     }
 
     @Test
@@ -1170,10 +1221,10 @@ class SlashCommandsTest extends UnitTest {
     // --- renderThinkingSelection branches ---
 
     private String renderThinkingSelection(Agent agent, llm.LlmTypes.ModelInfo m) throws Exception {
-        var meth = Commands.class.getDeclaredMethod(
-                "renderThinkingSelection", Agent.class, models.Conversation.class, llm.LlmTypes.ModelInfo.class);
+        var meth = Commands.class.getDeclaredMethod("renderThinkingSelection", Agent.class, models.Conversation.class,
+                llm.LlmTypes.ModelInfo.class, String.class);
         meth.setAccessible(true);
-        return (String) meth.invoke(null, agent, null, m);
+        return (String) meth.invoke(null, agent, null, m, ", conversation override");
     }
 
     @Test

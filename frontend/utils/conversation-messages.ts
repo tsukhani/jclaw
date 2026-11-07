@@ -50,7 +50,11 @@ export function newRowsCursor(shown: Message[]): number | null {
   const saved = shown.filter(m => typeof m.id === 'number' && Number.isFinite(Date.parse(m.createdAt)))
   const horizon = Math.max(...saved.map(m => Date.parse(m.createdAt))) - NEW_ROWS_LOOKBACK_MS
   const settled = settledRowId(saved.filter(m => Date.parse(m.createdAt) <= horizon))
-  if (settled != null) return settled
+  return settled ?? beforeOldestRow(shown)
+}
+
+/** The cursor that fetches every shown row again: just before the oldest one with an id, or null when none has one. */
+export function beforeOldestRow(shown: Message[]): number | null {
   const oldest = shown.find(m => typeof m.id === 'number')?.id
   return oldest == null ? null : oldest - 1
 }

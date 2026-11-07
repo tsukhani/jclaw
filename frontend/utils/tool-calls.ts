@@ -212,18 +212,6 @@ export function turnWindowStart(rows: ReadonlyArray<RawRow | LoadedRow>, opensCo
   return -1
 }
 
-/** {@link turnWindowStart}'s latest window instead of its first: the one that holds the newest turn; -1 when none. */
-export function latestTurnWindowStart(rows: ReadonlyArray<RawRow | LoadedRow>): number {
-  let settled = false
-  let start = -1
-  for (let i = 0; i < rows.length; i++) {
-    const m = rows[i]!
-    if (settled && m.role === 'user' && !m.subagentRunId) start = i
-    settled = settlesAt(m, settled)
-  }
-  return start
-}
-
 /** Id of the newest row after which nothing waits to attach, so rows fetched after it hydrate on their own. */
 export function settledRowId(rows: ReadonlyArray<RawRow | LoadedRow>): number | null {
   for (let i = rows.length - 1; i >= 0; i--) {

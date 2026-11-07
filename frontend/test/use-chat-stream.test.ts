@@ -420,6 +420,134 @@ describe('useChatStream', () => {
     expect(streamOn(77).url).toBe('/api/conversations/77/stream')
   })
 
+  it('places nothing from a command when the operator opens another conversation while its conversation loads', async () => {
+    serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'Context cleared.', saved: false }))
+    let loaded!: () => void
+    const openConversation = vi.fn((id: number) => {
+      deps.selectedConvoId.value = id
+      // A load another one superseded writes no rows, as useChatConversation's does.
+      return new Promise<void>((resolve) => {
+        loaded = resolve
+      })
+    })
+    const deps = makeDeps({ openConversation })
+    const { api } = await mountStream(deps)
+    deps.input.value = '/reset'
+    const sending = api.sendMessage()
+    await vi.waitFor(() => expect(openConversation).toHaveBeenCalledWith(5))
+
+    deps.selectedConvoId.value = 9
+    deps.messages.value = [{ id: 90, role: 'user', content: 'conversation nine', createdAt: '' }]
+    loaded()
+    await sending
+
+    expect(contents(deps)).toEqual([['user', 'conversation nine']])
+  })
+
+  /** Deps whose load of a command's conversation fails, after `during` runs while it loads. */
+  function failingLoad(during: (deps: UseChatStreamDeps) => void = () => {}) {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const deps = makeDeps({ openConversation: vi.fn(async (id: number) => {
+      deps.selectedConvoId.value = id
+      during(deps)
+      throw new Error('load failed')
+    }) })
+    return deps
+  }
+
+  it('leaves a saved /new reply to the merge when its conversation fails to load, and says why', async () => {
+    serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'What would you like to discuss?', saved: true }))
+    const deps = failingLoad()
+    const { api } = await mountStream(deps)
+
+    await expect(send(api, deps, '/new')).resolves.toBeUndefined()
+
+    expect(contents(deps)).toEqual([['user', '/new'], ['assistant', 'Error: load failed']])
+    expect(deps.mergeSavedRows).toHaveBeenCalledTimes(1)
+    expect(console.error).toHaveBeenCalledWith('Failed to open the conversation a command ran in:', expect.any(Error))
+  })
+
+  it('opens the stream of a conversation whose load failed, since the view selected it', async () => {
+    serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'What would you like to discuss?', saved: true }))
+    const deps = failingLoad()
+    const { api } = await mountStream(deps)
+
+    await send(api, deps, '/new')
+
+    expect(deps.followedConvoId.value).toBe(5)
+    expect(openStreamsOn(5)).toHaveLength(1)
+  })
+
+  it('places an unsaved reply and why its conversation failed right after its own message', async () => {
+    serveTurnStart(body => body.message === '/new'
+      ? { status: 'command', conversationId: 5, content: 'Started.', saved: false }
+      : { status: 'queued', conversationId: 5, position: 1 })
+    const deps = failingLoad((d) => {
+      d.messages.value = [...d.messages.value, { _key: 'later', role: 'user', content: 'later', createdAt: '', _local: true }]
+    })
+    const { api } = await mountStream(deps)
+
+    await send(api, deps, '/new')
+
+    expect(contents(deps)).toEqual([['user', '/new'], ['assistant', 'Started.'], ['assistant', 'Error: load failed'],
+      ['user', 'later']])
+  })
+
+  it('ends the turn a typed /stop ended when its stopped frame never comes', async () => {
+    serveTurnStart(() => ({ status: 'command', conversationId: 42, content: 'Stopped.', saved: false }))
+    const queue = { status: BUSY }
+    const deps = onConversation(42, { readQueue: vi.fn(async () => queue.status) })
+    const { api } = await mountStream(deps)
+    await turn(streamOn(42), 42, { type: 'token', content: 'long task' })
+
+    queue.status = IDLE
+    await send(api, deps, '/stop')
+
+    expect(deps.streaming.value).toBe(false)
+    expect(contents(deps)).toEqual([['user', '/stop'], ['assistant', 'Stopped.']])
+  })
+
+  it('keeps a message left waiting behind a New Chat command out of the next New Chat, whose later message follows its own first', async () => {
+    let answerHelp!: () => void
+    const helpHeld = new Promise<void>((resolve) => {
+      answerHelp = resolve
+    })
+    let answerX!: () => void
+    const xHeld = new Promise<void>((resolve) => {
+      answerX = resolve
+    })
+    const bodies = serveTurnStart(async (body) => {
+      if (body.message === '/help') {
+        await helpHeld
+        return { status: 'command', conversationId: null, content: 'Commands.', saved: false }
+      }
+      if (body.message === 'x') {
+        await xHeld
+        return { status: 'started', conversationId: 44 }
+      }
+      return { status: 'started', conversationId: body.message === 'first' ? 45 : 44 }
+    })
+    const deps = makeDeps()
+    const { api } = await mountStream(deps)
+    const sending = (text: string) => {
+      deps.input.value = text
+      return api.sendMessage()
+    }
+    const all = [sending('/help'), sending('first')]
+    await flushPromises()
+
+    api.leaveView()
+    all.push(sending('x'))
+    await vi.waitFor(() => expect(bodies.map(b => b.message)).toEqual(['/help', 'x']))
+    answerHelp()
+    await vi.waitFor(() => expect(bodies.map(b => b.message)).toEqual(['/help', 'x', 'first']))
+    all.push(sending('y'))
+    answerX()
+    await Promise.all(all)
+
+    expect(bodies.map(b => [b.message, b.conversationId])).toEqual([['/help', null], ['x', null], ['first', null], ['y', 44]])
+  })
+
   it('marks a send unpairable until its answer comes, so no merge can give a queued message a saved row\'s id', async () => {
     let answer!: () => void
     const answered = new Promise<void>((resolve) => {
@@ -501,10 +629,16 @@ describe('useChatStream', () => {
     await send(api, deps, 'hello')
     expect(deps.scrollToBottom).toHaveBeenCalledTimes(1)
 
-    await turn(streamOn(42), 42, { type: 'token', content: 'Hi' }, { type: 'complete', content: 'Hi' })
+    await turn(streamOn(42), 42,
+      { type: 'reasoning', content: 'Thinking it over' },
+      { type: 'token', content: 'Hi' },
+      { type: 'tool_call', id: 'tc1', name: 'exec', arguments: '{}', resultText: 'ok' },
+      { type: 'status', content: JSON.stringify({ usage: { prompt: 10, completion: 2, total: 12 } }) },
+      { type: 'complete', content: 'Hi' })
     await flushPromises()
     expect(deps.scrollToBottom).toHaveBeenCalledTimes(1)
-    expect(followToBottom.mock.calls.length).toBeGreaterThanOrEqual(3)
+    // init, reasoning, token, tool_call, usage, complete, and the end of the turn.
+    expect(followToBottom).toHaveBeenCalledTimes(7)
   })
 
   it('shows why a send was refused on a reply row that pairs with nothing', async () => {

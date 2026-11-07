@@ -36,6 +36,17 @@ export interface PendingOverrides {
   thinkingMode?: string
 }
 
+/**
+ * A pick a command typed in a fresh chat answered with (`/model`, `/think`, JF-202). `of` names what it sets; with
+ * that value null it clears the pick held, so the agent's default applies.
+ */
+export interface CommandPick {
+  of: 'model' | 'thinking'
+  modelProvider: string | null
+  modelId: string | null
+  thinkingMode: string | null
+}
+
 export interface UseAgentModel {
   selectedAgent: ComputedRef<Agent | undefined>
   currentConversation: ComputedRef<Conversation | null>
@@ -62,6 +73,8 @@ export interface UseAgentModel {
   currentThinkingLevel: ComputedRef<string | null>
   /** What the next fresh-chat message must carry, or null when nothing was picked. */
   pendingOverrides: ComputedRef<PendingOverrides | null>
+  /** Hold a command's pick for the fresh chat as the picker or the Think pill holds one. */
+  applyPick: (pick: CommandPick) => void
   /** The last rejected override write, for the composer to show; null once one succeeds. */
   overrideError: Ref<string | null>
 }
@@ -447,6 +460,29 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     }
   }
 
+  function applyPick(pick: CommandPick) {
+    // The command ran in no conversation, so its pick is the fresh chat's only.
+    if (selectedConvoId.value != null) return
+    if (pick.of === 'model') {
+      if (pick.modelProvider != null && pick.modelId != null) {
+        void onModelKeyChange(`${pick.modelProvider}::${pick.modelId}`)
+        return
+      }
+      pendingModel.value = null
+      // As a model change in the picker does: a level the agent's own model does not offer turns thinking off.
+      const held = pendingThinking.value
+      if (held && held !== 'off' && !thinkingLevels.value.includes(held)) pendingThinking.value = 'off'
+      return
+    }
+    if (pick.thinkingMode == null) {
+      pendingThinking.value = null
+      return
+    }
+    // The server checked the level against the model; the page's model list may not say the model thinks.
+    if (pick.thinkingMode !== 'off') lastThinkingLevel.value = pick.thinkingMode
+    void applyThinking(pick.thinkingMode)
+  }
+
   const pendingOverrides = computed<PendingOverrides | null>(() => {
     if (selectedConvoId.value != null) return null
     const o: PendingOverrides = {}
@@ -482,6 +518,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     onModelKeyChange,
     currentThinkingLevel: effectiveThinking,
     pendingOverrides,
+    applyPick,
     overrideError,
   }
 }

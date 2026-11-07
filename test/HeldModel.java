@@ -32,6 +32,8 @@ public final class HeldModel implements AutoCloseable {
     /** The model every agent on this provider names; {@link #OTHER_MODEL} is there to be picked instead. */
     public static final String MODEL = "turn-model";
     public static final String OTHER_MODEL = "other-model";
+    /** A model to pick that thinks, at {@code low} or {@code high}; the other two do not. */
+    public static final String THINKING_MODEL = "thinking-model";
     public static final String REPLY = "It is now.";
 
     /** How one call is answered; it may hold on {@link #awaitRelease} wherever the test needs it to. */
@@ -86,7 +88,9 @@ public final class HeldModel implements AutoCloseable {
             ConfigService.set("provider." + provider + ".apiKey", "sk-test");
             ConfigService.set("provider." + provider + ".models", "[{\"id\":\"" + MODEL
                     + "\",\"name\":\"Turn\",\"contextWindow\":100000,\"maxTokens\":4096},{\"id\":\"" + OTHER_MODEL
-                    + "\",\"name\":\"Other\",\"contextWindow\":100000,\"maxTokens\":4096}]");
+                    + "\",\"name\":\"Other\",\"contextWindow\":100000,\"maxTokens\":4096},{\"id\":\"" + THINKING_MODEL
+                    + "\",\"name\":\"Thinker\",\"contextWindow\":100000,\"maxTokens\":4096,\"supportsThinking\":true,"
+                    + "\"thinkingLevels\":[\"low\",\"high\"]}]");
             return null;
         });
         // refresh() returns at once while another class's refresh runs, and that one may predate this commit.

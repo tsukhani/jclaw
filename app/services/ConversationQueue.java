@@ -294,10 +294,11 @@ public class ConversationQueue {
     }
 
     /**
-     * The stop {@link #stopOperatorTurn} makes (GH-12), for a conversation on any channel; the operator's Stop goes
-     * through that, and tests drive the queue through this. It cancels the in-flight turn through its own cancel
-     * flag, drops pending messages, and releases ownership now, so the next send acquires instead of queueing. The
-     * stopped turn's later release carries a stale generation and is a no-op.
+     * Stop the turn running in {@code conversationId} if its owner registered a cancel flag of its own, whatever the
+     * channel (GH-12): set that flag, write the stop marker, drop the pending messages, release ownership so the next
+     * send acquires instead of queueing, and end the turn on the conversation's stream as stopped. The stopped turn's
+     * later release carries a stale generation and is a no-op. The operator's Stop makes this stop through
+     * {@link #stopOperatorTurn}; tests drive the queue through this one.
      *
      * @return {@code true} when a turn that registered a cancel flag owned the conversation and was
      *         stopped; {@code false}, changing nothing, otherwise
@@ -310,8 +311,9 @@ public class ConversationQueue {
     public enum OperatorStop { STOPPED, IDLE, UNSTOPPABLE }
 
     /**
-     * The operator's Stop, from the chat page's button and from a {@code /stop} typed in web chat: {@link #stop}, for a
-     * turn {@link #operatorStoppable} allows, decided under the stop's own lock.
+     * The operator's Stop, from the chat page's button and from a {@code /stop} typed in web chat (JF-202): under one
+     * lock, find the conversation idle, or its turn one the operator cannot stop ({@link #operatorStoppable}), or stop
+     * it as {@link #stop} does. Only a stopped turn changes anything.
      */
     public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType) {
         return stopWhen(conversationId, state -> operatorStoppable(state, channelType));
@@ -553,10 +555,10 @@ public class ConversationQueue {
     }
 
     /**
-     * Publish {@link NotificationBus#BUS_CONVERSATION_BUSY} for a transition the caller recorded under the state
-     * lock and has since released, since the bus's own listeners run on this thread. Detached: every turn acquires
-     * and releases, and its thread must not wait on an SSE client. The publish never throws, so a caller always
-     * reaches the release of what it acquired.
+     * Publish {@link NotificationBus#BUS_CONVERSATION_BUSY} for a change the caller made under the state lock (the
+     * conversation taken or given up, or a message queued), only once it has let the lock go, since the bus's own
+     * listeners run on this thread. Detached: every turn takes and gives up its conversation, and its thread must not
+     * wait on an SSE client. The publish never throws, so a caller always reaches the release of what it acquired.
      */
     private static void announceBusy(Long conversationId, boolean busy) {
         NotificationBus.publishDetached(NotificationBus.BUS_CONVERSATION_BUSY,
