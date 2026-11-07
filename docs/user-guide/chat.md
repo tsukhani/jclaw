@@ -14,7 +14,7 @@ The Chat page has three regions:
 
 The context meter appears once a conversation has started. It reads `used / window`: the prompt and completion tokens of the latest turn's last model call, against the model's context window, over a bar that turns amber at 70% and red at 90%. While a reply is still running, the meter moves each time the agent calls the model, so you can watch the context fill up. Hover it for **Context usage** as a percentage, **Prompt tokens**, **Thinking tokens** and **Cached tokens** when there are any, **Completion** and **Current context**, then **Conversation total** (every turn's tokens added up), **Compactions** once the conversation has been compacted (each one lowers the current context), and the running **Turns** and **Cost** (when the model has pricing).
 
-Closing or refreshing the page is safe. Your conversation history is server-side. To reopen an earlier thread, click its row on [Conversations](/conversations).
+Closing or refreshing the page is safe. Your conversation history is server-side. A reply that is still running keeps going when you close the tab, reload it, switch to another conversation, or start a new one. Only a stop ends it: **Stop generating**, or `/stop` typed in web chat. Open the conversation again and the reply shows: what it has written so far, then the rest as it comes. To reopen an earlier thread, click its row on [Conversations](/conversations).
 
 ## Picking an agent
 
@@ -26,9 +26,13 @@ If you do not have any agents yet, [Agents](/guide#agents) is the next stop. Com
 
 Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a newline without sending.
 
-The reply streams in real time. While the model is generating, the **Send** button turns into a **Stop generating** button. Click it to interrupt the current generation.
+The reply streams in real time. Under it, **Generating…** and a timer show how long the turn has run.
 
-Some turns run without streaming to the page: the agent picking up again after a subagent it waited for with `subagent_yield`, a message that waited in the queue while the agent was busy, a message sent through the API, or a Telegram, Slack or WhatsApp message in a conversation you opened with **Open in Chat** (see [Conversations & Channels](/guide#conversations-and-channels)). While one of these runs in the open conversation, **Working…** shows under the messages. Its tool calls and its reply appear as the agent saves them, with no need to reload. Such a turn has no **Stop generating** button. A message you send meanwhile follows the agent's [Queue Mode](/guide#agents-queue-mode): by default it waits in the queue and runs when the turn ends.
+The message box stays open while the agent works, with **Send** beside **Stop generating** (the red square). A message you send during a turn follows the agent's [Queue Mode](/guide#agents-queue-mode). By default it waits in the queue: it shows under the reply with a **Queued** label and its place in line, for example "Queued, position 1", and runs when the turn ends. Every open tab of the conversation shows the queued messages at once, and after a reload too.
+
+Click **Stop generating** to end the turn. Stop also drops the messages queued behind it. While any are queued, the button says so in words, for example **Stop and drop 2 queued**. The count includes a subagent result waiting to wake the agent, which has no **Queued** row, so the button can say **Stop and drop 1 queued** with no queued message on screen.
+
+Every turn in the open conversation shows here as it runs, not only the ones you send from this tab: a message you sent from another tab, the agent picking up again after a subagent it waited for with `subagent_yield`, a message that waited in the queue, a message sent through the API, or a Telegram, Slack or WhatsApp message in a conversation you opened with **Open in Chat** (see [Conversations & Channels](/guide#conversations-and-channels)). The pick-up after `subagent_yield`, a message that waited in the queue, and a message sent through the API show their progress and tool calls as they run, and their reply when it is done. **Stop generating** shows only on a turn you started from the message box that did not wait in the queue. A queued message once it runs, a channel or voice turn, and the other turns above have no Stop button yet. If the page knows a turn is running but cannot show it yet, **Working…** shows under the messages until it can.
 
 Replies render as Markdown, and math the model writes in TeX is typeset with KaTeX: `$…$` and `\(…\)` inline, `$$…$$` and `\[…\]` as a display equation. The equation scrolls inside the bubble when it is too wide. A dollar amount in prose stays text: `$` opens math only when a non-space follows it, and closes only after a non-space and before anything but a digit. So "$5 and $10" is left alone. Malformed TeX shows as an inline error rather than breaking the reply.
 
@@ -94,7 +98,7 @@ On an external channel, `/subagent`, `/prompt`, and the `/model` forms that chan
 | `/model` | Show the current model and its capabilities. `/model <provider>/<id>` sets a per-conversation override. `/model reset` clears the override. |
 | `/think` | Show the reasoning effort in force for this conversation. `/think off`, `/think <level>` (one the model advertises) set a per-conversation override; `/think reset` clears it. The agent's default is untouched. |
 | `/usage` | Show how much of the model's context window the current conversation occupies. |
-| `/stop` | Interrupt the current generation. (Same as clicking the **Stop generating** button.) |
+| `/stop` | Interrupt the current generation. In web chat on a web conversation it works like the **Stop generating** button: it drops the messages queued behind the turn, and on a turn that cannot be stopped yet it replies "This turn can't be stopped from chat yet." On a Telegram, Slack or WhatsApp conversation it leaves the queue alone. |
 | `/subagent` | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). |
 | `/prompt` | Search your [Prompts Library](/guide#prompts): `/prompt code review`. In the web composer the prompt's text drops straight into the box; on other channels JClaw replies with it so you can copy and edit it (for the binding's owner only). `/prompt` on its own lists what you have saved. |
 
@@ -175,7 +179,7 @@ The agent keeps seeing its checklist after older turns are summarized or drop ou
 
 ## Subagent transcripts are read-only
 
-If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. While the subagent is still working, the full page shows **Working…** under the transcript and adds its messages as it writes them. A run on an [external coding harness](/guide#subagents-acp-harness) is different: the full page shows its messages as of when you opened it. To follow one live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
+If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. While the subagent is still working, the full page shows that it is working and adds its messages as it writes them. A run on an [external coding harness](/guide#subagents-acp-harness) is different: the full page shows its messages as of when you opened it. To follow one live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
 
 ## Where to go next
 

@@ -1,26 +1,22 @@
 import type { Page } from '@playwright/test'
 import type { Agent, ChecklistItem, ConfigResponse, Conversation, ProviderModelDef } from '~/types/api'
 import { ROUTER_MODEL_ID, ROUTER_PROVIDER } from '../../utils/model-route'
-import { test, expect, gotoPage, json, blockApiWrites, holdChatStream, E2E_PREFIX } from './helpers'
+import { test, expect, gotoPage, json, blockApiWrites, fakeChatTurns, E2E_PREFIX } from './helpers'
 
 /**
  * UAT-15 — Chat, the core product path.
  *
- * /api/chat/stream is mocked throughout: at the Playwright route level, or held open in the page
- * where a state lasts only while the turn streams. A live
- * turn would spend a real model call per assertion and make the suite's
- * runtime depend on provider latency; what is under test here is the client
- * half — SSE parsing, message rendering, tool-call display, error surfacing —
- * which is exactly the half a mock exercises faithfully.
+ * A turn's start (POST /api/chat/turn) and its conversation's stream are faked
+ * in the page throughout (fakeChatTurns), the stream fed frame by frame where a
+ * state lasts only while the turn runs. A live turn would spend a real model
+ * call per assertion and make the suite's runtime depend on provider latency;
+ * what is under test here is the client half — frame parsing, message
+ * rendering, tool-call display, error surfacing — which is exactly the half a
+ * fake exercises faithfully.
  *
  * The backend half (cache_control injection, provider round-trip) is covered
  * by ApiChatControllerTest and the eval suites, not here.
  */
-
-/** Build an SSE body from the event shapes chat.vue consumes. */
-function sse(events: Array<Record<string, unknown>>): string {
-  return events.map(e => `data: ${JSON.stringify(e)}\n`).join('')
-}
 
 /** The agent the chat page opened on, as GET /api/agents reports it. */
 async function selectedAgent(page: Page): Promise<Agent> {
@@ -114,17 +110,13 @@ test.describe('UAT-15 chat', () => {
   })
 
   test('a full turn streams, renders and reports usage', async ({ page }) => {
-    await page.route('**/api/chat/stream', route => route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sse([
-        { type: 'init', conversationId: 990001 },
-        { type: 'token', content: 'Hello from ' },
-        { type: 'token', content: 'the UAT suite.' },
-        { type: 'status', content: JSON.stringify({ usage: { prompt: 100, completion: 5, total: 105, reasoning: 0, cached: 0, durationMs: 1000 } }) },
-        { type: 'complete', content: 'Hello from the UAT suite.' },
-      ]),
-    }))
+    await fakeChatTurns(page, 990001, [[
+      { type: 'init', conversationId: 990001 },
+      { type: 'token', content: 'Hello from ' },
+      { type: 'token', content: 'the UAT suite.' },
+      { type: 'status', content: JSON.stringify({ usage: { prompt: 100, completion: 5, total: 105, reasoning: 0, cached: 0, durationMs: 1000 } }) },
+      { type: 'complete', content: 'Hello from the UAT suite.' },
+    ]])
 
     await gotoPage(page, '/chat')
     await page.getByRole('button', { name: 'New conversation' }).click()
@@ -142,15 +134,10 @@ test.describe('UAT-15 chat', () => {
     const agents = async () =>
       (await (await request.get('/api/agents')).json() as Agent[]).filter(a => !a.name.startsWith(E2E_PREFIX))
     const before = await agents()
-    let sent: Record<string, unknown> | null = null
-    await page.route('**/api/chat/stream', (route) => {
-      sent = route.request().postDataJSON()
-      return route.fulfill({
-        status: 200,
-        contentType: 'text/event-stream',
-        body: sse([{ type: 'init', conversationId: 990002 }, { type: 'complete', content: 'pending pick acknowledged' }]),
-      })
-    })
+    const turns = await fakeChatTurns(page, 990002, [[
+      { type: 'init', conversationId: 990002 },
+      { type: 'complete', content: 'pending pick acknowledged' },
+    ]])
 
     await gotoPage(page, '/chat')
     await page.getByRole('button', { name: 'New conversation' }).click()
@@ -175,21 +162,17 @@ test.describe('UAT-15 chat', () => {
     await page.getByRole('button', { name: 'Send' }).click()
     await expect(page.getByText('pending pick acknowledged')).toBeVisible({ timeout: 15_000 })
 
-    await expect.poll(() => sent).not.toBeNull()
+    const [sent] = await turns.sent()
     expect(sent).toMatchObject({ conversationId: null, modelId: picked })
     expect(await agents()).toEqual(before)
   })
 
   test('the sent message appears in the transcript', async ({ page }) => {
-    await page.route('**/api/chat/stream', route => route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sse([
-        { type: 'init', conversationId: 990002 },
-        { type: 'token', content: 'ack' },
-        { type: 'complete', content: 'ack' },
-      ]),
-    }))
+    await fakeChatTurns(page, 990002, [[
+      { type: 'init', conversationId: 990002 },
+      { type: 'token', content: 'ack' },
+      { type: 'complete', content: 'ack' },
+    ]])
 
     await gotoPage(page, '/chat')
     await page.getByRole('button', { name: 'New conversation' }).click()
@@ -201,16 +184,12 @@ test.describe('UAT-15 chat', () => {
   })
 
   test('tool calls render in the transcript', async ({ page }) => {
-    await page.route('**/api/chat/stream', route => route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sse([
-        { type: 'init', conversationId: 990003 },
-        { type: 'tool_call', content: JSON.stringify({ name: 'web_search', arguments: { query: 'jclaw' } }) },
-        { type: 'token', content: 'Searched.' },
-        { type: 'complete', content: 'Searched.' },
-      ]),
-    }))
+    await fakeChatTurns(page, 990003, [[
+      { type: 'init', conversationId: 990003 },
+      { type: 'tool_call', id: 'tc1', name: 'web_search', arguments: '{"query":"jclaw"}', resultText: 'results' },
+      { type: 'token', content: 'Searched.' },
+      { type: 'complete', content: 'Searched.' },
+    ]])
 
     await gotoPage(page, '/chat')
     await page.getByRole('button', { name: 'New conversation' }).click()
@@ -229,11 +208,11 @@ test.describe('UAT-15 chat', () => {
       { content: 'Fix the parser', status: 'in_progress', activeForm: 'Fixing the parser' },
     ])
     const blocked = await blockApiWrites(page)
-    const stream = await holdChatStream(page)
+    const stream = await fakeChatTurns(page, 990301)
     const panel = page.getByTestId('chat-checklist')
     const rows = panel.getByTestId('chat-checklist-item')
     const spinner = panel.locator('.animate-spin')
-    const stop = page.getByRole('button', { name: 'Stop generating' })
+    const running = page.getByTestId('stream-progress')
 
     await gotoPage(page, '/chat?conversation=990301')
     await expect(rows).toHaveText(['Run tests(done)', 'Fix the parser(not finished)'])
@@ -244,7 +223,7 @@ test.describe('UAT-15 chat', () => {
     await stream.opened()
     await stream.push({ type: 'init', conversationId: 990301 })
     // The turn is running, but nothing in it has touched the stored step yet.
-    await expect(stop).toBeVisible()
+    await expect(running).toBeVisible()
     await expect(rows).toHaveText(['Run tests(done)', 'Fix the parser(not finished)'])
     await expect(spinner).toHaveCount(0)
 
@@ -260,40 +239,65 @@ test.describe('UAT-15 chat', () => {
     await expect(spinner).toHaveCount(1)
 
     await stream.push({ type: 'complete', content: 'Parser fixed.' })
-    await stream.end()
-    await expect(stop).toHaveCount(0)
+    await expect(running).toHaveCount(0)
     await expect(rows).toHaveText(['Fix the parser(done)', 'Commit(not finished)'])
     await expect(spinner).toHaveCount(0)
     expect(blocked()).toEqual([])
   })
 
   test('a stream error surfaces to the operator rather than hanging', async ({ page }) => {
-    // The failure mode this guards: the composer stays disabled behind a
-    // spinner forever because the error event never unwinds the sending state.
-    await page.route('**/api/chat/stream', route => route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sse([
-        { type: 'init', conversationId: 990004 },
-        { type: 'error', content: 'UAT injected provider failure' },
-      ]),
-    }))
+    // The failure mode this guards: the turn's progress line spins forever
+    // because the error frame never ends the turn.
+    await fakeChatTurns(page, 990004, [[
+      { type: 'init', conversationId: 990004 },
+      { type: 'error', content: 'UAT injected provider failure' },
+    ]])
 
     await gotoPage(page, '/chat')
     await page.getByRole('button', { name: 'New conversation' }).click()
     await page.getByPlaceholder('Send a message...').fill('trigger an error')
     await page.getByRole('button', { name: 'Send' }).click()
 
-    await expect(page.getByText(/UAT injected provider failure|error/i).first()).toBeVisible({ timeout: 15_000 })
-    // Composer must be usable again once the turn has failed.
-    await expect(page.getByPlaceholder('Send a message...')).toBeEnabled({ timeout: 15_000 })
+    await expect(page.getByText('UAT injected provider failure')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('stream-progress')).toHaveCount(0)
   })
 
-  test('an HTTP failure on the stream endpoint is surfaced', async ({ page }) => {
-    await page.route('**/api/chat/stream', route => route.fulfill({
+  test('Stop says what it drops, and after it no queued message remains', async ({ page }) => {
+    const blocked = await blockApiWrites(page)
+    const turns = await fakeChatTurns(page, 990005)
+    const stop = page.getByTestId('chat-stop')
+    const queued = page.getByTestId('queued-message')
+
+    await gotoPage(page, '/chat')
+    await page.getByRole('button', { name: 'New conversation' }).click()
+    await page.getByPlaceholder('Send a message...').fill('a long job')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await turns.opened()
+    await turns.setQueue({ busy: true, queueSize: 2, stoppable: true, pending: [
+      { text: 'e2e-uat second', attachmentNames: [], position: 1 },
+      { text: 'e2e-uat third', attachmentNames: [], position: 2 },
+    ] })
+    await turns.push({ type: 'init', conversationId: 990005 }, { type: 'token', content: 'Working on it' })
+
+    await expect(stop).toHaveText('Stop and drop 2 queued')
+    await expect(stop).toHaveAttribute('aria-label', 'Stop and drop 2 queued')
+    await expect(queued.getByTestId('queued-label')).toHaveText(['Queued, position 1', 'Queued, position 2'])
+    await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+
+    await stop.click()
+    await expect.poll(() => turns.stops()).toBe(1)
+
+    await expect(queued).toHaveCount(0)
+    await expect(stop).toHaveCount(0)
+    await expect(page.getByText('(stopped)')).toBeVisible()
+    expect(blocked()).toEqual([])
+  })
+
+  test('an HTTP failure starting the turn is surfaced', async ({ page }) => {
+    await page.route('**/api/chat/turn', route => route.fulfill({
       status: 500,
       contentType: 'application/json',
-      body: JSON.stringify({ error: 'UAT injected 500' }),
+      body: JSON.stringify({ code: 'internal_error', message: 'UAT injected 500' }),
     }))
 
     await gotoPage(page, '/chat')
@@ -301,7 +305,7 @@ test.describe('UAT-15 chat', () => {
     await page.getByPlaceholder('Send a message...').fill('trigger a 500')
     await page.getByRole('button', { name: 'Send' }).click()
 
-    await expect(page.getByPlaceholder('Send a message...')).toBeEnabled({ timeout: 20_000 })
+    await expect(page.getByText('Error: UAT injected 500')).toBeVisible({ timeout: 20_000 })
   })
 
   test('conversation deep link loads an existing transcript', async ({ page, request }) => {
@@ -313,12 +317,12 @@ test.describe('UAT-15 chat', () => {
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
   })
 
-  test('chat upload endpoint rejects an unauthenticated caller', async ({ playwright }) => {
+  test('the chat turn endpoint rejects an unauthenticated caller', async ({ playwright }) => {
     const anon = await playwright.request.newContext({
       baseURL: process.env.JCLAW_E2E_BASE_URL || 'http://localhost:3000',
       storageState: { cookies: [], origins: [] },
     })
-    const res = await anon.post('/api/chat/stream', { data: { message: 'should not run' } })
+    const res = await anon.post('/api/chat/turn', { data: { message: 'should not run' } })
     expect(res.status(), 'chat must be session-gated').toBe(401)
     await anon.dispose()
   })

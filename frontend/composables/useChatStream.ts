@@ -1,25 +1,27 @@
-import { onUnmounted, ref, triggerRef, nextTick, type Ref, type ShallowRef } from 'vue'
+import { nextTick, onUnmounted, ref, triggerRef, watch, type Ref, type ShallowRef } from 'vue'
 import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
+import type { MergeSavedRowsOptions } from '~/composables/useChatAnnouncePoller'
+import type { ConversationQueueStatus, QueuedMessageView } from '~/composables/useChatBackgroundTurn'
+import { useConversationStream, type TurnFrame } from '~/composables/useConversationStream'
+import { useEventBus } from '~/composables/useEventBus'
 import type { ChatQuote, ChecklistItem, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
 import { checklistFromCall } from '~/utils/checklist'
 import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
- * SSE streaming state machine + send flow (JCLAW-690 stage 4g; behaviour
- * extracted verbatim from pages/chat.vue). Owns the per-turn stream buffers and
- * the abort controller, composes {@link useStreamMarkdownRender} for the
- * throttled bubble HTML, and drives the whole send → stream → finalize turn.
+ * The chat page's send flow and turn renderer (JCLAW-690 stage 4g; JF-202). A send posts to `POST /api/chat/turn`,
+ * which answers once the turn has started or queued; every turn of the open conversation, the tab's own included,
+ * then renders the same way from the conversation stream (useConversationStream): its `init` opens the in-flight
+ * bubble, its frames fill it, and its terminal frame (`complete`, `error` or `stopped`) ends it and reconciles with the
+ * saved rows. Composes {@link useStreamMarkdownRender} for the throttled bubble HTML.
  *
- * `streaming` and `streamReasoning` are passed IN rather than owned: they are
- * cross-cutting shared state (useChatScroll pins the reasoning body off them,
- * useMediaGenPolling tears down on streaming-end, displayMessages/isEmptyChat
- * and the template read `streaming`), and those composables are constructed
- * before this one. Keeping them page-level dissolves the scroll/media ↔ stream
- * construction cycle. Everything this composable needs from later-constructed
- * composables (scrollToBottom, start*Polling, reconcileMessageIds, refresh*) is
- * injected and only invoked at turn time.
+ * `streaming` and `streamReasoning` are passed IN rather than owned: they are cross-cutting shared state (useChatScroll
+ * pins the reasoning body off them, useMediaGenPolling tears down on streaming-end, displayMessages/isEmptyChat and the
+ * template read `streaming`), and those composables are constructed before this one. `streaming` means the stream has
+ * a turn open. `followedConvoId` names the conversation the stream follows; the page sets it once a conversation's rows
+ * have loaded and clears it before the next load, and a send that creates a conversation sets it here.
  */
 
 // Local fields a streaming bubble carries beyond the persisted Message shape.
@@ -40,14 +42,20 @@ interface ToolCallEvent {
   generatedAttachments?: MessageAttachment[]
 }
 
-/**
- * Mutable cursor that the SSE handlers share. {@code assistantIdx} is updated
- * by the {@code init} handler when the server mints a new conversation and
- * the local history is reset to just the streaming placeholder.
- */
-interface StreamContext {
-  assistantIdx: number
-  readonly sentConversationId: number | null
+/** `POST /api/chat/turn`'s answer (JF-202). */
+interface TurnAnswer {
+  status: 'started' | 'queued' | 'command'
+  conversationId: number | null
+  position?: number
+  content?: string
+  /** A command's reply is a saved row the page may pair its copy with. */
+  saved?: boolean
+}
+
+/** The turn the stream has open: its bubble, and the SSE id of its `init`, which a replay of the same turn repeats. */
+interface OpenTurn {
+  bubble: StreamingMessage
+  initId: string
 }
 
 export interface UseChatStreamDeps {
@@ -58,27 +66,43 @@ export interface UseChatStreamDeps {
   /** Cross-cutting shared refs owned by the page (scroll/media also read them). */
   streaming: Ref<boolean>
   streamReasoning: Ref<string>
+  /** The conversation the stream follows; null closes it. */
+  followedConvoId: Ref<number | null>
   input: Ref<string>
   chatInput: Ref<HTMLTextAreaElement | null>
   attachedFiles: Ref<File[]>
   attachError: Ref<string | null>
   attachmentPreviews: Ref<Map<File, string>>
   uploadAttachments: (agentId: number) => Promise<UploadedAttachment[]>
+  /** For the operator's own send: scrolls whatever the reader's position. */
   scrollToBottom: () => void
+  /** For a turn's frames: scrolls a reader at the bottom only (useChatScroll); defaults to scrollToBottom. */
+  followToBottom?: () => void
+  /** Opens a conversation as the page's load does (useChatConversation's loadConversation). */
+  openConversation?: (id: number) => Promise<void>
+  /** Written here: whether the conversation stream is up, which the queue read's hold rule needs. */
+  streamUp?: Ref<boolean>
   focusInput: () => void
   imageGenTurnKey: Ref<string | null>
   startImageProgressPolling: () => void
   browserSetupTurnKey: Ref<string | null>
   startBrowserSetupPolling: () => void
   startVideoPolling: () => void
-  reconcileMessageIds: () => Promise<void>
+  /** Fetches the rows saved since the last read and merges them in server order (useChatAnnouncePoller). */
+  mergeSavedRows: (opts?: MergeSavedRowsOptions) => Promise<void>
+  /** Reads the conversation's queue: busy, stoppable, the queued messages (useChatBackgroundTurn). */
+  readQueue: (opts?: { init?: boolean }) => Promise<ConversationQueueStatus | null>
+  /** Shows a message the server just queued until the next queue read lists it. */
+  showQueued: (message: QueuedMessageView) => void
+  /** Hides Stop until a new turn's own queue read says whether it applies (useChatBackgroundTurn). */
+  clearStoppable?: () => void
   /** JCLAW-1196: picks made on a fresh chat, carried by the message that creates its conversation. */
   pendingOverrides?: { readonly value: PendingOverrides | null }
   /** JCLAW-1299: the message the next send replies to; cleared once sent. */
   quote?: Ref<ChatQuote | null>
   refreshConversations: () => Promise<void> | void
   refreshAgents: () => Promise<void> | void
-  /** JCLAW-1569: the list the turn in flight last set; cleared when a send starts, when the stored row takes over. */
+  /** JCLAW-1569: the list the turn in flight last set; cleared when a turn starts, when the stored row takes over. */
   liveChecklist?: Ref<ChecklistItem[] | null>
 }
 
@@ -88,8 +112,12 @@ export interface UseChatStream {
   streamingMessageKey: Ref<string | null>
   streamContentHtml: Ref<string>
   streamReasoningHtml: Ref<string>
+  /** Epoch ms the open turn started, from its `init`, for the progress timer. */
+  streamStartedAt: Ref<number | null>
   sendMessage: () => Promise<void>
   stopStreaming: () => void
+  /** New Chat or an agent change: an answer, read or merge for the view being left changes nothing. */
+  leaveView: () => void
 }
 
 /**
@@ -133,26 +161,39 @@ function finalizeThinkingOnTransition(m: StreamingMessage): boolean {
   return true
 }
 
+/** What the bubble holds before its first frame; a resync rebuilds it from here. */
+function clearBubble(m: StreamingMessage) {
+  m.content = ''
+  m.reasoning = null
+  m.usage = null
+  delete m.toolCalls
+  delete m.toolCallsCollapsed
+  delete m.attachments
+  delete m._thinkingStartedAt
+  delete m._thinkingInProgress
+  delete m._thinkingDurationMs
+  delete m.thinkingCollapsed
+  delete m._route
+  delete m._contextTokens
+}
+
 export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   const {
     messages, selectedConvoId, subagentTranscript, selectedAgentId,
-    streaming, streamReasoning, input, chatInput,
+    streaming, streamReasoning, followedConvoId, input, chatInput,
     attachedFiles, attachError, attachmentPreviews, uploadAttachments,
-    scrollToBottom, focusInput,
+    scrollToBottom, focusInput, openConversation,
     imageGenTurnKey, startImageProgressPolling, startVideoPolling,
     browserSetupTurnKey, startBrowserSetupPolling,
-    reconcileMessageIds, refreshConversations, refreshAgents,
+    mergeSavedRows, readQueue, showQueued, refreshConversations, refreshAgents,
   } = deps
 
   const streamStatus = ref('')
-  // _key of the assistant message currently being streamed. Set when we push the
-  // placeholder in sendMessage, cleared when the stream ends. Used by the
-  // template to route the in-flight bubble to streamContentHtml /
-  // streamReasoningHtml (throttled markdown render) instead of running the full
-  // renderMarkdown pipeline on every token mutation.
+  // _key of the open turn's bubble. The template routes that bubble to streamContentHtml / streamReasoningHtml
+  // (throttled markdown render) instead of running the full renderMarkdown pipeline on every token mutation.
   const streamingMessageKey = ref<string | null>(null)
   const streamContent = ref('')
-  const abortController = ref<AbortController | null>(null)
+  const streamStartedAt = ref<number | null>(null)
 
   const {
     streamContentHtml,
@@ -162,26 +203,114 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     flushStreamRender,
   } = useStreamMarkdownRender(streamContent, streamReasoning, selectedAgentId, messages)
 
+  const followToBottom = deps.followToBottom ?? scrollToBottom
   const { mutate } = useApiMutation()
   // GH-12: the in-flight stop POST; a send waits for it so the backend has released the turn.
   let pendingStop: Promise<unknown> | null = null
-  // GH-12: the conversation the open stream runs in; the on-screen one can change mid-stream.
-  let streamConvoId: number | null = null
+
+  let turn: OpenTurn | null = null
+  // Counts inits, so a read begun before one does not act on a turn it never saw.
+  let inits = 0
+  // Bumped whenever the stream closes: an answer, read or timer for an earlier view changes nothing.
+  let viewGen = 0
+  // Sends whose answer has not come: a turn's rows wait for them, so the optimistic row is paired, never doubled.
+  const sends = new Set<Promise<unknown>>()
+  // A New Chat's send awaiting the conversation it creates, which a second send from that chat goes to.
+  let newChatSend: Promise<number | null> | null = null
+
+  const stream = useConversationStream({ onFrame: dispatchFrame, onOpen: () => void settleIfIdle(), onGiveUp: giveUpTurn })
+  watch(stream.up, (up) => {
+    if (deps.streamUp) deps.streamUp.value = up
+  }, { flush: 'sync', immediate: true })
+  // A stream that gave up tries again once the event bus is back.
+  useEventBus().onOpen(() => stream.reopen())
+
+  /** No merge may give the open bubble a saved row's id: it is still streaming, and its reply is not saved yet. */
+  const unlessOpenBubble = (m: Message) => m !== turn?.bubble
+
+  /** Reset the bubble buffers the throttled renderer reads. */
+  function clearStreamBuffers() {
+    streamContent.value = ''
+    streamReasoning.value = ''
+    streamStatus.value = ''
+    streamContentHtml.value = ''
+    streamReasoningHtml.value = ''
+  }
+
+  /** Forget the open turn on this page; the server's turn is untouched. */
+  function dropTurn() {
+    turn = null
+    streaming.value = false
+    streamingMessageKey.value = null
+    streamStartedAt.value = null
+    streamStatus.value = ''
+  }
+
+  function closeView() {
+    viewGen++
+    if (turn) {
+      dropTurn()
+      clearStreamBuffers()
+    }
+  }
+
+  // Switching conversations, New Chat or an agent change closes the stream; the page reopens it once rows load.
+  watch(followedConvoId, (id) => {
+    closeView()
+    stream.close()
+    if (id != null) stream.open(id)
+  }, { flush: 'sync', immediate: true })
+  watch(selectedConvoId, (id) => {
+    if (id !== followedConvoId.value) followedConvoId.value = null
+  }, { flush: 'sync' })
+
+  function leaveView() {
+    followedConvoId.value = null
+    closeView()
+  }
+
+  /** Every merge: the open bubble and a send not yet answered pair with nothing, and a bubble drops a call a saved row shows. */
+  async function mergeRows(opts: { full?: boolean } = {}) {
+    await mergeSavedRows({ ...opts, pairable: unlessOpenBubble })
+    dropCallsSavedRowsShow()
+  }
+
+  // A round's saved row takes the calls the bubble streamed for it; left on the bubble too, they would show twice.
+  function dropCallsSavedRowsShow() {
+    let dropped = false
+    for (const m of messages.value) {
+      if (typeof m.id === 'number' || !m.toolCalls?.some(tc => shownOnSavedRow(tc.id))) continue
+      m.toolCalls = m.toolCalls.filter(tc => !shownOnSavedRow(tc.id))
+      dropped = true
+    }
+    if (dropped) triggerRef(messages)
+  }
 
   function stopStreaming() {
     if (!streaming.value) return
-    abortController.value?.abort()
-    const convoId = streamConvoId
+    const convoId = stream.conversationId.value
+    const stopping = turn
     if (convoId != null) {
-      // mutate never rejects, so a failed stop cannot block the next send.
-      const stop: Promise<unknown> = mutate(`/api/conversations/${convoId}/stop`, { method: 'POST' })
+      // mutate never rejects, so a failed stop cannot block the next send. The server publishes the turn's stopped
+      // frame before it answers, but on the stream's own connection, which can land later: a stop that worked ends the
+      // turn here. One that found nothing to stop leaves it to the turn's own terminal, or to an idle read.
+      const stop: Promise<unknown> = mutate<{ stopped?: boolean }>(`/api/conversations/${convoId}/stop`, { method: 'POST' })
+        .then(async (answer) => {
+          if (!answer?.stopped) {
+            await settleIfIdle()
+            return
+          }
+          if (stopping && turn === stopping) {
+            handleStreamStoppedEvent(stopping.bubble)
+            endTurn()
+          }
+          await readQueue()
+        })
         .finally(() => {
           if (pendingStop === stop) pendingStop = null
         })
       pendingStop = stop
     }
-    streaming.value = false
-    streamStatus.value = ''
     focusInput()
   }
 
@@ -210,55 +339,19 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
-  /** Reset all streaming buffers and flip the {@code streaming} flag on. */
-  function beginStreamingState() {
-    streaming.value = true
-    streamContent.value = ''
-    streamReasoning.value = ''
-    streamStatus.value = ''
-    streamContentHtml.value = ''
-    streamReasoningHtml.value = ''
-  }
-
-  /**
-   * JCLAW-26: if the backend minted a NEW conversation (e.g. /new slash-
-   * command), discard the stale visible history and re-anchor to just the
-   * streaming placeholder so the view matches what the new conversation
-   * actually contains.
-   */
-  function handleInitConversationSwap(ctx: StreamContext, newConversationId: number) {
-    if (ctx.sentConversationId === null) return
-    if (ctx.sentConversationId === newConversationId) return
-    const placeholder = messages.value[ctx.assistantIdx]
-    if (!placeholder) return
-    messages.value = [placeholder]
-    ctx.assistantIdx = 0
-    triggerRef(messages)
-  }
-
-  function handleStreamInitEvent(ctx: StreamContext, event: { conversationId?: number, thinkingMode?: string }) {
-    if (!event.conversationId) return
-    streamConvoId = event.conversationId
-    handleInitConversationSwap(ctx, event.conversationId)
-    selectedConvoId.value = event.conversationId
-    if (event.thinkingMode) {
-      streamStatus.value = `thinking (${event.thinkingMode})...`
-    }
-  }
-
   /** Parse a status frame that may carry a usage JSON payload. Returns true if it was consumed as usage. */
-  function tryApplyUsageFromStatusContent(ctx: StreamContext, content: string): boolean {
+  function tryApplyUsageFromStatusContent(m: StreamingMessage, content: string): boolean {
     if (!content.startsWith('{') || !content.includes('"usage"')) return false
     try {
       const parsed = JSON.parse(content)
       if (!parsed.usage) return false
-      messages.value[ctx.assistantIdx]!.usage = parsed.usage
+      m.usage = parsed.usage
       triggerRef(messages)
       // The metrics pill renders below the bubble the moment usage lands.
       // Without this scroll the per-token scroller leaves the viewport
       // pinned to the pre-metrics bottom and the user sees a half-cropped
       // stats row.
-      scrollToBottom()
+      followToBottom()
       return true
     }
     catch {
@@ -267,12 +360,12 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   }
 
   /** JCLAW-1222: a `{"route":…}` status frame names the model the router picked, or failed over to. Returns true if consumed. */
-  function tryApplyRouteFromStatusContent(ctx: StreamContext, content: string): boolean {
+  function tryApplyRouteFromStatusContent(m: StreamingMessage, content: string): boolean {
     if (!content.startsWith('{"route"')) return false
     try {
       const parsed = JSON.parse(content) as { route?: MessageRoute }
       if (!parsed.route) return false
-      messages.value[ctx.assistantIdx]!._route = parsed.route
+      m._route = parsed.route
       triggerRef(messages)
       return true
     }
@@ -282,12 +375,12 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   }
 
   /** Parse the context frame the backend sends after every model call, so the meter moves mid-turn. */
-  function tryApplyContextFromStatusContent(ctx: StreamContext, content: string): boolean {
+  function tryApplyContextFromStatusContent(m: StreamingMessage, content: string): boolean {
     if (!content.startsWith('{"contextTokens"')) return false
     try {
       const parsed = JSON.parse(content) as { contextTokens?: number }
       if (typeof parsed.contextTokens !== 'number') return false
-      messages.value[ctx.assistantIdx]!._contextTokens = parsed.contextTokens
+      m._contextTokens = parsed.contextTokens
       triggerRef(messages)
       return true
     }
@@ -296,21 +389,59 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
-  function handleStreamStatusEvent(ctx: StreamContext, event: { content?: string }) {
+  function handleStreamInitEvent(event: TurnFrame, eventId: string) {
+    // The same turn replayed around a resync, which rebuilds the bubble from the frames after it.
+    if (turn && eventId && turn.initId === eventId) return
+    // A turn whose terminal never reached this page: what its bubble holds is unknown, so its saved rows replace it.
+    if (turn) {
+      const stale = turn.bubble
+      dropTurn()
+      messages.value = messages.value.filter(m => m !== stale)
+    }
+    const bubble: StreamingMessage = { _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() }
+    turn = { bubble, initId: eventId }
+    inits++
+    clearStreamBuffers()
+    const startedAt = typeof event.startedAt === 'string' ? Date.parse(event.startedAt) : Number.NaN
+    streamStartedAt.value = Number.isFinite(startedAt) ? startedAt : Date.now()
+    streamingMessageKey.value = bubble._key!
+    if (deps.liveChecklist) deps.liveChecklist.value = null
+    deps.clearStoppable?.()
+    messages.value.push(bubble)
+    triggerRef(messages)
+    streaming.value = true
+    if (typeof event.thinkingMode === 'string' && event.thinkingMode) {
+      streamStatus.value = `thinking (${event.thinkingMode})...`
+    }
+    followToBottom()
+    void afterInit(bubble)
+  }
+
+  // The turn's user message, a drained one's included, is saved before its init: fetched first, so it shows before the
+  // reply, and only then the queue read that drops its Queued row.
+  async function afterInit(bubble: StreamingMessage) {
+    const gen = viewGen
+    if (sends.size) await Promise.allSettled([...sends])
+    if (gen !== viewGen || turn?.bubble !== bubble) return
+    await mergeRows()
+    if (gen !== viewGen || turn?.bubble !== bubble) return
+    await readQueue({ init: true })
+  }
+
+  function handleStreamStatusEvent(m: StreamingMessage, event: { content?: string }) {
     const content = event.content
-    if (content && (tryApplyUsageFromStatusContent(ctx, content) || tryApplyRouteFromStatusContent(ctx, content)
-      || tryApplyContextFromStatusContent(ctx, content))) return
+    if (content && (tryApplyUsageFromStatusContent(m, content) || tryApplyRouteFromStatusContent(m, content)
+      || tryApplyContextFromStatusContent(m, content))) return
     // Sent just before the call runs, whereas its tool_call frame arrives only once it has finished —
     // too late to show a first-use download while it happens. Scoped to this turn, like the image bar.
     if (content === 'Using tool: browser') {
-      browserSetupTurnKey.value = messages.value[ctx.assistantIdx]?._key ?? null
+      browserSetupTurnKey.value = m._key ?? null
       startBrowserSetupPolling()
     }
     streamStatus.value = content ?? ''
   }
 
-  function handleStreamReasoningEvent(ctx: StreamContext, event: { content: string }) {
-    const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  function handleStreamReasoningEvent(m: StreamingMessage, event: { content: string }) {
     const stateChanged = markThinkingStartedIfFirst(m)
     streamReasoning.value += event.content
     // Property mutation on a shallowRef-held object does not trigger
@@ -318,17 +449,17 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // (throttled markdown render below) instead of msg.reasoning, so
     // the user still sees the live update. msg.reasoning is kept in
     // sync so the post-stream renderMarkdown(msg.reasoning) path
-    // displays the final text after the finally{} triggerRef.
+    // displays the final text after the terminal triggerRef.
     m.reasoning = streamReasoning.value
     scheduleStreamReasoningRender()
     if (stateChanged) triggerRef(messages)
     if (!streamContent.value) {
       streamStatus.value = 'thinking...'
     }
-    scrollToBottom()
+    followToBottom()
   }
 
-  function handleStreamTokenEvent(ctx: StreamContext, event: { content?: string, timestamp?: string }) {
+  function handleStreamTokenEvent(m: StreamingMessage, event: { content?: string, timestamp?: string }) {
     // Empty-content token events are emitted by OpenAI-compatible providers
     // (observed on Kimi K2.5 via OpenRouter) interleaved with every reasoning
     // chunk — the `content` field is always present in the API schema and
@@ -338,7 +469,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // reasoning event was tripping the flip. Skip them entirely so the
     // transition fires only on the first byte of genuine content.
     if (!event.content) return
-    const m = messages.value[ctx.assistantIdx] as StreamingMessage
     const transitioned = finalizeThinkingOnTransition(m)
     streamStatus.value = ''
     if (event.timestamp) m.createdAt = event.timestamp
@@ -351,10 +481,15 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // messages-array reactivity, which is the whole point of the shallowRef
     // migration.
     if (transitioned) triggerRef(messages)
-    scrollToBottom()
+    followToBottom()
   }
 
-  function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
+  /** A turn joined late already shows its committed rounds' calls on their saved rows. */
+  function shownOnSavedRow(callId: string): boolean {
+    return messages.value.some(r => typeof r.id === 'number' && r.toolCalls?.some(tc => tc.id === callId))
+  }
+
+  function handleStreamToolCallEvent(m: StreamingMessage, event: ToolCallEvent) {
     // JCLAW-170: a tool invocation completed on the backend. Append the
     // structured payload to the streaming assistant message's toolCalls
     // array so the collapsible block surfaces it live. The accordion starts
@@ -363,7 +498,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // themselves, and it auto-collapses on reload for historical turns.
     // Per-call: collapse any prior calls and auto-expand the just-arrived
     // one so its results are visible without an extra click.
-    const m = messages.value[ctx.assistantIdx] as StreamingMessage
+    if (shownOnSavedRow(event.id)) return
     if (!m.toolCalls) {
       m.toolCalls = []
       m.toolCallsCollapsed = false
@@ -402,107 +537,194 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       startVideoPolling() // a generate_video placeholder (JCLAW-234) needs the progress poll to begin
     }
     triggerRef(messages)
-    scrollToBottom()
+    followToBottom()
   }
 
-  function handleStreamCompleteEvent(ctx: StreamContext, event: { content?: string }) {
-    const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  function handleStreamCompleteEvent(m: StreamingMessage, event: { content?: string }) {
     // Reasoning-only turn (no content streamed): finalize duration here.
     finalizeThinkingOnTransition(m)
-    streamStatus.value = ''
     m.content = event.content || streamContent.value
     // Collapsing thinking + swapping in final content shifts layout height.
     // Re-pin to the bottom so the next thing the user sees is fully in view.
-    scrollToBottom()
+    followToBottom()
   }
 
-  function handleStreamErrorEvent(ctx: StreamContext, event: { content: string }) {
-    messages.value[ctx.assistantIdx]!.content = event.content
+  function handleStreamStoppedEvent(m: StreamingMessage) {
+    // Keep what already streamed and mark it, rather than replacing the bubble with an error.
+    const existing = m.content || streamContent.value || ''
+    m.content = existing ? existing.trimEnd() + '\n\n_(stopped)_' : '_(stopped before any response)_'
+  }
+
+  /** End the open turn: the bubble keeps its final text, and the saved rows, its reply committed first, are merged. */
+  function endTurn() {
+    if (!turn) return
+    finalizeThinkingOnTransition(turn.bubble)
+    dropTurn()
+    flushStreamRender()
+    triggerRef(messages) // re-render with final content + markdown
+    // triggerRef can add height (markdown codeblocks expand, metrics pill
+    // appears if usage arrived after complete). Wait a tick so the DOM
+    // reflects the final layout, then pin to the bottom.
+    nextTick().then(followToBottom)
+    refreshConversations()
+    // Re-sync agents too: the agent can rewrite its own model mid-turn via
+    // the jclaw_api tool (PUT /api/agents/{id} → Agent.modelProvider/modelId).
+    // The header selector reads selectedAgent through effectiveModel, so
+    // without this it stays pinned to the pre-switch model until a manual
+    // reload. The tool's PUT commits in its own Tx mid-turn, well before the
+    // terminal frame, so the new value is already persisted by now.
+    refreshAgents()
+    // Every engine commits the reply before it publishes the terminal frame, so the bubble pairs with it now.
+    void mergeRows()
+  }
+
+  /**
+   * On open, and after a resync: if no turn runs, the saved rows are final, which covers a turn that ended before the
+   * page subscribed or while the stream was away; a turn still open here then ended unseen, and its rows replace it.
+   */
+  async function settleIfIdle() {
+    const at = inits
+    const gen = viewGen
+    const status = await readQueue()
+    if (!status || status.busy || gen !== viewGen || at !== inits) return
+    dropUnseenTurn()
+    await mergeRows()
+  }
+
+  /** The open turn ended where this page could not see it: what its bubble holds is unknown, so its saved rows replace it. */
+  function dropUnseenTurn() {
+    const ended = turn
+    if (!ended) return
+    dropTurn()
+    clearStreamBuffers()
+    messages.value = messages.value.filter(m => m !== ended.bubble)
     triggerRef(messages)
   }
 
-  function handleStreamQueuedEvent(ctx: StreamContext, event: { position?: number | string }) {
-    messages.value[ctx.assistantIdx]!.content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
-    triggerRef(messages)
+  // The stream will not reopen by itself: the Working… line and the poller show the turn until the page reopens it.
+  function giveUpTurn() {
+    dropUnseenTurn()
+    void mergeRows()
   }
 
-  /** Dispatch one SSE event to its dedicated handler. */
-  function dispatchStreamEvent(ctx: StreamContext, event: { type?: string } & Record<string, unknown>) {
+  /** Frames the page cannot have are gone: reload the rows and rebuild the turn from the frames after this one. */
+  function handleResync() {
+    const open = turn
+    if (open) {
+      clearBubble(open.bubble)
+      clearStreamBuffers()
+      triggerRef(messages)
+    }
+    const gen = viewGen
+    void (async () => {
+      await mergeRows({ full: true })
+      if (gen === viewGen) await settleIfIdle()
+    })()
+  }
+
+  function dispatchFrame(event: TurnFrame, eventId: string) {
+    if (event.type === 'init') {
+      handleStreamInitEvent(event, eventId)
+      return
+    }
+    if (event.type === 'resync') {
+      handleResync()
+      return
+    }
+    const m = turn?.bubble
+    if (!m) return
     switch (event.type) {
-      case 'init':
-        handleStreamInitEvent(ctx, event as { conversationId?: number, thinkingMode?: string })
-        break
       case 'status':
-        handleStreamStatusEvent(ctx, event as { content?: string })
+        handleStreamStatusEvent(m, event as { content?: string })
         break
       case 'reasoning':
-        handleStreamReasoningEvent(ctx, event as { content: string })
+        handleStreamReasoningEvent(m, event as { content: string })
         break
       case 'token':
-        handleStreamTokenEvent(ctx, event as { content?: string, timestamp?: string })
+        handleStreamTokenEvent(m, event as { content?: string, timestamp?: string })
         break
       case 'tool_call':
-        handleStreamToolCallEvent(ctx, event as unknown as ToolCallEvent)
+        handleStreamToolCallEvent(m, event as unknown as ToolCallEvent)
         break
       case 'complete':
-        handleStreamCompleteEvent(ctx, event as { content?: string })
+        handleStreamCompleteEvent(m, event as { content?: string })
+        endTurn()
         break
       case 'error':
-        handleStreamErrorEvent(ctx, event as { content: string })
+        m.content = typeof event.content === 'string' ? event.content : ''
+        // A failed turn saves no reply row, so nothing pairs with it and it keeps its place.
+        m._local = true
+        endTurn()
         break
-      case 'queued':
-        handleStreamQueuedEvent(ctx, event as { position?: number | string })
+      case 'stopped':
+        handleStreamStoppedEvent(m)
+        endTurn()
         break
     }
   }
 
-  /** Parse one `data: …` SSE line and dispatch; swallow malformed JSON. */
-  function processStreamLine(ctx: StreamContext, line: string) {
-    if (!line.startsWith('data: ')) return
-    try {
-      const event = JSON.parse(line.slice(6))
-      dispatchStreamEvent(ctx, event)
+  /** Follow the conversation a send just named, which the page shows from now on. */
+  function follow(conversationId: number) {
+    selectedConvoId.value = conversationId
+    followedConvoId.value = conversationId
+  }
+
+  /**
+   * The answer to a send: the turn renders from the stream, so this only places what the stream never carries. The
+   * view follows the answer's conversation, which a new chat or a load that never opened the stream had not, and a
+   * stream that gave up there opens again.
+   */
+  async function applyAnswer(answer: TurnAnswer, sent: Message, sentConversationId: number | null,
+    uploaded: UploadedAttachment[]) {
+    if (answer.status === 'command') {
+      await applyCommandAnswer(answer, sent, sentConversationId)
+      return
     }
-    catch {
-      // Skip malformed events
+    if (answer.conversationId != null && followedConvoId.value !== answer.conversationId) follow(answer.conversationId)
+    else stream.reopen()
+    if (answer.status === 'queued') {
+      messages.value = messages.value.filter(m => m !== sent)
+      triggerRef(messages)
+      showQueued({
+        text: sent.content ?? '',
+        attachmentNames: uploaded.map(u => u.originalFilename || u.kind),
+        position: answer.position ?? 1,
+      })
+      void readQueue()
     }
   }
 
-  /** Drain the SSE response stream, dispatching each event line as it arrives. */
-  async function consumeStreamResponse(ctx: StreamContext, res: Response) {
-    if (!res.body) throw new Error('No response body')
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) processStreamLine(ctx, line)
+  async function applyCommandAnswer(answer: TurnAnswer, sent: Message, sentConversationId: number | null) {
+    // The server answers a slash command without saving its text.
+    sent._local = true
+    const reply: Message = { _key: crypto.randomUUID(), role: 'assistant', content: answer.content ?? '',
+      createdAt: new Date().toISOString(), _local: true }
+    const elsewhere = answer.conversationId != null && answer.conversationId !== sentConversationId
+    if (elsewhere && openConversation) {
+      // /new made a conversation (JCLAW-26), or a New Chat's command ran in the agent's existing one: shown as a load
+      // shows it, with a reply that was not saved after its rows.
+      await openConversation(answer.conversationId!)
+      if (!answer.saved) {
+        messages.value = [...messages.value, sent, reply]
+        triggerRef(messages)
+      }
+      nextTick().then(scrollToBottom)
+      return
     }
-  }
-
-  /** Render the user-visible message into the assistant placeholder when the stream throws. */
-  function applyStreamErrorToPlaceholder(assistantIdx: number, e: unknown) {
-    const err = e as { name?: string, message?: string } | undefined
-    if (err?.name === 'AbortError') {
-      // AbortError is expected when the user clicks Stop — preserve any content
-      // that was already streamed and append a small "(stopped)" marker instead
-      // of replacing the bubble with a scary error.
-      const existing = messages.value[assistantIdx]!.content || streamContent.value || ''
-      messages.value[assistantIdx]!.content = existing
-        ? existing.trimEnd() + '\n\n_(stopped)_'
-        : '_(stopped before any response)_'
+    if (elsewhere) follow(answer.conversationId!)
+    if (answer.saved) {
+      // The reply committed before the answer: the merge puts it where the server did.
+      await mergeRows()
     }
     else {
-      messages.value[assistantIdx]!.content = 'Error: ' + (err?.message || 'Failed to get response')
+      messages.value = [...messages.value, reply]
+      triggerRef(messages)
     }
+    nextTick().then(scrollToBottom)
   }
 
   async function sendMessage() {
-    if (streaming.value || !selectedAgentId.value) return
+    if (!selectedAgentId.value) return
     // Subagent transcripts are read-only — the user reached this view via a
     // "View transcript" link, and there's no well-defined target agent to
     // post to (the dropdown shows a top-level agent, not the subagent).
@@ -533,90 +755,54 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // hidden until the next /messages refetch surfaced the persisted
     // {@link MessageAttachment} rows — observable as "I uploaded a file
     // but it doesn't show until I leave and come back."
-    messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded), ...(quote ? { _quote: quote } : {}) })
+    const sent: Message = { _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded), ...(quote ? { _quote: quote } : {}), _sending: true }
+    messages.value.push(sent)
     triggerRef(messages)
     scrollToBottom()
-    if (deps.liveChecklist) deps.liveChecklist.value = null
+    focusInput()
 
-    beginStreamingState()
-
-    // Capture the conversation id we're sending — if the server returns a
-    // DIFFERENT id in the init frame, the backend minted a new conversation
-    // (e.g. /new slash-command, JCLAW-26). We need to discard the stale
-    // visible history from the prior conversation so the view matches what
-    // the new conversation row actually contains on reload.
-    const ctx: StreamContext = {
-      assistantIdx: messages.value.length,
-      sentConversationId: selectedConvoId.value,
-    }
-    streamConvoId = ctx.sentConversationId
-
-    // Add placeholder for streaming response
-    const assistantKey = crypto.randomUUID()
-    messages.value.push({ _key: assistantKey, role: 'assistant', content: '', createdAt: new Date().toISOString() })
-    streamingMessageKey.value = assistantKey
-    triggerRef(messages)
-
-    abortController.value?.abort() // cancel any orphaned previous stream
-    abortController.value = new AbortController()
+    // A New Chat creates its conversation with its first send; a second one, sent before that answer, goes there too.
+    let sentConversationId = selectedConvoId.value
+    if (sentConversationId === null && newChatSend) sentConversationId = await newChatSend
+    const gen = viewGen
+    const post = useApiMutation()
+    const request = post.mutate<TurnAnswer>('/api/chat/turn', {
+      method: 'POST',
+      body: {
+        agentId: selectedAgentId.value,
+        conversationId: sentConversationId,
+        message: text,
+        attachments: uploaded,
+        ...(quote ? { quote } : {}),
+        ...(sentConversationId == null ? (deps.pendingOverrides?.value ?? {}) : {}),
+      },
+    })
+    sends.add(request)
+    const created = sentConversationId === null ? request.then(a => a?.conversationId ?? null) : null
+    if (created) newChatSend = created
+    let answer: TurnAnswer | null
     try {
-      const res = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortController.value.signal,
-        body: JSON.stringify({
-          agentId: selectedAgentId.value,
-          conversationId: selectedConvoId.value,
-          message: text,
-          attachments: uploaded,
-          ...(quote ? { quote } : {}),
-          ...(selectedConvoId.value == null ? (deps.pendingOverrides?.value ?? {}) : {}),
-        }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      await consumeStreamResponse(ctx, res)
-    }
-    catch (e: unknown) {
-      applyStreamErrorToPlaceholder(ctx.assistantIdx, e)
+      answer = await request
     }
     finally {
-      streaming.value = false
-      streamingMessageKey.value = null
-      flushStreamRender()
-      triggerRef(messages) // re-render with final content + markdown
-      // triggerRef can add height (markdown codeblocks expand, metrics pill
-      // appears if usage arrived after complete). Wait a tick so the DOM
-      // reflects the final layout, then pin to the bottom.
-      nextTick().then(scrollToBottom)
-      focusInput()
-      // Fire the refresh twice. Immediate: catches the common case where the
-      // backend persist already landed by the time onComplete fires. Delayed:
-      // catches the race where the SSE `complete` frame beat the persist Tx
-      // commit.
-      refreshConversations()
-      // Re-sync agents too: the agent can rewrite its own model mid-turn via
-      // the jclaw_api tool (PUT /api/agents/{id} → Agent.modelProvider/modelId).
-      // The header selector reads selectedAgent through effectiveModel, so
-      // without this it stays pinned to the pre-switch model until a manual
-      // reload. Single fire is enough — the tool's PUT commits in its own Tx
-      // mid-turn, well before the SSE `complete` frame, so the new value is
-      // already persisted by the time we get here (unlike the conversation
-      // persist-race the double-fire above guards against).
-      refreshAgents()
-      // Delayed reconcile rides the same persist-race window so the in-flight
-      // user + assistant bubbles pick up their server ids (delete button gates
-      // on msg.id — without this the Delete action was a no-op until the user
-      // navigated away and back).
-      setTimeout(() => {
-        refreshConversations()
-        void reconcileMessageIds()
-      }, 600)
+      sends.delete(request)
+      if (created && newChatSend === created) newChatSend = null
+      delete sent._sending
     }
+    refreshConversations()
+    // The operator left the view the message was sent from; the turn runs on and shows wherever its conversation opens.
+    if (gen !== viewGen || selectedConvoId.value !== sentConversationId) return
+    if (!answer) {
+      sent._local = true
+      const refused: Message = { _key: crypto.randomUUID(), role: 'assistant', content: 'Error: ' + (post.error.value || 'Failed to get response'), createdAt: new Date().toISOString(), _local: true }
+      messages.value = [...messages.value, refused]
+      triggerRef(messages)
+      return
+    }
+    await applyAnswer(answer, sent, sentConversationId, uploaded)
   }
 
-  onUnmounted(() => {
-    abortController.value?.abort()
-  })
+  onUnmounted(closeView)
 
   return {
     streamContent,
@@ -624,7 +810,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamingMessageKey,
     streamContentHtml,
     streamReasoningHtml,
+    streamStartedAt,
     sendMessage,
     stopStreaming,
+    leaveView,
   }
 }

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { DRIVER_LABELS, browserSetupNeeded, chromiumLabel, type DriverSource } from '../../utils/browser-setup'
-import { test, expect, gotoPage, json, blockApiWrites, holdChatStream } from './helpers'
+import { test, expect, gotoPage, json, blockApiWrites, fakeChatTurns } from './helpers'
 
 /**
  * The browser tool's first-use setup: Settings > Browser's Browser components section and the
@@ -97,7 +97,7 @@ test.describe('UAT-22 browser setup', () => {
 
   test('the chat shows the download under the reply whose browser call is waiting on it', async ({ page }) => {
     // The bar lives only while the turn streams.
-    const stream = await holdChatStream(page)
+    const stream = await fakeChatTurns(page, 990201)
 
     const blocked = await blockApiWrites(page)
     let current = setup({ active: true, driverSource: 'downloaded', step: 'Downloading Chrome for Testing 153.0.8010.12', percent: 35 })
@@ -126,7 +126,6 @@ test.describe('UAT-22 browser setup', () => {
     await expect(bar).toHaveCount(0, { timeout: 10_000 })
 
     await stream.push({ type: 'complete', content: 'Opened.' })
-    await stream.end()
     await expect(page.getByText('Opened.')).toBeVisible()
     expect(blocked()).toEqual([])
   })

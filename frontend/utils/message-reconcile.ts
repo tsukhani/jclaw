@@ -6,14 +6,13 @@ import type { Message, MessageAttachment, ToolCall } from '~/types/api'
  * Server-id reconciliation for optimistic chat rows (JCLAW-690 stage 4e; pure
  * logic extracted verbatim from pages/chat.vue). Kept as pure functions here so
  * the subtle role-stack pairing — the part most likely to regress — is
- * unit-testable without mounting the page or faking a stream. The impure
- * orchestrator (useChatConversation's reconcileMessageIds) calls
+ * unit-testable without mounting the page or faking a stream. Every merge of
+ * fetched rows into the chat goes through {@link mergeNewRows}, which calls
  * {@link backfillServerIds}.
  *
  * Pair id-less local rows with their server-side counterparts by role,
- * mutating local rows to carry the server id. Used both at end-of-stream
- * (reconcileMessageIds) and inside the announce poll loop so subsequent
- * id-membership checks dedupe correctly.
+ * mutating local rows to carry the server id, so subsequent id-membership
+ * checks dedupe correctly.
  *
  * Algorithm: build a per-role LIFO stack of unpaired server ids, then walk
  * local rows back to front and pop the latest matching-role server id off
@@ -29,8 +28,8 @@ import type { Message, MessageAttachment, ToolCall } from '~/types/api'
  * pairings: a local row whose role's stack runs dry stays id-less.
  *
  * {@link reconcileWindow} below is the merge every incremental fetch of
- * hydrated rows goes through: the chat page's live merge and the subagent
- * transcript panel alike.
+ * hydrated rows goes through: the chat page's live merge ({@link mergeNewRows})
+ * and the subagent transcript panel alike.
  */
 
 /** Set of message ids already present on local rows. */
@@ -241,6 +240,49 @@ export function reconcileWindow(shown: readonly Message[], fresh: Message[], par
   // Additions only: re-collapsing every row would fold a thinking card the reader just opened.
   initCollapsedState(additions)
   return { rows, additions, changed }
+}
+
+/** What {@link mergeNewRows} made of the rows a fetch returned. */
+export interface MergedRows {
+  /** The shown list after the merge. */
+  rows: Message[]
+  /** The fetched rows not shown before, with the collapse defaults applied. */
+  additions: Message[]
+  /** Whether a shown row changed, a row was added, or the order moved. */
+  changed: boolean
+}
+
+/**
+ * Merges `fresh`, the server's rows after some message, into the shown list as a reload would show them. An id-less
+ * row that `pairable` allows first takes the id of its saved copy ({@link backfillServerIds}); the rows with a server
+ * id then go in id order, the order the messages endpoint's cursor reads return, so a row that commits below a shown
+ * one lands where a reload puts it, each the shown copy where one exists. A `_sending` row pairs with nothing until
+ * its send is answered. A `_local` row, which nothing pairs with,
+ * stays after the saved row it followed; the other rows still without an id, which wait on their save or stream, come
+ * last, in their order. A row the window does not hold keeps its place.
+ */
+export function mergeNewRows(shown: Message[], fresh: Message[], pairable: (m: Message) => boolean = () => true): MergedRows {
+  const backfilled = backfillServerIds(
+    shown.filter(m => typeof m.id === 'number' || (!m._local && !m._sending && pairable(m))), fresh)
+  const window = reconcileWindow(shown, fresh, false)
+  const byId = new Map<number, Message>()
+  const localAfter = new Map<number | null, Message[]>()
+  const unsaved: Message[] = []
+  let before: number | null = null
+  for (const m of shown) {
+    if (typeof m.id === 'number') {
+      byId.set(m.id, m)
+      before = m.id
+    }
+    else if (m._local) localAfter.set(before, [...localAfter.get(before) ?? [], m])
+    else unsaved.push(m)
+  }
+  for (const m of window.rows) byId.set(m.id!, m)
+  const rows = [...localAfter.get(null) ?? []]
+  for (const m of [...byId.values()].sort((a, b) => a.id! - b.id!)) rows.push(m, ...localAfter.get(m.id!) ?? [])
+  rows.push(...unsaved)
+  const moved = rows.length !== shown.length || rows.some((m, i) => m !== shown[i])
+  return { rows, additions: window.additions, changed: backfilled || window.changed || moved }
 }
 
 /**

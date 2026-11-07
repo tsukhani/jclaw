@@ -148,46 +148,115 @@ export async function blockApiWrites(page: Page): Promise<() => string[]> {
   return () => blocked
 }
 
-type HeldStream = { open: () => boolean, push: (event: object) => void, end: () => void }
+/** What the fake answers for `GET /api/conversations/{id}/queue`. */
+export type FakeQueue = {
+  busy: boolean
+  queueSize: number
+  stoppable: boolean
+  pending: Array<{ text: string, attachmentNames: string[], position: number }>
+}
+
+type FakeTurns = {
+  sent: Array<Record<string, unknown>>
+  stops: number
+  queue: FakeQueue
+  open: () => boolean
+  push: (event: object) => void
+}
 
 /**
- * Answer `/api/chat/stream` with a stream the test feeds frame by frame, for states that last only while a
- * turn streams; `route.fulfill` delivers the whole body at once. Call before the first navigation: the fetch
- * is replaced before the page's scripts run, and every other request passes through.
+ * Stand in, in the page, for the server's half of a chat turn (JF-202): `POST /api/chat/turn` answers `started` in
+ * `conversationId` and records its body, and that conversation's stream (`GET /api/conversations/{id}/stream`) is an
+ * EventSource the test feeds, which stays open as the server's does. Its queue (`GET .../queue`) answers what the
+ * test last set, idle by default, and its Stop (`POST .../stop`) is counted, empties that queue and ends the turn
+ * on the stream before it answers. The nth send's
+ * turn plays `turns[n]` once the stream is open; a send past the list plays nothing, for a test that pushes a turn's
+ * frames itself while it runs. Call before the first navigation: fetch and EventSource are replaced before the page's
+ * scripts run, and every other request passes through.
  */
-export async function holdChatStream(page: Page) {
-  await page.addInitScript(() => {
+export async function fakeChatTurns(page: Page, conversationId: number, turns: object[][] = []) {
+  await page.addInitScript(({ conversationId, turns }) => {
+    type Source = {
+      readyState: number
+      onopen: ((e: Event) => void) | null
+      onmessage: ((e: MessageEvent) => void) | null
+      onerror: ((e: Event) => void) | null
+      close: () => void
+    }
     const realFetch = window.fetch.bind(window)
-    const encoder = new TextEncoder()
-    let controller: ReadableStreamDefaultController<Uint8Array> | null = null
-    ;(window as unknown as { e2eStream: HeldStream }).e2eStream = {
-      open: () => controller !== null,
-      push: event => controller?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n`)),
-      end: () => {
-        controller?.close()
-        controller = null
-      },
+    const RealEventSource = window.EventSource
+    let source: Source | null = null
+    let nextId = 1
+    const push = (event: object) => source?.onmessage?.(
+      new MessageEvent('message', { data: JSON.stringify(event), lastEventId: String(nextId++) }))
+    const fake: FakeTurns = {
+      sent: [], stops: 0, queue: { busy: false, queueSize: 0, stoppable: false, pending: [] },
+      open: () => source?.readyState === 1, push,
     }
-    window.fetch = (input, init) => {
+    const json = (body: unknown) => new Response(JSON.stringify(body),
+      { status: 200, headers: { 'Content-Type': 'application/json' } })
+    ;(window as unknown as { e2eTurns: FakeTurns }).e2eTurns = fake
+    const playWhenOpen = (frames: object[]) => {
+      if (!fake.open()) {
+        setTimeout(() => playWhenOpen(frames), 20)
+        return
+      }
+      for (const frame of frames) push(frame)
+    }
+    window.fetch = async (input, init) => {
       const url = input instanceof Request ? input.url : String(input)
-      if (!url.includes('/api/chat/stream')) return realFetch(input, init)
-      const body = new ReadableStream<Uint8Array>({
-        start(c) {
-          controller = c
-        },
-      })
-      return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+      const path = new URL(url, location.href).pathname
+      if (path === `/api/conversations/${conversationId}/queue`) return json(fake.queue)
+      if (path === `/api/conversations/${conversationId}/stop`) {
+        // As the server stops: drop the queue, end the turn on its stream, then answer.
+        fake.stops++
+        fake.queue = { busy: false, queueSize: 0, stoppable: false, pending: [] }
+        push({ type: 'stopped' })
+        return json({ stopped: true })
+      }
+      if (path !== '/api/chat/turn') return realFetch(input, init)
+      fake.sent.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      const frames = turns[fake.sent.length - 1]
+      if (frames) setTimeout(() => playWhenOpen(frames), 0)
+      return json({ status: 'started', conversationId })
     }
-  })
+    function HeldEventSource(url: string | URL, init?: EventSourceInit) {
+      if (!String(url).startsWith(`/api/conversations/${conversationId}/stream`)) return new RealEventSource(url, init)
+      const held: Source = {
+        readyState: 0, onopen: null, onmessage: null, onerror: null,
+        close: () => {
+          held.readyState = 2
+          if (source === held) source = null
+        },
+      }
+      source = held
+      setTimeout(() => {
+        held.readyState = 1
+        held.onopen?.(new Event('open'))
+      }, 0)
+      return held
+    }
+    window.EventSource = HeldEventSource as unknown as typeof EventSource
+  }, { conversationId, turns })
   return {
-    /** Resolves once the page has sent its turn. */
+    /** Resolves once the page has sent a turn and its stream is open. */
     opened: async () => {
-      await page.waitForFunction(() => (window as unknown as { e2eStream: HeldStream }).e2eStream.open())
+      await page.waitForFunction(() => {
+        const fake = (window as unknown as { e2eTurns: FakeTurns }).e2eTurns
+        return fake.sent.length > 0 && fake.open()
+      })
     },
     push: (...events: object[]) => page.evaluate((frames) => {
-      for (const frame of frames) (window as unknown as { e2eStream: HeldStream }).e2eStream.push(frame)
+      for (const frame of frames) (window as unknown as { e2eTurns: FakeTurns }).e2eTurns.push(frame)
     }, events),
-    end: () => page.evaluate(() => (window as unknown as { e2eStream: HeldStream }).e2eStream.end()),
+    /** The bodies the page posted to `/api/chat/turn`, in order. */
+    sent: () => page.evaluate(() => (window as unknown as { e2eTurns: FakeTurns }).e2eTurns.sent),
+    /** What the conversation's queue answers from now on. */
+    setQueue: (queue: FakeQueue) => page.evaluate((q) => {
+      (window as unknown as { e2eTurns: FakeTurns }).e2eTurns.queue = q
+    }, queue),
+    /** How many times the page posted the conversation's Stop. */
+    stops: () => page.evaluate(() => (window as unknown as { e2eTurns: FakeTurns }).e2eTurns.stops),
   }
 }
 

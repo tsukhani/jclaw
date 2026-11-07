@@ -2,8 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vites
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { setResponseStatus } from 'h3'
+import { defineComponent, h, ref } from 'vue'
 import Chat from '~/pages/chat.vue'
+import { useChatBackgroundTurn, type UseChatBackgroundTurn } from '~/composables/useChatBackgroundTurn'
 import { serveConversation } from './conversation-endpoint'
+import { fakeConversationStreams, serveTurnStart, streamOn, type FakeEventSource } from './conversation-stream'
 
 // The SSE bus is mocked so a test delivers the server's events to the handlers the page registers.
 const bus = vi.hoisted(() => ({
@@ -57,6 +60,7 @@ function serveQueue(convoId: number, answer?: () => Promise<{ busy: boolean, que
 }
 
 beforeEach(() => {
+  fakeConversationStreams()
   bus.handlers.length = 0
   bus.openHandlers.length = 0
   busy = {}
@@ -79,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 type ChatVm = { loadConversation: (id: number) => Promise<void>, backgroundBusy: boolean }
@@ -280,80 +285,163 @@ describe('Chat page — a turn the page is not streaming', () => {
   })
 })
 
-describe('Chat page — the tab streaming its own turn', () => {
-  /** A stream the test feeds: frames now, the rest when `finish` runs. */
-  function streamingTurn(convoId: number) {
-    let controller!: ReadableStreamDefaultController<Uint8Array>
-    const encoder = new TextEncoder()
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new ReadableStream<Uint8Array>({
-      start(c) {
-        controller = c
-        c.enqueue(encoder.encode(`data: {"type":"init","conversationId":${convoId}}\n`))
-        c.enqueue(encoder.encode('data: {"type":"token","content":"Hel"}\n'))
-      },
-    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
-    return {
-      finish() {
-        controller.enqueue(encoder.encode('data: {"type":"complete","content":"Hello"}\n'))
-        controller.close()
-      },
+describe('Chat page — a message another tab queues', () => {
+  it('shows it as a Queued row, and counts it on Stop, as soon as the busy event the queueing publishes arrives', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    let status: Record<string, unknown> = { busy: true, queueSize: 0, stoppable: true, pending: [] }
+    serveQueue(5, async () => structuredClone(status) as { busy: boolean, queueSize: number })
+    const component = await openConversation(5)
+    const stream = streamOn(5)
+    stream.open()
+    stream.send({ type: 'init', conversationId: 5 })
+    const stop = () => component.find('[data-testid="chat-stop"]')
+    await vi.waitFor(() => expect(stop().attributes('title')).toBe('Stop generating'))
+    const reads = queueReads[5]!
+
+    status = { ...status, queueSize: 1, pending: [{ text: 'sent from tab A', attachmentNames: [], position: 1 }] }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(stop().text()).toBe('Stop and drop 1 queued'))
+    expect(queueReads[5]).toBe(reads + 1)
+    expect(component.findAll('[data-testid="queued-message"]').map(r => r.find('.rounded-2xl').text()))
+      .toEqual(['sent from tab A'])
+  })
+})
+
+describe('Chat page — a send the server queues', () => {
+  /** Sends `typed`, quoting `quote` when given, and lets a queue read list `listed` before the answer queues it. */
+  async function readBeforeAnswer(typed: string, listed: string, quote?: string) {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    let status: Record<string, unknown> = { busy: true, queueSize: 0, stoppable: true, pending: [] }
+    serveQueue(5, async () => structuredClone(status) as { busy: boolean, queueSize: number })
+    let answer!: () => void
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    serveTurnStart(async () => {
+      await answered
+      return { status: 'queued', conversationId: 5, position: 1 }
+    })
+    const component = await openConversation(5)
+    if (quote) {
+      await component.find('[data-testid="reply-message"]').trigger('click')
+      expect(component.find('[data-testid="reply-quote"]').text()).toContain(quote)
     }
+    await component.find<HTMLTextAreaElement>('textarea').setValue(typed)
+    await component.find('form').trigger('submit.prevent')
+
+    status = { ...status, queueSize: 1, pending: [{ text: listed, attachmentNames: [], position: 1 }] }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+    const rows = () => component.findAll('[data-testid="queued-message"]').map(r => r.find('.rounded-2xl').text())
+    await vi.waitFor(() => expect(rows()).toHaveLength(1))
+    answer()
+    for (let i = 0; i < 5; i++) await flushPromises()
+    return rows()
   }
 
-  async function send(component: VueWrapper) {
+  it('shows one Queued row when a queue read listed the message before the send\'s answer arrived', async () => {
+    expect(await readBeforeAnswer('and then this', 'and then this')).toEqual(['and then this'])
+  })
+
+  it('shows one Queued row for a quoted reply a read listed with its quote before the answer arrived', async () => {
+    const rows = await readBeforeAnswer('about that', '[Replying to your message]\n> long job\n\nabout that', 'long job')
+    expect(rows).toEqual(['Replying to your messagelong jobabout that'])
+  })
+})
+
+describe('the queue read\'s hold on a message its turn took', () => {
+  async function mountQueue(streamUp: boolean) {
+    const pending = [{ text: 'and then this', attachmentNames: [], position: 1 }]
+    let status: Record<string, unknown> = { busy: true, queueSize: 1, stoppable: true, pending }
+    serveQueue(5, async () => structuredClone(status) as { busy: boolean, queueSize: number })
+    let api!: UseChatBackgroundTurn
+    await mountSuspended(defineComponent({
+      setup() {
+        api = useChatBackgroundTurn({ selectedConvoId: ref(5), streaming: ref(false), fetchNewRows: async () => {},
+          streamUp: ref(streamUp) })
+        return () => h('div')
+      },
+    }))
+    await vi.waitFor(() => expect(api.pending.value).toHaveLength(1))
+    // Its turn takes it from the queue; the conversation stays busy with that turn.
+    status = { ...status, queueSize: 0, pending: [] }
+    return api
+  }
+
+  it('keeps the row while the stream is up, for the turn\'s init to replace with its saved row', async () => {
+    const api = await mountQueue(true)
+    await api.readQueue()
+    expect(api.pending.value.map(p => p.text)).toEqual(['and then this'])
+    await api.readQueue({ init: true })
+    expect(api.pending.value).toEqual([])
+  })
+
+  it('drops the row at once while the stream is down, when no init will come', async () => {
+    const api = await mountQueue(false)
+    await api.readQueue()
+    expect(api.pending.value).toEqual([])
+  })
+})
+
+describe('Chat page — the turns the conversation stream reports', () => {
+  /** Sends a message the server starts in conversation `convoId`, saving it to `rows` first, and opens its turn on the stream. */
+  async function sendAndStart(component: VueWrapper, convoId: number, rows: Row[]): Promise<FakeEventSource> {
+    serveTurnStart(() => {
+      rows.push(row(2, 'user', 'hello'))
+      return { status: 'started', conversationId: convoId }
+    })
     await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
     await component.find('form').trigger('submit.prevent')
+    const stream = streamOn(convoId)
+    stream.send({ type: 'init', conversationId: convoId })
+    stream.send({ type: 'token', content: 'Hel' })
     await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(true))
+    return stream
   }
 
-  it('shows no Working… line during its turn or after it when nothing is queued', async () => {
-    serveConversation(5, [row(1, 'user', 'earlier')])
-    // The read after the stream is held, so the test sees the page before the answer lands.
-    let releaseAfterStream!: () => void
-    const afterStream = new Promise<void>((resolve) => {
-      releaseAfterStream = resolve
-    })
-    serveQueue(5, async () => {
-      if (queueReads[5] === 3) await afterStream
-      return { busy: busy[5] === true, queueSize: 0 }
-    })
-    const turn = streamingTurn(5)
+  it('shows no Working… line during a turn the stream reports, even on a busy event, nor after it when nothing is queued', async () => {
+    const rows = [row(1, 'user', 'earlier')]
+    serveConversation(5, rows)
+    serveQueue(5)
     const component = await openConversation(5)
-    await send(component)
+    const stream = await sendAndStart(component, 5, rows)
 
     busy[5] = true
     emitBus('conversation.busy', { conversationId: 5, busy: true })
-    await vi.waitFor(() => expect(vmOf(component).backgroundBusy).toBe(true))
-    expect(queueReads[5]).toBe(2)
-    expect(backgroundLine(component).exists()).toBe(false)
-    expect(announcer(component).text()).toBe('Generating…')
-
-    // The release precedes the stream's complete frame.
-    busy[5] = false
-    turn.finish()
-    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
-    await vi.waitFor(() => expect(queueReads[5]).toBe(3))
-    expect(backgroundLine(component).exists()).toBe(false)
-
-    releaseAfterStream()
     for (let i = 0; i < 5; i++) await flushPromises()
     expect(vmOf(component).backgroundBusy).toBe(false)
     expect(backgroundLine(component).exists()).toBe(false)
+    expect(announcer(component).text()).toBe('Generating…')
+
+    busy[5] = false
+    stream.send({ type: 'complete', content: 'Hello' })
+    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
+    for (let i = 0; i < 5; i++) await flushPromises()
+    expect(vmOf(component).backgroundBusy).toBe(false)
+    expect(backgroundLine(component).exists()).toBe(false)
+    expect(announcer(component).text()).toBe('')
   })
 
-  it('shows Working… after its turn when a queued message runs on with no stream', async () => {
-    serveConversation(5, [row(1, 'user', 'earlier')])
+  it('shows Working… from a turn\'s end until the queued message\'s init, which the stream then renders', async () => {
+    const rows = [row(1, 'user', 'earlier')]
+    serveConversation(5, rows)
     serveQueue(5)
-    const turn = streamingTurn(5)
     const component = await openConversation(5)
-    await send(component)
+    const stream = await sendAndStart(component, 5, rows)
 
     busy[5] = true
-    turn.finish()
-
+    rows.push(row(3, 'assistant', 'Hello'))
+    stream.send({ type: 'complete', content: 'Hello' })
     await vi.waitFor(() => expect(backgroundLine(component).exists()).toBe(true))
     expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false)
     expect(announcer(component).text()).toBe('Working…')
+
+    rows.push(row(4, 'user', 'the queued follow-up'))
+    stream.send({ type: 'init', conversationId: 5 })
+    await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(true))
+    expect(backgroundLine(component).exists()).toBe(false)
+    await vi.waitFor(() => expect(component.text()).toContain('the queued follow-up'))
+    expect(component.text().split('hello')).toHaveLength(2)
   })
 })
 

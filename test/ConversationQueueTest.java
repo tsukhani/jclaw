@@ -1161,6 +1161,85 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(1, markers(conv.id));
     }
 
+    // ── the operator's stop and the queue snapshot (JF-202) ──
+
+    @Test
+    void anOperatorStopFindsAConversationWithNoTurnIdle() {
+        long unknown = 17001L;
+        long released = 17002L;
+        var gen = ConversationQueue.tryAcquireOwnership(released, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+        ConversationQueue.releaseOwnership(released, gen);
+
+        assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(unknown, "web"));
+        assertEquals(ConversationQueue.OperatorStop.IDLE, ConversationQueue.stopOperatorTurn(released, "web"));
+    }
+
+    @Test
+    void anOperatorStopLeavesATurnWithNoCancelFlagOfItsOwnRunningWithItsQueue() {
+        long convId = 17003L;
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(convId, "web"));
+        assertTrue(ConversationQueue.isBusy(convId));
+        assertEquals(1, ConversationQueue.getQueueSize(convId));
+        ConversationQueue.forgetForTest(convId);
+    }
+
+    @Test
+    void anOperatorStopLeavesAChannelConversationsTurnRunningThoughItHoldsAFlag() {
+        long convId = 17004L;
+        var flag = new AtomicBoolean();
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), flag);
+
+        assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(convId, "telegram"));
+        assertTrue(ConversationQueue.isBusy(convId));
+        assertFalse(flag.get());
+        ConversationQueue.forgetForTest(convId);
+    }
+
+    @Test
+    void anOperatorStopEndsAWebTurnHoldingItsOwnFlagDropsItsQueueAndReleasesIt() {
+        long convId = 17005L;
+        var flag = new AtomicBoolean();
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
+        assertTrue(flag.get());
+        assertFalse(ConversationQueue.isBusy(convId));
+        assertEquals(0, ConversationQueue.getQueueSize(convId));
+    }
+
+    @Test
+    void aSnapshotTakesBusySizeStoppableAndTheShownMessagesTogether() {
+        long convId = 17006L;
+        var report = new services.AttachmentService.Input("att-1", "report.pdf", "application/pdf", 10, "file");
+        var photo = new services.AttachmentService.Input("att-2", null, "image/png", 20, "image");
+        // Queue mode, whatever an earlier test left set: interrupt mode would clear the line on each arrival.
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "queue");
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent),
+                    new AtomicBoolean());
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent, List.of(report, photo)));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "web", "admin", agent, true));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+
+            var pending = List.of(new ConversationQueue.PendingView("B", List.of("report.pdf", "image"), 1),
+                    new ConversationQueue.PendingView("C", List.of(), 3));
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, pending),
+                    ConversationQueue.snapshot(convId, "web"));
+            assertEquals(new ConversationQueue.Snapshot(true, 3, false, pending),
+                    ConversationQueue.snapshot(convId, "telegram"));
+            assertEquals(new ConversationQueue.Snapshot(false, 0, false, List.of()),
+                    ConversationQueue.snapshot(17007L, "web"));
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+        }
+    }
+
     // ── conversation.busy: each idle↔busy transition is announced once ──
 
     @Test
@@ -1175,14 +1254,15 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void aMessageQueuedBehindARunningTurnAnnouncesNothing() {
+    void aMessageQueuedBehindARunningTurnAnnouncesTheConversationBusy() {
+        // Every tab open on the conversation re-reads its queue on this and shows the message waiting (JF-202).
         long convId = 16002L;
         var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
 
         var heard = busyAnnouncedWhile(convId, () -> assertFalse(ConversationQueue.tryAcquire(convId,
                 new QueuedMessage("B", "web", "admin", agent))));
 
-        assertEquals(List.of(), heard);
+        assertEquals(List.of(busy(convId, true)), heard);
         ConversationQueue.drain(convId, gen);
         ConversationQueue.drain(convId, gen);
     }

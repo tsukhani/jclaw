@@ -485,6 +485,10 @@ export interface Message {
   _key?: string
   /** Client-only: the quote an optimistic user row was sent with, until the stored text replaces it. */
   _quote?: ChatQuote
+  /** Client-only: a row the server never saves (a refused send, a slash command's text), which no saved row may pair with. */
+  _local?: boolean
+  /** Client-only: an optimistic row whose send is unanswered; it may be queued, not saved, so nothing pairs with it yet. */
+  _sending?: boolean
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */
   thinkingCollapsed?: boolean
   /** Client-only: whether the tool-calls block is collapsed for this message (JCLAW-170). */

@@ -92,11 +92,15 @@ async function stubChat(page: Page, request: APIRequestContext, stub: ChatStub) 
   await page.route(url => /^\/api\/conversations\/990\d{3}(\/|$)/.test(url.pathname), (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     const url = new URL(route.request().url())
-    const [, rawId, suffix] = /^\/api\/conversations\/(\d+)(\/messages|\/queue)?$/.exec(url.pathname) ?? []
+    const [, rawId, suffix] = /^\/api\/conversations\/(\d+)(\/messages|\/queue|\/stream)?$/.exec(url.pathname) ?? []
     const id = Number(rawId)
-    // The page reads whether a turn it isn't streaming holds the conversation; no stubbed one is busy.
+    // The page reads whether a turn holds the conversation; no stubbed one is busy.
     if (suffix === '/queue' && (id === stub.parentId || stub.transcripts.has(id))) {
-      return fulfillJson(route, { busy: false, queueSize: 0 })
+      return fulfillJson(route, { busy: false, queueSize: 0, stoppable: false, pending: [] })
+    }
+    // The open conversation's turn stream: no turn runs, and the browser waits an hour before it reconnects.
+    if (suffix === '/stream' && (id === stub.parentId || stub.transcripts.has(id))) {
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 3600000\n\n' })
     }
     if (id === stub.parentId && !suffix) {
       return fulfillJson(route, {

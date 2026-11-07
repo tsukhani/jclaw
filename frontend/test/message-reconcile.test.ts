@@ -5,6 +5,7 @@ import {
   groupUnpairedServerIdsByRole,
   indexFreshById,
   backfillServerIds,
+  mergeNewRows,
   reconcileWindow,
 } from '~/utils/message-reconcile'
 
@@ -253,5 +254,70 @@ describe('reconcileWindow', () => {
     expect(merged.additions).toEqual([])
     expect(merged.changed).toBe(false)
     expect(streaming.toolCalls!.map(tc => tc.id)).toEqual(['s'])
+  })
+})
+
+describe('mergeNewRows', () => {
+  const ids = (rows: Message[]) => rows.map(r => r.id ?? r._key)
+
+  it('puts a row that commits below a shown one in server order, as a reload does', () => {
+    const shown = [m({ id: 1, role: 'user', content: 'go' }), m({ id: 3, role: 'assistant', content: 'Done.' })]
+    const fresh = [m({ id: 1, role: 'user', content: 'go' }), m({ id: 2, role: 'assistant', content: 'late', messageKind: 'task_run_result' }),
+      m({ id: 3, role: 'assistant', content: 'Done.' })]
+
+    const merged = mergeNewRows(shown, fresh)
+
+    expect(ids(merged.rows)).toEqual([1, 2, 3])
+    expect(merged.rows[0]).toBe(shown[0])
+    expect(merged.rows[2]).toBe(shown[1])
+    expect(merged.additions.map(r => r.id)).toEqual([2])
+    expect(merged.changed).toBe(true)
+  })
+
+  it('pairs an unsaved row with its saved copy and keeps a row it may not pair last, after the saved ones', () => {
+    const sent = m({ _key: 'sent', role: 'user', content: 'hello' })
+    const bubble = m({ _key: 'bubble', role: 'assistant', content: 'Hel' })
+    const shown = [m({ id: 1, role: 'assistant', content: 'Earlier.' }), sent, bubble]
+    const fresh = [m({ id: 2, role: 'user', content: 'hello' }), m({ id: 3, role: 'assistant', content: 'A background reply.' })]
+
+    const merged = mergeNewRows(shown, fresh, row => row !== bubble)
+
+    expect(ids(merged.rows)).toEqual([1, 2, 3, 'bubble'])
+    expect(merged.rows[1]).toBe(sent)
+    expect(bubble.id).toBeUndefined()
+    expect(merged.additions.map(r => r.id)).toEqual([3])
+  })
+
+  it('keeps a local row after the saved row it followed, paired with nothing, while the turn\'s rows come last', () => {
+    const refused = m({ _key: 'refused', role: 'assistant', content: 'Error: The turn could not start.', _local: true })
+    const sent = m({ _key: 'sent', role: 'user', content: 'try again' })
+    const shown = [m({ id: 1, role: 'user', content: 'go' }), refused, sent]
+    const fresh = [m({ id: 2, role: 'assistant', content: 'A late reply to go.' }), m({ id: 3, role: 'user', content: 'try again' })]
+
+    const merged = mergeNewRows(shown, fresh)
+
+    expect(ids(merged.rows)).toEqual([1, 'refused', 2, 3])
+    expect(refused.id).toBeUndefined()
+    expect(merged.rows[3]).toBe(sent)
+  })
+
+  it('changes nothing, and keeps every shown row, when the window holds what is shown', () => {
+    const shown = [m({ id: 1, role: 'user', content: 'go' }), m({ id: 2, role: 'assistant', content: 'Done.' })]
+
+    const merged = mergeNewRows(shown, [m({ id: 2, role: 'assistant', content: 'Done.' })])
+
+    expect(merged.changed).toBe(false)
+    expect(merged.rows).toEqual(shown)
+    expect(merged.rows[0]).toBe(shown[0])
+    expect(merged.additions).toEqual([])
+  })
+
+  it('reports a change when only the order of the shown rows moves', () => {
+    const shown = [m({ id: 2, role: 'assistant', content: 'Second.' }), m({ id: 1, role: 'user', content: 'First.' })]
+
+    const merged = mergeNewRows(shown, [m({ id: 1, role: 'user', content: 'First.' }), m({ id: 2, role: 'assistant', content: 'Second.' })])
+
+    expect(ids(merged.rows)).toEqual([1, 2])
+    expect(merged.changed).toBe(true)
   })
 })

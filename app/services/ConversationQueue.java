@@ -24,6 +24,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -211,10 +212,9 @@ public class ConversationQueue {
             }
         }
 
-        if (acquired != NOT_ACQUIRED) {
-            announceBusy(conversationId, true);
-            return acquired;
-        }
+        // Queued too: every tab open on the conversation re-reads its queue and shows the message waiting (JF-202).
+        announceBusy(conversationId, true);
+        if (acquired != NOT_ACQUIRED) return acquired;
 
         if (storeFailure != null) {
             EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
@@ -294,23 +294,39 @@ public class ConversationQueue {
     }
 
     /**
-     * Operator stop (GH-12): cancel the in-flight turn through its own cancel flag, drop pending
-     * messages, and release ownership now, so the next send acquires instead of queueing. The
+     * The stop {@link #stopOperatorTurn} makes (GH-12), for a conversation on any channel; the operator's Stop goes
+     * through that, and tests drive the queue through this. It cancels the in-flight turn through its own cancel
+     * flag, drops pending messages, and releases ownership now, so the next send acquires instead of queueing. The
      * stopped turn's later release carries a stale generation and is a no-op.
      *
      * @return {@code true} when a turn that registered a cancel flag owned the conversation and was
      *         stopped; {@code false}, changing nothing, otherwise
      */
     public static boolean stop(Long conversationId) {
+        return stopWhen(conversationId, _ -> true) == OperatorStop.STOPPED;
+    }
+
+    /** What the operator's stop found (JF-202). */
+    public enum OperatorStop { STOPPED, IDLE, UNSTOPPABLE }
+
+    /**
+     * The operator's Stop, from the chat page's button and from a {@code /stop} typed in web chat: {@link #stop}, for a
+     * turn {@link #operatorStoppable} allows, decided under the stop's own lock.
+     */
+    public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType) {
+        return stopWhen(conversationId, state -> operatorStoppable(state, channelType));
+    }
+
+    private static OperatorStop stopWhen(Long conversationId, Predicate<QueueState> allowed) {
         var state = queues.get(conversationId);
-        if (state == null) return false;
+        if (state == null) return OperatorStop.IDLE;
         AtomicBoolean stopped;
         long stoppedGeneration;
         @Nullable RuntimeException markerFailure = null;
         synchronized (state) {
-            // An owner with no flag of its own (a drained or sync run) could not be told to stop.
-            stopped = state.ownerCancel;
-            if (!state.processing || stopped == null) return false;
+            if (!state.processing) return OperatorStop.IDLE;
+            stopped = stoppableFlag(state);
+            if (stopped == null || !allowed.test(state)) return OperatorStop.UNSTOPPABLE;
             stopped.set(true);
             // Committed before the release, so the next turn's request cannot land ahead of it.
             try {
@@ -334,7 +350,24 @@ public class ConversationQueue {
         }
         TurnCancellation.cancel(stopped);
         announceBusy(conversationId, false);
-        return true;
+        return OperatorStop.STOPPED;
+    }
+
+    /**
+     * Under the state lock: whether the operator's Stop applies to the running turn, a web conversation's turn whose
+     * owner holds a cancel flag of its own. A channel turn's flag is the one the conversation's next turn shares, and a
+     * drained or sync run has none (JF-197).
+     */
+    private static boolean operatorStoppable(QueueState state, @Nullable String channelType) {
+        return ChannelType.WEB.value.equals(channelType) && stoppableFlag(state) != null;
+    }
+
+    /**
+     * Under the state lock: the running turn's own cancel flag, which {@link #stop} flips, or null when no turn runs
+     * or its owner registered none. A drained or sync run has none, so it could not be told to stop.
+     */
+    private static @Nullable AtomicBoolean stoppableFlag(QueueState state) {
+        return state.processing ? state.ownerCancel : null;
     }
 
     /**
@@ -597,6 +630,43 @@ public class ConversationQueue {
             sb.append("\n---\nMessage %d:\n%s\n".formatted(i + 1, messages.get(i).text()));
         }
         return sb.toString();
+    }
+
+    /**
+     * A message waiting in a conversation's queue, as the chat page shows it.
+     *
+     * @param attachmentNames each attachment's original file name, or its kind when it came without one
+     * @param position        its place in line, 1 for the next to run
+     */
+    public record PendingView(String text, List<String> attachmentNames, int position) {}
+
+    /**
+     * A conversation's queue as the chat page reads it, taken under one lock so its parts agree.
+     *
+     * @param queueSize every waiting message, a yield resume's announce included, all of which Stop drops
+     * @param stoppable whether the operator's Stop can stop the running turn ({@link #operatorStoppable})
+     * @param pending   the waiting messages in the order they run; one that is already a saved row (a yield resume's
+     *                  announce) is left out, since the conversation shows it, but keeps its place in line
+     */
+    public record Snapshot(boolean busy, int queueSize, boolean stoppable, List<PendingView> pending) {}
+
+    /** {@link Snapshot} of the queue of {@code conversationId}, a conversation on {@code channelType}. */
+    public static Snapshot snapshot(Long conversationId, @Nullable String channelType) {
+        var state = queues.get(conversationId);
+        if (state == null) return new Snapshot(false, 0, false, List.of());
+        var views = new ArrayList<PendingView>();
+        synchronized (state) {
+            int position = 0;
+            for (var message : state.pending) {
+                position++;
+                if (message.skipUserAppend()) continue;
+                var names = message.attachments().stream()
+                        .map(a -> a.originalFilename() != null ? a.originalFilename() : a.kind())
+                        .toList();
+                views.add(new PendingView(message.text(), names, position));
+            }
+            return new Snapshot(state.processing, state.pending.size(), operatorStoppable(state, channelType), views);
+        }
     }
 
     /** Number of pending messages waiting in a conversation's queue (0 when it has no state). */

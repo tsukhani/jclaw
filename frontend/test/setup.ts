@@ -60,11 +60,11 @@ if (typeof globalThis.DataTransfer === 'undefined') {
 }
 
 // EventSource — the SSE event bus (useEventBus) opens `new EventSource('/api/events')`
-// on first use once `auth:authenticated` is true. jsdom ships no EventSource, so any
-// component that touches the bus in setup (e.g. chat.vue's coding-run subscription)
-// would throw at mount. Minimal inert stub: constructs, exposes the handler slots,
-// and no-ops close(); it never emits, which is fine — tests drive the bus by calling
-// the composable's handlers directly, not through a live stream.
+// on first use once `auth:authenticated` is true, and the chat page opens one on the
+// open conversation's turn stream (useConversationStream). jsdom ships no EventSource,
+// so either would throw at mount. Minimal inert stub: constructs, exposes the handler
+// slots, and no-ops close(); it never emits. Tests drive the bus by calling the
+// composable's handlers directly, and a chat turn through test/conversation-stream.ts.
 if (typeof globalThis.EventSource === 'undefined') {
   class EventSourceStub {
     onmessage: ((e: MessageEvent) => void) | null = null

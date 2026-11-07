@@ -17,7 +17,11 @@ import { computed, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'v
  *     within a turn), so the label never flickers back to "Prefilling…".
  *
  * The timer runs continuously across both phases so a slow turn no longer looks
- * hung, then resets when {@code streaming} flips false.
+ * hung, then resets when {@code streaming} flips false. It counts from
+ * {@code startedAt}, the server's start time from the turn's {@code init}, so a
+ * view that joins a turn late (a reload, another tab) shows how long it has run.
+ * A skew between the browser's clock and the server's shifts the count; it
+ * never reads below 0:00.
  *
  * The "Prefilling…" label is gated on {@code local}: it only makes sense for a
  * self-hosted model, whose prompt-prefill / model-load window is long and
@@ -30,6 +34,7 @@ import { computed, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'v
  *                   (typically {@code !!streamContent || !!streamReasoning})
  * @param local      true when the active provider is self-hosted — gates the
  *                   "Prefilling…" label
+ * @param startedAt  epoch ms the turn started; null counts from when streaming began
  * @param tickMs     timer refresh cadence; 1s matches the m:ss display
  */
 export interface UseStreamProgress {
@@ -57,10 +62,11 @@ export function useStreamProgress(
   streaming: Ref<boolean>,
   producing: Ref<boolean>,
   local: Ref<boolean>,
+  startedAt: Ref<number | null> = ref(null),
   tickMs = 1000,
 ): UseStreamProgress {
   const elapsedMs = ref(0)
-  let startedAt = 0
+  let anchor = 0
   let timer: ReturnType<typeof setInterval> | null = null
 
   function clearTimer() {
@@ -73,13 +79,13 @@ export function useStreamProgress(
   // Start the ticker when a turn begins, tear it down when it ends. Anchoring
   // to a captured start timestamp (rather than incrementing) keeps the elapsed
   // value correct even if a tick is delayed or coalesced.
-  watch(streaming, (on) => {
+  watch([streaming, startedAt], ([on, start]) => {
     clearTimer()
     if (on) {
-      startedAt = Date.now()
-      elapsedMs.value = 0
+      anchor = start ?? Date.now()
+      elapsedMs.value = Math.max(0, Date.now() - anchor)
       timer = setInterval(() => {
-        elapsedMs.value = Date.now() - startedAt
+        elapsedMs.value = Date.now() - anchor
       }, tickMs)
     }
     else {

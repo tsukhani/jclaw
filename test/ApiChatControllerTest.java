@@ -1127,7 +1127,7 @@ class ApiChatControllerTest extends FunctionalTest {
 
             assertIsOk(started);
             assertEquals(Map.of("status", "command", "conversationId", chat.conversationId(),
-                    "content", slash.Commands.HELP_TEXT), flat(json(started)));
+                    "content", slash.Commands.HELP_TEXT, "saved", "true"), flat(json(started)));
             var frames = getContent(streamed).lines().filter(l -> l.startsWith("data: "))
                     .map(l -> JsonParser.parseString(l.substring("data: ".length())).getAsJsonObject()).toList();
             assertEquals(chat.conversationId(), frames.get(0).get("conversationId").getAsLong());
@@ -1146,8 +1146,128 @@ class ApiChatControllerTest extends FunctionalTest {
 
             long created = answer.get("conversationId").getAsLong();
             assertNotEquals(chat.conversationId(), created);
-            assertEquals(Map.of("status", "command", "conversationId", created, "content", slash.Commands.NEW_TEXT),
-                    flat(answer));
+            assertEquals(Map.of("status", "command", "conversationId", created, "content", slash.Commands.NEW_TEXT,
+                    "saved", "true"), flat(answer));
+        }
+    }
+
+    // A /stop typed in web chat on a web conversation is the Stop button (JF-202); its reply is never saved.
+
+    private static Map<String, Object> stopReply(long conversationId, String content) {
+        return Map.of("status", "command", "conversationId", conversationId, "content", content, "saved", "false");
+    }
+
+    private static ConversationQueue.QueuedMessage running(long agentId, String channelType) {
+        models.Agent agent = commitInFreshTx(() -> models.Agent.findById(agentId));
+        return new ConversationQueue.QueuedMessage("running", channelType, "admin", agent);
+    }
+
+    @Test
+    void aStopTypedOnAStoppableTurnEndsItStoppedEmptiesTheQueueAndRepliesStopped() throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                assertIsOk(POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?")));
+                assertTrue(model.called.await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+                assertEquals("queued",
+                        json(POST("/api/chat/turn", "application/json", turnBody(chat, "And now?"))).get("status").getAsString());
+
+                var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/stop")));
+
+                assertEquals(stopReply(chat.conversationId(), "Stopped."), flat(answer));
+                sink.awaitData(STOPPED);
+                assertEquals(new ConversationQueue.Snapshot(false, 0, false, List.of()),
+                        ConversationQueue.snapshot(chat.conversationId(), "web"));
+                assertEquals(1, model.calls.get(), "the queued message never ran");
+            } finally {
+                model.release();
+                unsubscribe.run();
+            }
+        }
+    }
+
+    @Test
+    void aStopTypedOnATurnChatCannotStopStopsNothingAndSaysSo() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            // A drained or sync turn holds no cancel flag of its own (JF-197).
+            var generation = ConversationQueue.tryAcquireOwnership(chat.conversationId(),
+                    running(chat.agentId(), "web"), null);
+            try {
+                var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/stop")));
+
+                assertEquals(stopReply(chat.conversationId(), "This turn can't be stopped from chat yet."), flat(answer));
+                assertTrue(ConversationQueue.isBusy(chat.conversationId()), "the turn runs on");
+            } finally {
+                ConversationQueue.releaseOwnership(chat.conversationId(), generation);
+            }
+        }
+    }
+
+    @Test
+    void aStopTypedOnAnIdleWebConversationRepliesNothingToStop() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+
+            var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/stop")));
+
+            assertEquals(stopReply(chat.conversationId(), "Nothing to stop."), flat(answer));
+            assertFalse(ConversationQueue.isBusy(chat.conversationId()));
+        }
+    }
+
+    @Test
+    void aStopTypedInANewChatStopsNothingThoughTheAgentsWebConversationRunsATurn() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            // The conversation a New Chat's command would otherwise resolve to: the agent's web chat with the operator.
+            var chat = seedWebChat(model);
+            var flag = new java.util.concurrent.atomic.AtomicBoolean();
+            ConversationQueue.tryAcquireOwnership(chat.conversationId(), running(chat.agentId(), "web"), flag);
+            ConversationQueue.tryAcquire(chat.conversationId(), running(chat.agentId(), "web"));
+            try {
+                var answer = json(POST("/api/chat/turn", "application/json",
+                        "{\"agentId\": %d, \"message\": \"/stop\"}".formatted(chat.agentId())));
+
+                assertEquals(JsonParser.parseString(
+                        "{\"status\":\"command\",\"conversationId\":null,\"content\":\"Nothing to stop.\",\"saved\":false}"),
+                        answer);
+                assertEquals(new ConversationQueue.Snapshot(true, 1, true,
+                                List.of(new ConversationQueue.PendingView("running", List.of(), 1))),
+                        ConversationQueue.snapshot(chat.conversationId(), "web"));
+                assertFalse(flag.get(), "the running turn was not told to stop");
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aStopTypedInChatOnAChannelConversationStillSignalsTheConversationsCancelFlag() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            long telegram = commitInFreshTx(() -> {
+                models.Agent agent = models.Agent.findById(chat.agentId());
+                return services.ConversationService.create(agent, "telegram", "jf202-peer").id;
+            });
+            var onTelegram = new Seeded(chat.agentId(), telegram);
+            var generation = ConversationQueue.tryAcquireOwnership(telegram, running(chat.agentId(), "telegram"), null);
+            try {
+                var answer = json(POST("/api/chat/turn", "application/json", turnBody(onTelegram, "/stop")));
+
+                assertEquals(stopReply(telegram, "Stopped."), flat(answer));
+                assertTrue(ConversationQueue.cancellationFlag(telegram).get(), "cancelTurn signalled the channel turn");
+                assertTrue(ConversationQueue.isBusy(telegram), "the channel turn ends when it sees the flag, not now");
+            } finally {
+                ConversationQueue.releaseOwnership(telegram, generation);
+                ConversationQueue.forgetForTest(telegram);
+            }
         }
     }
 

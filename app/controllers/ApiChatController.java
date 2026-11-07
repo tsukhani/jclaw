@@ -366,7 +366,7 @@ public class ApiChatController extends Controller {
      * detection — lives in the play1 fork's {@link SseStream} (PF-16). The
      * {@code cancelled} flag is bridged from {@code sse.onClose} so SSE
      * disconnect and {@code POST /api/conversations/{id}/stop} (which flips the same
-     * flag via {@link services.ConversationQueue#stop}) reach AgentRunner through one signal.
+     * flag via {@link services.ConversationQueue#stopOperatorTurn}) reach AgentRunner through one signal.
      * The turn is tied to this request; {@link #startTurn} starts one that is not (JF-202).
      * This route stays as it is while the chat page and the load-test harness drive it.
      *
@@ -409,7 +409,7 @@ public class ApiChatController extends Controller {
 
         // Bridge SSE close (heartbeat-write fail, explicit close, or the inactivity
         // timeout) into the AgentRunner cancellation flag. POST /api/conversations/{id}/stop
-        // also flips this flag via ConversationQueue.stop, so AgentRunner sees one unified
+        // also flips this flag via ConversationQueue.stopOperatorTurn, so AgentRunner sees one unified
         // signal regardless of source; the log line here is what tells the sources apart.
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> {
@@ -463,6 +463,8 @@ public class ApiChatController extends Controller {
             answer.put(KEY_STATUS, "command");
             answer.put(KEY_CONVERSATION_ID, slashResult.conversation() != null ? slashResult.conversation().id : null);
             answer.put("content", slashResult.responseText());
+            // Whether the reply is a saved row the page may pair its copy with (JF-202).
+            answer.put("saved", slashResult.saved());
             renderJSON(gson.toJson(answer));
         }
 
@@ -519,6 +521,10 @@ public class ApiChatController extends Controller {
                                                              @Nullable Long conversationId, String username) {
         var slashCmd = Commands.parse(messageText);
         if (slashCmd.isEmpty()) return null;
+        // A New Chat has no turn to stop; resolving one would stop the agent's existing web conversation's (JF-202).
+        if (slashCmd.get() == Commands.Command.STOP && conversationId == null) {
+            return new Commands.Result(null, Commands.NOTHING_TO_STOP, Commands.Command.STOP);
+        }
         var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
         // JCLAW-111: the typed arguments go through the args-aware execute overload, so /model status, /model reset
         // and /model NAME don't fall through to the no-args summary branch on web, as JCLAW-109 fixed for Telegram.

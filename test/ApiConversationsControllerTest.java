@@ -13,12 +13,16 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.AttachmentService;
+import services.ConversationQueue;
+import services.ConversationQueue.QueuedMessage;
 import services.ConversationService;
 import services.Tx;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
@@ -713,12 +717,132 @@ class ApiConversationsControllerTest extends FunctionalTest {
     @Test
     void getQueueStatusForAnExistingConversation() {
         login();
-        // The positive half of the case above: the shape callers actually consume is unchanged.
         var response = GET("/api/conversations/" + seededConversationId() + "/queue");
         assertIsOk(response);
-        var content = getContent(response);
-        assertTrue(content.contains("\"busy\""));
-        assertTrue(content.contains("\"queueSize\""));
+        assertEquals(JsonParser.parseString("{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}"),
+                JsonParser.parseString(getContent(response)));
+    }
+
+    // --- getQueueStatus: the pending list and stoppable (JF-202) ---
+
+    private static void assertQueue(String expected, Long convId) {
+        var response = GET("/api/conversations/" + convId + "/queue");
+        assertIsOk(response);
+        assertEquals(JsonParser.parseString(expected), JsonParser.parseString(getContent(response)));
+    }
+
+    private static QueuedMessage queued(Conversation convo, String text) {
+        return new QueuedMessage(text, convo.channelType, convo.peerId, convo.agent);
+    }
+
+    /** A yield resume's announce: already a saved row, queued to run without being appended again. */
+    private static QueuedMessage announce(Conversation convo) {
+        return new QueuedMessage("[subagent result]", convo.channelType, convo.peerId, convo.agent, true);
+    }
+
+    @Test
+    void queueStatusListsThePendingMessagesInOrderWithTheirAttachmentNamesAndPlaces() {
+        login();
+        var convo = seedConversation("jf202-queue-pending", "web");
+        var report = new AttachmentService.Input("att-1", "report.pdf", "application/pdf", 10, "file");
+        var photo = new AttachmentService.Input("att-2", null, "image/png", 20, "image");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "first follow-up"));
+            // A yield resume's announce is already a saved row the page shows; it still holds its place in line.
+            ConversationQueue.tryAcquire(convo.id, announce(convo));
+            ConversationQueue.tryAcquire(convo.id, new QueuedMessage(
+                    "second follow-up", "web", convo.peerId, convo.agent, List.of(report, photo)));
+
+            assertQueue("""
+                    {"busy":true,"queueSize":3,"stoppable":true,"pending":[
+                      {"text":"first follow-up","attachmentNames":[],"position":1},
+                      {"text":"second follow-up","attachmentNames":["report.pdf","image"],"position":3}]}
+                    """, convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusCountsAWaitingAnnounceItListsNoRowFor() {
+        login();
+        var convo = seedConversation("jf202-queue-announce", "web");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            ConversationQueue.tryAcquire(convo.id, announce(convo));
+
+            assertQueue("{\"busy\":true,\"queueSize\":1,\"stoppable\":true,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusReportsAStartedWebTurnStoppable() {
+        login();
+        var convo = seedConversation("jf202-stoppable-web", "web");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":true,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusReportsADrainedTurnUnstoppable() {
+        login();
+        var convo = seedConversation("jf202-stoppable-drained", "web");
+        var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "queued behind it"));
+            assertEquals(1, ConversationQueue.drain(convo.id, generation).size());
+
+            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusReportsARestoredTurnUnstoppable() {
+        login();
+        var convo = seedConversation("jf202-stoppable-restored", "web");
+        ConversationQueue.tryAcquireRestored(convo.id, List.of(queued(convo, "kept across a restart")));
+        try {
+            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusReportsAChannelTurnUnstoppable() {
+        login();
+        var convo = seedConversation("jf202-stoppable-telegram", "telegram");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusAfterAStopIsIdleWithNothingQueued() {
+        login();
+        var convo = seedConversation("jf202-queue-after-stop", "web");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "first follow-up"));
+            ConversationQueue.tryAcquire(convo.id, announce(convo));
+            assertIsOk(POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}"));
+
+            assertQueue("{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
     }
 
     // --- stopTurn tests (POST /api/conversations/{id}/stop, GH-12) ---

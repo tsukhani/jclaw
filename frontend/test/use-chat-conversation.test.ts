@@ -109,18 +109,6 @@ describe('useChatConversation', () => {
     expect(api.messages.value.map(m => m.id)).toEqual([10, 11])
   })
 
-  it('reconcileMessageIds backfills server ids onto id-less local rows', async () => {
-    const { api } = await mountConversation()
-    api.selectedConvoId.value = 5
-    api.messages.value = [
-      { role: 'user', content: 'hi' } as Message,
-      { role: 'assistant', content: 'yo' } as Message,
-    ]
-    await api.reconcileMessageIds()
-    expect(api.messages.value[0]!.id).toBe(10)
-    expect(api.messages.value[1]!.id).toBe(11)
-  })
-
   it('clears the open conversation when the agent changes (after init)', async () => {
     const { api, selectedAgentId } = await mountConversation()
     api.initializing.value = false // the page flips this off once conversations load

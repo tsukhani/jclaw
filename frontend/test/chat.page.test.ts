@@ -1,9 +1,18 @@
-import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, vi, afterEach, afterAll, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 import { visualEnabled } from '~/utils/visual/spec'
 import { serveConversation } from './conversation-endpoint'
+import { fakeConversationStreams, serveTurnStart, streamOn } from './conversation-stream'
+
+// Every turn renders from the open conversation's stream, which each test drives through a fake EventSource.
+beforeEach(() => {
+  fakeConversationStreams()
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 // A page left mounted shares the router, so it follows a later test's ?conversation= and fetches for it too.
 enableAutoUnmount(afterEach)
@@ -96,24 +105,14 @@ function announcer(component: VueWrapper) {
   return component.find('[data-testid="chat-progress-announcer"]')
 }
 
-/** A stream the test feeds: the init frame now, then whatever it enqueues. */
-function feedStream(...initial: string[]) {
-  let controller: ReadableStreamDefaultController<Uint8Array> | undefined
-  const encoder = new TextEncoder()
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new ReadableStream<Uint8Array>({
-    start(c) {
-      controller = c
-      for (const frame of initial) c.enqueue(encoder.encode(`data: ${frame}\n`))
-    },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
-  return {
-    send(frame: string) {
-      controller!.enqueue(encoder.encode(`data: ${frame}\n`))
-    },
-    close() {
-      controller!.close()
-    },
-  }
+/** Sends `text` from a new chat, which the server starts as conversation `conversationId`; returns its stream. */
+async function sendFromNewChat(component: VueWrapper, text: string, conversationId: number) {
+  serveTurnStart(() => ({ status: 'started', conversationId }))
+  registerEndpoint(`/api/conversations/${conversationId}/messages`, () => [])
+  await component.find<HTMLTextAreaElement>('textarea').setValue(text)
+  await component.find('form').trigger('submit.prevent')
+  await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe(String(conversationId)))
+  return streamOn(conversationId)
 }
 
 describe('Chat page — stream progress line', () => {
@@ -125,23 +124,12 @@ describe('Chat page — stream progress line', () => {
 
   it('leads the progress line with Clawdia while the turn streams, and drops both when it ends', async () => {
     setupBaseChatApi()
-    let stream: ReadableStreamDefaultController<Uint8Array> | undefined
-    const encoder = new TextEncoder()
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          stream = controller
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":970}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"token","content":"Hel"}\n'))
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
-    await component.find('form').trigger('submit.prevent')
+    const stream = await sendFromNewChat(component, 'hello', 970)
+    stream.send({ type: 'init', conversationId: 970 })
+    stream.send({ type: 'token', content: 'Hel' })
     await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(true))
 
     const progress = component.find('[data-testid="stream-progress"]')
@@ -153,8 +141,7 @@ describe('Chat page — stream progress line', () => {
     expect(progress.find('[role="status"]').exists()).toBe(false)
     expect(announcer(component).text()).toBe('Generating…')
 
-    stream!.enqueue(encoder.encode('data: {"type":"complete","content":"Hello"}\n'))
-    stream!.close()
+    stream.send({ type: 'complete', content: 'Hello' })
     await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
     expect(component.find('img[src="/clawdia-micro.webp"]').exists()).toBe(false)
     expect(announcer(component).text()).toBe('')
@@ -170,20 +157,18 @@ describe('Chat page — stream progress line', () => {
         { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":false}]' },
       ],
     }))
-    const stream = feedStream('{"type":"init","conversationId":971}')
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
-    await component.find('form').trigger('submit.prevent')
+    const stream = await sendFromNewChat(component, 'hello', 971)
+    stream.send({ type: 'init', conversationId: 971 })
     await vi.waitFor(() => expect(announcer(component).text()).toBe('Prefilling…'))
 
-    stream.send('{"type":"token","content":"Hel"}')
+    stream.send({ type: 'token', content: 'Hel' })
     await vi.waitFor(() => expect(announcer(component).text()).toBe('Generating…'))
     expect(component.find('[data-testid="stream-progress"] [aria-hidden="true"]').text()).toMatch(/^\d+:\d{2}$/)
 
-    stream.send('{"type":"complete","content":"Hello"}')
-    stream.close()
+    stream.send({ type: 'complete', content: 'Hello' })
     await vi.waitFor(() => expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false))
     expect(announcer(component).text()).toBe('')
   })
@@ -1941,28 +1926,15 @@ describe('Chat page — address bar', () => {
     await useRouter().replace({ query: {} })
   })
 
-  it('puts a new conversation in the address once its first reply starts, and drops it for a new conversation', async () => {
+  it('puts a new conversation in the address once the server starts its first turn, and drops it for a new conversation', async () => {
     setupBaseChatApi()
-    registerEndpoint('/api/conversations/950/messages', () => [])
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":950}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"complete","content":"hi"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
     const router = useRouter()
     const component = await mountSuspended(Chat)
     await flushPromises()
     expect(router.currentRoute.value.query.conversation).toBeUndefined()
 
-    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
-    await component.find('form').trigger('submit.prevent')
-    await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBe('950'))
+    await sendFromNewChat(component, 'hello', 950)
+    expect(router.currentRoute.value.query.conversation).toBe('950')
 
     await component.find('button[title="New conversation"]').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBeUndefined())
@@ -1994,60 +1966,36 @@ describe('Chat page — address bar', () => {
 describe('Chat page — error-event SSE branch', () => {
   it('renders the error content from a provider error envelope into the assistant bubble', async () => {
     setupBaseChatApi()
-    // Stub fetch to emit an error event mid-stream; the assistant placeholder
-    // bubble should pick up the error string instead of a model response.
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":900}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"error","content":"Provider returned 429: rate limited"}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
-
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('please try')
-    await component.find('form').trigger('submit.prevent')
-    await flushPromises()
+    const stream = await sendFromNewChat(component, 'please try', 900)
+    stream.send({ type: 'init', conversationId: 900 })
+    stream.send({ type: 'error', content: 'Provider returned 429: rate limited' })
     await flushPromises()
 
-    // The page should now have the error envelope as the assistant content.
     expect(component.text()).toContain('Provider returned 429: rate limited')
+    expect(component.find('[data-testid="stream-progress"]').exists()).toBe(false)
   })
 
-  it('renders the queued-position content from a queued event', async () => {
+  it('shows why the server refused to start a turn on the reply to the message', async () => {
     setupBaseChatApi()
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":901}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"queued","position":3}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200 })
+    registerEndpoint('/api/chat/turn', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 500)
+        return { code: 'internal_error', message: 'The turn could not start.' }
+      },
     })
-
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('queued one')
+    await component.find<HTMLTextAreaElement>('textarea').setValue('please try')
     await component.find('form').trigger('submit.prevent')
-    await flushPromises()
-    await flushPromises()
 
-    expect(component.text()).toContain('queued')
-    expect(component.text()).toContain('3')
+    await vi.waitFor(() => expect(component.text()).toContain('Error: The turn could not start.'))
+    expect(component.text()).toContain('please try')
   })
 })
 
@@ -2170,17 +2118,8 @@ describe('Chat page — model switch indicator', () => {
 describe('Chat page — input handlers', () => {
   it('routes Enter inside the textarea to sendMessage (form submit fires)', async () => {
     setupBaseChatApi()
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":980}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200 })
-    })
+    const bodies = serveTurnStart(() => ({ status: 'started', conversationId: 980 }))
+    registerEndpoint('/api/conversations/980/messages', () => [])
 
     const component = await mountSuspended(Chat)
     await flushPromises()
@@ -2188,11 +2127,8 @@ describe('Chat page — input handlers', () => {
     const textarea = component.find<HTMLTextAreaElement>('textarea')
     await textarea.setValue('hello via enter')
     await textarea.trigger('keydown.enter')
-    await flushPromises()
 
-    const streamCall = fetchSpy.mock.calls.find(call =>
-      String(call[0] ?? '').includes('/api/chat/stream'))
-    expect(streamCall).toBeTruthy()
+    await vi.waitFor(() => expect(bodies.map(b => b.message)).toEqual(['hello via enter']))
   })
 
   it('autoresize sets the textarea height bound to its scrollHeight', async () => {

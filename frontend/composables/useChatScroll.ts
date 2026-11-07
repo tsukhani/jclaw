@@ -23,6 +23,8 @@ export interface UseChatScroll {
   keepViewport: PrependOlder
   /** Appends rows outside a stream, following them down only when the reader was at the bottom. */
   appendFollowing: (append: () => void) => void
+  /** {@link UseChatScroll.scrollToBottom} for a reader at the bottom only: a turn's frames leave one reading above alone. */
+  followToBottom: () => void
 }
 
 export function useChatScroll(
@@ -33,9 +35,7 @@ export function useChatScroll(
   const messagesEl = ref<HTMLElement | null>(null)
   let scrollRaf: number | null = null
 
-  // A turn streams into its bubble by index (useChatStream's assistantIdx), so nothing is prepended while one runs.
   async function keepViewport(prepend: () => void): Promise<boolean> {
-    if (streaming.value) return false
     const el = messagesEl.value
     const fromBottom = el ? el.scrollHeight - el.scrollTop : 0
     prepend()
@@ -50,7 +50,7 @@ export function useChatScroll(
     if (!loadOlder || pulling) return
     pulling = true
     try {
-      for (let el = messagesEl.value; el && !streaming.value && el.scrollTop <= el.clientHeight; el = messagesEl.value) {
+      for (let el = messagesEl.value; el && el.scrollTop <= el.clientHeight; el = messagesEl.value) {
         const height = el.scrollHeight
         await loadOlder(keepViewport)
         if (el.scrollHeight === height) break
@@ -95,11 +95,14 @@ export function useChatScroll(
   // A viewport that shrinks (an expanded subagent chip above it) keeps scrollTop, dropping a reader off the bottom.
   const BOTTOM_SLACK_PX = 24
   let pinnedToBottom = true
+  // Set by scroll events alone: content that grows under a reader at the bottom leaves them following a turn.
+  let readerAbove = false
   function atBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
   }
   function trackPinned(e: Event) {
     pinnedToBottom = atBottom(e.currentTarget as HTMLElement)
+    readerAbove = !pinnedToBottom
     void pullOlderNearTop()
   }
   // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the bottom.
@@ -136,6 +139,10 @@ export function useChatScroll(
     if (follow) scrollToBottom()
   }
 
+  function followToBottom() {
+    if (!readerAbove) scrollToBottom()
+  }
+
   onUnmounted(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf)
     if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
@@ -143,5 +150,5 @@ export function useChatScroll(
     if (messagesEl.value instanceof HTMLElement) messagesEl.value.removeEventListener('scroll', trackPinned)
   })
 
-  return { messagesEl, scrollToBottom, keepViewport, appendFollowing }
+  return { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom }
 }

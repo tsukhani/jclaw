@@ -9,6 +9,7 @@ import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
 import models.EventLog;
 import models.Message;
@@ -158,8 +159,21 @@ public final class Commands {
      * @param responseText  user-visible reply text (markdown) the
      *                      transport should render
      * @param command       which {@link Command} the input parsed as
+     * @param saved         whether {@code responseText} was also saved as the conversation's assistant row, which
+     *                      the chat page may then pair with the reply it shows (JF-202)
      */
-    public record Result(@Nullable Conversation conversation, String responseText, Command command) {}
+    /** {@code /stop}'s reply when no turn runs, and when web chat sends it from a New Chat (JF-202). */
+    public static final String NOTHING_TO_STOP = "Nothing to stop.";
+
+    /** A reply and whether it was saved as the conversation's assistant row. */
+    private record Canned(String text, boolean saved) {}
+
+    public record Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved) {
+        /** A reply delivered but not saved. */
+        public Result(@Nullable Conversation conversation, String responseText, Command command) {
+            this(conversation, responseText, command, false);
+        }
+    }
 
     /**
      * Parse the first token of {@code text} as a recognized command.
@@ -340,7 +354,7 @@ public final class Commands {
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/new → new conversation %d for peer=%s".formatted(newConv.id, peerId));
-        return new Result(newConv, NEW_TEXT, Command.NEW);
+        return new Result(newConv, NEW_TEXT, Command.NEW, true);
     }
 
     /**
@@ -412,13 +426,10 @@ public final class Commands {
      * thread receive the same object reference, and the volatile write is
      * visible immediately.
      *
-     * <p>On Telegram this fully interrupts in-flight processing. On web,
-     * {@code AgentRunner.runStreaming} polls a per-request token created in
-     * {@code ApiChatController}, not {@code ConversationQueue.cancellationFlag},
-     * so this command is largely a no-op there — the in-product stop button
-     * remains the primary mechanism for the web channel. Worth keeping in
-     * the shared registry anyway: typed {@code /stop} surfaces uniformly
-     * across channels and the web reply is informative either way.
+     * <p>On Telegram this fully interrupts in-flight processing. A web turn
+     * polls its own cancel flag, not {@code ConversationQueue.cancellationFlag},
+     * so in web chat on a web conversation {@code /stop} is the Stop button
+     * instead ({@link #executeWebStop}, JF-202).
      *
      * <p>Like {@code /reset}, the ack is delivered via the channel transport
      * (SSE complete frame on web, sink.seal on Telegram) but NOT persisted
@@ -433,15 +444,31 @@ public final class Commands {
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
+        if (ChannelType.WEB.value.equals(channelType) && ChannelType.WEB.value.equals(current.channelType)) {
+            return executeWebStop(agent, current);
+        }
         if (!ConversationQueue.isBusy(current.id)) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop for conversation %d — nothing in flight".formatted(current.id));
-            return new Result(current, "Nothing to stop.", Command.STOP);
+            return new Result(current, NOTHING_TO_STOP, Command.STOP);
         }
         ConversationQueue.cancelTurn(current.id);
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop signalled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);
+    }
+
+    /** {@code /stop} typed in web chat on a web conversation: the chat's Stop button, which also drops the queue. */
+    private static Result executeWebStop(Agent agent, Conversation current) {
+        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType);
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), ChannelType.WEB.value,
+                "/stop for conversation %d: %s".formatted(current.id, outcome));
+        var reply = switch (outcome) {
+            case STOPPED -> "Stopped.";
+            case IDLE -> NOTHING_TO_STOP;
+            case UNSTOPPABLE -> "This turn can't be stopped from chat yet.";
+        };
+        return new Result(current, reply, Command.STOP);
     }
 
     /**
@@ -483,8 +510,8 @@ public final class Commands {
             var msg = "> Compaction failed\n\nNo LLM provider is configured for this agent"
                     + (providerName != null ? " ('" + providerName + "' is not set up)" : "")
                     + ", and it has no configured fallback. Add one in Settings.";
-            persistCompactAckAndLog(agent, channelType, current, msg, "no-provider");
-            return new Result(current, msg, Command.COMPACT);
+            boolean saved = persistCompactAckAndLog(agent, channelType, current, msg, "no-provider");
+            return new Result(current, msg, Command.COMPACT, saved);
         }
 
         // The request automatic compaction sends (JF-154), so one /compact summary shows what the trigger would write.
@@ -497,11 +524,11 @@ public final class Commands {
         var result = SessionCompactor.compact(current.id, summary.first().label(), turn, summary, /*force*/ true, args,
                 summary.callTokens(), Integer.MAX_VALUE);
         var responseText = buildCompactResponseText(result, args);
-        persistCompactAckAndLog(agent, channelType, current, responseText,
+        boolean saved = persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())
                         : "skipped: " + result.skipReason());
 
-        return new Result(current, responseText, Command.COMPACT);
+        return new Result(current, responseText, Command.COMPACT, saved);
     }
 
     /** The conversation's override, else the agent's default, else the agent's own fallback, as a turn resolves it. */
@@ -551,18 +578,14 @@ public final class Commands {
         return text.toString();
     }
 
-    private static void persistCompactAckAndLog(Agent agent, String channelType,
-                                                 Conversation current, String text, String outcome) {
+    /** @return whether the ack was saved as an assistant row */
+    private static boolean persistCompactAckAndLog(Agent agent, String channelType,
+                                                   Conversation current, String text, String outcome) {
         final Long convId = current.id;
-        final String responseFinal = text;
-        Tx.run(() -> {
-            var conv = (Conversation) Conversation.findById(convId);
-            if (conv != null) {
-                ConversationService.appendAssistantMessage(conv, responseFinal, null);
-            }
-        });
+        boolean saved = Tx.run(() -> persistCannedResponseInTx(current, text));
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/compact for conversation %d: %s".formatted(convId, outcome));
+        return saved;
     }
 
     /**
@@ -584,7 +607,7 @@ public final class Commands {
         // EntityManager, so the whole handler is wrapped exactly as /usage is:
         // the Telegram polling thread has no request-scoped transaction, and
         // Tx.run joins the web one rather than opening a second.
-        var responseFinal = Tx.run(() -> {
+        var reply = Tx.run(() -> {
             var all = Prompt.findAllOrdered();
             String response;
             if (all.isEmpty()) {
@@ -599,13 +622,12 @@ public final class Commands {
                     default -> "Several prompts match \"" + args + "\" — narrow the search:\n" + titleList(matches);
                 };
             }
-            persistCannedResponseInTx(current, response);
-            return response;
+            return new Canned(response, persistCannedResponseInTx(current, response));
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/prompt " + (args == null ? "(list)" : args)
                         + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, responseFinal, Command.PROMPT);
+        return new Result(current, reply.text(), Command.PROMPT, reply.saved());
     }
 
     /** Title/tag substring match, case-insensitive — the same rule the web picker uses. */
@@ -636,18 +658,10 @@ public final class Commands {
 
     private static Result executeHelp(Agent agent, String channelType, @Nullable Conversation current) {
         var helpText = helpTextFor(channelType);
-        if (current != null) {
-            final Long convId = current.id;
-            Tx.run(() -> {
-                var conv = (Conversation) Conversation.findById(convId);
-                if (conv != null) {
-                    ConversationService.appendAssistantMessage(conv, helpText, null);
-                }
-            });
-        }
+        boolean saved = current != null && Tx.run(() -> persistCannedResponseInTx(current, helpText));
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/help" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, helpText, Command.HELP);
+        return new Result(current, helpText, Command.HELP, saved);
     }
 
     /**
@@ -743,14 +757,13 @@ public final class Commands {
 
     private static Result persistAndLog(Agent agent, String channelType, @Nullable Conversation current,
                                         String logPrefix, Supplier<String> build, Command command) {
-        var responseText = Tx.run(() -> {
+        var reply = Tx.run(() -> {
             var text = build.get();
-            persistCannedResponseInTx(current, text);
-            return text;
+            return new Canned(text, persistCannedResponseInTx(current, text));
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 logPrefix + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, responseText, command);
+        return new Result(current, reply.text(), command, reply.saved());
     }
 
     // ---- /think (JCLAW-1196): the conversation's reasoning effort, never the agent's default ----
@@ -832,14 +845,13 @@ public final class Commands {
         // (Telegram) gets a transaction — the web SSE path already runs
         // inside a request-scoped tx, and Tx.run joins that instead of
         // opening a new one.
-        var responseText = Tx.run(() -> {
+        var reply = Tx.run(() -> {
             var text = buildUsageResponse(agent, current);
-            persistCannedResponseInTx(current, text);
-            return text;
+            return new Canned(text, persistCannedResponseInTx(current, text));
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/usage" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, responseText, Command.USAGE);
+        return new Result(current, reply.text(), Command.USAGE, reply.saved());
     }
 
     /**
@@ -847,13 +859,15 @@ public final class Commands {
      * already opened a transaction. Avoids a redundant Tx.run() nesting when
      * the handler body is itself wrapped in one (the {@code /usage} case,
      * which reads message history).
+     *
+     * @return whether the row was added: not with no conversation, or one deleted meanwhile
      */
-    private static void persistCannedResponseInTx(@Nullable Conversation current, String responseText) {
-        if (current == null) return;
+    private static boolean persistCannedResponseInTx(@Nullable Conversation current, String responseText) {
+        if (current == null) return false;
         var conv = (Conversation) Conversation.findById(current.id);
-        if (conv != null) {
-            ConversationService.appendAssistantMessage(conv, responseText, null);
-        }
+        if (conv == null) return false;
+        ConversationService.appendAssistantMessage(conv, responseText, null);
+        return true;
     }
 
     /**
@@ -1168,16 +1182,15 @@ public final class Commands {
     private static Result executeSubagent(Agent agent, String channelType,
                                            @Nullable Conversation current, @Nullable String args) {
         var sub = parseSubagentArgs(args);
-        var responseText = Tx.run(() -> {
+        var reply = Tx.run(() -> {
             var text = buildSubagentResponse(agent, current, sub);
-            persistCannedResponseInTx(current, text);
-            return text;
+            return new Canned(text, persistCannedResponseInTx(current, text));
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/subagent " + (sub.kind() != null ? sub.kind() : "(no-args)")
                         + (sub.id() != null ? " " + sub.id() : "")
                         + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, responseText, Command.SUBAGENT);
+        return new Result(current, reply.text(), Command.SUBAGENT, reply.saved());
     }
 
     /** Outcome of parsing the subcommand portion of {@code /subagent ARGS}. */

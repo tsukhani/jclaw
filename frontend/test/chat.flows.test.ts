@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
+import { fakeConversationStreams, serveTurnStart, streamOn } from './conversation-stream'
 
 /**
  * JCLAW-314 — pages/chat.vue critical user-flow coverage.
@@ -10,7 +11,7 @@ import Chat from '~/pages/chat.vue'
  * transcripts, async-announce polling, attachment gates, and truncation
  * markers. This sibling spec covers the still-uncovered user flows:
  *
- *   - Sending a message: form submit triggers POST /api/chat/stream
+ *   - Sending a message: form submit triggers POST /api/chat/turn
  *     with the expected JSON body.
  *   - Conversation switch: loadConversation populates message list and
  *     clears the input.
@@ -40,105 +41,62 @@ beforeEach(() => {
   // The chat composable layer caches conversation lists via useFetch; flush
   // so each case starts with the test-local fixture.
   clearNuxtData()
+  // Turns render from the conversation stream, which each test drives through a fake EventSource.
+  fakeConversationStreams()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
-describe('Chat page — POST /api/chat/stream on form submit', () => {
-  it('issues a POST to /api/chat/stream with the typed text and selected agent', async () => {
+/** Answers each send as a started turn in conversation 42, whose rows start empty. */
+function startTurnsIn42() {
+  registerEndpoint('/api/conversations/42/messages', () => [])
+  return serveTurnStart(() => ({ status: 'started', conversationId: 42 }))
+}
+
+async function sendOnce(component: VueWrapper, text: string) {
+  await component.find<HTMLTextAreaElement>('textarea').setValue(text)
+  await component.find('form').trigger('submit.prevent')
+  await flushPromises()
+}
+
+describe('Chat page — POST /api/chat/turn on form submit', () => {
+  it('issues a POST to /api/chat/turn with the typed text and selected agent', async () => {
     setupChatApi()
-
-    // The page uses native globalThis.fetch for the streaming endpoint
-    // (not $fetch — streaming bodies need ReadableStream). Stub it to a
-    // valid no-op stream so the post-stream flow exits cleanly without
-    // throwing on parsing nothing.
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      // Synthesize a minimal stream: an init frame then [DONE]. The chat
-      // page parses lines starting with 'data: '; anything else is ignored.
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
-
+    const bodies = startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // Type a message into the textarea, then submit the form. The form's
-    // @submit.prevent handler calls sendMessage().
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('hello world')
-    const form = component.find('form')
-    expect(form.exists()).toBe(true)
-    await form.trigger('submit.prevent')
-    await flushPromises()
+    await sendOnce(component, 'hello world')
 
-    // Look for the chat-stream POST in the spy history. There may be other
-    // fetches (e.g. /api/chat/upload short-circuits when no attachments),
-    // so filter on URL.
-    const streamCall = fetchSpy.mock.calls.find((call) => {
-      const url = String(call[0] ?? '')
-      return url.includes('/api/chat/stream')
-    })
-    expect(streamCall).toBeTruthy()
-    const init = streamCall![1] as RequestInit
-    expect(init.method).toBe('POST')
-    const body = JSON.parse(init.body as string) as Record<string, unknown>
-    expect(body.message).toBe('hello world')
-    expect(body.agentId).toBe(1)
+    await vi.waitFor(() => expect(bodies).toEqual([{ agentId: 1, conversationId: null, message: 'hello world', attachments: [] }]))
   })
 
   it('clears the textarea after a successful submit', async () => {
     setupChatApi()
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200 })
-    })
-
+    startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
 
     const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('clear-after-send')
-    await component.find('form').trigger('submit.prevent')
-    await flushPromises()
-    // sendMessage zeroes input.value before the stream fires; observe.
+    await sendOnce(component, 'clear-after-send')
+    // sendMessage zeroes input.value before the POST goes; observe.
     expect(textarea.element.value).toBe('')
   })
 
   it('does not POST when the input is empty and no attachments are queued', async () => {
     setupChatApi()
-    // Always provide a mock implementation — without one, vi.spyOn falls
-    // through to the real fetch and can hit the network in jsdom.
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }))
-
+    const bodies = startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // Submit an empty form. The early-return in sendMessage guards on
-    // !rawText && !attachedFiles.value.length, so no /api/chat/stream POST
-    // should fire.
+    // The early-return in sendMessage guards on !rawText && !attachedFiles.value.length.
     await component.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    const streamCall = fetchSpy.mock.calls.find(call =>
-      String(call[0] ?? '').includes('/api/chat/stream'))
-    expect(streamCall).toBeUndefined()
+    expect(bodies).toEqual([])
   })
 })
 
@@ -256,26 +214,12 @@ describe('Chat page — image-gen progress bar is scoped to the generate_image t
   // Fix: polling starts only when a turn fires a generate_image tool call, and
   // the bar is keyed to that turn.
 
-  function streamWith(frames: string[]) {
-    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      if (!String(input ?? '').includes('/api/chat/stream')) {
-        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          for (const f of frames) controller.enqueue(encoder.encode(f))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
-  }
-
-  async function sendOnce(component: VueWrapper, text: string) {
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue(text)
-    await component.find('form').trigger('submit.prevent')
+  /** Sends `text` and runs its turn in conversation 42 through `frames`. */
+  async function turnWith(component: VueWrapper, text: string, frames: object[]) {
+    await sendOnce(component, text)
+    const stream = await vi.waitFor(() => streamOn(42))
+    stream.send({ type: 'init', conversationId: 42 })
+    for (const f of frames) stream.send(f)
     await flushPromises()
   }
 
@@ -286,15 +230,13 @@ describe('Chat page — image-gen progress bar is scoped to the generate_image t
       progressPolls++
       return { percent: 40 }
     })
-    streamWith([
-      'data: {"type":"init","conversationId":42}\n',
-      'data: {"type":"token","content":"hi"}\n',
-      'data: {"type":"complete","content":"hi"}\n',
-    ])
-
+    startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
-    await sendOnce(component, 'just chat, no image')
+    await turnWith(component, 'just chat, no image', [
+      { type: 'token', content: 'hi' },
+      { type: 'complete', content: 'hi' },
+    ])
 
     expect(progressPolls).toBe(0)
     // And the transient bar never appears.
@@ -308,15 +250,13 @@ describe('Chat page — image-gen progress bar is scoped to the generate_image t
       progressPolls++
       return { percent: 40 }
     })
-    streamWith([
-      'data: {"type":"init","conversationId":42}\n',
-      'data: {"type":"tool_call","id":"tc1","name":"generate_image","arguments":"{\\"prompt\\":\\"a cat\\"}"}\n',
-      'data: {"type":"complete","content":"here is your cat"}\n',
-    ])
-
+    startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
-    await sendOnce(component, 'draw me a cat')
+    await turnWith(component, 'draw me a cat', [
+      { type: 'tool_call', id: 'tc1', name: 'generate_image', arguments: '{"prompt":"a cat"}' },
+      { type: 'complete', content: 'here is your cat' },
+    ])
 
     // The immediate poll fired synchronously when the generate_image tool call
     // was dispatched during the stream.
@@ -331,27 +271,23 @@ describe('Chat page — image-gen progress bar is scoped to the generate_image t
       return { percent: 40 }
     })
 
+    startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
 
     // Turn 1: generate_image → polls.
-    streamWith([
-      'data: {"type":"init","conversationId":42}\n',
-      'data: {"type":"tool_call","id":"tc1","name":"generate_image","arguments":"{}"}\n',
-      'data: {"type":"complete","content":"done"}\n',
+    await turnWith(component, 'make an image', [
+      { type: 'tool_call', id: 'tc1', name: 'generate_image', arguments: '{}' },
+      { type: 'complete', content: 'done' },
     ])
-    await sendOnce(component, 'make an image')
     const afterTurn1 = progressPolls
     expect(afterTurn1).toBeGreaterThanOrEqual(1)
-    vi.restoreAllMocks()
 
     // Turn 2: plain turn — polling must not resume (it was torn down at turn 1 end).
-    streamWith([
-      'data: {"type":"init","conversationId":42}\n',
-      'data: {"type":"token","content":"ok"}\n',
-      'data: {"type":"complete","content":"ok"}\n',
+    await turnWith(component, 'now just talk', [
+      { type: 'token', content: 'ok' },
+      { type: 'complete', content: 'ok' },
     ])
-    await sendOnce(component, 'now just talk')
     expect(progressPolls).toBe(afterTurn1)
   })
 })
@@ -380,22 +316,8 @@ describe('Chat page — model selector re-syncs after a mid-turn model switch', 
     }))
     registerEndpoint('/api/conversations', () => [])
 
-    // Simulate the tool's server-side persist: flip the agent's model when
-    // the stream POST fires, mimicking the jclaw_api PUT committing mid-turn.
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      if (String(input ?? '').includes('/api/chat/stream')) {
-        agentModelId = 'kimi-k2.6'
-      }
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
+    registerEndpoint('/api/conversations/42/messages', () => [])
+    serveTurnStart(() => ({ status: 'started', conversationId: 42 }))
 
     const component = await mountSuspended(Chat)
     await flushPromises()
@@ -404,48 +326,27 @@ describe('Chat page — model selector re-syncs after a mid-turn model switch', 
     // Baseline: the header shows the agent's starting model.
     expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.5')
 
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('switch your model please')
-    await component.find('form').trigger('submit.prevent')
-    await flushPromises()
-    await flushPromises() // let the finally block's refreshAgents() resolve
+    await sendOnce(component, 'switch your model please')
+    const stream = await vi.waitFor(() => streamOn(42))
+    stream.send({ type: 'init', conversationId: 42 })
+    // The tool's server-side persist: the jclaw_api PUT commits mid-turn.
+    agentModelId = 'kimi-k2.6'
+    stream.send({ type: 'complete', content: 'Switched.' })
 
     // The selector now reflects the mid-turn switch — no reload required.
-    expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.6')
+    await vi.waitFor(() => expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.6'))
   })
 })
 
 describe('Chat page — replying to a message (JCLAW-1299)', () => {
-  function stubStream() {
-    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const encoder = new TextEncoder()
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
-          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
-  }
-
-  function streamBodies(fetchSpy: ReturnType<typeof stubStream>) {
-    return fetchSpy.mock.calls
-      .filter(call => String(call[0] ?? '').includes('/api/chat/stream'))
-      .map(call => JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>)
-  }
-
   async function send(component: VueWrapper, text: string) {
-    await component.find<HTMLTextAreaElement>('textarea').setValue(text)
-    await component.find('form').trigger('submit.prevent')
+    await sendOnce(component, text)
     await flushPromises()
   }
 
   it('quotes the message above the composer, sends the quote once, and can be dismissed', async () => {
     setupChatApi()
-    registerEndpoint('/api/conversations/42/messages', () => [])
-    const fetchSpy = stubStream()
+    const bodies = startTurnsIn42()
     const component = await mountSuspended(Chat)
     await flushPromises()
     await send(component, 'first message')
@@ -462,7 +363,7 @@ describe('Chat page — replying to a message (JCLAW-1299)', () => {
     await send(component, 'about that')
     await send(component, 'unrelated')
 
-    const [, reply, after] = streamBodies(fetchSpy)
+    const [, reply, after] = bodies
     expect(reply!.quote).toEqual({ kind: 'user', text: 'first message' })
     expect(reply!.message).toBe('about that')
     expect(after!.quote).toBeUndefined()
@@ -513,21 +414,9 @@ describe('Chat page — checklist panel (JCLAW-1569)', () => {
     registerEndpoint('/api/conversations/99/messages', () => [
       { id: 7000, role: 'user', content: 'plan it', createdAt: '2026-10-18T10:00:00Z' },
     ])
-    const encoder = new TextEncoder()
-    let stream!: ReadableStreamDefaultController<Uint8Array>
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      if (!String(input ?? '').includes('/api/chat/stream')) {
-        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      const body = new ReadableStream<Uint8Array>({
-        start(c) {
-          stream = c
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    })
+    serveTurnStart(() => ({ status: 'started', conversationId: 99 }))
     const push = async (frame: object) => {
-      stream.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n`))
+      streamOn(99).send(frame)
       await flushPromises()
     }
     const component = await mountSuspended(Chat)
@@ -557,8 +446,6 @@ describe('Chat page — checklist panel (JCLAW-1569)', () => {
     expect(spinning()).toBe(true)
 
     await push({ type: 'complete', content: 'Parser fixed.' })
-    stream.close()
-    await flushPromises()
 
     expect(rowTexts()).toEqual(['Fix the parser(done)', 'Commit(not finished)'])
     expect(spinning()).toBe(false)

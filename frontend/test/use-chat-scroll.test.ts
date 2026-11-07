@@ -177,6 +177,40 @@ describe('useChatScroll', () => {
     expect(el.scrollTop).toBe(400)
   })
 
+  it('follows a turn\'s frames for a reader at the bottom as its content grows, and leaves one scrolled up where they are', async () => {
+    const resize = stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, content, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    // A token grows the bubble before its frame scrolls, which the content observer sees first.
+    layout({ scrollTop: 800, scrollHeight: 1100, clientHeight: 200 })
+    resize.fire([content])
+    api.followToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(1100)
+
+    // The reader scrolls up to read; the next tokens leave them there.
+    layout({ scrollTop: 300, scrollHeight: 1100, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 300, scrollHeight: 1200, clientHeight: 200 })
+    resize.fire([content])
+    api.followToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(300)
+
+    // Back at the bottom, it follows again.
+    layout({ scrollTop: 1000, scrollHeight: 1200, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 1000, scrollHeight: 1300, clientHeight: 200 })
+    api.followToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(1300)
+  })
+
   it('keeps a reader at the bottom when the viewport shrinks, and leaves one reading above it alone', async () => {
     const resize = stubResizeObserver()
     const { api } = mountScroll()

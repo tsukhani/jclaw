@@ -722,21 +722,22 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    void stopOnBusyConversationSetsCancellationFlag() {
+    void stopOnBusyChannelConversationSetsCancellationFlag() {
         // Drive the queue into "processing" state via tryAcquire so isBusy
         // returns true. Then /stop must flip the cancellation flag — the
         // streaming thread's checkCancelled poll observes it on its next
-        // checkpoint and short-circuits the loop.
-        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        // checkpoint and short-circuits the loop. A web conversation's /stop
+        // is the Stop button instead (ApiChatControllerTest).
+        var convo = ConversationService.findOrCreate(agent, "telegram", "admin");
         var queueMsg = new services.ConversationQueue.QueuedMessage(
-                "in-flight prompt", "web", "admin", agent);
+                "in-flight prompt", "telegram", "admin", agent);
         var acquired = services.ConversationQueue.tryAcquire(convo.id, queueMsg);
         assertTrue(acquired, "tryAcquire on a fresh conversation should succeed");
         try {
             assertTrue(services.ConversationQueue.isBusy(convo.id),
                     "conversation must register as busy after tryAcquire");
 
-            var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo);
+            var result = Commands.execute(Commands.Command.STOP, agent, "telegram", "admin", convo);
 
             assertEquals(Commands.Command.STOP, result.command());
             assertEquals("Stopped.", result.responseText());
@@ -748,6 +749,44 @@ class SlashCommandsTest extends UnitTest {
             // processing back to false.
             services.ConversationQueue.releaseOwnership(convo.id);
         }
+    }
+
+    // ── Result.saved: whether the reply is a row the chat page may pair its copy with (JF-202) ──
+
+    @ParameterizedTest(name = "{0} {1} on {2}")
+    @CsvSource(nullValues = "-", value = {
+            "HELP,     -,      web,      true",
+            "MODEL,    -,      web,      true",
+            "MODEL,    status, web,      true",
+            "THINK,    -,      web,      true",
+            "USAGE,    -,      web,      true",
+            "PROMPT,   -,      web,      true",
+            "SUBAGENT, -,      web,      true",
+            "COMPACT,  -,      web,      true",
+            "RESET,    -,      web,      false",
+            "STOP,     -,      telegram, false",
+    })
+    void aCommandSaysItsReplyWasSavedExactlyWhenItAddedAnAssistantRow(Commands.Command command, String args,
+                                                                       String channelType, boolean saved) {
+        // No provider is configured, so /compact answers with its no-provider reply, which it saves.
+        var convo = ConversationService.findOrCreate(agent, channelType, "admin");
+        var before = Message.count("conversation = ?1", convo);
+
+        var result = Commands.execute(command, agent, channelType, "admin", convo, args, true);
+
+        assertEquals(saved, result.saved(), result.responseText());
+        assertEquals(saved ? before + 1 : before, Message.count("conversation = ?1", convo));
+    }
+
+    @Test
+    void aCommandWhoseConversationIsGoneSaysItSavedNothing() {
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        convo.delete();
+
+        var result = Commands.execute(Commands.Command.HELP, agent, "web", "admin", convo, null, true);
+
+        assertEquals(Commands.HELP_TEXT, result.responseText());
+        assertFalse(result.saved(), "the conversation was deleted, so no row holds the reply");
     }
 
     @Test

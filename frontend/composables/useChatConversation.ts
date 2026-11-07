@@ -1,26 +1,24 @@
-import { computed, ref, shallowRef, triggerRef, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import {
   fetchHistoryPage,
-  fetchMessagesAfter,
   fetchUsageBefore,
   HISTORY_PAGE_SIZE,
-  newRowsCursor,
   type MessageUsageRow,
 } from '~/utils/conversation-messages'
 import { hydrateToolCalls, turnWindowStart } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
-import { applyToolCallDefaults, backfillServerIds } from '~/utils/message-reconcile'
+import { applyToolCallDefaults } from '~/utils/message-reconcile'
 import type { Agent, Conversation, Message } from '~/types/api'
 
 /**
  * Chat conversation lifecycle (JCLAW-690 stage 4f; behaviour extracted verbatim
  * from pages/chat.vue). Owns the current-conversation message state — the
  * `messages` shallowRef every other chat composable reads — plus the load /
- * switch / resolve flow, the end-of-stream id reconciliation, and the read-only
- * subagent-transcript mode.
+ * switch / resolve flow and the read-only subagent-transcript mode.
  *
  * `loadConversation` has cross-composable side effects (stop/start video
- * polling, subagent-collapse init, autoscroll, focus) that live in other
+ * polling, subagent-collapse init, autoscroll, focus, the conversation
+ * stream) that live in other
  * composables created *after* this one — a genuine construction-order cycle,
  * since those composables in turn read this composable's `messages`. It's
  * broken with a {@link ChatConversationLoadHooks} bag: this composable is
@@ -56,7 +54,6 @@ export interface UseChatConversation {
   effectiveDisplayAgentId: ComputedRef<number | null>
   clearSubagentTranscript: () => void
   initializing: Ref<boolean>
-  reconcileMessageIds: () => Promise<void>
   resolveAndLoadConversation: (id: number) => Promise<boolean>
   loadConversation: (id: number) => Promise<void>
   /** True while the shown messages start after the conversation's first row. */
@@ -101,31 +98,6 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
 
   function clearSubagentTranscript() {
     subagentTranscript.value = null
-  }
-
-  /**
-   * Backfill server ids onto the local `messages` array after a stream turn.
-   *
-   * The stream protocol doesn't emit persisted message ids
-   * (ApiChatController's complete frame carries only content).
-   * Without this, the optimistic user + assistant bubbles stay id-less until
-   * the user leaves and re-enters the conversation, which disabled the Delete
-   * button (gated on `msg.id`) and caused pollForAnnounce to treat the
-   * server-side copy of those same rows as new additions, duplicating the
-   * user bubble in the transcript.
-   */
-  async function reconcileMessageIds() {
-    const convoId = selectedConvoId.value
-    if (!convoId) return
-    try {
-      const fresh = await fetchMessagesAfter(convoId, newRowsCursor(messages.value))
-      if (selectedConvoId.value !== convoId) return
-      if (!fresh?.length) return
-      if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
-    }
-    catch (e) {
-      console.error('Failed to reconcile message ids:', e)
-    }
   }
 
   // Auto-select agent on load
@@ -311,7 +283,6 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     effectiveDisplayAgentId,
     clearSubagentTranscript,
     initializing,
-    reconcileMessageIds,
     resolveAndLoadConversation,
     loadConversation,
     hasOlderMessages,

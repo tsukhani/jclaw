@@ -151,9 +151,18 @@ public class ApiConversationsController extends Controller {
                                         boolean generated, boolean deleted,
                                         String generationMetadata, Long generationJobId) {}
 
-    public record QueueStatusResponse(boolean busy, int queueSize) {}
+    /**
+     * @param queueSize every queued message, the ones {@code pending} leaves out included, all of which Stop drops
+     * @param stoppable whether the operator's Stop can stop the running turn: a web turn whose owner holds a cancel
+     *                  flag of its own (JF-202)
+     * @param pending   the queued messages the chat shows, in the order they run, each with its place in line
+     */
+    public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable,
+                                      List<ConversationQueue.PendingView> pending) {}
 
     public record StopTurnResponse(boolean stopped) {}
+
+    private record StopTarget(String agentName, String channelType) {}
 
     public record StatusResponse(String status) {}
 
@@ -513,16 +522,17 @@ public class ApiConversationsController extends Controller {
      * GET /api/conversations/{id}/queue
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
-    @Operation(summary = "Get the busy flag and queued-message count for a conversation")
+    @Operation(summary = "Get the busy flag, whether Stop applies, and the queued messages for a conversation")
     @AgentAccess(value = OWN_ONLY,
-            reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
+            reason = "the queue of one conversation the calling agent owns, its queued messages included; "
+                    + "main reaches every agent's (JCLAW-1270)")
     public static void getQueueStatus(Long id) {
         // Loaded rather than read straight off the id: the queue is keyed by conversation id
-        // alone, so without this an agent could size another agent's backlog (JCLAW-1270).
-        requireConversation(id);
-        var busy = ConversationQueue.isBusy(id);
-        var queueSize = ConversationQueue.getQueueSize(id);
-        renderJSON(gson.toJson(new QueueStatusResponse(busy, queueSize)));
+        // alone, so without this an agent could read another agent's queued messages (JCLAW-1270).
+        var conversation = requireConversation(id);
+        var queue = ConversationQueue.snapshot(id, conversation.channelType);
+        renderJSON(gson.toJson(new QueueStatusResponse(queue.busy(), queue.queueSize(), queue.stoppable(),
+                queue.pending())));
     }
 
     /**
@@ -537,15 +547,17 @@ public class ApiConversationsController extends Controller {
     @NoTransaction
     public static void stopTurn(Long id) {
         // No request transaction: the stop marker must commit before the stop releases the conversation.
-        var agentName = Tx.run(() -> {
+        var target = Tx.run(() -> {
             var conversation = requireConversation(id);
             if (!"web".equals(conversation.channelType)) {
                 badRequest();
             }
-            return conversation.agent.name;
+            return new StopTarget(conversation.agent.name, conversation.channelType);
         });
+        var agentName = target.agentName();
         var pending = ConversationQueue.getQueueSize(id);
-        var stopped = ConversationQueue.stop(id);
+        var stopped = ConversationQueue.stopOperatorTurn(id, target.channelType())
+                == ConversationQueue.OperatorStop.STOPPED;
         if (stopped) {
             EventLogger.info("queue", agentName, "web",
                     "Stopped the turn in conversation %d, dropped %d pending message(s)".formatted(id, pending));

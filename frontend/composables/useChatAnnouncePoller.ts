@@ -1,6 +1,7 @@
 import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
 import { fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages'
-import { backfillServerIds, reconcileWindow } from '~/utils/message-reconcile'
+import { mergeNewRows } from '~/utils/message-reconcile'
+import { latestTurnWindowStart } from '~/utils/tool-calls'
 import { useEventBus } from '~/composables/useEventBus'
 import { useLatestRequest } from '~/composables/useLatestRequest'
 import type { Message } from '~/types/api'
@@ -21,10 +22,11 @@ import type { Message } from '~/types/api'
  * never clobber in-flight optimistic placeholders. Stops as soon as the
  * announce arrives or the page unmounts.
  *
- * Deliberately silent during streaming — the SSE path already keeps the
- * messages list reactive, so polling on top of it would race and risk
- * stomping the in-flight assistant bubble. The check runs every 5s
- * regardless, so within one cadence of stream end the loop kicks in.
+ * Deliberately silent while the conversation stream reports a turn — the
+ * stream renders it and fetches its rows itself ({@code mergeSavedRows}), so
+ * polling on top of it would race the in-flight assistant bubble. The check
+ * runs every 5s regardless, so within one cadence of the turn's end the loop
+ * kicks in.
  *
  * This is conversation-refresh, not display — a separate concern from
  * useChatSubagents (whose initSubagentCollapsedState it calls on the rows of
@@ -142,16 +144,34 @@ export interface UseChatAnnouncePollerDeps {
   appendRows?: (append: () => void) => void
 }
 
+export interface MergeSavedRowsOptions {
+  /** Which id-less rows may take a saved row's id; the running turn's bubble may not. */
+  pairable?: (m: Message) => boolean
+  /** A resync's reload: fetch from the window that holds the newest turn, rather than from the newest settled row. */
+  full?: boolean
+}
+
 export interface UseChatAnnouncePoller {
   hasPendingAsyncAnnounce: () => boolean
   hasRecentTaskCreate: () => boolean
   pollForAnnounce: () => Promise<void>
+  /** {@link pollForAnnounce} while the conversation stream reports a turn, whose rows it fetches on init and after its end. */
+  mergeSavedRows: (opts?: MergeSavedRowsOptions) => Promise<void>
   /**
    * Poll for {@code ms} from now whatever else holds. A background scrape job's card calls it when the
    * job ends (JCLAW-1273): the completion message and the agent's reply to it land with no SSE
    * channel to this tab.
    */
   keepPollingFor: (ms: number) => void
+}
+
+/** The cursor a resync's reload fetches after: just before the window that holds the newest turn, else every shown row. */
+function turnWindowCursor(shown: Message[]): number | null {
+  const saved = shown.filter(m => typeof m.id === 'number')
+  const start = latestTurnWindowStart(saved)
+  if (start > 0) return saved[start - 1]!.id!
+  const oldest = saved[0]?.id
+  return oldest == null ? null : oldest - 1
 }
 
 export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatAnnouncePoller {
@@ -232,35 +252,34 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
 
   /**
    * Refetch the open conversation's newer rows and merge them through
-   * {@link reconcileWindow}: rows whose server id isn't present locally are
-   * appended, and a row already shown is brought to what the server holds
-   * for it (its tool calls, their results, its attachments) in place, keeping
-   * its other client-only state (thinkingCollapsed, _key on optimistic
-   * placeholders, etc.). Collapse defaults apply to the appended rows alone.
+   * {@link mergeNewRows}: rows whose server id isn't present locally go in
+   * server order, as a reload shows them, and a row already shown is brought
+   * to what the server holds for it (its tool calls, their results, its
+   * attachments) in place, keeping its other client-only state
+   * (thinkingCollapsed, _key on optimistic placeholders, etc.). Collapse
+   * defaults apply to the added rows alone.
    *
-   * Backfills server ids onto id-less optimistic rows BEFORE reconciling:
-   * without that step the server-side copies of those rows (which carry ids
-   * the local set doesn't yet have) sail past the id match and get appended
-   * as duplicates, producing the "user prompt rendered twice" symptom on
-   * async-spawn turns.
+   * Id-less optimistic rows take their saved copies' ids first: without that
+   * step the server-side copies of those rows (which carry ids the local set
+   * doesn't yet have) sail past the id match and get added as duplicates,
+   * producing the "user prompt rendered twice" symptom on async-spawn turns.
    */
-  async function pollForAnnounce() {
+  async function fetchAndMerge(duringTurn: boolean, opts: MergeSavedRowsOptions = {}) {
     const convoId = selectedConvoId.value
     if (!convoId) return
     const poll = polls.begin()
     let fresh: Message[]
     try {
-      fresh = await fetchMessagesAfter(convoId, newRowsCursor(messages.value))
+      fresh = await fetchMessagesAfter(convoId, opts.full ? turnWindowCursor(messages.value) : newRowsCursor(messages.value))
     }
     catch (e) {
       console.error('Failed to poll for announce:', e)
       return
     }
-    // A tick can land after the operator switched conversations, whose rows belong to the old one, or after a send,
-    // whose optimistic rows the stream owns.
-    if (!polls.isCurrent(poll) || selectedConvoId.value !== convoId || streaming.value) return
+    // A tick can land after the operator switched conversations, whose rows belong to the old one, or after a turn
+    // began, whose rows the stream's own fetches bring in.
+    if (!polls.isCurrent(poll) || selectedConvoId.value !== convoId || (!duringTurn && streaming.value)) return
     if (!fresh.length) return
-    const backfilled = backfillServerIds(messages.value, fresh)
     const shownRuns = new Set<number>()
     for (const m of messages.value) {
       if (m.subagentRunId != null) shownRuns.add(m.subagentRunId)
@@ -268,14 +287,18 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     // The window holds a running turn's earlier rounds too, and hydrating it hangs all their calls on its newest row:
     // the shown row that held them after the last merge must give them up, or each merge leaves one more block behind.
     // Not partial: newRowsCursor starts the window after a settled row or before every shown one, so it hydrates whole.
-    const { additions, changed } = reconcileWindow(messages.value, fresh, false)
-    if (!additions.length && !changed && !backfilled) return
+    const { rows, additions, changed } = mergeNewRows(messages.value, fresh, opts.pairable)
+    if (!changed) return
     const addedRuns = additions.filter(m => m.subagentRunId != null && !shownRuns.has(m.subagentRunId))
     appendRows(() => {
-      if (additions.length) messages.value = [...messages.value, ...additions]
+      messages.value = rows
       if (addedRuns.length) initSubagentCollapsedState(addedRuns)
       triggerRef(messages)
     })
+  }
+
+  function pollForAnnounce() {
+    return fetchAndMerge(false)
   }
 
   function announcePollTick() {
@@ -327,6 +350,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     hasPendingAsyncAnnounce,
     hasRecentTaskCreate,
     pollForAnnounce,
+    mergeSavedRows: opts => fetchAndMerge(true, opts),
     keepPollingFor,
   }
 }

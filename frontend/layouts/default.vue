@@ -82,8 +82,9 @@ const frameworkDotTitle = computed(() => frameworkVersionMatch.value === 'match'
   ? `Framework matches .play-version (v${expectedFrameworkVersion.value})`
   : `Framework drift: running v${frameworkVersion.value}, .play-version expects v${expectedFrameworkVersion.value}`)
 const apiOnline = ref(false)
-// Plain http caps a browser at 6 connections per host and each tab's /api/events stream holds
-// one, so a 7th tab's probe times out; JClaw's https port serves HTTP/2, which has no such cap.
+// Plain http caps a browser at 6 connections per host; each tab's /api/events stream holds one, and a chat tab's
+// conversation stream a second, so a few tabs leave the probe none and it times out. JClaw's https port serves
+// HTTP/2, which has no such cap.
 const offlineMessage = location.protocol === 'http:'
   ? 'The JClaw server isn\'t responding. If several JClaw tabs are open, close a few, then Retry.'
   : 'The JClaw server isn\'t responding.'

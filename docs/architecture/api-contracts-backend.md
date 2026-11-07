@@ -92,7 +92,7 @@ The **config store is the live source for operator settings** — not `conf/appl
 { "agentId": 12, "message": "Draft a release note.", "conversationId": 345 }
 ```
 
-**Streaming event contract.** `/api/chat/stream` emits seven event types, consumed by `frontend/composables/useChatStream.ts`:
+**Streaming event contract.** `/api/chat/stream` emits seven event types, consumed by `app/services/LoadTestRunner.java`; the chat page (`frontend/composables/useChatStream.ts`) reads them from `GET /api/conversations/{id}/stream`, where `init` also carries `startedAt` and two more frames come, `stopped` and `resync`:
 
 | Event | Meaning |
 |---|---|

@@ -47,7 +47,7 @@ import { useChatSubagentChips } from '~/composables/useChatSubagentChips'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
 import { useChatReplyHandoff } from '~/composables/useChatReplyHandoff'
-import { QUOTE_KIND_LABELS, quoteFor } from '~/utils/quoted-reply'
+import { QUOTE_KIND_LABELS, quoteFor, splitQuotedReply } from '~/utils/quoted-reply'
 import { useStreamProgress } from '~/composables/useStreamProgress'
 import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
@@ -125,6 +125,10 @@ const { data: conversations, refresh: refreshConversations } = await useFetch<Co
 // they read this composable's messages, so it must exist first. See the wiring
 // block after useChatSubagents.
 const convHooks: ChatConversationLoadHooks = {}
+// The conversation whose turn stream useChatStream follows: set once its rows have loaded, cleared before the next load.
+const followedConvoId = ref<number | null>(null)
+// Whether that stream is up, which useChatStream keeps; the queue read's hold rule needs it.
+const conversationStreamUp = ref(false)
 const {
   messages,
   selectedConvoId,
@@ -132,7 +136,6 @@ const {
   effectiveDisplayAgentId,
   clearSubagentTranscript,
   initializing,
-  reconcileMessageIds,
   resolveAndLoadConversation,
   loadConversation,
   hasOlderMessages,
@@ -198,6 +201,7 @@ const openChecklist = computed(() => {
 // useMediaGenPolling tears down on streaming-end, and displayMessages /
 // isEmptyChat / the template read `streaming` — all constructed before the
 // stream composable. Keeping them here dissolves that construction cycle.
+// True while the conversation stream has a turn open, whichever started it.
 const streaming = ref(false)
 const chatInput = ref<HTMLTextAreaElement | null>(null)
 
@@ -207,7 +211,7 @@ const chatInput = ref<HTMLTextAreaElement | null>(null)
 const streamReasoning = ref('')
 // Autoscroll coordination (viewport el + scrollToBottom + reasoning-body pin)
 // lives in useChatScroll; it reads the stream state it reacts to as args.
-const { messagesEl, scrollToBottom, keepViewport, appendFollowing } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
+const { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
 
 // Older turns without scrolling, for a keyboard or screen-reader user; focus moves to the list once none remain.
 const loadOlderButton = ref<HTMLButtonElement | null>(null)
@@ -284,12 +288,17 @@ const {
 // load time, so the deep-link resolution below (which can call loadConversation
 // synchronously on its immediate watch) sees them already populated. focusInput
 // is a hoisted function declaration, so referencing it here is safe.
-convHooks.beforeLoad = () => stopVideoPolling() // don't leak a prior convo's poll loop
+convHooks.beforeLoad = () => {
+  stopVideoPolling() // don't leak a prior convo's poll loop
+  followedConvoId.value = null
+}
 convHooks.afterLoad = (msgs) => {
   initSubagentCollapsedState(msgs)
   scrollToBottom()
   focusInput()
   startVideoPolling() // resume progress polling for any pending video placeholder
+  // Opened only on rows of this conversation, so a turn's frames and merges never land on the previous one's.
+  followedConvoId.value = selectedConvoId.value
 }
 convHooks.afterPrepend = older => initSubagentCollapsedState(older)
 
@@ -302,14 +311,38 @@ const {
   hasPendingAsyncAnnounce,
   hasRecentTaskCreate,
   pollForAnnounce,
+  mergeSavedRows,
   keepPollingFor,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState, appendRows: appendFollowing })
 provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
 
-// A turn the server runs with no stream to this tab (a yield resume, a queued message, a turn streamed to a channel
-// or to voice): its rows arrive on conversation.updated through the poller above, and this flag drives the
-// "Working…" line until it ends.
-const { backgroundBusy } = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce })
+// The open conversation's queue: whether Stop can stop its turn, the messages queued behind it, and backgroundBusy, a
+// turn the conversation stream does not report (before its init, or while the stream is down), which drives the
+// "Working…" line; such a turn's rows arrive through the poller above.
+const {
+  backgroundBusy,
+  stoppable,
+  queueSize,
+  pending: queuedMessages,
+  readQueue,
+  showQueued,
+  clearStoppable,
+} = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce, streamUp: conversationStreamUp })
+// Stop discards everything queued behind the turn, a waiting subagent result too, so the button says so (JF-202).
+const stopLabel = computed(() => queueSize.value
+  ? `Stop and drop ${queueSize.value} queued`
+  : 'Stop generating')
+// A quoted reply waits with the quote the server folded into its text, which the row shows as ChatMessage does.
+const queuedRows = computed(() => queuedMessages.value.map(q => ({ ...q, quoted: splitQuotedReply(q.text) })))
+// The Queued row is outside the live region, so the region says where a send went; the next turn's start replaces it.
+const queuedAnnouncement = ref('')
+function showQueuedAndAnnounce(message: Parameters<typeof showQueued>[0]) {
+  showQueued(message)
+  queuedAnnouncement.value = `Queued, position ${message.position}`
+}
+watch(selectedConvoId, () => {
+  queuedAnnouncement.value = ''
+})
 
 const {
   chips: subagentChips,
@@ -397,9 +430,10 @@ else {
 // conversation) and after newChat (reset state, ready for a new turn).
 //
 // nextTick guards two race conditions: (1) the textarea's :disabled binding
-// flips with `streaming`, and a synchronously-disabled element silently
-// rejects focus(); (2) on first deep-link load the template-ref is bound
-// after the surrounding microtask, so a same-tick focus would no-op.
+// flips with the read-only transcript mode, and a synchronously-disabled
+// element silently rejects focus(); (2) on first deep-link load the
+// template-ref is bound after the surrounding microtask, so a same-tick focus
+// would no-op.
 function focusInput() {
   nextTick(() => {
     chatInput.value?.focus()
@@ -464,9 +498,8 @@ watch(selectedConvoId, (id) => {
 })
 
 function newChat() {
-  // Abort any in-flight stream first so late SSE events don't land in the
-  // freshly-cleared state as orphan deltas.
-  if (streaming.value) stopStreaming()
+  // Leaving closes the conversation's stream, and a send still unanswered places nothing; the turn runs on.
+  leaveView()
   selectedConvoId.value = null
   messages.value = []
   clearSubagentTranscript()
@@ -512,20 +545,22 @@ const {
   uploadAttachments,
 } = useChatAttachments(configDataRef)
 
-// SSE streaming state machine + send flow lives in useChatStream. It composes
-// useStreamMarkdownRender for the throttled bubble HTML and takes the cross-
-// composable coordination it needs (conversation messages/reconcile, scroll,
-// media-gen pollers, attachment upload, data refresh) as deps. streaming and
-// streamReasoning are shared page refs (see the note by their declarations), so
-// scroll/media — constructed before this — can read them without a cycle.
+// The send flow and the turn renderer live in useChatStream: a send posts the turn, and every turn of the open
+// conversation, this tab's own included, renders from the conversation stream it follows (followedConvoId). It
+// composes useStreamMarkdownRender for the throttled bubble HTML and takes the cross-composable coordination it needs
+// (conversation messages and row merges, the queue read, scroll, media-gen pollers, attachment upload, data refresh)
+// as deps. streaming and streamReasoning are shared page refs (see the note by their declarations), so scroll/media —
+// constructed before this — can read them without a cycle.
 const {
   streamContent,
   streamStatus,
   streamingMessageKey,
   streamContentHtml,
   streamReasoningHtml,
+  streamStartedAt,
   sendMessage,
   stopStreaming,
+  leaveView,
 } = useChatStream({
   messages,
   selectedConvoId,
@@ -533,6 +568,7 @@ const {
   selectedAgentId,
   streaming,
   streamReasoning,
+  followedConvoId,
   input,
   chatInput,
   attachedFiles,
@@ -540,19 +576,27 @@ const {
   attachmentPreviews,
   uploadAttachments,
   scrollToBottom,
+  followToBottom,
+  openConversation: loadConversation,
+  streamUp: conversationStreamUp,
   focusInput,
   imageGenTurnKey,
   startImageProgressPolling,
   browserSetupTurnKey,
   startBrowserSetupPolling,
   startVideoPolling,
-  reconcileMessageIds,
+  mergeSavedRows,
+  readQueue,
+  showQueued: showQueuedAndAnnounce,
+  clearStoppable,
   refreshConversations,
   refreshAgents,
   pendingOverrides,
   quote: pendingQuote,
   liveChecklist,
 })
+// An agent change clears the conversation; a send still unanswered places nothing in the next one.
+watch(selectedAgentId, () => leaveView())
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
 // the in-flight turn (useStreamProgress). `producing` flips true on the model's
@@ -611,12 +655,16 @@ const noToolsNotice = computed(() => {
     skillCount,
   }
 })
-const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStreamProgress(streaming, streamProducing, streamIsLocal)
+const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStreamProgress(streaming, streamProducing, streamIsLocal, streamStartedAt)
 // Read by the progress lines' live region: a role="status" inserted together with its text is often never announced,
 // so the region stays mounted and only this text changes. The label reads "Generating…" at idle, hence the gate.
 const progressAnnouncement = computed(() => {
+  if (queuedAnnouncement.value) return queuedAnnouncement.value
   if (streaming.value) return streamProgressLabel.value
   return backgroundBusy.value ? 'Working…' : ''
+})
+watch(streamingMessageKey, () => {
+  queuedAnnouncement.value = ''
 })
 
 // Composer-local interaction glue (/model autocomplete, textarea keyboard +
@@ -1022,9 +1070,11 @@ function exportConversation() {
               @set-tok-stats-hover-key="tokStatsHoverKey = $event"
             />
             <!--
-              In-flight turn progress. Shown for the whole stream (send →
-              done) with a running elapsed timer, so a slow turn no longer
-              looks hung. Two phases off client-observable stream state:
+              In-flight turn progress. Shown for the whole turn (its init to
+              its terminal frame) with an elapsed timer counted from the
+              turn's start, so a slow turn no longer looks hung and a late
+              view shows how long it has run. Two phases off client-observable
+              stream state:
                 • "Prefilling…" — stream open, no token yet (prompt prefill /
                   model load; the GPU-busy-but-blank window, esp. on local
                   models). This is the gap the old pre-first-byte placeholder
@@ -1054,8 +1104,8 @@ function exportConversation() {
               >{{ streamProgressElapsed }}</span>
             </div>
             <!--
-              A turn the server runs with no stream to this tab. No timer: the page cannot know when it
-              started. No Stop for any turn shown here yet: JF-197 tracks it.
+              A turn holding the conversation that the stream does not report: before its init, or while the
+              stream is down. No timer: the page cannot know when it started.
             -->
             <div
               v-if="backgroundBusy && !streaming"
@@ -1075,6 +1125,57 @@ function exportConversation() {
               v-if="streaming && browserSetupTurnKey && browserSetup?.active"
               :setup="browserSetup"
             />
+            <!-- Messages waiting behind the running turn, in the order they run; each renders as a turn when it drains. -->
+            <div
+              v-for="queued in queuedRows"
+              :key="`queued-${queued.position}-${queued.text}`"
+              data-testid="queued-message"
+              class="flex justify-end"
+            >
+              <div class="max-w-[80%] min-w-0 flex flex-col items-end gap-1">
+                <div
+                  v-if="queued.attachmentNames.length"
+                  class="flex flex-wrap gap-2 justify-end"
+                >
+                  <span
+                    v-for="(name, idx) in queued.attachmentNames"
+                    :key="`${name}-${idx}`"
+                    class="inline-flex items-center gap-1.5 px-2 py-1 bg-muted border border-input rounded text-[11px] text-fg-primary"
+                  >
+                    <PaperClipIcon
+                      class="w-3 h-3 text-fg-muted shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span
+                      class="truncate max-w-[140px]"
+                      :title="name"
+                    >{{ name }}</span>
+                  </span>
+                </div>
+                <div
+                  v-if="queued.quoted"
+                  class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
+                >
+                  <blockquote
+                    data-testid="message-quote"
+                    class="mb-1.5 border-l-2 border-input pl-2 text-sm text-fg-muted line-clamp-4"
+                    :title="queued.quoted.quoted"
+                  >
+                    <span class="block text-xs font-medium">{{ queued.quoted.label }}</span>{{ queued.quoted.quoted }}
+                  </blockquote>{{ queued.quoted.reply }}
+                </div>
+                <div
+                  v-else
+                  class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
+                >
+                  {{ queued.text }}
+                </div>
+                <span
+                  data-testid="queued-label"
+                  class="text-xs text-fg-muted"
+                >Queued, position {{ queued.position }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1318,7 +1419,7 @@ function exportConversation() {
               ref="chatInput"
               v-model="input"
               :placeholder="subagentTranscript ? 'Subagent transcripts are read-only' : 'Send a message...'"
-              :disabled="streaming || !!subagentTranscript"
+              :disabled="!!subagentTranscript"
               rows="1"
               aria-label="Message input"
               class="w-full px-4 pt-4 pb-6 bg-transparent text-sm text-fg-strong
@@ -1524,20 +1625,26 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                 </button>
+                <!-- Only for a turn the server can stop (JF-202); Send stays beside it, and a message sent mid-turn follows the queue mode. -->
                 <button
-                  v-if="streaming"
+                  v-if="streaming && stoppable"
                   type="button"
-                  class="p-1.5 text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-400 transition-colors"
-                  title="Stop generating"
+                  data-testid="chat-stop"
+                  class="inline-flex items-center gap-1 p-1.5 text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-400 transition-colors"
+                  :title="stopLabel"
+                  :aria-label="stopLabel"
                   @click="stopStreaming"
                 >
                   <StopIconSolid
-                    class="w-5 h-5"
+                    class="w-5 h-5 shrink-0"
                     aria-hidden="true"
                   />
+                  <span
+                    v-if="queueSize"
+                    class="text-xs font-medium whitespace-nowrap"
+                  >{{ stopLabel }}</span>
                 </button>
                 <button
-                  v-else
                   type="submit"
                   :disabled="(!input.trim() && !attachedFiles.length) || completer.blocksSend.value"
                   class="p-1.5 transition-colors
