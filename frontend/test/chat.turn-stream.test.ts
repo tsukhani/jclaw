@@ -197,10 +197,10 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(progressLine(component).exists()).toBe(false)
   })
 
-  it('background turn: a drained message renders its progress line and tool calls live, without Stop, and its reply at the end', async () => {
+  it('background turn: a drained message renders its progress line and tool calls live, with Stop, and its reply at the end', async () => {
     const rows = [row(1, 'user', 'earlier'), row(2, 'user', 'the drained message')]
     serveConversation(5, rows)
-    serveQueue(5, { busy: true, stoppable: false })
+    serveQueue(5, { busy: true, stoppable: true })
     const { component, stream } = await openConversation(5)
 
     stream.send({ type: 'init', conversationId: 5, startedAt: new Date(Date.now() - 65_000).toISOString() })
@@ -210,8 +210,7 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(progressLine(component).exists()).toBe(true)
     // Timed from the turn's start, not from when this page saw it.
     expect(progressLine(component).find('[aria-hidden="true"]').text()).toMatch(/^1:0\d$/)
-    for (let i = 0; i < 5; i++) await flushPromises()
-    expect(stopButton(component).exists()).toBe(false)
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
     expect(sendButton(component).exists()).toBe(true)
 
     rows.push(row(3, 'assistant', 'Fetched the page.'))

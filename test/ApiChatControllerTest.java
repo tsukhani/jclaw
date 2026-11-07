@@ -1,8 +1,12 @@
 import agents.QueueDrainOrchestrator;
+import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import mcp.McpElicitations;
+import models.Agent;
+import models.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,6 +16,7 @@ import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.ConfigService;
 import services.ConversationQueue;
+import services.ConversationService;
 import services.ConversationTurnStream;
 import services.Tx;
 
@@ -24,6 +29,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -1190,21 +1197,105 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aStopTypedOnATurnChatCannotStopStopsNothingAndSaysSo() throws Exception {
+    void aStopTypedOnATurnThatPassedNoCancelFlagStopsItAndRepliesStopped() throws Exception {
         login();
         try (var model = HeldModel.answering()) {
             var chat = seedWebChat(model);
-            // A drained or sync turn holds no cancel flag of its own (JF-197).
+            // A drained or sync turn passes no flag of its own; the queue gives it one (JF-197).
             var generation = ConversationQueue.tryAcquireOwnership(chat.conversationId(),
                     running(chat.agentId(), "web"), null);
             try {
                 var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/stop")));
 
-                assertEquals(stopReply(chat.conversationId(), "This turn can't be stopped from chat yet."), flat(answer));
-                assertTrue(ConversationQueue.isBusy(chat.conversationId()), "the turn runs on");
+                assertEquals(stopReply(chat.conversationId(), "Stopped."), flat(answer));
+                assertFalse(ConversationQueue.isBusy(chat.conversationId()), "the turn lost its conversation");
             } finally {
                 ConversationQueue.releaseOwnership(chat.conversationId(), generation);
             }
+        }
+    }
+
+    // MCP forms (JF-197): a queued message's turn shows one in Chat; an API send's turn hands its questions to the agent.
+
+    @Test
+    void anApiSendsToolIsOfferedNoFormAndADrainedWebTurnsToolIs() throws Exception {
+        login();
+        var offered = new CopyOnWriteArrayList<Boolean>();
+        ToolRegistrySync.publishForTest(List.of(formProbe(offered)));
+        try (var model = HeldModel.replying(request -> lastRole(request).equals("tool")
+                ? HeldModel.replyCompletion() : FORM_PROBE_CALL)) {
+            var chat = seedWebChat(model);
+
+            var sent = json(POST("/api/chat/send", "application/json", turnBody(chat, "Ask the server")));
+            assertEquals(HeldModel.REPLY, sent.get("response").getAsString());
+            long held = holdConversation(chat);
+            assertFalse(ConversationQueue.tryAcquire(chat.conversationId(), running(chat.agentId(), "web")));
+            QueueDrainOrchestrator.runOwned(chat.conversationId(), held,
+                    ConversationQueue.drain(chat.conversationId(), held));
+            for (int i = 0; i < 300 && offered.size() < 2; i++) Thread.sleep(50);
+            awaitIdle(chat.conversationId());
+
+            assertEquals(List.of(false, true), offered, "the API send's tool, then the drained turn's");
+        } finally {
+            ToolRegistrySync.release();
+        }
+    }
+
+    private static final String FORM_PROBE_CALL = """
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"",
+            "tool_calls":[{"id":"call_probe","type":"function","function":{"name":"form_probe","arguments":"{}"}}]},
+            "finish_reason":"tool_calls"}],
+            "usage":{"prompt_tokens":100,"completion_tokens":5,"total_tokens":105}}""";
+
+    private static String lastRole(JsonObject request) {
+        var messages = request.getAsJsonArray("messages");
+        return messages.get(messages.size() - 1).getAsJsonObject().get("role").getAsString();
+    }
+
+    /** A tool that records, on its own dispatch, whether an MCP server's form would be put to the operator there. */
+    private static ToolRegistry.Tool formProbe(List<Boolean> offered) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return "form_probe"; }
+            @Override public String description() { return "Records whether a form would be shown, for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                offered.add(McpElicitations.offeredHere());
+                return "ok";
+            }
+        };
+    }
+
+    @Test
+    void aSendStoppedWhileItRunsAnswersTheStopMarkerAndSavesNothingAfterIt() throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            var stop = new CompletableFuture<ConversationQueue.OperatorStop>();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    if (!model.called.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("no model call");
+                    stop.complete(ConversationQueue.stopOperatorTurn(chat.conversationId(), "web"));
+                } catch (Throwable t) {
+                    stop.completeExceptionally(t);
+                } finally {
+                    model.release();
+                }
+            });
+
+            var response = POST("/api/chat/send", "application/json", turnBody(chat, "What time is it?"));
+
+            assertIsOk(response);
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, stop.get(30, TimeUnit.SECONDS));
+            assertEquals(ConversationService.STOP_MARKER_CONTENT, json(response).get("response").getAsString());
+            assertEquals(List.of("user What time is it?", "assistant " + ConversationService.STOP_MARKER_CONTENT),
+                    commitInFreshTx(() -> {
+                        List<Message> rows = Message.find("conversation.id = ?1 ORDER BY id",
+                                chat.conversationId()).fetch();
+                        return rows.stream().map(m -> m.role + " " + m.content).toList();
+                    }));
+            awaitIdle(chat.conversationId());
         }
     }
 

@@ -153,8 +153,7 @@ public class ApiConversationsController extends Controller {
 
     /**
      * @param queueSize every queued message, the ones {@code pending} leaves out included, all of which Stop drops
-     * @param stoppable whether the operator's Stop can stop the running turn: a web turn whose owner holds a cancel
-     *                  flag of its own (JF-202)
+     * @param stoppable whether the operator's Stop can stop the running turn: any turn of a web conversation (JF-197)
      * @param pending   the queued messages the chat shows, in the order they run, each with its place in line
      */
     public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable,

@@ -1,5 +1,8 @@
 import agents.AgentRunner;
+import agents.QueueDrainOrchestrator;
 import agents.RunCancelledException;
+import agents.ToolContext;
+import agents.ToolRegistry;
 import agents.TurnBroadcast;
 import agents.TurnFrames;
 import com.google.gson.JsonElement;
@@ -11,6 +14,7 @@ import llm.LlmResilience;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
+import models.Message;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,7 +24,9 @@ import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.ConversationTurnStream;
+import services.EventLogger;
 import services.SubagentRegistry;
+import services.Tx;
 import utils.AppClock;
 import utils.CircuitBreakers;
 
@@ -34,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -458,6 +465,137 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
         unsubscribe.run();
     }
 
+    // --- the operator's stop of a background turn (JF-197) ---
+
+    @Test
+    void aYieldResumeStoppedMidRoundEndsBeforeItsNextRoundLeavingTheMarkerLast() throws Exception {
+        var convo = seedConversation("web", "web-resume-stopped-" + UUID.randomUUID());
+        ConversationService.appendUserMessage(convo, "[subagent result] the report is ready");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        responder = heldThenCalling(reached, release, "datetime");
+        var sink = new ConversationTurnStreamTest.RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(convo.id, null, sink);
+        var result = new AtomicReference<AgentRunner.RunResult>();
+        var run = Thread.ofVirtual().start(() -> result.set(AgentRunner.runYieldResume(convo.agent, convo)));
+        try {
+            assertTrue(reached.await(30, TimeUnit.SECONDS), "test precondition: the resume reached the model");
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id));
+        } finally {
+            release.countDown();
+        }
+        run.join(60_000);
+        assertFalse(run.isAlive(), "the stopped resume never ended");
+
+        assertEquals(ConversationService.STOP_MARKER_CONTENT, result.get().response());
+        assertEquals(1, calls.get(), "the stopped resume made no round after the stop");
+        assertEquals(List.of("user [subagent result] the report is ready",
+                "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id));
+        marker(convo.id);
+        assertEquals(List.of("init", "stopped", "status"),
+                ConversationTurnStreamTest.data(sink.awaitData(MARK)).stream()
+                        .map(StreamingAgentRunnerTurnStreamTest::type).toList());
+        unsubscribe.run();
+    }
+
+    @Test
+    void aDrainedTurnStoppedMidRoundEndsAndTheNextMessageRunsToItsReply() throws Exception {
+        var convo = seedConversation("web", "web-drained-stopped-" + UUID.randomUUID());
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        responder = heldThenCalling(reached, release, "datetime");
+        toolRounds = 0;
+        long held = ConversationQueue.tryAcquireOwnership(convo.id,
+                new ConversationQueue.QueuedMessage("holding", "web", convo.peerId, convo.agent), null);
+        assertFalse(ConversationQueue.tryAcquire(convo.id,
+                new ConversationQueue.QueuedMessage("What time is it?", "web", convo.peerId, convo.agent)));
+        assertEquals(1, ConversationQueue.drain(convo.id, held).size(), "test precondition: the message takes over");
+        var drained = new AtomicReference<AgentRunner.RunResult>();
+        var run = QueueDrainOrchestrator.startDrainThread(() ->
+                drained.set(AgentRunner.runWithOwnedQueue(convo.agent, convo, "What time is it?")));
+        try {
+            assertTrue(reached.await(30, TimeUnit.SECONDS), "test precondition: the drained turn reached the model");
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id));
+        } finally {
+            release.countDown();
+        }
+        run.join(60_000);
+        assertFalse(run.isAlive(), "the stopped drained turn never ended");
+
+        assertEquals(ConversationService.STOP_MARKER_CONTENT, drained.get().response());
+        assertEquals(1, calls.get(), "the stopped turn made no round after the stop");
+        assertEquals(List.of("user What time is it?", "assistant " + ConversationService.STOP_MARKER_CONTENT),
+                rows(convo.id));
+
+        var next = runInBackground(convo, "And now?");
+
+        assertEquals(REPLY, next.response(), "the next turn runs on a flag of its own");
+        assertEquals(List.of("user What time is it?", "assistant " + ConversationService.STOP_MARKER_CONTENT,
+                "user And now?", "assistant " + REPLY), rows(convo.id));
+    }
+
+    @Test
+    void aStopReachesTheToolASyncTurnIsRunning() throws Exception {
+        var convo = seedConversation("web", "web-tool-stopped-" + UUID.randomUUID());
+        var started = new CountDownLatch(1);
+        var outcome = new CompletableFuture<String>();
+        ToolRegistry.publish(List.of(cancelWatcher(started, outcome)));
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(0);
+        responder = heldThenCalling(reached, release, "cancel_watch");
+        var result = new AtomicReference<AgentRunner.RunResult>();
+        var run = Thread.ofVirtual().start(() -> result.set(AgentRunner.run(convo.agent, convo, "Watch for a stop")));
+
+        assertTrue(started.await(30, TimeUnit.SECONDS), "test precondition: the tool started");
+        assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id));
+        assertEquals("stopped", outcome.get(15, TimeUnit.SECONDS), "the stop ran the tool's cancel action");
+        run.join(60_000);
+        assertFalse(run.isAlive(), "the stopped turn never ended");
+
+        assertEquals(ConversationService.STOP_MARKER_CONTENT, result.get().response());
+        assertEquals(1, calls.get(), "the turn ended at the checkpoint after the tool");
+        assertEquals(List.of("user Watch for a stop", "assistant " + ConversationService.STOP_MARKER_CONTENT),
+                rows(convo.id));
+    }
+
+    @Test
+    void aStopThatLandsAfterTheReplyIsSavedLeavesTheReplyAsTheTurnsResult() throws Exception {
+        var convo = seedConversation("web", "web-stopped-after-reply-" + UUID.randomUUID());
+        toolRounds = 0;
+        var saved = new CountDownLatch(1);
+        var stopped = new CountDownLatch(1);
+        var result = new AtomicReference<AgentRunner.RunResult>();
+        var stop = new AtomicReference<ConversationQueue.OperatorStop>();
+        // Logged on the turn's thread once its reply is committed, before the turn releases the conversation.
+        EventLogger.captureMatchingForTest(e -> {
+            if (convo.agent.name.equals(e.agentId()) && e.message().startsWith("Response generated")) {
+                saved.countDown();
+                await(stopped);
+            }
+            return false;
+        }, _ -> {
+            var run = Thread.ofVirtual().start(() -> result.set(AgentRunner.run(convo.agent, convo, "What time is it?")));
+            try {
+                assertTrue(saved.await(30, TimeUnit.SECONDS), "test precondition: the turn saved its reply");
+                stop.set(stopFromTheChatPage(convo.id));
+                stopped.countDown();
+                run.join(60_000);
+            } catch (InterruptedException e) {
+                throw new AssertionError(e);
+            } finally {
+                stopped.countDown();
+            }
+            assertFalse(run.isAlive(), "the turn never ended");
+        });
+
+        assertEquals(ConversationQueue.OperatorStop.STOPPED, stop.get(), "the turn still held its conversation");
+        assertEquals(REPLY, result.get().response());
+        assertFalse(result.get().stopped(), "the reply was saved before the stop");
+        assertEquals(List.of("user What time is it?", "assistant " + REPLY), rows(convo.id));
+    }
+
     @Test
     void aSyncTurnThatThrowsEndsItsWatchersOnItsClassifiedError() throws Exception {
         var gone = seedConversation("web", "web-vanished-" + UUID.randomUUID());
@@ -729,6 +867,74 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
                 "tool_calls":[{"id":"%s","type":"function","function":{"name":"datetime","arguments":"{\\"action\\":\\"now\\"}"}}]},
                 "finish_reason":"tool_calls"}],
                 "usage":{"prompt_tokens":100,"completion_tokens":5,"total_tokens":105}}""".formatted(id);
+    }
+
+    /**
+     * The first call opens {@code reached}, waits for {@code release}, then asks for {@code tool}; every later call is
+     * {@link #toolRoundsThenReply}'s.
+     */
+    private Responder heldThenCalling(CountDownLatch reached, CountDownLatch release, String tool) {
+        var first = new AtomicBoolean(true);
+        return (exchange, request) -> {
+            if (!first.getAndSet(false)) {
+                toolRoundsThenReply(exchange, request);
+                return;
+            }
+            reached.countDown();
+            release.await(30, TimeUnit.SECONDS);
+            LlmReplyFixture.send(exchange, toolCallReply("call_held").replace("datetime", tool));
+        };
+    }
+
+    /** A tool that opens {@code started}, then reports whether its turn's cancel action ran within 10 s. */
+    private static ToolRegistry.Tool cancelWatcher(CountDownLatch started,
+                                                   CompletableFuture<String> outcome) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return "cancel_watch"; }
+            @Override public String description() { return "Waits for its turn to be stopped, for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                var stopped = new CountDownLatch(1);
+                try (var _ = ToolContext.onCancel(stopped::countDown)) {
+                    started.countDown();
+                    outcome.complete(stopped.await(10, TimeUnit.SECONDS) ? "stopped" : "never");
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                return "ok";
+            }
+        };
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** The operator's Stop, run as its route runs it: on a thread of its own, its marker committed before it returns. */
+    private static ConversationQueue.OperatorStop stopFromTheChatPage(Long conversationId) throws InterruptedException {
+        var outcome = new AtomicReference<ConversationQueue.OperatorStop>();
+        var stopper = Thread.ofPlatform().start(() -> outcome.set(ConversationQueue.stopOperatorTurn(conversationId, "web")));
+        stopper.join(10_000);
+        assertFalse(stopper.isAlive(), "the stop never returned");
+        return outcome.get();
+    }
+
+    /** The conversation's rows in order, each as its role and content, read in a transaction of their own. */
+    private static List<String> rows(Long conversationId) throws InterruptedException {
+        var rows = new AtomicReference<List<String>>();
+        var reader = Thread.ofPlatform().start(() -> rows.set(Tx.run(() -> {
+            List<Message> messages = Message.find("conversation.id = ?1 ORDER BY id", conversationId).fetch();
+            return messages.stream().map(m -> m.role + " " + m.content).toList();
+        })));
+        reader.join(10_000);
+        assertFalse(reader.isAlive(), "reading the rows never finished");
+        return rows.get();
     }
 
     private static final String FINAL_REPLY = """

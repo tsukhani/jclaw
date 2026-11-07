@@ -41,5 +41,11 @@ public class RunCancelledException extends RuntimeException {
         this.runId = runId;
     }
 
+    /** A stop with no run behind it: {@link TurnStoppedException}'s. */
+    RunCancelledException(String message) {
+        super(message);
+        this.runId = null;
+    }
+
     public @Nullable Long runId() { return runId; }
 }

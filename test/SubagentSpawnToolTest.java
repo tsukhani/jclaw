@@ -31,6 +31,8 @@ import utils.CircuitBreakers;
 import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -1066,6 +1068,75 @@ class SubagentSpawnToolTest extends UnitTest {
             assertEquals(SubagentRun.Status.KILLED, row.status);
             assertTrue(row.outcome.contains("parent turn was stopped"), row.outcome);
         } finally {
+            SubagentRegistry.unregister(run.id);
+        }
+    }
+
+    private static final String KILLED_FROM_ITS_CHAT = "Killed by operator via Stop in the subagent's chat";
+
+    @Test
+    void stoppingASessionChildFromItsTranscriptKillsTheRunAsAKillDoes() throws Exception {
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        startLlmServer(exchange -> {
+            reached.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            LlmReplyFixture.send(exchange, simpleResponse("the child's answer"));
+        });
+        configureProvider();
+        var parent = createAgent("p-transcript-stop", "spawn-provider", "test-model");
+        var child = createAgent("c-transcript-stop", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-transcript-stop");
+        // A session child takes its parent's channel, so its transcript is a web conversation Stop reaches (JF-197).
+        var childConv = ConversationService.create(child, "web", "u-transcript-stop");
+        childConv.parentConversation = parentConv;
+        childConv.save();
+        var run = new SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = child;
+        run.parentConversation = parentConv;
+        run.childConversation = childConv;
+        run.status = SubagentRun.Status.RUNNING;
+        run.save();
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(run.id, future);
+        try {
+            // As the session spawn runs its child: on a thread of its own, as the run.
+            Thread.ofVirtual().start(() -> {
+                try {
+                    var agent = Tx.run(() -> (Agent) Agent.findById(child.id));
+                    var conversation = Tx.run(() -> (Conversation) Conversation.findById(childConv.id));
+                    future.complete(SubagentRegistry.callAsRun(run.id,
+                            () -> AgentRunner.run(agent, conversation, "Summarize the deploy logs")));
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
+            });
+            assertTrue(reached.await(30, TimeUnit.SECONDS), "test precondition: the child ran");
+            var stop = new AtomicReference<ConversationQueue.OperatorStop>();
+            var stopper = Thread.ofPlatform().start(
+                    () -> stop.set(ConversationQueue.stopOperatorTurn(childConv.id, "web")));
+            stopper.join(10_000);
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, stop.get(), "the transcript's Stop stopped the turn");
+            release.countDown();
+
+            var outcome = SubagentSpawnTool.awaitFuture(future, 3600, 3600, run.id);
+
+            assertEquals(new SubagentSpawnTool.SyncRunOutcome("", SubagentRun.Status.KILLED, KILLED_FROM_ITS_CHAT,
+                    null, true, false), outcome, "what the parent's spawn hands back, as for /subagent kill");
+            JPA.em().clear();
+            SubagentRun row = SubagentRun.findById(run.id);
+            assertEquals(SubagentRun.Status.KILLED, row.status);
+            assertEquals(KILLED_FROM_ITS_CHAT, row.outcome);
+        } finally {
+            release.countDown();
             SubagentRegistry.unregister(run.id);
         }
     }

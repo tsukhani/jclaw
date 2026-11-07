@@ -1,5 +1,6 @@
 package agents;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -207,7 +208,7 @@ public final class ParallelToolExecutor {
         Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
         // A subagent's stop flag is bound to the child's own thread, which the work-unit threads below do not inherit.
         var subagentRun = SubagentRegistry.currentRun();
-        // Neither a subagent's loop nor a task fire's passes a turn flag; the run's stop flag or the fire's cancel
+        // An inline subagent's loop and a task fire's pass no turn flag; the run's stop flag or the fire's cancel
         // flag stands in, so a kill or a cancel stops the tool it is running (JCLAW-1573, JCLAW-1574).
         var fireCancel = isCancelled == null && subagentRun == null && taskRunId != null
                 ? TaskRunRegistry.cancelFlag(taskRunId) : null;
@@ -221,20 +222,33 @@ public final class ParallelToolExecutor {
 
         ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 
-        if (n == 1) {
-            if (turnCancel == null || !turnCancel.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled, turnCancel,
-                        onStatus, offeredTools);
+        try (var _ = forwardKill(subagentRun, isCancelled)) {
+            if (n == 1) {
+                if (turnCancel == null || !turnCancel.get()) {
+                    results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled,
+                            turnCancel, onStatus, offeredTools);
+                }
+            } else {
+                dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, turnCancel,
+                        cancelled, offeredTools);
             }
-        } else {
-            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, turnCancel,
-                    cancelled, offeredTools);
         }
         if (conversationId != null) {
             ConversationService.persistReadOutsideContent(conversationId);
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
+    }
+
+    /**
+     * A session child's sync turn holds a flag of its own, which its tools register on (JF-197): while the batch runs,
+     * a kill of the run cancels that flag too, so it still stops the tool the run is in.
+     */
+    @MustBeClosed
+    private static TurnCancellation.Registration forwardKill(SubagentRegistry.@Nullable RunScope run,
+                                                             @Nullable AtomicBoolean turnFlag) {
+        if (run == null || turnFlag == null) return TurnCancellation.Registration.none();
+        return TurnCancellation.register(run.stopFlag(), () -> TurnCancellation.cancel(turnFlag));
     }
 
     /**

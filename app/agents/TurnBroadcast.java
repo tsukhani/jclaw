@@ -41,9 +41,14 @@ public final class TurnBroadcast {
         return new TurnBroadcast(true, isCancelled);
     }
 
-    /** A turn that already owns {@code conversationId} at {@code generation}: it begins now. */
+    /** A turn that already owns {@code conversationId} at {@code generation}, with no cancel flag: it begins now. */
     public static TurnBroadcast owning(Long conversationId, long generation) {
-        var broadcast = new TurnBroadcast(true, null);
+        return owning(conversationId, generation, null);
+    }
+
+    /** {@link #owning(Long, long)} for a turn cancelled by {@code cancelled}, its owner's flag (JF-197). */
+    public static TurnBroadcast owning(Long conversationId, long generation, @Nullable AtomicBoolean cancelled) {
+        var broadcast = new TurnBroadcast(true, cancelled);
         broadcast.acquired(conversationId, generation);
         return broadcast;
     }

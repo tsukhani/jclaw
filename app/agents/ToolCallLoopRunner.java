@@ -167,7 +167,7 @@ public final class ToolCallLoopRunner {
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, @Nullable Long taskRunId, int maxRounds) {
         return callWithToolLoop(agent, conversation, conversationId, messages, tools, primary, fallback,
-                audioBearers, imageBearers, sink, taskRunId, maxRounds, null);
+                audioBearers, imageBearers, sink, taskRunId, maxRounds, null, null);
     }
 
     /**
@@ -176,7 +176,10 @@ public final class ToolCallLoopRunner {
      */
     record RoundFrames(Consumer<String> onStatus, Consumer<AgentRunner.ToolCallEvent> onToolCall) {}
 
-    /** {@link #callWithToolLoop} that also hands each round's tool frames to {@code frames}, when there are any. */
+    /**
+     * {@link #callWithToolLoop} that also hands each round's tool frames to {@code frames}, when there are any, and
+     * {@code turnCancel}, the turn's own flag when it took its conversation, to its checkpoints and its tools (JF-197).
+     */
     @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry and the single cut-off resend
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
                                          @Nullable Long conversationId,
@@ -185,7 +188,7 @@ public final class ToolCallLoopRunner {
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, @Nullable Long taskRunId, int maxRounds,
-                                         @Nullable RoundFrames frames) {
+                                         @Nullable RoundFrames frames, @Nullable AtomicBoolean turnCancel) {
         // Sibling helpers accept a null conversation, but this loop dereferences
         // conversation.channelType for the provider call — fail here rather than
         // with an opaque NPE deeper in the stack.
@@ -209,6 +212,7 @@ public final class ToolCallLoopRunner {
             // or mid-tool-call (would orphan partial side effects).
             AgentRunner.checkSubagentCancel(conversation);
             AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
+            AgentRunner.checkTurnCancel(turnCancel);
             var attempt = invokeOneRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially,
                     overflow, note);
@@ -232,7 +236,7 @@ public final class ToolCallLoopRunner {
                     audioBearers, imageBearers, audioState, visionState);
 
             var roundOutcome = handleSyncRoundResponse(attempt.okResponse(), agent, conversation, conversationId, primary,
-                    fallback, currentMessages, tools, sink, round, taskRunId, overflow, frames);
+                    fallback, currentMessages, tools, sink, round, taskRunId, overflow, frames, turnCancel);
             if (roundOutcome != null) return roundOutcome;
         }
 
@@ -616,7 +620,7 @@ public final class ToolCallLoopRunner {
      * yield) or execute the tool calls and return {@code null} so the
      * caller continues to the next round.
      */
-    @SuppressWarnings("java:S107") // round-response dispatcher mirrors the loop's per-round state, the JCLAW-414 task-run id and the round frames
+    @SuppressWarnings("java:S107") // round-response dispatcher mirrors the loop's per-round state, the JCLAW-414 task-run id, the round frames and the turn flag
     private static @Nullable LoopOutcome handleSyncRoundResponse(
                                                        ChatResponse response, Agent agent,
                                                        Conversation conversation,
@@ -627,7 +631,8 @@ public final class ToolCallLoopRunner {
                                                        AgentExecutionSink sink, int round,
                                                        @Nullable Long taskRunId,
                                                        ContextWindowManager.OverflowBudget overflow,
-                                                       @Nullable RoundFrames frames) {
+                                                       @Nullable RoundFrames frames,
+                                                       @Nullable AtomicBoolean turnCancel) {
         var choice = response.choices().getFirst();
         var assistantMsg = choice.message();
         var assistantToolCalls = assistantMsg.toolCalls();
@@ -674,7 +679,7 @@ public final class ToolCallLoopRunner {
 
         ParallelToolExecutor.executeToolsParallel(assistantToolCalls, agent, conversationId, currentMessages,
                 frames == null ? null : frames.onStatus(), frames == null ? null : frames.onToolCall(),
-                null, null, sink, offeredToolNames(tools));
+                null, turnCancel, sink, offeredToolNames(tools));
 
         // JCLAW-291: cooperative-cancel checkpoint between tool calls
         // and the next LLM round. If /subagent kill landed during the
@@ -682,6 +687,7 @@ public final class ToolCallLoopRunner {
         // round on the now-stale plan.
         AgentRunner.checkSubagentCancel(conversation);
         AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
+        AgentRunner.checkTurnCancel(turnCancel);
 
         // JCLAW-273: detect a successful subagent_yield call and bail out of the
         // tool-call loop without continuing to the next LLM round. The runner

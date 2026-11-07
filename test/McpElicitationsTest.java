@@ -7,6 +7,7 @@ import models.Conversation;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.NotificationBus;
@@ -319,10 +320,33 @@ class McpElicitationsTest extends UnitTest {
         Thread.ofVirtual().start(() -> SubagentRegistry.runAs(new SubagentRegistry.RunScope(7L, new AtomicBoolean()),
                 () -> subagent.complete(ToolContext.withConversation(web, McpElicitations::offeredHere))));
         assertFalse(subagent.get(10, TimeUnit.SECONDS), "a subagent's run");
-        var unstoppable = new CompletableFuture<Boolean>();
-        Thread.ofVirtual().start(() -> unstoppable.complete(ToolContext.withConversation(web, McpElicitations::offeredHere)));
-        assertFalse(unstoppable.get(10, TimeUnit.SECONDS), "a web-chat turn with no cancel flag, which Stop could not reach");
+        var unflagged = new CompletableFuture<Boolean>();
+        Thread.ofVirtual().start(() -> unflagged.complete(ToolContext.withConversation(web, McpElicitations::offeredHere)));
+        assertFalse(unflagged.get(10, TimeUnit.SECONDS), "a dispatch that carries no turn's cancel flag");
         assertFalse(McpElicitations.offeredHere(), "no turn at all");
+    }
+
+    @Test
+    void aDrainedWebTurnIsOfferedAndATurnNoPersonWatchesIsNot() throws Exception {
+        var web = conversation("web");
+        var owner = commitInFreshTx(() -> ((Conversation) Conversation.findById(web)).agent);
+        long gen = ConversationQueue.tryAcquireOwnership(web, new ConversationQueue.QueuedMessage("A", "web", "admin", owner),
+                null);
+        try {
+            ConversationQueue.tryAcquire(web, new ConversationQueue.QueuedMessage("B", "web", "admin", owner));
+            assertEquals(1, ConversationQueue.drain(web, gen).size(), "test precondition: B takes over");
+            var drained = ConversationQueue.ownerCancel(web, gen);
+            assertTrue(onTurn(web, drained, McpElicitations::offeredHere).get(10, TimeUnit.SECONDS), "a drained turn");
+
+            var apiSend = new AtomicBoolean();
+            // The registration is the flag's, so it reaches a tool on any thread the turn dispatches to.
+            assertFalse(McpElicitations.unwatched(apiSend, () -> onTurn(web, apiSend, McpElicitations::offeredHere)
+                    .orTimeout(10, TimeUnit.SECONDS).join()), "an /api/chat/send turn");
+            assertTrue(onTurn(web, apiSend, McpElicitations::offeredHere).get(10, TimeUnit.SECONDS),
+                    "the flag is free again once the turn ends");
+        } finally {
+            ConversationQueue.forgetForTest(web);
+        }
     }
 
     private static final String CLOSING = "\nYou can fill the values in as arguments and call again, ask in chat, or use another tool.";

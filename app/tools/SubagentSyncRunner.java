@@ -115,7 +115,7 @@ final class SubagentSyncRunner {
              var _ = SubagentRegistry.waitingOn(List.of(runId))) {
             while (true) {
                 try {
-                    return endedOutcome(future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS));
+                    return endedOutcome(future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS), runId);
                 } catch (TimeoutException _) {
                     // Poll tick — the child is still running. Check the two budgets.
                     long idleNanos = SubagentRegistry.nanosSinceActivity(runId);
@@ -136,7 +136,7 @@ final class SubagentSyncRunner {
                 } catch (CancellationException _) {
                     // JCLAW-291: kill primitive canceled our Future. Registry already KILLED.
                     return new SyncRunOutcome("", SubagentRun.Status.KILLED,
-                            parentStopped.get() ? PARENT_STOPPED_REASON : "Killed by operator", null, true, false);
+                            parentStopped.get() ? PARENT_STOPPED_REASON : KILLED_REASON, null, true, false);
                 } catch (ExecutionException ee) {
                     return fromExecutionException(ee);
                 }
@@ -147,9 +147,16 @@ final class SubagentSyncRunner {
     }
 
     static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
+    static final String KILLED_REASON = "Killed by operator";
+    static final String TRANSCRIPT_STOP_REASON = "Killed by operator via Stop in the subagent's chat";
     static final String SUSPENDED_REASON = "The subagent stopped its turn to wait for another run and gave no reply.";
 
-    private static SyncRunOutcome endedOutcome(AgentRunner.@Nullable RunResult result) {
+    private static SyncRunOutcome endedOutcome(AgentRunner.@Nullable RunResult result, Long runId) {
+        // Stop on a session child's own transcript kills the run, as /subagent kill does (JF-197).
+        if (result != null && result.stopped()) {
+            SubagentRegistry.kill(runId, TRANSCRIPT_STOP_REASON);
+            return new SyncRunOutcome("", SubagentRun.Status.KILLED, TRANSCRIPT_STOP_REASON, null, true, false);
+        }
         // Nothing resumes a child's turn, so one that suspended anyway has no reply to give (JF-168).
         if (result != null && result.yielded()) {
             releaseYields(result.yieldedRunIds());
@@ -219,8 +226,7 @@ final class SubagentSyncRunner {
         var cause = ee.getCause() != null ? ee.getCause() : ee;
         if (cause instanceof RunCancelledException) {
             // JCLAW-291: runner observed the cancel flag at a checkpoint and threw.
-            return new SyncRunOutcome("", SubagentRun.Status.KILLED,
-                    "Killed by operator", null, true, false);
+            return new SyncRunOutcome("", SubagentRun.Status.KILLED, KILLED_REASON, null, true, false);
         }
         if (cause instanceof TimeoutException) {
             // JCLAW-326: yield watchdog completed the future exceptionally.

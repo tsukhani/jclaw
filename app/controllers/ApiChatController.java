@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
+import mcp.McpElicitations;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
@@ -309,7 +310,10 @@ public class ApiChatController extends Controller {
             conversation = Tx.run(() -> ConversationService.findOrCreate(ctx.agent(), "web", ctx.username()));
         }
 
-        var result = AgentRunner.run(ctx.agent(), conversation, ctx.message(), ctx.attachments());
+        // An API caller waits on the reply, never on a person answering an MCP server's form (JF-197).
+        var turnCancel = new AtomicBoolean(false);
+        var result = McpElicitations.unwatched(turnCancel,
+                () -> AgentRunner.run(ctx.agent(), conversation, ctx.message(), ctx.attachments(), turnCancel));
 
         var resp = new HashMap<String, Object>();
         resp.put(KEY_CONVERSATION_ID, conversation.id);

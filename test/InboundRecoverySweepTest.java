@@ -25,6 +25,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
+import services.EventLogger;
 import services.InboundRecoverySweep;
 import services.Tx;
 import tools.ConversationSendTool;
@@ -73,6 +74,9 @@ class InboundRecoverySweepTest extends UnitTest {
             Instant.ofEpochMilli(ManagementFactory.getRuntimeMXBean().getStartTime()).plusMillis(1);
 
     private final AtomicInteger llmCalls = new AtomicInteger();
+    /** When set, each model call opens {@link #modelReached} and answers once this opens. */
+    private volatile CountDownLatch modelHeld;
+    private final CountDownLatch modelReached = new CountDownLatch(1);
     private HttpServer llmServer;
     private String provider;
     private final List<String> agentNames = new ArrayList<>();
@@ -85,6 +89,15 @@ class InboundRecoverySweepTest extends UnitTest {
         llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         llmServer.createContext("/chat/completions", exchange -> {
             llmCalls.incrementAndGet();
+            var held = modelHeld;
+            if (held != null) {
+                modelReached.countDown();
+                try {
+                    held.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             LlmReplyFixture.send(exchange, REPLY);
         });
         llmServer.start();
@@ -98,6 +111,8 @@ class InboundRecoverySweepTest extends UnitTest {
 
     @AfterEach
     void teardown() throws IOException {
+        var held = modelHeld;
+        if (held != null) held.countDown();
         conversationIds.forEach(ConversationQueue::forgetForTest);
         for (var name : agentNames) ConfigService.delete("agent." + name + ".queue.mode");
         for (var suffix : List.of("baseUrl", "apiKey", "models")) {
@@ -456,6 +471,34 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
+    void aStopEndsARestoredMessagesTurnAsItEndsADrainedOne() throws Exception {
+        var agent = persistAgent();
+        var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        commit();
+        storeBeforeRestart(agent, convo, List.of("kept across the restart", "also kept"));
+        modelHeld = new CountDownLatch(1);
+
+        EventLogger.captureMatchingForTest(e -> agent.name.equals(e.agentId()), seen -> {
+            try {
+                assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+                assertTrue(modelReached.await(30, TimeUnit.SECONDS), "test precondition: the restored message ran");
+                assertTrue(ConversationQueue.stop(convo.id), "the restored message's turn holds a flag of its own");
+            } catch (InterruptedException e) {
+                throw new AssertionError(e);
+            } finally {
+                modelHeld.countDown();
+            }
+            awaitLogged(seen, "Response generated");
+        });
+
+        assertFalse(ConversationQueue.isBusy(convo.id));
+        assertEquals(List.of(new Row("user", "kept across the restart"),
+                new Row("assistant", ConversationService.STOP_MARKER_CONTENT)), rows(convo));
+        assertEquals(List.of(), pendingTexts(convo), "the restored message behind it is dropped with its row");
+        assertEquals(1, llmCalls.get());
+    }
+
+    @Test
     void aWebMessageQueuedBehindATurnIsNotStored() {
         var agent = persistAgent();
         var convo = persistConversation(agent, "web", "admin");
@@ -620,6 +663,19 @@ class InboundRecoverySweepTest extends UnitTest {
             Thread.sleep(50);
         }
         assertFalse(ConversationQueue.isBusy(convo.id), "the re-queued turn finished and released the conversation");
+    }
+
+    private static void awaitLogged(List<EventLogger.Captured> seen, String prefix) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (seen.stream().noneMatch(e -> e.message().startsWith(prefix)) && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        assertTrue(seen.stream().anyMatch(e -> e.message().startsWith(prefix)), "never logged: " + prefix);
     }
 
     private static List<String> pendingTexts(Conversation convo) {

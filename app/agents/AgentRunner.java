@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Core agent pipeline: receive message → load conversation → assemble prompt →
@@ -97,9 +98,16 @@ public class AgentRunner {
      * @param truncated    true when the final non-tool-call assistant turn
      *                     came back with {@code finish_reason=length}
      * @param yieldedRunIds the runs a {@link #yielded()} turn waits on; empty otherwise
+     * @param stopped      true when an operator stop ended the turn (JF-197): {@link #response} is then the stop
+     *                     marker, which no channel is sent
      */
     public record RunResult(String response, @Nullable Conversation conversation, boolean truncated,
-                            List<Long> yieldedRunIds) {
+                            List<Long> yieldedRunIds, boolean stopped) {
+        public RunResult(String response, @Nullable Conversation conversation, boolean truncated,
+                         List<Long> yieldedRunIds) {
+            this(response, conversation, truncated, yieldedRunIds, false);
+        }
+
         public RunResult(String response, @Nullable Conversation conversation, boolean truncated) {
             this(response, conversation, truncated, List.of());
         }
@@ -114,6 +122,15 @@ public class AgentRunner {
          *  resumes replies instead. */
         public boolean yielded() {
             return YIELDED_RESPONSE.equals(response);
+        }
+
+        /** Whether the turn ended in a reply to send on to its destination: it neither yielded nor was stopped. */
+        public boolean sendsReply() {
+            return !yielded() && !stopped;
+        }
+
+        static RunResult stoppedIn(@Nullable Conversation conversation) {
+            return new RunResult(ConversationService.STOP_MARKER_CONTENT, conversation, false, List.of(), true);
         }
     }
 
@@ -301,6 +318,15 @@ public class AgentRunner {
     }
 
     /**
+     * JF-197: the operator-stop checkpoint of a sync turn that took its conversation, beside
+     * {@link #checkSubagentCancel} and {@link #checkTaskRunCancel}: throws {@link TurnStoppedException} once
+     * {@code turnCancel} is set. A no-op without one: an inline child and a task fire take no conversation.
+     */
+    static void checkTurnCancel(@Nullable AtomicBoolean turnCancel) {
+        if (turnCancel != null && turnCancel.get()) throw new TurnStoppedException();
+    }
+
+    /**
      * Run the agent synchronously. Returns the final assistant response.
      * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
      * is held during LLM HTTP calls or tool execution.
@@ -333,13 +359,20 @@ public class AgentRunner {
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
                                 @Nullable List<AttachmentService.Input> attachments) {
+        return run(agent, conversation, userMessage, attachments, new AtomicBoolean(false));
+    }
+
+    /** {@link #run(Agent, Conversation, String, List)} on {@code turnCancel}, a fresh flag its caller keeps (JF-197). */
+    public static RunResult run(Agent agent, Conversation conversation, String userMessage,
+                                @Nullable List<AttachmentService.Input> attachments, AtomicBoolean turnCancel) {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent, attachments);
-        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, null);
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true, List.of());
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true, List.of(),
+                turnCancel);
     }
 
     /**
@@ -357,9 +390,10 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
-        return runAfterAcquire(agent, conversation, userMessage, null, false,
-                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), true,
-                List.of());
+        long generation = ConversationQueue.currentGeneration(conversation.id);
+        boolean owned = ConversationQueue.isBusy(conversation.id);
+        return runAfterAcquire(agent, conversation, userMessage, null, false, generation, owned, true, List.of(),
+                owned ? ConversationQueue.ownerCancel(conversation.id, generation) : null);
     }
 
     /**
@@ -376,7 +410,7 @@ public class AgentRunner {
         // A parent on a conversation nothing owns (a task fire's spawn) has no stop to fence against.
         return runAfterAcquire(agent, conversation, task, null, false,
                 ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), false,
-                List.of());
+                List.of(), null);
     }
 
     /**
@@ -398,7 +432,7 @@ public class AgentRunner {
                                        List<AttachmentService.Input> attachments, boolean skipUserAppend,
                                        long generation, List<Long> pendingIds) {
         return runAfterAcquire(agent, conversation, userMessage, attachments, skipUserAppend, generation, true, true,
-                pendingIds);
+                pendingIds, ConversationQueue.ownerCancel(conversation.id, generation));
     }
 
     /**
@@ -430,11 +464,12 @@ public class AgentRunner {
         // Empty text + skipUserAppend=true: the child's reply is already the persisted announce row.
         var queueMsg = new ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent, true);
-        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, null);
+        var turnCancel = new AtomicBoolean(false);
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true, List.of());
+        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true, List.of(), turnCancel);
     }
 
     /**
@@ -448,7 +483,7 @@ public class AgentRunner {
 
     /** The delivery half of {@link #resumeAndDeliver}, apart so a test can hand it a reply without a model call. */
     static void deliverResumed(Agent agent, Conversation conversation, RunResult result) {
-        if (QUEUED_MESSAGE_RESPONSE.equals(result.response()) || result.yielded()) return;
+        if (QUEUED_MESSAGE_RESPONSE.equals(result.response()) || !result.sendsReply()) return;
         dispatchToChannel(agent, conversation.channelType, conversation.peerId, result.response());
     }
 
@@ -701,11 +736,17 @@ public class AgentRunner {
         });
     }
 
-    @SuppressWarnings("java:S107") // the drained turn's inputs, its ownership, and its stored rows
+    /**
+     * The sync turn on a conversation it owns at {@code generation}, or, when it does not {@code release} it, inside
+     * the turn that does. {@code turnCancel} is the owner's flag, which an operator stop sets (JF-197): the turn then
+     * ends at its next checkpoint, or at its refused reply, as a {@link RunResult#stopped} result.
+     */
+    @SuppressWarnings("java:S107") // the drained turn's inputs, its ownership, its stored rows and its cancel flag
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
                                              boolean skipUserAppend, long generation, boolean fenced,
-                                             boolean releases, List<Long> pendingIds) {
+                                             boolean releases, List<Long> pendingIds,
+                                             @Nullable AtomicBoolean turnCancel) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -715,7 +756,7 @@ public class AgentRunner {
         // where AgentRunner takes responsibility for the conversation.
         // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
         // Announcing: no tab streams this sink's rows, an inline child's inside a streamed parent turn included.
-        final var sink = ConversationSink.announcing(conversation, fenced, generation, null, pendingIds);
+        final var sink = ConversationSink.announcing(conversation, fenced, generation, turnCancel, pendingIds);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally
         // skipped. Every other segment is captured, which is why
@@ -735,8 +776,12 @@ public class AgentRunner {
         try (var _ = LatencyTrace.bind(trace)) {
             // Until this path streams (JF-203), its watchers get the turn's start, each round's tool frames and its
             // end, never tokens: the sync loop retries after output. An inline child's frames join its parent's turn.
-            broadcast = releases ? TurnBroadcast.owning(conversationId, generation) : TurnBroadcast.joining(conversationId);
-            result = runBoundTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace, broadcast);
+            broadcast = releases
+                    ? TurnBroadcast.owning(conversationId, generation, turnCancel)
+                    : TurnBroadcast.joining(conversationId);
+            var turnBroadcast = broadcast;
+            result = unlessStopped(turnCancel, sink, conversationId, () -> runBoundTurn(agent, conversation,
+                    userMessage, attachments, skipUserAppend, sink, trace, turnBroadcast, turnCancel));
             return result;
         } catch (RuntimeException e) {
             failure = e;
@@ -753,11 +798,27 @@ public class AgentRunner {
         }
     }
 
+    /**
+     * {@code turn}'s result, or a stopped one when a stop set {@code turnCancel} before the turn's last write, so that
+     * {@code sink} refused it. A stop that lands once the reply is saved leaves the reply as the result.
+     */
+    private static RunResult unlessStopped(@Nullable AtomicBoolean turnCancel, ConversationSink sink,
+                                           Long conversationId, Supplier<RunResult> turn) {
+        try {
+            var result = turn.get();
+            if (turnCancel == null || !turnCancel.get() || !sink.refused()) return result;
+        } catch (TurnStoppedException _) {
+            // Thrown only once turnCancel is set.
+        }
+        return RunResult.stoppedIn(Tx.run(() -> ConversationService.findById(conversationId)));
+    }
+
     /** {@link #runAfterAcquire}'s turn, inside its trace binding. */
-    @SuppressWarnings("java:S107") // the turn's inputs, its sink and trace, and where its frames go
+    @SuppressWarnings("java:S107") // the turn's inputs, its sink and trace, where its frames go, and its cancel flag
     private static RunResult runBoundTurn(Agent agent, Conversation conversation, String userMessage,
                                           @Nullable List<AttachmentService.Input> attachments, boolean skipUserAppend,
-                                          AgentExecutionSink sink, LatencyTrace trace, TurnBroadcast broadcast) {
+                                          AgentExecutionSink sink, LatencyTrace trace, TurnBroadcast broadcast,
+                                          @Nullable AtomicBoolean turnCancel) {
         final Long conversationId = conversation.id;
         // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
         // boundary. If a /subagent kill landed between queue acquire and now,
@@ -765,6 +826,7 @@ public class AgentRunner {
         // runAfterAcquire's try so a RunCancelledException still runs the finally
         // that releases queue ownership (trace end/flush/processQueueDrain).
         checkSubagentCancel(conversation);
+        checkTurnCancel(turnCancel);
 
         // JCLAW-1222: a conversation on the model router gets its model first, bound for the whole turn.
         var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType);
@@ -780,11 +842,11 @@ public class AgentRunner {
         if (route == null) {
             return FallbackTurn.run(agent, conversation,
                     () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
-                            broadcast));
+                            broadcast, turnCancel));
         }
         return RoutedTurn.callWith(route, conversation,
                 () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
-                        broadcast));
+                        broadcast, turnCancel));
     }
 
     /** The sync turn from prologue to persisted reply; {@link #runAfterAcquire} owns the trace and the queue. */
@@ -792,7 +854,7 @@ public class AgentRunner {
     private static RunResult runPreparedTurn(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
                                              boolean skipUserAppend, AgentExecutionSink sink, LatencyTrace trace,
-                                             TurnBroadcast broadcast) {
+                                             TurnBroadcast broadcast, @Nullable AtomicBoolean turnCancel) {
         final Long conversationId = conversation.id;
 
         // Short setup transaction: persist user message, assemble prompt, resolve provider.
@@ -827,7 +889,7 @@ public class AgentRunner {
         var outcome = LlmProvider.callCountingRounds(turnUsage, () -> ToolCallLoopRunner.callWithToolLoop(agent,
                 conversation, conversationId, loopInput.messages(), loopInput.tools(), loopInput.primary(),
                 loopInput.fallback(), loopInput.audioBearers(), loopInput.imageBearers(), sink,
-                null, maxToolRounds(), frames));  // JCLAW-414: chat path is not task-cancellable
+                null, maxToolRounds(), frames, turnCancel));  // JCLAW-414: chat path is not task-cancellable
         var response = outcome.content();
         var truncated = outcome.truncated();
         trace.mark(LatencyTrace.STREAM_BODY_END);

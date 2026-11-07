@@ -52,7 +52,7 @@ final class ChannelInboundDispatcher {
         var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(route.agent(), channelType, peerId));
         var result = AgentRunner.run(route.agent(), conversation, text);
-        if (!result.yielded()) sendResponse.accept(peerId, result.response());
+        if (result.sendsReply()) sendResponse.accept(peerId, result.response());
     }
 
     /**
@@ -90,7 +90,7 @@ final class ChannelInboundDispatcher {
         var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
         var result = AgentRunner.run(agent, conversation, text);
-        if (!result.yielded()) sendResponse.accept(peerId, result.response());
+        if (result.sendsReply()) sendResponse.accept(peerId, result.response());
     }
 
     /**

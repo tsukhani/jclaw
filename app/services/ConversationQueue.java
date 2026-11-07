@@ -107,7 +107,7 @@ public class ConversationQueue {
         volatile AtomicBoolean cancelled = new AtomicBoolean(false);
         /** Renewed on every acquire and every {@link #stop}; a release carrying another value is a no-op. */
         long generation = 0;
-        /** The current owner's own cancel flag, flipped by {@link #stop}; null when the owner registered none. */
+        /** The current owner's own cancel flag, which {@link #stop} flips; set on every acquire and hand-over. */
         @Nullable AtomicBoolean ownerCancel;
         /**
          * Wall-clock ms of the last activity that touched this state (tryAcquire / drain /
@@ -152,7 +152,8 @@ public class ConversationQueue {
      * {@link #tryAcquire} that returns the ownership generation the caller must pass to
      * {@link #drain(Long, long)} / {@link #releaseOwnership(Long, long)}.
      *
-     * @param ownerCancel the turn's own cancel flag, which {@link #stop} flips; may be null
+     * @param ownerCancel the turn's own cancel flag, which {@link #stop} flips; null registers a fresh one, which
+     *                    {@link #ownerCancel} hands the turn (JF-197)
      * @return the acquired generation (non-negative), or {@link #NOT_ACQUIRED} when queued
      */
     public static long tryAcquireOwnership(Long conversationId, QueuedMessage message,
@@ -179,7 +180,7 @@ public class ConversationQueue {
 
             if (!state.processing) {
                 state.processing = true;
-                state.ownerCancel = ownerCancel;
+                state.ownerCancel = ownerCancel != null ? ownerCancel : new AtomicBoolean(false);
                 state.generation = GENERATIONS.incrementAndGet();
                 acquired = state.generation;
             } else {
@@ -263,7 +264,7 @@ public class ConversationQueue {
             var queued = restored;
             if (!state.processing) {
                 state.processing = true;
-                state.ownerCancel = null;
+                state.ownerCancel = new AtomicBoolean(false);
                 state.generation = GENERATIONS.incrementAndGet();
                 acquired = state.generation;
                 queued = restored.subList(1, restored.size());
@@ -294,14 +295,14 @@ public class ConversationQueue {
     }
 
     /**
-     * Stop the turn running in {@code conversationId} if its owner registered a cancel flag of its own, whatever the
-     * channel (GH-12): set that flag, write the stop marker, drop the pending messages, release ownership so the next
-     * send acquires instead of queueing, and end the turn on the conversation's stream as stopped. The stopped turn's
-     * later release carries a stale generation and is a no-op. The operator's Stop makes this stop through
-     * {@link #stopOperatorTurn}; tests drive the queue through this one.
+     * Stop the turn running in {@code conversationId}, whatever the channel (GH-12): set its owner's cancel flag, write
+     * the stop marker, drop the pending messages, release ownership so the next send acquires instead of queueing, and
+     * end the turn on the conversation's stream as stopped. The stopped turn's later release carries a stale generation
+     * and is a no-op. The operator's Stop makes this stop through {@link #stopOperatorTurn}; tests drive the queue
+     * through this one.
      *
-     * @return {@code true} when a turn that registered a cancel flag owned the conversation and was
-     *         stopped; {@code false}, changing nothing, otherwise
+     * @return {@code true} when a turn owned the conversation and was stopped; {@code false}, changing nothing,
+     *         otherwise
      */
     public static boolean stop(Long conversationId) {
         return stopWhen(conversationId, _ -> true) == OperatorStop.STOPPED;
@@ -356,18 +357,16 @@ public class ConversationQueue {
     }
 
     /**
-     * Under the state lock: whether the operator's Stop applies to the running turn, a web conversation's turn whose
-     * owner holds a cancel flag of its own. A channel turn's flag is the one the conversation's next turn shares, and a
-     * drained or sync run has none (JF-197).
+     * Under the state lock: whether the operator's Stop applies to the running turn, which it does on a web
+     * conversation. A streamed channel turn's flag is the one the conversation's next turn shares (JF-197b).
+     * A drained or restored channel turn holds a flag of its own, but stays unstoppable until JF-197b decides what
+     * the person on the channel gets.
      */
     private static boolean operatorStoppable(QueueState state, @Nullable String channelType) {
         return ChannelType.WEB.value.equals(channelType) && stoppableFlag(state) != null;
     }
 
-    /**
-     * Under the state lock: the running turn's own cancel flag, which {@link #stop} flips, or null when no turn runs
-     * or its owner registered none. A drained or sync run has none, so it could not be told to stop.
-     */
+    /** Under the state lock: the running turn's own cancel flag, which {@link #stop} flips; null when no turn runs. */
     private static @Nullable AtomicBoolean stoppableFlag(QueueState state) {
         return state.processing ? state.ownerCancel : null;
     }
@@ -382,6 +381,20 @@ public class ConversationQueue {
     public static boolean writeStopMarkerIfOwner(Long conversationId, long generation) {
         return commitIfOwner(conversationId, generation, null,
                 () -> ConversationService.appendStopMarkerIfUnanswered(conversationId));
+    }
+
+    /**
+     * The cancel flag of the turn that owns {@code conversationId} at {@code generation}, for a run handed the
+     * conversation with no flag in hand, a drained or restored message's (JF-197). Once that turn no longer owns it,
+     * as after a {@link #stop}, the flag returned is already set, so the turn ends at its next checkpoint.
+     */
+    public static AtomicBoolean ownerCancel(Long conversationId, long generation) {
+        var state = queues.get(conversationId);
+        if (state == null) return new AtomicBoolean(true);
+        synchronized (state) {
+            var flag = state.generation == generation ? stoppableFlag(state) : null;
+            return flag != null ? flag : new AtomicBoolean(true);
+        }
     }
 
     /**
@@ -503,11 +516,11 @@ public class ConversationQueue {
 
     /**
      * Under the state lock, with a message pending: the message(s) the drain returns, all of them in
-     * collect mode. Ownership transfers to the caller — processing stays true — and a drained run
-     * registers no cancel flag of its own.
+     * collect mode. Ownership transfers to the caller — processing stays true — with a fresh cancel
+     * flag of its own, which {@link #ownerCancel} hands the drained run.
      */
     private static List<QueuedMessage> handOver(QueueState state) {
-        state.ownerCancel = null;
+        state.ownerCancel = new AtomicBoolean(false);
         if ("collect".equals(state.mode)) {
             var all = new ArrayList<>(state.pending);
             state.pending.clear();

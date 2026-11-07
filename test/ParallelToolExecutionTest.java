@@ -896,7 +896,17 @@ class ParallelToolExecutionTest extends UnitTest {
         assertEquals("stopped", stopASubagentMidTool(List.of(CANCEL_WATCH, ALONGSIDE)));
     }
 
+    @Test
+    void stoppingASubagentStopsTheToolItIsRunningThoughItsTurnHoldsAFlagOfItsOwn() throws Exception {
+        // A session child's turn takes its conversation, so it holds a turn flag too (JF-197).
+        assertEquals("stopped", stopASubagentMidTool(List.of(CANCEL_WATCH), new AtomicBoolean()));
+    }
+
     private String stopASubagentMidTool(List<ToolCall> calls) throws Exception {
+        return stopASubagentMidTool(calls, null);
+    }
+
+    private String stopASubagentMidTool(List<ToolCall> calls, AtomicBoolean turnCancel) throws Exception {
         long[] ids = seedAgentAndConversation();
         // The loop runs on a thread of its own, which reads the conversation.
         JPA.em().getTransaction().commit();
@@ -910,7 +920,7 @@ class ParallelToolExecutionTest extends UnitTest {
         var loop = Thread.ofVirtual().start(() -> {
             try {
                 SubagentRegistry.callAsRun(runId, () -> {
-                    invokeParallel(calls, agent, ids[1], new ArrayList<>(), null);
+                    invokeParallel(calls, agent, ids[1], new ArrayList<>(), turnCancel);
                     return null;
                 });
             } catch (Exception e) {

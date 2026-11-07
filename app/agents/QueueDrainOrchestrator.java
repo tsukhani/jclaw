@@ -69,7 +69,8 @@ public final class QueueDrainOrchestrator {
      * invocation (which reuses the queue ownership transferred by this
      * method's {@link ConversationQueue#drain} call). For external
      * channels (Telegram, Slack, WhatsApp), the response is dispatched
-     * back through the channel via {@link AgentRunner#dispatchToChannel}.
+     * back through the channel via {@link AgentRunner#dispatchToChannel},
+     * unless the turn yielded or was stopped before its reply.
      * For web, the response is persisted to the DB, and an open chat page
      * fetches it once it commits.
      *
@@ -138,7 +139,7 @@ public final class QueueDrainOrchestrator {
             // use the owned-queue variant to avoid re-acquire.
             var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
                     attachments, skipUserAppend, generation, pendingIds);
-            if (!result.yielded()) {
+            if (result.sendsReply()) {
                 AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             }
         } catch (Exception e) {

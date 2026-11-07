@@ -33,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -80,6 +81,8 @@ public final class McpElicitations {
     private static final ScopedValue<Boolean> FROM_VIEW = ScopedValue.newInstance();
     private static final ConcurrentHashMap<String, Waiting> WAITING = new ConcurrentHashMap<>();
     private static final AtomicLong ORDER = new AtomicLong();
+    /** The cancel flags, by identity, of the turns {@link #unwatched} runs. */
+    private static final Set<AtomicBoolean> UNWATCHED = ConcurrentHashMap.newKeySet();
 
     private McpElicitations() {}
 
@@ -171,11 +174,26 @@ public final class McpElicitations {
     }
 
     /**
-     * Whether a request made on this thread declares elicitation: a top-level web-chat turn whose Stop and chat
-     * stream can cancel a waiting form. A failure to tell counts as no, so the server is offered nothing.
+     * Whether a request made on this thread declares elicitation: a top-level web-chat turn whose Stop can cancel a
+     * waiting form, and not one {@link #unwatched} runs. A failure to tell counts as no, so the server is offered nothing.
      */
     public static boolean offeredHere() {
-        return ToolContext.turnCancel() != null && McpViewTools.webChatDispatchOrNot();
+        var turnFlag = ToolContext.turnCancel();
+        return turnFlag != null && !UNWATCHED.contains(turnFlag) && McpViewTools.webChatDispatchOrNot();
+    }
+
+    /**
+     * {@code body}, a turn no person watches, an {@code /api/chat/send} call's, whose own cancel flag is
+     * {@code turnFlag}: no form is put to the operator from its tools, whatever thread they run on, so the call never
+     * waits on a person, and the agent gets the questions instead (JF-197).
+     */
+    public static <T> T unwatched(AtomicBoolean turnFlag, Supplier<T> body) {
+        UNWATCHED.add(turnFlag);
+        try {
+            return body.get();
+        } finally {
+            UNWATCHED.remove(turnFlag);
+        }
     }
 
     /** Why a request on this thread cannot ask the operator at all, or null when its forms can go to them. */

@@ -23,6 +23,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
+import services.EventLogger;
 import services.Tx;
 import tools.SubagentSpawnTool;
 import utils.CircuitBreakers;
@@ -33,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -49,6 +51,14 @@ class YieldedTurnDeliveryTest extends UnitTest {
     private String provider;
     private Long agentId;
     private volatile Long yieldOn;
+    /** When set, each model call opens {@code reached} and answers once {@code release} opens. */
+    private volatile Hold hold;
+
+    private record Hold(CountDownLatch reached, CountDownLatch release) {
+        Hold() {
+            this(new CountDownLatch(1), new CountDownLatch(1));
+        }
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -187,6 +197,123 @@ class YieldedTurnDeliveryTest extends UnitTest {
         }
     }
 
+    // --- JF-197: a turn stopped before its reply sends nothing to its destination ---
+
+    @Test
+    void aStoppedResumeSendsNothingToItsChannel() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                Conversation chat = commit(() -> Conversation.findById(conversationId));
+
+                stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.resumeAndDeliver(agent(), chat));
+
+                assertEquals(0, telegram.countRequests("sendMessage"), "the stopped resume's reply is not sent");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void aStoppedInboundTurnForABoundAgentSendsNothing() throws Exception {
+        var conversationId = conversation("telegram", PEER);
+        var sent = new CopyOnWriteArrayList<String>();
+
+        stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.processInboundForAgent(agent(), "telegram", PEER,
+                ASK, (peer, text) -> sent.add(text)));
+
+        assertEquals(List.of(), sent);
+    }
+
+    @Test
+    void aStoppedWebhookTurnSendsNothing() throws Exception {
+        commit(() -> {
+            var binding = new AgentBinding();
+            binding.agent = Agent.findById(agentId);
+            binding.channelType = "slack";
+            binding.peerId = "C-stopped";
+            binding.save();
+            return null;
+        });
+        var conversationId = conversation("slack", "C-stopped");
+        var sent = new CopyOnWriteArrayList<String>();
+
+        stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.processWebhookMessage("slack", "C-stopped", ASK,
+                (peer, text) -> sent.add(text), peer -> sent.add("no route for " + peer)));
+
+        assertEquals(List.of(), sent);
+    }
+
+    @Test
+    void aStoppedQueuedTurnSendsNothingToItsChannel() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                hold = new Hold();
+                var message = new ConversationQueue.QueuedMessage(ASK, "telegram", PEER, agent(), false, List.of());
+                long generation = ConversationQueue.tryAcquireOwnership(conversationId, message, null);
+                assertNotEquals(ConversationQueue.NOT_ACQUIRED, generation, "test precondition: the conversation is free");
+                String agentName = agent().name;
+                EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+                    QueueDrainOrchestrator.runOwned(conversationId, generation, List.of(message));
+                    try {
+                        assertTrue(hold.reached().await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+                        assertTrue(ConversationQueue.stop(conversationId), "the queued turn holds a flag of its own");
+                    } catch (InterruptedException e) {
+                        throw new AssertionError(e);
+                    } finally {
+                        hold.release().countDown();
+                    }
+                    awaitLogged(seen, "Response generated");
+                });
+                // The drain thread sends just after its reply is generated: 500 ms lets a send that was coming arrive.
+                Thread.sleep(500);
+
+                assertEquals(0, telegram.countRequests("sendMessage"), "the stopped turn's reply is not sent");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    /** Runs {@code turn} on its own thread, stops it once it calls the model, then lets the call answer and waits. */
+    private void stopWhileTheModelIsCalled(Long conversationId, Runnable turn) throws InterruptedException {
+        hold = new Hold();
+        var error = new AtomicReference<Throwable>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                turn.run();
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+        try {
+            assertTrue(hold.reached().await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+            assertTrue(ConversationQueue.stop(conversationId), "the turn holds a flag of its own");
+        } finally {
+            hold.release().countDown();
+        }
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "the stopped turn ends within 30s");
+        if (error.get() != null) throw new AssertionError(error.get());
+    }
+
+    private static void awaitLogged(List<EventLogger.Captured> seen, String prefix) {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (seen.stream().noneMatch(e -> e.message().startsWith(prefix)) && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        assertTrue(seen.stream().anyMatch(e -> e.message().startsWith(prefix)), "never logged: " + prefix);
+    }
+
     /** Runs {@code ASK} the way a queue drain does, on a conversation this test owns, and waits for it to end. */
     private void runQueued(Long conversationId) throws InterruptedException {
         var message = new ConversationQueue.QueuedMessage(ASK, "telegram", PEER, agent(), false, List.of());
@@ -258,6 +385,15 @@ class YieldedTurnDeliveryTest extends UnitTest {
     private void answer(HttpExchange exchange) throws IOException {
         var request = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8))
                 .getAsJsonObject();
+        var held = hold;
+        if (held != null) {
+            held.reached().countDown();
+            try {
+                held.release().await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         var messages = request.getAsJsonArray("messages");
         var lastRole = messages.get(messages.size() - 1).getAsJsonObject().get("role").getAsString();
         var runId = yieldOn;

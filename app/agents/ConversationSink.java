@@ -147,6 +147,11 @@ public class ConversationSink implements AgentExecutionSink {
         }
     }
 
+    /** Whether a commit of this turn was refused: it lost the conversation before that write. */
+    boolean refused() {
+        return discarding;
+    }
+
     /** Rows this turn would have written after it lost the conversation. */
     public int droppedRows() {
         return droppedRows.get();
