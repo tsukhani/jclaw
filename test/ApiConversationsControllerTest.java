@@ -22,6 +22,7 @@ import services.Tx;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
@@ -719,11 +720,17 @@ class ApiConversationsControllerTest extends FunctionalTest {
         login();
         var response = GET("/api/conversations/" + seededConversationId() + "/queue");
         assertIsOk(response);
-        assertEquals(JsonParser.parseString("{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}"),
+        assertEquals(JsonParser.parseString(
+                        "{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"stopDropsQueue\":true,\"pending\":[]}"),
                 JsonParser.parseString(getContent(response)));
     }
 
     // --- getQueueStatus: the pending list and stoppable (JF-202) ---
+
+    private static final String IDLE_WEB =
+            "{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"stopDropsQueue\":true,\"pending\":[]}";
+    private static final String BUSY_WEB =
+            "{\"busy\":true,\"queueSize\":0,\"stoppable\":true,\"stopDropsQueue\":true,\"pending\":[]}";
 
     private static void assertQueue(String expected, Long convId) {
         var response = GET("/api/conversations/" + convId + "/queue");
@@ -755,7 +762,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
                     "second follow-up", "web", convo.peerId, convo.agent, List.of(report, photo)));
 
             assertQueue("""
-                    {"busy":true,"queueSize":3,"stoppable":true,"pending":[
+                    {"busy":true,"queueSize":3,"stoppable":true,"stopDropsQueue":true,"pending":[
                       {"text":"first follow-up","attachmentNames":[],"position":1},
                       {"text":"second follow-up","attachmentNames":["report.pdf","image"],"position":3}]}
                     """, convo.id);
@@ -772,7 +779,8 @@ class ApiConversationsControllerTest extends FunctionalTest {
         try {
             ConversationQueue.tryAcquire(convo.id, announce(convo));
 
-            assertQueue("{\"busy\":true,\"queueSize\":1,\"stoppable\":true,\"pending\":[]}", convo.id);
+            assertQueue("{\"busy\":true,\"queueSize\":1,\"stoppable\":true,\"stopDropsQueue\":true,\"pending\":[]}",
+                    convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
@@ -784,7 +792,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
         var convo = seedConversation("jf202-stoppable-web", "web");
         ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
         try {
-            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":true,\"pending\":[]}", convo.id);
+            assertQueue(BUSY_WEB, convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
@@ -802,7 +810,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
             ConversationQueue.tryAcquire(convo.id, queued(convo, "second behind the drained one"));
 
             assertQueue("""
-                    {"busy":true,"queueSize":2,"stoppable":true,"pending":[
+                    {"busy":true,"queueSize":2,"stoppable":true,"stopDropsQueue":true,"pending":[
                       {"text":"first behind the drained one","attachmentNames":[],"position":1},
                       {"text":"second behind the drained one","attachmentNames":[],"position":2}]}
                     """, convo.id);
@@ -810,7 +818,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
             var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
             assertIsOk(response);
             assertEquals(JsonParser.parseString("{\"stopped\":true}"), JsonParser.parseString(getContent(response)));
-            assertQueue("{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+            assertQueue(IDLE_WEB, convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
@@ -822,34 +830,71 @@ class ApiConversationsControllerTest extends FunctionalTest {
         var convo = seedConversation("jf197-stoppable-restored", "web");
         ConversationQueue.tryAcquireRestored(convo.id, List.of(queued(convo, "kept across a restart")));
         try {
-            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":true,\"pending\":[]}", convo.id);
+            assertQueue(BUSY_WEB, convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
     }
 
     @Test
-    void queueStatusReportsADrainedChannelTurnUnstoppable() {
+    void queueStatusReportsADrainedChannelTurnStoppableWithAStopThatKeepsItsQueue() {
         login();
         var convo = seedConversation("jf197-stoppable-drained-telegram", "telegram");
         var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
         try {
             ConversationQueue.tryAcquire(convo.id, queued(convo, "queued behind it"));
             assertEquals(1, ConversationQueue.drain(convo.id, generation).size());
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "behind the drained one"));
 
-            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+            assertQueue("""
+                    {"busy":true,"queueSize":1,"stoppable":true,"stopDropsQueue":false,"pending":[
+                      {"text":"behind the drained one","attachmentNames":[],"position":1}]}
+                    """, convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
     }
 
     @Test
-    void queueStatusReportsAChannelTurnUnstoppable() {
+    void queueStatusReportsTheTurnOfEachChannelConversationStoppableWithAStopThatKeepsItsQueue() {
         login();
-        var convo = seedConversation("jf202-stoppable-telegram", "telegram");
+        for (var channel : List.of("telegram", "slack", "whatsapp")) {
+            var convo = seedConversation("jf197b-stoppable-" + channel, channel);
+            ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+            try {
+                assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":true,\"stopDropsQueue\":false,"
+                        + "\"pending\":[]}", convo.id);
+            } finally {
+                ConversationQueue.forgetForTest(convo.id);
+            }
+        }
+    }
+
+    @Test
+    void queueStatusReportsAVoiceTurnStoppableWithAStopThatDropsTheUtteranceQueuedBehindIt() {
+        login();
+        var convo = seedConversation("jf197b-stoppable-voice", "voice");
         ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
         try {
-            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "said while it answered"));
+
+            assertQueue("""
+                    {"busy":true,"queueSize":1,"stoppable":true,"stopDropsQueue":true,"pending":[
+                      {"text":"said while it answered","attachmentNames":[],"position":1}]}
+                    """, convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void queueStatusReportsAnAppConversationsTurnUnstoppable() {
+        login();
+        var convo = seedConversation("jf197b-stoppable-app", "app");
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), new AtomicBoolean(false));
+        try {
+            assertQueue("{\"busy\":true,\"queueSize\":0,\"stoppable\":false,\"stopDropsQueue\":true,"
+                    + "\"pending\":[]}", convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
@@ -865,7 +910,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
             ConversationQueue.tryAcquire(convo.id, announce(convo));
             assertIsOk(POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}"));
 
-            assertQueue("{\"busy\":false,\"queueSize\":0,\"stoppable\":false,\"pending\":[]}", convo.id);
+            assertQueue(IDLE_WEB, convo.id);
         } finally {
             ConversationQueue.forgetForTest(convo.id);
         }
@@ -874,10 +919,15 @@ class ApiConversationsControllerTest extends FunctionalTest {
     // --- stopTurn tests (POST /api/conversations/{id}/stop, GH-12) ---
 
     private static Conversation seedConversation(String agentName, String channelType) {
+        return seedConversation(agentName, channelType, "openrouter");
+    }
+
+    /** {@code modelProvider} names no configured provider for a turn the test must not send to a model. */
+    private static Conversation seedConversation(String agentName, String channelType, String modelProvider) {
         return commitInFreshTx(() -> {
             var agent = new Agent();
             agent.name = agentName;
-            agent.modelProvider = "openrouter";
+            agent.modelProvider = modelProvider;
             agent.modelId = "gpt-4.1";
             agent.enabled = true;
             agent.save();
@@ -915,6 +965,16 @@ class ApiConversationsControllerTest extends FunctionalTest {
         var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"stopped\":false"));
+        assertFalse(services.ConversationQueue.isBusy(convo.id));
+    }
+
+    @Test
+    void stopTurnOnATelegramConversationWhoseTurnAlreadyEndedReportsNothingStopped() {
+        login();
+        var convo = seedConversation("jf197b-stop-idle-telegram", "telegram");
+        var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+        assertIsOk(response);
+        assertEquals(JsonParser.parseString("{\"stopped\":false}"), JsonParser.parseString(getContent(response)));
         assertFalse(services.ConversationQueue.isBusy(convo.id));
     }
 
@@ -967,16 +1027,44 @@ class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void stopTurnRefusesANonWebConversation() {
+    void stopTurnRefusesAnAppConversation() {
         login();
-        var convo = seedConversation("gh12-stop-telegram", "telegram");
-        var msg = new services.ConversationQueue.QueuedMessage("running", "telegram", "gh12", convo.agent);
+        var convo = seedConversation("gh12-stop-app", "app");
+        var msg = new services.ConversationQueue.QueuedMessage("running", "app", "gh12", convo.agent);
         assertTrue(services.ConversationQueue.tryAcquire(convo.id, msg));
         try {
             assertStatus(400, POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}"));
             assertTrue(services.ConversationQueue.isBusy(convo.id), "a refused stop changes nothing");
         } finally {
             services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnStopsATelegramTurnAndKeepsTheMessageQueuedBehindIt() throws InterruptedException {
+        login();
+        var convo = seedConversation("jf197b-stop-telegram", "telegram", "jf197b-no-provider-" + UUID.randomUUID());
+        var ownerFlag = new AtomicBoolean(false);
+        ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "running"), ownerFlag);
+        try {
+            assertFalse(ConversationQueue.tryAcquire(convo.id, queued(convo, "queued behind it")));
+            var expected = "Stopped the turn in conversation %d, kept 1 pending message(s)".formatted(convo.id);
+
+            var seen = services.EventLogger.captureMatchingForTest(e -> convo.agent.name.equals(e.agentId()), _ -> {
+                var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+                assertIsOk(response);
+                assertEquals(JsonParser.parseString("{\"stopped\":true}"), JsonParser.parseString(getContent(response)));
+            });
+
+            assertTrue(ownerFlag.get(), "the channel turn was told to stop");
+            assertEquals(ConversationQueue.ChannelStop.NOTICE, ConversationQueue.channelStop(ownerFlag));
+            assertEquals(List.of(expected), seen.stream().filter(e -> "queue".equals(e.category()))
+                    .map(services.EventLogger.Captured::message).filter(m -> m.startsWith("Stopped")).toList());
+            // The queued message ran on its own thread; its writes must end before the next test clears the tables.
+            for (int i = 0; i < 200 && ConversationQueue.isBusy(convo.id); i++) Thread.sleep(50);
+            assertFalse(ConversationQueue.isBusy(convo.id), "the message the stop handed on never finished");
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
         }
     }
 

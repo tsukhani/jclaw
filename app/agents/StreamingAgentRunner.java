@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * JCLAW-678: the streaming execution engine extracted from {@link AgentRunner}.
@@ -73,6 +74,23 @@ final class StreamingAgentRunner {
                              @Nullable Long acceptedAtNs,
                              @Nullable List<AttachmentService.Input> attachments,
                              @Nullable CompletableFuture<AgentRunner.TurnStart> admission) {
+        runStreaming(agent, conversationId, channelType, peerId, userMessage, isCancelled, cb, acceptedAtNs,
+                attachments, admission, null);
+    }
+
+    /**
+     * {@link #runStreaming} whose reply goes to a channel's sink, which {@code stopNotice} ends with a stop's notice:
+     * the stop sends it itself, before the next queued message runs (JF-197b).
+     */
+    @SuppressWarnings("java:S107") // the streaming entrypoint's surface plus where a stop's notice goes
+    static void runStreaming(Agent agent, @Nullable Long conversationId, String channelType, String peerId,
+                             String userMessage,
+                             AtomicBoolean isCancelled,
+                             AgentRunner.StreamingCallbacks cb,
+                             @Nullable Long acceptedAtNs,
+                             @Nullable List<AttachmentService.Input> attachments,
+                             @Nullable CompletableFuture<AgentRunner.TurnStart> admission,
+                             @Nullable Consumer<String> stopNotice) {
         Runnable turnBody = () -> {
             final Long[] conversationIdRef = {null};
             // GH-12: the queue generation acquired with, so a release after an operator stop is a no-op.
@@ -87,11 +105,14 @@ final class StreamingAgentRunner {
             // guarantees exactly one drain per turn regardless of which
             // path fires first.
             final var queueReleased = new AtomicBoolean(false);
+            // JF-219: the kill a yielded round arms, closed just before a terminal releases the conversation: a channel
+            // turn's flag is the conversation's, and the next turn's stop or interrupt must not reach this turn's runs.
+            final TurnCancellation.Registration[] yieldKillRef = {TurnCancellation.Registration.none()};
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
             var broadcast = TurnBroadcast.forStreamedTurn(isCancelled);
             var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, generationRef, queueReleased,
-                    isCancelled, agent, broadcast);
+                    isCancelled, agent, broadcast, channelType, sinkRef, yieldKillRef);
             // JCLAW-882: bind the turn to this virtual thread so every provider
             // dispatch on it — round 1, each tool-loop continuation, the empty-
             // continuation retry, any prologue compaction call — counts against
@@ -100,7 +121,7 @@ final class StreamingAgentRunner {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
-                        isCancelled, conversationIdRef, generationRef, sinkRef, broadcast, admission);
+                        isCancelled, conversationIdRef, generationRef, sinkRef, broadcast, admission, stopNotice);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 trace.conversationId(conversation.id);
@@ -112,7 +133,7 @@ final class StreamingAgentRunner {
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
                 streamRoutedLlmLoop(agent, conversation, channelType, userMessage, attachments,
-                        isCancelled, tracedCb, trace, Objects.requireNonNull(sinkRef[0]));
+                        isCancelled, tracedCb, trace, Objects.requireNonNull(sinkRef[0]), yieldKillRef);
 
             } catch (Exception e) {
                 if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -137,6 +158,7 @@ final class StreamingAgentRunner {
                 // releaseQueueOnce no-ops here. The block only fires for
                 // exception paths that returned without invoking any
                 // terminal callback.
+                yieldKillRef[0].close();
                 QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
             }
         };
@@ -190,15 +212,30 @@ final class StreamingAgentRunner {
      * <p>Every frame is also published to the conversation's watchers through {@code broadcast}, which the acquire
      * begins, so the queued and not-found paths publish nothing. The terminal goes out before the release: a drained
      * next turn's frames must not overtake it.
+     *
+     * <p>A Telegram, Slack or WhatsApp turn a stop ended before its reply was saved ends stopped, whichever terminal it
+     * reaches (JF-197b): a stop after the last cancel check reaches the completion with the reply its sink refused, and
+     * the channel must get neither that reply nor an error, only what the stop owes it.
      */
-    @SuppressWarnings("java:S107") // the trace, the queue ownership slots, the cancel flag, and the broadcast
+    @SuppressWarnings("java:S107") // the trace, the queue slots, the cancel flag, the broadcast, the turn's channel, sink and yield kill
     private static AgentRunner.StreamingCallbacks wrapCallbacksWithTrace(AgentRunner.StreamingCallbacks cb, LatencyTrace trace,
                                                               Long[] conversationIdRef,
                                                               long[] generationRef,
                                                               AtomicBoolean queueReleased,
                                                               AtomicBoolean isCancelled,
-                                                              Agent agent, TurnBroadcast broadcast) {
+                                                              Agent agent, TurnBroadcast broadcast,
+                                                              String channelType, ConversationSink[] sinkRef,
+                                                              TurnCancellation.Registration[] yieldKillRef) {
         var firstTokenSeen = new AtomicBoolean(false);
+        boolean channelTurn = ConversationQueue.EXTERNAL_CHANNELS.contains(channelType);
+        Runnable stopped = () -> {
+            writeStopMarker(conversationIdRef, generationRef, queueReleased);
+            broadcast.stopped();
+            yieldKillRef[0].close();
+            QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
+            try { cb.onCancel().run(); }
+            finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
+        };
         return new AgentRunner.StreamingCallbacks(
                 conversation -> {
                     broadcast.init(agent, conversation);
@@ -230,26 +267,38 @@ final class StreamingAgentRunner {
                     cb.onToolCall().accept(toolCall);
                 },
                 content -> {
-                    if (isCancelled.get()) writeStopMarker(conversationIdRef, generationRef, queueReleased);
+                    if (isCancelled.get()) {
+                        if (channelTurn && stoppedBeforeTheReply(isCancelled, sinkRef)) {
+                            stopped.run();
+                            return;
+                        }
+                        writeStopMarker(conversationIdRef, generationRef, queueReleased);
+                    }
                     broadcast.complete(content);
+                    yieldKillRef[0].close();
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 error -> {
+                    if (channelTurn && isCancelled.get() && ConversationQueue.channelStop(isCancelled) != null) {
+                        stopped.run();
+                        return;
+                    }
                     broadcast.error(error);
+                    yieldKillRef[0].close();
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onError().accept(error); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
-                () -> {
-                    writeStopMarker(conversationIdRef, generationRef, queueReleased);
-                    broadcast.stopped();
-                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
-                    try { cb.onCancel().run(); }
-                    finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
-                }
+                stopped
         );
+    }
+
+    /** Whether a stop, not interrupt mode, set the turn's flag before its reply's commit, which the sink then refused. */
+    private static boolean stoppedBeforeTheReply(AtomicBoolean isCancelled, ConversationSink[] sinkRef) {
+        var sink = sinkRef[0];
+        return sink != null && sink.refused() && ConversationQueue.channelStop(isCancelled) != null;
     }
 
     /** A stopped turn marks its unanswered request before releasing; a failure must never skip the release. */
@@ -275,14 +324,15 @@ final class StreamingAgentRunner {
      * {@code broadcast}, and its fenced sink goes to {@code sinkRef[0]}. {@code admission}, when
      * given, learns the outcome: not found, queued, or started once the user's message is saved.
      */
-    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag, slots for its ownership and sink, and its broadcast
+    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag, slots for its ownership and sink, its broadcast, and where a stop's notice goes
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments,
             AtomicBoolean isCancelled, Long[] conversationIdRef, long[] generationRef,
             ConversationSink[] sinkRef, TurnBroadcast broadcast,
-            @Nullable CompletableFuture<AgentRunner.TurnStart> admission) {
+            @Nullable CompletableFuture<AgentRunner.TurnStart> admission,
+            @Nullable Consumer<String> stopNotice) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -302,7 +352,7 @@ final class StreamingAgentRunner {
 
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, channelType, peerId, agent, attachments);
-        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, isCancelled);
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, isCancelled, stopNotice);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             if (admission != null) {
                 // Read after the enqueue, so the turn ahead may have taken the message already: it is next either way.
@@ -340,7 +390,8 @@ final class StreamingAgentRunner {
     private static void streamRoutedLlmLoop(Agent agent, Conversation conversation, String channelType,
                                             String userMessage, @Nullable List<AttachmentService.Input> attachments,
                                             AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
-                                            LatencyTrace trace, AgentExecutionSink sink)
+                                            LatencyTrace trace, AgentExecutionSink sink,
+                                            TurnCancellation.Registration[] yieldKillRef)
             throws InterruptedException {
         var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType);
         if (route == null) {
@@ -349,7 +400,7 @@ final class StreamingAgentRunner {
                 return;
             }
             FallbackTurn.run(agent, conversation, () -> {
-                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink, yieldKillRef);
                 return null;
             });
             return;
@@ -357,7 +408,7 @@ final class StreamingAgentRunner {
         RoutedTurn.callWith(route, conversation, () -> {
             // Emitted before the prologue so the chat shows the model while the reply is still streaming.
             cb.onStatus().accept(routeFrame(agent, conversation));
-            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
+            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink, yieldKillRef);
             return null;
         });
     }
@@ -367,10 +418,14 @@ final class StreamingAgentRunner {
      * the streaming LLM call loop (including tool-call continuation, retry on
      * transient errors, truncation handling, and usage reporting).
      */
+    // S107: the loop's surface plus the turn's yield-kill slot. MustBeClosed: the kill stays armed in that slot until a
+    // terminal closes it, just before the release (runStreaming).
+    @SuppressWarnings({"java:S107", "MustBeClosed"})
     private static void streamLlmLoop(Agent agent, Conversation conversation,
                                        String channelType, String userMessage,
                                        AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
-                                       LatencyTrace trace, AgentExecutionSink sink)
+                                       LatencyTrace trace, AgentExecutionSink sink,
+                                       TurnCancellation.Registration[] yieldKillRef)
             throws InterruptedException {
 
         EventLogger.info("llm", agent.name, channelType,
@@ -500,6 +555,9 @@ final class StreamingAgentRunner {
                 ? new StreamingPostAccumulator(cutOffReply(accumulator.content(), agent, channelType, cb), true)
                 : runPostAccumulatorToolLoop(accumulator, turn, messages);
 
+        // JF-219: armed until the terminal below closes it, just before it releases the conversation, so a stop any
+        // time until then kills the runs a yielded round waits on.
+        yieldKillRef[0] = ToolCallLoopRunner.killOnCancel(isCancelled, post.yieldedRunIds());
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         // JCLAW-273: parent agent yielded into an async subagent. No final
@@ -677,7 +735,11 @@ final class StreamingAgentRunner {
      * content, plus the round-1 reply-truncation flag that rides through to the persist
      * site so the chat UI can render a "Reply was truncated" marker (JCLAW-291).
      */
-    private record StreamingPostAccumulator(String content, boolean replyTruncated) {}
+    private record StreamingPostAccumulator(String content, boolean replyTruncated, List<Long> yieldedRunIds) {
+        StreamingPostAccumulator(String content, boolean replyTruncated) {
+            this(content, replyTruncated, List.of());
+        }
+    }
 
     /**
      * Post round-1 processing: detect the empty-toolCalls truncation case, then drive
@@ -712,7 +774,7 @@ final class StreamingAgentRunner {
 
         if (!accumulator.toolCalls().isEmpty()) {
             var outcome = ToolCallLoopRunner.handleToolCallsStreaming(turn, messages, accumulator.toolCalls(), content, 0);
-            return new StreamingPostAccumulator(outcome.content(), outcome.truncated());
+            return new StreamingPostAccumulator(outcome.content(), outcome.truncated(), outcome.yieldedRunIds());
         }
         return new StreamingPostAccumulator(content, replyTruncated);
     }

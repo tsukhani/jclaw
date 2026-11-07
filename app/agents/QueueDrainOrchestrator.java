@@ -70,7 +70,8 @@ public final class QueueDrainOrchestrator {
      * method's {@link ConversationQueue#drain} call). For external
      * channels (Telegram, Slack, WhatsApp), the response is dispatched
      * back through the channel via {@link AgentRunner#dispatchToChannel},
-     * unless the turn yielded or was stopped before its reply.
+     * unless the turn yielded or was stopped before its reply; an operator
+     * stop sends {@link AgentRunner#STOP_NOTICE} in its place (JF-197b).
      * For web, the response is persisted to the DB, and an open chat page
      * fetches it once it commits.
      *
@@ -139,9 +140,10 @@ public final class QueueDrainOrchestrator {
             // use the owned-queue variant to avoid re-acquire.
             var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
                     attachments, skipUserAppend, generation, pendingIds);
-            if (result.sendsReply()) {
-                AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
-            }
+            // Stopped before its USER row consumed them, the rows would run the message again after a restart.
+            if (result.stopped()) ConversationQueue.discardPending(pendingIds);
+            var text = result.channelText();
+            if (text != null) AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), text);
         } catch (Exception e) {
             EventLogger.error("queue", msg.agent().name, msg.channelType(),
                     "Failed to process queued message: %s".formatted(e.getMessage()));

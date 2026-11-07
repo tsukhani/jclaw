@@ -865,18 +865,18 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     await vi.waitFor(() => expect(vmOf(component).messages.map(m => m.id ?? m.content)).toEqual([1, 2, '/stop', 'Stopped.']))
   })
 
-  it('typed /stop: a turn chat cannot stop yet runs on, and an idle conversation says there is nothing to stop', async () => {
+  it('typed /stop: a turn chat cannot stop runs on, and an idle conversation says there is nothing to stop', async () => {
     serveConversation(5, [row(1, 'user', 'drained job')])
     serveQueue(5, { busy: true, stoppable: false })
     serveTurnStart(() => queues[5]!.busy
-      ? { status: 'command', conversationId: 5, content: 'This turn can\'t be stopped from chat yet.', saved: false }
+      ? { status: 'command', conversationId: 5, content: 'This turn can\'t be stopped.', saved: false }
       : { status: 'command', conversationId: 5, content: 'Nothing to stop.', saved: false })
     const { component, stream } = await openConversation(5)
     stream.send({ type: 'init', conversationId: 5 })
     await vi.waitFor(() => expect(progressLine(component).exists()).toBe(true))
 
     await type(component, '/stop')
-    await vi.waitFor(() => expect(component.text()).toContain('This turn can\'t be stopped from chat yet.'))
+    await vi.waitFor(() => expect(component.text()).toContain('This turn can\'t be stopped.'))
     expect(progressLine(component).exists()).toBe(true)
 
     setQueue(5, { busy: false })
@@ -1065,6 +1065,37 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
 
     await vi.waitFor(() => expect(queuedRows(component)).toEqual([]))
     expect(stopButton(component).exists()).toBe(false)
+  })
+
+  it('stop, channel conversation: Stop keeps the queue, says only Stop generating, and the next message runs', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: false, queueSize: 2, pending: [
+      { text: 'second', attachmentNames: [], position: 1 },
+      { text: 'third', attachmentNames: [], position: 2 },
+    ] })
+    // As the server stops a Telegram, Slack, WhatsApp or voice turn: the next message takes the conversation.
+    registerEndpoint('/api/conversations/5/stop', {
+      method: 'POST',
+      handler: () => {
+        stops.push(5)
+        setQueue(5, { pending: [{ text: 'third', attachmentNames: [], position: 1 }], queueSize: 1 })
+        for (const stream of openStreamsOn(5)) stream.send({ type: 'stopped' })
+        return { stopped: true }
+      },
+    })
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5 })
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
+    expect(stopButton(component).attributes('title')).toBe('Stop generating')
+    expect(stopButton(component).attributes('aria-label')).toBe('Stop generating')
+    expect(stopButton(component).text()).toBe('')
+
+    await stopButton(component).trigger('click')
+    await vi.waitFor(() => expect(stops).toEqual([5]))
+    stream.send({ type: 'init', conversationId: 5 })
+
+    await vi.waitFor(() => expect(queuedRows(component)).toEqual(['third | Queued, position 1']))
+    expect(stopButton(component).attributes('title')).toBe('Stop generating')
   })
 
   it('slash command: a command\'s reply renders, and /new switches to the conversation it made', async () => {

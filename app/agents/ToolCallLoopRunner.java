@@ -1,5 +1,6 @@
 package agents;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
@@ -11,6 +12,8 @@ import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.SubagentRegistry;
+import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
 import utils.ChannelOriginTrust;
 import utils.ErrorRendering;
@@ -677,32 +680,33 @@ public final class ToolCallLoopRunner {
         EventLogger.info("tool", agent.name, null,
                 "Round %d: executing %d tool call(s)".formatted(round + 1, assistantToolCalls.size()));
 
-        ParallelToolExecutor.executeToolsParallel(assistantToolCalls, agent, conversationId, currentMessages,
-                frames == null ? null : frames.onStatus(), frames == null ? null : frames.onToolCall(),
+        var yieldedOn = ParallelToolExecutor.executeToolsParallel(assistantToolCalls, agent, conversationId,
+                currentMessages, frames == null ? null : frames.onStatus(), frames == null ? null : frames.onToolCall(),
                 null, turnCancel, sink, offeredToolNames(tools));
+        try (var _ = killOnCancel(turnCancel, yieldedOn)) {
+            // JCLAW-291: cooperative-cancel checkpoint between tool calls
+            // and the next LLM round. If /subagent kill landed during the
+            // tool-call batch, abort here rather than spending another
+            // round on the now-stale plan.
+            AgentRunner.checkSubagentCancel(conversation);
+            AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
+            AgentRunner.checkTurnCancel(turnCancel);
 
-        // JCLAW-291: cooperative-cancel checkpoint between tool calls
-        // and the next LLM round. If /subagent kill landed during the
-        // tool-call batch, abort here rather than spending another
-        // round on the now-stale plan.
-        AgentRunner.checkSubagentCancel(conversation);
-        AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
-        AgentRunner.checkTurnCancel(turnCancel);
-
-        // JCLAW-273: detect a successful subagent_yield call and bail out of the
-        // tool-call loop without continuing to the next LLM round. The runner
-        // returns YIELDED_RESPONSE so the caller skips its final-assistant-message
-        // persist; the parent's logical turn resumes later from
-        // tools.SubagentSpawnTool#runAsyncAndAnnounce once the child terminates.
-        // JCLAW-497: in a task fire subagent_yield block-awaits and returns the
-        // child result inline (no sentinel), so this never triggers there.
-        var yieldedRunIds = yieldedRunIds(currentMessages, toolResultsAnchor);
-        if (!yieldedRunIds.isEmpty()) {
-            EventLogger.info("tool", agent.name, null,
-                    "Round %d: subagent_yield invoked — suspending parent turn".formatted(round + 1));
-            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE, false, yieldedRunIds);
+            // JCLAW-273: detect a successful subagent_yield call and bail out of the
+            // tool-call loop without continuing to the next LLM round. The runner
+            // returns YIELDED_RESPONSE so the caller skips its final-assistant-message
+            // persist; the parent's logical turn resumes later from
+            // tools.SubagentSpawnTool#runAsyncAndAnnounce once the child terminates.
+            // JCLAW-497: in a task fire subagent_yield block-awaits and returns the
+            // child result inline (no sentinel), so this never triggers there.
+            var yieldedRunIds = yieldedRunIds(currentMessages, toolResultsAnchor);
+            if (!yieldedRunIds.isEmpty()) {
+                EventLogger.info("tool", agent.name, null,
+                        "Round %d: subagent_yield invoked — suspending parent turn".formatted(round + 1));
+                return new LoopOutcome(AgentRunner.YIELDED_RESPONSE, false, yieldedRunIds);
+            }
+            return null;
         }
-        return null;
     }
 
     /**
@@ -729,23 +733,46 @@ public final class ToolCallLoopRunner {
      * {@link SubagentYieldTool#PARAM_RUN_ID}, in call order; empty when the round did not yield.
      */
     public static List<Long> yieldedRunIds(List<ChatMessage> currentMessages, int fromIndex) {
-        return yieldSentinels(currentMessages, fromIndex).stream()
-                .map(s -> JsonParser.parseString(s).getAsJsonObject().get(SubagentYieldTool.PARAM_RUN_ID).getAsLong())
-                .toList();
+        return yieldSentinels(currentMessages, fromIndex).stream().map(ToolCallLoopRunner::sentinelRunId).toList();
+    }
+
+    /** The run a {@code subagent_yield} result suspended the turn on, read from its sentinel; null for any other result. */
+    static @Nullable Long yieldedRunId(@Nullable String toolName, @Nullable String result) {
+        return isYieldSentinel(toolName, result) ? sentinelRunId(Objects.requireNonNull(result)) : null;
+    }
+
+    private static boolean isYieldSentinel(@Nullable String toolName, @Nullable Object content) {
+        return SubagentYieldTool.TOOL_NAME.equals(toolName) && content instanceof String s
+                && s.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX);
+    }
+
+    private static long sentinelRunId(String sentinel) {
+        return JsonParser.parseString(sentinel).getAsJsonObject().get(SubagentYieldTool.PARAM_RUN_ID).getAsLong();
     }
 
     private static List<String> yieldSentinels(List<ChatMessage> currentMessages, int fromIndex) {
         var sentinels = new ArrayList<String>();
         for (int i = fromIndex; i < currentMessages.size(); i++) {
             var m = currentMessages.get(i);
-            if (m != null && MessageRole.TOOL.value.equals(m.role())
-                    && SubagentYieldTool.TOOL_NAME.equals(m.toolName())
-                    && m.content() instanceof String s
-                    && s.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX)) {
-                sentinels.add(s);
+            if (m != null && MessageRole.TOOL.value.equals(m.role()) && isYieldSentinel(m.toolName(), m.content())) {
+                sentinels.add((String) m.content());
             }
         }
         return sentinels;
+    }
+
+    /**
+     * JF-219: from the round whose {@code subagent_yield} calls suspended the turn on {@code yieldedOn} until the turn
+     * lets go of its conversation, a cancel of the turn's flag, by a stop or interrupt mode, kills those runs, at once
+     * when the flag is already set: each one's end would otherwise wake the stopped conversation and reply into it.
+     * Killed as a sync spawn's child is when its parent turn stops, a run announces nothing and resumes nothing.
+     */
+    @MustBeClosed
+    static TurnCancellation.Registration killOnCancel(@Nullable AtomicBoolean cancelled, List<Long> yieldedOn) {
+        if (cancelled == null || yieldedOn.isEmpty()) return TurnCancellation.Registration.none();
+        return TurnCancellation.register(cancelled, () -> {
+            for (var runId : yieldedOn) SubagentRegistry.kill(runId, SubagentSpawnTool.PARENT_STOPPED_REASON);
+        });
     }
 
     /**
@@ -821,30 +848,32 @@ public final class ToolCallLoopRunner {
 
         int streamingToolResultsAnchor = currentMessages.size();
         var toolRoundStartNs = System.nanoTime();
-        ParallelToolExecutor.executeToolsParallel(toolCalls, ctx.agent(), ctx.conversationId(), currentMessages,
-                ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(), ctx.sink(),
-                offeredToolNames(ctx.tools()));
+        var yieldedOn = ParallelToolExecutor.executeToolsParallel(toolCalls, ctx.agent(), ctx.conversationId(),
+                currentMessages, ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(),
+                ctx.sink(), offeredToolNames(ctx.tools()));
         ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
-        if (ctx.isCancelled().get()) return cancelled(ctx, priorContent, round);
+        try (var _ = killOnCancel(ctx.isCancelled(), yieldedOn)) {
+            if (ctx.isCancelled().get()) return cancelled(ctx, priorContent, round);
 
-        // JCLAW-291: cooperative-cancel checkpoint between the tool round
-        // and the LLM continuation. Subagent-driven streaming runs aren't
-        // the common case but the checkpoint is cheap and keeps the two
-        // round-loops symmetric.
-        AgentRunner.checkSubagentCancel(ctx.conversation());
+            // JCLAW-291: cooperative-cancel checkpoint between the tool round
+            // and the LLM continuation. Subagent-driven streaming runs aren't
+            // the common case but the checkpoint is cheap and keeps the two
+            // round-loops symmetric.
+            AgentRunner.checkSubagentCancel(ctx.conversation());
 
-        // JCLAW-273: subagent_yield detected in this round — exit the
-        // streaming loop without continuing to the next LLM round and
-        // without emitting a final assistant payload. Returning the
-        // YIELDED_RESPONSE sentinel lets streamLlmLoop short-circuit its
-        // persistence + terminal-callback path; the parent's logical turn
-        // resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce.
-        if (yieldRequestedInLastRound(currentMessages, streamingToolResultsAnchor)) {
-            EventLogger.info("tool", ctx.agent().name, null,
-                    "Streaming round %d: subagent_yield invoked — suspending parent turn"
-                            .formatted(round + 1));
-            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
+            // JCLAW-273: subagent_yield detected in this round — exit the
+            // streaming loop without continuing to the next LLM round and
+            // without emitting a final assistant payload. Returning the
+            // YIELDED_RESPONSE sentinel lets streamLlmLoop short-circuit its
+            // persistence + terminal-callback path; the parent's logical turn
+            // resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce.
+            if (yieldRequestedInLastRound(currentMessages, streamingToolResultsAnchor)) {
+                EventLogger.info("tool", ctx.agent().name, null,
+                        "Streaming round %d: subagent_yield invoked — suspending parent turn"
+                                .formatted(round + 1));
+                return new LoopOutcome(AgentRunner.YIELDED_RESPONSE, false, yieldedOn);
+            }
         }
 
         ctx.cb().onStatus().accept("Processing results (round %d)...".formatted(round + 1));

@@ -188,6 +188,10 @@ public class ConversationSink implements AgentExecutionSink {
         }
         ConversationService.appendUserMessage(managed, content, attachments);
         PendingInbound.deleteByIds(pendingIds);
+        // Once the row commits: a stop reads committed rows only, so until then the request must count as unsaved.
+        // After the commit too, so the queue's monitor is never awaited while this transaction holds the conversation
+        // row a stop writes its marker to (the sync prologue's transaction goes on to assemble the whole prompt).
+        if (fenced) Tx.afterCommit(() -> ConversationQueue.requestSaved(conversation.id, generation));
     }
 
     @Override

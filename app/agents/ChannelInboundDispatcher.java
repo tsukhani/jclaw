@@ -14,6 +14,7 @@ import services.Tx;
 import slash.Commands;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -51,8 +52,9 @@ final class ChannelInboundDispatcher {
 
         var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(route.agent(), channelType, peerId));
-        var result = AgentRunner.run(route.agent(), conversation, text);
-        if (result.sendsReply()) sendResponse.accept(peerId, result.response());
+        var reply = AgentRunner.run(route.agent(), conversation, text, null, new AtomicBoolean(false),
+                notice -> sendResponse.accept(peerId, notice)).channelText();
+        if (reply != null) sendResponse.accept(peerId, reply);
     }
 
     /**
@@ -89,8 +91,9 @@ final class ChannelInboundDispatcher {
         }
         var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
-        var result = AgentRunner.run(agent, conversation, text);
-        if (result.sendsReply()) sendResponse.accept(peerId, result.response());
+        var reply = AgentRunner.run(agent, conversation, text, null, new AtomicBoolean(false),
+                notice -> sendResponse.accept(peerId, notice)).channelText();
+        if (reply != null) sendResponse.accept(peerId, reply);
     }
 
     /**
@@ -224,10 +227,13 @@ final class ChannelInboundDispatcher {
         var isCancelled = ConversationQueue.cancellationFlag(conversation.id);
         var cb = new AgentRunner.StreamingCallbacks(
                 _ -> {},                 // onInit — nothing to do for Telegram
-                sink::update,            // onToken — live preview edits
+                token -> {               // onToken — live preview edits
+                    if (!stopped(isCancelled)) sink.update(token);
+                },
                 _ -> {},                 // onReasoning — not surfaced on Telegram
                 _ -> {},                 // onStatus — not surfaced on Telegram
                 tc -> {                  // onToolCall — Slack off-thread draft preview (JCLAW-346); Telegram out-of-band media
+                    if (stopped(isCancelled)) return;
                     sink.toolProgress(tc.name());
                     if (!tc.generatedAttachmentUuids().isEmpty()) {
                         sink.collectGeneratedAttachments(tc.generatedAttachmentUuids());
@@ -235,9 +241,35 @@ final class ChannelInboundDispatcher {
                 },
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback,     // onError — delete placeholder + send error
-                sink::cancel);           // onCancel — quiesce typing heartbeat on /stop
-        AgentRunner.runStreaming(agent, conversation.id, channelType, peerId, turnText,
-                isCancelled, cb, null, attachments);
+                () -> endCancelled(sink, isCancelled));
+        // A stop ends the sink with its notice itself (JF-197b): every sink's stop is safe from another thread.
+        StreamingAgentRunner.runStreaming(agent, conversation.id, channelType, peerId, turnText,
+                isCancelled, cb, null, attachments, null, sink::stop);
+    }
+
+    /**
+     * Whether a stop, not interrupt mode, set the turn's flag (JF-197b): nothing more of the turn reaches the channel,
+     * the fallback text a stopped tool round writes included.
+     */
+    private static boolean stopped(AtomicBoolean isCancelled) {
+        return isCancelled.get() && ConversationQueue.channelStop(isCancelled) != null;
+    }
+
+    /**
+     * A stopped turn ends as its stop decided (JF-197b): with nothing more when the stop already ended the sink with
+     * its notice. Interrupt mode's cancel only quiesces the sink, as before.
+     */
+    private static void endCancelled(ChannelStreamingSink sink, AtomicBoolean isCancelled) {
+        var stop = ConversationQueue.channelStop(isCancelled);
+        if (stop == null) {
+            sink.cancel();
+            return;
+        }
+        switch (stop) {
+            case NOTICE -> sink.stop(AgentRunner.STOP_NOTICE);
+            case SILENT -> sink.stop(null);
+            case SENT -> { /* the stop ended the sink itself */ }
+        }
     }
 
     /**

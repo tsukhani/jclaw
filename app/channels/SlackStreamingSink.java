@@ -11,6 +11,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * JCLAW-341: streams an LLM response into Slack using the native streaming API
@@ -30,9 +31,11 @@ import java.util.Objects;
  * Only when no token ever arrives (or the draft post fails) does it post once via
  * {@link SlackChannel#sendMessage}.
  *
- * <p>Single-threaded by contract: {@link agents.AgentRunner#runStreaming} drives
- * update/seal/error sequentially on one virtual thread, and {@link #begin()} runs
- * before it (happens-before via thread start), so no synchronization is needed.
+ * <p>One lock serializes every call (JF-197b). {@link agents.AgentRunner#runStreaming}
+ * drives update/seal/error in sequence, but a stop comes from the turn's thread
+ * while a token batch can still be in {@link #update} on the model stream's reader
+ * thread, starting the stream: the stop then waits for it, and closes the stream
+ * that start opened.
  */
 public final class SlackStreamingSink implements ChannelStreamingSink {
 
@@ -47,6 +50,8 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private static final int DRAFT_PREVIEW_MAX = 3500;
     private static final int MAX_TOOL_LINES = 8;
     private static final String STATUS_TYPING = "is typing...";
+    /** What a stop the person's own {@code /stop} answered leaves in a draft that showed only tool progress. */
+    private static final String STOPPED_TEXT = "Stopped.";
 
     /** Slack streaming + fallback operations, injectable so tests don't hit the API. */
     public interface Slacker {
@@ -119,11 +124,15 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private @Nullable String draftTs;        // chat.update message ts; null until the first post
     private @Nullable String lastDraftText;  // dedup consecutive identical edits
     private boolean draftStopped;  // stop the live loop (length cap / post-or-edit failure)
+    private final ReentrantLock lock = new ReentrantLock();
+    private boolean turnStopped;   // JF-197b: a stop ended the turn, so every later call is a no-op
+    private boolean finished;      // the reply or the error notice went out, so a later stop owes nothing
+    private @Nullable String toolDraftText;  // the last tool-progress text the draft showed
     private final List<String> toolLines = new ArrayList<>();
     // Uuids of this turn's tool-produced generated attachments (generate_image's image,
     // diarize voice clips, a finished generate_video clip), fed by the runner's
-    // per-tool-call callback and uploaded at seal. Plain list: the single-threaded
-    // contract means collect + seal run on the one streaming virtual thread.
+    // per-tool-call callback and uploaded at seal. A plain list: the lock guards it, as
+    // it does every other field.
     private final List<String> generatedAttachmentUuids = new ArrayList<>();
 
     /** Production: stream as the binding's bot, in its workspace {@code teamId}; {@code agentName}
@@ -154,14 +163,19 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     /** Show the "is typing…" status (assistant thread). The stream message itself is
      *  created lazily on the first token (see {@link #update}) so it's never empty. */
     public void begin() {
-        boolean thread = threadTs != null && !threadTs.isBlank();
-        if (thread) {
-            // Status line cue, set before the LLM runs so it shows during "thinking".
-            slacker.setStatus(channelId, threadTs, STATUS_TYPING);
-            statusSet = true;
-            canStream = recipientUserId != null && !recipientUserId.isBlank();
+        lock.lock();
+        try {
+            boolean thread = threadTs != null && !threadTs.isBlank();
+            if (thread) {
+                // Status line cue, set before the LLM runs so it shows during "thinking".
+                slacker.setStatus(channelId, threadTs, STATUS_TYPING);
+                statusSet = true;
+                canStream = recipientUserId != null && !recipientUserId.isBlank();
+            }
+            lastFlushMs = System.currentTimeMillis();
+        } finally {
+            lock.unlock();
         }
-        lastFlushMs = System.currentTimeMillis();
     }
 
     /** JCLAW-442: {@link ChannelStreamingSink} typing cue. Slack's is the
@@ -172,23 +186,59 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         begin();
     }
 
-    /** JCLAW-442: {@link ChannelStreamingSink} cancellation (e.g. /stop) — clear
-     *  the "is typing…" status; no live stream to tear down beyond that. */
+    /** JCLAW-442: {@link ChannelStreamingSink} cancellation with no stop behind it
+     *  (interrupt mode) — clear the "is typing…" status; a stop calls {@link #stop}. */
     @Override
     public void cancel() {
-        clearStatus();
+        lock.lock();
+        try {
+            clearStatus();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** JF-197b: close the native stream with what it already shows, or leave the draft as it stood, then post
+     *  {@code notice}, when there is one, in the reply's thread. Unflushed tokens are dropped, as Telegram's are.
+     *  A draft that shows only tool progress becomes the notice, or "Stopped." for a stop that owes none, as an
+     *  error's notice replaces it: left alone, "Working…" would stay in the channel for good. When that edit fails,
+     *  the notice is posted as above. */
+    @Override
+    public void stop(@Nullable String notice) {
+        lock.lock();
+        try {
+            if (turnStopped || finished) return;
+            turnStopped = true;
+            clearStatus();
+            if (nativeMode && streamTs != null) {
+                slacker.stopStream(channelId, streamTs);
+            } else if (draftShowsOnlyToolProgress()
+                    && slacker.editMessage(channelId, Objects.requireNonNull(draftTs),
+                            notice != null ? notice : STOPPED_TEXT)) {
+                return;
+            }
+            // A rate-limited edit leaves the draft as it was: the notice still goes in the thread.
+            if (notice != null) slacker.postFallback(channelId, notice, threadTs);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /** Per-token-batch hook. Native (assistant thread + recipient) lazily starts a
      *  chat.startStream and appends throttled deltas; off-thread it drives a
      *  chat.update draft preview (JCLAW-346). */
     public void update(String token) {
-        if (token == null || token.isEmpty()) return;
-        pending.append(token);
-        if (canStream) {
-            updateNative();
-        } else {
-            updateDraft();
+        lock.lock();
+        try {
+            if (turnStopped || token == null || token.isEmpty()) return;
+            pending.append(token);
+            if (canStream) {
+                updateNative();
+            } else {
+                updateDraft();
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -254,48 +304,62 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     /** Completion: finalize the native stream, the draft preview (a last formatted
      *  edit), or — when neither posted anything — post the full reply once. */
     public void seal(String fullText) {
-        if (nativeMode && streamTs != null) {
-            flush();
-            slacker.stopStream(channelId, streamTs);
-        } else if (draftTs != null) {
-            // Replace the raw live preview with clean mrkdwn-formatted text.
-            slacker.editMessage(channelId, draftTs, SlackMarkdownFormatter.format(fullText));
-        } else {
-            // No native stream and no draft posted (no tokens / draft post failed):
-            // post the full formatted reply once.
-            slacker.postFallback(channelId, fullText, threadTs);
+        lock.lock();
+        try {
+            if (turnStopped) return;
+            finished = true;
+            if (nativeMode && streamTs != null) {
+                flush();
+                slacker.stopStream(channelId, streamTs);
+            } else if (draftTs != null) {
+                // Replace the raw live preview with clean mrkdwn-formatted text.
+                slacker.editMessage(channelId, draftTs, SlackMarkdownFormatter.format(fullText));
+            } else {
+                // No native stream and no draft posted (no tokens / draft post failed):
+                // post the full formatted reply once.
+                slacker.postFallback(channelId, fullText, threadTs);
+            }
+            // JCLAW-345: upload any files the agent linked in its reply (the prose was
+            // already streamed above). No-op on the test-injected path (botToken/agentName
+            // null) and when the reply has no workspace-file links.
+            SlackOutboundPlanner.dispatchFiles(channelId, threadTs, agentName, fullText, botToken);
+            // Upload this turn's tool-generated media, which is delivered out-of-band and so
+            // is NOT linked in the prose above (dispatchFiles never sees it).
+            deliverGeneratedAttachments();
+            clearStatus();
+        } finally {
+            lock.unlock();
         }
-        // JCLAW-345: upload any files the agent linked in its reply (the prose was
-        // already streamed above). No-op on the test-injected path (botToken/agentName
-        // null) and when the reply has no workspace-file links.
-        SlackOutboundPlanner.dispatchFiles(channelId, threadTs, agentName, fullText, botToken);
-        // Upload this turn's tool-generated media, which is delivered out-of-band and so
-        // is NOT linked in the prose above (dispatchFiles never sees it).
-        deliverGeneratedAttachments();
-        clearStatus();
     }
 
     /** Error: append a notice to the native stream, edit the draft in place, or
      *  post one — then finalize. */
     public void errorFallback(Exception e) {
-        EventLogger.record("WARN", LOG_CATEGORY, null, LOG_SOURCE,
-                "Streaming error: %s".formatted(e != null ? e.getMessage() : "unknown"),
-                ChannelErrorTemplates.operatorDetail(e));
-        // Rich, then converted: ErrorRendering.RICH emits CommonMark (**bold**), and Slack's
-        // mrkdwn uses *single* asterisks — sending the former renders the asterisks literally.
-        // SlackMarkdownFormatter is the same converter seal() puts its content through.
-        String msg = "⚠️ " + SlackMarkdownFormatter.format(ChannelErrorTemplates.render(
-                ChannelErrorTemplates.forChannelReader(), ErrorRendering.RICH,
-                SlackOutboundPlanner.CAPTION_MAX));
-        if (nativeMode && streamTs != null) {
-            slacker.appendStream(channelId, streamTs, "\n\n" + msg);
-            slacker.stopStream(channelId, streamTs);
-        } else if (draftTs != null) {
-            slacker.editMessage(channelId, draftTs, msg);
-        } else {
-            slacker.postFallback(channelId, msg, threadTs);
+        lock.lock();
+        try {
+            if (turnStopped) return;
+            finished = true;
+            EventLogger.record("WARN", LOG_CATEGORY, null, LOG_SOURCE,
+                    "Streaming error: %s".formatted(e != null ? e.getMessage() : "unknown"),
+                    ChannelErrorTemplates.operatorDetail(e));
+            // Rich, then converted: ErrorRendering.RICH emits CommonMark (**bold**), and Slack's
+            // mrkdwn uses *single* asterisks — sending the former renders the asterisks literally.
+            // SlackMarkdownFormatter is the same converter seal() puts its content through.
+            String msg = "⚠️ " + SlackMarkdownFormatter.format(ChannelErrorTemplates.render(
+                    ChannelErrorTemplates.forChannelReader(), ErrorRendering.RICH,
+                    SlackOutboundPlanner.CAPTION_MAX));
+            if (nativeMode && streamTs != null) {
+                slacker.appendStream(channelId, streamTs, "\n\n" + msg);
+                slacker.stopStream(channelId, streamTs);
+            } else if (draftTs != null) {
+                slacker.editMessage(channelId, draftTs, msg);
+            } else {
+                slacker.postFallback(channelId, msg, threadTs);
+            }
+            clearStatus();
+        } finally {
+            lock.unlock();
         }
-        clearStatus();
     }
 
     /** JCLAW-346: off-thread tool-progress preview. Renders a "Working…" list of the
@@ -303,22 +367,35 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
      *  text turn begins (pending non-empty). No-op in native mode / once text flows. */
     @Override
     public void toolProgress(@Nullable String toolName) {
-        if (canStream || draftStopped || toolName == null || toolName.isBlank()) return;
-        if (!pending.isEmpty()) return; // the real reply has started → it owns the draft
-        toolLines.add(toolName);
-        while (toolLines.size() > MAX_TOOL_LINES) {
-            toolLines.remove(0);
+        lock.lock();
+        try {
+            if (turnStopped || canStream || draftStopped || toolName == null || toolName.isBlank()) return;
+            if (!pending.isEmpty()) return; // the real reply has started → it owns the draft
+            toolLines.add(toolName);
+            while (toolLines.size() > MAX_TOOL_LINES) {
+                toolLines.remove(0);
+            }
+            var sb = new StringBuilder("Working…");
+            for (var line : toolLines) {
+                sb.append("\n• ").append(line);
+            }
+            var text = sb.toString();
+            sendOrEditDraft(text);
+            // Only once the draft shows it: a failed edit leaves the draft reading the last text that went out.
+            if (text.equals(lastDraftText)) toolDraftText = text;
+        } finally {
+            lock.unlock();
         }
-        var sb = new StringBuilder("Working…");
-        for (var line : toolLines) {
-            sb.append("\n• ").append(line);
-        }
-        sendOrEditDraft(sb.toString());
     }
 
     @Override
     public void collectGeneratedAttachments(List<String> attachmentUuids) {
-        generatedAttachmentUuids.addAll(attachmentUuids);
+        lock.lock();
+        try {
+            generatedAttachmentUuids.addAll(attachmentUuids);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -346,6 +423,11 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
                 slacker.uploadFile(channelId, threadTs, m.file(), m.displayName(), null);
             }
         });
+    }
+
+    /** Whether the draft, as last written, shows tool progress and no reply text, whatever tokens wait unflushed. */
+    private boolean draftShowsOnlyToolProgress() {
+        return draftTs != null && toolDraftText != null && toolDraftText.equals(lastDraftText);
     }
 
     private void clearStatus() {

@@ -1186,7 +1186,7 @@ class ApiChatControllerTest extends FunctionalTest {
 
                 assertEquals(stopReply(chat.conversationId(), "Stopped."), flat(answer));
                 sink.awaitData(STOPPED);
-                assertEquals(new ConversationQueue.Snapshot(false, 0, false, List.of()),
+                assertEquals(new ConversationQueue.Snapshot(false, 0, false, true, List.of()),
                         ConversationQueue.snapshot(chat.conversationId(), "web"));
                 assertEquals(1, model.calls.get(), "the queued message never ran");
             } finally {
@@ -1335,7 +1335,7 @@ class ApiChatControllerTest extends FunctionalTest {
                         "/stop with no current conversation", null)), heard);
                 assertEquals(JsonParser.parseString("{\"status\":\"command\",\"conversationId\":null,"
                         + "\"content\":\"No active conversation. Nothing to stop.\",\"saved\":false}"), answer[0]);
-                assertEquals(new ConversationQueue.Snapshot(true, 1, true,
+                assertEquals(new ConversationQueue.Snapshot(true, 1, true, true,
                                 List.of(new ConversationQueue.PendingView("running", List.of(), 1))),
                         ConversationQueue.snapshot(chat.conversationId(), "web"));
                 assertFalse(flag.get(), "the running turn was not told to stop");
@@ -1828,7 +1828,7 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aStopTypedInChatOnAChannelConversationStillSignalsTheConversationsCancelFlag() throws Exception {
+    void aStopTypedInChatOnAChannelConversationStopsItsTurnAsTheStopButtonDoes() throws Exception {
         login();
         try (var model = HeldModel.answering()) {
             var chat = seedWebChat(model);
@@ -1837,15 +1837,17 @@ class ApiChatControllerTest extends FunctionalTest {
                 return services.ConversationService.create(agent, "telegram", "jf202-peer").id;
             });
             var onTelegram = new Seeded(chat.agentId(), telegram);
-            var generation = ConversationQueue.tryAcquireOwnership(telegram, running(chat.agentId(), "telegram"), null);
+            var flag = new java.util.concurrent.atomic.AtomicBoolean();
+            ConversationQueue.tryAcquireOwnership(telegram, running(chat.agentId(), "telegram"), flag);
             try {
                 var answer = json(POST("/api/chat/turn", "application/json", turnBody(onTelegram, "/stop")));
 
                 assertEquals(stopReply(telegram, "Stopped."), flat(answer));
-                assertTrue(ConversationQueue.cancellationFlag(telegram).get(), "cancelTurn signalled the channel turn");
-                assertTrue(ConversationQueue.isBusy(telegram), "the channel turn ends when it sees the flag, not now");
+                assertTrue(flag.get(), "the channel turn was told to stop");
+                assertEquals(ConversationQueue.ChannelStop.NOTICE, ConversationQueue.channelStop(flag),
+                        "the person on the channel is told, as after the Stop button");
+                assertFalse(ConversationQueue.isBusy(telegram), "the stop released the conversation");
             } finally {
-                ConversationQueue.releaseOwnership(telegram, generation);
                 ConversationQueue.forgetForTest(telegram);
             }
         }

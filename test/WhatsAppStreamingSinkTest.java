@@ -118,4 +118,44 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         sink.seal("too late");
         assertTrue(ch.sent.isEmpty(), "a cancelled sink sends nothing on a later seal");
     }
+
+    // --- JF-197b: a stopped turn ---
+
+    private static final String NOTICE = "This reply was stopped.";
+
+    @Test
+    void aStopSendsTheNoticeAloneOnceAndNothingAfterIt() {
+        var ch = new RecordingChannel();
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
+        sink.update("half a reply");
+
+        sink.stop(NOTICE);
+        sink.stop(NOTICE);
+        sink.seal("the complete reply");
+        sink.errorFallback(new RuntimeException("late"));
+
+        assertEquals(List.of(NOTICE), ch.sent);
+    }
+
+    @Test
+    void aStopTheTurnsOwnStopAnsweredSendsNothing() {
+        var ch = new RecordingChannel();
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
+
+        sink.stop(null);
+        sink.seal("the complete reply");
+
+        assertEquals(List.of(), ch.sent);
+    }
+
+    @Test
+    void aStopAfterTheReplyWasSentSendsNoNotice() {
+        var ch = new RecordingChannel();
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
+        sink.seal("the complete reply");
+
+        sink.stop(NOTICE);
+
+        assertEquals(List.of("the complete reply"), ch.sent);
+    }
 }

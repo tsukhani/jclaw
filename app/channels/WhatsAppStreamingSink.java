@@ -99,8 +99,16 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
     @Override
     public void cancel() {
         // Quiesce: mark sealed so a late seal()/update() is a no-op. Nothing to
-        // send — /stop already acknowledged on its own sink.
+        // send: no stop is behind this cancel, which stop() handles.
         sealed.compareAndSet(false, true);
+    }
+
+    /** JF-197b: WhatsApp streamed nothing, so the person gets {@code notice} alone, when there is one. */
+    @Override
+    public void stop(@Nullable String notice) {
+        if (!sealed.compareAndSet(false, true) || notice == null || channel == null) return;
+        awaitTypingCue();
+        channel.sendText(peerId, notice, agent);
     }
 
     private String agentName() {

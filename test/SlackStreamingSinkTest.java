@@ -12,6 +12,9 @@ import utils.LlmErrorTemplates;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JCLAW-341/346: the sink's two live-reply modes, exercised with an injected
@@ -26,6 +29,13 @@ class SlackStreamingSinkTest extends UnitTest {
     static final class FakeSlacker implements Slacker {
         final List<String> appended = new ArrayList<>();
         final List<String> fallbackPosts = new ArrayList<>();
+        final List<String> fallbackThreads = new ArrayList<>();
+        int stopStreams = 0;
+        /** Every stream, post and edit call, in order; written from the reader and the turn thread alike. */
+        final List<String> calls = new CopyOnWriteArrayList<>();
+        /** When set, startStream opens {@code startEntered} and returns once {@code startRelease} opens. */
+        volatile CountDownLatch startEntered;
+        volatile CountDownLatch startRelease;
         final List<String> statuses = new ArrayList<>();
         final List<String> posted = new ArrayList<>();   // JCLAW-346 draft placeholder posts
         final List<String> edited = new ArrayList<>();    // JCLAW-346 draft edits
@@ -42,16 +52,29 @@ class SlackStreamingSinkTest extends UnitTest {
             startedThread = threadTs;
             startedUser = recipientUserId;
             startedInitial = initialMarkdown;
+            calls.add("startStream " + initialMarkdown);
+            var release = startRelease;
+            if (release != null) {
+                startEntered.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             return startResult;
         }
 
         @Override public boolean appendStream(String channelId, String ts, String markdownDelta) {
             appended.add(markdownDelta);
+            calls.add("appendStream " + markdownDelta);
             return true;
         }
 
         @Override public boolean stopStream(String channelId, String ts) {
             stopped = true;
+            stopStreams++;
+            calls.add("stopStream " + ts);
             return true;
         }
 
@@ -61,15 +84,19 @@ class SlackStreamingSinkTest extends UnitTest {
 
         @Override public void postFallback(String channelId, String text, String threadTs) {
             fallbackPosts.add(text);
+            fallbackThreads.add(threadTs);
+            calls.add("postFallback " + text + " in " + threadTs);
         }
 
         @Override public String postMessage(String channelId, String text, String threadTs) {
             posted.add(text);
+            calls.add("postMessage " + text);
             return postResult;
         }
 
         @Override public boolean editMessage(String channelId, String ts, String text) {
             edited.add(text);
+            calls.add("editMessage " + text);
             return editResult;
         }
 
@@ -274,5 +301,176 @@ class SlackStreamingSinkTest extends UnitTest {
         assertTrue(edited.contains("How to retry"), edited);
         assertFalse(edited.contains("**"), "mrkdwn, not raw CommonMark: " + edited);
         assertTrue(f.fallbackPosts.isEmpty());
+    }
+
+    // --- JF-197b: a stopped turn ---
+
+    private static final String NOTICE = "This reply was stopped.";
+
+    @Test
+    void aStopClosesTheStreamWithWhatItStreamedAndPostsTheNoticeInTheThreadOnce() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", "1700.0", "U1", f, 0L);
+        sink.begin();
+        sink.update("Hel");
+        sink.update("lo");
+
+        sink.stop(NOTICE);
+        sink.stop(NOTICE);
+        sink.update(" world");
+        sink.seal("Hello world");
+        sink.errorFallback(new RuntimeException("late"));
+
+        assertEquals("Hel", f.startedInitial);
+        assertEquals(List.of("lo"), f.appended, "nothing is appended after the stop");
+        assertEquals(1, f.stopStreams, "the stream is closed once, by the stop");
+        assertEquals(List.of(NOTICE), f.fallbackPosts);
+        assertEquals(List.of("1700.0"), f.fallbackThreads, "the notice goes in the reply's thread");
+        assertEquals(List.of("is typing...", ""), f.statuses);
+        assertEquals(List.of(), f.edited);
+    }
+
+    @Test
+    void aStopOffThreadLeavesTheDraftAsItStoodAndPostsTheNotice() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, null, f, 0L);
+        sink.begin();
+        sink.update("Hel");
+        sink.update("lo");
+
+        sink.stop(NOTICE);
+        sink.seal("Hello");
+
+        assertEquals(List.of("Hel"), f.posted);
+        assertEquals(List.of("Hello"), f.edited, "the draft keeps its last live edit, with no final one");
+        assertEquals(List.of(NOTICE), f.fallbackPosts);
+        assertEquals(0, f.stopStreams);
+    }
+
+    @Test
+    void aStopTheTurnsOwnStopAnsweredClosesTheStreamAndPostsNothing() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", "1700.0", "U1", f, 0L);
+        sink.begin();
+        sink.update("Hel");
+
+        sink.stop(null);
+        assertEquals(1, f.stopStreams, "the stop closed the stream");
+        sink.seal("Hello");
+
+        assertEquals(1, f.stopStreams);
+        assertEquals(List.of(), f.fallbackPosts);
+        assertEquals(List.of(), f.appended);
+    }
+
+    @Test
+    void aStopAfterTheReplyWasSealedPostsNothing() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", "1700.0", "U1", f, 0L);
+        sink.begin();
+        sink.update("Hello");
+        sink.seal("Hello");
+
+        sink.stop(NOTICE);
+
+        assertEquals(1, f.stopStreams, "the seal closed the stream");
+        assertEquals(List.of(), f.fallbackPosts);
+    }
+
+    @Test
+    void aStopThatArrivesWhileTheStreamIsStartingClosesThatStreamAndNothingIsAppendedAfter() throws Exception {
+        var f = new FakeSlacker();
+        f.startEntered = new CountDownLatch(1);
+        f.startRelease = new CountDownLatch(1);
+        var sink = new SlackStreamingSink("C1", "1700.0", "U1", f, 0L);
+        sink.begin();
+        // The first token batch starts the stream on the model stream's reader thread.
+        var reader = Thread.ofPlatform().start(() -> sink.update("Hel"));
+        assertTrue(f.startEntered.await(10, TimeUnit.SECONDS), "test precondition: the stream is starting");
+        var stopper = Thread.ofPlatform().start(() -> sink.stop(NOTICE));
+        for (int i = 0; i < 200 && stopper.isAlive() && stopper.getState() != Thread.State.WAITING; i++) {
+            Thread.sleep(5);
+        }
+        assertEquals(Thread.State.WAITING, stopper.getState(),
+                "test precondition: the stop waits on the stream that is starting");
+        f.startRelease.countDown();
+        reader.join(10_000);
+        stopper.join(10_000);
+
+        sink.update("lo");
+        sink.seal("Hello");
+
+        assertEquals(List.of("startStream Hel", "stopStream 1700000000.0001",
+                "postFallback " + NOTICE + " in 1700.0"), f.calls);
+    }
+
+    @Test
+    void aStopOfAnOffThreadTurnShowingOnlyToolProgressEditsThatDraftToTheNotice() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, null, f, 0L);
+        sink.begin();
+        sink.toolProgress("web_search");
+
+        sink.stop(NOTICE);
+        sink.seal("late");
+
+        assertEquals(List.of("postMessage Working…\n• web_search", "editMessage " + NOTICE), f.calls);
+    }
+
+    @Test
+    void aStopTheTurnsOwnStopAnsweredEditsAToolProgressDraftToStopped() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, null, f, 0L);
+        sink.begin();
+        sink.toolProgress("web_search");
+
+        sink.stop(null);
+        sink.seal("late");
+
+        assertEquals(List.of("postMessage Working…\n• web_search", "editMessage Stopped."), f.calls);
+    }
+
+    @Test
+    void aStopWhoseEditOfAToolProgressDraftFailsPostsTheNoticeInTheThread() {
+        var f = new FakeSlacker();
+        f.editResult = false; // Slack rate-limits chat.update
+        var sink = new SlackStreamingSink("C1", null, null, f, 0L);
+        sink.begin();
+        sink.toolProgress("web_search");
+
+        sink.stop(NOTICE);
+
+        assertEquals(List.of("postMessage Working…\n• web_search", "editMessage " + NOTICE,
+                "postFallback " + NOTICE + " in null"), f.calls);
+    }
+
+    @Test
+    void aStopWithTokensNotYetShownOnAToolProgressDraftEditsThatDraftToTheNotice() {
+        var f = new FakeSlacker();
+        // The draft's throttle keeps the reply's first tokens back.
+        var sink = new SlackStreamingSink("C1", null, null, f, 60_000L);
+        sink.begin();
+        sink.toolProgress("web_search");
+        sink.update("Hel");
+
+        sink.stop(NOTICE);
+
+        assertEquals(List.of("postMessage Working…\n• web_search", "editMessage " + NOTICE), f.calls);
+    }
+
+    @Test
+    void aStopAfterAToolProgressEditFailedEditsTheDraftAsItStillReads() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, null, f, 0L);
+        sink.begin();
+        sink.toolProgress("web_search");
+        f.editResult = false; // the next edit is rate-limited, so the draft keeps reading "• web_search"
+        sink.toolProgress("read_file");
+        f.editResult = true;
+
+        sink.stop(NOTICE);
+
+        assertEquals(List.of("postMessage Working…\n• web_search", "editMessage Working…\n• web_search\n• read_file",
+                "editMessage " + NOTICE), f.calls);
     }
 }

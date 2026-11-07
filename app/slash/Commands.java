@@ -553,19 +553,9 @@ public final class Commands {
     /**
      * {@code /stop} — interrupt an in-flight assistant turn for this conversation.
      *
-     * <p>Sets {@link services.ConversationQueue#cancellationFlag} so
-     * {@code CancellationManager.checkCancelled} polls short-circuit
-     * the streaming loop on the next checkpoint. The shared
-     * {@code AtomicBoolean} works because {@code tryAcquire} (which any active
-     * stream has already passed through) creates the {@code QueueState} via
-     * {@code computeIfAbsent} — so the streaming thread and this dispatcher
-     * thread receive the same object reference, and the volatile write is
-     * visible immediately.
-     *
-     * <p>On Telegram this fully interrupts in-flight processing. A web turn
-     * polls its own cancel flag, not {@code ConversationQueue.cancellationFlag},
-     * so in web chat on a web conversation {@code /stop} is the Stop button
-     * instead ({@link #executeWebStop}, JF-202).
+     * <p>On a conversation the chat's Stop button applies to ({@link ConversationQueue#operatorStoppable}), it is that
+     * stop ({@link #executeOperatorStop}, JF-202, JF-197b). Elsewhere, on an app conversation, it sets
+     * {@link services.ConversationQueue#cancellationFlag}, which the turn's cancel checkpoints poll.
      *
      * <p>Like {@code /reset}, the ack is delivered via the channel transport
      * (SSE complete frame on web, sink.seal on Telegram) but NOT persisted
@@ -580,8 +570,8 @@ public final class Commands {
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
-        if (ChannelType.WEB.value.equals(channelType) && ChannelType.WEB.value.equals(current.channelType)) {
-            return executeWebStop(agent, current);
+        if (ConversationQueue.operatorStoppable(current.channelType)) {
+            return executeOperatorStop(agent, channelType, current);
         }
         if (!ConversationQueue.isBusy(current.id)) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
@@ -594,15 +584,19 @@ public final class Commands {
         return new Result(current, "Stopped.", Command.STOP);
     }
 
-    /** {@code /stop} typed in web chat on a web conversation: the chat's Stop button, which also drops the queue. */
-    private static Result executeWebStop(Agent agent, Conversation current) {
-        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType);
-        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), ChannelType.WEB.value,
+    /**
+     * {@code /stop} as the chat's Stop button stops: typed in Chat, it tells the person on a channel conversation, as
+     * the button does; sent on the channel, its own "Stopped." is their answer, so the stop adds none (JF-197b).
+     */
+    private static Result executeOperatorStop(Agent agent, String channelType, Conversation current) {
+        boolean typedInChat = ChannelType.WEB.value.equals(channelType);
+        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType, typedInChat);
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop for conversation %d: %s".formatted(current.id, outcome));
         var reply = switch (outcome) {
             case STOPPED -> "Stopped.";
             case IDLE -> NOTHING_TO_STOP;
-            case UNSTOPPABLE -> "This turn can't be stopped from chat yet.";
+            case UNSTOPPABLE -> "This turn can't be stopped.";
         };
         return new Result(current, reply, Command.STOP);
     }

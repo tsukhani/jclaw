@@ -152,11 +152,14 @@ public class ApiConversationsController extends Controller {
                                         String generationMetadata, Long generationJobId) {}
 
     /**
-     * @param queueSize every queued message, the ones {@code pending} leaves out included, all of which Stop drops
-     * @param stoppable whether the operator's Stop can stop the running turn: any turn of a web conversation (JF-197)
-     * @param pending   the queued messages the chat shows, in the order they run, each with its place in line
+     * @param queueSize      every queued message, the ones {@code pending} leaves out included
+     * @param stoppable      whether the operator's Stop can stop the running turn: any turn of a conversation but an
+     *                       app's (JF-197, JF-197b)
+     * @param stopDropsQueue whether that Stop drops every queued message, as on a web or voice conversation, rather than
+     *                       running the next, as on a Telegram, Slack or WhatsApp one
+     * @param pending        the queued messages the chat shows, in the order they run, each with its place in line
      */
-    public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable,
+    public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable, boolean stopDropsQueue,
                                       List<ConversationQueue.PendingView> pending) {}
 
     public record StopTurnResponse(boolean stopped) {}
@@ -531,35 +534,36 @@ public class ApiConversationsController extends Controller {
         var conversation = requireConversation(id);
         var queue = ConversationQueue.snapshot(id, conversation.channelType);
         renderJSON(gson.toJson(new QueueStatusResponse(queue.busy(), queue.queueSize(), queue.stoppable(),
-                queue.pending())));
+                queue.stopDropsQueue(), queue.pending())));
     }
 
     /**
-     * POST /api/conversations/{id}/stop — the web chat's Stop button (GH-12). Cancels the
-     * in-flight turn and releases the conversation at once, so the next send starts a fresh
-     * run instead of being queued behind a turn that only notices the dropped SSE later.
-     * Web only: a channel turn's cancel flag is shared with the conversation's next turn.
+     * POST /api/conversations/{id}/stop — the chat's Stop button (GH-12). Cancels the in-flight turn at once. On a web or
+     * voice conversation it drops the messages queued behind the turn and releases the conversation, so the next send
+     * starts a fresh run instead of being queued behind a turn that only notices the stop later. On a Telegram, Slack or
+     * WhatsApp conversation the next queued message takes the conversation, and the person who sent the stopped
+     * message is told (JF-197b). An app conversation has no Stop: 400.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StopTurnResponse.class)))
-    @Operation(summary = "Stop the web chat turn running in a conversation and release it")
+    @Operation(summary = "Stop the turn running in a conversation")
     @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's chat Stop button")
     @NoTransaction
     public static void stopTurn(Long id) {
         // No request transaction: the stop marker must commit before the stop releases the conversation.
         var target = Tx.run(() -> {
             var conversation = requireConversation(id);
-            if (!"web".equals(conversation.channelType)) {
+            if (!ConversationQueue.operatorStoppable(conversation.channelType)) {
                 badRequest();
             }
             return new StopTarget(conversation.agent.name, conversation.channelType);
         });
-        var agentName = target.agentName();
+        var channelType = target.channelType();
         var pending = ConversationQueue.getQueueSize(id);
-        var stopped = ConversationQueue.stopOperatorTurn(id, target.channelType())
-                == ConversationQueue.OperatorStop.STOPPED;
+        var stopped = ConversationQueue.stopOperatorTurn(id, channelType) == ConversationQueue.OperatorStop.STOPPED;
         if (stopped) {
-            EventLogger.info("queue", agentName, "web",
-                    "Stopped the turn in conversation %d, dropped %d pending message(s)".formatted(id, pending));
+            EventLogger.info("queue", target.agentName(), channelType,
+                    "Stopped the turn in conversation %d, %s %d pending message(s)".formatted(id,
+                            ConversationQueue.stopDropsQueue(channelType) ? "dropped" : "kept", pending));
         }
         renderJSON(gson.toJson(new StopTurnResponse(stopped)));
     }

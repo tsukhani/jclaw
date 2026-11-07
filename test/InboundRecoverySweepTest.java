@@ -498,6 +498,99 @@ class InboundRecoverySweepTest extends UnitTest {
         assertEquals(1, llmCalls.get());
     }
 
+    // --- JF-197b: the operator's stop of a channel turn keeps the messages queued behind it ---
+
+    @Test
+    void anOperatorStopOfARestoredTurnTellsItsSenderAndRunsTheNextMessage() throws Exception {
+        var agent = persistAgent();
+        var peer = "197" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf197b-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        commit();
+        storeBeforeRestart(agent, convo, List.of("kept across the restart", "also kept"));
+        modelHeld = new CountDownLatch(1);
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            try {
+                assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+                assertTrue(modelReached.await(30, TimeUnit.SECONDS), "test precondition: the restored message ran");
+                assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromChat(convo));
+            } finally {
+                modelHeld.countDown();
+            }
+            awaitIdle(convo);
+            sent = awaitSent(telegram, 2);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of(new Sent(peer, AgentRunner.STOP_NOTICE), new Sent(peer, "noted")),
+                sent.stream().sorted(Comparator.comparing(Sent::text)).toList());
+        assertEquals(List.of(new Row("user", "kept across the restart"),
+                new Row("assistant", ConversationService.STOP_MARKER_CONTENT), new Row("user", "also kept"),
+                new Row("assistant", "noted")), rows(convo));
+        assertEquals(List.of(), pendingTexts(convo));
+    }
+
+    @Test
+    void aChannelTurnStoppedBeforeItsMessageIsSavedDropsTheStoredRowAndTellsItsSender() throws Exception {
+        var agent = persistAgent();
+        var peer = "197" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf197b-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        commit();
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            try {
+                hold(agent, convo);
+                assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "stopped first")));
+                assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "runs next")));
+                long generation = ConversationQueue.currentGeneration(convo.id);
+                var handed = ConversationQueue.drain(convo.id, generation);
+                assertEquals(List.of("stopped first"), handed.stream().map(ConversationQueue.QueuedMessage::text).toList());
+
+                // The stop lands before the handed message's run reads its flag.
+                assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromChat(convo));
+                QueueDrainOrchestrator.runOwned(convo.id, generation, handed);
+                awaitIdle(convo);
+                sent = awaitSent(telegram, 2);
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+
+        assertEquals(List.of(new Sent(peer, AgentRunner.STOP_NOTICE), new Sent(peer, "noted")),
+                sent.stream().sorted(Comparator.comparing(Sent::text)).toList());
+        assertEquals(List.of(new UserRow("runs next", List.of())), userRows(convo));
+        assertEquals(List.of(), pendingTexts(convo), "the stopped message is not run again after a restart");
+        assertEquals(1, llmCalls.get());
+    }
+
+    /** The chat page's Stop, on a thread with no transaction of the test's, so its marker commits before it returns. */
+    private static ConversationQueue.OperatorStop stopFromChat(Conversation convo) throws InterruptedException {
+        var outcome = new AtomicReference<ConversationQueue.OperatorStop>();
+        var stopper = Thread.ofPlatform().start(() ->
+                outcome.set(ConversationQueue.stopOperatorTurn(convo.id, convo.channelType)));
+        stopper.join(10_000);
+        assertFalse(stopper.isAlive(), "the stop never returned");
+        return outcome.get();
+    }
+
+    /** The drain threads send after they free the conversation: waits, up to 10 s, for {@code count} sends. */
+    private static List<Sent> awaitSent(MockTelegramServer telegram, int count) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (sentMessages(telegram).size() < count && System.nanoTime() < deadline) Thread.sleep(20);
+        return sentMessages(telegram);
+    }
+
     @Test
     void aWebMessageQueuedBehindATurnIsNotStored() {
         var agent = persistAgent();

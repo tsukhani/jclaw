@@ -722,32 +722,43 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    void stopOnBusyChannelConversationSetsCancellationFlag() {
-        // Drive the queue into "processing" state via tryAcquire so isBusy
-        // returns true. Then /stop must flip the cancellation flag — the
-        // streaming thread's checkCancelled poll observes it on its next
-        // checkpoint and short-circuits the loop. A web conversation's /stop
-        // is the Stop button instead (ApiChatControllerTest).
+    void stopSentOnABusyChannelConversationStopsItsTurnOwingTheChannelNoSecondAnswer() {
+        // JF-197b: the operator's stop, with the queue kept; the "Stopped." reply is what the person on the channel
+        // is told, so the stop owes them no notice of its own.
         var convo = ConversationService.findOrCreate(agent, "telegram", "admin");
-        var queueMsg = new services.ConversationQueue.QueuedMessage(
-                "in-flight prompt", "telegram", "admin", agent);
-        var acquired = services.ConversationQueue.tryAcquire(convo.id, queueMsg);
-        assertTrue(acquired, "tryAcquire on a fresh conversation should succeed");
+        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
+        services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("in-flight prompt", "telegram", "admin", agent), turnFlag);
         try {
-            assertTrue(services.ConversationQueue.isBusy(convo.id),
-                    "conversation must register as busy after tryAcquire");
-
             var result = Commands.execute(Commands.Command.STOP, agent, "telegram", "admin", convo);
 
             assertEquals(Commands.Command.STOP, result.command());
             assertEquals("Stopped.", result.responseText());
-            assertTrue(services.ConversationQueue.cancellationFlag(convo.id).get(),
-                    "/stop on a busy conversation must set the cancellation flag");
+            assertTrue(turnFlag.get(), "the turn was told to stop");
+            assertEquals(services.ConversationQueue.ChannelStop.SILENT,
+                    services.ConversationQueue.channelStop(turnFlag));
+            assertFalse(services.ConversationQueue.isBusy(convo.id), "nothing was queued, so the stop released it");
         } finally {
-            // Release ownership so subsequent tests don't see this conversation
-            // as permanently busy. drain() with an empty pending deque flips
-            // processing back to false.
-            services.ConversationQueue.releaseOwnership(convo.id);
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void stopOnABusyAppConversationSetsItsCancellationFlag() {
+        // An app conversation has no Stop button, so /stop signals the flag the turn's checkpoints poll.
+        var convo = ConversationService.findOrCreate(agent, "app", "admin");
+        var acquired = services.ConversationQueue.tryAcquire(convo.id,
+                new services.ConversationQueue.QueuedMessage("in-flight prompt", "app", "admin", agent));
+        assertTrue(acquired, "tryAcquire on a fresh conversation should succeed");
+        try {
+            var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo);
+
+            assertEquals("Stopped.", result.responseText());
+            assertTrue(services.ConversationQueue.cancellationFlag(convo.id).get(),
+                    "/stop on a busy app conversation must set the cancellation flag");
+            assertTrue(services.ConversationQueue.isBusy(convo.id), "the turn ends when it sees the flag, not now");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
         }
     }
 

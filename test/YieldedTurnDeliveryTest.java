@@ -37,6 +37,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** A turn that suspends on {@code subagent_yield} sends nothing to its channel; the resumed turn replies later (JF-166). */
@@ -279,8 +280,204 @@ class YieldedTurnDeliveryTest extends UnitTest {
         }
     }
 
+    // --- JF-197b: the operator's stop tells the person on the channel, in place of the reply ---
+
+    private static boolean stopFromChat(Long conversationId, String channelType) {
+        return ConversationQueue.stopOperatorTurn(conversationId, channelType) == ConversationQueue.OperatorStop.STOPPED;
+    }
+
+    @Test
+    void anOperatorStopOfAnInboundTurnForABoundAgentSendsTheNoticeAlone() throws Exception {
+        var conversationId = conversation("telegram", PEER);
+        var sent = new CopyOnWriteArrayList<String>();
+
+        stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.processInboundForAgent(agent(), "telegram", PEER,
+                ASK, (peer, text) -> sent.add(peer + ": " + text)), id -> stopFromChat(id, "telegram"));
+        awaitSent(sent);
+
+        assertEquals(List.of(PEER + ": " + AgentRunner.STOP_NOTICE), sent);
+    }
+
+    @Test
+    void anOperatorStopOfAWebhookTurnSendsTheNoticeAlone() throws Exception {
+        commit(() -> {
+            var binding = new AgentBinding();
+            binding.agent = Agent.findById(agentId);
+            binding.channelType = "slack";
+            binding.peerId = "C-noticed";
+            binding.save();
+            return null;
+        });
+        var conversationId = conversation("slack", "C-noticed");
+        var sent = new CopyOnWriteArrayList<String>();
+
+        stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.processWebhookMessage("slack", "C-noticed", ASK,
+                (peer, text) -> sent.add(peer + ": " + text), peer -> sent.add("no route for " + peer)),
+                id -> stopFromChat(id, "slack"));
+        awaitSent(sent);
+
+        assertEquals(List.of("C-noticed: " + AgentRunner.STOP_NOTICE), sent);
+    }
+
+    @Test
+    void anOperatorStopOfAResumeSendsTheNoticeToItsChannel() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                // The yielded run's announce: the request the resumed turn answers.
+                Conversation chat = commit(() -> {
+                    Conversation found = Conversation.findById(conversationId);
+                    ConversationService.appendUserMessage(found, "[subagent result] the report is ready");
+                    return found;
+                });
+
+                stopWhileTheModelIsCalled(conversationId, () -> AgentRunner.resumeAndDeliver(agent(), chat),
+                        id -> stopFromChat(id, "telegram"));
+                awaitRequest(telegram, "sendMessage");
+                Thread.sleep(300);
+
+                assertEquals(List.of(AgentRunner.STOP_NOTICE), sentTexts(telegram));
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void anOperatorStopOfAQueuedChannelTurnSendsTheNoticeAlone() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                hold = new Hold();
+                var message = new ConversationQueue.QueuedMessage(ASK, "telegram", PEER, agent(), false, List.of());
+                long generation = ConversationQueue.tryAcquireOwnership(conversationId, message, null);
+                assertNotEquals(ConversationQueue.NOT_ACQUIRED, generation, "test precondition: the conversation is free");
+                QueueDrainOrchestrator.runOwned(conversationId, generation, List.of(message));
+                try {
+                    assertTrue(hold.reached().await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+                    assertTrue(stopFromChat(conversationId, "telegram"), "the queued turn holds a flag of its own");
+                } finally {
+                    hold.release().countDown();
+                }
+                awaitRequest(telegram, "sendMessage");
+
+                assertEquals(List.of(AgentRunner.STOP_NOTICE), sentTexts(telegram));
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void aStopSentOnTheChannelOfAQueuedChannelTurnSendsItNothingMore() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                hold = new Hold();
+                var message = new ConversationQueue.QueuedMessage(ASK, "telegram", PEER, agent(), false, List.of());
+                long generation = ConversationQueue.tryAcquireOwnership(conversationId, message, null);
+                assertNotEquals(ConversationQueue.NOT_ACQUIRED, generation, "test precondition: the conversation is free");
+                String agentName = agent().name;
+                EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+                    QueueDrainOrchestrator.runOwned(conversationId, generation, List.of(message));
+                    try {
+                        assertTrue(hold.reached().await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+                        // The person's own /stop: its "Stopped." is their answer.
+                        assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                                ConversationQueue.stopOperatorTurn(conversationId, "telegram", false));
+                    } catch (InterruptedException e) {
+                        throw new AssertionError(e);
+                    } finally {
+                        hold.release().countDown();
+                    }
+                    awaitLogged(seen, "Response generated");
+                });
+                // The drain thread sends just after its reply is generated: 500 ms lets a send that was coming arrive.
+                Thread.sleep(500);
+
+                assertEquals(List.of(), sentTexts(telegram), "neither the reply nor a notice");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void aStopWhileTheSyncProloguesTransactionHoldsTheUnsavedMessageStillSendsTheNoticeOnce() throws Exception {
+        try (var telegram = new MockTelegramServer()) {
+            var token = bindTelegram(telegram);
+            try {
+                var conversationId = conversation("telegram", PEER);
+                var agent = agent();
+                long generation = ConversationQueue.tryAcquireOwnership(conversationId,
+                        new ConversationQueue.QueuedMessage("running", "telegram", PEER, agent), null);
+                assertFalse(ConversationQueue.tryAcquire(conversationId,
+                        new ConversationQueue.QueuedMessage(ASK, "telegram", PEER, agent)));
+                var handed = ConversationQueue.drain(conversationId, generation);
+                var inPrologue = new CountDownLatch(1);
+                var stopped = new CountDownLatch(1);
+                var stop = new AtomicReference<ConversationQueue.OperatorStop>();
+                // Logged inside the prologue's transaction, after its USER row was written and before it commits.
+                EventLogger.captureMatchingForTest(e -> {
+                    if (agent.name.equals(e.agentId()) && e.message().startsWith("Calling ")) {
+                        inPrologue.countDown();
+                        try {
+                            stopped.await(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return false;
+                }, _ -> {
+                    QueueDrainOrchestrator.runOwned(conversationId, generation, handed);
+                    try {
+                        assertTrue(inPrologue.await(30, TimeUnit.SECONDS), "test precondition: the prologue ran");
+                        var stopper = Thread.ofPlatform().start(() ->
+                                stop.set(ConversationQueue.stopOperatorTurn(conversationId, "telegram")));
+                        stopper.join(10_000);
+                    } catch (InterruptedException e) {
+                        throw new AssertionError(e);
+                    } finally {
+                        stopped.countDown();
+                    }
+                });
+                awaitRequest(telegram, "sendMessage");
+                // The drained turn ends at its next checkpoint: 500 ms lets a second notice that was coming arrive.
+                Thread.sleep(500);
+
+                assertEquals(ConversationQueue.OperatorStop.STOPPED, stop.get());
+                assertEquals(List.of(AgentRunner.STOP_NOTICE), sentTexts(telegram));
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    /** The stop sends its notice off its own thread: waits, up to 10 s, for it. */
+    private static void awaitSent(List<String> sent) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (sent.isEmpty() && System.nanoTime() < deadline) Thread.sleep(20);
+        Thread.sleep(300);
+    }
+
+    private static List<String> sentTexts(MockTelegramServer telegram) {
+        return telegram.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .map(r -> JsonParser.parseString(r.body()).getAsJsonObject().get("text").getAsString())
+                .toList();
+    }
+
     /** Runs {@code turn} on its own thread, stops it once it calls the model, then lets the call answer and waits. */
     private void stopWhileTheModelIsCalled(Long conversationId, Runnable turn) throws InterruptedException {
+        stopWhileTheModelIsCalled(conversationId, turn, ConversationQueue::stop);
+    }
+
+    /** {@link #stopWhileTheModelIsCalled(Long, Runnable)} with {@code stop} as the stop, true when it stopped a turn. */
+    private void stopWhileTheModelIsCalled(Long conversationId, Runnable turn, Predicate<Long> stop)
+            throws InterruptedException {
         hold = new Hold();
         var error = new AtomicReference<Throwable>();
         var thread = Thread.ofVirtual().start(() -> {
@@ -292,7 +489,7 @@ class YieldedTurnDeliveryTest extends UnitTest {
         });
         try {
             assertTrue(hold.reached().await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
-            assertTrue(ConversationQueue.stop(conversationId), "the turn holds a flag of its own");
+            assertTrue(stop.test(conversationId), "the turn holds a flag of its own");
         } finally {
             hold.release().countDown();
         }

@@ -1,5 +1,7 @@
 package services.voice;
 
+import agents.TurnCancellation;
+import com.google.errorprone.annotations.MustBeClosed;
 import play.Logger;
 import services.tts.TtsRouter;
 import services.tts.TtsText;
@@ -10,6 +12,7 @@ import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongConsumer;
 
 /**
@@ -40,6 +43,21 @@ public final class VoiceTurnSpeaker {
         boolean isOpen();
 
         void send(Map<String, Object> frame);
+    }
+
+    /**
+     * JF-197b: the operator's Stop, from Chat in another tab, cancels {@code cancel} while it is still the overlay's
+     * {@code current} turn: flush the playback and end the turn, so the overlay listens again. A barge-in, a close and
+     * {@code bye} take the turn from {@code current} before they cancel it, and send their own frames.
+     */
+    @MustBeClosed
+    public static TurnCancellation.Registration endOnStop(AtomicReference<AtomicBoolean> current, AtomicBoolean cancel,
+                                                          int turnId, Sink sink) {
+        return TurnCancellation.register(cancel, () -> {
+            if (!current.compareAndSet(cancel, null)) return;
+            sink.send(Map.of("type", "flush"));
+            sink.send(Map.of("type", "turn_complete", "turn", turnId));
+        });
     }
 
     /** Turns one utterance into audio. Production binds

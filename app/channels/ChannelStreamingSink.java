@@ -12,10 +12,10 @@ import java.util.List;
  * attachment finalization — while the sink owns the channel-specific live-reply
  * mechanics.
  *
- * <p>The five core methods are exactly what {@code processInboundForAgentStreaming}
+ * <p>The six core methods are exactly what {@code processInboundForAgentStreaming}
  * invokes on its sink: a typing cue before the first token, per-token updates,
- * completion, error delivery, and cancellation. {@link TelegramStreamingSink}
- * and {@link SlackStreamingSink} implement it. {@link #toolProgress} is an
+ * completion, error delivery, cancellation, and a stop. {@link TelegramStreamingSink},
+ * {@link SlackStreamingSink} and {@link WhatsAppStreamingSink} implement it. {@link #toolProgress} is an
  * optional hook (default no-op) a channel can override to surface tool activity.
  */
 public interface ChannelStreamingSink {
@@ -34,8 +34,15 @@ public interface ChannelStreamingSink {
     /** Error: deliver a failure notice and finalize. */
     void errorFallback(Exception e);
 
-    /** Cancellation (e.g. /stop): quiesce any live indicator/stream. */
+    /** Cancellation with no stop behind it, as interrupt mode's: quiesce any live indicator/stream. */
     void cancel();
+
+    /**
+     * A stop ended the turn (JF-197b): quiesce as {@link #cancel} does, leaving the partial reply as the person saw it,
+     * then send {@code notice}, when there is one, where the reply would have gone. Nothing else follows: no final
+     * edit, no generated media, no later token. A sink that already delivered the reply sends nothing.
+     */
+    void stop(@Nullable String notice);
 
     /** Optional (JCLAW-346): surface a completed tool call (by name) as live
      *  progress before the assistant's text turn begins. Default no-op —

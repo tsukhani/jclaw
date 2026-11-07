@@ -15,8 +15,10 @@ export interface QueuedMessageView {
 export interface ConversationQueueStatus {
   busy: boolean
   queueSize?: number
-  /** Whether the operator's Stop can stop the running turn: a web turn whose owner holds a cancel flag (JF-202). */
+  /** Whether the operator's Stop can stop the running turn: any but an app conversation's (JF-202, JF-197b). */
   stoppable?: boolean
+  /** Whether Stop drops the messages queued behind the turn, as on a web or voice conversation; on a channel one the next runs. */
+  stopDropsQueue?: boolean
   pending?: QueuedMessageView[]
 }
 
@@ -35,8 +37,10 @@ export interface UseChatBackgroundTurn {
   backgroundBusy: Ref<boolean>
   /** From the last read: whether Stop can stop the running turn. */
   stoppable: Ref<boolean>
-  /** From the last read: every message Stop would drop, a waiting subagent result included, which `pending` leaves out. */
+  /** From the last read: every message queued behind the turn, a waiting subagent result included, which `pending` leaves out. */
   queueSize: Ref<number>
+  /** From the last read: whether Stop drops those messages rather than running the next one. */
+  stopDropsQueue: Ref<boolean>
   /** The queued messages, from the last read, or a send the server just answered queued. */
   pending: Ref<QueuedMessageView[]>
   /**
@@ -65,6 +69,7 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
   const backgroundBusy = ref(false)
   const stoppable = ref(false)
   const queueSize = ref(0)
+  const stopDropsQueue = ref(true)
   const pending = ref<QueuedMessageView[]>([])
   const reads = useLatestRequest()
 
@@ -76,6 +81,7 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
       backgroundBusy.value = false
       stoppable.value = false
       queueSize.value = 0
+      stopDropsQueue.value = true
       pending.value = []
       return null
     }
@@ -95,6 +101,8 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
     if (status) {
       stoppable.value = status.stoppable === true
       queueSize.value = status.queueSize ?? 0
+      // A server that does not say predates JF-197b, when every Stop dropped the queue.
+      stopDropsQueue.value = status.stopDropsQueue !== false
       const next = status.pending ?? []
       // A message leaves the list when its turn takes it, before that turn's init brings its saved row: kept until then.
       const held = busy && !init && deps.streamUp?.value !== false && next.length < pending.value.length
@@ -112,6 +120,7 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
   watch(selectedConvoId, () => {
     stoppable.value = false
     queueSize.value = 0
+    stopDropsQueue.value = true
     pending.value = []
     reread()
   }, { immediate: true })
@@ -141,6 +150,7 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
     backgroundBusy,
     stoppable,
     queueSize,
+    stopDropsQueue,
     pending,
     readQueue: opts => refresh(false, opts?.init === true),
     showQueued,

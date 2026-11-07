@@ -1,3 +1,4 @@
+import agents.TurnCancellation;
 import controllers.VoiceController;
 import jobs.VoiceConversationSweepJob;
 import models.Agent;
@@ -6,10 +7,17 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConversationService;
+import services.voice.VoiceTurnSpeaker;
 
 import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Voice-mode WebSocket coverage. Two concerns, both testable without a socket —
@@ -177,5 +185,54 @@ class VoiceControllerTest extends UnitTest {
                 "abandoned voice conversations must not survive a boot");
         assertNotNull(ConversationService.findById(web.id),
                 "the web conversation must be untouched by the voice sweep");
+    }
+
+    // =====================
+    // The operator's Stop — JF-197b
+    // =====================
+
+    /** The overlay's socket: every frame sent to it, in order. */
+    private static final class Overlay implements VoiceTurnSpeaker.Sink {
+        final List<Map<String, Object>> frames = new CopyOnWriteArrayList<>();
+        final CountDownLatch ended = new CountDownLatch(2);
+
+        @Override public boolean isOpen() {
+            return true;
+        }
+
+        @Override public void send(Map<String, Object> frame) {
+            frames.add(frame);
+            ended.countDown();
+        }
+    }
+
+    @Test
+    void aStopOfTheOverlaysTurnFlushesItsPlaybackAndEndsTheTurn() throws Exception {
+        var cancel = new AtomicBoolean();
+        var current = new AtomicReference<>(cancel);
+        var overlay = new Overlay();
+
+        try (var _ = VoiceTurnSpeaker.endOnStop(current, cancel, 3, overlay)) {
+            TurnCancellation.cancel(cancel);
+            assertTrue(overlay.ended.await(10, TimeUnit.SECONDS), "the overlay got " + overlay.frames);
+        }
+
+        assertEquals(List.of(Map.of("type", "flush"), Map.of("type", "turn_complete", "turn", 3)), overlay.frames);
+        assertNull(current.get(), "the stopped turn is no longer the overlay's");
+    }
+
+    @Test
+    void aBargeInCloseOrByeTakesTheTurnFromTheOverlayFirstSoItsCancelSendsNothing() throws Exception {
+        var cancel = new AtomicBoolean();
+        var current = new AtomicReference<>(cancel);
+        var overlay = new Overlay();
+
+        try (var _ = VoiceTurnSpeaker.endOnStop(current, cancel, 3, overlay)) {
+            // As cancelCurrent does for each of them: the slot is cleared before the flag is cancelled.
+            TurnCancellation.cancel(current.getAndSet(null));
+            assertFalse(overlay.ended.await(500, TimeUnit.MILLISECONDS), "the overlay got " + overlay.frames);
+        }
+
+        assertEquals(List.of(), overlay.frames);
     }
 }

@@ -1231,37 +1231,85 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void anOperatorStopLeavesADrainedTurnOnAChannelConversationRunning() {
+    void anOperatorStopEndsADrainedChannelTurnSendingItsChannelTheNoticeAndHandsTheConversationOn() {
         long convId = 17009L;
         try {
             var gen = ConversationQueue.tryAcquireOwnership(convId,
                     new QueuedMessage("A", "telegram", "peer", agent), null);
             ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "telegram", "peer", agent));
             assertEquals(1, ConversationQueue.drain(convId, gen).size(), "test precondition: B takes over");
+            var drained = ConversationQueue.ownerCancel(convId, gen);
             ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "telegram", "peer", agent));
 
-            assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE,
-                    ConversationQueue.stopOperatorTurn(convId, "telegram"));
-            assertTrue(ConversationQueue.isBusy(convId));
-            assertEquals(1, ConversationQueue.getQueueSize(convId), "C still waits");
+            var heard = busyAnnouncedWhile(convId, () -> assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram")));
+
+            assertTrue(drained.get(), "the drained turn was told to stop");
+            assertEquals(ConversationQueue.ChannelStop.SENT, ConversationQueue.channelStop(drained),
+                    "the stop sent the notice where the drained reply goes, so the turn sends none");
+            // C takes the conversation once the notice is sent, off the stop's thread.
+            for (int i = 0; i < 200 && ConversationQueue.getQueueSize(convId) > 0; i++) sleep(50);
+            assertEquals(0, ConversationQueue.getQueueSize(convId), "C took the conversation");
+            assertEquals(busy(convId, true), heard.getFirst(), "the conversation stayed busy with C: " + heard);
+            assertSame(drained, ConversationQueue.ownerCancel(convId, gen),
+                    "a run the stop overtook reads the flag the stop set");
         } finally {
             ConversationQueue.forgetForTest(convId);
         }
     }
 
     @Test
-    void anOperatorStopLeavesAChannelConversationsTurnRunningThoughItHoldsAFlag() {
-        long convId = 17004L;
-        var flag = new AtomicBoolean();
+    void aStopSentOnTheChannelOwesItNothingAndAWebStopOwesNoChannelAnything() {
+        long channel = 17004L;
+        long web = 17010L;
+        var channelFlag = new AtomicBoolean();
+        var webFlag = new AtomicBoolean();
         try {
-            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), flag);
+            ConversationQueue.tryAcquireOwnership(channel, new QueuedMessage("A", "telegram", "peer", agent),
+                    channelFlag);
+            ConversationQueue.tryAcquireOwnership(web, new QueuedMessage("A", "web", "admin", agent), webFlag);
 
-            assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE,
-                    ConversationQueue.stopOperatorTurn(convId, "telegram"));
-            assertTrue(ConversationQueue.isBusy(convId));
-            assertFalse(flag.get());
+            assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(channel, "telegram", false));
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(web, "web"));
+
+            assertTrue(channelFlag.get());
+            assertEquals(ConversationQueue.ChannelStop.SILENT, ConversationQueue.channelStop(channelFlag));
+            assertFalse(ConversationQueue.isBusy(channel));
+            assertTrue(webFlag.get());
+            assertNull(ConversationQueue.channelStop(webFlag));
+            assertNull(ConversationQueue.channelStop(new AtomicBoolean(true)), "no stop set this flag");
         } finally {
-            ConversationQueue.forgetForTest(convId);
+            ConversationQueue.forgetForTest(channel);
+            ConversationQueue.forgetForTest(web);
+        }
+    }
+
+    @Test
+    void anOperatorStopEndsAVoiceTurnDroppingItsQueuedUtteranceAndLeavesAnAppConversationsTurnRunning() {
+        long voice = 17011L;
+        long app = 17012L;
+        var voiceFlag = new AtomicBoolean();
+        var appFlag = new AtomicBoolean();
+        try {
+            ConversationQueue.tryAcquireOwnership(voice, new QueuedMessage("A", "voice", "admin", agent), voiceFlag);
+            ConversationQueue.tryAcquire(voice, new QueuedMessage("B", "voice", "admin", agent));
+            ConversationQueue.tryAcquireOwnership(app, new QueuedMessage("A", "app", "app-user", agent), appFlag);
+
+            var heard = busyAnnouncedWhile(voice, () -> assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(voice, "voice")));
+            assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE, ConversationQueue.stopOperatorTurn(app, "app"));
+
+            assertTrue(voiceFlag.get());
+            assertNull(ConversationQueue.channelStop(voiceFlag), "the voice overlay ends its own turn");
+            assertEquals(List.of(busy(voice, false)), heard, "B was dropped, not handed the conversation");
+            assertEquals(0, ConversationQueue.getQueueSize(voice));
+            assertFalse(ConversationQueue.isBusy(voice));
+            assertFalse(appFlag.get());
+            assertTrue(ConversationQueue.isBusy(app));
+        } finally {
+            ConversationQueue.forgetForTest(voice);
+            ConversationQueue.forgetForTest(app);
         }
     }
 
@@ -1331,11 +1379,15 @@ class ConversationQueueTest extends UnitTest {
 
             var pending = List.of(new ConversationQueue.PendingView("B", List.of("report.pdf", "image"), 1),
                     new ConversationQueue.PendingView("C", List.of(), 3));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, true, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, true, pending),
                     ConversationQueue.snapshot(convId, "web"));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, false, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, false, pending),
                     ConversationQueue.snapshot(convId, "telegram"));
-            assertEquals(new ConversationQueue.Snapshot(false, 0, false, List.of()),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, true, pending),
+                    ConversationQueue.snapshot(convId, "voice"));
+            assertEquals(new ConversationQueue.Snapshot(true, 3, false, true, pending),
+                    ConversationQueue.snapshot(convId, "app"));
+            assertEquals(new ConversationQueue.Snapshot(false, 0, false, true, List.of()),
                     ConversationQueue.snapshot(17007L, "web"));
         } finally {
             ConversationQueue.forgetForTest(convId);
@@ -1429,11 +1481,11 @@ class ConversationQueueTest extends UnitTest {
     @Test
     void aStopAnnouncesTheConversationIdleAndARefusedStopNothing() {
         long convId = 16007L;
-        var channelTurn = ConversationQueue.tryAcquireOwnership(convId,
-                new QueuedMessage("A", "telegram", "peer", agent), null);
+        var appTurn = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "app", "app-user", agent), null);
         var refused = busyAnnouncedWhile(convId, () -> assertEquals(ConversationQueue.OperatorStop.UNSTOPPABLE,
-                ConversationQueue.stopOperatorTurn(convId, "telegram")));
-        ConversationQueue.releaseOwnership(convId, channelTurn);
+                ConversationQueue.stopOperatorTurn(convId, "app")));
+        ConversationQueue.releaseOwnership(convId, appTurn);
         ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("B", "web", "admin", agent),
                 new AtomicBoolean());
 
@@ -1546,5 +1598,13 @@ class ConversationQueueTest extends UnitTest {
 
     private static java.util.Map<String, Object> busy(long convId, boolean busy) {
         return java.util.Map.of("conversationId", convId, "busy", busy);
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

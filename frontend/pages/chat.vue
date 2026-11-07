@@ -325,14 +325,17 @@ const {
   backgroundBusy,
   stoppable,
   queueSize,
+  stopDropsQueue,
   pending: queuedMessages,
   readQueue,
   showQueued,
   clearStoppable,
 } = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce, streamUp: conversationStreamUp })
-// Stop discards everything queued behind the turn, a waiting subagent result too, so the button says so (JF-202).
-const stopLabel = computed(() => queueSize.value
-  ? `Stop and drop ${queueSize.value} queued`
+// On a web or voice conversation Stop discards everything queued behind the turn, a waiting subagent result too, so the
+// button says so (JF-202); on a Telegram, Slack or WhatsApp conversation the next message runs instead (JF-197b).
+const stopDrops = computed(() => (stopDropsQueue.value ? queueSize.value : 0))
+const stopLabel = computed(() => stopDrops.value
+  ? `Stop and drop ${stopDrops.value} queued`
   : 'Stop generating')
 // A quoted reply waits with the quote the server folded into its text, which the row shows as ChatMessage does.
 const queuedRows = computed(() => queuedMessages.value.map(q => ({ ...q, quoted: splitQuotedReply(q.text) })))
@@ -1645,7 +1648,7 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                   <span
-                    v-if="queueSize"
+                    v-if="stopDrops"
                     class="text-xs font-medium whitespace-nowrap"
                   >{{ stopLabel }}</span>
                 </button>

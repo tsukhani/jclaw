@@ -116,6 +116,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  and the row exists purely as the child's audit-trail container. */
     public static final String SUBAGENT_CHANNEL = "subagent";
 
+    /** The outcome of a run killed because the turn that started or awaited it was stopped. */
+    public static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
+
     static final String FIELD_NOTE = "note";
     static final String INLINE_RAN_AS_SESSION =
             "mode=\"inline\" ran as mode=\"session\": a task fire has no conversation to embed the child into.";
@@ -497,7 +500,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
         if (inlineMode && parentConvIdFinal != null
                 && !SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.resolvedTask())) {
-            SubagentRegistry.kill(runId, SubagentSyncRunner.PARENT_STOPPED_REASON);
+            SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
             return STOPPED_BEFORE_START;
         }
 

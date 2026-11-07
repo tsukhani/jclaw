@@ -83,6 +83,9 @@ public class AgentRunner {
     static final String QUEUED_MESSAGE_RESPONSE =
             "Your message has been queued and will be processed shortly.";
 
+    /** What the person on a channel is sent in place of a reply the operator stopped (JF-197b). */
+    public static final String STOP_NOTICE = "This reply was stopped.";
+
     // Package-private so ToolCallLoopRunner (JCLAW-299) can read the
     // operator-configurable per-turn round cap.
     static int maxToolRounds() {
@@ -100,12 +103,13 @@ public class AgentRunner {
      * @param yieldedRunIds the runs a {@link #yielded()} turn waits on; empty otherwise
      * @param stopped      true when an operator stop ended the turn (JF-197): {@link #response} is then the stop
      *                     marker, which no channel is sent
+     * @param stopNotice   true when that stop owes the person on the turn's channel {@link #STOP_NOTICE} (JF-197b)
      */
     public record RunResult(String response, @Nullable Conversation conversation, boolean truncated,
-                            List<Long> yieldedRunIds, boolean stopped) {
+                            List<Long> yieldedRunIds, boolean stopped, boolean stopNotice) {
         public RunResult(String response, @Nullable Conversation conversation, boolean truncated,
                          List<Long> yieldedRunIds) {
-            this(response, conversation, truncated, yieldedRunIds, false);
+            this(response, conversation, truncated, yieldedRunIds, false, false);
         }
 
         public RunResult(String response, @Nullable Conversation conversation, boolean truncated) {
@@ -129,8 +133,15 @@ public class AgentRunner {
             return !yielded() && !stopped;
         }
 
-        static RunResult stoppedIn(@Nullable Conversation conversation) {
-            return new RunResult(ConversationService.STOP_MARKER_CONTENT, conversation, false, List.of(), true);
+        /** What the turn's channel is sent: its reply, {@link #STOP_NOTICE} in place of a stopped one, or nothing. */
+        public @Nullable String channelText() {
+            if (sendsReply()) return response;
+            return stopped && stopNotice ? STOP_NOTICE : null;
+        }
+
+        static RunResult stoppedIn(@Nullable Conversation conversation, boolean stopNotice) {
+            return new RunResult(ConversationService.STOP_MARKER_CONTENT, conversation, false, List.of(), true,
+                    stopNotice);
         }
     }
 
@@ -365,9 +376,19 @@ public class AgentRunner {
     /** {@link #run(Agent, Conversation, String, List)} on {@code turnCancel}, a fresh flag its caller keeps (JF-197). */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
                                 @Nullable List<AttachmentService.Input> attachments, AtomicBoolean turnCancel) {
+        return run(agent, conversation, userMessage, attachments, turnCancel, null);
+    }
+
+    /**
+     * {@link #run(Agent, Conversation, String, List, AtomicBoolean)} whose reply its caller sends with
+     * {@code stopNotice}, which a stop of the turn then sends its notice through itself (JF-197b).
+     */
+    static RunResult run(Agent agent, Conversation conversation, String userMessage,
+                         @Nullable List<AttachmentService.Input> attachments, AtomicBoolean turnCancel,
+                         @Nullable Consumer<String> stopNotice) {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent, attachments);
-        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel);
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel, stopNotice);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
@@ -465,7 +486,9 @@ public class AgentRunner {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent, true);
         var turnCancel = new AtomicBoolean(false);
-        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel);
+        // The resumed reply goes out on the conversation's channel (resumeAndDeliver), and so does a stop's notice.
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, turnCancel,
+                ConversationQueue.replyTarget(agent, conversation.channelType, conversation.peerId));
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
@@ -483,8 +506,9 @@ public class AgentRunner {
 
     /** The delivery half of {@link #resumeAndDeliver}, apart so a test can hand it a reply without a model call. */
     static void deliverResumed(Agent agent, Conversation conversation, RunResult result) {
-        if (QUEUED_MESSAGE_RESPONSE.equals(result.response()) || !result.sendsReply()) return;
-        dispatchToChannel(agent, conversation.channelType, conversation.peerId, result.response());
+        var text = result.channelText();
+        if (QUEUED_MESSAGE_RESPONSE.equals(result.response()) || text == null) return;
+        dispatchToChannel(agent, conversation.channelType, conversation.peerId, text);
     }
 
     /**
@@ -794,7 +818,13 @@ public class AgentRunner {
             }
             EventLogger.flush();
             if (broadcast != null) broadcast.endWith(result, failure);
-            if (releases) QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
+            if (releases) {
+                // JF-219: armed until the release, so a stop any time before it kills the runs the turn yielded on.
+                var yieldedOn = result != null && result.yielded() ? result.yieldedRunIds() : List.<Long>of();
+                try (var _ = ToolCallLoopRunner.killOnCancel(turnCancel, yieldedOn)) {
+                    QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
+                }
+            }
         }
     }
 
@@ -810,7 +840,9 @@ public class AgentRunner {
         } catch (TurnStoppedException _) {
             // Thrown only once turnCancel is set.
         }
-        return RunResult.stoppedIn(Tx.run(() -> ConversationService.findById(conversationId)));
+        boolean notice = turnCancel != null
+                && ConversationQueue.channelStop(turnCancel) == ConversationQueue.ChannelStop.NOTICE;
+        return RunResult.stoppedIn(Tx.run(() -> ConversationService.findById(conversationId)), notice);
     }
 
     /** {@link #runAfterAcquire}'s turn, inside its trace binding. */

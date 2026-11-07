@@ -366,7 +366,7 @@ public class VoiceController extends WebSocketController {
                     int turnId = turnSeq.incrementAndGet();
                     send(out, writeLock, Map.of("type", "state", "value", "thinking"));
                     Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
-                            runTurn(binding, asr, wav, cancel, turnId, out, writeLock));
+                            runTurn(binding, asr, wav, cancel, current, turnId, out, writeLock));
                 }
             }, partialSink, ConfigService.getInt(VoiceSettings.PARTIALS_INTERVAL_MS,
                     VoiceSettings.DEFAULT_PARTIALS_INTERVAL_MS));
@@ -402,13 +402,14 @@ public class VoiceController extends WebSocketController {
 
     /** One voice turn: STT → agent → sentence-chunked streaming TTS. Bails at each
      *  step if superseded (barge-in), and never emits {@code turn_complete} for a
-     *  canceled turn. */
-    private static void runTurn(VoiceBinding binding, AsrSidecarClient asr, byte[] wav,
-                                AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
+     *  canceled turn; an operator stop's {@link VoiceTurnSpeaker#endOnStop} sends it instead. */
+    @SuppressWarnings("java:S107") // the utterance, its turn's flag and id, the overlay's current turn, and its socket
+    private static void runTurn(VoiceBinding binding, AsrSidecarClient asr, byte[] wav, AtomicBoolean cancel,
+                                AtomicReference<AtomicBoolean> current, int turnId, Http.Outbound out, Object lock) {
         var agent = binding.agent();
         var username = binding.username();
         var sink = sinkFor(out, lock);
-        try {
+        try (var _ = VoiceTurnSpeaker.endOnStop(current, cancel, turnId, sink)) {
             long t0 = System.nanoTime(); // ≈ endpoint: the utterance is now in hand
             // Per-stage voice latency (JCLAW-800): STT, first-chunk TTS synth, and the
             // two voice-to-voice numbers, recorded under channel "voice" alongside the

@@ -110,7 +110,7 @@ final class SubagentSyncRunner {
         var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try (var _ = ToolContext.onCancel(() -> {
                 parentStopped.set(true);
-                SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
+                SubagentRegistry.kill(runId, SubagentSpawnTool.PARENT_STOPPED_REASON);
             });
              var _ = SubagentRegistry.waitingOn(List.of(runId))) {
             while (true) {
@@ -136,7 +136,8 @@ final class SubagentSyncRunner {
                 } catch (CancellationException _) {
                     // JCLAW-291: kill primitive canceled our Future. Registry already KILLED.
                     return new SyncRunOutcome("", SubagentRun.Status.KILLED,
-                            parentStopped.get() ? PARENT_STOPPED_REASON : KILLED_REASON, null, true, false);
+                            parentStopped.get() ? SubagentSpawnTool.PARENT_STOPPED_REASON : KILLED_REASON, null,
+                            true, false);
                 } catch (ExecutionException ee) {
                     return fromExecutionException(ee);
                 }
@@ -146,7 +147,6 @@ final class SubagentSyncRunner {
         }
     }
 
-    static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
     static final String KILLED_REASON = "Killed by operator";
     static final String TRANSCRIPT_STOP_REASON = "Killed by operator via Stop in the subagent's chat";
     static final String SUSPENDED_REASON = "The subagent stopped its turn to wait for another run and gave no reply.";

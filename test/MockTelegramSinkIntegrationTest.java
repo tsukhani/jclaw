@@ -1,6 +1,8 @@
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
 import channels.TelegramStreamingSinkTestHooks;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -517,6 +519,67 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                 "legacy sink placeholder must omit reply_parameters");
         assertFalse(body.contains("message_thread_id"),
                 "legacy sink placeholder must omit message_thread_id");
+    }
+
+    // ==================== JF-197b: a stopped turn's notice ====================
+
+    private static final String NOTICE = "This reply was stopped.";
+
+    private List<JsonObject> sentMessages() {
+        return server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .map(r -> JsonParser.parseString(r.body()).getAsJsonObject())
+                .toList();
+    }
+
+    @Test
+    void aStopLeavesThePartialAsItStoodAndRepliesWithTheNoticeOnceInTheSameChatAndTopic() {
+        services.ConfigService.delete("telegram.replyTo.mode"); // → default "first"
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 14L, "supergroup", 4321, 88);
+        pokePending(sink, "Half an answer");
+        TelegramStreamingSinkTestHooks.flush(sink);
+        assertNotNull(TelegramStreamingSinkTestHooks.messageId(sink), "test precondition: the partial is on screen");
+
+        sink.stop(NOTICE);
+        sink.stop(NOTICE);
+        sink.update(" and more");
+        sink.seal("Half an answer, and the rest.");
+
+        var sent = sentMessages();
+        assertEquals(2, sent.size(), "the placeholder, then the notice: " + server.requests());
+        var notice = sent.get(1);
+        assertEquals(NOTICE, notice.get("text").getAsString());
+        assertEquals(CHAT_ID, notice.get("chat_id").getAsString());
+        assertEquals(88, notice.get("message_thread_id").getAsInt());
+        assertEquals(4321, notice.getAsJsonObject("reply_parameters").get("message_id").getAsInt());
+        assertEquals(0, server.countRequests("editMessageText"), "no final edit follows the stop");
+        assertEquals(0, server.countRequests("deleteMessage"), "the partial stays");
+    }
+
+    @Test
+    void aStopTheTurnsOwnStopAnsweredSendsNothing() {
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 15L, "private", 4321, null);
+        pokePending(sink, "Half an answer");
+        TelegramStreamingSinkTestHooks.flush(sink);
+
+        sink.stop(null);
+        sink.seal("Half an answer, and the rest.");
+
+        assertEquals(1, sentMessages().size(), "only the placeholder: " + server.requests());
+        assertEquals(0, server.countRequests("editMessageText"));
+        assertEquals(0, server.countRequests("deleteMessage"));
+    }
+
+    @Test
+    void aStopAfterTheReplyWasDeliveredSendsNoNotice() {
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 16L, "private", 4321, null);
+
+        sink.seal("The whole reply.");
+        sink.stop(NOTICE);
+
+        var sent = sentMessages();
+        assertEquals(1, sent.size(), "only the reply: " + server.requests());
+        assertEquals("The whole reply.", sent.getFirst().get("text").getAsString());
     }
 
     // ==================== JCLAW-375: ack-reaction lifecycle ====================

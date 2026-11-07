@@ -576,22 +576,37 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     }
 
     /**
-     * Called when the turn was canceled (JCLAW-181 follow-up: typing-indicator
-     * leak on {@code /stop}). Quiesces the sink without sending anything new:
+     * Called when the turn was canceled with no stop behind it, as interrupt mode
+     * cancels it (JCLAW-181 follow-up: typing-indicator leak on cancel); a stop
+     * calls {@link #stop} instead. Quiesces the sink without sending anything new:
      * cancels the typing heartbeat, drops any pending flush, marks the sink
      * sealed so late tokens become no-ops, and clears stream-checkpoint state
      * so the recovery job does not try to resume an abandoned turn.
      *
      * <p>Distinct from {@link #errorFallback}: no error message is sent and
-     * any partial placeholder is left in place. The {@code /stop} slash command
-     * already sent its own "Stopped." acknowledgment on a separate sink, and
-     * the partial placeholder (when one exists) is informative — it shows the
-     * user what was generated up to the cancel point.
+     * any partial placeholder is left in place. The partial placeholder (when
+     * one exists) is informative — it shows the user what was generated up to
+     * the cancel point.
      *
      * <p>Idempotent: a second call after seal/error/cancel is a no-op.
      */
     public void cancel() {
-        if (!sealed.compareAndSet(false, true)) return;
+        quiesce();
+    }
+
+    /**
+     * JF-197b: {@link #cancel}, then {@code notice}, when there is one, as a message of its own with the reply's
+     * target and topic thread, as {@link #errorFallback}'s reply goes. The partial placeholder stays as it was.
+     */
+    @Override
+    public void stop(@Nullable String notice) {
+        if (!quiesce() || notice == null) return;
+        TelegramChannel.forToken(botToken).sendTurn(chatId, notice, agent, replyToMessageId, messageThreadId);
+    }
+
+    /** {@link #cancel}'s work; false, doing nothing, once the sink was sealed, errored, cancelled or stopped. */
+    private boolean quiesce() {
+        if (!sealed.compareAndSet(false, true)) return false;
         cancelTypingHeartbeat();
         stateLock.lock();
         try {
@@ -604,6 +619,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         // assertions in tests deterministic.
         awaitInFlightFlush();
         clearStreamCheckpoint();
+        return true;
     }
 
     /**

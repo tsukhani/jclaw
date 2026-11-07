@@ -186,10 +186,13 @@ public final class ParallelToolExecutor {
      * accumulates extracted image URLs for the synthesis-side download
      * suffix; {@code onToolCall} (when non-null) fires once per completed
      * call so the SSE chat UI can render a per-call row post-persist.
+     *
+     * @return the runs this batch's {@code subagent_yield} calls suspended the turn on, whether or not a stop let
+     *         their results be saved (JF-219); empty when none did
      */
     // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
     @SuppressWarnings("java:S107") // every parameter is required to schedule and surface tool results
-    public static void executeToolsParallel(List<ToolCall> toolCalls,
+    public static List<Long> executeToolsParallel(List<ToolCall> toolCalls,
                                       Agent agent, @Nullable Long conversationId,
                                       List<ChatMessage> currentMessages,
                                       @Nullable Consumer<String> onStatus,
@@ -199,7 +202,7 @@ public final class ParallelToolExecutor {
                                       AgentExecutionSink sink,
                                       @Nullable Set<String> offeredTools) {
         int n = toolCalls.size();
-        if (n == 0) return;
+        if (n == 0) return List.of();
 
         // JCLAW-462: task fires carry no conversation id (stub Conversation,
         // null id); their tool turns persist to task_run_message via
@@ -238,6 +241,14 @@ public final class ParallelToolExecutor {
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
+        var yieldedOn = new ArrayList<Long>();
+        for (int i = 0; i < n; i++) {
+            var result = results[i];
+            var runId = result == null ? null
+                    : ToolCallLoopRunner.yieldedRunId(toolCalls.get(i).function().name(), result.text());
+            if (runId != null) yieldedOn.add(runId);
+        }
+        return yieldedOn;
     }
 
     /**
