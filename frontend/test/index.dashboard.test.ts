@@ -23,6 +23,10 @@ function setupApi(opts?: {
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/conversations', () => [])
   registerEndpoint('/api/metrics/latency/rows', () => opts?.latency ?? ({ since: '', channels: [], segments: {} }))
+  registerEndpoint('/api/metrics/compression', () => ({
+    since: '', agents: [], channels: [], compressions: 0, tokensBefore: 0, tokensAfter: 0, inflationGuards: 0,
+    ccrRetrievals: 0, ccrHits: 0, byType: [], byAlgorithm: [], byTool: [],
+  }))
   registerEndpoint('/api/logs', () => ({ events: opts?.events ?? [] }))
   registerEndpoint('/api/videogen/jobs/recent', () => opts?.videoJobs ?? [])
   registerEndpoint('/api/workspace/stats',

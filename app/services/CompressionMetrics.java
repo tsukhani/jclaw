@@ -8,9 +8,9 @@ import play.Logger;
 /**
  * Records compression-pipeline events (JCLAW-467). Recording is best-effort — a
  * failed write never disrupts an agent run — and skipped for agent-less events
- * (the pure pipeline test seam passes a null agentId). Aggregation happens
- * client-side over the raw rows the metrics endpoint returns (mirroring the Chat
- * Cost dashboard), so this service only writes and resets.
+ * (the pure pipeline test seam passes a null agentId). {@code GET /api/metrics/compression}
+ * aggregates on the server and {@code /api/metrics/compression/rows} pages the raw rows,
+ * so this service only writes and resets.
  */
 public final class CompressionMetrics {
 

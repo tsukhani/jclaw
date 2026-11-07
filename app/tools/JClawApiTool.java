@@ -98,7 +98,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
-    private static final int MAX_RESPONSE_CHARS = 50_000;
+    public static final int MAX_RESPONSE_CHARS = 50_000;
     private static final List<String> ALLOWED_METHODS =
             List.of("GET", "POST", "PUT", "PATCH", "DELETE");
 

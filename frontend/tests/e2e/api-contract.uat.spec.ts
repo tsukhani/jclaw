@@ -55,6 +55,7 @@ const READ_ENDPOINTS = [
   '/api/metrics/cost',
   '/api/metrics/db-pool',
   '/api/metrics/compression',
+  '/api/metrics/compression/rows',
 ]
 
 test.describe('UAT-2 read-side API contract', () => {

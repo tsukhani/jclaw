@@ -1,32 +1,18 @@
 <script setup lang="ts">
 /**
- * JCLAW-467: Chat Compression dashboard section. Mirrors Chat Cost — a single
- * raw-rows fetch per time window from GET /api/metrics/compression, then all
- * aggregation + agent/channel filtering happens client-side so filter switches
- * are instant. Table/chart view toggle for the by-type, per-algorithm and
- * per-tool fetch-back-rate breakdowns, and a reset (trash) that clears the recorded metrics.
- * The first-call cache tile reads the turn rows of GET /api/metrics/cost under the same filters.
+ * JCLAW-467, JF-139: Chat Compression dashboard section. GET /api/metrics/compression answers with
+ * the totals for the window, agent and channel selected, so every change asks again and the body
+ * shows its loading state until the answer lands; ratios, ordering and alert thresholds are worked
+ * out here. Table/chart view toggle for the by-type, per-algorithm and per-tool fetch-back-rate
+ * breakdowns, and a reset (trash) that clears the recorded metrics. The first-call cache tile
+ * reads the turn rows of GET /api/metrics/cost under the same filters.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
-import type { Agent } from '~/types/api'
+import type { Agent, CompressionTotals } from '~/types/api'
 import { cacheShare, computeFleetCost, formatShare, type FleetCostRow } from '~/utils/usage-cost'
 
 const props = defineProps<{ agents: Agent[] | null | undefined }>()
 
-interface Row {
-  timestamp: string
-  agentId: string | null
-  channel: string | null
-  contentType: string | null
-  algorithm: string | null
-  tokensBefore: number
-  tokensAfter: number
-  kind: string
-  ccrHit: boolean | null
-  toolName: string | null
-  resultHash: string | null
-}
-interface CompressionResponse { since: string, rows: Row[] }
 type WindowKey = '7d' | '30d' | 'all'
 type View = 'table' | 'chart'
 
@@ -35,6 +21,11 @@ const WINDOWS: { key: WindowKey, label: string }[] = [
   { key: '30d', label: '30d' },
   { key: 'all', label: 'All' },
 ]
+
+const NO_TOTALS: CompressionTotals = {
+  since: '', agents: [], channels: [], compressions: 0, tokensBefore: 0, tokensAfter: 0, inflationGuards: 0,
+  ccrRetrievals: 0, ccrHits: 0, byType: [], byAlgorithm: [], byTool: [],
+}
 
 const selectedWindow = ref<WindowKey>('30d')
 const selectedAgentId = ref<string | null>(null)
@@ -48,9 +39,13 @@ const since = computed(() => {
   return new Date(Date.now() - days * 86_400_000).toISOString()
 })
 
-const { data, refresh, status } = useFetch<CompressionResponse>('/api/metrics/compression', {
-  query: { since },
-  default: () => ({ since: '', rows: [] }),
+const { data, refresh, status, error } = useFetch<CompressionTotals>('/api/metrics/compression', {
+  query: {
+    since,
+    agentId: computed(() => selectedAgentId.value ?? undefined),
+    channel: computed(() => selectedChannel.value ?? undefined),
+  },
+  default: () => NO_TOTALS,
 })
 const { data: costData, refresh: refreshCost, status: costStatus } = useFetch<{ since: string, rows: FleetCostRow[] }>('/api/metrics/cost', {
   query: { since },
@@ -58,19 +53,28 @@ const { data: costData, refresh: refreshCost, status: costStatus } = useFetch<{ 
 })
 defineExpose({ refresh: () => Promise.all([refresh(), refreshCost()]) })
 
-// The tiles wait for both row sets: either alone reads the other's empty default as zeros.
-// A refresh keeps the prior data, so only the first load needs it.
+// The tiles wait for both reads: either alone reads the other's empty default as zeros.
 const settled = (s: string) => s === 'success' || s === 'error'
 const hasLoadedOnce = ref(false)
 watchEffect(() => {
   if (settled(status.value) && settled(costStatus.value)) hasLoadedOnce.value = true
 })
+// A refetch keeps the previous answer in `data`, which no longer matches the selection.
+const reloading = computed(() => status.value === 'pending' || costStatus.value === 'pending')
 
 // Reserve the height this panel had last visit so the tiles landing don't move
 // the page. 349px is the measured natural body height on a populated install.
-const { reservedHeight: bodyHeight, el: bodyEl } = useStableHeight('compression', 349, hasLoadedOnce)
+const { reservedHeight, el: bodyEl } = useStableHeight('compression', 349, hasLoadedOnce)
+// And hold the current height while a filter change reloads, so the loading line doesn't collapse the panel.
+const reloadHeight = ref<string>()
+watch(reloading, (now) => {
+  const h = bodyEl.value?.getBoundingClientRect().height
+  reloadHeight.value = now && h ? `${Math.round(h)}px` : undefined
+})
+const bodyHeight = computed(() => reservedHeight.value ?? reloadHeight.value)
 
-const rows = computed<Row[]>(() => data.value?.rows ?? [])
+const totals = computed<CompressionTotals>(() => data.value ?? NO_TOTALS)
+const totalsError = computed(() => (error.value ? apiErrorDetails(error.value) : null))
 const costRows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
 
 const agentNameById = computed(() => {
@@ -78,98 +82,54 @@ const agentNameById = computed(() => {
   for (const a of props.agents ?? []) m.set(String(a.id), a.name)
   return m
 })
-// Built from both row sets: an agent that never compresses still has a first-call cache share.
+// Built from both reads: an agent that never compresses still has a first-call cache share.
 const availableAgents = computed(() => {
-  const ids = new Set<string>()
-  for (const r of rows.value) if (r.agentId) ids.add(r.agentId)
+  const ids = new Set<string>(totals.value.agents)
   for (const r of costRows.value) ids.add(String(r.agentId))
   return [...ids]
     .map(id => ({ id, name: agentNameById.value.get(id) ?? `agent #${id}` }))
     .sort((a, b) => a.name.localeCompare(b.name))
 })
 const availableChannels = computed(() => {
-  const s = new Set<string>()
-  for (const r of rows.value) if (r.channel) s.add(r.channel)
+  const s = new Set<string>(totals.value.channels)
   for (const r of costRows.value) s.add(r.channelType)
   return [...s].sort()
 })
 
-// Drop a filter selection that no longer exists after a window reload.
+// Drop a filter selection that no longer exists after a window reload. A failed read leaves `data`
+// at its empty default, which lists nothing, so it says nothing about what the window holds.
 watch(availableAgents, (list) => {
+  if (status.value === 'error') return
   if (selectedAgentId.value && !list.some(a => a.id === selectedAgentId.value)) selectedAgentId.value = null
 })
 watch(availableChannels, (list) => {
+  if (status.value === 'error') return
   if (selectedChannel.value && !list.includes(selectedChannel.value)) selectedChannel.value = null
 })
 
-const filtered = computed(() => rows.value.filter(r =>
-  (selectedAgentId.value === null || r.agentId === selectedAgentId.value)
-  && (selectedChannel.value === null || r.channel === selectedChannel.value)))
-
-function savingsByType(comp: Row[]) {
-  const typeMap = new Map<string, { before: number, after: number }>()
-  for (const r of comp) {
-    const t = r.contentType ?? '—'
-    const e = typeMap.get(t) ?? { before: 0, after: 0 }
-    e.before += r.tokensBefore
-    e.after += r.tokensAfter
-    typeMap.set(t, e)
-  }
-  return [...typeMap.entries()]
-    .map(([type, v]) => ({ type, saved: v.before - v.after, ratio: v.before ? v.after / v.before : 0 }))
-    .sort((a, b) => b.saved - a.saved)
-}
-
-function countsByAlgorithm(comp: Row[]) {
-  const algoMap = new Map<string, { count: number, saved: number }>()
-  for (const r of comp) {
-    const a = r.algorithm ?? '—'
-    const e = algoMap.get(a) ?? { count: 0, saved: 0 }
-    e.count += 1
-    e.saved += r.tokensBefore - r.tokensAfter
-    algoMap.set(a, e)
-  }
-  return [...algoMap.entries()]
-    .map(([algorithm, v]) => ({ algorithm, count: v.count, saved: v.saved }))
-    .sort((a, b) => b.count - a.count)
-}
-
 const agg = computed(() => {
-  const comp = filtered.value.filter(r => r.kind === 'COMPRESSION')
-  const tokensBefore = comp.reduce((s, r) => s + r.tokensBefore, 0)
-  const tokensAfter = comp.reduce((s, r) => s + r.tokensAfter, 0)
-  const tokensSaved = tokensBefore - tokensAfter
-  const reduction = tokensBefore ? tokensSaved / tokensBefore : 0
-  const events = comp.length
+  const t = totals.value
+  const tokensSaved = t.tokensBefore - t.tokensAfter
+  const reduction = t.tokensBefore ? tokensSaved / t.tokensBefore : 0
 
-  const byType = savingsByType(comp)
-  const byAlgo = countsByAlgorithm(comp)
-
-  const guards = filtered.value.filter(r => r.kind === 'INFLATION_GUARD').length
-
-  // A retrieval carries its agent but no channel, so it follows the agent select alone.
-  const ccrRows = rows.value.filter(r => r.kind === 'CCR_RETRIEVAL'
-    && (selectedAgentId.value === null || r.agentId === selectedAgentId.value))
-  const ccrTotal = ccrRows.length
-  const ccrHits = ccrRows.filter(r => r.ccrHit).length
-  const ccrHitRate = ccrTotal ? ccrHits / ccrTotal : 0
-
-  // Each round recompresses a result, so a tool's rate counts distinct results; rows saved before they
-  // named their tool and result are left out. Matching a fetch-back to its compression applies the channel.
-  const compressedByTool = new Map<string, Set<string>>()
-  for (const r of comp) {
-    if (!r.toolName || !r.resultHash) continue
-    const hashes = compressedByTool.get(r.toolName) ?? new Set<string>()
-    hashes.add(r.resultHash)
-    compressedByTool.set(r.toolName, hashes)
-  }
-  const fetchedBack = new Set(ccrRows.flatMap(r => (r.ccrHit && r.resultHash ? [r.resultHash] : [])))
-  const byTool = [...compressedByTool.entries()]
-    .map(([tool, hashes]) => {
-      const fetched = [...hashes].filter(h => fetchedBack.has(h)).length
-      return { tool, compressed: hashes.size, fetched, rate: fetched / hashes.size }
-    })
+  const byType = t.byType
+    .map(e => ({
+      type: e.contentType ?? '—',
+      saved: e.tokensBefore - e.tokensAfter,
+      ratio: e.tokensBefore ? e.tokensAfter / e.tokensBefore : 0,
+    }))
+    .sort((a, b) => b.saved - a.saved)
+  const byAlgo = t.byAlgorithm
+    .map(e => ({ algorithm: e.algorithm ?? '—', count: e.count, saved: e.tokensBefore - e.tokensAfter }))
+    .sort((a, b) => b.count - a.count)
+  const byTool = t.byTool
+    .map(e => ({ ...e, rate: e.fetched / e.compressed }))
     .sort((a, b) => b.rate - a.rate || b.compressed - a.compressed || a.tool.localeCompare(b.tool))
+
+  const guards = t.inflationGuards
+  const ccrTotal = t.ccrRetrievals
+  const ccrHits = t.ccrHits
+  const ccrHitRate = ccrTotal ? ccrHits / ccrTotal : 0
 
   const alerts: string[] = []
   // A very low kept-ratio is the *designed* outcome for json-smartcrush /
@@ -179,12 +139,12 @@ const agg = computed(() => {
   // so gate the per-type warning on unhealthy CCR retrieval. A low ratio with
   // healthy retrieval (or no retrievals at all) is a well-tuned pipeline.
   const retrievalUnhealthy = ccrTotal > 0 && ccrHitRate < 0.9
-  for (const t of byType) {
-    if (t.ratio > 0 && t.ratio < 0.1 && retrievalUnhealthy) {
-      alerts.push(`${t.type} compression ratio is very low (${Math.round(t.ratio * 100)}% kept) — verify it isn't dropping needed data`)
+  for (const e of byType) {
+    if (e.ratio > 0 && e.ratio < 0.1 && retrievalUnhealthy) {
+      alerts.push(`${e.type} compression ratio is very low (${Math.round(e.ratio * 100)}% kept) — verify it isn't dropping needed data`)
     }
   }
-  const attempts = comp.length + guards
+  const attempts = t.compressions + guards
   if (attempts > 0 && guards / attempts > 0.05) {
     alerts.push(`Inflation-guard rate is ${Math.round((100 * guards) / attempts)}% — the compressor is frequently inflating`)
   }
@@ -193,9 +153,9 @@ const agg = computed(() => {
   }
 
   return {
-    tokensBefore, tokensAfter, tokensSaved, reduction, events,
+    tokensBefore: t.tokensBefore, tokensAfter: t.tokensAfter, tokensSaved, reduction, events: t.compressions,
     byType, byAlgo, byTool, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
-    hasData: comp.length > 0 || ccrTotal > 0 || guards > 0,
+    hasData: t.compressions > 0 || ccrTotal > 0 || guards > 0,
   }
 })
 
@@ -336,16 +296,23 @@ function fmt(n: number) {
       :error="resetError"
       class="px-4 py-2.5"
     />
+    <ApiErrorAlert
+      :error="totalsError"
+      class="px-4 py-2.5"
+    />
 
     <!-- Body reserves its last-known height so the tiles landing don't move the
          page. See useStableHeight. -->
     <div
       ref="bodyEl"
       :style="{ minHeight: bodyHeight }"
+      :aria-busy="reloading"
     >
       <div
-        v-if="!hasLoadedOnce"
+        v-if="!hasLoadedOnce || reloading"
         class="px-4 py-4 text-xs text-fg-muted"
+        role="status"
+        aria-live="polite"
       >
         Loading compression data…
       </div>

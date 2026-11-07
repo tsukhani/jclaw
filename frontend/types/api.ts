@@ -586,6 +586,24 @@ export interface LatencyHistogram {
  */
 export type LatencyMetrics = Record<string, Record<string, LatencyHistogram>>
 
+/** Response shape from GET /api/metrics/compression: the totals for one window, agent and channel (JF-139). */
+export interface CompressionTotals {
+  since: string
+  /** Every agent and channel in the window, whatever the filter. */
+  agents: string[]
+  channels: string[]
+  compressions: number
+  tokensBefore: number
+  tokensAfter: number
+  inflationGuards: number
+  ccrRetrievals: number
+  ccrHits: number
+  byType: { contentType: string | null, tokensBefore: number, tokensAfter: number }[]
+  byAlgorithm: { algorithm: string | null, count: number, tokensBefore: number, tokensAfter: number }[]
+  /** Distinct results per tool, and how many a fetch-back returned. */
+  byTool: { tool: string, compressed: number, fetched: number }[]
+}
+
 /** A skill definition (returned by /api/skills). */
 export interface Skill {
   name: string

@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.persistence.Query;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
 import models.CompressionMetric;
@@ -36,8 +37,10 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
 import static controllers.AgentAccess.Level.OPEN;
@@ -82,7 +85,7 @@ public class ApiMetricsController extends Controller {
 
     // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
     @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows", "webVitals",
-            "cost", "compression", "resetCompression", "dbPool", "jvm", "logs", "purgeLogs"})
+            "cost", "compression", "compressionRows", "resetCompression", "dbPool", "jvm", "logs", "purgeLogs"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -99,11 +102,37 @@ public class ApiMetricsController extends Controller {
 
     public record CostResponse(String since, List<CostRow> rows) {}
 
-    public record CompressionRow(String timestamp, String agentId, String channel, String contentType,
-                                 String algorithm, int tokensBefore, int tokensAfter, String kind, Boolean ccrHit,
-                                 String toolName, String resultHash) {}
+    public record CompressionTypeTotal(@Nullable String contentType, long tokensBefore, long tokensAfter) {}
 
-    public record CompressionResponse(String since, List<CompressionRow> rows) {}
+    public record CompressionAlgorithmTotal(@Nullable String algorithm, long count, long tokensBefore,
+                                            long tokensAfter) {}
+
+    /** Distinct results a tool's compressions carried, and how many of them a fetch-back hit returned. */
+    public record CompressionToolTotal(String tool, long compressed, long fetched) {}
+
+    /**
+     * The Chat Compression panel's figures for one window and filter. {@code agents} and {@code channels}
+     * list the whole window whatever the filter, so the panel's selects keep every choice.
+     */
+    public record CompressionResponse(String since, List<String> agents, List<String> channels,
+                                      long compressions, long tokensBefore, long tokensAfter, long inflationGuards,
+                                      long ccrRetrievals, long ccrHits, List<CompressionTypeTotal> byType,
+                                      List<CompressionAlgorithmTotal> byAlgorithm, List<CompressionToolTotal> byTool) {}
+
+    public record CompressionRow(long id, String timestamp, @Nullable String agentId, @Nullable String channel,
+                                 @Nullable String contentType, @Nullable String algorithm, int tokensBefore,
+                                 int tokensAfter, String kind, @Nullable Boolean ccrHit, @Nullable String toolName,
+                                 @Nullable String resultHash) {}
+
+    /** {@code nextBefore} is the {@code before} that reads the next page; null when no row remains. */
+    public record CompressionRowsPage(String since, List<CompressionRow> rows, @Nullable Long nextBefore) {}
+
+    /**
+     * A row runs to about 800 characters at its longest, so a full page stays under
+     * {@link tools.JClawApiTool#MAX_RESPONSE_CHARS}; {@link PagedJpqlQuery#MAX_LIMIT} would not.
+     */
+    static final int COMPRESSION_ROWS_DEFAULT_LIMIT = 25;
+    static final int COMPRESSION_ROWS_MAX_LIMIT = 50;
 
     /**
      * Loadtest response schema descriptor (JCLAW-278). Used solely for OpenAPI
@@ -301,25 +330,193 @@ public class ApiMetricsController extends Controller {
     }
 
     /**
-     * GET /api/metrics/compression — raw compression-metric rows since a
-     * timestamp, for client-side aggregation in the Chat Compression dashboard
-     * (mirrors {@link #cost()}). The frontend filters by agent/channel and rolls
-     * up savings, ratios, algorithm usage, CCR hit rate, each tool's fetch-back rate, and alerts over the rows.
+     * GET /api/metrics/compression — the Chat Compression panel's totals since {@code since} (ISO-8601,
+     * default 30 days back), computed by grouped queries, so the response grows with content types,
+     * algorithms, tools, agents and channels rather than with events (JF-139).
+     *
+     * <p>{@code agentId} filters everything; {@code channel} filters compressions and inflation guards
+     * only, because a fetch-back records no channel. A tool's fetch-backs are the distinct results its
+     * compressions carried that a fetch-back hit returned, so a result recompressed every round counts
+     * once; rows saved before the tool and result were recorded count in the totals but not per tool.
+     * Ratios, ordering and alert thresholds are the panel's.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
-    @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
+    @Operation(summary = "Compression totals; query params: since (ISO-8601, default 30 days back), agentId, channel")
     @AgentAccess(OPEN)
     public static void compression() {
+        var filter = new CompressionFilter(parseSinceParam(params.get(KEY_SINCE)),
+                optionalParam("agentId"), optionalParam("channel"));
+        renderJSON(GSON.toJson(compressionTotals(filter)));
+    }
+
+    /**
+     * GET /api/metrics/compression/rows — the raw compression events since {@code since}, newest first.
+     * {@code limit} defaults to {@value #COMPRESSION_ROWS_DEFAULT_LIMIT} and is clamped to
+     * {@value #COMPRESSION_ROWS_MAX_LIMIT}; pass a page's {@code nextBefore} as {@code before} to read
+     * the next one.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionRowsPage.class)))
+    @Operation(summary = "Raw compression events, newest first; query params: since, limit (25, max 50),"
+            + " before (a page's nextBefore, sent with the same since)")
+    @AgentAccess(OPEN)
+    public static void compressionRows() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
-        List<CompressionMetric> events = CompressionMetric.<CompressionMetric>find(
-                "createdAt >= ?1 order by createdAt desc", since).fetch();
-        var rows = new ArrayList<CompressionRow>(events.size());
-        for (var m : events) {
-            rows.add(new CompressionRow(
-                    m.createdAt.toString(), m.agentId, m.channel, m.contentType, m.algorithm,
-                    m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit, m.toolName, m.resultHash));
+        Long before = parseOptionalLong("before");
+        Long limit = parseOptionalLong("limit");
+        int size = limit == null || limit <= 0
+                ? COMPRESSION_ROWS_DEFAULT_LIMIT : (int) Math.min(limit, COMPRESSION_ROWS_MAX_LIMIT);
+
+        var query = JPA.em().createQuery("SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since"
+                        + (before != null ? " AND m.id < :before" : "") + " ORDER BY m.id DESC",
+                        CompressionMetric.class)
+                .setParameter(KEY_SINCE, since)
+                .setMaxResults(size + 1);
+        if (before != null) query.setParameter("before", before);
+        var events = query.getResultList();
+
+        var rows = new ArrayList<CompressionRow>(Math.min(events.size(), size));
+        for (var m : events.subList(0, Math.min(events.size(), size))) {
+            rows.add(new CompressionRow(m.id, m.createdAt.toString(), m.agentId, m.channel, m.contentType,
+                    m.algorithm, m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit, m.toolName, m.resultHash));
         }
-        renderJSON(GSON.toJson(new CompressionResponse(since.toString(), rows)));
+        Long nextBefore = events.size() > size ? events.get(size - 1).id : null;
+        renderJSON(GSON.toJson(new CompressionRowsPage(since.toString(), rows, nextBefore)));
+    }
+
+    private record CompressionFilter(Instant since, @Nullable String agentId, @Nullable String channel) {}
+
+    private static final Comparator<@Nullable String> NULLS_FIRST = Comparator.nullsFirst(Comparator.naturalOrder());
+
+    /** Running sums for one content type or algorithm. */
+    private static final class CompressionSums {
+        long count;
+        long tokensBefore;
+        long tokensAfter;
+
+        void add(@Nullable Object count, @Nullable Object tokensBefore, @Nullable Object tokensAfter) {
+            this.count += asLong(count);
+            this.tokensBefore += asLong(tokensBefore);
+            this.tokensAfter += asLong(tokensAfter);
+        }
+    }
+
+    private static CompressionResponse compressionTotals(CompressionFilter f) {
+        var agents = new TreeSet<String>();
+        var channels = new TreeSet<String>();
+        for (var r : JPA.em().createQuery("SELECT DISTINCT m.agentId, m.channel FROM CompressionMetric m"
+                        + " WHERE m.createdAt >= :since", Object[].class)
+                .setParameter(KEY_SINCE, f.since()).getResultList()) {
+            if (r[0] != null) agents.add((String) r[0]);
+            if (r[1] != null) channels.add((String) r[1]);
+        }
+
+        var byType = new HashMap<@Nullable String, CompressionSums>();
+        var byAlgorithm = new HashMap<@Nullable String, CompressionSums>();
+        var all = new CompressionSums();
+        for (var o : compressionQuery("SELECT m.contentType, m.algorithm, COUNT(m), SUM(m.tokensBefore),"
+                + " SUM(m.tokensAfter)", CompressionMetric.Kind.COMPRESSION, f, true,
+                " GROUP BY m.contentType, m.algorithm").getResultList()) {
+            var r = (Object[]) o;
+            all.add(r[2], r[3], r[4]);
+            byType.computeIfAbsent((String) r[0], _ -> new CompressionSums()).add(r[2], r[3], r[4]);
+            byAlgorithm.computeIfAbsent((String) r[1], _ -> new CompressionSums()).add(r[2], r[3], r[4]);
+        }
+
+        long guards = asLong(compressionQuery("SELECT COUNT(m)", CompressionMetric.Kind.INFLATION_GUARD, f, true, "")
+                .getSingleResult());
+
+        long retrievals = 0;
+        long hits = 0;
+        for (var o : compressionQuery("SELECT m.ccrHit, COUNT(m)", CompressionMetric.Kind.CCR_RETRIEVAL, f, false,
+                " GROUP BY m.ccrHit").getResultList()) {
+            var r = (Object[]) o;
+            retrievals += asLong(r[1]);
+            if (Boolean.TRUE.equals(r[0])) hits += asLong(r[1]);
+        }
+
+        return new CompressionResponse(f.since().toString(), List.copyOf(agents), List.copyOf(channels),
+                all.count, all.tokensBefore, all.tokensAfter, guards, retrievals, hits,
+                byType.entrySet().stream().sorted(Map.Entry.comparingByKey(NULLS_FIRST))
+                        .map(e -> new CompressionTypeTotal(e.getKey(), e.getValue().tokensBefore,
+                                e.getValue().tokensAfter))
+                        .toList(),
+                byAlgorithm.entrySet().stream().sorted(Map.Entry.comparingByKey(NULLS_FIRST))
+                        .map(e -> new CompressionAlgorithmTotal(e.getKey(), e.getValue().count,
+                                e.getValue().tokensBefore, e.getValue().tokensAfter))
+                        .toList(),
+                compressionToolTotals(f));
+    }
+
+    /** One kind's rows in the window; {@code byChannel} false leaves the channel filter out. */
+    @SuppressWarnings("java:S2077") // the JPQL is constant fragments; every value is bound
+    private static Query compressionQuery(String select, CompressionMetric.Kind kind, CompressionFilter f,
+                                          boolean byChannel, String groupBy) {
+        var channel = byChannel ? f.channel() : null;
+        var query = JPA.em().createQuery(select + " FROM CompressionMetric m WHERE m.kind = :kind"
+                + " AND m.createdAt >= :since"
+                + (f.agentId() != null ? " AND m.agentId = :agentId" : "")
+                + (channel != null ? " AND m.channel = :channel" : "")
+                + groupBy);
+        query.setParameter("kind", kind);
+        query.setParameter(KEY_SINCE, f.since());
+        if (f.agentId() != null) query.setParameter("agentId", f.agentId());
+        if (channel != null) query.setParameter("channel", channel);
+        return query;
+    }
+
+    /**
+     * Distinct (tool, result) pairs among the compressions, each tested against the fetch-back hits:
+     * 150-350 ms for every window and filter on a 225,000-row copy. Joining the pairs to the distinct
+     * hit results took over 60 s with an agent filter, because H2 reruns a joined derived table per
+     * outer row and the agent index makes each rerun scan that agent's whole window.
+     */
+    @SuppressWarnings("java:S2077") // the SQL is constant fragments; every value is bound
+    private static List<CompressionToolTotal> compressionToolTotals(CompressionFilter f) {
+        var agent = f.agentId() != null ? " AND agent_id = :agentId" : "";
+        var channel = f.channel() != null ? " AND channel = :channel" : "";
+        var query = JPA.em().createNativeQuery("SELECT tool_name, COUNT(*), SUM(CASE WHEN result_hash IN"
+                + " (SELECT result_hash FROM compression_metrics"
+                + " WHERE kind = :retrieval AND ccr_hit = TRUE AND created_at >= :since"
+                + " AND result_hash IS NOT NULL" + agent + ") THEN 1 ELSE 0 END)"
+                + " FROM (SELECT DISTINCT tool_name, result_hash FROM compression_metrics"
+                + " WHERE kind = :compression AND created_at >= :since"
+                + " AND tool_name IS NOT NULL AND result_hash IS NOT NULL" + agent + channel + ") pairs"
+                + " GROUP BY tool_name");
+        query.setParameter("retrieval", CompressionMetric.Kind.CCR_RETRIEVAL.name());
+        query.setParameter("compression", CompressionMetric.Kind.COMPRESSION.name());
+        query.setParameter(KEY_SINCE, f.since());
+        if (f.agentId() != null) query.setParameter("agentId", f.agentId());
+        if (f.channel() != null) query.setParameter("channel", f.channel());
+
+        var tools = new ArrayList<CompressionToolTotal>();
+        for (var o : query.getResultList()) {
+            var r = (Object[]) o;
+            tools.add(new CompressionToolTotal((String) r[0], asLong(r[1]), asLong(r[2])));
+        }
+        tools.sort(Comparator.comparing(CompressionToolTotal::tool));
+        return tools;
+    }
+
+    // COUNT and SUM come back as Long from JPQL and as the dialect's integer type from native SQL.
+    private static long asLong(@Nullable Object value) {
+        return value == null ? 0 : ((Number) value).longValue();
+    }
+
+    private static @Nullable String optionalParam(String key) {
+        var value = params.get(key);
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    @SuppressWarnings("java:S2259")
+    private static @Nullable Long parseOptionalLong(String key) {
+        var value = optionalParam(key);
+        if (value == null) return null;
+        try {
+            return Long.parseLong(value.strip());
+        } catch (NumberFormatException _) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid '" + key + "' — must be an integer");
+            throw ApiResponses.unreachable();
+        }
     }
 
     /**

@@ -747,6 +747,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/mcp-servers
             GET /api/mcp-servers/{id}
             GET /api/metrics/compression
+            GET /api/metrics/compression/rows
             GET /api/metrics/cost
             GET /api/metrics/db-pool
             GET /api/metrics/jvm
