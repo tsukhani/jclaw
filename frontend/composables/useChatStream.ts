@@ -53,7 +53,25 @@ interface TurnAnswer {
   saved?: boolean
   /** The pick a command typed in a fresh chat made, which that chat holds until its first message. */
   pick?: CommandPick
+  /** A `/compact` that stored a summary: the prompt's estimated tokens before and after, and how long it took. */
+  compaction?: { tokensBefore: number, tokensAfter: number, ms: number }
 }
+
+/** What the compaction card shows: a compaction under way, or one that just finished. */
+export interface CompactionCard {
+  phase: 'start' | 'done'
+  /** The prompt's estimated tokens when it began; null for a `/compact`, which only learns it when it ends. */
+  tokensBefore: number | null
+  tokensAfter?: number
+  /** Rows summarized so far and in all; absent until the first summary lands, and for a `/compact`. */
+  done?: number
+  total?: number
+  ms?: number
+}
+
+const COMPACT_COMMAND = /^\/compact(\s|$)/i
+/** How long the finished card stays before it clears itself. */
+const COMPACTION_DONE_MS = 10_000
 
 /**
  * The turn the stream has open: its bubble, the SSE id of its `init`, which a replay of the same turn repeats, and the
@@ -124,6 +142,8 @@ export interface UseChatStreamDeps {
 export interface UseChatStream {
   streamContent: Ref<string>
   streamStatus: Ref<string>
+  /** The compaction card above the composer, or null when none is under way or just done. */
+  compaction: Ref<CompactionCard | null>
   streamingMessageKey: Ref<string | null>
   streamContentHtml: Ref<string>
   streamReasoningHtml: Ref<string>
@@ -204,6 +224,18 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   } = deps
 
   const streamStatus = ref('')
+  const compaction = ref<CompactionCard | null>(null)
+  let compactionTimer: ReturnType<typeof setTimeout> | null = null
+  function setCompaction(card: CompactionCard | null) {
+    if (compactionTimer) clearTimeout(compactionTimer)
+    compactionTimer = null
+    compaction.value = card
+    if (card?.phase === 'done') {
+      compactionTimer = setTimeout(() => {
+        compaction.value = null
+      }, COMPACTION_DONE_MS)
+    }
+  }
   // _key of the open turn's bubble. The template routes that bubble to streamContentHtml / streamReasoningHtml
   // (throttled markdown render) instead of running the full renderMarkdown pipeline on every token mutation.
   const streamingMessageKey = ref<string | null>(null)
@@ -280,6 +312,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
 
   // Switching conversations, New Chat or an agent change closes the stream; the page reopens it once rows load.
   watch(followedConvoId, (id) => {
+    setCompaction(null)
     closeView()
     stream.close()
     if (id != null) stream.open(id)
@@ -291,6 +324,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   function leaveView() {
     followedConvoId.value = null
     closeView()
+    setCompaction(null)
   }
 
   /** Every merge: the open bubble and a send not yet answered pair with nothing, and a bubble drops a call a saved row shows. */
@@ -412,6 +446,31 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
     catch {
       return false
+    }
+  }
+
+  /** A `{"compaction":{"phase":…}}` status frame: the card opens at its start, fills as rows are summarized, and ends with the token counts. */
+  function applyCompactionFrame(content: string) {
+    try {
+      const body = (JSON.parse(content) as { compaction?: Record<string, number | string> }).compaction
+      if (!body) return
+      const current = compaction.value
+      if (body.phase === 'start') {
+        setCompaction({ phase: 'start', tokensBefore: Number(body.tokensBefore), done: 0, total: Number(body.rows) })
+      }
+      else if (body.phase === 'progress' && current?.phase === 'start') {
+        setCompaction({ ...current, done: Number(body.done), total: Number(body.total) })
+      }
+      else if (body.phase === 'done') {
+        setCompaction({ phase: 'done', tokensBefore: Number(body.tokensBefore), tokensAfter: Number(body.tokensAfter),
+          ms: Number(body.ms), done: current?.total, total: current?.total })
+      }
+      else if (body.phase === 'skipped') {
+        setCompaction(null)
+      }
+    }
+    catch {
+      // A frame this page cannot read changes nothing on it.
     }
   }
 
@@ -660,6 +719,11 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       handleResync()
       return
     }
+    // A compaction runs in the turn's prologue, ahead of its init, so its frames belong to no bubble.
+    if (event.type === 'status' && typeof event.content === 'string' && event.content.startsWith('{"compaction"')) {
+      applyCompactionFrame(event.content)
+      return
+    }
     const m = turn?.bubble
     if (!m) return
     switch (event.type) {
@@ -839,6 +903,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
         triggerRef(messages)
       }
     }
+    // A /compact answers when it is done, with nothing streamed meanwhile, so its card opens here and the answer ends it.
+    const compacting = COMPACT_COMMAND.test(text)
+    if (compacting) setCompaction({ phase: 'start', tokensBefore: null })
     const post = useApiMutation()
     const request = post.mutate<TurnAnswer>('/api/chat/turn', {
       method: 'POST',
@@ -872,6 +939,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       finally {
         sends.delete(request)
         delete sent._sending
+        if (compacting) setCompaction(null)
+      }
+      if (compacting && answer?.compaction) {
+        setCompaction({ phase: 'done', ...answer.compaction, tokensBefore: answer.compaction.tokensBefore })
       }
       refreshConversations()
       // A row the last merge held back for a send not yet answered shows now, whatever the answer.
@@ -897,11 +968,15 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
-  onUnmounted(closeView)
+  onUnmounted(() => {
+    closeView()
+    if (compactionTimer) clearTimeout(compactionTimer)
+  })
 
   return {
     streamContent,
     streamStatus,
+    compaction,
     streamingMessageKey,
     streamContentHtml,
     streamReasoningHtml,

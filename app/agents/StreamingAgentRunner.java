@@ -16,6 +16,7 @@ import models.ChannelType;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.CompactionProgress;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
@@ -443,8 +444,8 @@ final class StreamingAgentRunner {
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
         var supportsVisionForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsVision();
-        prepared = AgentPromptPreparer.applyMediaRewrite(agent, conversation, primary, prepared,
-                supportsAudioForStream, supportsVisionForStream);
+        prepared = rewriteReportingCompaction(agent, conversation, primary, prepared,
+                supportsAudioForStream, supportsVisionForStream, cb.onStatus());
         var messages = prepared.messages();
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
@@ -836,5 +837,13 @@ final class StreamingAgentRunner {
                 : content;
         cb.onToken().accept(reply.equals(content) ? "" : "\n\n*[Response was truncated — the incomplete tool call was not run.]*");
         return reply;
+    }
+
+    /** {@link AgentPromptPreparer#applyMediaRewrite}, its compaction's progress going to {@code onStatus} as status frames ahead of the turn's init. */
+    private static AgentPromptPreparer.PreparedPrologue rewriteReportingCompaction(
+            Agent agent, Conversation conversation, LlmProvider primary, AgentPromptPreparer.PreparedPrologue prepared,
+            boolean supportsAudio, boolean supportsVision, java.util.function.Consumer<String> onStatus) {
+        return ScopedValue.where(CompactionProgress.SINK, onStatus).call(() ->
+                AgentPromptPreparer.applyMediaRewrite(agent, conversation, primary, prepared, supportsAudio, supportsVision));
     }
 }

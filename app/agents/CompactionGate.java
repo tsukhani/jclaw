@@ -9,6 +9,7 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
+import services.CompactionProgress;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -137,10 +138,12 @@ public final class CompactionGate {
         var turnModel = new SummaryModels.Choice(primary, snapshot.modelId());
         var summary = SummaryModels.resolve(agent, snapshot.conversation(), () -> turnModel, snapshot.channelType());
         long startNs = System.nanoTime();
-        var result = SessionCompactor.compact(conversationId, summary.first().label(),
+        var progress = CompactionProgress.open(estimatedTokens);
+        var result = progress.around(() -> SessionCompactor.compact(conversationId, summary.first().label(),
                 new SessionCompactor.TurnRequest(current.messages(), tools), summary, false, null,
-                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
+                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS));
         if (!result.compacted()) {
+            progress.skipped();
             // Under the token trigger or the row limit alone the window is far off, and this would repeat every turn.
             if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
                 EventLogger.info("compaction", agent.name, snapshot.channelType(),
@@ -155,15 +158,12 @@ public final class CompactionGate {
             return current;
         }
         long tookMs = (System.nanoTime() - startNs) / 1_000_000L;
-        EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                "Compacted %d turns (%d chars) via %s in %d ms over %d summary call%s".formatted(result.turnsCompacted(),
-                        result.summaryChars(), Objects.requireNonNullElse(summary.answeredBy(), summary.first().label()),
-                        tookMs, result.calls(), result.calls() == 1 ? "" : "s"));
+        logCompacted(agent.name, snapshot.channelType(), summary, result, tookMs);
 
         // Rebuild messages: fresh read picks up the bumped compactionSince,
         // appendSummaryToPrompt re-injects the (now stored) segments. No user message, so recall
         // does not run again: the caller's trailing message carries the prologue's (JF-152).
-        return Tx.run(() -> {
+        var rebuilt = Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return current;
             var promptDisabled = disabledTools != null ? disabledTools : AgentPromptPreparer.turnDisabled(agent, conv,
@@ -171,6 +171,19 @@ public final class CompactionGate {
             var assembled = SystemPromptAssembler.assemble(agent, null, promptDisabled, conv.channelType, null, conv);
             return MessageHydrator.buildMessages(AgentPromptPreparer.turnSystemPrompt(assembled.systemPrompt(), conv), conv);
         });
+        progress.done(ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(),
+                TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), rebuilt.messages(), tools)) + reservedTokens,
+                (System.nanoTime() - startNs) / 1_000_000L);
+        return rebuilt;
+    }
+
+    /** The success line of a compaction, automatic or {@code /compact}: what it did, on which model, and how long it took. */
+    public static void logCompacted(@Nullable String agentName, @Nullable String channelType,
+                                    SummaryModels summary, SessionCompactor.CompactionResult result, long tookMs) {
+        EventLogger.info("compaction", agentName, channelType,
+                "Compacted %d turns (%d chars) via %s in %d ms over %d summary call%s".formatted(result.turnsCompacted(),
+                        result.summaryChars(), Objects.requireNonNullElse(summary.answeredBy(), summary.first().label()),
+                        tookMs, result.calls(), result.calls() == 1 ? "" : "s"));
     }
 
     /**

@@ -7,6 +7,7 @@ import models.ChannelType;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.CompactionProgress;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
@@ -188,9 +189,19 @@ final class ChannelInboundDispatcher {
             Conversation current = cmd == Commands.Command.NEW
                     ? null
                     : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
-            var result = Commands.execute(cmd, agent, channelType, peerId, current,
-                    Commands.extractArgs(text), DangerousActionGate.ownerInitiated());
-            var slashSink = sinkFactory.apply(
+            // A /compact runs for as long as its summary calls take, so its sink shows the typing cue and the
+            // compaction notice while it does, and delivers the ack afterwards.
+            var compactSink = cmd == Commands.Command.COMPACT && current != null ? sinkFactory.apply(current.id) : null;
+            if (compactSink != null) compactSink.startTypingHeartbeat();
+            var result = compactSink == null
+                    ? Commands.execute(cmd, agent, channelType, peerId, current,
+                            Commands.extractArgs(text), DangerousActionGate.ownerInitiated())
+                    : ScopedValue.where(CompactionProgress.SINK, (Consumer<String>) status -> {
+                        var notice = CompactionProgress.startNotice(status);
+                        if (notice != null) compactSink.compacting(notice);
+                    }).call(() -> Commands.execute(cmd, agent, channelType, peerId, current,
+                            Commands.extractArgs(text), DangerousActionGate.ownerInitiated()));
+            var slashSink = compactSink != null ? compactSink : sinkFactory.apply(
                     result.conversation() != null ? result.conversation().id : null);
             // JCLAW-109: an empty responseText is the handler's signal that
             // it already delivered the reply itself (e.g. /model on Telegram
@@ -231,7 +242,10 @@ final class ChannelInboundDispatcher {
                     if (!stopped(isCancelled)) sink.update(token);
                 },
                 _ -> {},                 // onReasoning — not surfaced on Telegram
-                _ -> {},                 // onStatus — not surfaced on Telegram
+                status -> {              // onStatus — only a compaction's start is surfaced
+                    var notice = CompactionProgress.startNotice(status);
+                    if (notice != null && !stopped(isCancelled)) sink.compacting(notice);
+                },
                 tc -> {                  // onToolCall — Slack off-thread draft preview (JCLAW-346); Telegram out-of-band media
                     if (stopped(isCancelled)) return;
                     sink.toolProgress(tc.name());

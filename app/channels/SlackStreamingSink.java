@@ -362,6 +362,11 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         }
     }
 
+    @Override
+    public void compacting(String notice) {
+        toolProgress(notice);
+    }
+
     /** JCLAW-346: off-thread tool-progress preview. Renders a "Working…" list of the
      *  last few completed tool calls into the draft message, until the assistant's
      *  text turn begins (pending non-empty). No-op in native mode / once text flows. */

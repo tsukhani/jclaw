@@ -349,6 +349,7 @@ public final class SessionCompactor {
         int turnsCompacted = 0;
         int rowsSkipped = 0;
         int calls = 0;
+        int rowsTotal = 0;
         boolean reachedTail = false;
         @Nullable Instant floor = null;
         while (calls < maxCalls) {
@@ -360,6 +361,11 @@ public final class SessionCompactor {
                 break;
             }
             var plan = planOpt.get();
+            if (first) {
+                int total = Tx.run(() -> rowsBeforeTail(conversationId, force));
+                rowsTotal = total;
+                CompactionProgress.started(total);
+            }
             if (floor != null && !plan.firstKept().createdAt().isAfter(floor)) {
                 // Rows sharing the floor's timestamp would be planned again on every call without the floor moving.
                 EventLogger.info("compaction", null, null, ("Compaction for conversation %d stopped: its next rows "
@@ -375,6 +381,7 @@ public final class SessionCompactor {
             }
             turnsCompacted += stored.turnsCompacted();
             rowsSkipped += plan.skipped();
+            CompactionProgress.advanced(Math.min(turnsCompacted, rowsTotal), rowsTotal);
             floor = plan.firstKept().createdAt();
             if (plan.last()) {
                 reachedTail = true;

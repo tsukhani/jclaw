@@ -51,6 +51,13 @@ public interface ChannelStreamingSink {
         // no-op by default
     }
 
+    /** Optional: tell the person the conversation is being compacted before the reply starts (see
+     *  {@link services.CompactionProgress#startNotice}). Default no-op; Telegram shows it in the reply's
+     *  placeholder, which the first words replace, and Slack in its draft. */
+    default void compacting(String notice) {
+        // no-op by default
+    }
+
     /** Optional: record the uuids of a completed tool call's persisted generated
      *  attachments (generate_image's image, diarize_audio's voice clips, a
      *  finished generate_video clip) so a channel that delivers media out-of-band

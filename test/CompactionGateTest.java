@@ -398,6 +398,81 @@ class CompactionGateTest extends UnitTest {
                 lines.getFirst());
     }
 
+    // ─── Progress frames ────────────────────────────────────────────────
+
+    @Test
+    void aCompactionReportsStartProgressAndTheTokensBeforeAndAfter() throws Exception {
+        ConfigService.set("chat.compactionReserveTokens", "500");
+        ConfigService.set("chat.compactionReserveTokensFloor", "500");
+        startLlmServer(simpleResponse("This is the canned compaction summary."));
+        configureProviderWithModel("test-model", 2000, 1024);
+        var primary = llm.ProviderRegistry.get("test-provider");
+        var conv = ConversationService.create(agent, "web", "frames-user");
+        for (int i = 0; i < 25; i++) {
+            ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                    "turn " + i, null, null, null);
+        }
+        commitAndReopen();
+        var bigContent = ("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt "
+                + "ut labore et dolore magna aliqua. ").repeat(80);
+        var current = List.of(ChatMessage.system("SP"), ChatMessage.user(bigContent));
+        var frames = new java.util.ArrayList<String>();
+
+        var rebuilt = new java.util.concurrent.atomic.AtomicReference<List<ChatMessage>>();
+        ScopedValue.where(services.CompactionProgress.SINK, (java.util.function.Consumer<String>) frames::add)
+                .run(() -> rebuilt.set(CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current)));
+
+        assertEquals(3, frames.size(), frames.toString());
+        var start = com.google.gson.JsonParser.parseString(frames.get(0)).getAsJsonObject().getAsJsonObject("compaction");
+        var progress = com.google.gson.JsonParser.parseString(frames.get(1)).getAsJsonObject().getAsJsonObject("compaction");
+        var done = com.google.gson.JsonParser.parseString(frames.get(2)).getAsJsonObject().getAsJsonObject("compaction");
+        assertEquals("start", start.get("phase").getAsString());
+        assertTrue(start.get("rows").getAsInt() > 0, frames.get(0));
+        assertEquals("progress", progress.get("phase").getAsString());
+        assertEquals(start.get("rows").getAsInt(), progress.get("total").getAsInt());
+        assertEquals(progress.get("total").getAsInt(), progress.get("done").getAsInt(), "the one summary call reaches the tail");
+        assertEquals("done", done.get("phase").getAsString());
+        assertEquals(start.get("tokensBefore").getAsInt(), done.get("tokensBefore").getAsInt());
+        int estimateOf = ContextWindowManager.adjustedPromptTokens("test-provider", "test-model",
+                TokenUsageEstimator.estimateChatRequest("test-model", current, List.of()));
+        int rebuiltEstimate = ContextWindowManager.adjustedPromptTokens("test-provider", "test-model",
+                TokenUsageEstimator.estimateChatRequest("test-model", rebuilt.get(), List.of()));
+        assertEquals(estimateOf, done.get("tokensBefore").getAsInt(), "the prompt the turn was about to send");
+        assertEquals(rebuiltEstimate, done.get("tokensAfter").getAsInt(), "the prompt it sends instead");
+        assertTrue(done.get("ms").getAsLong() >= 0, frames.get(2));
+    }
+
+    @Test
+    void aConversationWithNothingToCutReportsNoProgress() throws Exception {
+        ConfigService.set("chat.compactionReserveTokens", "500");
+        ConfigService.set("chat.compactionReserveTokensFloor", "500");
+        configureProviderWithModel("test-model", 2000, 1024);
+        var primary = llm.ProviderRegistry.get("test-provider");
+        var conv = ConversationService.create(agent, "web", "no-frames-user");
+        ConversationService.appendMessage(conv, MessageRole.USER, "only one", null, null, null);
+        commitAndReopen();
+        var bigContent = ("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt "
+                + "ut labore et dolore magna aliqua. ").repeat(80);
+        var current = List.of(ChatMessage.system("SP"), ChatMessage.user(bigContent));
+        var frames = new java.util.ArrayList<String>();
+
+        ScopedValue.where(services.CompactionProgress.SINK, (java.util.function.Consumer<String>) frames::add)
+                .run(() -> CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current));
+
+        assertEquals(List.of(), frames);
+    }
+
+    @Test
+    void theStartNoticeNamesTheTokensBeingCompacted() {
+        assertEquals("Compacting this conversation (~182k tokens)…", services.CompactionProgress.startNotice(
+                "{\"compaction\":{\"phase\":\"start\",\"tokensBefore\":182345,\"rows\":90}}"));
+        assertEquals("Compacting this conversation (~800 tokens)…", services.CompactionProgress.startNotice(
+                "{\"compaction\":{\"phase\":\"start\",\"tokensBefore\":800,\"rows\":3}}"));
+        assertNull(services.CompactionProgress.startNotice("{\"compaction\":{\"phase\":\"progress\",\"done\":1,\"total\":2}}"));
+        assertNull(services.CompactionProgress.startNotice("{\"contextTokens\":5}"));
+        assertNull(services.CompactionProgress.startNotice("Using tool: exec"));
+    }
+
     // ─── Tokens sent after the list (JF-152) ────────────────────────────
 
     @Test

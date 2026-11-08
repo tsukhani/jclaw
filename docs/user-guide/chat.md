@@ -107,6 +107,8 @@ On an external channel, `/subagent`, `/prompt`, and the `/model` forms that chan
 
 :::tip /compact when context fills up
 `/usage` shows how much of the context window a conversation is using. When it is near full, `/compact` summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. It keeps going until every older message is summarized, however many summary calls that takes, and its reply says how many messages it summarized, how many calls it made, and any messages it could not summarize. Pass a focus hint when you only care about a specific subtopic. The summarizer keeps that thread tight.
+
+While a conversation is being compacted, a card above the message box says so. For a compaction that starts by itself, it shows how many tokens are being compressed and a bar of the earlier messages summarized so far. For `/compact`, which answers only when it is done, the bar slides until the answer arrives. When it ends, the card shows the token count before and after, how much was freed and how long it took, and clears itself after ten seconds. On Telegram and Slack, a conversation being compacted shows a "Compacting this conversation" notice where the reply will appear, and the reply replaces it. WhatsApp can only show its typing indicator.
 :::
 
 ## Tool calls and reasoning

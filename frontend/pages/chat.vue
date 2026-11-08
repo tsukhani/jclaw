@@ -572,6 +572,7 @@ const {
 const {
   streamContent,
   streamStatus,
+  compaction,
   streamingMessageKey,
   streamContentHtml,
   streamReasoningHtml,
@@ -1330,6 +1331,10 @@ function exportConversation() {
             ~25% alpha, black shadows vanish against #222427 — this
             is the "elevated card" token across the auth pages.
         -->
+          <ChatCompactionCard
+            v-if="compaction"
+            :card="compaction"
+          />
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form
             data-tour="chat-composer"

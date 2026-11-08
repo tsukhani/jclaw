@@ -331,6 +331,100 @@ describe('useChatStream', () => {
     expect(deps.streaming.value).toBe(true)
   })
 
+  describe('compaction card', () => {
+    const frame = (body: object) => ({ type: 'status', content: JSON.stringify({ compaction: body }) })
+
+    it('opens at the start frame, ahead of the turn\'s init, fills with the rows summarized and ends with the token counts', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+
+      stream.send(frame({ phase: 'start', tokensBefore: 182345, rows: 90 }))
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: 182345, done: 0, total: 90 })
+
+      stream.send(frame({ phase: 'progress', done: 45, total: 90 }))
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: 182345, done: 45, total: 90 })
+
+      stream.send(frame({ phase: 'done', tokensBefore: 182345, tokensAfter: 41000, ms: 14200 }))
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'done', tokensBefore: 182345, tokensAfter: 41000, ms: 14200, done: 90, total: 90 })
+    })
+
+    it('clears itself ten seconds after it ends', async () => {
+      vi.useFakeTimers()
+      try {
+        const deps = onConversation(42)
+        const { api } = await mountStream(deps)
+        streamOn(42).send(frame({ phase: 'start', tokensBefore: 1000, rows: 4 }))
+        streamOn(42).send(frame({ phase: 'done', tokensBefore: 1000, tokensAfter: 300, ms: 900 }))
+        await flushPromises()
+        expect(api.compaction.value?.phase).toBe('done')
+        vi.advanceTimersByTime(9_999)
+        expect(api.compaction.value?.phase).toBe('done')
+        vi.advanceTimersByTime(1)
+        expect(api.compaction.value).toBeNull()
+      }
+      finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('closes the card when the compaction stored nothing, and shows nothing for a frame that is no compaction', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      stream.send(frame({ phase: 'start', tokensBefore: 1000, rows: 4 }))
+      stream.send(frame({ phase: 'skipped' }))
+      await flushPromises()
+      expect(api.compaction.value).toBeNull()
+
+      stream.send({ type: 'status', content: '{"contextTokens":5}' })
+      await flushPromises()
+      expect(api.compaction.value).toBeNull()
+    })
+
+    it('opens a card the moment a /compact is sent and replaces it with the counts its answer carries', async () => {
+      let release: () => void = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      serveTurnStart(async () => {
+        await held
+        return { status: 'command', conversationId: 42, content: 'Compacted.', saved: true,
+          compaction: { tokensBefore: 90000, tokensAfter: 12000, ms: 8200 } }
+      })
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      deps.input.value = '/compact'
+      const sending = api.sendMessage()
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: null })
+
+      release()
+      await sending
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'done', tokensBefore: 90000, tokensAfter: 12000, ms: 8200 })
+    })
+
+    it('closes the /compact card when nothing was compacted', async () => {
+      serveTurnStart(() => ({ status: 'command', conversationId: 42, content: 'Nothing to compact.', saved: true }))
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      await send(api, deps, '/compact')
+      expect(api.compaction.value).toBeNull()
+    })
+
+    it('opens no card for another command', async () => {
+      serveTurnStart(() => ({ status: 'command', conversationId: 42, content: 'Stopped.', saved: false }))
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      await send(api, deps, '/compactor')
+      expect(api.compaction.value).toBeNull()
+    })
+  })
+
   it('shows an unsaved slash command reply as a row that pairs with nothing, and merges a saved one in', async () => {
     serveTurnStart(body => body.message === '/model kimi'
       ? { status: 'command', conversationId: 42, content: 'Model set.', saved: true }

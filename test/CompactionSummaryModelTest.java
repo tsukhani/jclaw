@@ -27,6 +27,7 @@ import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.Tx;
 import slash.Commands;
 import utils.AppClock;
@@ -327,6 +328,52 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
+    void slashCompactLogsTheDurationAndReportsTheTokensBeforeAndAfter() throws Exception {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf-slash-log");
+        var conv = ConversationService.create(agent, "web", "u-slash-log");
+        seed(conv, 12, i -> "turn " + i + " " + "padding ".repeat(200));
+        commit();
+        var result = new AtomicReference<Commands.Result>();
+
+        var events = EventLogger.captureMatchingForTest(
+                e -> "compaction".equals(e.category()) && agent.name.equals(e.agentId()),
+                _ -> {
+                    try {
+                        result.set(slashCompact(agent, conv));
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                });
+
+        var lines = events.stream().map(EventLogger.Captured::message).filter(m -> m.startsWith("Compacted ")).toList();
+        assertEquals(1, lines.size(), lines.toString());
+        assertTrue(lines.getFirst().matches("Compacted \\d+ turns \\(\\d+ chars\\) via \\S+ in \\d+ ms over \\d+ summary calls?"),
+                lines.getFirst());
+        var outcome = result.get().compaction();
+        assertNotNull(outcome);
+        assertTrue(outcome.tokensAfter() < outcome.tokensBefore(), outcome.toString());
+        assertTrue(outcome.ms() >= 0);
+    }
+
+    @Test
+    void slashCompactReportsItsProgressToTheBoundSink() throws Exception {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf-slash-frames");
+        var conv = ConversationService.create(agent, "web", "u-slash-frames");
+        seed(conv, 12, i -> "turn " + i + " " + "padding ".repeat(200));
+        commit();
+        var frames = new java.util.concurrent.CopyOnWriteArrayList<String>();
+
+        slashCompact(agent, conv, frames::add);
+
+        var phases = frames.stream().map(f -> com.google.gson.JsonParser.parseString(f).getAsJsonObject()
+                .getAsJsonObject("compaction").get("phase").getAsString()).toList();
+        assertEquals("start", phases.getFirst(), frames.toString());
+        assertEquals("done", phases.getLast(), frames.toString());
+    }
+
+    @Test
     void aCompactionModelOnAProviderThatIsNotConfiguredFallsBackToTheAgentsOwnModel() {
         configure(1_000_000);
         var agent = fixedAgentOnA("jf239-missing");
@@ -481,13 +528,23 @@ class CompactionSummaryModelTest extends UnitTest {
 
     /** {@code /compact} as web chat runs it, on a thread with no transaction of its own. */
     private static Commands.Result slashCompact(Agent agent, Conversation conv) throws Exception {
+        return slashCompact(agent, conv, null);
+    }
+
+    /** As {@link #slashCompact(Agent, Conversation)}, with {@code sink} bound as the transport binds it around the command. */
+    private static Commands.Result slashCompact(Agent agent, Conversation conv,
+                                                java.util.function.@org.jspecify.annotations.Nullable Consumer<String> sink)
+            throws Exception {
         var result = new AtomicReference<Commands.Result>();
         var error = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var fresh = Tx.run(() -> (Agent) Agent.findById(agent.id));
                 var c = Tx.run(() -> (Conversation) Conversation.findById(conv.id));
-                result.set(Commands.execute(Commands.Command.COMPACT, fresh, "web", c.peerId, c, null, true));
+                result.set(sink == null
+                        ? Commands.execute(Commands.Command.COMPACT, fresh, "web", c.peerId, c, null, true)
+                        : ScopedValue.where(services.CompactionProgress.SINK, sink).call(() ->
+                                Commands.execute(Commands.Command.COMPACT, fresh, "web", c.peerId, c, null, true)));
             } catch (Exception e) {
                 error.set(e);
             }

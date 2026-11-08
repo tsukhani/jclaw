@@ -483,6 +483,7 @@ public class ApiChatController extends Controller {
             // Whether the reply is a saved row the page may pair its copy with (JF-202).
             answer.put("saved", slashResult.saved());
             if (slashResult.pick() != null) answer.put("pick", slashResult.pick());
+            if (slashResult.compaction() != null) answer.put("compaction", slashResult.compaction());
             renderJSON(gson.toJson(answer));
         }
 

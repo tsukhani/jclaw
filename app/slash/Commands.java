@@ -9,6 +9,7 @@ import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
+import llm.TokenUsageEstimator;
 import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
@@ -18,6 +19,7 @@ import models.Message;
 import models.Prompt;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
+import services.CompactionProgress;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
@@ -192,15 +194,24 @@ public final class Commands {
      *                      for the page to hold as that conversation's pick ({@link #executeInNewChat}); null otherwise
      */
     public record Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved,
-                         @Nullable Pick pick) {
+                         @Nullable Pick pick, @Nullable CompactionOutcome compaction) {
+        public Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved,
+                      @Nullable Pick pick) {
+            this(conversation, responseText, command, saved, pick, null);
+        }
+
         public Result(@Nullable Conversation conversation, String responseText, Command command, boolean saved) {
-            this(conversation, responseText, command, saved, null);
+            this(conversation, responseText, command, saved, null, null);
         }
 
         /** A reply delivered but not saved. */
         public Result(@Nullable Conversation conversation, String responseText, Command command) {
-            this(conversation, responseText, command, false, null);
+            this(conversation, responseText, command, false, null, null);
         }
+    }
+
+    /** What a {@code /compact} that stored a summary did to the prompt, for the web chat's card; token counts are estimates. */
+    public record CompactionOutcome(int tokensBefore, int tokensAfter, long ms) {
     }
 
     /**
@@ -763,14 +774,30 @@ public final class Commands {
                     "/compact on conversation %d, which is gone".formatted(current.id));
             return new Result(null, "Nothing to compact: this conversation was deleted.", Command.COMPACT);
         }
-        var result = SessionCompactor.compact(current.id, summary.first().label(), turn, summary, /*force*/ true, args,
-                summary.callTokens(), Integer.MAX_VALUE);
+        var modelId = summary.first().modelId();
+        int tokensBefore = TokenUsageEstimator.estimateChatRequest(modelId, turn.messages(), turn.tools()).promptTokens();
+        long startNs = System.nanoTime();
+        var progress = CompactionProgress.open(tokensBefore);
+        var result = progress.around(() -> SessionCompactor.compact(current.id, summary.first().label(), turn, summary,
+                /*force*/ true, args, summary.callTokens(), Integer.MAX_VALUE));
+        long tookMs = (System.nanoTime() - startNs) / 1_000_000L;
+        int[] tokensAfter = {0};
+        if (result.compacted()) {
+            CompactionGate.logCompacted(Agent.nameOf(agent), channelType, summary, result, tookMs);
+            var after = CompactionGate.nextTurnRequest(agent, current.id);
+            tokensAfter[0] = after == null ? 0 : TokenUsageEstimator.estimateChatRequest(modelId, after.messages(),
+                    after.tools()).promptTokens();
+            progress.done(tokensAfter[0], tookMs);
+        } else {
+            progress.skipped();
+        }
         var responseText = buildCompactResponseText(result, args);
         boolean saved = persistCompactAckAndLog(agent, channelType, current, responseText,
                 result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())
                         : "skipped: " + result.skipReason());
 
-        return new Result(current, responseText, Command.COMPACT, saved);
+        return new Result(current, responseText, Command.COMPACT, saved, null,
+                result.compacted() ? new CompactionOutcome(tokensBefore, tokensAfter[0], tookMs) : null);
     }
 
     /** The conversation's override, else the agent's default, else the agent's own fallback, as a turn resolves it. */

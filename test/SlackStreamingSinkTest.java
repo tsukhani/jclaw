@@ -222,6 +222,17 @@ class SlackStreamingSinkTest extends UnitTest {
         assertEquals(List.of("Working…\n• search_web\n• read_file", "the answer"), f.edited);
     }
 
+    @Test
+    void theCompactionNoticeShowsInTheDraftUntilTheReplyReplacesIt() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, "U1", f, 0L);
+        sink.begin();
+        sink.compacting("Compacting this conversation (~182k tokens)…");
+        sink.update("the answer");
+        assertEquals(List.of("Working…\n• Compacting this conversation (~182k tokens)…"), f.posted);
+        assertEquals(List.of("the answer"), f.edited);
+    }
+
     // ── Out-of-band generated-media delivery (generate_image et al.) ──
     //
     // A tool-generated attachment is persisted out-of-band and the generating tool

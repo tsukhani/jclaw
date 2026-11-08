@@ -994,6 +994,32 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                 .build();
     }
 
+    /**
+     * The reply's placeholder carries the compaction notice until the first words edit it into the reply, so a
+     * conversation being compacted shows more than the typing cue. A reply that already has its message is left alone.
+     */
+    @Override
+    public void compacting(String notice) {
+        stateLock.lock();
+        try {
+            if (sealed.get() || streamCapReached || messageId != null) return;
+        } finally {
+            stateLock.unlock();
+        }
+        try {
+            var sentId = sendPlaceholder(notice);
+            stateLock.lock();
+            try {
+                if (messageId == null) messageId = sentId;
+            } finally {
+                stateLock.unlock();
+            }
+            TelegramChannel.recordSentMessage(botToken, chatId, sentId);
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", "Compaction notice not delivered to Telegram: %s".formatted(e.getMessage()));
+        }
+    }
+
     private Integer sendPlaceholder(String plainText) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
         var builder = SendMessage.builder()
