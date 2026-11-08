@@ -873,6 +873,8 @@ function exportConversation() {
             :cached-tokens="contextUsage.cached"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :cumulative-tokens="conversationCumulativeTokens"
+            :message-count="currentConversation?.messageCount ?? 0"
+            :user-prompt-count="currentConversation?.userPromptCount ?? 0"
             :compaction-count="currentConversation?.compactionCount ?? 0"
             :cost-label="conversationCostSummary?.label ?? null"
             :cost-tooltip="conversationCostSummary?.tooltip ?? null"

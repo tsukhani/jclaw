@@ -960,9 +960,16 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     runFrames()
 
     const list = component.find('[data-testid="chat-messages-scroll"]').element as HTMLElement
-    for (const [key, value] of Object.entries({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })) {
-      Object.defineProperty(list, key, { configurable: true, writable: true, value })
+    const layout = (box: Record<string, number>) => {
+      for (const [key, value] of Object.entries(box)) {
+        Object.defineProperty(list, key, { configurable: true, writable: true, value })
+      }
     }
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    list.dispatchEvent(new Event('scroll'))
+    // The reader's own wheel: only their input says they scrolled away (JF-229).
+    list.dispatchEvent(new Event('wheel'))
+    layout({ scrollTop: 300 })
     list.dispatchEvent(new Event('scroll'))
     stream.send({ type: 'reasoning', content: 'and then' })
     stream.send({ type: 'token', content: ', there was a parser.' })

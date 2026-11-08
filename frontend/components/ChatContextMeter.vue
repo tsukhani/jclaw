@@ -30,11 +30,14 @@ const props = defineProps<{
    * which shrinks after a compaction; this number monotonically grows.
    */
   cumulativeTokens?: number | null
+  /** Persisted message rows (user, assistant, tool and system) in the conversation. */
+  messageCount?: number | null
+  /** Rows the operator sent; a turn can add many assistant and tool rows to one prompt. */
+  userPromptCount?: number | null
   /**
-   * Number of SessionCompaction rows for this conversation. Surfaced
-   * so the operator can tell whether "current context" has been reset
-   * (and how many times). Hidden when zero — a chat that has never
-   * been compacted shouldn't carry the row.
+   * Number of SessionCompaction rows for this conversation, so the
+   * operator can tell whether "current context" has been reset and how
+   * many times.
    */
   compactionCount?: number | null
   /** Running conversation cost string (e.g. "$0.0041"); omitted when pricing is absent. */
@@ -229,7 +232,26 @@ function handleMouseLeave() {
           </dd>
         </div>
         <div
-          v-if="compactions > 0"
+          aria-hidden="true"
+          class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+        />
+        <div class="flex items-center justify-between gap-4">
+          <dt class="text-muted-foreground">
+            Messages
+          </dt>
+          <dd class="font-mono tabular-nums">
+            {{ (messageCount ?? 0).toLocaleString() }}
+          </dd>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <dt class="text-muted-foreground">
+            Prompts
+          </dt>
+          <dd class="font-mono tabular-nums">
+            {{ (userPromptCount ?? 0).toLocaleString() }}
+          </dd>
+        </div>
+        <div
           class="flex items-center justify-between gap-4"
           title="Number of times this conversation's prefix has been summarized into a compaction. Each compaction resets the 'Current context' reading."
         >
@@ -242,12 +264,9 @@ function handleMouseLeave() {
         </div>
         <template v-if="costLabel != null || (turnCount ?? 0) > 0">
           <div
-            aria-hidden="true"
-            class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
-          />
-          <div
             v-if="(turnCount ?? 0) > 0"
             class="flex items-center justify-between gap-4"
+            title="Model replies that carry token usage. One prompt can take several, one per round of tool calls."
           >
             <dt class="text-muted-foreground">
               Turns
