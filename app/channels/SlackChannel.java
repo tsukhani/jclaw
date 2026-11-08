@@ -325,7 +325,11 @@ public class SlackChannel implements Channel {
         if (botToken == null || botToken.isBlank()) return null;
         try {
             var resp = slack.methods(botToken).chatPostMessage(postRequest(channelId, text, threadTs));
-            return resp.isOk() ? resp.getTs() : null;
+            if (!resp.isOk()) {
+                EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "postText not ok: %s".formatted(resp.getError()));
+                return null;
+            }
+            return resp.getTs();
         } catch (SlackApiException | IOException e) {
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "postText failed: %s".formatted(e.getMessage()));
             return null;

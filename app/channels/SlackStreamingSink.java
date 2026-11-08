@@ -372,6 +372,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         try {
             if (turnStopped || draftStopped) return;
             if (statusSet) {
+                EventLogger.info(LOG_CATEGORY, agentName, LOG_SOURCE, "Compaction notice set as the assistant status");
                 slacker.setStatus(channelId, threadTs, "is " + Character.toLowerCase(notice.charAt(0))
                         + notice.substring(1).replace("…", "..."));
                 return;
@@ -379,6 +380,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         } finally {
             lock.unlock();
         }
+        EventLogger.info(LOG_CATEGORY, agentName, LOG_SOURCE, "Compaction notice posted as a draft line");
         toolProgress(notice);
     }
 
