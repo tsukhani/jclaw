@@ -136,6 +136,7 @@ public final class CompactionGate {
         // The trigger measures the turn's model; a router agent's summary goes to its summarize class (JF-160).
         var turnModel = new SummaryModels.Choice(primary, snapshot.modelId());
         var summary = SummaryModels.resolve(agent, snapshot.conversation(), () -> turnModel, snapshot.channelType());
+        long startNs = System.nanoTime();
         var result = SessionCompactor.compact(conversationId, summary.first().label(),
                 new SessionCompactor.TurnRequest(current.messages(), tools), summary, false, null,
                 summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
@@ -153,9 +154,11 @@ public final class CompactionGate {
             }
             return current;
         }
+        long tookMs = (System.nanoTime() - startNs) / 1_000_000L;
         EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                "Compacted %d turns (%d chars) via %s".formatted(result.turnsCompacted(), result.summaryChars(),
-                        Objects.requireNonNullElse(summary.answeredBy(), summary.first().label())));
+                "Compacted %d turns (%d chars) via %s in %d ms over %d summary call%s".formatted(result.turnsCompacted(),
+                        result.summaryChars(), Objects.requireNonNullElse(summary.answeredBy(), summary.first().label()),
+                        tookMs, result.calls(), result.calls() == 1 ? "" : "s"));
 
         // Rebuild messages: fresh read picks up the bumped compactionSince,
         // appendSummaryToPrompt re-injects the (now stored) segments. No user message, so recall

@@ -371,6 +371,33 @@ class CompactionGateTest extends UnitTest {
                 "successful compaction must bump compactionSince watermark");
     }
 
+    @Test
+    void theCompactionLineSaysHowLongItTookAndHowManySummaryCalls() throws Exception {
+        ConfigService.set("chat.compactionReserveTokens", "500");
+        ConfigService.set("chat.compactionReserveTokensFloor", "500");
+        startLlmServer(simpleResponse("This is the canned compaction summary."));
+        configureProviderWithModel("test-model", 2000, 1024);
+        var primary = llm.ProviderRegistry.get("test-provider");
+        var conv = ConversationService.create(agent, "whatsapp", "447911111111");
+        for (int i = 0; i < 25; i++) {
+            var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
+            ConversationService.appendMessage(conv, role, "turn " + i, null, null, null);
+        }
+        commitAndReopen();
+        var bigContent = ("Lorem ipsum dolor sit amet consectetur adipiscing "
+                + "elit sed do eiusmod tempor incididunt ut labore et dolore "
+                + "magna aliqua. ").repeat(80);
+        var current = List.of(ChatMessage.system("SP"), ChatMessage.user(bigContent));
+
+        var events = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, Set.of(), primary, current));
+
+        var lines = compactionLines(events).stream().filter(l -> l.startsWith("Compacted ")).toList();
+        assertEquals(1, lines.size(), lines.toString());
+        assertTrue(lines.getFirst().matches("Compacted \\d+ turns \\(\\d+ chars\\) via \\S+ in \\d+ ms over 1 summary call"),
+                lines.getFirst());
+    }
+
     // ─── Tokens sent after the list (JF-152) ────────────────────────────
 
     @Test
