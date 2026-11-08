@@ -203,6 +203,21 @@ afterEach(() => {
  * Nuxt-test-utils ComponentMountingOptions inference, which doesn't narrow
  * well across spec files; we only need the findAll/trigger surface.
  */
+/** The helper agent with the JF-239 compaction-model fields set as `extra` says. */
+function helperWithCompaction(extra: Record<string, unknown>) {
+  return {
+    id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4', enabled: true, isMain: false,
+    providerConfigured: true, thinkingMode: null, compressionEnabled: false, compressionJson: false,
+    compressionCode: false, compressionText: false, compressionTargetRatio: 0.3, acpAllowed: false,
+    memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+    memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
+    compactionModelInherited: true, compactionProvider: 'openai', compactionModel: 'gpt-4',
+    fallbackProvider: null, fallbackModelId: null,
+    createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+    ...extra,
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: helper consumes the Nuxt mount wrapper without depending on its precise generic shape.
 async function openHelperEdit(component: any) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: matches the broad wrapper above.
@@ -416,6 +431,62 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await saveBtn!.trigger('click')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
     expect(putBody).toMatchObject({ fallbackProvider: null, fallbackModelId: null })
+  })
+
+  // JF-239: the compaction model is saved the moment it is picked, and is null while it matches the agent's own.
+  it('PUTs the chosen compaction provider and its first model when another provider is picked', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi({ agents: [helperWithCompaction({})] })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    const card = component.find('[data-testid="agent-compaction-model"]')
+    expect(card.exists(), 'the compaction model card should render').toBe(true)
+    expect(card.text()).not.toContain('Use the agent\'s model')
+    const provider = card.find('select')
+    expect((provider.element as HTMLSelectElement).value).toBe('openai')
+    await provider.setValue('ollama-cloud')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody).toEqual({ compactionProvider: 'ollama-cloud', compactionModel: 'kimi-k2.5' })
+  })
+
+  it('PUTs null for both halves when Use the agent\'s model is clicked on an override', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi({
+      agents: [helperWithCompaction({
+        compactionModelInherited: false, compactionProvider: 'ollama-cloud', compactionModel: 'kimi-k2.5',
+      })],
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    const card = component.find('[data-testid="agent-compaction-model"]')
+    expect((card.find('select').element as HTMLSelectElement).value).toBe('ollama-cloud')
+    const reset = card.findAll('button').find(b => b.text().includes('Use the agent\'s model'))
+    expect(reset, 'an override offers a way back to the agent\'s model').toBeTruthy()
+    await reset!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody).toEqual({ compactionProvider: null, compactionModel: null })
   })
 
   it('PUTs a partial { compressionEnabled } immediately when the Content Compression toggle is clicked', async () => {

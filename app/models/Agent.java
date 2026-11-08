@@ -157,6 +157,17 @@ public class Agent extends TimestampedModel {
     public String memoryAutocaptureModel;
 
     /**
+     * JF-239: the provider and model that write this agent's compaction summaries, ahead of the router's summarize
+     * class and the turn's own model. Null, the default, means the summary is written as before (JF-160). Set together
+     * or not at all; read through {@link #compactionModelOverridden()}.
+     */
+    @Column(name = "compaction_provider")
+    public String compactionProvider;
+
+    @Column(name = "compaction_model")
+    public String compactionModel;
+
+    /**
      * JCLAW-1190: the provider and model a turn moves to when this agent's primary is refused
      * by its circuit breaker. Both null — the default — means no fallback: the turn fails fast.
      * Set together; the model is the operator's choice on that provider, never the primary's id.
@@ -256,6 +267,12 @@ public class Agent extends TimestampedModel {
 
     public static List<Agent> findEnabled() {
         return Agent.find("enabled", true).fetch();
+    }
+
+    /** JF-239: true when both halves of the compaction-model override are set. */
+    public boolean compactionModelOverridden() {
+        return compactionProvider != null && !compactionProvider.isBlank()
+                && compactionModel != null && !compactionModel.isBlank();
     }
 
     /**

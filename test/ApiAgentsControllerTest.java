@@ -134,6 +134,67 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
+    // JF-239: per-agent compaction model
+    // =====================
+
+    @Test
+    void theCompactionModelRoundTripsAndResetsToTheAgentsOwn() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("compaction-roundtrip");
+
+        var initial = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertTrue(initial.get("compactionModelInherited").getAsBoolean());
+        assertEquals("openrouter", initial.get("compactionProvider").getAsString());
+        assertEquals("gpt-4.1", initial.get("compactionModel").getAsString(), "inherited: the agent's own model");
+
+        var put = PUT("/api/agents/" + id, "application/json",
+                "{\"compactionProvider\":\"together\",\"compactionModel\":\"fb-model\"}");
+        assertIsOk(put);
+        var after = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertFalse(after.get("compactionModelInherited").getAsBoolean());
+        assertEquals("together", after.get("compactionProvider").getAsString());
+        assertEquals("fb-model", after.get("compactionModel").getAsString());
+
+        assertIsOk(PUT("/api/agents/" + id, "application/json",
+                "{\"compactionProvider\":null,\"compactionModel\":null}"));
+        var reset = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertTrue(reset.get("compactionModelInherited").getAsBoolean());
+        assertEquals("gpt-4.1", reset.get("compactionModel").getAsString());
+    }
+
+    @Test
+    void theCompactionModelMustBeAWholeRegisteredPairAndAFailedPutChangesNothing() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("compaction-validation");
+
+        assertStatus(400, PUT("/api/agents/" + id, "application/json", "{\"compactionProvider\":\"together\"}"));
+        assertStatus(400, PUT("/api/agents/" + id, "application/json", "{\"compactionModel\":\"fb-model\"}"));
+        assertStatus(400, PUT("/api/agents/" + id, "application/json",
+                "{\"compactionProvider\":\"together\",\"compactionModel\":\"nope-model\"}"));
+        assertStatus(400, PUT("/api/agents/" + id, "application/json",
+                "{\"compactionProvider\":\"no-such-provider\",\"compactionModel\":\"fb-model\"}"));
+
+        var view = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertTrue(view.get("compactionModelInherited").getAsBoolean(), "every refusal left the agent inheriting");
+    }
+
+    @Test
+    void aPutThatNamesNoCompactionModelLeavesTheStoredOneAlone() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("compaction-partial");
+        assertIsOk(PUT("/api/agents/" + id, "application/json",
+                "{\"compactionProvider\":\"together\",\"compactionModel\":\"fb-model\"}"));
+
+        assertIsOk(PUT("/api/agents/" + id, "application/json", "{\"description\":\"renamed in a later edit\"}"));
+
+        var view = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertEquals("fb-model", view.get("compactionModel").getAsString());
+    }
+
+    // =====================
     // GET /api/agents/{id}/shell/effective-allowlist
     // =====================
 

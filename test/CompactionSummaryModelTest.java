@@ -250,6 +250,101 @@ class CompactionSummaryModelTest extends UnitTest {
         assertEquals(List.of(c + "/" + c + "-model"), storedModels(conv.id));
     }
 
+    // ─── An agent's own compaction model (JF-239) ───────────────────────
+
+    @Test
+    void anAgentsCompactionModelWritesItsMidChatSummary() {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf239-fixed");
+        agent.compactionProvider = c;
+        agent.compactionModel = c + "-model";
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-gate");
+        seed(conv, 25, i -> "turn " + i);
+        commit();
+
+        CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), ProviderRegistry.get(a),
+                hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi"))), List.of(), 1_000_000);
+
+        assertEquals(List.of(c + "-model"), models(c));
+        assertEquals(0, requests.get(a).size() + requests.get(b).size(), "the agent's own model and the router write none");
+        assertEquals(List.of(c + "/" + c + "-model"), storedModels(conv.id));
+    }
+
+    @Test
+    void anAgentsCompactionModelBeatsTheRoutersSummarizeClass() {
+        configure(1_000_000);
+        var agent = routerAgent();
+        agent.compactionProvider = c;
+        agent.compactionModel = c + "-model";
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-router");
+        seed(conv, 25, i -> "turn " + i);
+        commit();
+
+        compactDuringACodingTurn(agent, conv, List.of(ChatMessage.system("SP"), ChatMessage.user("hi")));
+
+        assertEquals(List.of(c + "-model"), models(c));
+        assertEquals(0, requests.get(a).size() + requests.get(b).size(), "the summarize class's first choice, b, is not asked");
+        assertEquals(List.of(c + "/" + c + "-model"), storedModels(conv.id));
+    }
+
+    @Test
+    void slashCompactUsesTheAgentsCompactionModel() throws Exception {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf239-slash");
+        agent.compactionProvider = c;
+        agent.compactionModel = c + "-model";
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-slash");
+        seed(conv, 12, i -> "turn " + i);
+        commit();
+
+        slashCompact(agent, conv);
+
+        assertEquals(List.of(c + "-model"), models(c));
+        assertEquals(0, requests.get(a).size() + requests.get(b).size());
+        assertEquals(List.of(c + "/" + c + "-model"), storedModels(conv.id));
+    }
+
+    @Test
+    void aCompactionModelOnAProviderThatIsNotConfiguredFallsBackToTheAgentsOwnModel() {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf239-missing");
+        agent.compactionProvider = "jf239-no-such-provider";
+        agent.compactionModel = "ghost-model";
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-missing");
+        seed(conv, 25, i -> "turn " + i);
+        commit();
+
+        CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), ProviderRegistry.get(a),
+                hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi"))), List.of(), 1_000_000);
+
+        assertEquals(List.of(a + "-model"), models(a));
+        assertEquals(List.of(a + "/" + a + "-model"), storedModels(conv.id));
+    }
+
+    @Test
+    void aFailingCompactionModelHandsTheSummaryToTheAgentsOwnModel() throws Exception {
+        configure(1_000_000);
+        statuses.put(c, 400);
+        var agent = fixedAgentOnA("jf239-failing");
+        agent.compactionProvider = c;
+        agent.compactionModel = c + "-model";
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-failing");
+        seed(conv, 12, i -> "turn " + i);
+        commit();
+
+        var result = slashCompact(agent, conv);
+
+        assertEquals(List.of(c + "-model"), models(c), "the compaction model is tried first");
+        assertEquals(List.of(a + "-model"), models(a), "then the agent's own model writes the summary");
+        assertTrue(result.responseText().startsWith("> Conversation Compacted"), result.responseText());
+        assertEquals(List.of(a + "/" + a + "-model"), storedModels(conv.id), "the row names the model that wrote it");
+    }
+
     @Test
     void aCatchUpIsChunkedByTheSummaryModelsWindow() throws Exception {
         // b's 40,000-token window bounds a call at 20,000 tokens, six of these ~3,000-token rows; the turn's
@@ -306,6 +401,16 @@ class CompactionSummaryModelTest extends UnitTest {
         var out = new ArrayList<String>();
         for (var p : providers) out.add("{\"provider\":\"%s\",\"model\":\"%s-model\"}".formatted(p, p));
         return "[" + String.join(",", out) + "]";
+    }
+
+    private Agent fixedAgentOnA(String prefix) {
+        var agent = new Agent();
+        agent.name = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+        agent.modelProvider = a;
+        agent.modelId = a + "-model";
+        agent.enabled = true;
+        agent.save();
+        return agent;
     }
 
     private Agent routerAgent() {

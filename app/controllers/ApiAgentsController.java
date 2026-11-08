@@ -70,6 +70,8 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_MEMORY_AUTOCAPTURE_ENABLED = "memoryAutocaptureEnabled";
     private static final String KEY_MEMORY_AUTOCAPTURE_PROVIDER = "memoryAutocaptureProvider";
     private static final String KEY_MEMORY_AUTOCAPTURE_MODEL = "memoryAutocaptureModel";
+    private static final String KEY_COMPACTION_PROVIDER = "compactionProvider";
+    private static final String KEY_COMPACTION_MODEL = "compactionModel";
     private static final String KEY_FALLBACK_PROVIDER = "fallbackProvider";
     private static final String KEY_FALLBACK_MODEL_ID = "fallbackModelId";
     private static final String KEY_SERVICE_AGENT = "serviceAgent";
@@ -163,6 +165,9 @@ public class ApiAgentsController extends Controller {
                              boolean memoryAutocaptureModelInherited,
                              String memoryAutocaptureProvider,
                              String memoryAutocaptureModel,
+                             boolean compactionModelInherited,
+                             String compactionProvider,
+                             String compactionModel,
                              @Nullable String fallbackProvider,
                              @Nullable String fallbackModelId,
                              boolean serviceAgent) {
@@ -196,6 +201,9 @@ public class ApiAgentsController extends Controller {
                     a.memoryAutocaptureProvider == null && a.memoryAutocaptureModel == null,
                     a.autocaptureProviderEffective(),
                     a.autocaptureModelEffective(),
+                    !a.compactionModelOverridden(),
+                    a.compactionModelOverridden() ? a.compactionProvider : a.modelProvider,
+                    a.compactionModelOverridden() ? a.compactionModel : a.modelId,
                     a.fallbackProvider,
                     a.fallbackModelId,
                     a.serviceAgent);
@@ -440,6 +448,37 @@ public class ApiAgentsController extends Controller {
     }
 
     /**
+     * JF-239: apply the compaction-model pair present in {@code body} under the partial-PUT convention. Both null or
+     * blank resets the agent to writing its summaries as before; one without the other is a 400, and a concrete pair
+     * must be a model registered on that provider. Checked before anything is applied so a 400 never leaves a
+     * half-written agent behind.
+     */
+    private static void applyCompactionModel(Agent agent, JsonObject body) {
+        if (!body.has(KEY_COMPACTION_PROVIDER) && !body.has(KEY_COMPACTION_MODEL)) return;
+        var provider = body.has(KEY_COMPACTION_PROVIDER)
+                ? readOptionalString(body, KEY_COMPACTION_PROVIDER) : agent.compactionProvider;
+        var modelId = body.has(KEY_COMPACTION_MODEL)
+                ? readOptionalString(body, KEY_COMPACTION_MODEL) : agent.compactionModel;
+        if (provider == null && modelId == null) {
+            agent.compactionProvider = null;
+            agent.compactionModel = null;
+            return;
+        }
+        if (provider == null || modelId == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'compactionProvider' and 'compactionModel' go together: set both or neither");
+            throw ApiResponses.unreachable();
+        }
+        if (!AgentService.isProviderConfigured(provider, modelId)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Model '%s' is not registered on provider '%s'".formatted(modelId, provider));
+            throw ApiResponses.unreachable();
+        }
+        agent.compactionProvider = provider;
+        agent.compactionModel = modelId;
+    }
+
+    /**
      * Read a JSON string field that may be missing, null, or blank, returning
      * {@code null} in all of those cases. Used for optional nullable fields
      * like {@code thinkingMode} where the frontend sends {@code null} to clear.
@@ -529,6 +568,7 @@ public class ApiAgentsController extends Controller {
         }
 
         applyMemorySettings(agent, body);
+        applyCompactionModel(agent, body);
         applyFallbackSettings(agent, body, modelProvider);
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,

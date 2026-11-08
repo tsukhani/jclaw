@@ -576,6 +576,9 @@ const memoryAutocaptureEnabled = ref(true)
 const memoryAutocaptureProvider = ref('')
 const memoryAutocaptureModel = ref('')
 const savingMemory = ref(false)
+const compactionProvider = ref('')
+const compactionModel = ref('')
+const savingCompaction = ref(false)
 const savingAcpAllowed = ref(false)
 // Section-header count: the master plus each per-type sub-toggle that is
 // effectively on (sub-toggles are off while the master is off).
@@ -621,6 +624,8 @@ const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 const agentMemoryProviderId = useId()
 const agentMemoryModelId = useId()
+const agentCompactionProviderId = useId()
+const agentCompactionModelId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -940,10 +945,17 @@ const autocaptureAvailableModels = computed(() => {
   return provider?.models ?? []
 })
 
+// JF-239: models for the per-agent compaction-model override.
+const compactionAvailableModels = computed(() => {
+  const provider = providers.value.find(p => p.name === compactionProvider.value)
+  return provider?.models ?? []
+})
+
 const toModelOptions = (models: ProviderModel[]): SearchableOption[] => models.map(m => modelOption(m.id, m.name || m.id, m))
 const modelPickerOptions = computed(() => toModelOptions(availableModels.value))
 const fallbackModelPickerOptions = computed(() => toModelOptions(fallbackAvailableModels.value))
 const autocaptureModelPickerOptions = computed(() => toModelOptions(autocaptureAvailableModels.value))
+const compactionModelPickerOptions = computed(() => toModelOptions(compactionAvailableModels.value))
 
 // The currently selected model's full metadata — drives the thinking-level dropdown.
 const selectedModel = computed<ProviderModel | null>(() =>
@@ -1030,6 +1042,8 @@ function editAgent(agent: Agent) {
   refreshCoreMigration()
   memoryAutocaptureProvider.value = agent.memoryAutocaptureProvider
   memoryAutocaptureModel.value = agent.memoryAutocaptureModel
+  compactionProvider.value = agent.compactionProvider
+  compactionModel.value = agent.compactionModel
   creating.value = false
   saveError.value = null
   toolsError.value = null
@@ -1409,6 +1423,51 @@ async function saveMemoryModel() {
 function onAutocaptureProviderChange() {
   memoryAutocaptureModel.value = autocaptureAvailableModels.value[0]?.id ?? ''
   saveMemoryModel()
+}
+
+// JF-239: immediate-save the compaction-model override. Sent as null when the selection equals the agent's
+// own model, so the agent keeps inheriting it (and tracks it if the model later changes).
+function pickCompactionModel(model: string) {
+  compactionModel.value = model
+  saveCompactionModel()
+}
+
+async function saveCompactionModel() {
+  if (!editing.value) return
+  savingCompaction.value = true
+  const isDefault = compactionProvider.value === editing.value.modelProvider
+    && compactionModel.value === editing.value.modelId
+  const updated = await mutateAgent<Agent>(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: {
+      compactionProvider: isDefault ? null : compactionProvider.value,
+      compactionModel: isDefault ? null : compactionModel.value,
+    },
+  })
+  if (updated === null) {
+    compactionProvider.value = editing.value.compactionProvider
+    compactionModel.value = editing.value.compactionModel
+  }
+  else {
+    editing.value.compactionProvider = updated.compactionProvider
+    editing.value.compactionModel = updated.compactionModel
+    editing.value.compactionModelInherited = updated.compactionModelInherited
+    refresh()
+  }
+  savingCompaction.value = false
+}
+
+// The chosen model id won't exist under a newly-picked provider, so snap it to that provider's first model, then save.
+function onCompactionProviderChange() {
+  compactionModel.value = compactionAvailableModels.value[0]?.id ?? ''
+  saveCompactionModel()
+}
+
+function useAgentModelForCompaction() {
+  if (!editing.value) return
+  compactionProvider.value = editing.value.modelProvider
+  compactionModel.value = editing.value.modelId
+  saveCompactionModel()
 }
 
 // JCLAW-463: per-type sub-toggle saves. Same immediate-save partial-PUT pattern
@@ -2291,6 +2350,76 @@ const agentKinds = [
                 empty-text="No matching models."
                 class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
                 @update:model-value="pickMemoryModel"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- JF-239: the model that writes this agent's compaction summaries. Defaults to the agent's own model and is
+           sent as null while it matches it. Immediate-saves via a partial PUT, like the memory card above. -->
+      <div
+        v-if="editing"
+        class="bg-surface-elevated border border-border"
+        data-testid="agent-compaction-model"
+      >
+        <div class="px-4 py-2.5">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <span class="text-sm font-medium text-fg-strong">Compaction model</span>
+              <div class="text-xs text-fg-muted mt-0.5">
+                The model that writes summaries of this agent's older messages when a chat gets long. It defaults to
+                the agent's model; a faster or cheaper one works, but this agent's older messages are sent to it.
+              </div>
+            </div>
+            <button
+              v-if="!editing.compactionModelInherited"
+              type="button"
+              :disabled="savingCompaction"
+              class="shrink-0 px-2 py-1 text-xs text-fg-muted border border-border hover:bg-muted disabled:opacity-50"
+              @click="useAgentModelForCompaction"
+            >
+              Use the agent's model
+            </button>
+          </div>
+          <div class="grid grid-cols-2 gap-3 mt-2">
+            <label
+              :for="agentCompactionProviderId"
+              class="block"
+            >
+              <span class="block text-xs text-fg-muted mb-1">Provider</span>
+              <select
+                :id="agentCompactionProviderId"
+                v-model="compactionProvider"
+                :disabled="savingCompaction"
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
+                @change="onCompactionProviderChange"
+              >
+                <option
+                  v-for="p in providers"
+                  :key="p.name"
+                  :value="p.name"
+                >
+                  {{ p.name }}
+                </option>
+              </select>
+            </label>
+            <label
+              :for="agentCompactionModelId"
+              class="block"
+            >
+              <span class="block text-xs text-fg-muted mb-1">Model</span>
+              <SearchableSelect
+                :id="agentCompactionModelId"
+                :model-value="compactionModel"
+                :options="compactionModelPickerOptions"
+                placeholder="Choose a model"
+                label="Compaction model"
+                :disabled="savingCompaction"
+                search-label="Type to filter models"
+                empty-text="No matching models."
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
+                @update:model-value="pickCompactionModel"
               />
             </label>
           </div>
