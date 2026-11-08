@@ -30,6 +30,11 @@ class ChromeControlToolTest extends UnitTest {
     @BeforeEach
     @AfterEach
     void clear() {
+        for (var key : List.of("chromeBridge.find.provider", "chromeBridge.find.model", "provider.find-test.baseUrl",
+                "provider.find-test.apiKey")) {
+            ConfigService.delete(key);
+        }
+        llm.ProviderRegistry.refresh();
         for (var name : List.of("main", "tool-helper")) {
             for (var setting : List.of(ChromeBridgePolicy.ALLOWED_SITES, ChromeBridgePolicy.ALLOW_ALL_SITES,
                     ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL)) {
@@ -554,6 +559,40 @@ class ChromeControlToolTest extends UnitTest {
         ChromeBridgeSync.with(fake, () ->
                 assertEquals(UNTRUSTED + "\n\nMatches for \"email\":\nf1 input[email]  (label: Your email)\n",
                         run(helper(), "{\"action\":\"find\",\"tabId\":7,\"query\":\"email\"}")));
+    }
+
+    private static final String FALLBACK_NOTE = "Note: the find model did not answer, so these are plain word "
+            + "matches and may miss what you meant. Try read, or a shorter query of words the page uses.\n\n";
+
+    private static void useAFindModelThatCannotAnswer() {
+        ConfigService.set("provider.find-test.baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider.find-test.apiKey", "k");
+        ConfigService.set("chromeBridge.find.provider", "find-test");
+        ConfigService.set("chromeBridge.find.model", "any-model");
+        llm.ProviderRegistry.refresh();
+    }
+
+    @Test
+    void aFindModelThatFailsIsSaidSoAboveTheWordMatch() throws Exception {
+        allow(helper(), "example.com");
+        useAFindModelThatCannotAnswer();
+        var fake = scripted(Map.of("tab_info", ok("{\"url\":\"https://example.com/\"}"), "read", ok(SHOP),
+                "find", ok("{\"matches\":[{\"ref\":\"f1\",\"tag\":\"a\",\"text\":\"Pricing\",\"link\":true}]}")));
+        ChromeBridgeSync.with(fake, () ->
+                assertEquals(FALLBACK_NOTE + UNTRUSTED + "\n\nMatches for \"price\":\nf1 a Pricing\n",
+                        run(helper(), "{\"action\":\"find\",\"tabId\":7,\"query\":\"price\"}")));
+    }
+
+    @Test
+    void aFindRefusedForTheSiteListCarriesNoModelNote() throws Exception {
+        allow(helper(), "example.com");
+        useAFindModelThatCannotAnswer();
+        var fake = scripted(Map.of("tab_info", ok("{\"url\":\"https://evil.com/\"}")));
+        ChromeBridgeSync.with(fake, () -> {
+            var reply = run(helper(), "{\"action\":\"find\",\"tabId\":7,\"query\":\"price\"}");
+            assertTrue(reply.startsWith("Error: "), reply);
+            assertEquals(false, reply.contains("find model"), reply);
+        });
     }
 
     @Test

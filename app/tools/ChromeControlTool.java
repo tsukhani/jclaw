@@ -479,10 +479,17 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         var tab = longOf(args, ARG_TAB);
         if (tab == null) return ERROR + "find needs a tabId.";
         var model = ChromeFinder.configured();
+        var failed = false;
         if (model != null) {
-            var answer = modelFind(agent, tab, query, model);
-            if (answer != null) return answer;
+            var found = modelFind(agent, tab, query, model);
+            if (found.text() != null) return found.text();
+            failed = found.modelFailed();
         }
+        var wordMatch = wordFind(agent, args, query, tab);
+        return failed && !wordMatch.startsWith(ERROR) ? MODEL_FAILED_NOTE + wordMatch : wordMatch;
+    }
+
+    private static String wordFind(Agent agent, JsonObject args, String query, long tab) {
         return simple(agent, args, ACTION_FIND, r -> {
             var prefix = agent.name + ":" + tab + ":";
             var out = new StringBuilder(UNTRUSTED).append("\n\nMatches for \"").append(query).append("\":\n");
@@ -498,12 +505,19 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         }, ARG_QUERY);
     }
 
-    /** Find by meaning with the operator's finder model; null when it cannot, so the word match answers instead. */
-    private static @Nullable String modelFind(Agent agent, long tab, String query, ChromeFinder.Model model) {
-        if (tabRefusal(agent, tab) != null) return null;
+    private static final String MODEL_FAILED_NOTE = "Note: the find model did not answer, so these are plain word "
+            + "matches and may miss what you meant. Try read, or a shorter query of words the page uses.\n\n";
+
+    /** The model's answer, or none: {@code modelFailed} says the model was asked and could not answer. */
+    private record ModelFind(@Nullable String text, boolean modelFailed) {}
+
+    /** Find by meaning with the operator's finder model; no text means the word match answers instead. */
+    private static ModelFind modelFind(Agent agent, long tab, String query, ChromeFinder.Model model) {
+        var refused = new ModelFind(null, false);
+        if (tabRefusal(agent, tab) != null) return refused;
         var page = ChromeBridge.call(ACTION_READ, withTab(tab)).getAsJsonObject();
         var url = string(page, ARG_URL);
-        if (url == null || ChromeBridgePolicy.visitRefusal(agent, url) != null) return null;
+        if (url == null || ChromeBridgePolicy.visitRefusal(agent, url) != null) return refused;
         var elements = new LinkedHashMap<String, JsonObject>();
         var listing = new StringBuilder();
         for (JsonElement e : page.has("elements") ? page.getAsJsonArray("elements") : new JsonArray()) {
@@ -513,7 +527,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         }
         var title = string(page, "title");
         var picks = ChromeFinder.pick(model, title == null ? "" : title, query, listing.toString());
-        if (picks == null) return null;
+        if (picks == null) return new ModelFind(null, true);
         var prefix = agent.name + ":" + tab + ":";
         var out = new StringBuilder(UNTRUSTED).append("\n\nMatches for \"").append(query).append("\":\n");
         for (var ref : picks) {
@@ -523,7 +537,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
             appendElement(out, el);
         }
         if (picks.isEmpty()) out.append("(none)\n");
-        return out.toString();
+        return new ModelFind(out.toString(), false);
     }
 
     private static String console(Agent agent, JsonObject args) {
