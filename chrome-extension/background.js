@@ -1,3 +1,5 @@
+import { plainLink } from './plain-link.js'
+
 const GROUP_NAME = 'JClaw'
 // Chrome gives a group a title and a colour but no icon, so the lobster rides in the title. A group the
 // operator named plain "JClaw" by hand is still the JClaw group, and takes the emoji at startup.
@@ -217,6 +219,17 @@ async function run(tabId, func, args = []) {
   return r.result
 }
 
+// Each element the page described gets its link verdict here, and the facts behind it are not passed on.
+function withLinkVerdicts(result, pageUrl) {
+  for (const el of result.elements ?? result.matches ?? []) {
+    el.link = plainLink({ tag: el.tag, rawHref: el.rawHref ?? null, href: el.href ?? '', onclick: el.onclick, role: el.role }, pageUrl)
+    delete el.rawHref
+    delete el.onclick
+    delete el.role
+  }
+  return result
+}
+
 async function handle(msg) {
   switch (msg.action) {
     case 'tabs_list': {
@@ -246,10 +259,20 @@ async function handle(msg) {
     }
     case 'read': {
       const tab = await groupedTab(msg.tabId)
-      return run(tab.id, readPage, [MAX_TEXT, MAX_ELEMENTS, Math.max(0, Number(msg.offset) || 0)])
+      return withLinkVerdicts(await run(tab.id, readPage, [MAX_TEXT, MAX_ELEMENTS, Math.max(0, Number(msg.offset) || 0)]), tab.url)
     }
     case 'click': {
       const tab = await groupedTab(msg.tabId)
+      // The server let this click through unasked because the element was read as a plain link; the page may
+      // have changed since, so judge it again before pressing.
+      if (msg.requirePlain) {
+        const facts = await run(tab.id, (ref) => {
+          const el = window.__agentRefs?.get(ref)
+          if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+          return { tag: el.tagName, rawHref: el.getAttribute('href'), href: el.href ?? '', onclick: el.hasAttribute('onclick'), role: el.getAttribute('role') }
+        }, [msg.ref])
+        if (!plainLink(facts, tab.url)) throw new Error(`${msg.ref} is no longer a plain link, so it needs the operator's approval`)
+      }
       // A real click, so an input takes focus and a handler sees a trusted event; an element with no size
       // cannot be pointed at, so it keeps the scripted click.
       const p = await pointOf(tab.id, msg)
@@ -403,7 +426,7 @@ async function handle(msg) {
     }
     case 'find': {
       const tab = await groupedTab(msg.tabId)
-      return run(tab.id, (query, limit) => {
+      return withLinkVerdicts(await run(tab.id, (query, limit) => {
         const words = String(query).toLowerCase().split(/\s+/).filter(Boolean)
         if (!window.__agentRefs) window.__agentRefs = new Map()
         const hintOf = (el, text) => {
@@ -445,11 +468,13 @@ async function handle(msg) {
               ref, tag: el.tagName.toLowerCase(), text, hint: hint || undefined,
               type: el.tagName === 'INPUT' ? el.type : undefined,
               href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
-              link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
+              rawHref: el.tagName === 'A' ? el.getAttribute('href') : undefined,
+              onclick: el.hasAttribute('onclick'),
+              role: el.getAttribute('role'),
             }
           }),
         }
-      }, [msg.query, 10])
+      }, [msg.query, 10]), tab.url)
     }
     case 'resize': {
       const tab = await groupedTab(msg.tabId)
@@ -521,9 +546,10 @@ function readPage(maxText, maxElements, offset) {
       hint: hintOf(el, text) || undefined,
       // The absolute address, so the agent can see where a link goes before it clicks.
       href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
-      // A plain link: the only click the server lets an agent make without asking. A click handler on
-      // a link, or a javascript: href, is not plain, so it is not flagged.
-      link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
+      // What plainLink needs to judge the click; the verdict is given outside the page, where it cannot be altered.
+      rawHref: el.tagName === 'A' ? el.getAttribute('href') : undefined,
+      onclick: el.hasAttribute('onclick'),
+      role: el.getAttribute('role'),
     })
   }
   const full = document.body.innerText

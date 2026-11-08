@@ -56,6 +56,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
     private static final String ARG_ACTION = "action";
     private static final String ARG_URL = "url";
     private static final String ARG_TAB = "tabId";
+    private static final String ARG_REQUIRE_PLAIN = "requirePlain";
     private static final String ARG_REF = "ref";
     private static final String ARG_TEXT = "text";
     private static final String ARG_OFFSET = "offset";
@@ -372,6 +373,11 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         if (refusal != null) return ERROR + refusal;
         var call = withTab(tab);
         call.addProperty(ARG_REF, ref);
+        // Asked about only because the element was read as a plain link: the extension judges it again at the click.
+        if (ACTION_CLICK.equals(action) && ChromeBridgePolicy.clickNeedsApproval(agent)
+                && Boolean.TRUE.equals(LINKS.get(agent.name + ":" + refKey(args)))) {
+            call.addProperty(ARG_REQUIRE_PLAIN, true);
+        }
         if (ACTION_TYPE.equals(action)) {
             var text = string(args, ARG_TEXT);
             if (text == null) return ERROR + "type needs text.";

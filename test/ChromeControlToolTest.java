@@ -224,6 +224,35 @@ class ChromeControlToolTest extends UnitTest {
     }
 
     @Test
+    void aClickLetThroughAsAPlainLinkIsMarkedSoTheExtensionJudgesItAgain() throws Exception {
+        var helper = helper();
+        allow(helper, "example.com");
+        var fake = shopTab();
+        ChromeBridgeSync.with(fake, () -> {
+            run(helper, "{\"action\":\"read\",\"tabId\":7}");
+
+            run(helper, click("e2"));
+            assertTrue(fake.sent.getLast().get("requirePlain").getAsBoolean(), "a link clicked unasked is rechecked at the click");
+
+            run(helper, click("e1"));
+            assertFalse(fake.sent.getLast().has("requirePlain"), "a button the operator approved is not a link to judge");
+        });
+    }
+
+    @Test
+    void aClickTheMainAgentMakesFreelyIsNotMarked() throws Exception {
+        var main = agent("main");
+        ConfigService.set(ChromeBridgePolicy.key("main", ChromeBridgePolicy.ALLOW_ALL_SITES), "true");
+        ConfigService.set(ChromeBridgePolicy.key("main", ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL), "true");
+        var fake = shopTab();
+        ChromeBridgeSync.with(fake, () -> {
+            run(main, "{\"action\":\"read\",\"tabId\":7}");
+            run(main, click("e2"));
+            assertFalse(fake.sent.getLast().has("requirePlain"), "the operator turned approval off for main");
+        });
+    }
+
+    @Test
     void theMainAgentClicksFreelyOnlyOnceTheOperatorSaysSo() throws Exception {
         var main = agent("main");
         ConfigService.set(ChromeBridgePolicy.key("main", ChromeBridgePolicy.ALLOW_ALL_SITES), "true");

@@ -934,7 +934,7 @@ Pressing a key, dragging, and clicking at a point count as clicks for approval, 
 - **Click without asking** lets the main agent click without any approval step. For every other agent, a click on anything except a plain link is **refused**, whatever [Tool Approvals](#settings-tool-approvals) is set to, unless that setting is `ask`: then JClaw sends a confirmation to the agent's bound Telegram DM and the click waits for your answer. A button, a form control and a styled box with a click handler are all treated alike. The model is told the action was not approved.
 - **Run page script** lets the main agent use `chrome_script`. It does not exempt anything from approval: each script call is refused unless [Tool Approvals](#settings-tool-approvals) is `ask`, which sends a confirmation to the agent's bound Telegram DM.
 
-A plain link never needs approval. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through, and so does a link whose page runs a script on click.
+A plain link never needs approval: one that opens a different page. A link that stays on the page waits like a button: a `#` link, an empty one, one back to the same page, one with a click handler written on it, or one marked as a button. A link that changes something when it is opened, such as a sign-out or a confirm link, still goes through.
 
 A page can contain text that tries to give the agent instructions. JClaw marks page text as untrusted when it hands it to the agent, but that is a help and not a guarantee. Keep the lists short. The site list is the stronger protection, and the approval prompt is a second check, not a guarantee.
 
