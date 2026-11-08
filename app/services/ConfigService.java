@@ -411,8 +411,6 @@ public class ConfigService {
                     ? key + " must be a whole number from 0 to 100; 0 turns the window share off." : null,
             (key, value) -> key.equals(SessionCompactor.ON_ROW_LIMIT_KEY) && !isTrueOrFalse(value)
                     ? key + " must be 'true' or 'false'." : null,
-            (key, value) -> key.equals(SessionCompactor.ON_TOOL_ROUND_KEY) && !isTrueOrFalse(value)
-                    ? key + " must be 'true' or 'false'." : null,
             (key, value) -> key.equals(SystemPromptAssembler.VISUAL_ENABLED_KEY) && !value.isBlank()
                     && !isTrueOrFalse(value) ? key + " must be 'true' or 'false'." : null,
             atLeast(SessionCompactor.SUMMARY_BUDGET_KEY, SessionCompactor.MIN_SUMMARY_BUDGET,

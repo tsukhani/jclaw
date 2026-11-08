@@ -144,12 +144,6 @@ public final class SessionCompactor {
     /** JF-159: the token trigger's share, in percent, of the window left after the system prompt and tools; 0 or less turns this half off. */
     public static final String TRIGGER_PERCENT_KEY = "chat.compaction.triggerPercent";
     public static final int DEFAULT_TRIGGER_PERCENT = 50;
-    /**
-     * JF-236: true lets a summary end after a finished tool round when a chat has no user row to end it on, as one
-     * long run of tool calls under a single prompt does. Off by default and unseeded: it newly summarizes chats that
-     * could never be cut, and a summary is undone only by SQL, so it is turned on after trying one long chat.
-     */
-    public static final String ON_TOOL_ROUND_KEY = "chat.compaction.onToolRound";
     /** JF-159: false leaves a chat past its history limit to the newest-rows load, dropping the oldest unread. */
     public static final String ON_ROW_LIMIT_KEY = "chat.compaction.onRowLimit";
     /** The most summary calls one automatic compaction makes; a catch-up that needs more continues on the next turn. */
@@ -911,13 +905,13 @@ public final class SessionCompactor {
     }
 
     /**
-     * The last row from {@code from} to {@code to} a summary may end on: a user row, else, when
-     * {@link #ON_TOOL_ROUND_KEY} is on, the row opening a tool round (JF-236). A turn of many tool rounds under one prompt has no user row to cut at, so it was never
+     * The last row from {@code from} to {@code to} a summary may end on: a user row, else the row opening a tool
+     * round (JF-236). A turn of many tool rounds under one prompt has no user row to cut at, so it was never
      * summarized however far past the trigger it ran.
      */
     private static int latestCut(List<Message> rows, int from, int to) {
         int user = latestUserRow(rows, from, to);
-        if (user >= 0 || !ConfigService.getBoolean(ON_TOOL_ROUND_KEY, false)) return user;
+        if (user >= 0) return user;
         for (int i = Math.min(to, rows.size() - 1); i >= Math.max(from, 1); i--) {
             if (opensToolRound(rows, i)) return i;
         }
@@ -927,7 +921,7 @@ public final class SessionCompactor {
     /** {@link #latestCut} from the other end: the first such row. */
     private static int earliestCut(List<Message> rows, int from, int to) {
         int user = earliestUserRow(rows, from, to);
-        if (user >= 0 || !ConfigService.getBoolean(ON_TOOL_ROUND_KEY, false)) return user;
+        if (user >= 0) return user;
         for (int i = Math.max(from, 1); i <= Math.min(to, rows.size() - 1); i++) {
             if (opensToolRound(rows, i)) return i;
         }

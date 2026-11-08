@@ -102,7 +102,6 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void findSafeBoundary_cutsAfterAToolRound_whenTheOnlyUserRowOpensTheTurn() {
-        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
         // One prompt, then 31 rounds of assistant call + tool result: 63 rows, keepMin 10 → boundary range [10, 53].
         var msgs = oneLongTurn(31);
         int boundary = SessionCompactor.findSafeBoundary(msgs);
@@ -113,25 +112,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void findSafeBoundary_leavesALongTurnUncutWhileTheToolRoundSwitchIsOff() {
-        assertEquals(-1, SessionCompactor.findSafeBoundary(oneLongTurn(31)));
-    }
-
-    @Test
-    void compact_skipsALongTurnWhileTheToolRoundSwitchIsOff() {
-        var conv = ConversationService.create(agent, "web", "user1");
-        seedOneLongTurn(conv, 31);
-        commitAndReopen();
-
-        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "never used");
-
-        assertFalse(result.compacted());
-        assertEquals(SessionCompactor.NO_CUT_REASON, result.skipReason());
-    }
-
-    @Test
     void findSafeBoundary_prefersAUserRowOverAToolRound() {
-        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
         var msgs = oneLongTurn(31);
         msgs.get(12).role = MessageRole.USER.value;
         assertEquals(12, SessionCompactor.findSafeBoundary(msgs));
@@ -302,7 +283,6 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void aSummaryOnTheTurnCutAtAToolRoundSendsItsPrefixNotTheTranscript() {
-        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
         var conv = ConversationService.create(agent, "web", "user1");
         seedOneLongTurn(conv, 31);
         commitAndReopen();
@@ -324,7 +304,6 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void aSecondCompactionOnAFloorThatOpensOnAnAssistantRowSendsThePrefixWithItsLeadingNote() {
-        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
         var conv = ConversationService.create(agent, "web", "user1");
         seedOneLongTurn(conv, 31);
         commitAndReopen();
@@ -602,7 +581,6 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void compact_summarizesOneLongTurnAtAToolRoundBoundary() {
-        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
         var conv = ConversationService.create(agent, "web", "user1");
         seedOneLongTurn(conv, 31);
         commitAndReopen();

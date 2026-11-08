@@ -20,8 +20,7 @@ public final class CompactionTriggerSync {
     private static final ReentrantLock LOCK = new ReentrantLock();
 
     private static final List<String> KEYS = List.of(SessionCompactor.TRIGGER_TOKENS_KEY,
-            SessionCompactor.TRIGGER_PERCENT_KEY, SessionCompactor.ON_ROW_LIMIT_KEY, SessionCompactor.ON_TOOL_ROUND_KEY,
-            ConversationService.KEY_GLOBAL_MAX,
+            SessionCompactor.TRIGGER_PERCENT_KEY, SessionCompactor.ON_ROW_LIMIT_KEY, ConversationService.KEY_GLOBAL_MAX,
             ConversationService.KEY_DM_LIMIT, ConversationService.KEY_GROUP_LIMIT, SessionCompactor.SUMMARY_BUDGET_KEY,
             SessionCompactor.TOOL_RESULT_CHARS_KEY);
 

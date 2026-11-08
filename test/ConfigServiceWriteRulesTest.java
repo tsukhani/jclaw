@@ -255,17 +255,6 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
-    void theToolRoundSwitchMustBeTrueOrFalse() {
-        var expected = "chat.compaction.onToolRound must be 'true' or 'false'.";
-        for (var value : List.of("yes", "1", "")) {
-            assertRefused(expected, SessionCompactor.ON_TOOL_ROUND_KEY, value);
-        }
-        for (var value : List.of("true", "false", "TRUE")) {
-            assertAccepted(SessionCompactor.ON_TOOL_ROUND_KEY, value);
-        }
-    }
-
-    @Test
     void theVisualSwitchMustBeTrueOrFalseOrBlank() {
         var key = SystemPromptAssembler.VISUAL_ENABLED_KEY;
         for (var value : List.of("yes", "1")) {
