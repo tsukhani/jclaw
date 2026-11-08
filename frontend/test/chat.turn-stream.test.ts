@@ -1283,12 +1283,19 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(openStreamsOn(6)).toEqual([])
 
     await vmOf(component).loadConversation(5)
-    await flushPromises()
+    // Its stream opens once the conversation's fetches land, which under load is after more than one flush.
+    await vi.waitFor(() => expect(openStreamsOn(5)).toHaveLength(1))
     const again = streamOn(5)
     component.unmount()
     expect(again.closed).toBe(true)
     await flushPromises()
     expect(stops).toEqual([])
-    expect(FakeEventSource.all.every(s => s.closed)).toBe(true)
+    // Only the conversations' streams: the app-wide /api/events stream outlives a page, and opens in whichever test
+    // mounts the page first.
+    expect(FakeEventSource.all.filter(s => s.url.startsWith('/api/conversations/')).map(s => [s.url, s.closed])).toEqual([
+      ['/api/conversations/5/stream', true],
+      ['/api/conversations/6/stream', true],
+      ['/api/conversations/5/stream', true],
+    ])
   })
 })
