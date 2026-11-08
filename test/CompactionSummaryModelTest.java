@@ -290,6 +290,25 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
+    void aFixedModelAgentCanChooseTheRouterAsItsCompactionModelToGetTheSummarizeClass() {
+        configure(1_000_000);
+        var agent = fixedAgentOnA("jf239-router-choice");
+        agent.compactionProvider = ModelRouter.PROVIDER;
+        agent.compactionModel = ModelRouter.MODEL_ID;
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-jf239-router-choice");
+        seed(conv, 25, i -> "turn " + i);
+        commit();
+
+        CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), ProviderRegistry.get(a),
+                hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi"))), List.of(), 1_000_000);
+
+        assertEquals(List.of(b + "-model"), models(b), "the summarize class's first choice writes it");
+        assertEquals(0, requests.get(a).size() + requests.get(c).size());
+        assertEquals(List.of(b + "/" + b + "-model"), storedModels(conv.id));
+    }
+
+    @Test
     void slashCompactUsesTheAgentsCompactionModel() throws Exception {
         configure(1_000_000);
         var agent = fixedAgentOnA("jf239-slash");

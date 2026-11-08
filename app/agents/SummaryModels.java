@@ -25,7 +25,8 @@ import java.util.function.Supplier;
  * override else its own, is the router summarizes with the router's summarize class, its choice and then that choice's
  * fallback; any other agent, or a router with nothing to offer, summarizes with the caller's own model, so a
  * conversation never reaches a provider its agent was not set up to use. An agent's own compaction model (JF-239) goes
- * first, an operator's explicit choice for that agent, with the caller's own model behind it.
+ * first, an operator's explicit choice for that agent, with the caller's own model behind it; the router entry there
+ * means the router's summarize class, so a fixed-model agent can ask for it.
  */
 public final class SummaryModels implements SessionCompactor.ModelCall {
 
@@ -70,7 +71,7 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
         }
         var configured = ModelOverrideResolver.configured(conversation, agent);
         var choices = new ArrayList<Choice>(2);
-        if (ModelRouter.isRouter(configured.provider(), configured.modelId())) {
+        if (ModelRouter.isRouter(configured.provider(), configured.modelId()) || choosesTheRouter(agent)) {
             for (var target : ModelRouter.summarizers()) {
                 var provider = ProviderRegistry.get(target.provider());
                 if (provider != null) choices.add(new Choice(provider, target.modelId()));
@@ -81,9 +82,15 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
         return new SummaryModels(fallback != null ? List.of(fallback) : List.of(), false, false, channel);
     }
 
+    /** True when the agent's compaction model is the router entry: summaries go to the router's summarize class. */
+    private static boolean choosesTheRouter(Agent agent) {
+        return agent.compactionModelOverridden()
+                && ModelRouter.isRouter(agent.compactionProvider, agent.compactionModel);
+    }
+
     /** The agent's own compaction model, or null when it sets none or that provider or model is no longer configured. */
     private static @Nullable Choice compactionModelOf(Agent agent) {
-        if (!agent.compactionModelOverridden()) return null;
+        if (!agent.compactionModelOverridden() || choosesTheRouter(agent)) return null;
         var provider = ProviderRegistry.get(agent.compactionProvider);
         if (provider == null) return null;
         var choice = new Choice(provider, agent.compactionModel);
