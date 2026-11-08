@@ -18,6 +18,7 @@ import utils.SandboxHiddenRoots;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -460,6 +461,24 @@ class HarnessSandboxTest extends UnitTest {
         for (var hidden : stateOf(root)) {
             assertTrue(indexOfPair(argv, "--tmpfs", hidden.toString()) > bind,
                     hidden + " must be hidden after the ancestor bind that would re-expose it, argv=" + argv);
+        }
+    }
+
+    /** A home read is bound read-only: only the write root gets a read-write bind, so a homeReads folder cannot be written. */
+    @Test
+    void linuxBindsEveryAllowanceReadOnlyAndOnlyTheWriteRootReadWrite() {
+        var home = "/home/operator";
+        var writeRoot = new File(home + "/workspace/agent");
+        var reads = List.of(home + "/tools", home + "/notes");
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), writeRoot, reads, home, List.of(), false, false);
+        var readWrite = new ArrayList<String>();
+        for (int i = 0; i + 2 < argv.size(); i++) {
+            if (argv.get(i).equals("--bind")) readWrite.add(argv.get(i + 1));
+        }
+        assertEquals(List.of(SandboxHiddenRoots.canonical(writeRoot.toPath()).toString()), readWrite, "argv=" + argv);
+        for (var read : reads) {
+            var canonical = SandboxHiddenRoots.canonical(java.nio.file.Path.of(read)).toString();
+            assertTrue(indexOfPair(argv, "--ro-bind-try", canonical) > 0, read + " must be a read-only bind, argv=" + argv);
         }
     }
 
