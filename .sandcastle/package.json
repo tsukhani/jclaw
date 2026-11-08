@@ -7,7 +7,7 @@
     "check": "tsc --noEmit -p . && tsx check.ts"
   },
   "dependencies": {
-    "@ai-hero/sandcastle": "0.12.0",
+    "@ai-hero/sandcastle": "0.14.0",
     "tsx": "4.23.15",
     "zod": "4.6.7"
   },
