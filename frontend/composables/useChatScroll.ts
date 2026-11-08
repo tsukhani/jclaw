@@ -57,9 +57,9 @@ export function useChatScroll(
   let draggingList = false
   let pointerOnRow = false
   let writtenTop: number | null = null
-  // Where the page or the reader last put the view. A move up from it that this page saw no input for is the reader's
-  // once it passes the slack, whatever moved it (a wheel over an embedded frame, find in page): a layout change keeps a
-  // reader at the bottom where they were. Measured from here, not from the last event, so a slow drift adds up.
+  // Where the page or the reader last put the view: a reader's move up or down is measured from here. A move up with no
+  // input is never the reader's, however far: a full page load's layout settling (fonts, scroll anchoring) moves the
+  // view up by itself, and counted, it stopped a running reply's follow at the open in a long conversation (JF-229).
   let placedTop: number | null = null
   // The furthest the view could reach when it was placed. A clamp moves the view up to the very bottom once that falls
   // (rows that shrank, a taller viewport); any other move up is a move, even when rows below the view shrank too.
@@ -246,10 +246,6 @@ export function useChatScroll(
         const back = !movedUp && (top > placed || fromBottom <= 1)
         readerAbove.value = movedUp || (readerAbove.value && !(bottom && back))
       }
-      place(el, top)
-    }
-    else if (!own && placed != null && top < placed - BOTTOM_SLACK_PX && !bottom) {
-      readerAbove.value = true
       place(el, top)
     }
     else {

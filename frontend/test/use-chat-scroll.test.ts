@@ -531,7 +531,7 @@ describe('useChatScroll', () => {
     }
   })
 
-  it('takes a move up it did not make for the reader\'s with no input it saw, but not a shrink that keeps them at the bottom', async () => {
+  it('keeps following through a move up no input caused, as a page\'s first layout makes, and a shrink that keeps the view at the bottom', async () => {
     stubResizeObserver()
     const { api } = mountScroll()
     const { el, layout } = viewportWithContent()
@@ -548,13 +548,14 @@ describe('useChatScroll', () => {
     flushRaf()
     expect(el.scrollTop).toBe(1000)
 
-    // A wheel over an embedded frame scrolls the list up with no input on it: the reader stays where they went.
+    // A full page load's layout settling (fonts swapping in, scroll anchoring) moves the view up 700 px with no input:
+    // live in a long conversation it left the view 1,271 px short of a running reply's bottom, never followed again.
     layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })
     el.dispatchEvent(new Event('scroll'))
     layout({ scrollTop: 300, scrollHeight: 1100, clientHeight: 200 })
     api.followToBottom()
     flushRaf()
-    expect(el.scrollTop).toBe(300)
+    expect(el.scrollTop).toBe(1100)
   })
 
   it('does not count focus a click moved, a wheel down at the bottom, or input made before a pin', async () => {
@@ -610,27 +611,6 @@ describe('useChatScroll', () => {
     flushRaf()
 
     expect(el.scrollTop).toBe(2300)
-  })
-
-  it('takes a slow move up it did not make for the reader\'s once it adds up past the slack', async () => {
-    stubResizeObserver()
-    const { api } = mountScroll()
-    const box = { top: 800, height: 1000, client: 200 }
-    const el = clampingViewport(box)
-    api.messagesEl.value = el
-    await nextTick()
-    el.dispatchEvent(new Event('scroll'))
-
-    // A trackpad over an embedded frame scrolls the list up 10 px an event, with no input on the list itself.
-    for (const top of [790, 780, 770, 760, 750, 740]) {
-      box.top = top
-      el.dispatchEvent(new Event('scroll'))
-    }
-    box.height = 1100
-    api.followToBottom()
-    flushRaf()
-
-    expect(el.scrollTop).toBe(740)
   })
 
   it('leaves a reader who wheels up a few pixels where they are while a turn streams, though that is within the slack', async () => {
@@ -1001,7 +981,7 @@ describe('useChatScroll', () => {
     expect(api.scrolledAway.value).toBe(false)
   })
 
-  it('sets scrolledAway on a nudge inside the slack and on a move up no input caused, and clears it at the very bottom', async () => {
+  it('sets scrolledAway on a nudge inside the slack but not on a move up no input caused, and clears it at the very bottom', async () => {
     stubResizeObserver()
     const { api } = mountScroll()
     const box = { top: 800, height: 1000, client: 200 }
@@ -1019,13 +999,17 @@ describe('useChatScroll', () => {
     el.dispatchEvent(new Event('scroll'))
     expect(api.scrolledAway.value).toBe(false)
 
-    // A wheel over an embedded frame moves the list up with no input on it.
+    // A layout shift moves the view up with no input on the list.
     box.top = 600
+    el.dispatchEvent(new Event('scroll'))
+    expect(api.scrolledAway.value).toBe(false)
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }))
+    box.top = 560
     el.dispatchEvent(new Event('scroll'))
     expect(api.scrolledAway.value).toBe(true)
     // The rows shrink to the view, and the browser clamps it to the very bottom.
-    box.height = 800
-    box.top = 600
+    box.height = 760
+    box.top = 560
     el.dispatchEvent(new Event('scroll'))
     expect(api.scrolledAway.value).toBe(false)
   })
