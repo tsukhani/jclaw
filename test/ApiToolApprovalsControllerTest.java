@@ -1,3 +1,4 @@
+import agents.DangerousActionGate;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.ToolApprovalGrant;
@@ -99,6 +100,30 @@ class ApiToolApprovalsControllerTest extends FunctionalTest {
 
         var response = DELETE("/api/agents/" + agentId + "/tool-approvals/no_such_tool");
         assertStatus(404, response);
+    }
+
+    @Test
+    void revokingASessionOnlyGrantIs200AndWithdrawsIt() {
+        // An "approve for the session" tap records no row, so the row lookup alone answers 404 and the
+        // grant stands until a restart.
+        var agentId = createAgent("approvals-revoke-session");
+        DangerousActionGate.grantSessionForTest(agentId, DANGEROUS_TOOL);
+        login();
+
+        assertIsOk(DELETE("/api/agents/" + agentId + "/tool-approvals/" + DANGEROUS_TOOL));
+        assertStatus(404, DELETE("/api/agents/" + agentId + "/tool-approvals/" + DANGEROUS_TOOL));
+    }
+
+    @Test
+    void revokingAnAlwaysGrantAlsoWithdrawsItsSessionCopy() {
+        var agentId = createAgent("approvals-revoke-both");
+        seedGrant(agentId, DANGEROUS_TOOL);
+        DangerousActionGate.grantSessionForTest(agentId, DANGEROUS_TOOL);
+        login();
+
+        assertIsOk(DELETE("/api/agents/" + agentId + "/tool-approvals/" + DANGEROUS_TOOL));
+        assertFalse(grantExists(agentId, DANGEROUS_TOOL), "revoke must delete the row");
+        assertStatus(404, DELETE("/api/agents/" + agentId + "/tool-approvals/" + DANGEROUS_TOOL));
     }
 
     @Test

@@ -85,10 +85,11 @@ public class ApiToolApprovalsController extends Controller {
             requireAgent(id);
             return ToolApprovalGrant.revoke(id, toolName);
         });
-        if (!Boolean.TRUE.equals(removed)) notFound();
-        // JCLAW-1226: the gate ORs the row against an in-process cache, so the row
-        // delete alone would leave the grant standing until the JVM restarts.
-        DangerousActionGate.revokeGrant(id, toolName);
+        // JCLAW-1226: the gate ORs the row against an in-process cache, so the row delete alone would
+        // leave the grant standing until the JVM restarts. An "approve for the session" tap leaves only
+        // the cache entry, so it must count as something removed.
+        var sessionRemoved = DangerousActionGate.revokeGrant(id, toolName);
+        if (!Boolean.TRUE.equals(removed) && !sessionRemoved) notFound();
         ok();
     }
 

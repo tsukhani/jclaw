@@ -608,8 +608,8 @@ public final class DangerousActionGate {
      * is an OR over this never-pruned set and the live table, so a row delete on its own
      * leaves the grant standing until the JVM restarts.
      */
-    public static void revokeGrant(Long agentId, @Nullable String toolName) {
-        GRANTS.remove(grantKey(agentId, toolName));
+    public static boolean revokeGrant(Long agentId, @Nullable String toolName) {
+        return GRANTS.remove(grantKey(agentId, toolName));
     }
 
     /** JCLAW-1226: the {@link #revokeGrant} sweep for a whole agent, for the delete cascade. */
@@ -717,6 +717,11 @@ public final class DangerousActionGate {
     private static Duration timeout() {
         return Duration.ofSeconds(
                 ConfigService.getInt(APPROVAL_TIMEOUT_KEY, DEFAULT_TIMEOUT_SECONDS));
+    }
+
+    /** Visible for testing: record the in-process grant an "approve for the session" tap leaves, with no row. */
+    public static void grantSessionForTest(Long agentId, String toolName) {
+        GRANTS.add(grantKey(agentId, toolName));
     }
 
     /** Visible for testing: drop every standing grant. */
