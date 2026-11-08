@@ -56,7 +56,11 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
   So a failure outside the ticket's own classes surfaces at `/deploy`, and is fixed before the push.
 
-  Before starting those tests, check that no full suite is running in any checkout on this machine: `jcmd -l | grep playAutotest | grep -v -e -Ptests=` prints one line for each, with the checkout in its wrapper path. Wait until it prints nothing. A full suite runs up to 16 classes at once, so a run started beside it starves: tests with a timeout fail in both runs, through no fault in either change.
+  Before starting those tests, wait until neither wide run is in progress on this machine, that is until both checks print nothing:
+  - a full suite, in any checkout: `jcmd -l | grep playAutotest | grep -v -e -Ptests=` prints one line for each, with the checkout in its wrapper path;
+  - `/deploy`'s pre-push hook, whose run is a `-Ptests=` list unless the push reaches every class, so the first check skips it: `pgrep -fl '[.]githooks/pre-push'` prints it for as long as it runs, and the brackets keep the pattern from matching the shell that runs it.
+
+  A wide run executes up to 16 classes at once, so a run started beside it starves: tests with a timeout fail in both runs, through no fault in either change, and a red in the hook blocks the push.
 - `./jclaw.sh check` runs what fails without running a test (the wildcard-import grep, spotlessCheck, compileJava with NullAway, ESLint, Stylelint, the typecheck), 23 s on a warm tree; `--backend-only` leaves the frontend out. `./jclaw.sh check-arch` runs the 18 ArchUnit and conformance classes alone, about 2.5 min.
 - Test sources are the default package: test seams must be `public`. A test class must extend `play.test.UnitTest` or `FunctionalTest`; `TestDiscoveryConformanceTest` fails the build on one that does neither, which the runner would never reach. A test reaches a package-private method by reflection (`SubagentRunEventsTest` into `SubagentRunStore`), so changing such a signature compiles and fails only when that class runs: `git grep -n '"<method>"' -- test` first.
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
