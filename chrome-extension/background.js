@@ -86,6 +86,23 @@ function waitForLoad(tabId) {
   })
 }
 
+// A click can start a navigation that has not begun when the script returns. Without waiting, the agent's
+// next read still sees the page it just left.
+async function settleAfterClick(tabId, before) {
+  const deadline = Date.now() + 700
+  while (Date.now() < deadline) {
+    const t = await chrome.tabs.get(tabId)
+    if (t.status === 'loading' || t.url !== before) {
+      const limit = Date.now() + 15_000
+      while (Date.now() < limit && (await chrome.tabs.get(tabId)).status === 'loading') {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      return
+    }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
 async function run(tabId, func, args = []) {
   const [r] = await chrome.scripting.executeScript({ target: { tabId }, func, args })
   // A function that throws inside the page yields an empty result, not a rejection.
@@ -127,13 +144,15 @@ async function handle(msg) {
     }
     case 'click': {
       const tab = await groupedTab(msg.tabId)
-      return run(tab.id, (ref) => {
+      const clicked = await run(tab.id, (ref) => {
         const el = window.__agentRefs?.get(ref)
         if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
         el.scrollIntoView({ block: 'center' })
         el.click()
         return { done: 'clicked' }
       }, [msg.ref])
+      await settleAfterClick(tab.id, tab.url)
+      return clicked
     }
     case 'type': {
       const tab = await groupedTab(msg.tabId)

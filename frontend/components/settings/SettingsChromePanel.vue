@@ -180,7 +180,7 @@ async function unpair() {
           <span class="text-sm text-fg-primary">
             Click without asking
             <span class="block text-xs text-fg-muted">
-              Every other agent asks you before it clicks anything except a plain link.
+              For every other agent, a click on anything except a plain link goes through Tool Approvals.
             </span>
           </span>
         </label>

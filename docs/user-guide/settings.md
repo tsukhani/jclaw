@@ -923,9 +923,9 @@ An agent can use Chrome only after you turn on the `chrome_control` tool on that
 **Main agent only.** Two options belong to the main agent and cannot be set for any other agent:
 
 - **Allow any site** skips the list. Loopback and private-network addresses, including this JClaw instance, stay blocked, because your browser is signed in to JClaw.
-- **Click without asking** lets the main agent click without waiting for your approval. Every other agent asks you before it clicks anything except a plain link, so a button, a form control or a styled box with a click handler all wait for you.
+- **Click without asking** lets the main agent click without any approval step. For every other agent, a click on anything except a plain link goes through [Tool Approvals](#settings-tool-approvals): with the default `allow` it runs, with `ask` you confirm it in the agent's bound Telegram DM, and with `deny` it is refused. A button, a form control and a styled box with a click handler are all treated alike.
 
-A plain link does not ask. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through without asking, and so does a link whose page runs a script on click.
+A plain link never goes through approval. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through, and so does a link whose page runs a script on click. Because the default is `allow`, nothing asks you in the web chat unless you change that setting.
 
 A page can contain text that tries to give the agent instructions. JClaw marks page text as untrusted when it hands it to the agent, but that is a help and not a guarantee. Keep the lists short. The site list is the stronger protection, and the approval prompt is a second check, not a guarantee.
 
