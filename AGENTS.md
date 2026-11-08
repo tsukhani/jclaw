@@ -55,6 +55,8 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
   - Jenkins runs the full suite after the push.
 
   So a failure outside the ticket's own classes surfaces at `/deploy`, and is fixed before the push.
+
+  Before starting those tests, check that no full suite is running in any checkout on this machine: `jcmd -l | grep playAutotest | grep -v -e -Ptests=` prints one line for each, with the checkout in its wrapper path. Wait until it prints nothing. A full suite runs up to 16 classes at once, so a run started beside it starves: tests with a timeout fail in both runs, through no fault in either change.
 - `./jclaw.sh check` runs what fails without running a test (the wildcard-import grep, spotlessCheck, compileJava with NullAway, ESLint, Stylelint, the typecheck), 23 s on a warm tree; `--backend-only` leaves the frontend out. `./jclaw.sh check-arch` runs the 18 ArchUnit and conformance classes alone, about 2.5 min.
 - Test sources are the default package: test seams must be `public`. A test class must extend `play.test.UnitTest` or `FunctionalTest`; `TestDiscoveryConformanceTest` fails the build on one that does neither, which the runner would never reach. A test reaches a package-private method by reflection (`SubagentRunEventsTest` into `SubagentRunStore`), so changing such a signature compiles and fails only when that class runs: `git grep -n '"<method>"' -- test` first.
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
