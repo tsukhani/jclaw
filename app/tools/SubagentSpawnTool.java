@@ -135,7 +135,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String FIELD_LABEL = "label";
     // JCLAW-S1192: request-arg and response-field key constants.
     private static final String ARG_TASKS = "tasks";
+    /** No longer an argument: a call naming it is refused with {@link #AGENT_ID_REFUSED}. */
     static final String ARG_AGENT_ID = "agentId";
+    static final String AGENT_ID_REFUSED = "Error: subagent_spawn no longer takes agentId: it spawns only helper "
+            + "copies of the calling agent. To hand a task to another agent, call agent_spawn with that agent's name.";
+    static final String SPAWN_REFUSED = "Subagent spawn refused: ";
     static final String ARG_CONTEXT = "context";
     static final String ARG_RUN_TIMEOUT_SECONDS = "runTimeoutSeconds";
     static final String ARG_RUNTIME = "runtime";
@@ -197,9 +201,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * saturate the executor with concurrent children.
      *
      * <p>Depth = count of {@link Agent#parentAgent} links walking from the
-     * spawning agent back to a root. {@code depthLimit=1} means
-     * "only top-level agents (parentAgent == null) can spawn"; a child
-     * would itself be at depth 1, hit the limit, and be refused.
+     * spawning agent back to a root, or the depth of the run the spawning turn
+     * executes when that is greater (an {@code agent_spawn} callee has no
+     * parentAgent). {@code depthLimit=1} means only a top-level turn can spawn
+     * or hand off; a child or a callee is at depth 1 and is refused.
      *
      * <p>Breadth = count of {@link SubagentRun} rows whose
      * {@code parentAgent} is the spawning agent and {@code status = RUNNING}.
@@ -331,16 +336,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         props.put(ARG_TASKS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
                 SchemaKeys.DESCRIPTION,
-                "BATCH FAN-OUT: an array of task strings to run as async subagents IN PARALLEL "
+                "BATCH FAN-OUT: an array of task strings (or {task, label} objects) to run as async subagents IN PARALLEL "
                         + "from one call (provide this INSTEAD of 'task'). Returns {run_ids:[...]} "
                         + "immediately; collect them all with ONE subagent_yield using runIds (or "
                         + "all=true). Session mode only."));
         props.put(FIELD_LABEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"));
-        props.put(ARG_AGENT_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                SchemaKeys.DESCRIPTION,
-                "Optional id of an existing Agent row to run as the child; "
-                        + "defaults to a fresh clone of the calling agent"));
         props.put("mode", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Spawn mode: \"session\" (default) creates a child Conversation that "
@@ -418,6 +419,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent parentAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        if (namesAgentId(args)) return AGENT_ID_REFUSED;
         // JCLAW-498: batch fan-out — a tasks[] array spawns N async children in
         // parallel; the single-child flow below handles a scalar task.
         if (args.has(ARG_TASKS) && !args.get(ARG_TASKS).isJsonNull()) {
@@ -425,6 +427,27 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         var requested = SubagentSpawnArgs.parse(args);
         if (requested.error() != null) return requested.error();
+        return spawnOne(args, parentAgent, requested, SPAWN_REFUSED, Map.of());
+    }
+
+    /** Whether the call names {@code agentId} at the top level or in a {@code tasks[]} object, whatever its value. */
+    private static boolean namesAgentId(JsonObject args) {
+        if (args.has(ARG_AGENT_ID)) return true;
+        var tasks = args.get(ARG_TASKS);
+        if (tasks == null || !tasks.isJsonArray()) return false;
+        for (var el : tasks.getAsJsonArray()) {
+            if (el.isJsonObject() && el.getAsJsonObject().has(ARG_AGENT_ID)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * One child, from the recursion caps to its result: the pipeline {@code subagent_spawn}'s single spawn and
+     * {@code agent_spawn}'s hand-off share. A cap refusal reads {@code refusalPrefix} followed by the reason, and a
+     * synchronous result carries {@code resultExtras} after its own fields.
+     */
+    static String spawnOne(JsonObject args, Agent parentAgent, SubagentSpawnArgs requested, String refusalPrefix,
+                           Map<String, Object> resultExtras) {
         // Not refused: the fire gets the same reply either way, and an unattended run that loses a
         // round to an error can lose the run with it.
         final boolean inlineRanAsSession = ToolContext.noParentChat() && MODE_INLINE.equals(requested.resolvedMode());
@@ -438,12 +461,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // consistent snapshot. On refusal we emit SUBAGENT_LIMIT_EXCEEDED and
         // return a plain-text error — no SubagentRun row, no child Agent, no
         // child Conversation gets written.
-        var refusal = Tx.run(() -> SubagentLimits.enforceRecursionLimits(parentAgent));
+        var admission = Tx.run(() -> SubagentLimits.enforceRecursionLimits(parentAgent));
+        var refusal = admission.refusal();
         if (refusal != null) {
             EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
-            return "Subagent spawn refused: " + refusal;
+            return refusalPrefix + refusal;
         }
         if (insideTransaction(parentAgent)) return INSIDE_TRANSACTION;
+        var depth = admission.childDepth();
 
         // Resolve the parent conversation: the calling turn's own, else the
         // agent's most recent (DeliveryResolver.operatingConversation);
@@ -507,12 +532,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
 
         boolean acpBridged = SubagentAcpRunner.isAcpRuntime(args);
+        var spawn = new Spawn(runId, bootstrap, parentAgent.name, parsed, acpBridged, depth);
         if (!parsed.asyncRequested()) {
-            return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed, acpBridged,
-                    inlineRanAsSession ? INLINE_RAN_AS_SESSION : null);
+            return runSyncSpawn(spawn, parentConvIdFinal, inlineRanAsSession ? INLINE_RAN_AS_SESSION : null,
+                    resultExtras);
         }
-        return dispatchAsync(runId, bootstrap, parentConv, parentAgent.name, parsed, acpBridged);
+        return dispatchAsync(spawn, parentConv);
     }
+
+    /** A child whose run row is written, on its way to running. */
+    private record Spawn(Long runId, SubagentChildBootstrap.Bootstrap child, String parentAgentName,
+                         SubagentSpawnArgs parsed, boolean acpBridged, int depth) {}
 
     /**
      * JCLAW-270: an async request dispatches the run to a background VT and returns at once with
@@ -521,8 +551,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * top, so this is always session mode, and a request that cannot get a background run runs in the
      * foreground with a note saying why.
      */
-    private static String dispatchAsync(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Conversation parentConv,
-                                        String parentAgentName, SubagentSpawnArgs parsed, boolean acpBridged) {
+    private static String dispatchAsync(Spawn spawn, @Nullable Conversation parentConv) {
+        var runId = spawn.runId();
+        var child = spawn.child();
+        var parentAgentName = spawn.parentAgentName();
+        var parsed = spawn.parsed();
         var runIdStr = String.valueOf(runId);
         // JCLAW-497: a task fire has no persistent conversation to resume into,
         // so the announce/resume model can't deliver there. Use a block-await
@@ -530,24 +563,26 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // collect its result inline. Chat keeps the announce/resume path.
         if (parentConv == null) {
             return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, child.childAgentId(), child.childConvId(),
-                    parentAgentName, parsed, runIdStr);
+                    parentAgentName, parsed, runIdStr, spawn.depth());
         }
         // JF-168: nothing resumes a subagent's turn, so a background result there would reach no one.
         if (SubagentRegistry.inSubagentTurn()) {
-            return runSyncSpawn(runId, child, parentConv.id, parentAgentName, parsed, acpBridged,
-                    ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT);
+            return runSyncSpawn(spawn, parentConv.id, ASYNC_RAN_IN_FOREGROUND_IN_SUBAGENT, Map.of());
         }
         // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
         if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
             return SubagentAsyncRunner.launchAsyncSpawn(runId, child.childAgentId(), child.childConvId(), parentConv.id,
-                    parentAgentName, parsed, runIdStr);
+                    parentAgentName, parsed, runIdStr, spawn.depth());
         }
-        return runSyncSpawn(runId, child, parentConv.id, parentAgentName, parsed, acpBridged, ASYNC_RAN_IN_FOREGROUND);
+        return runSyncSpawn(spawn, parentConv.id, ASYNC_RAN_IN_FOREGROUND, Map.of());
     }
 
-    private static String runSyncSpawn(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Long parentConvId,
-                                       String parentAgentName, SubagentSpawnArgs parsed,
-                                       boolean acpBridged, @Nullable String note) {
+    private static String runSyncSpawn(Spawn spawn, @Nullable Long parentConvId, @Nullable String note,
+                                       Map<String, Object> resultExtras) {
+        var runId = spawn.runId();
+        var child = spawn.child();
+        var parsed = spawn.parsed();
+        var acpBridged = spawn.acpBridged();
         var runIdStr = String.valueOf(runId);
         var childConvId = child.childConvId();
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
@@ -562,7 +597,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         SyncRunOutcome runOutcome;
         try {
             runOutcome = SubagentSyncRunner.runChildSynchronously(runId, child.childAgentId(), childConvId,
-                    parsed.resolvedTask(), parsed.timeoutSeconds(), inlineMode);
+                    parsed.resolvedTask(), parsed.timeoutSeconds(), inlineMode, spawn.depth());
         } finally {
             if (acpBridged) SubagentChatBridge.clearRunCallbacks(runId);
         }
@@ -582,7 +617,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
         // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
         if (!runOutcome.killedByOperator()) {
-            SubagentResponses.emitTerminalEvent(parentAgentName, child.childAgentName(), runIdStr,
+            SubagentResponses.emitTerminalEvent(spawn.parentAgentName(), child.childAgentName(), runIdStr,
                     parsed.resolvedMode(), parsed.resolvedContext(),
                     runOutcome.terminalStatus(), runOutcome.errorReason());
         }
@@ -600,6 +635,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
         if (runOutcome.replyTruncated()) payload.put(FIELD_TRUNCATED, Boolean.TRUE);
+        payload.putAll(resultExtras);
         return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
@@ -613,7 +649,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private String executeBatch(JsonObject args, Agent parentAgent) {
         var tasksEl = args.get(ARG_TASKS);
         if (!tasksEl.isJsonArray() || tasksEl.getAsJsonArray().isEmpty()) {
-            return "Error: 'tasks' must be a non-empty array of task strings or {task, ...} objects.";
+            return "Error: 'tasks' must be a non-empty array of task strings or {task, label} objects.";
         }
         // Batch is inherently async + session-scoped; inline has no batch semantics.
         var rawMode = SubagentSpawnArgs.optString(args, "mode");
@@ -630,9 +666,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (!ALLOWED_CONTEXTS.contains(context)) {
             return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + ".";
         }
-        var runDefault = defaultRunTimeoutSeconds();
-        var timeoutSeconds = SubagentSpawnArgs.optInt(args, ARG_RUN_TIMEOUT_SECONDS, runDefault);
-        if (timeoutSeconds <= 0) timeoutSeconds = runDefault;
+        var timeoutSeconds = SubagentSpawnArgs.timeoutSeconds(args);
         // JCLAW-499: runtime validation (native | acp) + resolved harness command,
         // applied to every child of the fan-out.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);
@@ -644,13 +678,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             if (el.isJsonPrimitive()) {
                 var t = el.getAsString();
                 if (t.isBlank()) return "Error: each 'tasks' entry must be a non-blank task.";
-                specs.add(new BatchTaskSpec(t, null, null));
+                specs.add(new BatchTaskSpec(t, null));
             } else if (el.isJsonObject()) {
                 var o = el.getAsJsonObject();
                 var t = SubagentSpawnArgs.optString(o, "task");
                 if (t == null || t.isBlank()) return "Error: each 'tasks' object must have a non-blank 'task'.";
-                specs.add(new BatchTaskSpec(t, SubagentSpawnArgs.optString(o, FIELD_LABEL),
-                        SubagentSpawnArgs.optLong(o, ARG_AGENT_ID)));
+                specs.add(new BatchTaskSpec(t, SubagentSpawnArgs.optString(o, FIELD_LABEL)));
             } else {
                 return "Error: each 'tasks' entry must be a string or an object.";
             }
@@ -658,11 +691,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
         // Breadth cap for the whole fan-out (running + N must fit).
         final int n = specs.size();
-        var refusal = Tx.run(() -> SubagentLimits.enforceRecursionLimits(parentAgent, n));
+        var admission = Tx.run(() -> SubagentLimits.enforceRecursionLimits(parentAgent, n));
+        var refusal = admission.refusal();
         if (refusal != null) {
             EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
-            return "Subagent spawn refused: " + refusal;
+            return SPAWN_REFUSED + refusal;
         }
+        final var depth = admission.childDepth();
         if (insideTransaction(parentAgent)) return INSIDE_TRANSACTION;
 
         final var parentAgentId = parentAgent.id;
@@ -689,7 +724,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var runIds = new ArrayList<String>();
         var failures = new LinkedHashMap<String, String>();
         for (var spec : specs) {
-            var perArgs = SubagentSpawnArgs.batchChild(args, spec.task(), spec.label(), spec.agentId(),
+            var perArgs = SubagentSpawnArgs.batchChild(args, spec.task(), spec.label(),
                     fMode, fContext, fTimeout);
             var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, perArgs, summary);
             if (bootstrap.error() != null) {
@@ -709,7 +744,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 SubagentAcpRunner.ACP_RUNS.put(runId, acpLaunch);
             }
             SubagentAsyncRunner.dispatchDetachedAsync(runId, bootstrap.childAgentId(), bootstrap.childConvId(),
-                    parentAgent.name, fMode, fContext, fTimeout, spec.task(), scopeKey);
+                    parentAgent.name, fMode, fContext, fTimeout, spec.task(), scopeKey, depth);
             runIds.add(String.valueOf(runId));
         }
         var payload = new LinkedHashMap<String, Object>();
@@ -737,7 +772,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     /** JCLAW-498: one entry of a batch fan-out. */
-    private record BatchTaskSpec(String task, @Nullable String label, @Nullable Long agentId) {}
+    private record BatchTaskSpec(String task, @Nullable String label) {}
 
     /**
      * JCLAW-809: reject a spawn mode that is not in {@link #ALLOWED_MODES},

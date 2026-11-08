@@ -286,8 +286,9 @@ class AgentRunnerCompactionTest extends UnitTest {
     }
 
     @Test
-    void aCompactedTurnTheOwnerDoesNotReadAloneIsStillNotToldAboutJclawApi() throws Exception {
-        // JF-148: the rebuild after compaction assembles the prompt again, so it must leave jclaw_api out again.
+    void aCompactedTurnTheOwnerDoesNotReadAloneIsStillNotToldAboutTheOperatorOnlyTools() throws Exception {
+        // JF-148: the rebuild after compaction assembles the prompt again, so it must leave jclaw_api and agent_spawn
+        // out again.
         var chatPrompts = new java.util.concurrent.CopyOnWriteArrayList<String>();
         startLlmServer(exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
@@ -331,9 +332,11 @@ class AgentRunnerCompactionTest extends UnitTest {
             assertTrue(prompt.contains("SUMMARY-OF-OLDER-TURNS"), "each chat call carries the rebuilt prompt");
         }
         var fromWeb = catalogTools(chatPrompts.get(1));
-        assertTrue(fromWeb.contains("jclaw_api"), "control: the operator's compacted turn is told about it: " + fromWeb);
+        assertTrue(fromWeb.containsAll(java.util.Set.of("jclaw_api", "agent_spawn")),
+                "control: the operator's compacted turn is told about them: " + fromWeb);
         var expected = new java.util.TreeSet<>(fromWeb);
         expected.remove("jclaw_api");
+        expected.remove("agent_spawn");
         assertEquals(expected, catalogTools(chatPrompts.get(0)), "a hosted app's compacted turn");
     }
 

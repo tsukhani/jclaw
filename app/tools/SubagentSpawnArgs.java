@@ -51,12 +51,9 @@ record SubagentSpawnArgs(
             return fail("Error: 'task' is required.");
         }
         var label = optString(args, SubagentSpawnTool.FIELD_LABEL);
-        var requestedAgentId = optLong(args, SubagentSpawnTool.ARG_AGENT_ID);
         var modelProviderOverride = optString(args, FIELD_MODEL_PROVIDER);
         var modelIdOverride = optString(args, FIELD_MODEL_ID);
-        var runDefault = SubagentSpawnTool.defaultRunTimeoutSeconds();
-        var timeoutSeconds = optInt(args, SubagentSpawnTool.ARG_RUN_TIMEOUT_SECONDS, runDefault);
-        if (timeoutSeconds <= 0) timeoutSeconds = runDefault;
+        var timeoutSeconds = timeoutSeconds(args);
         // JCLAW-267: mode parameter — "session" (default) materializes a fresh
         // child Conversation; "inline" runs the child in the parent's
         // Conversation with messages tagged so the chat UI folds them.
@@ -101,34 +98,42 @@ record SubagentSpawnArgs(
         // handoff collected by subagent_yield — see launchAsyncSpawnForTask),
         // superseding JCLAW-494's interim rejection.
 
-        return new SubagentSpawnArgs(null, task, label, requestedAgentId,
+        return new SubagentSpawnArgs(null, task, label, null,
                 modelProviderOverride, modelIdOverride,
                 mode, context, timeoutSeconds, asyncRequested);
     }
 
     /**
-     * One child of a batch fan-out: its own task/label/agentId over the batch-wide mode,
+     * One child of a batch fan-out: its own task and label over the batch-wide mode,
      * context and timeout {@link SubagentSpawnTool#executeBatch} has already validated.
      *
      * <p>The model override comes from the top-level call, so a batch child honors it as a
      * single spawn does (JCLAW-1231).
      */
     static SubagentSpawnArgs batchChild(JsonObject args, String task, @Nullable String label,
-                                        @Nullable Long agentId, String mode, String context,
-                                        int timeoutSeconds) {
-        return new SubagentSpawnArgs(null, task, label, agentId,
+                                        String mode, String context, int timeoutSeconds) {
+        return new SubagentSpawnArgs(null, task, label, null,
                 optString(args, FIELD_MODEL_PROVIDER), optString(args, FIELD_MODEL_ID),
                 mode, context, timeoutSeconds, true);
+    }
+
+    /** An {@code agent_spawn} hand-off to agent {@code agentId}: always session, fresh and synchronous. */
+    static SubagentSpawnArgs handOff(String task, @Nullable String label, Long agentId, int timeoutSeconds) {
+        return new SubagentSpawnArgs(null, task, label, agentId, null, null,
+                SubagentSpawnTool.MODE_SESSION, SubagentSpawnTool.CONTEXT_FRESH, timeoutSeconds, false);
+    }
+
+    /** The {@code runTimeoutSeconds} a call asks for, or the configured default when it names none or a non-positive one. */
+    static int timeoutSeconds(JsonObject args) {
+        var runDefault = SubagentSpawnTool.defaultRunTimeoutSeconds();
+        var timeoutSeconds = optInt(args, SubagentSpawnTool.ARG_RUN_TIMEOUT_SECONDS, runDefault);
+        return timeoutSeconds > 0 ? timeoutSeconds : runDefault;
     }
 
     // Thin forwarders to the shared {@link JsonArgs} accessors (JCLAW-729). Kept
     // package-visible because SubagentSpawnTool / SubagentAcpRunner call them.
     static @Nullable String optString(JsonObject obj, String key) {
         return JsonArgs.optString(obj, key);
-    }
-
-    static @Nullable Long optLong(JsonObject obj, String key) {
-        return JsonArgs.optLong(obj, key);
     }
 
     static int optInt(JsonObject obj, String key, int fallback) {

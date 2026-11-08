@@ -789,8 +789,8 @@ Caps, timeout defaults and the model for [Subagents](/guide#subagents):
 
 | Key                               | Default | Meaning                                                                                |
 |-----------------------------------|---------|----------------------------------------------------------------------------------------|
-| `subagent.maxDepth`               | 1       | How deep the parent → child → grandchild chain can go (1 = no grandchildren).          |
-| `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children a single parent can have in flight.           |
+| `subagent.maxDepth`               | 1       | How deep the parent → child chain can go, subagents and `agent_spawn` hand-offs alike (1 = no grandchildren). |
+| `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children, subagents and hand-offs together, a single parent can have in flight. |
 | `subagent.defaultRunTimeoutSeconds` | 300   | Idle budget (seconds with no activity) for a `subagent_spawn` call that omits `runTimeoutSeconds`. A call-site value overrides. Must be positive; anything else falls back to 300. |
 | `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. It applies only when the yield ends the turn to wait: a yield that waits inline (for a `tasks` batch child, or in a task fire) uses the child's own run timeout. |
 | `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it (e.g. a cheaper one for large evaluations). |
@@ -1025,7 +1025,7 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 
 A Slack binding with no owner saved cannot prove that a message is yours, so there your own messages count as someone else's. If JClaw restarts while a message of yours is still waiting its turn, it runs after the restart as someone else's message.
 
-The agent has the `jclaw_api` tool only on your own turns where you alone read the reply: the web UI, its voice mode, and your own Telegram or Slack DM. On someone else's turn it does not have the tool at all, so their messages cannot read JClaw's API through it, and cannot write through it either. Your own message in a Telegram group or a Slack channel does not get it either, because everyone there reads the reply.
+The agent has the `jclaw_api` tool only on your own turns where you alone read the reply: the web UI, its voice mode, and your own Telegram or Slack DM. On someone else's turn it does not have the tool at all, so their messages cannot read JClaw's API through it, and cannot write through it either. Your own message in a Telegram group or a Slack channel does not get it either, because everyone there reads the reply. The same turns withhold `agent_spawn`, which hands the message's task to another of your agents with that agent's own tools.
 
 Every call an agent makes through `jclaw_api` is written to [Logs](/logs) under the `jclaw_api` category, whether it ran or was refused. The line gives the method and path, the names of the fields the call sent (never their values), and the result, for example `PUT /api/router/models/reasoning (body: models): HTTP 200`. An approval prompt for a `jclaw_api` write names the call the same way, on a **Call:** line. A standing approval still covers the whole tool, so the log is where you see each action it let through.
 

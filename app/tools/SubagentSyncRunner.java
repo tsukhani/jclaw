@@ -59,7 +59,7 @@ final class SubagentSyncRunner {
     @SuppressWarnings("java:S1181")
     static SyncRunOutcome runChildSynchronously(Long runId, @Nullable Long childAgentId,
                                                 @Nullable Long childConvId, String task,
-                                                int timeoutSeconds, boolean inlineMode) {
+                                                int timeoutSeconds, boolean inlineMode, int depth) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
@@ -70,7 +70,7 @@ final class SubagentSyncRunner {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                future.complete(SubagentRegistry.callAsRun(runId,
+                future.complete(SubagentRegistry.callAsRun(runId, depth,
                         () -> SubagentAcpRunner.executeChildRun(runId, childAgent, childConv, task, inlineMode)));
             } catch (Throwable t) {
                 future.completeExceptionally(t);

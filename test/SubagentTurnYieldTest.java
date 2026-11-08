@@ -266,20 +266,34 @@ class SubagentTurnYieldTest extends UnitTest {
     }
 
     /**
-     * The parent runs itself as a child ({@code agentId}, so it may spawn again), and that child's real turn spawns
-     * an {@code async} grandchild and answers from what the spawn returned.
+     * The parent spawns a child under {@code subagent.maxDepth=2}, so the child may spawn again, and that child's real
+     * turn spawns an {@code async} grandchild and answers from what the spawn returned.
      */
     private void childSpawnsAnAsyncGrandchild(String mode) throws Exception {
         var parent = createAgent("turn-yield-" + mode + "-" + provider);
         var conv = ConversationService.create(parent, "web", "u-turn-yield-" + mode);
         commitAndReopen();
 
-        var spawned = spawnIn(parent.id, conv.id, Map.of("task", CHILD_TASK, "agentId", parent.id, "mode", mode));
+        var prior = inFreshTx(() -> ConfigService.get(SubagentSpawnTool.DEPTH_LIMIT_KEY));
+        inFreshTx(() -> {
+            ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, "2");
+            return null;
+        });
+        String spawned;
+        try {
+            spawned = spawnIn(parent.id, conv.id, Map.of("task", CHILD_TASK, "mode", mode));
+        } finally {
+            inFreshTx(() -> {
+                if (prior == null) ConfigService.delete(SubagentSpawnTool.DEPTH_LIMIT_KEY);
+                else ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, prior);
+                return null;
+            });
+        }
 
         var childRunId = Long.parseLong(JsonParser.parseString(spawned).getAsJsonObject().get("run_id").getAsString());
         JPA.em().clear();
         SubagentRun child = SubagentRun.findById(childRunId);
-        SubagentRun grandchild = SubagentRun.find("parentAgent.id = ?1 AND id <> ?2", parent.id, childRunId).first();
+        SubagentRun grandchild = SubagentRun.find("parentAgent.id = ?1", child.childAgent.id).first();
         assertNotNull(grandchild, "the child spawned a grandchild: " + spawned);
         var grandchildResult = new LinkedHashMap<String, Object>();
         grandchildResult.put("run_id", String.valueOf(grandchild.id));

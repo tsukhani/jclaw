@@ -1,0 +1,735 @@
+import agents.ConversationSink;
+import agents.DangerousActionGate;
+import agents.ParallelToolExecutor;
+import agents.ToolContext;
+import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import llm.LlmResilience;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
+import llm.ProviderRegistry;
+import models.Agent;
+import models.AgentToolConfig;
+import models.Conversation;
+import models.SubagentRun;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
+import play.test.Fixtures;
+import play.test.UnitTest;
+import services.AgentService;
+import services.ConfigService;
+import services.ConversationService;
+import services.EventLogger;
+import services.LoadTestRunner;
+import services.Tx;
+import tools.AgentSpawnTool;
+import tools.SubagentSpawnTool;
+import utils.CircuitBreakers;
+import utils.GsonHolder;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+
+/**
+ * JF-164: {@code agent_spawn} hands a task to another of the operator's agents, which runs as itself in a conversation
+ * of its own and answers through {@code subagent_spawn}'s pipeline. The model is a stub routed by the task each
+ * conversation was given; each test reads what that stub was offered and what the caller got back.
+ */
+class AgentSpawnToolTest extends UnitTest {
+
+    private static final String MODEL = "agent-spawn-model";
+    private static final String STATIC_DESCRIPTION = """
+            Hand a task to another agent on this instance and wait for its reply. The agent works in its own \
+            conversation and sees only the task you write, so include everything it needs. Its reply is that \
+            agent's own output: check it before relying on it. A file it saves stays in its own workspace: link it \
+            as files_url followed by the file's path, using the files_url in the result. To run a helper copy of \
+            yourself, use subagent_spawn instead.
+
+            Agents you can hand work to:
+            """;
+
+    private HttpServer llmServer;
+    private ExecutorService llmThreads;
+    private String provider;
+    /** What the stub model does in a conversation whose task contains a script's marker. */
+    private final List<Script> scripts = new CopyOnWriteArrayList<>();
+    /** Each model call: the marker of the conversation it served, and the tools it was offered. */
+    private final List<Request> requests = new CopyOnWriteArrayList<>();
+
+    private record Script(String marker, String toolName, Map<String, Object> toolArgs, String reply) {
+        static Script replies(String marker, String reply) {
+            return new Script(marker, null, Map.of(), reply);
+        }
+    }
+
+    private record Request(String marker, Set<String> tools) {}
+
+    @BeforeEach
+    void setUp() throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        Fixtures.deleteDatabase();
+        EventLogger.clear();
+        provider = "agent-spawn-" + UUID.randomUUID().toString().substring(0, 8);
+        llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        // A callee's model call is answered while its caller's call is still open.
+        llmThreads = Executors.newVirtualThreadPerTaskExecutor();
+        llmServer.setExecutor(llmThreads);
+        llmServer.createContext("/chat/completions", this::answer);
+        llmServer.start();
+        var baseUrl = "http://127.0.0.1:" + llmServer.getAddress().getPort();
+        inFreshTx(() -> {
+            ConfigService.set("provider." + provider + ".baseUrl", baseUrl);
+            ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+            ConfigService.set("provider." + provider + ".models",
+                    "[{\"id\":\"" + MODEL + "\",\"name\":\"Spawn\",\"contextWindow\":100000,\"maxTokens\":4096}]");
+            return null;
+        });
+        for (var i = 0; i < 50 && ProviderRegistry.get(provider) == null; i++) {
+            ProviderRegistry.refresh();
+            if (ProviderRegistry.get(provider) == null) Thread.sleep(20);
+        }
+        assertNotNull(ProviderRegistry.get(provider), "test precondition: the stub provider must register");
+    }
+
+    @AfterEach
+    void tearDown() {
+        llmServer.stop(0);
+        llmThreads.shutdownNow();
+        inFreshTx(() -> {
+            for (var suffix : new String[] {".baseUrl", ".apiKey", ".models"}) {
+                ConfigService.delete("provider." + provider + suffix);
+            }
+            return null;
+        });
+        ProviderRegistry.refresh();
+        CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        EventLogger.clear();
+        ToolRegistrySync.release();
+    }
+
+    // ── main hands work to a specialist ──
+
+    @Test
+    void mainHandsATaskToASpecialistThatHoldsAToolMainHasDisabled() throws Exception {
+        var main = createAgent("main");
+        setTool(main, "generate_video", false);
+        var videoMaker = createAgent("video-maker");
+        setTool(videoMaker, "generate_video", true);
+        var web = ConversationService.create(main, "web", "u-main");
+        commitAndReopen();
+        scripts.add(Script.replies("Make the launch clip.", "CLIP_READY"));
+
+        var result = handOff(main.id, web.id, false, "{\"agent\":\"video-maker\",\"task\":\"Make the launch clip.\"}");
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.find("childAgent.id = ?1", videoMaker.id).first();
+        assertNotNull(run, result);
+        assertEquals(expectedResult(run, "CLIP_READY", videoMaker), result);
+        assertEquals(1, requests.size(), requests.toString());
+        assertTrue(requests.getFirst().tools().contains("generate_video"),
+                "the callee is offered its own tools: " + requests.getFirst().tools());
+        assertEquals(main.id, run.parentAgent.id);
+        assertEquals(web.id, run.parentConversation.id);
+        assertNotEquals(web.id, run.childConversation.id, "the callee works in a conversation of its own");
+        Conversation calleeConv = Conversation.findById(run.childConversation.id);
+        assertEquals("web", calleeConv.channelType, "the callee's conversation takes the caller's channel");
+        assertEquals(SubagentRun.Status.COMPLETED, run.status);
+        Agent callee = Agent.findById(videoMaker.id);
+        assertNull(callee.parentAgent, "the callee stays a top-level agent");
+        ToolRegistry.invalidateDisabledToolsCache(callee);
+        assertFalse(ToolRegistry.loadDisabledTools(callee).contains("generate_video"),
+                "the caller's deny rows are never copied onto the callee");
+    }
+
+    @Test
+    void aCalleeRunsOnItsOwnModelNotTheCallersOverride() throws Exception {
+        var main = createAgent("main");
+        var writer = createAgent("writer");
+        var web = ConversationService.create(main, "web", "u-model");
+        web.modelProviderOverride = provider;
+        web.modelIdOverride = "some-other-model";
+        web.save();
+        commitAndReopen();
+        scripts.add(Script.replies("Write the blurb.", "BLURB"));
+
+        handOff(main.id, web.id, false, "{\"agent\":\"writer\",\"task\":\"Write the blurb.\"}");
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.find("childAgent.id = ?1", writer.id).first();
+        Conversation calleeConv = Conversation.findById(run.childConversation.id);
+        assertNull(calleeConv.modelProviderOverride);
+        assertNull(calleeConv.modelIdOverride);
+    }
+
+    // ── depth ──
+
+    @Test
+    void aChainOfSpecialistsPassesEachReplyUpWhenTheDepthLimitIsTwo() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var b = createAgent("analyst");
+        var web = ConversationService.create(main, "web", "u-chain");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "agent_spawn",
+                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
+        scripts.add(Script.replies("Analyse the figures.", "FIGURES_ANALYSED"));
+
+        var result = withDepthLimit("2",
+                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
+
+        JPA.em().clear();
+        SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
+        SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
+        assertNotNull(toB, "the researcher handed off to the analyst: " + result);
+        assertEquals(a.id, toB.parentAgent.id);
+        assertEquals(toA.childConversation.id, toB.parentConversation.id);
+        var bResult = expectedResult(toB, "FIGURES_ANALYSED", b);
+        assertEquals(expectedResult(toA, "researcher saw: " + bResult, a), result);
+    }
+
+    @Test
+    void atDepthLimitOneASpecialistsHandOffIsRefusedAndMainsHandOffStillCompletes() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var b = createAgent("analyst");
+        var web = ConversationService.create(main, "web", "u-depth1");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "agent_spawn",
+                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
+        scripts.add(Script.replies("Analyse the figures.", "FIGURES_ANALYSED"));
+
+        var result = withDepthLimit("1",
+                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
+
+        JPA.em().clear();
+        SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
+        assertEquals(expectedResult(toA,
+                "researcher saw: Agent hand-off refused: depth limit 1 exceeded (current depth: 1).", a), result);
+        assertEquals(0, SubagentRun.count("childAgent.id = ?1", b.id), "no run for the refused hand-off");
+    }
+
+    @Test
+    void aCalleeAtDepthLimitOneCannotSpawnASubagent() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var web = ConversationService.create(main, "web", "u-callee-spawn");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "subagent_spawn",
+                Map.of("task", "Collect the raw figures."), "researcher saw: "));
+        scripts.add(Script.replies("Collect the raw figures.", "RAW"));
+
+        var result = withDepthLimit("1",
+                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
+
+        JPA.em().clear();
+        SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
+        assertEquals(expectedResult(toA,
+                "researcher saw: Subagent spawn refused: depth limit 1 exceeded (current depth: 1).", a), result);
+        assertEquals(1, SubagentRun.count(), "the callee spawned nothing");
+    }
+
+    // ── who may be reached ──
+
+    @Test
+    void namingTheMainAgentIsRefusedWhateverItsCase() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var conv = ConversationService.create(a, "web", "u-names-main");
+        var mainConv = ConversationService.create(main, "web", "u-main-self");
+        commitAndReopen();
+
+        assertEquals("Error: agent_spawn cannot hand work to the main agent.",
+                handOff(a.id, conv.id, false, "{\"agent\":\"main\",\"task\":\"x\"}"));
+        assertEquals("Error: agent_spawn cannot hand work to the main agent.",
+                handOff(a.id, conv.id, false, "{\"agent\":\"Main\",\"task\":\"x\"}"));
+        assertEquals("Error: agent_spawn cannot hand work to the main agent.",
+                handOff(main.id, mainConv.id, false,
+                        "{\"agent\":\"main\",\"task\":\"x\"}"));
+        assertNoRuns();
+    }
+
+    @Test
+    void namingAnAgentJclawRunsForItselfIsRefused() throws Exception {
+        var main = createAgent("main");
+        for (var name : List.of(Agent.EVALTEST_AGENT_NAME, LoadTestRunner.LOADTEST_AGENT_NAME,
+                LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME)) {
+            createAgent(name);
+        }
+        var conv = ConversationService.create(main, "web", "u-internal");
+        commitAndReopen();
+
+        for (var name : List.of(Agent.EVALTEST_AGENT_NAME, LoadTestRunner.LOADTEST_AGENT_NAME,
+                LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME)) {
+            assertEquals("Error: agent_spawn cannot hand work to '" + name + "', an agent JClaw runs for itself.",
+                    handOff(main.id, conv.id, false, "{\"agent\":\"" + name + "\",\"task\":\"x\"}"));
+        }
+        assertNoRuns();
+    }
+
+    @Test
+    void namingItselfIsRefusedPointingAtSubagentSpawn() throws Exception {
+        var a = createAgent("researcher");
+        var conv = ConversationService.create(a, "web", "u-self");
+        commitAndReopen();
+
+        assertEquals("Error: 'researcher' is the calling agent. To run a helper copy of yourself, use subagent_spawn.",
+                handOff(a.id, conv.id, false, "{\"agent\":\"researcher\",\"task\":\"x\"}"));
+        assertNoRuns();
+    }
+
+    @Test
+    void namingAnUnknownAgentOrASpawnedCloneIsRefused() throws Exception {
+        var main = createAgent("main");
+        var clone = createAgent("main-sub-1");
+        clone.parentAgent = main;
+        clone.save();
+        var conv = ConversationService.create(main, "web", "u-unknown");
+        commitAndReopen();
+
+        assertEquals("Error: no agent named 'ghost' can take this task. Choose one of the agents listed in this "
+                + "tool's description.", handOff(main.id, conv.id, false, "{\"agent\":\"ghost\",\"task\":\"x\"}"));
+        assertEquals("Error: no agent named 'main-sub-1' can take this task. Choose one of the agents listed in this "
+                + "tool's description.", handOff(main.id, conv.id, false, "{\"agent\":\"main-sub-1\",\"task\":\"x\"}"));
+        assertNoRuns();
+    }
+
+    @Test
+    void namingADisabledAgentIsRefused() throws Exception {
+        var main = createAgent("main");
+        var off = createAgent("archivist");
+        off.enabled = false;
+        off.save();
+        var conv = ConversationService.create(main, "web", "u-disabled");
+        commitAndReopen();
+
+        assertEquals("Error: agent 'archivist' is disabled.",
+                handOff(main.id, conv.id, false, "{\"agent\":\"archivist\",\"task\":\"x\"}"));
+        assertNoRuns();
+    }
+
+    @Test
+    void aMissingOrBlankAgentOrTaskIsRefused() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var conv = ConversationService.create(main, "web", "u-args");
+        commitAndReopen();
+
+        assertEquals("Error: 'agent' is required.", handOff(main.id, conv.id, false, "{\"task\":\"x\"}"));
+        assertEquals("Error: 'agent' is required.", handOff(main.id, conv.id, false, "{\"agent\":\" \",\"task\":\"x\"}"));
+        assertEquals("Error: 'task' is required.", handOff(main.id, conv.id, false, "{\"agent\":\"researcher\"}"));
+        assertEquals("Error: 'task' is required.",
+                handOff(main.id, conv.id, false, "{\"agent\":\"researcher\",\"task\":\"\"}"));
+        assertNoRuns();
+    }
+
+    // ── the description lists who may be reached ──
+
+    @Test
+    void theDescriptionListsEveryAgentTheCallerMayReachAndNoOther() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("A");
+        a.description = "Makes videos";
+        a.save();
+        var b = createAgent("b");
+        var clone = createAgent("A-sub-1");
+        clone.parentAgent = a;
+        clone.save();
+        var off = createAgent("disabled-one");
+        off.enabled = false;
+        off.save();
+        for (var name : List.of(Agent.EVALTEST_AGENT_NAME, LoadTestRunner.LOADTEST_AGENT_NAME,
+                LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME)) {
+            createAgent(name);
+        }
+
+        assertEquals(STATIC_DESCRIPTION + "- A: Makes videos\n- b: (no purpose given)", agentSpawnDescription(main));
+        assertEquals(STATIC_DESCRIPTION + "- b: (no purpose given)", agentSpawnDescription(a));
+        assertEquals(STATIC_DESCRIPTION + "- A: Makes videos", agentSpawnDescription(b));
+        assertEquals(STATIC_DESCRIPTION + "(listed per agent)", new AgentSpawnTool().description());
+    }
+
+    @Test
+    void theDescriptionSaysNoneWhenNoAgentCanBeReached() throws Exception {
+        var main = createAgent("main");
+
+        assertEquals(STATIC_DESCRIPTION + "none", agentSpawnDescription(main));
+    }
+
+    // ── guest turns ──
+
+    @Test
+    void aDirectCallOnAGuestsTurnAsksNoAgent() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var guestDm = ConversationService.create(main, "telegram", "5151");
+        var group = ConversationService.create(main, "telegram", "-100200");
+        commitAndReopen();
+        var call = "{\"agent\":\"researcher\",\"task\":\"x\"}";
+
+        assertEquals("Error: agent_spawn is available only on a turn the owner reads alone; no agent was asked.",
+                handOff(main.id, guestDm.id, false, call));
+        assertEquals("Error: agent_spawn is available only on a turn the owner reads alone; no agent was asked.",
+                handOff(main.id, group.id, true, call));
+        assertNoRuns();
+        assertTrue(requests.isEmpty(), requests.toString());
+    }
+
+    @Test
+    void aGuestsCallThroughTheToolLoopIsRefusedAsNotOffered() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var guestDm = ConversationService.create(main, "telegram", "5151");
+        commitAndReopen();
+        var offered = new TreeSet<String>();
+        for (var def : ToolRegistry.forTurn(ToolRegistry.getToolDefsForAgent(main), false)) {
+            offered.add(def.function().name());
+        }
+        assertFalse(offered.contains(AgentSpawnTool.TOOL_NAME), offered.toString());
+
+        var reply = onVirtualThread(() -> {
+            var conversation = Tx.run(() -> (Conversation) Conversation.findById(guestDm.id));
+            var caller = Tx.run(() -> (Agent) Agent.findById(main.id));
+            var messages = new ArrayList<ChatMessage>();
+            DangerousActionGate.withOwnerInitiated(false, () -> {
+                ParallelToolExecutor.executeToolsParallel(
+                        List.of(new ToolCall("c1", "function", new FunctionCall(AgentSpawnTool.TOOL_NAME,
+                                "{\"agent\":\"researcher\",\"task\":\"x\"}"))),
+                        caller, guestDm.id, messages, null, null, null, new AtomicBoolean(false),
+                        new ConversationSink(conversation), offered);
+                return null;
+            });
+            return (String) messages.getFirst().content();
+        });
+
+        assertEquals("Error: Tool 'agent_spawn' is not enabled for this agent. Do not retry it — "
+                + "use only the tools listed in your request.", reply);
+        assertNoRuns();
+    }
+
+    @Test
+    void aCalleeIsOfferedJclawApiAndAgentSpawnOnlyWhenTheOwnerReadsTheHandingTurnAlone() throws Exception {
+        var main = createAgent("main");
+        var callee = createAgent("researcher");
+        setTool(callee, "jclaw_api", true);
+        var web = ConversationService.create(main, "web", "u-trust");
+        var ownerDm = ConversationService.create(main, "telegram", "4242");
+        var group = ConversationService.create(main, "telegram", "-100200");
+        var guestDm = ConversationService.create(main, "telegram", "5151");
+        commitAndReopen();
+        scripts.add(Script.replies("Look it up.", "LOOKED_UP"));
+        var call = "{\"agent\":\"researcher\",\"task\":\"Look it up.\"}";
+
+        handOff(main.id, web.id, false, call);
+        handOff(main.id, ownerDm.id, true, call);
+        // A turn offering agent_spawn is never a guest's, so the guest side is driven one level below the tool's gate.
+        pipelineHandOff(main.id, group.id, true, callee.id, "Look it up.");
+        pipelineHandOff(main.id, guestDm.id, false, callee.id, "Look it up.");
+
+        assertEquals(4, requests.size(), "one model call per hand-off: " + requests);
+        var fromWeb = requests.get(0).tools();
+        assertTrue(fromWeb.contains("jclaw_api") && fromWeb.contains("agent_spawn"), "from web chat: " + fromWeb);
+        assertEquals(fromWeb, requests.get(1).tools(), "from the owner's own Telegram DM");
+        var expected = new TreeSet<>(fromWeb);
+        expected.remove("jclaw_api");
+        expected.remove("agent_spawn");
+        assertEquals(expected, requests.get(2).tools(), "from the owner's message in a Telegram group");
+        assertEquals(expected, requests.get(3).tools(), "from a guest's Telegram turn");
+    }
+
+    // ── task fires ──
+
+    @Test
+    void aCalleeInAFireIsBoundByTheTasksToolList() throws Exception {
+        var main = createAgent("main");
+        var callee = createAgent("researcher");
+        var taskRunId = seedTaskRun(main, "[\"agent_spawn\",\"datetime\"]");
+        commitAndReopen();
+        scripts.add(Script.replies("Check the clock.", "CHECKED"));
+
+        var result = onVirtualThread(() -> {
+            var caller = Tx.run(() -> (Agent) Agent.findById(main.id));
+            return DangerousActionGate.withFireOrigin("web", () -> ToolContext.withScope(null, taskRunId,
+                    () -> new AgentSpawnTool().execute("{\"agent\":\"researcher\",\"task\":\"Check the clock.\"}",
+                            caller)));
+        });
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.find("childAgent.id = ?1", callee.id).first();
+        assertEquals(expectedResult(run, "CHECKED", callee), result);
+        assertEquals(taskRunId, run.parentTaskRun.id);
+        Conversation calleeConv = Conversation.findById(run.childConversation.id);
+        assertEquals("[\"agent_spawn\",\"datetime\"]", calleeConv.enabledToolNames);
+        assertEquals(1, requests.size(), requests.toString());
+        assertEquals(new TreeSet<>(Set.of("agent_spawn", "datetime")), requests.getFirst().tools());
+    }
+
+    // ---- helpers ----
+
+    private String agentSpawnDescription(Agent caller) {
+        return ToolRegistry.getToolDefsForAgent(caller).stream()
+                .filter(d -> AgentSpawnTool.TOOL_NAME.equals(d.function().name()))
+                .findFirst().orElseThrow().function().description();
+    }
+
+    private static String expectedResult(SubagentRun run, String reply, Agent callee) {
+        var expected = new LinkedHashMap<String, Object>();
+        expected.put("run_id", String.valueOf(run.id));
+        expected.put("conversation_id", String.valueOf(run.childConversation.id));
+        expected.put("reply", reply);
+        expected.put("status", "COMPLETED");
+        expected.put("agent", callee.name);
+        expected.put("agent_id", callee.id);
+        expected.put("files_url", "/api/agents/" + callee.id + "/files/");
+        return GsonHolder.GSON.toJson(expected, Map.class);
+    }
+
+    private static void assertNoRuns() {
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(), "a refused hand-off writes no run");
+    }
+
+    /** {@code body} with {@code subagent.maxDepth} at {@code limit}, restored afterwards. */
+    private static String withDepthLimit(String limit, ThrowingSupplier body) throws Exception {
+        var prior = inFreshTx(() -> ConfigService.get(SubagentSpawnTool.DEPTH_LIMIT_KEY));
+        inFreshTx(() -> {
+            ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, limit);
+            return null;
+        });
+        try {
+            return body.get();
+        } finally {
+            inFreshTx(() -> {
+                if (prior == null) ConfigService.delete(SubagentSpawnTool.DEPTH_LIMIT_KEY);
+                else ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, prior);
+                return null;
+            });
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingSupplier {
+        String get() throws Exception;
+    }
+
+    /** {@code agent_spawn} as a chat turn's tool call runs it: on its own thread, in the conversation, with its sender. */
+    private static String handOff(Long callerId, Long conversationId, boolean ownerInitiated, String argsJson)
+            throws Exception {
+        return onVirtualThread(() -> {
+            var caller = Tx.run(() -> (Agent) Agent.findById(callerId));
+            return DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                    () -> ToolContext.withConversation(conversationId,
+                            () -> new AgentSpawnTool().execute(argsJson, caller)));
+        });
+    }
+
+    /** The shared pipeline {@code agent_spawn} runs once its gate has passed, on a turn the gate would refuse. */
+    private static String pipelineHandOff(Long callerId, Long conversationId, boolean ownerInitiated, Long calleeId,
+                                          String task)
+            throws Exception {
+        var argsClass = Class.forName("tools.SubagentSpawnArgs");
+        var handOff = argsClass.getDeclaredMethod("handOff", String.class, String.class, Long.class, int.class);
+        handOff.setAccessible(true);
+        var spawnOne = SubagentSpawnTool.class.getDeclaredMethod("spawnOne", JsonObject.class, Agent.class,
+                argsClass, String.class, Map.class);
+        spawnOne.setAccessible(true);
+        var parsed = handOff.invoke(null, task, null, calleeId, 300);
+        return onVirtualThread(() -> {
+            var caller = Tx.run(() -> (Agent) Agent.findById(callerId));
+            return DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> ToolContext.withConversation(conversationId,
+                    () -> {
+                        try {
+                            return (String) spawnOne.invoke(null, new JsonObject(), caller, parsed,
+                                    "Agent hand-off refused: ", Map.of());
+                        } catch (ReflectiveOperationException e) {
+                            throw new AssertionError(e);
+                        }
+                    }));
+        });
+    }
+
+    private Agent createAgent(String name) {
+        var agent = AgentService.create(name, provider, MODEL);
+        agent.enabled = true;
+        agent.save();
+        return agent;
+    }
+
+    private static void setTool(Agent agent, String tool, boolean enabled) {
+        var row = new AgentToolConfig();
+        row.agent = agent;
+        row.toolName = tool;
+        row.enabled = enabled;
+        row.save();
+    }
+
+    private static Long seedTaskRun(Agent agent, String enabledToolNames) {
+        var task = new models.Task();
+        task.enabledToolNames = enabledToolNames;
+        task.agent = agent;
+        task.name = "fenced-" + agent.name;
+        task.originChannel = "web";
+        task.type = models.Task.Type.IMMEDIATE;
+        task.status = models.Task.Status.RUNNING;
+        task.nextRunAt = java.time.Instant.now();
+        task.save();
+        var run = new models.TaskRun();
+        run.task = task;
+        run.startedAt = java.time.Instant.now();
+        run.save();
+        return run.id;
+    }
+
+    /** Routes each model call by the task its conversation was given and the tool result that ends it. */
+    private void answer(HttpExchange exchange) throws IOException {
+        var body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8))
+                .getAsJsonObject();
+        var messages = body.getAsJsonArray("messages");
+        var userText = new StringBuilder();
+        for (var m : messages) {
+            if ("user".equals(role(m.getAsJsonObject()))) userText.append(textOf(m.getAsJsonObject()));
+        }
+        var last = messages.get(messages.size() - 1).getAsJsonObject();
+        var script = scripts.stream().filter(s -> userText.toString().contains(s.marker())).findFirst().orElse(null);
+        var tools = new TreeSet<String>();
+        if (body.has("tools")) {
+            for (var tool : body.getAsJsonArray("tools")) {
+                tools.add(tool.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
+            }
+        }
+        requests.add(new Request(script == null ? "?" : script.marker(), tools));
+        if (script == null) {
+            LlmReplyFixture.send(exchange, reply("UNEXPECTED: " + userText));
+        } else if ("tool".equals(role(last))) {
+            LlmReplyFixture.send(exchange, reply(script.reply() + textOf(last)));
+        } else if (script.toolName() != null) {
+            LlmReplyFixture.send(exchange, toolCall(script.toolName(), script.toolArgs()));
+        } else {
+            LlmReplyFixture.send(exchange, reply(script.reply()));
+        }
+    }
+
+    private static String toolCall(String name, Map<String, Object> arguments) {
+        var function = new JsonObject();
+        function.addProperty("name", name);
+        function.addProperty("arguments", GsonHolder.GSON.toJson(arguments));
+        var call = new JsonObject();
+        call.addProperty("id", "call_" + name);
+        call.addProperty("type", "function");
+        call.add("function", function);
+        var calls = new JsonArray();
+        calls.add(call);
+        var message = new JsonObject();
+        message.addProperty("role", "assistant");
+        message.addProperty("content", "");
+        message.add("tool_calls", calls);
+        return completion(message, "tool_calls");
+    }
+
+    private static String role(JsonObject message) {
+        return message.get("role").getAsString();
+    }
+
+    private static String textOf(JsonObject message) {
+        var content = message.get("content");
+        if (content == null || content.isJsonNull()) return "";
+        if (content.isJsonPrimitive()) return content.getAsString();
+        var text = new StringBuilder();
+        for (var part : content.getAsJsonArray()) {
+            var p = part.getAsJsonObject();
+            if (p.has("text")) text.append(p.get("text").getAsString());
+        }
+        return text.toString();
+    }
+
+    private static String reply(String content) {
+        var message = new JsonObject();
+        message.addProperty("role", "assistant");
+        message.addProperty("content", content);
+        return completion(message, "stop");
+    }
+
+    private static String completion(JsonObject message, String finishReason) {
+        var choice = new JsonObject();
+        choice.addProperty("index", 0);
+        choice.add("message", message);
+        choice.addProperty("finish_reason", finishReason);
+        var choices = new JsonArray();
+        choices.add(choice);
+        var usage = new JsonObject();
+        usage.addProperty("prompt_tokens", 10);
+        usage.addProperty("completion_tokens", 5);
+        var completion = new JsonObject();
+        completion.add("choices", choices);
+        completion.add("usage", usage);
+        return completion.toString();
+    }
+
+    @FunctionalInterface
+    private interface ThrowingBody<T> {
+        T get() throws Exception;
+    }
+
+    /** Runs {@code body} on its own thread, outside the test's transaction, as a turn's tool call runs. */
+    private static <T> T onVirtualThread(ThrowingBody<T> body) throws Exception {
+        var result = new AtomicReference<T>();
+        var error = new AtomicReference<Throwable>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                result.set(body.get());
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "the call did not return within 60s");
+        if (error.get() instanceof Exception e) throw e;
+        if (error.get() != null) throw new AssertionError(error.get());
+        return result.get();
+    }
+
+    private static void commitAndReopen() {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+    }
+
+    private static <T> T inFreshTx(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
+    }
+}

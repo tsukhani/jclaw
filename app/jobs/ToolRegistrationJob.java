@@ -6,6 +6,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
+import tools.AgentSpawnTool;
 import tools.AppInstallTool;
 import tools.CcrRetrieveTool;
 import tools.CheckListTool;
@@ -106,6 +107,8 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new JClawApiTool());
         // JCLAW-265: subagent_spawn — the synchronous primitive; recursion limits and the async path are JCLAW-266 / JCLAW-270.
         toolList.add(new SubagentSpawnTool());
+        // JF-164: agent_spawn hands a task to another of the operator's agents through subagent_spawn's pipeline.
+        toolList.add(new AgentSpawnTool());
         // JCLAW-273: subagent_yield. Companion tool to async spawn —
         // flips SubagentRun.yielded so the announce VT posts a USER-role
         // resume Message and re-invokes AgentRunner.run on the parent

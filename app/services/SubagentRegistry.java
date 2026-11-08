@@ -93,7 +93,12 @@ public final class SubagentRegistry {
      * A child thread's run and its stop flag. The awaiting side unregisters a timed-out or
      * killed run while the child can still be mid-tool, so the child keeps the flag itself.
      */
-    public record RunScope(Long runId, AtomicBoolean stopFlag) {
+    public record RunScope(Long runId, AtomicBoolean stopFlag, int depth) {
+        /** A run whose depth nobody recorded, which can only be a first-level child. */
+        public RunScope(Long runId, AtomicBoolean stopFlag) {
+            this(runId, stopFlag, 1);
+        }
+
         public boolean stopRequested() {
             return stopFlag.get();
         }
@@ -150,11 +155,28 @@ public final class SubagentRegistry {
         ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false), new AtomicLong(System.nanoTime())));
     }
 
-    /** Call {@code body} as run {@code runId}'s child thread; a run that isn't registered calls it unbound. */
+    /** {@link #callAsRun(Long, int, CallableOp)} for a first-level child. */
     public static <R, X extends Throwable> R callAsRun(Long runId, CallableOp<R, X> body) throws X {
+        return callAsRun(runId, 1, body);
+    }
+
+    /**
+     * Call {@code body} as run {@code runId}'s child thread, {@code depth} spawns below a top-level turn; a run that
+     * isn't registered calls it unbound.
+     */
+    public static <R, X extends Throwable> R callAsRun(Long runId, int depth, CallableOp<R, X> body) throws X {
         var entry = ACTIVE.get(runId);
         if (entry == null) return body.call();
-        return ScopedValue.where(CURRENT_RUN, new RunScope(runId, entry.cancelRequested())).call(body);
+        return ScopedValue.where(CURRENT_RUN, new RunScope(runId, entry.cancelRequested(), depth)).call(body);
+    }
+
+    /**
+     * How many spawns below a top-level turn this thread runs: 0 outside a run. An {@code agent_spawn} callee is a
+     * top-level agent, so only the run chain counts it; a {@link ScopedValue} does not cross a new thread, so read
+     * it on the spawning thread.
+     */
+    public static int currentRunDepth() {
+        return CURRENT_RUN.isBound() ? CURRENT_RUN.get().depth() : 0;
     }
 
     /** The run bound to this thread by {@link #callAsRun}, or null when the thread runs no child. */

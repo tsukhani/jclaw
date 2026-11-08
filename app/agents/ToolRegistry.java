@@ -149,6 +149,9 @@ public class ToolRegistry {
         Map<String, Object> parameters();
         String execute(String argsJson, Agent agent);
 
+        /** The description {@code caller} is offered; a tool whose text depends on who calls it overrides this. */
+        default String description(Agent caller) { return description(); }
+
         /**
          * JCLAW-170: rich-output variant. Defaults to wrapping {@link #execute} in a
          * text-only {@link ToolResult}; tools that want the UI to render a richer
@@ -741,7 +744,7 @@ public class ToolRegistry {
         return tools.values().stream()
                 .filter(t -> !disabled.contains(t.name()))
                 .filter(t -> t.group() == null || t.isServerLevel())
-                .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
+                .map(t -> ToolDef.of(t.name(), t.description(agent), t.parameters()))
                 .toList();
     }
 
@@ -826,13 +829,16 @@ public class ToolRegistry {
     /** Page script and file upload sit beside {@code chrome_control} as tools of their own, so a standing grant for one cannot cover the others. */
     private static final String CHROME_SCRIPT_TOOL = "chrome_script";
     private static final String CHROME_UPLOAD_TOOL = "chrome_upload";
+    /** Hands the turn's task to another of the operator's agents, which acts with its own tools on what a guest wrote. */
+    private static final String AGENT_SPAWN_TOOL = "agent_spawn";
 
     /**
      * JF-148: tools a turn is offered only where the owner reads the reply alone, whatever the agent was
      * granted. {@code jclaw_api} reaches JClaw's whole agent-callable API, and only its writes wait for
      * approval, so a guest's message could otherwise drive its reads, and a group would read the result.
      */
-    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL, CHROME_CONTROL_TOOL, CHROME_SCRIPT_TOOL, CHROME_UPLOAD_TOOL);
+    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL, CHROME_CONTROL_TOOL, CHROME_SCRIPT_TOOL, CHROME_UPLOAD_TOOL,
+            AGENT_SPAWN_TOOL);
 
     /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
      *  with the other cross-turn-reach tools rather than defaulting on. */

@@ -27,17 +27,15 @@ describe('rewriteWorkspaceLinks', () => {
       expect(a.classList.contains('workspace-file')).toBe(true)
     })
 
-    it('does not touch workspace URLs for a different agent id', () => {
-      // Safety guard: agent-scoped URLs should only be styled for the current
-      // agent. A link pointing to a different agent's workspace must remain
-      // a plain absolute href (no download affordance) — cross-agent file
-      // access is an authorization decision that belongs in the backend.
-      const input = '<a href="/api/agents/99/files/other.png">other</a>'
+    it('styles another agent\'s workspace URL as a file link and keeps its href', () => {
+      // An agent_spawn callee saves into its own workspace and the caller links the
+      // files_url it was handed; the backend decides who may fetch it.
+      const input = '<a href="/api/agents/7/files/out/clip.mp4">clip</a>'
       const result = rewriteWorkspaceLinks(input, AGENT_ID)
       const a = firstAnchor(result)!
-      expect(a.getAttribute('href')).toBe('/api/agents/99/files/other.png')
-      expect(a.hasAttribute('download')).toBe(false)
-      expect(a.classList.contains('workspace-file')).toBe(false)
+      expect(a.getAttribute('href')).toBe('/api/agents/7/files/out/clip.mp4')
+      expect(a.hasAttribute('download')).toBe(true)
+      expect(a.classList.contains('workspace-file')).toBe(true)
     })
 
     it('leaves unrelated /api/ links alone', () => {

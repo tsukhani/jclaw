@@ -10,7 +10,7 @@
  *    a markdown image) — rewritten to `/api/agents/{agentId}/files/{encoded}`.
  *    Anchors additionally get the `download` attribute and `workspace-file`
  *    CSS class so they render as pill buttons; images get only the src fix.
- *  - Absolute workspace URLs (`/api/agents/{agentId}/files/...`) — already
+ *  - Absolute workspace URLs (`/api/agents/{id}/files/...`, any agent's) — already
  *    correctly addressed, so the URL is left alone; the anchor `download`
  *    attribute and `workspace-file` class are still applied so tool-emitted
  *    links render the same way.
@@ -47,6 +47,8 @@ function stripAngleWrapping(url: string): string {
     .replace(/>$/, '')
 }
 
+const WORKSPACE_FILE_URL = /^\/api\/agents\/\d+\/files\//
+
 export function rewriteWorkspaceLinks(html: string, agentId: number): string {
   if (typeof DOMParser === 'undefined') return html
   const parser = new DOMParser()
@@ -63,7 +65,8 @@ export function rewriteWorkspaceLinks(html: string, agentId: number): string {
     if (href !== raw) a.setAttribute('href', href)
     if (!href) return
     if (href.startsWith('#')) return
-    if (href.startsWith(workspacePrefix)) {
+    // Any agent's workspace URL, not only this chat's: an agent_spawn callee's file lives in the callee's workspace.
+    if (WORKSPACE_FILE_URL.test(href)) {
       a.setAttribute('download', '')
       a.classList.add('workspace-file')
       return

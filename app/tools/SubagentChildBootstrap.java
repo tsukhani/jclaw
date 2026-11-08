@@ -15,13 +15,13 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.SessionCompactor;
+import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool.SubagentModel;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.TreeSet;
 
 /**
  * JCLAW-677: materialize the child {@link Agent} + child {@link Conversation}
@@ -104,7 +104,7 @@ final class SubagentChildBootstrap {
         // and a new subagent has no explicit grant rows, so without this it sees
         // zero MCP tools even when the parent has them enabled — independent of
         // the fresh/inherit context choice. Scoped to freshly-created children so
-        // operator-configured reused (agentId) agents are untouched.
+        // an agent_spawn callee keeps its own configuration.
         if (requestedAgentId == null) {
             // JCLAW-500: bound the fresh clone's tool surface above by the
             // parent's restrictions before any inherit-mode widening below.
@@ -126,7 +126,7 @@ final class SubagentChildBootstrap {
 
         var childConv = resolveChildConversation(childAgent, parentConv,
                 modelProviderOverride, modelIdOverride,
-                applyInheritGrants ? parentContextSummary : null, inlineMode);
+                applyInheritGrants ? parentContextSummary : null, inlineMode, requestedAgentId != null);
 
         return Bootstrap.ok(childAgent.id, childConv.id, childAgent.name);
     }
@@ -155,15 +155,8 @@ final class SubagentChildBootstrap {
             Agent existing = Agent.findById(requestedAgentId);
             if (existing == null) {
                 return ResolvedChildAgent.fail(
-                        "Error: agentId %d not found.".formatted(requestedAgentId));
+                        "Error: agent %d not found.".formatted(requestedAgentId));
             }
-            // JCLAW-500 (Change 3): a reused agent must not be MORE capable than
-            // the spawning agent, or the spawn is a privilege escalation (a
-            // confined parent naming the main / an unrestricted agent to run
-            // with its tools or acp). Self-reuse and equal-or-narrower agents
-            // pass.
-            var escalation = capabilityEscalationError(parentAgent, existing);
-            if (escalation != null) return ResolvedChildAgent.fail(escalation);
             // Don't mutate Agent.parent_agent_id on a pre-existing row. The
             // lineage of *this* run is already recorded on the SubagentRun
             // (parentAgentId + childAgentId), and stamping parent_agent_id
@@ -180,9 +173,7 @@ final class SubagentChildBootstrap {
         // into a fresh row so the child is its own auditable identity.
         // JCLAW-269: child Agent ALWAYS inherits the parent's defaults; the
         // per-spawn modelProvider/modelId override (when supplied) lands on
-        // the child Conversation, not on this row. Keeping the Agent row
-        // clean of one-shot overrides means re-running the same child agent
-        // later (via agentId) doesn't carry stale per-spawn state.
+        // the child Conversation, not on this row.
         var name = buildChildAgentName(parentAgent.name);
         Agent created;
         try {
@@ -209,52 +200,6 @@ final class SubagentChildBootstrap {
     }
 
     /**
-     * JCLAW-500 (Change 3): bound a reused (agentId) child above by the
-     * spawning agent. A subagent must not be MORE capable than its parent, or
-     * naming an agentId becomes a privilege-escalation hatch (a confined custom
-     * agent reusing the main or an unrestricted agent to act with its tools /
-     * acp). Enforces child_capabilities ⊆ parent_capabilities:
-     * <ul>
-     *   <li>every tool the parent has disabled must also be disabled on the
-     *       named child (so child_enabled ⊆ parent_enabled), except {@code skill_read}
-     *       when the parent has {@code filesystem};</li>
-     *   <li>the child may use the acp runtime only if the parent may;</li>
-     *   <li>only the main agent may name the main agent: its shell privileges (global
-     *       paths, allowlist bypass) follow {@code isMain}, not any tool grant.</li>
-     * </ul>
-     * Self-reuse and equal-or-narrower agents pass. Returns an error string on
-     * escalation, or null when the named agent is within bounds.
-     */
-    private static @Nullable String capabilityEscalationError(Agent spawningAgent, Agent named) {
-        if (named.id != null && named.id.equals(spawningAgent.id)) {
-            return null; // self-reuse is always within bounds
-        }
-        if (named.isMain() && !spawningAgent.isMain()) {
-            return "Error: agentId %d ('%s') is the main agent, which only the main agent may run as a subagent."
-                    .formatted(named.id, named.name);
-        }
-        var parentDisabled = ToolRegistry.loadDisabledTools(spawningAgent);
-        var exceeded = new TreeSet<>(parentDisabled);
-        exceeded.removeAll(ToolRegistry.loadDisabledTools(named));
-        // JF-162: a parent with filesystem may name a child that has it, and a child's filesystem reaches every skill its skill_read would.
-        if (!parentDisabled.contains("filesystem")) exceeded.remove("skill_read");
-        if (!exceeded.isEmpty()) {
-            return ("Error: agentId %d ('%s') is more capable than the spawning agent '%s' "
-                    + "(it enables tools the spawning agent has disabled: %s); a subagent may not "
-                    + "exceed its parent's tool capabilities.")
-                    .formatted(named.id, named.name, spawningAgent.name, String.join(", ", exceeded));
-        }
-        boolean parentAcp = spawningAgent.isMain() || spawningAgent.acpAllowed;
-        boolean childAcp = named.isMain() || named.acpAllowed;
-        if (childAcp && !parentAcp) {
-            return ("Error: agentId %d ('%s') may use the acp runtime but the spawning agent "
-                    + "'%s' may not; a subagent may not exceed its parent's capabilities.")
-                    .formatted(named.id, named.name, spawningAgent.name);
-        }
-        return null;
-    }
-
-    /**
      * Resolve the child {@link Conversation}: inline mode reuses the
      * parent's row, session mode creates a fresh row stamped with the
      * per-spawn model override and inherited parent-context summary.
@@ -273,7 +218,7 @@ final class SubagentChildBootstrap {
                                                          @Nullable String modelProviderOverride,
                                                          @Nullable String modelIdOverride,
                                                          @Nullable String parentContextSummary,
-                                                         boolean inlineMode) {
+                                                         boolean inlineMode, boolean ownModel) {
         // JCLAW-267: inline mode reuses the parent Conversation as the child's
         // run target — the SubagentRun row points its childConversation FK at
         // the same row as parentConversation, and AgentRunner persists the
@@ -313,7 +258,9 @@ final class SubagentChildBootstrap {
         var inherited = parentConv != null ? parentConv : AgentRunner.taskFireParent(ToolContext.taskRunId());
         // The list rides down with every child, or a fenced task would leave its fence by delegating.
         if (inherited != null) childConv.enabledToolNames = inherited.enabledToolNames;
-        var resolved = resolveSubagentModel(inherited, childAgent, modelProviderOverride, modelIdOverride);
+        // An agent_spawn callee is the operator's agent, configured with the model its work needs.
+        var resolved = ownModel ? new SubagentModel(childAgent.modelProvider, childAgent.modelId)
+                : resolveSubagentModel(inherited, childAgent, modelProviderOverride, modelIdOverride);
         // Only stamp an override when the resolved model DIFFERS from the child
         // agent's base — the plain inherit case keeps a null override (matches
         // prior behavior and the cost dashboard's COALESCE(override, base)).
@@ -470,8 +417,8 @@ final class SubagentChildBootstrap {
      * {@link #unionParentToolGrants}. Those only ever widen the child toward
      * the parent's ENABLED set, and {@code unionParentToolGrants} explicitly
      * skips any tool in the parent's disabled set, so the deny-rows copied
-     * here survive both. Scoped to freshly-cloned children — the {@code
-     * agentId}-reuse path runs an existing agent that already carries its own
+     * here survive both. Scoped to freshly-cloned children — an
+     * {@code agent_spawn} callee is an existing agent that carries its own
      * rows.
      */
     private static void copyParentToolRestrictions(Agent parentAgent, @Nullable Agent childAgent) {
@@ -556,6 +503,20 @@ final class SubagentChildBootstrap {
         // The spawning turn's own conversation, else the most recently updated one. A subagent
         // calling spawn nests under its own child conversation, which is itself an existing
         // Conversation row, so no special case is needed. A turn with no parent chat (ToolContext.noParentChat) never reaches here.
-        return DeliveryResolver.operatingConversation(parent).orElse(null);
+        var calling = DeliveryResolver.callingConversation(parent);
+        if (calling.isPresent()) return calling.get();
+        var host = inlineHostConversation(parent);
+        return host != null ? host : DeliveryResolver.operatingConversation(parent).orElse(null);
+    }
+
+    /**
+     * The conversation an inline child runs in, which is its parent agent's: the child has none of its own, so
+     * without this its own spawn finds no parent conversation.
+     */
+    private static @Nullable Conversation inlineHostConversation(Agent child) {
+        var id = ToolContext.conversationId();
+        if (id == null || child.parentAgent == null || !SubagentRegistry.inSubagentTurn()) return null;
+        var conv = (Conversation) Conversation.findById(id);
+        return conv != null && conv.agent != null && Objects.equals(conv.agent.id, child.parentAgent.id) ? conv : null;
     }
 }

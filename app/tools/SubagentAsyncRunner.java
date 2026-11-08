@@ -75,12 +75,12 @@ final class SubagentAsyncRunner {
      *  acknowledgment payload. */
     static String launchAsyncSpawn(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                    Long parentConvId, String parentAgentName,
-                                   SubagentSpawnArgs parsed, String runIdStr) {
+                                   SubagentSpawnArgs parsed, String runIdStr, int depth) {
         var outcome = track(runId, currentScopeKey());
         Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
                 runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId,
                         parentAgentName, parsed.mode(), parsed.context(), parsed.label(),
-                        parsed.timeoutSeconds(), parsed.resolvedTask(), outcome));
+                        parsed.timeoutSeconds(), parsed.resolvedTask(), outcome, depth));
         var asyncPayload = new LinkedHashMap<String, Object>();
         asyncPayload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         asyncPayload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
@@ -134,18 +134,20 @@ final class SubagentAsyncRunner {
      */
     static void dispatchDetachedAsync(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                       String parentAgentName, @Nullable String mode, @Nullable String context,
-                                      int timeoutSeconds, String task, @Nullable String scopeKey) {
+                                      int timeoutSeconds, String task, @Nullable String scopeKey, int depth) {
         var outcomeFuture = track(runId, scopeKey, true);
         Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
                 runAsyncDetached(runId, childAgentId, childConvId, parentAgentName,
-                        mode, context, timeoutSeconds, task, outcomeFuture));
+                        mode, context, timeoutSeconds, task, outcomeFuture, depth));
     }
 
     /** JCLAW-497: single async spawn inside a task fire. Returns run_id immediately. */
     static String launchAsyncSpawnForTask(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
-                                          String parentAgentName, SubagentSpawnArgs parsed, String runIdStr) {
+                                          String parentAgentName, SubagentSpawnArgs parsed, String runIdStr,
+                                          int depth) {
         dispatchDetachedAsync(runId, childAgentId, childConvId, parentAgentName,
-                parsed.resolvedMode(), parsed.resolvedContext(), parsed.timeoutSeconds(), parsed.resolvedTask(), currentScopeKey());
+                parsed.resolvedMode(), parsed.resolvedContext(), parsed.timeoutSeconds(), parsed.resolvedTask(),
+                currentScopeKey(), depth);
         var payload = new LinkedHashMap<String, Object>();
         payload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         payload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
@@ -163,9 +165,9 @@ final class SubagentAsyncRunner {
     private static void runAsyncDetached(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                          String parentAgentName, @Nullable String mode, @Nullable String context,
                                          int timeoutSeconds, String task,
-                                         CompletableFuture<SyncRunOutcome> outcomeFuture) {
+                                         CompletableFuture<SyncRunOutcome> outcomeFuture, int depth) {
         try {
-            var future = startAsyncChild(runId, childAgentId, childConvId, task);
+            var future = startAsyncChild(runId, childAgentId, childConvId, task, depth);
             SyncRunOutcome outcome;
             try {
                 outcome = awaitAsyncFuture(future, timeoutSeconds,
@@ -354,18 +356,19 @@ final class SubagentAsyncRunner {
                                     @Nullable String mode, @Nullable String context, @Nullable String label,
                                     int timeoutSeconds, String task) {
         runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId, parentAgentName,
-                mode, context, label, timeoutSeconds, task, null);
+                mode, context, label, timeoutSeconds, task, null, 1);
     }
 
     /** {@link #runAsyncAndAnnounce(Long, Long, Long, Long, String, String, String, String, int, String)}
-     *  that also completes {@code collected}, the outcome a subagent_yield runIds/all collects. */
+     *  that also completes {@code collected}, the outcome a subagent_yield runIds/all collects, and runs the child
+     *  at {@code depth}. */
     @SuppressWarnings("java:S1181")
     private static void runAsyncAndAnnounce(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                             Long parentConvId, String parentAgentName,
                                             @Nullable String mode, @Nullable String context, @Nullable String label,
                                             int timeoutSeconds, String task,
-                                            @Nullable CompletableFuture<SyncRunOutcome> collected) {
-        var future = startAsyncChild(runId, childAgentId, childConvId, task);
+                                            @Nullable CompletableFuture<SyncRunOutcome> collected, int depth) {
+        var future = startAsyncChild(runId, childAgentId, childConvId, task, depth);
         SyncRunOutcome outcome;
         try {
             outcome = awaitAsyncFuture(future, timeoutSeconds,
@@ -430,7 +433,7 @@ final class SubagentAsyncRunner {
      */
     @SuppressWarnings("java:S1181")
     private static CompletableFuture<AgentRunner.RunResult> startAsyncChild(
-            Long runId, @Nullable Long childAgentId, @Nullable Long childConvId, String task) {
+            Long runId, @Nullable Long childAgentId, @Nullable Long childConvId, String task, int depth) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {
@@ -441,7 +444,7 @@ final class SubagentAsyncRunner {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                future.complete(SubagentRegistry.callAsRun(runId,
+                future.complete(SubagentRegistry.callAsRun(runId, depth,
                         () -> SubagentAcpRunner.executeChildRun(runId, childAgent, childConv, task, false)));
             } catch (Throwable t) {
                 future.completeExceptionally(t);

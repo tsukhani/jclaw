@@ -898,136 +898,49 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void agentIdReuseRejectedWhenMoreCapable() throws Exception {
-        // JCLAW-500 (Change 3): reusing an agentId that is MORE capable than the
-        // spawning agent is a privilege escalation and must be refused.
-        startLlmServer(simpleResponse("done."));
+    void aSingleSpawnNamingAgentIdIsRefusedNamingAgentSpawn() throws Exception {
+        var parent = createAgent("p-agent-id", "spawn-provider", "test-model");
+        var other = createAgent("a-other", "spawn-provider", "test-model");
+        ConversationService.create(parent, "web", "u-agent-id");
+        commitAndReopen();
+
+        var spawned = invokeCapturing(parent, "{\"task\":\"x\",\"agentId\":" + other.id + "}");
+
+        assertEquals(AGENT_ID_REFUSED, spawned.reply());
+        assertEquals(AGENT_ID_REFUSED, invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":null}"),
+                "the key alone is refused, whatever its value");
+        assertEquals(AGENT_ID_REFUSED, invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + parent.id + "}"),
+                "its own id too");
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(), "refused before any row");
+        assertEquals(java.util.List.of(), ofCategory(spawned.events(), EventLogger.SUBAGENT_LIMIT_EXCEEDED),
+                "refused before the limits are read");
+    }
+
+    @Test
+    void aBatchEntryNamingAgentIdIsRefusedNamingAgentSpawn() throws Exception {
+        startLlmServer(simpleResponse("batch done"));
         configureProvider();
-        // Spawning parent restricts exec; the target does not — the target is
-        // more capable, so naming it as the child must be rejected.
-        var parent = createAgent("p-narrow", "spawn-provider", "test-model");
-        var deny = new AgentToolConfig();
-        deny.agent = parent;
-        deny.toolName = "exec";
-        deny.enabled = false;
-        deny.save();
-        var target = createAgent("a-wide", "spawn-provider", "test-model"); // exec enabled
-        ConversationService.create(parent, "web", "u-narrow");
+        var parent = createAgent("p-batch-agent-id", "spawn-provider", "test-model");
+        var other = createAgent("a-batch-other", "spawn-provider", "test-model");
+        ConversationService.create(parent, "web", "u-batch-agent-id");
         commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
 
-        var result = invokeOnVirtualThread(parent.id,
-                "{\"task\":\"x\",\"agentId\":" + target.id + "}");
-        assertEquals(capabilityRefusal(target, parent, "exec"), result);
+        assertEquals(AGENT_ID_REFUSED, invokeOnVirtualThread(parent.id,
+                "{\"tasks\":[\"plain\",{\"task\":\"x\",\"agentId\":" + other.id + "}]}"));
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(), "no entry of a refused batch runs");
+
+        var plain = JsonParser.parseString(invokeOnVirtualThread(parent.id,
+                "{\"tasks\":[\"one\",{\"task\":\"two\",\"label\":\"second\"}]}")).getAsJsonObject();
+        assertEquals(2, plain.get("count").getAsInt(), plain.toString());
+        for (var runId : plain.getAsJsonArray("run_ids")) {
+            awaitTerminalStatus(Long.parseLong(runId.getAsString()), SubagentRun.Status.COMPLETED, 15_000);
+        }
     }
 
-    // ── JF-162: skill_read does not count against a parent that has filesystem ──
-
-    @Test
-    void aParentWithFilesystemCanNameAnAgentKeptOffFilesystemThatHasSkillRead() throws Exception {
-        startLlmServer(simpleResponse("done."));
-        configureProvider();
-        var parent = createAgent("p-fs", "spawn-provider", "test-model");
-        var target = createAgent("a-skill-reader", "spawn-provider", "test-model");
-        setTool(target, "filesystem", false);
-        setTool(target, "skill_read", true);
-        ConversationService.create(parent, "web", "u-fs");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
-
-        var result = invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}");
-        assertEquals("done.", result.startsWith("{")
-                ? JsonParser.parseString(result).getAsJsonObject().get("reply").getAsString() : result);
-    }
-
-    @Test
-    void aParentWithoutFilesystemIsStillRefusedAnAgentThatHasSkillRead() throws Exception {
-        var parent = createAgent("p-nofs", "spawn-provider", "test-model");
-        setTool(parent, "filesystem", false);
-        var target = createAgent("a-skill-reader-2", "spawn-provider", "test-model");
-        setTool(target, "filesystem", false);
-        setTool(target, "skill_read", true);
-        ConversationService.create(parent, "web", "u-nofs");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
-
-        assertEquals(capabilityRefusal(target, parent, "skill_read"),
-                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
-    }
-
-    @Test
-    void anotherToolTheParentLacksIsNamedAloneBesideAnExemptSkillRead() throws Exception {
-        var parent = createAgent("p-noexec", "spawn-provider", "test-model");
-        setTool(parent, "exec", false);
-        var target = createAgent("a-exec-skill", "spawn-provider", "test-model");
-        setTool(target, "skill_read", true);
-        ConversationService.create(parent, "web", "u-noexec");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
-
-        assertEquals(capabilityRefusal(target, parent, "exec"),
-                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
-    }
-
-    @Test
-    void aDefaultOffToolTheNamedAgentHoldsStillRefuses() throws Exception {
-        var parent = createAgent("p-plain", "spawn-provider", "test-model");
-        var target = createAgent("a-image", "spawn-provider", "test-model");
-        setTool(target, "generate_image", true);
-        ConversationService.create(parent, "web", "u-plain");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
-
-        assertEquals(capabilityRefusal(target, parent, "generate_image"),
-                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
-    }
-
-    @Test
-    void everyToolThatTripsTheGuardIsNamedAlphabetically() throws Exception {
-        var parent = createAgent("p-narrow2", "spawn-provider", "test-model");
-        setTool(parent, "exec", false);
-        var target = createAgent("a-wide2", "spawn-provider", "test-model");
-        setTool(target, "generate_image", true);
-        ConversationService.create(parent, "web", "u-narrow2");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(target);
-
-        assertEquals(capabilityRefusal(target, parent, "exec, generate_image"),
-                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + target.id + "}"));
-    }
-
-    @Test
-    void anAgentOtherThanMainCannotNameTheMainAgent() throws Exception {
-        var parent = createAgent("p-not-main", "spawn-provider", "test-model");
-        var main = createAgent("main", "spawn-provider", "test-model");
-        ConversationService.create(parent, "web", "u-not-main");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        ToolRegistry.invalidateDisabledToolsCache(main);
-
-        assertEquals("Error: agentId " + main.id + " ('main') is the main agent, which only the main agent may run as a subagent.",
-                invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"agentId\":" + main.id + "}"));
-    }
-
-    private static String capabilityRefusal(Agent named, Agent parent, String tools) {
-        return "Error: agentId " + named.id + " ('" + named.name + "') is more capable than the spawning agent '"
-                + parent.name + "' (it enables tools the spawning agent has disabled: " + tools
-                + "); a subagent may not exceed its parent's tool capabilities.";
-    }
-
-    private static void setTool(Agent agent, String tool, boolean enabled) {
-        var row = new AgentToolConfig();
-        row.agent = agent;
-        row.toolName = tool;
-        row.enabled = enabled;
-        row.save();
-    }
+    private static final String AGENT_ID_REFUSED = "Error: subagent_spawn no longer takes agentId: it spawns only "
+            + "helper copies of the calling agent. To hand a task to another agent, call agent_spawn with that agent's name.";
 
     // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────
 
@@ -1479,56 +1392,6 @@ class SubagentSpawnToolTest extends UnitTest {
                 "the run's parent must be the spawning conversation, not the more recently updated #" + newer.id);
         Conversation childConv = Conversation.findById(run.childConversation.id);
         assertEquals(calling.id, childConv.parentConversation.id);
-    }
-
-    @Test
-    void aSubagentIsOfferedJclawApiOnlyWhenTheOwnerReadsTheSpawningTurnAlone() throws Exception {
-        // JF-148: the child's conversation takes the parent's channel and peer, and its thread the parent turn's
-        // owner flag, so neither a guest nor a group reaches the tool one hop out.
-        var requestTools = new CopyOnWriteArrayList<java.util.Set<String>>();
-        startLlmServer(exchange -> {
-            var body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
-            var tools = new java.util.TreeSet<String>();
-            if (body.has("tools")) {
-                for (var tool : body.getAsJsonArray("tools")) {
-                    tools.add(tool.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
-                }
-            }
-            requestTools.add(tools);
-            LlmReplyFixture.send(exchange, simpleResponse("done."));
-        });
-        configureProvider();
-        var parent = createAgent("p-jclaw-api", "spawn-provider", "test-model");
-        var grant = new AgentToolConfig();
-        grant.agent = parent;
-        grant.toolName = "jclaw_api";
-        grant.enabled = true;
-        grant.save();
-        var web = ConversationService.create(parent, "web", "u-jclaw-api");
-        var ownerDm = ConversationService.create(parent, "telegram", "4242");
-        var group = ConversationService.create(parent, "telegram", "-100200");
-        var guestDm = ConversationService.create(parent, "telegram", "5151");
-        commitAndReopen();
-        ToolRegistry.invalidateDisabledToolsCache(parent);
-        // The parent's own agent, granted the tool; a fresh child is never granted it.
-        var spawn = "{\"task\":\"look it up\",\"agentId\":" + parent.id + "}";
-
-        ToolRegistrySync.withCanonicalTools(() -> {
-            invokeOnVirtualThreadInConversation(parent.id, web.id, spawn, false);
-            invokeOnVirtualThreadInConversation(parent.id, ownerDm.id, spawn, true);
-            invokeOnVirtualThreadInConversation(parent.id, group.id, spawn, true);
-            invokeOnVirtualThreadInConversation(parent.id, guestDm.id, spawn, false);
-        });
-
-        assertEquals(4, requestTools.size(), "one model call per child: " + requestTools);
-        var fromWeb = requestTools.get(0);
-        assertTrue(fromWeb.contains("jclaw_api"), "spawned from web chat: " + fromWeb);
-        assertEquals(fromWeb, requestTools.get(1), "spawned from the owner's own Telegram DM");
-        var expected = new java.util.TreeSet<>(fromWeb);
-        expected.remove("jclaw_api");
-        assertEquals(expected, requestTools.get(2), "spawned from the owner's message in a Telegram group");
-        assertEquals(expected, requestTools.get(3), "spawned from a guest's Telegram turn");
     }
 
     /** {@link #invokeOnVirtualThread} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */

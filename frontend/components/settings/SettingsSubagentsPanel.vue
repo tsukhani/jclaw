@@ -122,7 +122,9 @@ async function saveSubagentModel(value: string) {
       Subagents
     </h2>
     <p class="text-xs text-fg-muted">
-      Recursion caps for the <span class="font-mono">subagent_spawn</span> tool.
+      Recursion caps for the <span class="font-mono">subagent_spawn</span> tool,
+      shared with <span class="font-mono">agent_spawn</span>: a hand-off to another
+      agent counts as one level of depth and as one running child.
       <span class="font-mono">maxDepth</span> bounds how deep the parent-child
       chain may go (1 = top-level agents may spawn, grandchildren refused);
       <span class="font-mono">maxChildrenPerParent</span> bounds how many
@@ -143,7 +145,7 @@ async function saveSubagentModel(value: string) {
               label="About maxDepth"
               content-class="w-64 font-mono"
             >
-              Max recursion depth for subagent_spawn. 1 = only top-level agents may spawn; a child trying to spawn its own subagent is refused.
+              Max recursion depth for subagent_spawn and agent_spawn alike. 1 = only top-level agents may spawn or hand off; a child, or an agent that was handed work, is refused.
             </InfoTip>
           </span>
           <template v-if="editingSubagentField === 'maxDepth'">

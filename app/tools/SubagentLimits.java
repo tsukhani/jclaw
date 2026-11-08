@@ -4,6 +4,7 @@ import models.Agent;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import services.SubagentRegistry;
 
 /**
  * JCLAW-677: recursion caps for subagent
@@ -19,11 +20,13 @@ final class SubagentLimits {
 
     private SubagentLimits() {}
 
+    /** {@code refusal} non-null refuses the spawn; otherwise the child runs at {@code childDepth}. */
+    record Admission(@Nullable String refusal, int childDepth) {}
+
     /**
-     * Returns a refusal reason string when the spawn would violate either
-     * recursion cap, or {@code null} when the spawn may proceed. Must be
-     * called inside a {@link services.Tx#run} block: it touches the persisted
-     * {@code parentAgent} chain and queries {@link SubagentRun}.
+     * Refuses a spawn that would violate either recursion cap, or admits it at the child's depth. Must be
+     * called inside a {@link services.Tx#run} block on the spawning thread: it touches the persisted
+     * {@code parentAgent} chain, queries {@link SubagentRun}, and reads the run this thread executes.
      *
      * <p>Race note: two concurrent spawns from the same parent could both
      * see "N-1 RUNNING" and both proceed, transiently exceeding the breadth
@@ -32,14 +35,14 @@ final class SubagentLimits {
      * advisory limit for now. A {@code SELECT ... FOR UPDATE} on the parent
      * Agent row would close the window if/when it matters.
      */
-    static @Nullable String enforceRecursionLimits(Agent parentAgent) {
+    static Admission enforceRecursionLimits(Agent parentAgent) {
         return enforceRecursionLimits(parentAgent, 1);
     }
 
     /** JCLAW-498: as above, but for spawning {@code additionalChildren} at once
      *  (batch fan-out) — the breadth check refuses when the running count plus the
      *  requested count would exceed the cap, so a single fan-out can't blow it. */
-    static @Nullable String enforceRecursionLimits(Agent parentAgent, int additionalChildren) {
+    static Admission enforceRecursionLimits(Agent parentAgent, int additionalChildren) {
         // Read from the runtime Config table so the Settings page can edit
         // these without a restart. ConfigService.getInt falls back to the
         // hard-coded default when the row is absent or unparseable; values
@@ -50,13 +53,12 @@ final class SubagentLimits {
         var breadthLimit = readPositiveIntConfig(SubagentSpawnTool.BREADTH_LIMIT_KEY,
                 SubagentSpawnTool.DEFAULT_BREADTH_LIMIT);
 
-        var currentDepth = depthOf(parentAgent);
-        // currentDepth is the spawning agent's depth. Spawning would create
-        // a child at depth currentDepth+1; refuse when currentDepth+1 exceeds
-        // the limit, i.e. currentDepth >= limit.
+        // An agent_spawn callee has no parentAgent, so its agent chain alone would count it as top-level.
+        var currentDepth = Math.max(depthOf(parentAgent), SubagentRegistry.currentRunDepth());
+        // Spawning would create a child at depth currentDepth+1; refuse when that exceeds the limit.
         if (currentDepth >= depthLimit) {
-            return "depth limit %d exceeded (current depth: %d)."
-                    .formatted(depthLimit, currentDepth);
+            return refuse("depth limit %d exceeded (current depth: %d)."
+                    .formatted(depthLimit, currentDepth));
         }
 
         // Re-fetch the parent inside this tx for a managed reference. The
@@ -65,18 +67,22 @@ final class SubagentLimits {
         if (managed == null) {
             // The spawning agent vanished between the controller and here.
             // Surface a clear refusal rather than spinning into bootstrap.
-            return "parent agent %d not found.".formatted(parentAgent.id);
+            return refuse("parent agent %d not found.".formatted(parentAgent.id));
         }
         long running = SubagentRun.count(
                 "parentAgent = ?1 AND status = ?2",
                 managed, SubagentRun.Status.RUNNING);
         if (running + additionalChildren > breadthLimit) {
-            return additionalChildren == 1
+            return refuse(additionalChildren == 1
                     ? "breadth limit %d exceeded (running children: %d).".formatted(breadthLimit, running)
                     : "breadth limit %d exceeded: %d already running + %d requested.".formatted(
-                            breadthLimit, running, additionalChildren);
+                            breadthLimit, running, additionalChildren));
         }
-        return null;
+        return new Admission(null, currentDepth + 1);
+    }
+
+    private static Admission refuse(String reason) {
+        return new Admission(reason, 0);
     }
 
     /** Count of parentAgent links from {@code start} back to a root.
