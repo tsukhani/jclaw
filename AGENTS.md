@@ -16,7 +16,21 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - `bin/policy-guard.mjs` enforces the push, hook-skipping, `git stash -u`, instance-stopping and upstream-skill rules of this block, as a PreToolUse hook and in `.githooks/pre-push`. Ask the operator before a refused stop or restart, and only on their yes in this conversation rerun it prefixed `JCLAW_OPERATOR_APPROVED=1`.
 - Never hand-edit the seven upstream-imported skills (`skills/{claude-designer,powerpoint-pptx,humanizer,youtube-transcript,git,frontend-design,ffmpeg-video-processing}`) — a re-import overwrites them; the other skills under `skills/`, including the ClawHub-derived `in-depth-research` and `research-paper-writer-pro`, are local and edited normally. `docs/architecture/` is a snapshot nothing regenerates: correct a wrong fact in place, never expand or restructure it.
 - Commit messages and tags are public on the GitHub mirror: no credentials, customer specifics, or unreleased plans.
-- Don't create worktrees or branches unless asked; work on `main`. One exception: when a test run here fails twice from another session's work, for a cause you can name (its mid-run edit reloading Play's classes, its test stopping the server), rerun it in a temporary detached worktree outside the checkout (`git worktree add --detach`, which seeds its own `PLAY_TEST_PORT`) holding `HEAD` plus only your diff, then remove the worktree; you still commit on `main`. Other sessions share this checkout: stage only your own hunks, never `git stash -u`. `/deploy` stages everything (`git add -A`), so check `git status` for other sessions' work before running it.
+- Implement every Jira ticket in a worktree of its own. Sessions sharing this clone then never share an index, a working tree or a test port.
+  - **Create** it with `git worktree add -b <KEY> .claude/worktrees/<KEY> HEAD`. Branch from local `HEAD`, never `origin/main`, which lacks the unpushed commits the work builds on.
+  - **Setup:**
+    - The `post-checkout` hook seeds the worktree's `certs/.env` with its own `PLAY_TEST_PORT`.
+    - `cd frontend && CI=true pnpm install` gives it the `node_modules` the pre-commit hook needs and the `.nuxt` vitest needs.
+    - `EnterWorktree` skips the hook and branches from `origin/main`: run `./jclaw.sh init-worktree` in it and check its base.
+  - **What stays in the main checkout:**
+    - A spec under `_bmad-output/` is gitignored, so it stays in the main checkout and is addressed by absolute path.
+    - The live instance builds from the main checkout, so a live check waits for the merge.
+  - **Land** it:
+    1. Rebase the branch onto `main`. If `main` moved, rerun the tests the change touches.
+    2. From the main checkout, run `git merge --ff-only <KEY>`. If another session's uncommitted edits block the fast-forward, stop and ask.
+    3. Only when the merge succeeded and `main` equals the branch, run `git worktree remove` and `git branch -d`. Never `-D`: it deletes an unmerged branch when another session has moved `main`.
+  - **Everything else:** work that has no ticket stays on `main`, and make no other branch unless asked.
+- Other sessions share the main checkout: stage only your own hunks there, and never `git stash -u`. A test run on `main` that another session's work fails twice, for a cause you can name, reruns in a temporary detached worktree holding `HEAD` plus only your diff. `/deploy` stages everything (`git add -A`), so check `git status` for other sessions' work before running it.
 - The `jclaw_api` token exists only in the running process and the database keeps only its hash, so a restart mints a new one and there is no plaintext to SELECT. Read-only SELECTs on the live H2 (empty credentials, `AUTO_SERVER`) are fine. Third-party credentials cannot be hashed, so they are stored AES-GCM-encrypted (`enc:v1:`) under a key HKDF derives from `PLAY_SECRET` in `certs/.env` (`utils.CredentialCipher`, JCLAW-1455): the Config keys `ConfigService.encryptsAtRest` flags (outside `auth.`, a last word ending `key`, `keys` or `token`, or any word containing `secret` or `password`), the Slack, Telegram and WhatsApp binding token and secret columns, and the secret values in `McpServer` and `ChannelConfig` JSON. A SELECT returns ciphertext, but `certs/.env` opens it, and a data file not yet compacted (`jclaw.sh compact`) or a backup Settings marks Unencrypted still holds plaintext: never copy a value read from any of them into output, commits or tickets.
 
 ## Where things are
@@ -31,6 +45,16 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 ## Running and verifying
 
 - Backend tests: `play autotest`, never `play test` (it starts an interactive test server). One class, or several comma-separated in one start: `./gradlew playAutotest -Ptests=<Class>[,<Class>]`, about 30 s a start; the full suite takes about 9–10 min. `./jclaw.sh test` runs all five checks to the end and prints a pass/fail summary naming each failed check's `logs/test-*.log`.
+- A Jira ticket runs the tests of its own work, never the full suite. That means:
+  - the test classes it wrote or changed, and those covering the code it changed, in one `./gradlew playAutotest -Ptests=…` start;
+  - the vitest files likewise, with `cd frontend && pnpm exec vitest run <file>…`;
+  - `./jclaw.sh check`, which runs no test.
+
+  The wide run is `/deploy`'s:
+  - its pre-push hook runs every test class the whole push reaches (`bin/select-tests.mjs`), plus the frontend checks when a frontend input changed;
+  - Jenkins runs the full suite after the push.
+
+  So a failure outside the ticket's own classes surfaces at `/deploy`, and is fixed before the push.
 - `./jclaw.sh check` runs what fails without running a test (the wildcard-import grep, spotlessCheck, compileJava with NullAway, ESLint, Stylelint, the typecheck), 23 s on a warm tree; `--backend-only` leaves the frontend out. `./jclaw.sh check-arch` runs the 18 ArchUnit and conformance classes alone, about 2.5 min.
 - Test sources are the default package: test seams must be `public`. A test class must extend `play.test.UnitTest` or `FunctionalTest`; `TestDiscoveryConformanceTest` fails the build on one that does neither, which the runner would never reach. A test reaches a package-private method by reflection (`SubagentRunEventsTest` into `SubagentRunStore`), so changing such a signature compiles and fails only when that class runs: `git grep -n '"<method>"' -- test` first.
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
