@@ -409,7 +409,7 @@ class CompactionGateTest extends UnitTest {
     }
 
     @Test
-    void aSkipUnderTheTokenTriggerAloneLogsNothingButOneWithTheWindowRuleDoes() {
+    void aSkipUnderTheTokenTriggerAloneLogsOncePerFloorAndOneWithTheWindowRuleLogsEveryTurn() {
         // No history rows, so every attempt skips for want of a boundary before any model call.
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         var provider = ownProvider(1_000_000);
@@ -425,7 +425,14 @@ class CompactionGateTest extends UnitTest {
             var pastTheWindow = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
                     agent, conv.id, Set.of(), primary, current, List.of(), 1_000_000));
 
-            assertEquals(List.of(), compactionLines(triggerOnly));
+            var triggerAgain = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
+                    agent, conv.id, Set.of(), primary, current, List.of(), 150_000));
+
+            assertEquals(1, compactionLines(triggerOnly).size());
+            assertTrue(compactionLines(triggerOnly).getFirst().startsWith("Compaction skipped (no safe boundary or "
+                    + "below min-turns) at an estimated "), compactionLines(triggerOnly).toString());
+            assertEquals(List.of(), compactionLines(triggerAgain),
+                    "the same floor is not logged a second time");
             assertEquals(List.of("Compaction skipped (no safe boundary or below min-turns); "
                     + "the context-window trim is left to fit the prompt"), compactionLines(pastTheWindow));
         } finally {

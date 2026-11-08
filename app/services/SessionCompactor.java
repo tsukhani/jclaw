@@ -129,12 +129,27 @@ public final class SessionCompactor {
 
     // ─── Decision ───────────────────────────────────────────────────────
 
+    /**
+     * The first message when a compaction floor leaves history opening on an assistant row, as a cut at a tool
+     * round does (JF-236): a provider such as Gemini refuses an assistant turn straight after the system prompt.
+     */
+    public static final String LEADING_USER_NOTE = "[Earlier messages of this conversation are summarized in the system prompt.]";
+
+    /** The skip reason when no row in the eligible range can end a summary. */
+    public static final String NO_CUT_REASON = "no safe boundary or below min-turns";
+
     /** JF-154: the token trigger's cap; 0 or less turns this half off. */
     public static final String TRIGGER_TOKENS_KEY = "chat.compaction.triggerTokens";
     public static final int DEFAULT_TRIGGER_TOKENS = 150_000;
     /** JF-159: the token trigger's share, in percent, of the window left after the system prompt and tools; 0 or less turns this half off. */
     public static final String TRIGGER_PERCENT_KEY = "chat.compaction.triggerPercent";
     public static final int DEFAULT_TRIGGER_PERCENT = 50;
+    /**
+     * JF-236: true lets a summary end after a finished tool round when a chat has no user row to end it on, as one
+     * long run of tool calls under a single prompt does. Off by default and unseeded: it newly summarizes chats that
+     * could never be cut, and a summary is undone only by SQL, so it is turned on after trying one long chat.
+     */
+    public static final String ON_TOOL_ROUND_KEY = "chat.compaction.onToolRound";
     /** JF-159: false leaves a chat past its history limit to the newest-rows load, dropping the oldest unread. */
     public static final String ON_ROW_LIMIT_KEY = "chat.compaction.onRowLimit";
     /** The most summary calls one automatic compaction makes; a catch-up that needs more continues on the next turn. */
@@ -346,7 +361,7 @@ public final class SessionCompactor {
             final boolean first = calls == 0;
             var planOpt = Tx.run(() -> buildPlan(conversationId, force, callTokens, first));
             if (planOpt.isEmpty()) {
-                if (first) return CompactionResult.skipped("no safe boundary or below min-turns");
+                if (first) return CompactionResult.skipped(NO_CUT_REASON);
                 reachedTail = true;
                 break;
             }
@@ -697,14 +712,14 @@ public final class SessionCompactor {
         var oldest = ConversationService.loadOldestMessages(conv, (int) Math.min(total, limit + 1L));
         int reach = (int) Math.min(limit, total - keep);
         int fit = rowsWithin(oldest, callTokens);
-        int boundary = latestUserRow(oldest, min, Math.min(reach, fit));
+        int boundary = latestCut(oldest, min, Math.min(reach, fit));
         if (boundary > 0) return planAt(oldest, boundary, false, reach == total - keep && fit >= reach, 0);
         // One chunk over the budget beats none: the call may still fit, and one that fails only stops the catch-up.
-        boundary = earliestUserRow(oldest, Math.max(min, fit + 1), reach);
+        boundary = earliestCut(oldest, Math.max(min, fit + 1), reach);
         if (boundary > 0) return planAt(oldest, boundary, false, false, 0);
         if (total <= limit) return Optional.empty();
-        EventLogger.info("compaction", null, null, ("Compaction for conversation %d found no user message to end a "
-                + "summary on among its oldest rows; the %d rows before its newest %d are not summarized")
+        EventLogger.info("compaction", null, null, ("Compaction for conversation %d found no user message or tool "
+                + "round to end a summary on among its oldest rows; the %d rows before its newest %d are not summarized")
                 .formatted(conversationId, total - limit, limit));
         var recent = ConversationService.loadRecentMessages(conv);
         return planAt(recent, findSafeBoundary(recent, keep, min), firstCall, true, (int) (total - limit));
@@ -779,18 +794,28 @@ public final class SessionCompactor {
         return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
     }
 
-    /** The turn's list is its system prompt then the loaded rows, so the slot after the summarized rows holds the first kept row. */
+    /**
+     * The turn's list is its system prompt, the {@link #LEADING_USER_NOTE} when the history after the
+     * floor opens on an assistant row, then the loaded rows, so the slot after the summarized rows holds the first
+     * kept row.
+     */
     private static boolean alignsWith(CompactionPlan plan, List<ChatMessage> turn) {
-        int firstKept = plan.toSummarize().size() + 1;
+        int firstKept = plan.toSummarize().size() + 1 + leadingNotes(turn);
         if (turn.size() <= firstKept) return false;
         var kept = turn.get(firstKept);
-        return MessageRole.USER.value.equals(kept.role())
-                && (!(kept.content() instanceof String text) || text.equals(plan.firstKept().content()));
+        return Objects.equals(kept.role(), plan.firstKept().role())
+                && (!(kept.content() instanceof String text)
+                || text.equals(Objects.requireNonNullElse(plan.firstKept().content(), "")));
+    }
+
+    private static int leadingNotes(List<ChatMessage> turn) {
+        return turn.size() > 1 && MessageRole.USER.value.equals(turn.get(1).role())
+                && LEADING_USER_NOTE.equals(turn.get(1).content()) ? 1 : 0;
     }
 
     private static List<ChatMessage> turnRequest(CompactionPlan plan, List<ChatMessage> turn,
                                                  @Nullable String additionalInstructions) {
-        var prefix = turn.subList(0, plan.toSummarize().size() + 1);
+        var prefix = turn.subList(0, plan.toSummarize().size() + 1 + leadingNotes(turn));
         var request = new ArrayList<ChatMessage>(prefix.size() + 1);
         for (var m : prefix) request.add(withoutMedia(m));
         request.add(ChatMessage.user(instructions(additionalInstructions)));
@@ -832,11 +857,14 @@ public final class SessionCompactor {
      *       than it saves.</li>
      *   <li>The boundary message is a USER role — guarantees we don't
      *       split a tool-call cycle across the boundary, since user
-     *       messages start new turns.</li>
+     *       messages start new turns. Without one in range, it is an
+     *       assistant row straight after a tool result (JF-236), which
+     *       splits no call from its result either.</li>
      * </ul>
      *
      * Returns {@code -1} if no valid boundary exists (conversation too
-     * short, or no user message in the eligible range).
+     * short, or neither a user message nor a completed tool round in the
+     * eligible range).
      */
     public static int findSafeBoundary(List<Message> messages) {
         return findSafeBoundary(messages, keepMessages(false), minTurns(false));
@@ -853,7 +881,7 @@ public final class SessionCompactor {
     }
 
     public static int findSafeBoundary(List<Message> messages, int keepMin, int minCompactable) {
-        return latestUserRow(messages, minCompactable, messages.size() - keepMin);
+        return latestCut(messages, minCompactable, messages.size() - keepMin);
     }
 
     private static int keepMessages(boolean force) {
@@ -880,6 +908,39 @@ public final class SessionCompactor {
             if (MessageRole.USER.value.equals(rows.get(i).role)) return i;
         }
         return -1;
+    }
+
+    /**
+     * The last row from {@code from} to {@code to} a summary may end on: a user row, else, when
+     * {@link #ON_TOOL_ROUND_KEY} is on, the row opening a tool round (JF-236). A turn of many tool rounds under one prompt has no user row to cut at, so it was never
+     * summarized however far past the trigger it ran.
+     */
+    private static int latestCut(List<Message> rows, int from, int to) {
+        int user = latestUserRow(rows, from, to);
+        if (user >= 0 || !ConfigService.getBoolean(ON_TOOL_ROUND_KEY, false)) return user;
+        for (int i = Math.min(to, rows.size() - 1); i >= Math.max(from, 1); i--) {
+            if (opensToolRound(rows, i)) return i;
+        }
+        return -1;
+    }
+
+    /** {@link #latestCut} from the other end: the first such row. */
+    private static int earliestCut(List<Message> rows, int from, int to) {
+        int user = earliestUserRow(rows, from, to);
+        if (user >= 0 || !ConfigService.getBoolean(ON_TOOL_ROUND_KEY, false)) return user;
+        for (int i = Math.max(from, 1); i <= Math.min(to, rows.size() - 1); i++) {
+            if (opensToolRound(rows, i)) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * An assistant row straight after a tool result: every call before it has been answered, so a cut here never
+     * separates a call from its result, which providers reject.
+     */
+    private static boolean opensToolRound(List<Message> rows, int i) {
+        return MessageRole.ASSISTANT.value.equals(rows.get(i).role)
+                && MessageRole.TOOL.value.equals(rows.get(i - 1).role);
     }
 
     /**

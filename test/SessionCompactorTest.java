@@ -101,6 +101,50 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void findSafeBoundary_cutsAfterAToolRound_whenTheOnlyUserRowOpensTheTurn() {
+        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
+        // One prompt, then 31 rounds of assistant call + tool result: 63 rows, keepMin 10 → boundary range [10, 53].
+        var msgs = oneLongTurn(31);
+        int boundary = SessionCompactor.findSafeBoundary(msgs);
+        assertEquals(53, boundary);
+        assertEquals(MessageRole.ASSISTANT.value, msgs.get(boundary).role);
+        assertEquals(MessageRole.TOOL.value, msgs.get(boundary - 1).role,
+                "the prefix must end on a tool result so no call is separated from its answer");
+    }
+
+    @Test
+    void findSafeBoundary_leavesALongTurnUncutWhileTheToolRoundSwitchIsOff() {
+        assertEquals(-1, SessionCompactor.findSafeBoundary(oneLongTurn(31)));
+    }
+
+    @Test
+    void compact_skipsALongTurnWhileTheToolRoundSwitchIsOff() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedOneLongTurn(conv, 31);
+        commitAndReopen();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "never used");
+
+        assertFalse(result.compacted());
+        assertEquals(SessionCompactor.NO_CUT_REASON, result.skipReason());
+    }
+
+    @Test
+    void findSafeBoundary_prefersAUserRowOverAToolRound() {
+        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
+        var msgs = oneLongTurn(31);
+        msgs.get(12).role = MessageRole.USER.value;
+        assertEquals(12, SessionCompactor.findSafeBoundary(msgs));
+    }
+
+    @Test
+    void findSafeBoundary_neverCutsAnAssistantThatFollowsAnAssistantWithoutAToolResult() {
+        // Assistant rows only after the opening prompt: no completed tool round, so no cut.
+        var msgs = buildFakeHistory(63, i -> i == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
+        assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
+    }
+
+    @Test
     void findSafeBoundary_honorsConfigOverrides() {
         ConfigService.set("chat.compactionKeepMessages", "5");
         ConfigService.set("chat.compactionMinTurns", "3");
@@ -254,6 +298,63 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(SECTIONS, headings(request.getLast().content()));
         commitAndReopen();
         assertEquals("TURN SUMMARY", SessionCompaction.findLatest(Conversation.findById(conv.id)).summary);
+    }
+
+    @Test
+    void aSummaryOnTheTurnCutAtAToolRoundSendsItsPrefixNotTheTranscript() {
+        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedOneLongTurn(conv, 31);
+        commitAndReopen();
+        var turn = turnMessages(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(turn, TOOLS),
+                (msgs, defs) -> {
+                    calls.add(msgs);
+                    return reply("LONG TURN SUMMARY");
+                });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(53, result.turnsCompacted());
+        var request = calls.getFirst();
+        assertEquals(53 + 2, request.size(), "the turn's own prefix then the instruction, not a transcript");
+        assertEquals(turn.subList(0, 54), request.subList(0, 54));
+    }
+
+    @Test
+    void aSecondCompactionOnAFloorThatOpensOnAnAssistantRowSendsThePrefixWithItsLeadingNote() {
+        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedOneLongTurn(conv, 31);
+        commitAndReopen();
+        var first = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> reply("FIRST"));
+        assertTrue(first.compacted(), "reason=" + first.skipReason());
+        commitAndReopen();
+        for (int r = 31; r < 61; r++) {
+            ConversationService.appendMessage(Conversation.<Conversation>findById(conv.id), MessageRole.ASSISTANT,
+                    "step " + r, utils.GsonHolder.GSON.toJson(new ToolCall("call-" + r, "function",
+                            new FunctionCall("datetime", "{}"))), null, null);
+            ConversationService.appendMessage(Conversation.<Conversation>findById(conv.id), MessageRole.TOOL,
+                    "result " + r, null, "call-" + r, null);
+        }
+        commitAndReopen();
+        var turn = turnMessages(conv.id);
+        assertEquals(SessionCompactor.LEADING_USER_NOTE, turn.get(1).content());
+        var calls = new ArrayList<List<ChatMessage>>();
+
+        var second = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(turn, TOOLS),
+                (msgs, defs) -> {
+                    calls.add(msgs);
+                    return reply("SECOND");
+                });
+
+        assertTrue(second.compacted(), "reason=" + second.skipReason());
+        var request = calls.getFirst();
+        int summarized = second.turnsCompacted();
+        assertEquals(summarized + 3, request.size(), "system, the note, the summarized rows, the instruction");
+        assertEquals(turn.subList(0, summarized + 2), request.subList(0, summarized + 2));
     }
 
     @Test
@@ -500,6 +601,33 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void compact_summarizesOneLongTurnAtAToolRoundBoundary() {
+        ConfigService.set(SessionCompactor.ON_TOOL_ROUND_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedOneLongTurn(conv, 31);
+        commitAndReopen();
+
+        var seen = new ArrayList<String>();
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            seen.add(msgs.getLast().content() instanceof String t ? t : "");
+            return "summary of the long turn";
+        });
+
+        assertTrue(result.compacted(), "a single long turn past the trigger must be summarized: " + result.skipReason());
+        commitAndReopen();
+        var fresh = Conversation.<Conversation>findById(conv.id);
+        assertNotNull(fresh.compactionSince);
+        var kept = ConversationService.loadRecentMessages(fresh);
+        assertEquals(MessageRole.ASSISTANT.value, kept.getFirst().role,
+                "the kept tail opens on the assistant row that follows the last summarized tool result");
+        assertEquals(10, kept.size(), "the newest ten rows stay verbatim");
+        assertEquals("summary of the long turn", SessionCompaction.<SessionCompaction>findAll().getFirst().summary);
+        assertTrue(seen.getFirst().contains("[USER] do the long task"), "the prompt that opened the turn is summarized");
+        assertTrue(seen.getFirst().contains("[TOOL_RESULT_ID] call-25"), "the last summarized row is call 25's result");
+        assertFalse(seen.getFirst().contains("call-26"), "call 26 opens the kept tail and is not summarized");
+    }
+
+    @Test
     void compact_skipsWhenTooFewMessages() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 5); // below minCompactable
@@ -684,8 +812,8 @@ class SessionCompactorTest extends UnitTest {
 
         assertEquals(1, inputs.size());
         assertTranscript(rows.subList(60, 90), inputs.getFirst());
-        assertEquals(List.of(("Compaction for conversation %d found no user message to end a summary on among its "
-                + "oldest rows; the 60 rows before its newest 40 are not summarized").formatted(conv.id)),
+        assertEquals(List.of(("Compaction for conversation %d found no user message or tool round to end a summary on "
+                + "among its oldest rows; the 60 rows before its newest 40 are not summarized").formatted(conv.id)),
                 events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList());
         commitAndReopen();
         assertEquals(rows.get(90).createdAt(), Conversation.<Conversation>findById(conv.id).compactionSince);
@@ -1216,6 +1344,36 @@ class SessionCompactorTest extends UnitTest {
             out.add(m);
         }
         return out;
+    }
+
+    /** One user prompt, then {@code rounds} of an assistant row that calls a tool and the tool row that answers it. */
+    private static List<Message> oneLongTurn(int rounds) {
+        var out = new ArrayList<Message>(1 + 2 * rounds);
+        var prompt = new Message();
+        prompt.role = MessageRole.USER.value;
+        prompt.content = "do the long task";
+        out.add(prompt);
+        for (int r = 0; r < rounds; r++) {
+            var call = new Message();
+            call.role = MessageRole.ASSISTANT.value;
+            call.content = "step " + r;
+            call.toolCalls = utils.GsonHolder.GSON.toJson(new ToolCall("call-" + r, "function",
+                    new FunctionCall("datetime", "{}")));
+            out.add(call);
+            var result = new Message();
+            result.role = MessageRole.TOOL.value;
+            result.content = "result " + r;
+            result.toolResults = "call-" + r;
+            out.add(result);
+        }
+        return out;
+    }
+
+    private static void seedOneLongTurn(Conversation conv, int rounds) {
+        for (var m : oneLongTurn(rounds)) {
+            ConversationService.appendMessage(conv, MessageRole.fromValue(m.role), m.content, m.toolCalls,
+                    m.toolResults, null);
+        }
     }
 
     private static void seedMessages(Conversation conv, int count) {

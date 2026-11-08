@@ -14,9 +14,12 @@ import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * JCLAW-38 / JCLAW-268 compaction trigger. Extracted from
@@ -142,6 +145,11 @@ public final class CompactionGate {
                 EventLogger.info("compaction", agent.name, snapshot.channelType(),
                         "Compaction skipped (%s); the context-window trim is left to fit the prompt"
                                 .formatted(result.skipReason()));
+            } else if (SessionCompactor.NO_CUT_REASON.equals(result.skipReason())
+                    && firstNoCutOnThisFloor(conversationId, snapshot.conversation().compactionSince)) {
+                EventLogger.info("compaction", agent.name, snapshot.channelType(),
+                        "Compaction skipped (%s) at an estimated %d tokens, past the token trigger; logged once until the next compaction"
+                                .formatted(result.skipReason(), estimatedTokens));
             }
             return current;
         }
@@ -183,6 +191,14 @@ public final class CompactionGate {
         if (built == null) return null;
         return new SessionCompactor.TurnRequest(
                 AgentPromptPreparer.prunedAndCompressed(built.messages(), agent, built.conversation()), built.tools());
+    }
+
+    /** The floor each conversation last logged a no-cut skip on, so the token trigger's skip is not repeated every turn. */
+    private static final Map<Long, String> NO_CUT_LOGGED_ON = new ConcurrentHashMap<>();
+
+    private static boolean firstNoCutOnThisFloor(Long conversationId, @Nullable Instant floor) {
+        var key = String.valueOf(floor);
+        return !key.equals(NO_CUT_LOGGED_ON.put(conversationId, key));
     }
 
     private record NextTurn(Conversation conversation, List<ChatMessage> messages, List<ToolDef> tools) {

@@ -3,6 +3,7 @@ import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.Conversation;
+import models.Message;
 import models.MessageRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -280,6 +281,50 @@ class MessageHydratorTest extends UnitTest {
         assertEquals(MessageRole.ASSISTANT.value, announce.role());
         assertEquals("Subagent completed (subagent run): 42", announce.content());
         assertNull(announce.toolCalls());
+    }
+
+    @Test
+    void buildMessagesOpensWithAUserNoteWhenTheHistoryAfterTheFloorStartsOnAnAssistantRow() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        ConversationService.appendMessage(conv, MessageRole.USER, "do the task", null, null, null);
+        Message call = ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null,
+                toolCallJson("call_1", "exec", "{}"), null, null);
+        ConversationService.appendMessage(conv, MessageRole.TOOL, "done", null, "call_1", null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "all done", null, null, null);
+        conv.compactionSince = call.createdAt;
+        conv.save();
+        commitAndReopen();
+        var fresh = Conversation.<Conversation>findById(conv.id);
+
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
+        assertEquals(List.of("system", "user", "assistant", "tool", "assistant"),
+                messages.stream().map(m -> m.role()).toList());
+        assertEquals(services.SessionCompactor.LEADING_USER_NOTE, messages.get(1).content());
+        assertEquals(MessageRole.ASSISTANT.value, messages.get(2).role());
+    }
+
+    @Test
+    void buildMessagesAddsNoNoteWhenTheHistoryStartsOnAUserRowOrHasNoFloor() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        ConversationService.appendMessage(conv, MessageRole.USER, "hello", null, null, null);
+        Message reply = ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "hi", null, null, null);
+        commitAndReopen();
+        var noFloor = Conversation.<Conversation>findById(conv.id);
+        assertEquals(List.of("system", "user", "assistant"),
+                MessageHydrator.buildMessages("SP", noFloor).messages().stream().map(m -> m.role()).toList(),
+                "a chat that was never compacted keeps its history exactly as stored");
+
+        var withFloor = Conversation.<Conversation>findById(conv.id);
+        withFloor.compactionSince = reply.createdAt;
+        withFloor.save();
+        var userFirst = ConversationService.appendMessage(withFloor, MessageRole.USER, "again", null, null, null);
+        withFloor.compactionSince = userFirst.createdAt;
+        withFloor.save();
+        commitAndReopen();
+        var fresh = Conversation.<Conversation>findById(conv.id);
+        assertEquals(List.of("system", "user"),
+                MessageHydrator.buildMessages("SP", fresh).messages().stream().map(m -> m.role()).toList());
+        assertEquals("again", MessageHydrator.buildMessages("SP", fresh).messages().get(1).content());
     }
 
     @Test

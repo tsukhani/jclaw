@@ -9,6 +9,7 @@ import models.MessageAttachment;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.ConversationService;
+import services.SessionCompactor;
 import tools.SubagentSpawnTool;
 
 import java.util.ArrayList;
@@ -124,6 +125,11 @@ public final class MessageHydrator {
         var heldAnnounces = new ArrayList<ChatMessage>();
 
         var history = ConversationService.loadRecentMessages(conversation);
+        // A cut at a tool round leaves the floor's history opening on an assistant row (JF-236).
+        if (conversation.compactionSince != null && !history.isEmpty()
+                && !MessageRole.USER.value.equals(history.getFirst().role)) {
+            messages.add(ChatMessage.user(SessionCompactor.LEADING_USER_NOTE));
+        }
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
             if (role == MessageRole.SYSTEM && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(msg.messageKind)) {
