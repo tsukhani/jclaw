@@ -122,7 +122,7 @@ class ApiConversationsControllerSchemaDriftTest extends UnitTest {
         conv.parentConversation = parent;
 
         Map<String, Object> emitted = invoke("conversationToMap",
-                new Class<?>[]{Conversation.class, long.class, long.class}, conv, 2L, 5L);
+                new Class<?>[]{Conversation.class, long.class, long.class, long.class}, conv, 2L, 9L, 5L);
 
         var allowed = componentNames(ConversationView.class);
         assertTrue(allowed.containsAll(emitted.keySet()),

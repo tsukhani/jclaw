@@ -180,12 +180,35 @@ class ApiConversationsControllerBranchTest extends FunctionalTest {
         var byId = new java.util.HashMap<Long, com.google.gson.JsonObject>();
         for (var row : rows) byId.put(row.getAsJsonObject().get("id").getAsLong(), row.getAsJsonObject());
         assertEquals(2, byId.get(ids[0]).get("userPromptCount").getAsInt());
-        assertEquals(4, byId.get(ids[0]).get("messageCount").getAsInt());
+        assertEquals(4, byId.get(ids[0]).get("messageRowCount").getAsInt());
         assertEquals(0, byId.get(ids[1]).get("userPromptCount").getAsInt());
+        assertEquals(1, byId.get(ids[1]).get("messageRowCount").getAsInt());
 
         var single = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations/" + ids[0])))
                 .getAsJsonObject();
         assertEquals(2, single.get("userPromptCount").getAsInt());
+        assertEquals(4, single.get("messageRowCount").getAsInt());
+    }
+
+    @Test
+    void messageRowCountSeesRowsTheStoredCounterMissed() {
+        login();
+        var id = commitInFreshTx(() -> {
+            var agent = newAgent("row-count-agent");
+            var conv = ConversationService.create(agent, "web", "u-rows");
+            ConversationService.appendUserMessage(conv, "go");
+            // A tool round: rows persisted, counter bumped only in memory, as in a real turn.
+            ConversationService.appendToolResult(conv, "call-1", "out");
+            ConversationService.appendToolResult(conv, "call-2", "out");
+            conv.messageCount = 1;
+            conv.save();
+            return conv.id;
+        });
+
+        var single = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations/" + id)))
+                .getAsJsonObject();
+        assertEquals(1, single.get("messageCount").getAsInt());
+        assertEquals(3, single.get("messageRowCount").getAsInt());
     }
 
     @Test

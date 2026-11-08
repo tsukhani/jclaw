@@ -81,6 +81,7 @@ public class ApiConversationsController extends Controller {
                                    String thinkingModeOverride,
                                    Long parentConversationId,
                                    long compactionCount,
+                                   long messageRowCount,
                                    long userPromptCount,
                                    JsonArray checklist) {}
 
@@ -277,7 +278,7 @@ public class ApiConversationsController extends Controller {
         // conversations with no compactions are absent from the map (default 0).
         var convIds = convos.stream().map(c -> c.id).filter(Objects::nonNull).toList();
         Map<Long, Long> compactionCounts = Map.of();
-        Map<Long, Long> userPromptCounts = Map.of();
+        Map<Long, long[]> messageRows = Map.of();
         if (!convIds.isEmpty()) {
             @SuppressWarnings("unchecked")
             var rows = (List<Object[]>) JPA.em().createQuery(
@@ -291,22 +292,26 @@ public class ApiConversationsController extends Controller {
             }
             compactionCounts = m;
             @SuppressWarnings("unchecked")
-            var promptRows = (List<Object[]>) JPA.em().createQuery(
-                    "SELECT m.conversation.id, COUNT(m) FROM Message m "
-                            + "WHERE m.conversation.id IN :ids AND m.role = :role GROUP BY m.conversation.id")
+            var rowCounts = (List<Object[]>) JPA.em().createQuery(
+                    "SELECT m.conversation.id, COUNT(m), "
+                            + "SUM(CASE WHEN m.role = :role THEN 1L ELSE 0L END) FROM Message m "
+                            + "WHERE m.conversation.id IN :ids GROUP BY m.conversation.id")
                     .setParameter("ids", convIds)
                     .setParameter("role", MessageRole.USER.value)
                     .getResultList();
-            var prompts = HashMap.<Long, Long>newHashMap(promptRows.size());
-            for (var row : promptRows) {
-                prompts.put((Long) row[0], (Long) row[1]);
+            var perConversation = HashMap.<Long, long[]>newHashMap(rowCounts.size());
+            for (var row : rowCounts) {
+                perConversation.put((Long) row[0], new long[] {(Long) row[1], ((Number) row[2]).longValue()});
             }
-            userPromptCounts = prompts;
+            messageRows = perConversation;
         }
         final var counts = compactionCounts;
-        final var promptCounts = userPromptCounts;
+        final var rowsByConversation = messageRows;
         var result = convos.stream()
-                .map(c -> conversationToMap(c, counts.getOrDefault(c.id, 0L), promptCounts.getOrDefault(c.id, 0L)))
+                .map(c -> {
+                    var perRow = rowsByConversation.getOrDefault(c.id, new long[] {0L, 0L});
+                    return conversationToMap(c, counts.getOrDefault(c.id, 0L), perRow[0], perRow[1]);
+                })
                 .toList();
 
         renderJSON(gson.toJson(result));
@@ -380,6 +385,7 @@ public class ApiConversationsController extends Controller {
         Conversation conversation = requireConversation(id);
         renderJSON(gson.toJson(conversationToMap(conversation,
                 SessionCompaction.count("conversation = ?1", conversation),
+                Message.count("conversation = ?1", conversation),
                 Message.count("conversation = ?1 AND role = ?2", conversation, MessageRole.USER.value))));
     }
 
@@ -1066,7 +1072,8 @@ public class ApiConversationsController extends Controller {
      * was the kind of subtle drift this codebase has accumulated bug fixes
      * for elsewhere.
      */
-    private static Map<String, Object> conversationToMap(Conversation c, long compactionCount, long userPromptCount) {
+    private static Map<String, Object> conversationToMap(Conversation c, long compactionCount, long messageRowCount,
+                                                         long userPromptCount) {
         var map = new HashMap<String, Object>();
         map.put("id", c.id);
         map.put(AGENT_ID, c.agent.id);
@@ -1101,8 +1108,10 @@ public class ApiConversationsController extends Controller {
         // is a fresh prompt or has been reset by compaction (and how many
         // times). Cheap COUNT on an indexed column; no need to denormalize.
         map.put("compactionCount", compactionCount);
-        // The chat-header meter shows prompts beside messageCount: a prompt is one USER row,
-        // while a turn the model answers can add many assistant and tool rows.
+        // The chat-header meter counts rows rather than reading messageCount, which only
+        // persists with a user or final-assistant append and so misses the tool rounds
+        // (one conversation read 30 against 386 rows). A prompt is one USER row.
+        map.put("messageRowCount", messageRowCount);
         map.put("userPromptCount", userPromptCount);
         var checklist = CheckListTool.storedItems(c.checklist);
         if (checklist != null) map.put("checklist", checklist);
