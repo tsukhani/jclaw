@@ -104,3 +104,16 @@ describe('formatTokensPerSec', () => {
     expect(formatTokensPerSec({ durationMs: 2000, completion: 50 } as MessageUsage)).toBe('25.0 tok/s')
   })
 })
+
+// prose-chat.css hides a task item's marker by its shape: the checkbox first in the item, or first in its paragraph.
+describe('renderMarkdown task lists', () => {
+  it('puts a tight task item\'s checkbox first in the item', () => {
+    expect(renderMarkdown('- [ ] open\n- [x] done')).toBe(
+      '<ul>\n<li><input disabled="" type="checkbox"> open</li>\n<li><input checked="" disabled="" type="checkbox"> done</li>\n</ul>\n')
+  })
+
+  it('puts a loose task item\'s checkbox first in its paragraph', () => {
+    expect(renderMarkdown('- [ ] open\n\n- [x] done')).toBe(
+      '<ul>\n<li><p><input disabled="" type="checkbox"> open</p>\n</li>\n<li><p><input checked="" disabled="" type="checkbox"> done</p>\n</li>\n</ul>\n')
+  })
+})

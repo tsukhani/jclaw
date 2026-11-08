@@ -9,8 +9,10 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  * turn is left out on purpose: it costs tokens, depends on what the model writes, and would leave a real
  * conversation on the instance that this suite could not remove without deleting a transcript.
  *
- * What only a browser can show is the bounded-mount test: jsdom has no layout, so the unit tests can only
- * prove that figures the IntersectionObserver reports get mounted.
+ * What only a browser can show:
+ * - the bounded-mount test: jsdom has no layout, so the unit tests can only prove that figures the
+ *   IntersectionObserver reports get mounted;
+ * - list markers (JF-240): jsdom never loads Tailwind's preflight, which removes them.
  */
 const CONVERSATION_ID = 999_999_001
 
@@ -190,5 +192,72 @@ test.describe('UAT-25 chat visuals', () => {
     await expect(page.locator('.code-block', { hasText: '"kind":"chart"' })).toBeVisible()
     await expect(page.locator('figure.visual-view')).toHaveCount(0)
     await expect(page.locator('.visual-host')).toHaveCount(0)
+  })
+
+  // Tailwind's preflight sets list-style: none on every list, which jsdom never loads, so only a browser shows it.
+  test('a reply\'s lists show their numbers and bullets, while a task list and a visual\'s legend and steps show none', async ({ page }) => {
+    const lists = [
+      '1. alpha',
+      '2. second',
+      '   1. beta',
+      '',
+      '- gamma',
+      '  - delta',
+      '    - epsilon',
+      '',
+      'Steps:',
+      '',
+      '1. zeta',
+      '   - eta',
+      '     - theta',
+      '',
+      'Tasks:',
+      '',
+      '- [ ] open task',
+      '- [x] done task',
+      '',
+      'Loose tasks:',
+      '',
+      '- [ ] loose one',
+      '',
+      '- [ ] loose two',
+      '',
+      'Count:',
+      '',
+      ...Array.from({ length: 12 }, (_, i) => `${i + 1}. n${i + 1}`),
+    ].join('\n')
+    const blocked = await serveTranscript(page, [lists, fence(chart(1)), fence(diagram)])
+    await gotoPage(page, `/conversations/${CONVERSATION_ID}`)
+    const item = (start: RegExp) => page.locator('.prose-chat li').filter({ hasText: start })
+    const marker = (li: Locator) => li.evaluate(el => getComputedStyle(el).listStyleType)
+
+    expect(await marker(item(/^alpha/))).toBe('decimal')
+    expect(await marker(item(/^beta/))).toBe('decimal')
+    expect(await marker(item(/^gamma/))).toBe('disc')
+    expect(await marker(item(/^delta/))).toBe('circle')
+    expect(await marker(item(/^epsilon/))).toBe('square')
+    // A bulleted list inside a numbered one steps down as a browser's own styles do.
+    expect(await marker(item(/^eta/))).toBe('circle')
+    expect(await marker(item(/^theta/))).toBe('square')
+    const tasks = page.locator('.prose-chat li', { has: page.locator('input[type="checkbox"]') })
+    await expect(tasks).toHaveCount(4)
+    expect(await tasks.evaluateAll(els => els.map(el => getComputedStyle(el).listStyleType)))
+      .toEqual(['none', 'none', 'none', 'none'])
+    // The list's own gutter holds a two-digit marker: Chat's reply box has no padding and clips what sticks out.
+    const gutter = await item(/^n10$/).evaluate((li) => {
+      const context = document.createElement('canvas').getContext('2d')!
+      context.font = getComputedStyle(li).font
+      return { room: li.getBoundingClientRect().left - li.parentElement!.getBoundingClientRect().left,
+        marker: context.measureText('10. ').width }
+    })
+    expect(gutter.room, `the "10. " marker needs ${gutter.marker}px`).toBeGreaterThanOrEqual(gutter.marker)
+
+    await drawn(figures(page).nth(0))
+    await drawn(figures(page).nth(1))
+    expect(await page.locator('.visual-legend li').evaluateAll(els => els.map(el => getComputedStyle(el).listStyleType)))
+      .toEqual(['none', 'none'])
+    expect(await page.locator('.visual-step-list li').evaluateAll(els => els.map(el => getComputedStyle(el).listStyleType)))
+      .toEqual(['none', 'none'])
+    expect(blocked(), 'the staged page wrote to the instance').toEqual([])
   })
 })

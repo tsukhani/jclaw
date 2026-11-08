@@ -15,6 +15,22 @@
 }
 .prose-chat li { margin: 0.25em 0; }
 
+/* Tailwind's preflight sets list-style: none on every list, so Markdown lists get their markers back here. */
+.prose-chat ul { list-style-type: disc; }
+.prose-chat :is(ul, ol) ul { list-style-type: circle; }
+.prose-chat :is(ul, ol) :is(ul, ol) ul { list-style-type: square; }
+
+/* 1.5em is narrower than a "10." marker, which Chat's unpadded reply box would clip. */
+.prose-chat ol { list-style-type: decimal; padding-left: 2.25em; }
+
+/* A GFM task item: marked puts its checkbox first, in the item or in a loose item's paragraph, and gives it no class. */
+.prose-chat li:has(> input[type="checkbox"]:first-child, > p:first-child > input[type="checkbox"]:first-child) {
+  list-style-type: none;
+}
+
+/* A visual's legend and step list lay out their own items. Two classes outrank the nesting rules above. */
+.prose-chat .visual-legend, .prose-chat .visual-step-list { list-style-type: none; }
+
 /* Headings, code blocks, links, blockquote, hr, img: structural + light-mode
    palette are merged here. Dark-mode overrides further below restate only the
    colours that change. */
