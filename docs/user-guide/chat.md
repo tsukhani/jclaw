@@ -26,7 +26,7 @@ If you do not have any agents yet, [Agents](/guide#agents) is the next stop. Com
 
 Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a newline without sending.
 
-The reply streams in real time. Under it, **Generating…** and a timer show how long the turn has run. Chat keeps the newest text in view. If you scroll up to read, even a little, it leaves you where you are, and a **Jump to latest** button shows above the message box. Click it, or scroll back to the bottom, and Chat follows the newest text again.
+The reply streams in real time. Under it, **Generating…** and a timer show how long the turn has run. Chat keeps the newest text in view. If you scroll up to read, even a little, it leaves you where you are, and a **Jump to latest** button shows at the bottom of the conversation. Click it, send a message, or scroll back to the bottom, and Chat follows the newest text again.
 
 The message box stays open while the agent works, with **Send** beside **Stop generating** (the red square). A message you send during a turn follows the agent's [Queue Mode](/guide#agents-queue-mode). By default it waits in the queue: it shows under the reply with a **Queued** label and its place in line, for example "Queued, position 1", and runs when the turn ends. Every open tab of the conversation shows the queued messages at once, and after a reload too.
 

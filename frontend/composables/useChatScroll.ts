@@ -1,4 +1,4 @@
-import { nextTick, onUnmounted, ref, watch, type Ref } from 'vue'
+import { nextTick, onUnmounted, readonly, ref, watch, type Ref } from 'vue'
 import type { PrependOlder } from '~/composables/useChatConversation'
 
 /**
@@ -24,6 +24,8 @@ export interface UseChatScroll {
   appendFollowing: (append: () => void) => void
   /** {@link UseChatScroll.scrollToBottom} for a reader at the bottom only: a turn's frames leave one reading above alone. */
   followToBottom: () => void
+  /** True while the reader has scrolled up, away from following: the page's Jump to latest button shows then. */
+  scrolledAway: Readonly<Ref<boolean>>
 }
 
 export function useChatScroll(
@@ -38,7 +40,7 @@ export function useChatScroll(
   const BOTTOM_SLACK_PX = 24
   let pinnedToBottom = true
   // Set by the reader's own scrolling alone: content that grows under a reader at the bottom leaves them following a turn.
-  let readerAbove = false
+  const readerAbove = ref(false)
   function atBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
   }
@@ -186,7 +188,7 @@ export function useChatScroll(
     // Every caller puts the reader at the bottom on purpose (a conversation opening, the operator's own send, a command's
     // answer, rows appended for a reader at the bottom), so the view follows again whatever the reader did before: the
     // list is reused across conversations.
-    readerAbove = false
+    readerAbove.value = false
     pinnedToBottom = true
     forgetReaderInput()
     // The list is reused: where the last conversation left the view says nothing about this one.
@@ -236,29 +238,29 @@ export function useChatScroll(
     // A reader's nudge can land within a pixel of the page's own write and arrive with its event.
     if (byReader() && (!own || movedUp)) {
       if (placed == null) {
-        readerAbove = !bottom
+        readerAbove.value = !bottom
       }
       else {
         // Any move up the reader makes, a few pixels included, means they are reading what came before. Coming back
         // into the slack (any move down, or resting at the very bottom) puts them back to following.
         const back = !movedUp && (top > placed || fromBottom <= 1)
-        readerAbove = movedUp || (readerAbove && !(bottom && back))
+        readerAbove.value = movedUp || (readerAbove.value && !(bottom && back))
       }
       place(el, top)
     }
     else if (!own && placed != null && top < placed - BOTTOM_SLACK_PX && !bottom) {
-      readerAbove = true
+      readerAbove.value = true
       place(el, top)
     }
     else {
       // Not the reader's: content that grew moved the bottom, not them. Only the very bottom puts a reader who scrolled
       // away back to following; a layout shift that leaves them inside the slack is not them coming back.
-      if (fromBottom <= 1) readerAbove = false
+      if (fromBottom <= 1) readerAbove.value = false
       if (own || fromBottom <= 1 || placed == null || top > placed) place(el, top)
     }
     // While a turn streams, an event short of its growing bottom keeps following; outside one, a reader the rows grew
     // away from (a card opened in place) stays where they are when the next rows are appended.
-    pinnedToBottom = !readerAbove && (bottom || own || streaming.value)
+    pinnedToBottom = !readerAbove.value && (bottom || own || streaming.value)
     void pullOlderNearTop()
   }
   // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the
@@ -270,16 +272,16 @@ export function useChatScroll(
         const el = messagesEl.value
         if (!el) return
         const viewportResized = entries.some(entry => entry.target === el)
-        if ((pinnedToBottom && viewportResized) || (streaming.value && !readerAbove)) setScrollTop(el, el.scrollHeight)
+        if ((pinnedToBottom && viewportResized) || (streaming.value && !readerAbove.value)) setScrollTop(el, el.scrollHeight)
         // A reader who scrolled up can still be within the slack: the next append must not pull them down.
-        pinnedToBottom = !readerAbove && atBottom(el)
+        pinnedToBottom = !readerAbove.value && atBottom(el)
         void pullOlderNearTop()
       })
   let observedContent: Element | null = null
   watch(messagesEl, (el, prev) => {
     // A new list (an empty chat's first turn mounts one) starts with its reader at the bottom.
     pinnedToBottom = true
-    readerAbove = false
+    readerAbove.value = false
     writtenTop = null
     placedTop = null
     forgetReaderInput()
@@ -310,10 +312,10 @@ export function useChatScroll(
   // Checked again when the frame runs: a reader scrolling up between a token and its frame stays where they went.
   let followRaf: number | null = null
   function followToBottom() {
-    if (readerAbove || followRaf != null) return
+    if (readerAbove.value || followRaf != null) return
     followRaf = requestAnimationFrame(() => {
       followRaf = null
-      if (!readerAbove && messagesEl.value) setScrollTop(messagesEl.value, messagesEl.value.scrollHeight)
+      if (!readerAbove.value && messagesEl.value) setScrollTop(messagesEl.value, messagesEl.value.scrollHeight)
     })
   }
 
@@ -332,5 +334,5 @@ export function useChatScroll(
     window.removeEventListener('blur', endPointer)
   })
 
-  return { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom }
+  return { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom, scrolledAway: readonly(readerAbove) }
 }

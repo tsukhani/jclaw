@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ArrowDownIcon,
   ArrowDownTrayIcon,
   ArrowUturnLeftIcon,
   EyeIcon,
@@ -212,7 +213,15 @@ const chatInput = ref<HTMLTextAreaElement | null>(null)
 const streamReasoning = ref('')
 // Autoscroll coordination (viewport el + scrollToBottom + reasoning-body pin)
 // lives in useChatScroll; it reads the stream state it reacts to as args.
-const { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
+const { messagesEl, scrollToBottom, keepViewport, appendFollowing, followToBottom, scrolledAway } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
+
+// A press never focuses the button (mousedown.prevent), so a reader typing keeps their caret. A keyboard user who
+// pressed it moves to the message box, where a reader at the newest message types next, as the button unmounts:
+// the list would hand their next Tab to Load earlier messages, at the top.
+function jumpToLatest(e: MouseEvent) {
+  if (document.activeElement === e.currentTarget) focusInput()
+  scrollToBottom()
+}
 
 // Older turns without scrolling, for a keyboard or screen-reader user; focus moves to the list once none remain.
 const loadOlderButton = ref<HTMLButtonElement | null>(null)
@@ -1186,6 +1195,33 @@ function exportConversation() {
                 >Queued, position {{ queued.position }}</span>
               </div>
             </div>
+          </div>
+          <!--
+          Shown only while the reader has scrolled up. A zero-height sticky row holds it at the list's visible bottom,
+          above whatever is docked under the list, without adding scroll height. It stays after the content column:
+          useChatScroll observes the list's first child.
+        -->
+          <div
+            v-if="scrolledAway"
+            class="sticky bottom-2 h-0 flex items-start justify-center pointer-events-none"
+          >
+            <button
+              type="button"
+              data-testid="chat-jump-latest"
+              class="pointer-events-auto -translate-y-full inline-flex items-center gap-1.5 rounded-full
+                     border border-neutral-200 dark:border-neutral-700/50 bg-surface-elevated px-3 py-1.5
+                     text-xs font-medium text-fg-primary hover:bg-muted transition-colors
+                     shadow-[0_1px_2px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_#0000004d]
+                     focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+              @mousedown.prevent
+              @click="jumpToLatest"
+            >
+              <ArrowDownIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+              Jump to latest
+            </button>
           </div>
         </div>
 

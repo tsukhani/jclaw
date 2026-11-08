@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll, onTestFinished } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
@@ -96,8 +96,8 @@ type ChatVm = {
 const vmOf = (component: VueWrapper) => component.vm as unknown as ChatVm
 
 /** The chat page with conversation `convoId` open and its stream connected. */
-async function openConversation(convoId: number): Promise<{ component: VueWrapper, stream: FakeEventSource }> {
-  const component = await mountSuspended(Chat)
+async function openConversation(convoId: number, attachTo?: HTMLElement): Promise<{ component: VueWrapper, stream: FakeEventSource }> {
+  const component = await mountSuspended(Chat, attachTo ? { attachTo } : {})
   await flushPromises()
   await vmOf(component).loadConversation(convoId)
   await flushPromises()
@@ -968,7 +968,7 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
     list.dispatchEvent(new Event('scroll'))
     // The reader's own wheel: only their input says they scrolled away (JF-229).
-    list.dispatchEvent(new Event('wheel'))
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }))
     layout({ scrollTop: 300 })
     list.dispatchEvent(new Event('scroll'))
     stream.send({ type: 'reasoning', content: 'and then' })
@@ -978,6 +978,105 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     runFrames()
 
     expect(list.scrollTop).toBe(300)
+  })
+
+  // A turn streaming in conversation 5, mounted in the document so focus can move, with the list's layout set by hand.
+  async function openStreamingTurnAtBottom() {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    let frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const runFrames = () => {
+      const due = frames
+      frames = []
+      for (const cb of due) cb(0)
+    }
+    serveConversation(5, [row(1, 'user', 'write a long story')])
+    serveQueue(5, { busy: true, stoppable: true })
+    const host = document.body.appendChild(document.createElement('div'))
+    onTestFinished(() => host.remove())
+    const { component, stream } = await openConversation(5, host)
+    stream.send({ type: 'init', conversationId: 5 })
+    stream.send({ type: 'token', content: 'Once upon a time' })
+    await vi.waitFor(() => expect(component.text()).toContain('Once upon a time'))
+    runFrames()
+    const list = component.find('[data-testid="chat-messages-scroll"]').element as HTMLElement
+    const layout = (box: Record<string, number>) => {
+      for (const [key, value] of Object.entries(box)) {
+        Object.defineProperty(list, key, { configurable: true, writable: true, value })
+      }
+    }
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    list.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    const readerScrolls = async (deltaY: number, scrollTop: number) => {
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY }))
+      layout({ scrollTop })
+      list.dispatchEvent(new Event('scroll'))
+      await flushPromises()
+    }
+    const jumpButton = () => component.find('[data-testid="chat-jump-latest"]')
+    return { component, stream, list, layout, runFrames, readerScrolls, jumpButton }
+  }
+
+  it('shows Jump to latest while the reader has scrolled up, and a keyboard press brings the view back, following again, with focus in the message box', async () => {
+    const { component, stream, list, layout, runFrames, readerScrolls, jumpButton } = await openStreamingTurnAtBottom()
+    expect(jumpButton().exists()).toBe(false)
+
+    await readerScrolls(-40, 300)
+    const jump = jumpButton()
+    expect(jump.element.tagName).toBe('BUTTON')
+    expect(jump.attributes('type')).toBe('button')
+    expect(jump.text()).toBe('Jump to latest')
+
+    // A keyboard user tabs to it and presses it.
+    ;(jump.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(jump.element)
+    await jump.trigger('click')
+    runFrames()
+    await flushPromises()
+    expect(document.activeElement).toBe(component.find('textarea').element)
+    expect(list.scrollTop).toBe(1000)
+    expect(jumpButton().exists()).toBe(false)
+
+    layout({ scrollHeight: 1200 })
+    stream.send({ type: 'token', content: ', there was a parser.' })
+    await flushPromises()
+    runFrames()
+    expect(list.scrollTop).toBe(1200)
+  })
+
+  it('leaves focus where it is when Jump to latest shows or is clicked with the mouse, and hides it once the reader scrolls back down', async () => {
+    const { component, list, runFrames, readerScrolls, jumpButton } = await openStreamingTurnAtBottom()
+    const box = component.find('textarea').element as HTMLTextAreaElement
+    box.focus()
+
+    await readerScrolls(-40, 300)
+    expect(jumpButton().exists()).toBe(true)
+    expect(document.activeElement).toBe(box)
+    await jumpButton().trigger('mousedown')
+    await jumpButton().trigger('click')
+    runFrames()
+    await flushPromises()
+    expect(document.activeElement).toBe(box)
+    expect(list.scrollTop).toBe(1000)
+
+    // With focus nowhere in particular, a click moves none either.
+    box.blur()
+    await readerScrolls(-40, 300)
+    await jumpButton().trigger('click')
+    runFrames()
+    await flushPromises()
+    expect(document.activeElement).toBe(document.body)
+
+    await readerScrolls(-40, 300)
+    expect(jumpButton().exists()).toBe(true)
+    await readerScrolls(500, 800)
+    expect(jumpButton().exists()).toBe(false)
   })
 
   it('drops a Queued row the queue no longer lists once the stream gives up, when no init will come', async () => {

@@ -969,6 +969,67 @@ describe('useChatScroll', () => {
     }
   })
 
+  it('exposes whether the reader has scrolled away: set by their scroll up, cleared by coming back, a pin or a new list', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const box = { top: 800, height: 1000, client: 200 }
+    const el = clampingViewport(box)
+    api.messagesEl.value = el
+    await nextTick()
+    el.dispatchEvent(new Event('scroll'))
+    const scrollReader = (deltaY: number, top: number) => {
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY }))
+      box.top = top
+      el.dispatchEvent(new Event('scroll'))
+    }
+    expect(api.scrolledAway.value).toBe(false)
+
+    scrollReader(-40, 760)
+    expect(api.scrolledAway.value).toBe(true)
+    scrollReader(40, 800)
+    expect(api.scrolledAway.value).toBe(false)
+
+    scrollReader(-40, 760)
+    api.scrollToBottom()
+    expect(api.scrolledAway.value).toBe(false)
+    flushRaf()
+
+    scrollReader(-40, 760)
+    expect(api.scrolledAway.value).toBe(true)
+    api.messagesEl.value = viewportWithContent().el
+    await nextTick()
+    expect(api.scrolledAway.value).toBe(false)
+  })
+
+  it('sets scrolledAway on a nudge inside the slack and on a move up no input caused, and clears it at the very bottom', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const box = { top: 800, height: 1000, client: 200 }
+    const el = clampingViewport(box)
+    api.messagesEl.value = el
+    await nextTick()
+    el.dispatchEvent(new Event('scroll'))
+
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: -5 }))
+    box.top = 795
+    el.dispatchEvent(new Event('scroll'))
+    expect(api.scrolledAway.value).toBe(true)
+    api.scrollToBottom()
+    flushRaf()
+    el.dispatchEvent(new Event('scroll'))
+    expect(api.scrolledAway.value).toBe(false)
+
+    // A wheel over an embedded frame moves the list up with no input on it.
+    box.top = 600
+    el.dispatchEvent(new Event('scroll'))
+    expect(api.scrolledAway.value).toBe(true)
+    // The rows shrink to the view, and the browser clamps it to the very bottom.
+    box.height = 800
+    box.top = 600
+    el.dispatchEvent(new Event('scroll'))
+    expect(api.scrolledAway.value).toBe(false)
+  })
+
   it('keeps following a reader back at the bottom when the rows shrink a moment after their wheel', async () => {
     stubResizeObserver()
     const { api } = mountScroll()
