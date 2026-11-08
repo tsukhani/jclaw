@@ -81,7 +81,8 @@ class DangerousActionGateTest extends UnitTest {
         // running class last published.
         ToolRegistrySync.canonicalForTest();
         ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false),
-                new tools.JClawApiTool(), new tools.ChromeControlTool()));
+                new tools.JClawApiTool(), new tools.ChromeControlTool(), new tools.ChromeUploadTool(),
+                new tools.ChromeScriptTool()));
     }
 
     @AfterEach
@@ -491,6 +492,24 @@ class DangerousActionGateTest extends UnitTest {
 
         assertEquals(Decision.ABORT, DangerousActionGate.guard(agent, convId, CHROME_CONTROL,
                 "{\"action\":\"key\",\"tabId\":7,\"key\":\"Enter\"}"));
+    }
+
+    @Test
+    void aChromeUploadOnTheWebIsRefusedUnderTheAllowDefault() {
+        var agent = unboundAgent("gate-chrome-upload");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.ABORT, DangerousActionGate.guard(agent, convId, "chrome_upload",
+                "{\"tabId\":7,\"ref\":\"e5\",\"path\":\"a.txt\"}"));
+    }
+
+    @Test
+    void pageScriptForAnAgentThatMayNotRunItIsNotPromptedAboutAndTheToolRefusesItself() {
+        var agent = unboundAgent("gate-chrome-script");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.PROCEED, DangerousActionGate.guard(agent, convId, "chrome_script",
+                "{\"tabId\":7,\"expression\":\"1\"}"));
     }
 
     @Test

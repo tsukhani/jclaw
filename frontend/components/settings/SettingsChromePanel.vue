@@ -11,6 +11,7 @@ const { mutate, errorDetails: pairError } = useApiMutation()
 const SITES = 'allowedSites'
 const ALLOW_ALL = 'allowAllSites'
 const CLICK_FREE = 'clickWithoutApproval'
+const SCRIPT = 'allowScript'
 const keyFor = (agent: Agent, setting: string) => `agent.${agent.name}.chromeBridge.${setting}`
 
 const agents = ref<Agent[]>([])
@@ -182,6 +183,27 @@ async function unpair() {
             <span class="block text-xs text-fg-muted">
               For every other agent, a click on anything except a plain link is refused, unless Tool
               Approvals is set to ask, which sends a confirmation to the agent's Telegram DM.
+            </span>
+          </span>
+        </label>
+        <label
+          for="chrome-allow-script"
+          class="px-4 py-2.5 flex items-start gap-3 cursor-pointer"
+        >
+          <input
+            id="chrome-allow-script"
+            type="checkbox"
+            class="mt-0.5 accent-emerald-600"
+            data-testid="chrome-allow-script"
+            :checked="isOn(mainAgent, SCRIPT)"
+            :disabled="saving"
+            @change="setOverride(mainAgent, SCRIPT, ($event.target as HTMLInputElement).checked)"
+          >
+          <span class="text-sm text-fg-primary">
+            Run page script
+            <span class="block text-xs text-fg-muted">
+              Lets the main agent run JavaScript in a page with the chrome_script tool. A script can read what the
+              page keeps and act as you, so every call still waits for your approval, which needs Tool Approvals set to ask.
             </span>
           </span>
         </label>

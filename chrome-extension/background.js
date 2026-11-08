@@ -363,6 +363,41 @@ async function handle(msg) {
         }
       }, [msg.query, 10])
     }
+    case 'javascript': {
+      const tab = await groupedTab(msg.tabId)
+      const r = await cdp(tab.id, 'Runtime.evaluate', {
+        expression: String(msg.expression), returnByValue: true, awaitPromise: true, timeout: 5000, userGesture: false,
+      })
+      if (r.exceptionDetails) {
+        throw new Error(`script error: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`.slice(0, 500))
+      }
+      const v = r.result
+      const value = v.type === 'undefined' ? 'undefined' : typeof v.value === 'string' ? v.value : JSON.stringify(v.value ?? v.description ?? null)
+      return { value, type: v.type }
+    }
+    case 'upload': {
+      const tab = await groupedTab(msg.tabId)
+      const nonce = crypto.randomUUID()
+      const tagged = await run(tab.id, (ref, mark) => {
+        const el = window.__agentRefs?.get(ref)
+        if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+        if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { error: 'that element is not a file input' }
+        el.setAttribute('data-jclaw-upload', mark)
+        return { done: 'tagged' }
+      }, [msg.ref, nonce])
+      try {
+        const doc = await cdp(tab.id, 'DOM.getDocument', { depth: 0 })
+        const found = await cdp(tab.id, 'DOM.querySelector', { nodeId: doc.root.nodeId, selector: `[data-jclaw-upload="${nonce}"]` })
+        if (!found.nodeId) throw new Error('could not reach the file input')
+        await cdp(tab.id, 'DOM.setFileInputFiles', { nodeId: found.nodeId, files: [String(msg.path)] })
+      } finally {
+        await run(tab.id, (mark) => {
+          document.querySelector(`[data-jclaw-upload="${mark}"]`)?.removeAttribute('data-jclaw-upload')
+          return { done: 'untagged' }
+        }, [nonce])
+      }
+      return { done: tagged.done === 'tagged' ? 'uploaded' : 'failed' }
+    }
     case 'resize': {
       const tab = await groupedTab(msg.tabId)
       await chrome.windows.update(tab.windowId, { state: 'normal', width: msg.width, height: msg.height })

@@ -823,13 +823,16 @@ public class ToolRegistry {
     /** Drives the operator's own signed-in Chrome, so no agent has it until the operator grants it, and
      *  a turn is offered it only where the owner reads the reply alone. */
     private static final String CHROME_CONTROL_TOOL = "chrome_control";
+    /** Page script and file upload sit beside {@code chrome_control} as tools of their own, so a standing grant for one cannot cover the others. */
+    private static final String CHROME_SCRIPT_TOOL = "chrome_script";
+    private static final String CHROME_UPLOAD_TOOL = "chrome_upload";
 
     /**
      * JF-148: tools a turn is offered only where the owner reads the reply alone, whatever the agent was
      * granted. {@code jclaw_api} reaches JClaw's whole agent-callable API, and only its writes wait for
      * approval, so a guest's message could otherwise drive its reads, and a group would read the result.
      */
-    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL, CHROME_CONTROL_TOOL);
+    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL, CHROME_CONTROL_TOOL, CHROME_SCRIPT_TOOL, CHROME_UPLOAD_TOOL);
 
     /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
      *  with the other cross-turn-reach tools rather than defaulting on. */
@@ -874,7 +877,7 @@ public class ToolRegistry {
      */
     private static final List<String> OPT_IN_FOR_EVERY_AGENT = List.of(
             GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL,
-            CHROME_CONTROL_TOOL);
+            CHROME_CONTROL_TOOL, CHROME_SCRIPT_TOOL, CHROME_UPLOAD_TOOL);
 
     /**
      * Tools main holds by default and every other agent has to be granted. The split is

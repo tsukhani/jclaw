@@ -16,22 +16,24 @@ import java.util.regex.Pattern;
  * logged-in browser, so a page the agent opens is a page opened as the operator: every rule
  * here exists because the agent's reach is the operator's.
  *
- * <p>Each agent has its own site allowlist. Two overrides exist and both are for the main agent
- * alone: opening any site, and submitting a form without asking. Any other agent is bound by its
- * allowlist and by approval, whatever is set. All three live under {@code agent.<name>.chromeBridge.}
- * so deleting or renaming an agent carries them with it, and only the operator-only config write
- * can change them, so an agent cannot widen its own reach.
+ * <p>Each agent has its own site allowlist. Three overrides exist and all are for the main agent
+ * alone: opening any site, clicking without asking, and running page script. Any other agent is
+ * bound by its allowlist and by approval, whatever is set. All of them live under
+ * {@code agent.<name>.chromeBridge.} so deleting or renaming an agent carries them with it, and only
+ * the operator-only config write can change them, so an agent cannot widen its own reach.
  */
 public final class ChromeBridgePolicy {
 
     public static final String ALLOWED_SITES = "allowedSites";
     public static final String ALLOW_ALL_SITES = "allowAllSites";
     public static final String CLICK_WITHOUT_APPROVAL = "clickWithoutApproval";
+    public static final String ALLOW_SCRIPT = "allowScript";
 
     static final int MAX_PATTERNS = 200;
 
     private static final Pattern KEY = Pattern.compile(
-            "agent\\.(.+)\\.chromeBridge\\.(" + ALLOWED_SITES + "|" + ALLOW_ALL_SITES + "|" + CLICK_WITHOUT_APPROVAL + ")");
+            "agent\\.(.+)\\.chromeBridge\\.(" + ALLOWED_SITES + "|" + ALLOW_ALL_SITES + "|" + CLICK_WITHOUT_APPROVAL
+                    + "|" + ALLOW_SCRIPT + ")");
 
     private static final Pattern HOST_PATTERN = Pattern.compile(
             "(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+");
@@ -78,6 +80,11 @@ public final class ChromeBridgePolicy {
         return !(agent.isMain() && ConfigService.getBoolean(key(agent.name, CLICK_WITHOUT_APPROVAL), false));
     }
 
+    /** True when the operator turned page script on for the main agent; no other agent can ever run it. */
+    public static boolean scriptAllowed(Agent agent) {
+        return agent.isMain() && ConfigService.getBoolean(key(agent.name, ALLOW_SCRIPT), false);
+    }
+
     public static List<String> allowedSites(Agent agent) {
         var raw = ConfigService.get(key(agent.name, ALLOWED_SITES));
         return raw == null ? List.of() : split(raw);
@@ -103,7 +110,7 @@ public final class ChromeBridgePolicy {
         var setting = m.group(2);
         if (setting.equals(ALLOWED_SITES)) return sitesRejection(key, value);
         if (!agent.isMain()) {
-            return "Allowing every site and clicking without approval can only be set for the main agent.";
+            return "Allowing every site, clicking without approval and running page script can only be set for the main agent.";
         }
         return value.equals("true") || value.equals("false") ? null : key + " must be true or false.";
     }

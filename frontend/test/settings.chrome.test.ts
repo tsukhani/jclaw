@@ -182,14 +182,16 @@ describe('Settings page — Chrome', () => {
     expect(component.find('[data-testid="chrome-sites-save-helper"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('offers the two overrides for the main agent only, both off by default', async () => {
+  it('offers the three overrides for the main agent only, all off by default', async () => {
     baseEndpoints()
     const component = await mountChrome()
 
     expect(component.html()).toContain('Main agent only')
     expect(checked(component, '[data-testid="chrome-allow-all"]')).toBe(false)
     expect(checked(component, '[data-testid="chrome-click-free"]')).toBe(false)
+    expect(checked(component, '[data-testid="chrome-allow-script"]')).toBe(false)
     expect(component.findAll('[data-testid="chrome-allow-all"]')).toHaveLength(1)
+    expect(component.findAll('[data-testid="chrome-allow-script"]')).toHaveLength(1)
   })
 
   it('turning an override on saves it under the main agent\'s key', async () => {
@@ -201,10 +203,15 @@ describe('Settings page — Chrome', () => {
       expect(component.find('[data-testid="chrome-click-free"]').attributes('disabled')).toBeUndefined())
     await component.find('[data-testid="chrome-click-free"]').setValue(true)
     await vi.waitFor(() => expect(posted).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(component.find('[data-testid="chrome-allow-script"]').attributes('disabled')).toBeUndefined())
+    await component.find('[data-testid="chrome-allow-script"]').setValue(true)
+    await vi.waitFor(() => expect(posted).toHaveLength(3))
 
     expect(posted).toEqual([
       { key: 'agent.main.chromeBridge.allowAllSites', value: 'true' },
       { key: 'agent.main.chromeBridge.clickWithoutApproval', value: 'true' },
+      { key: 'agent.main.chromeBridge.allowScript', value: 'true' },
     ])
     expect(checked(component, '[data-testid="chrome-allow-all"]')).toBe(true)
   })
