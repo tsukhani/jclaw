@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "JClaw Bridge",
+  "version": "0.0.1",
+  "description": "Lets JClaw read and act on the tabs in this browser's JClaw tab group, and nothing else.",
+  "permissions": ["tabs", "tabGroups", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html" }
+}

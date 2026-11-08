@@ -389,6 +389,7 @@ public class ConfigService {
             (key, value) -> key.equals(MemoryAutoCapture.SHORTLIST_CONTAINMENT_KEY) && !isShare(value)
                     ? key + " must be a number above 0 and at most 1." : null,
             under(WebScrapeSettings.PREFIX, WebScrapeSettings::rejectionFor),
+            ChromeBridgePolicy::rejectionFor,
             // JCLAW-1222: a model list naming what is not registered would route to nothing, and silently.
             under(RouterPolicy.PREFIX, RouterPolicy::rejectionFor),
             // Each of these readers falls back to its default on a bad value, so without a check

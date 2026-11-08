@@ -29,6 +29,7 @@ import {
   CodeBracketIcon,
   ServerStackIcon,
   CommandLineIcon,
+  ComputerDesktopIcon,
   CpuChipIcon,
   CubeIcon,
   DocumentMagnifyingGlassIcon,
@@ -57,6 +58,7 @@ import SettingsAlertsPanel from './SettingsAlertsPanel.vue'
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
 import SettingsBrowserPanel from './SettingsBrowserPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
+import SettingsChromePanel from './SettingsChromePanel.vue'
 import SettingsCodingPanel from './SettingsCodingPanel.vue'
 import SettingsDatabasePanel from './SettingsDatabasePanel.vue'
 import SettingsDecisionProvidersPanel from './SettingsDecisionProvidersPanel.vue'
@@ -174,6 +176,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'software-factory', title: 'Software Factory', icon: CubeIcon, component: SettingsSoftwareFactoryPanel },
       { id: 'web-scraping', title: 'Web Scraping', icon: GlobeAltIcon, component: SettingsWebScrapePanel },
       { id: 'browser', title: 'Browser', icon: WindowIcon, component: SettingsBrowserPanel },
+      { id: 'chrome', title: 'Chrome', icon: ComputerDesktopIcon, component: SettingsChromePanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
     ],

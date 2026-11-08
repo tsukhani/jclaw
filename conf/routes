@@ -333,6 +333,11 @@ PUT     /api/channels/{channelType}             ApiChannelsController.save
 GET     /api/tailscale                          ApiTailscaleController.status
 POST    /api/tailscale                          ApiTailscaleController.toggle
 
+# Chrome extension bridge: operator pairs the extension that lets JClaw drive the JClaw tab group
+GET     /api/chrome-bridge                      ApiChromeBridgeController.status
+POST    /api/chrome-bridge/pairing              ApiChromeBridgeController.pair
+DELETE  /api/chrome-bridge/pairing              ApiChromeBridgeController.unpair
+
 # Software Factory status, board and story logs (JCLAW-1391)
 GET     /api/factory                            ApiFactoryController.status
 GET     /api/factory/stories/{key}/logs/{file}  ApiFactoryController.storyLog
