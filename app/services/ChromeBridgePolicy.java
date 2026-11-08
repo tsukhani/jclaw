@@ -35,8 +35,7 @@ public final class ChromeBridgePolicy {
             "agent\\.(.+)\\.chromeBridge\\.(" + ALLOWED_SITES + "|" + ALLOW_ALL_SITES + "|" + CLICK_WITHOUT_APPROVAL
                     + "|" + ALLOW_SCRIPT + ")");
 
-    private static final Pattern HOST_PATTERN = Pattern.compile(
-            "(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+");
+    private static final Pattern HOST_LABEL = Pattern.compile("[a-z0-9]([a-z0-9-]*[a-z0-9])?");
     private static final Pattern SEPARATORS = Pattern.compile("[\\s,]+");
 
     private ChromeBridgePolicy() {}
@@ -121,12 +120,23 @@ public final class ChromeBridgePolicy {
             return key + " holds at most " + MAX_PATTERNS + " sites.";
         }
         for (var p : patterns) {
-            if (!HOST_PATTERN.matcher(p).matches()) {
+            if (!isHost(p)) {
                 return key + ": \"" + p + "\" is not a host name; use example.com or *.example.com, "
                         + "with no scheme, port or path.";
             }
         }
         return null;
+    }
+
+    /** A dotted host of at least two labels, optionally led by {@code *.}; checked label by label, not by one nested regex. */
+    private static boolean isHost(String pattern) {
+        var host = pattern.startsWith("*.") ? pattern.substring(2) : pattern;
+        var labels = host.split("\\.", -1);
+        if (labels.length < 2) return false;
+        for (var label : labels) {
+            if (!HOST_LABEL.matcher(label).matches()) return false;
+        }
+        return true;
     }
 
     private static List<String> split(String raw) {

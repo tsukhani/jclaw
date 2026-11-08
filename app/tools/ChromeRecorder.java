@@ -50,6 +50,7 @@ final class ChromeRecorder {
         final long startedAt = AppClock.now().toEpochMilli();
         final List<byte[]> webpFrames = new ArrayList<>();
         final List<byte[]> pngFrames = new ArrayList<>();
+        final Object lock = new Object();
         long bytes;
         int dropped;
 
@@ -119,7 +120,7 @@ final class ChromeRecorder {
         var recording = RECORDINGS.remove(key(agent, tab));
         if (recording == null) return ERROR + "no recording is running on that tab.";
         try {
-            synchronized (recording) {
+            synchronized (recording.lock) {
                 if (!recording.full()) capture(agent, tab, recording);
             }
         } catch (ChromeBridge.BridgeException _) {
@@ -134,7 +135,7 @@ final class ChromeRecorder {
     }
 
     private static void count(Recording recording) {
-        synchronized (recording) {
+        synchronized (recording.lock) {
             recording.dropped++;
         }
     }
@@ -146,7 +147,7 @@ final class ChromeRecorder {
 
     /** One frame in each format the recording wants, kept only if every one was captured. */
     private static boolean capture(Agent agent, long tab, Recording recording) {
-        synchronized (recording) {
+        synchronized (recording.lock) {
             if (recording.full()) return true;
             byte[] webp = null;
             byte[] png = null;

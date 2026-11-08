@@ -169,7 +169,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
   // historical turns — same UX as the thinking card.
   function prepareHistorical(rows: Message[]) {
     hydrateToolCalls(rows as unknown as Array<Record<string, unknown>>)
-    rows.forEach(applyToolCallDefaults)
+    rows.forEach(row => applyToolCallDefaults(row))
     initCollapsedState(rows)
   }
 

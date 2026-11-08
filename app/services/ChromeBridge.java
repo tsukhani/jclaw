@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static utils.GsonHolder.GSON;
 
@@ -39,20 +40,19 @@ public final class ChromeBridge {
 
     private static final String CATEGORY = "chrome-bridge";
 
-    private static volatile @Nullable Transport current;
+    private static final AtomicReference<@Nullable Transport> CURRENT = new AtomicReference<>();
     private static final ConcurrentHashMap<Long, CompletableFuture<JsonElement>> PENDING = new ConcurrentHashMap<>();
     private static final AtomicLong SEQ = new AtomicLong();
 
     private ChromeBridge() {}
 
     public static boolean isConnected() {
-        return current != null;
+        return CURRENT.get() != null;
     }
 
     /** Makes {@code transport} the live connection; a second extension replaces the first. */
     public static void attach(Transport transport) {
-        var old = current;
-        current = transport;
+        var old = CURRENT.getAndSet(transport);
         if (old != null && old != transport) {
             failAll("The Chrome extension reconnected from another window.");
             old.close();
@@ -61,15 +61,14 @@ public final class ChromeBridge {
     }
 
     public static void detach(Transport transport) {
-        if (current != transport) return;
-        current = null;
+        if (!CURRENT.compareAndSet(transport, null)) return;
         failAll("The Chrome extension disconnected.");
         EventLogger.info(CATEGORY, "Chrome extension disconnected");
     }
 
     /** Delivers an extension reply; ignored unless it came from the live connection. */
     public static void onResult(Transport from, JsonObject msg) {
-        if (current != from || !msg.has("id") || !msg.get("id").isJsonPrimitive()) return;
+        if (CURRENT.get() != from || !msg.has("id") || !msg.get("id").isJsonPrimitive()) return;
         long id;
         try {
             id = msg.get("id").getAsLong();
@@ -93,7 +92,7 @@ public final class ChromeBridge {
     }
 
     public static JsonElement call(String action, JsonObject args, long timeoutMs) {
-        var transport = current;
+        var transport = CURRENT.get();
         if (transport == null) throw new BridgeException("The Chrome extension is not connected.");
         long id = SEQ.incrementAndGet();
         var reply = new CompletableFuture<JsonElement>();

@@ -76,6 +76,7 @@ public final class ConversationTurnStream {
         void close();
     }
 
+    @SuppressWarnings("java:S6218") // never compared or printed: identity-held in a queue
     private record Frame(long id, byte[] json) {}
 
     private static final Frame POISON = new Frame(-1, new byte[0]);
@@ -121,6 +122,7 @@ public final class ConversationTurnStream {
     }
 
     /** A kept frame as a catching-up client gets it; a merged delta's JSON is built on the client's writer, off the lock. */
+    @SuppressWarnings("java:S6218") // never compared or printed: written to a client once
     private record Snapshot(long id, byte @Nullable [] json, TurnFrames.@Nullable Chunk kind, @Nullable String text) {
         byte[] bytes() {
             return json != null ? json
@@ -488,7 +490,7 @@ public final class ConversationTurnStream {
             closed = true;
             queue.clear();
             queuedBytes.set(0);
-            queue.offer(POISON);
+            while (!queue.offer(POISON)) queue.poll();
         }
     }
 

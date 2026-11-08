@@ -140,7 +140,8 @@ public final class HarnessSandbox {
     /** Only a success is kept: a host whose namespaces are fixed later is re-probed rather than refused for the JVM's life. */
     private static volatile boolean bwrapLaunched;
 
-    private static volatile CustomAgentOverride customAgentOverride = CustomAgentOverride.NONE;
+    private static final java.util.concurrent.atomic.AtomicReference<CustomAgentOverride> CUSTOM_AGENT_OVERRIDE =
+            new java.util.concurrent.atomic.AtomicReference<>(CustomAgentOverride.NONE);
 
     private HarnessSandbox() {}
 
@@ -292,7 +293,7 @@ public final class HarnessSandbox {
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
     public static List<String> wrapCustomAgentShell(List<String> argv, File writeRoot) {
-        var override = customAgentOverride;
+        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
         if (override == CustomAgentOverride.PASSTHROUGH) return argv;
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
@@ -323,7 +324,7 @@ public final class HarnessSandbox {
 
     /** Test seam: ShellSandboxSync sets it while it holds its lock and resets it to {@link CustomAgentOverride#NONE}. */
     public static void setCustomAgentOverrideForTest(CustomAgentOverride override) {
-        customAgentOverride = override;
+        CUSTOM_AGENT_OVERRIDE.set(override);
     }
 
     /**

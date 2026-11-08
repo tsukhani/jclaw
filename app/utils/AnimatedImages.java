@@ -34,6 +34,7 @@ public final class AnimatedImages {
     }
 
     /** A still WebP's image chunks ({@code ALPH} and {@code VP8 } or {@code VP8L}) ready to go inside a frame. */
+    @SuppressWarnings("java:S6218") // never compared or printed: read once by the muxer
     private record Still(Size size, byte[] chunks, boolean alpha) {}
 
     private AnimatedImages() {}
