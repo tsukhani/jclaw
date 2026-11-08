@@ -1,10 +1,12 @@
 import agents.AgentRunner;
+import agents.QueueDrainOrchestrator;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import channels.ChannelStreamingSink;
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
 import channels.WhatsAppStreamingSink;
+import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import llm.LlmResilience;
@@ -23,6 +25,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
+import services.ConversationTurnStream;
 import services.EventLogger;
 import services.Tx;
 import services.voice.VoiceTurnSpeaker;
@@ -284,6 +287,89 @@ class ChannelTurnStopTest extends UnitTest {
 
         assertEquals("Stopped.", reply.get());
         assertEquals(List.of("update Hel", "stop " + NOTICE), turn.events());
+    }
+
+    // --- a Stop names the turn the page shows (JF-226) ---
+
+    @Test
+    void aStopNamingATurnThatEndedLeavesTheQueuedMessageNowRunningToReplyWithNoNotice() throws Exception {
+        var convo = seedConversation("telegram");
+        var token = "channel-stop-" + System.nanoTime();
+        bindTelegram(convo, token);
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        first = exchange -> {
+            reached.countDown();
+            release.await(30, TimeUnit.SECONDS);
+            LlmReplyFixture.send(exchange, FINAL_REPLY);
+        };
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            try {
+                var generation = ConversationQueue.tryAcquireOwnership(convo.id,
+                        new ConversationQueue.QueuedMessage(ASK, "telegram", convo.peerId, convo.agent), null);
+                var ended = ConversationQueue.ownerTurn(convo.id, generation);
+                var queued = new RecordingSink();
+                streamOnChannel(convo, NEXT, queued);
+                queued.awaitEnd();
+                // A ends: the drain hands the conversation to the queued message, under A's generation.
+                QueueDrainOrchestrator.runOwned(convo.id, generation, ConversationQueue.drain(convo.id, generation));
+                assertTrue(reached.await(30, TimeUnit.SECONDS), "test precondition: the queued message runs");
+                var drained = ConversationQueue.ownerCancel(convo.id, generation);
+                try {
+                    assertEquals(ConversationQueue.OperatorStop.IDLE, stopFromTheChatPage(convo.id, "telegram", ended));
+                } finally {
+                    release.countDown();
+                }
+                awaitIdle(convo.id);
+                awaitSentTexts(telegram, 1);
+
+                assertFalse(drained.get(), "the queued message's run was not told to stop");
+                assertNull(ConversationQueue.channelStop(drained), "and no stop owes its channel a notice");
+                assertEquals(List.of(REPLY), sentTexts(telegram), "its reply, and no notice before it");
+                assertEquals(List.of("seal " + QUEUED), queued.events());
+                assertEquals(List.of("user " + NEXT, "assistant " + REPLY), rows(convo.id), "and no stop marker");
+            } finally {
+                release.countDown();
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void aStopNamingTheRunningChannelTurnByItsInitStopsItTellsThePersonAndRunsTheQueuedMessage() throws Exception {
+        var convo = seedConversation("telegram");
+        var release = new CountDownLatch(1);
+        first = heldAfterFirstToken(release);
+        var watcher = new ConversationTurnStreamTest.RecordingSink();
+        var unsubscribe = ConversationTurnStream.subscribe(convo.id, null, watcher);
+        var turn = new RecordingSink();
+        var queued = new RecordingSink();
+        try {
+            streamOnChannel(convo, ASK, turn);
+            turn.awaitEvent("update Hel");
+            streamOnChannel(convo, NEXT, queued);
+            queued.awaitEnd();
+            var init = JsonParser.parseString(watcher.awaitUntil(heard -> !heard.isEmpty(), "heard the turn's init")
+                    .getFirst().data()).getAsJsonObject();
+            try {
+                assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                        stopFromTheChatPage(convo.id, "telegram", init.get("turn").getAsLong()));
+            } finally {
+                release.countDown();
+            }
+            turn.awaitEnd();
+            awaitIdle(convo.id);
+        } finally {
+            release.countDown();
+            unsubscribe.run();
+        }
+
+        assertEquals(List.of("update Hel", "stop " + NOTICE), turn.events());
+        assertEquals(List.of("seal " + QUEUED), queued.events());
+        assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT, "user " + NEXT,
+                "assistant " + REPLY), rows(convo.id));
     }
 
     // --- voice ---
@@ -1107,9 +1193,15 @@ class ChannelTurnStopTest extends UnitTest {
     /** The operator's Stop, run as its route runs it: on a thread of its own, its marker committed before it returns. */
     private static ConversationQueue.OperatorStop stopFromTheChatPage(Long conversationId, String channelType)
             throws InterruptedException {
+        return stopFromTheChatPage(conversationId, channelType, null);
+    }
+
+    /** {@link #stopFromTheChatPage(Long, String)} naming the turn the page shows, {@code turn} (JF-226). */
+    private static ConversationQueue.OperatorStop stopFromTheChatPage(Long conversationId, String channelType,
+                                                                      @Nullable Long turn) throws InterruptedException {
         var outcome = new AtomicReference<ConversationQueue.OperatorStop>();
         var stopper = Thread.ofPlatform().start(() ->
-                outcome.set(ConversationQueue.stopOperatorTurn(conversationId, channelType)));
+                outcome.set(ConversationQueue.stopOperatorTurn(conversationId, channelType, true, turn)));
         stopper.join(10_000);
         assertFalse(stopper.isAlive(), "the stop never returned");
         return outcome.get();

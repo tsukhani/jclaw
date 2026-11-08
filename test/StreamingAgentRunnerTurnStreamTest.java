@@ -783,7 +783,8 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
 
     /**
      * Frames as JSON trees, the first token's timestamp replaced: the tab and the broadcast each stamp their own. The
-     * watchers' init also carries when the turn started (JF-202), which the tab's never does; it goes too.
+     * watchers' init also carries when the turn started (JF-202) and the turn's id (JF-226), which the tab's never
+     * does; they go too.
      */
     private static List<JsonElement> normalized(List<String> frames) {
         var trees = new ArrayList<JsonElement>();
@@ -796,6 +797,10 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
             if (tree.has("startedAt")) {
                 assertDoesNotThrow(() -> Instant.parse(tree.get("startedAt").getAsString()));
                 tree.remove("startedAt");
+            }
+            if (tree.has("turn")) {
+                assertTrue(tree.get("turn").getAsLong() > 0, "a turn id: " + tree);
+                tree.remove("turn");
             }
             trees.add(tree);
         }

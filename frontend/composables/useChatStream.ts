@@ -55,11 +55,19 @@ interface TurnAnswer {
   pick?: CommandPick
 }
 
-/** The turn the stream has open: its bubble, and the SSE id of its `init`, which a replay of the same turn repeats. */
+/**
+ * The turn the stream has open: its bubble, the SSE id of its `init`, which a replay of the same turn repeats, and the
+ * id the server gave the turn, which Stop and a typed `/stop` name so that one landing after it ended stops nothing
+ * (JF-226); null when its `init` carried none.
+ */
 interface OpenTurn {
   bubble: StreamingMessage
   initId: string
+  turnId: number | null
 }
+
+// A /stop as the server reads one: the command, any `@bot` suffix, then whitespace or nothing.
+const STOP_COMMAND = /^\/stop(?:@\S*)?(?:\s|$)/i
 
 export interface UseChatStreamDeps {
   messages: ShallowRef<Message[]>
@@ -216,6 +224,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   let pendingStop: Promise<unknown> | null = null
 
   let turn: OpenTurn | null = null
+  // The id of the last turn the page showed, kept past its terminal: a /stop typed before the next init names it, not
+  // the queued message that already runs (JF-226). Cleared with the view.
+  let shownTurnId: number | null = null
   // Counts inits, so a read begun before one does not act on a turn it never saw.
   let inits = 0
   // Bumped whenever the stream closes: an answer, read or timer for an earlier view changes nothing.
@@ -257,6 +268,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
 
   function closeView() {
     viewGen++
+    shownTurnId = null
     // Whatever closed the view, a send from it places nothing and holds up no later one.
     if (newChatSend) newChatSend.left = true
     newChatSend = null
@@ -306,7 +318,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // mutate never rejects, so a failed stop cannot block the next send. The server publishes the turn's stopped
       // frame before it answers, but on the stream's own connection, which can land later: a stop that worked ends the
       // turn here. One that found nothing to stop leaves it to the turn's own terminal, or to an idle read.
-      const stop: Promise<unknown> = mutate<{ stopped?: boolean }>(`/api/conversations/${convoId}/stop`, { method: 'POST' })
+      const named = stopping?.turnId
+      const stop: Promise<unknown> = mutate<{ stopped?: boolean }>(`/api/conversations/${convoId}/stop`,
+        { method: 'POST', ...(named != null ? { body: { turn: named } } : {}) })
         .then(async (answer) => {
           if (!answer?.stopped) {
             await settleIfIdle()
@@ -411,7 +425,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       messages.value = messages.value.filter(m => m !== stale)
     }
     const bubble: StreamingMessage = { _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() }
-    turn = { bubble, initId: eventId }
+    turn = { bubble, initId: eventId, turnId: typeof event.turn === 'number' ? event.turn : null }
+    shownTurnId = turn.turnId
     inits++
     clearStreamBuffers()
     const startedAt = typeof event.startedAt === 'string' ? Date.parse(event.startedAt) : Number.NaN
@@ -767,6 +782,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     const rawText = input.value.trim()
     if (!rawText && !attachedFiles.value.length) return
     const quote = deps.quote?.value ?? null
+    // The turn shown as the operator typed: the uploads and a stop in flight can outlast it.
+    const stopTurn = STOP_COMMAND.test(rawText) ? shownTurnId : null
 
     attachError.value = null
     const pending = attachedFiles.value.slice()
@@ -830,6 +847,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
         message: text,
         attachments: uploaded,
         ...(quote ? { quote } : {}),
+        ...(stopTurn != null ? { stopTurn } : {}),
         ...(sentConversationId == null ? overrides : {}),
       },
     })

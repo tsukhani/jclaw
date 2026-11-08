@@ -357,6 +357,19 @@ public final class Commands {
     public static Result execute(Command cmd, Agent agent, String channelType, String peerId,
                                   @Nullable Conversation current, @Nullable String args,
                                   boolean ownerInitiated) {
+        return execute(cmd, agent, channelType, peerId, current, args, ownerInitiated, null);
+    }
+
+    /**
+     * {@link #execute(Command, Agent, String, String, Conversation, String, boolean)} for a command typed in Chat, whose
+     * {@code /stop} names {@code stopTurn}, the turn the page shows: it stops that turn only while it still runs, and
+     * answers {@link #NOTHING_TO_STOP} once it has ended (JF-226). Null stops whatever runs; every other command
+     * ignores it.
+     */
+    @SuppressWarnings("java:S107") // execute's call surface plus the turn a /stop names
+    public static Result execute(Command cmd, Agent agent, String channelType, String peerId,
+                                  @Nullable Conversation current, @Nullable String args,
+                                  boolean ownerInitiated, @Nullable Long stopTurn) {
         if (!ownerInitiated && ownerOnly(cmd, args)) {
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "Refused %s from a non-owner turn on peer=%s".formatted(cmd.literal, peerId));
@@ -371,7 +384,7 @@ public final class Commands {
             case MODEL -> executeModel(agent, channelType, current, args);
             case THINK -> executeThink(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
-            case STOP -> executeStop(agent, channelType, current);
+            case STOP -> executeStop(agent, channelType, current, stopTurn);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
             case PROMPT -> executePrompt(agent, channelType, current, args);
         };
@@ -564,14 +577,15 @@ public final class Commands {
      * content the canceled stream left behind would clutter history and
      * skew {@code /usage} accounting.
      */
-    private static Result executeStop(Agent agent, String channelType, @Nullable Conversation current) {
+    private static Result executeStop(Agent agent, String channelType, @Nullable Conversation current,
+                                      @Nullable Long stopTurn) {
         if (current == null) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
         if (ConversationQueue.operatorStoppable(current.channelType)) {
-            return executeOperatorStop(agent, channelType, current);
+            return executeOperatorStop(agent, channelType, current, stopTurn);
         }
         if (!ConversationQueue.isBusy(current.id)) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
@@ -588,9 +602,10 @@ public final class Commands {
      * {@code /stop} as the chat's Stop button stops: typed in Chat, it tells the person on a channel conversation, as
      * the button does; sent on the channel, its own "Stopped." is their answer, so the stop adds none (JF-197b).
      */
-    private static Result executeOperatorStop(Agent agent, String channelType, Conversation current) {
+    private static Result executeOperatorStop(Agent agent, String channelType, Conversation current,
+                                              @Nullable Long stopTurn) {
         boolean typedInChat = ChannelType.WEB.value.equals(channelType);
-        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType, typedInChat);
+        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType, typedInChat, stopTurn);
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop for conversation %d: %s".formatted(current.id, outcome));
         var reply = switch (outcome) {

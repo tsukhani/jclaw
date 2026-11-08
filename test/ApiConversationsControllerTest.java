@@ -1068,6 +1068,107 @@ class ApiConversationsControllerTest extends FunctionalTest {
         }
     }
 
+    // --- a Stop names the turn the page shows (JF-226) ---
+
+    @Test
+    void stopTurnNamingAWebTurnThatEndedStopsNothingAndKeepsTheQueueBehindTheTurnNowRunning() {
+        login();
+        var convo = seedConversation("jf226-stop-late-web", "web");
+        var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "A"), new AtomicBoolean(false));
+        try {
+            var ended = ConversationQueue.ownerTurn(convo.id, generation);
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "B"));
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "C"));
+            assertEquals("B", ConversationQueue.drain(convo.id, generation).getFirst().text(),
+                    "test precondition: B takes the conversation from A");
+            commitInFreshTx(() -> ConversationService.appendUserMessage(Conversation.findById(convo.id), "B"));
+            var running = ConversationQueue.ownerCancel(convo.id, generation);
+
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json",
+                    "{\"turn\":" + ended + "}");
+
+            assertIsOk(response);
+            assertEquals(JsonParser.parseString("{\"stopped\":false}"), JsonParser.parseString(getContent(response)));
+            assertFalse(running.get(), "B runs on");
+            assertQueue("""
+                    {"busy":true,"queueSize":1,"stoppable":true,"stopDropsQueue":true,"pending":[
+                      {"text":"C","attachmentNames":[],"position":1}]}
+                    """, convo.id);
+            assertEquals(0L, stopMarkers(convo.id), "no marker under B's unanswered message");
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnNamingATelegramTurnThatEndedStopsNothingAndOwesThePersonNoNotice() {
+        login();
+        var convo = seedConversation("jf226-stop-late-telegram", "telegram");
+        var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "A"), new AtomicBoolean(false));
+        try {
+            var ended = ConversationQueue.ownerTurn(convo.id, generation);
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "B"));
+            assertEquals("B", ConversationQueue.drain(convo.id, generation).getFirst().text(),
+                    "test precondition: B takes the conversation from A");
+            var running = ConversationQueue.ownerCancel(convo.id, generation);
+
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json",
+                    "{\"turn\":" + ended + "}");
+
+            assertIsOk(response);
+            assertEquals(JsonParser.parseString("{\"stopped\":false}"), JsonParser.parseString(getContent(response)));
+            assertFalse(running.get(), "B runs on");
+            assertNull(ConversationQueue.channelStop(running), "the person who sent B is told nothing");
+            assertTrue(ConversationQueue.isBusy(convo.id));
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnNamingTheTurnThatRunsStopsItAndDropsTheQueueBehindIt() {
+        login();
+        var convo = seedConversation("jf226-stop-current-web", "web");
+        var flag = new AtomicBoolean(false);
+        var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "A"), flag);
+        try {
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "B"));
+            commitInFreshTx(() -> ConversationService.appendUserMessage(Conversation.findById(convo.id), "A"));
+
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json",
+                    "{\"turn\":" + ConversationQueue.ownerTurn(convo.id, generation) + "}");
+
+            assertIsOk(response);
+            assertEquals(JsonParser.parseString("{\"stopped\":true}"), JsonParser.parseString(getContent(response)));
+            assertTrue(flag.get(), "A was told to stop");
+            assertQueue(IDLE_WEB, convo.id);
+            assertEquals(1L, stopMarkers(convo.id));
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnWithNoBodyStopsTheTurnThatRunsAsAnOlderPagesStopDoes() {
+        login();
+        var convo = seedConversation("jf226-stop-no-body", "web");
+        var generation = ConversationQueue.tryAcquireOwnership(convo.id, queued(convo, "A"), new AtomicBoolean(false));
+        try {
+            ConversationQueue.tryAcquire(convo.id, queued(convo, "B"));
+            assertEquals(1, ConversationQueue.drain(convo.id, generation).size(), "test precondition: B takes over");
+            var running = ConversationQueue.ownerCancel(convo.id, generation);
+
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "");
+
+            assertIsOk(response);
+            assertEquals(JsonParser.parseString("{\"stopped\":true}"), JsonParser.parseString(getContent(response)));
+            assertTrue(running.get(), "the turn that runs now was told to stop");
+            assertQueue(IDLE_WEB, convo.id);
+        } finally {
+            ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
     // --- deleteMessage tests (DELETE /api/conversations/{id}/messages/{mid}) ---
 
     @Test

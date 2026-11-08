@@ -31,6 +31,7 @@ import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.InactivityTimer;
+import utils.JsonArgs;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
 
@@ -110,9 +111,15 @@ public class ApiChatController extends Controller {
         sse.sendRaw(TurnFrames.chunk(SSE_DATA, kind, content, SSE_FRAME_END));
     }
 
-    /** Validated prologue shared by send(), streamChat() and startTurn(). */
+    /**
+     * Validated prologue shared by send(), streamChat() and startTurn().
+     *
+     * @param stopTurn the turn a {@code /stop} names, the one the page shows, so a {@code /stop} that lands after it
+     *                 ended stops nothing (JF-226); null when the body names none
+     */
     private record ChatContext(Agent agent, String message, @Nullable Long conversationId, String username,
-                                List<AttachmentService.Input> attachments, @Nullable PendingOverrides overrides) {}
+                                List<AttachmentService.Input> attachments, @Nullable PendingOverrides overrides,
+                                @Nullable Long stopTurn) {}
 
     /**
      * Model and thinking picks made on a fresh web chat before its first message (JCLAW-1196).
@@ -163,7 +170,8 @@ public class ApiChatController extends Controller {
         var attachments = parseAttachments(body);
         var overrides = conversationId == null ? parseOverrides(body) : null;
 
-        return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments, overrides);
+        return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments, overrides,
+                JsonArgs.optLong(body, "stopTurn"));
     }
 
     /** JCLAW-1299: the quoted block for a reply, or null when the body quotes nothing. */
@@ -285,7 +293,8 @@ public class ApiChatController extends Controller {
     public static void send() {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
-        var slashResult = runSlashCommand(ctx.agent(), ctx.message(), ctx.conversationId(), ctx.username());
+        var slashResult = runSlashCommand(ctx.agent(), ctx.message(), ctx.conversationId(), ctx.username(),
+                ctx.stopTurn());
         if (slashResult != null) {
             var slashResp = new HashMap<String, Object>();
             slashResp.put(KEY_CONVERSATION_ID,
@@ -426,7 +435,7 @@ public class ApiChatController extends Controller {
         });
 
         close.finished().set(true); // a slash command answers and closes inside the call below
-        if (handleStreamingSlashCommand(sse, agent, messageText, conversationId, username)) {
+        if (handleStreamingSlashCommand(sse, agent, messageText, conversationId, username, ctx.stopTurn())) {
             return;
         }
         close.finished().set(false);
@@ -463,7 +472,9 @@ public class ApiChatController extends Controller {
         var slashResult = commandInNewChat(ctx);
         var conversationId = slashResult != null ? null : conversationFor(ctx);
 
-        if (slashResult == null) slashResult = runSlashCommand(ctx.agent(), ctx.message(), conversationId, ctx.username());
+        if (slashResult == null) {
+            slashResult = runSlashCommand(ctx.agent(), ctx.message(), conversationId, ctx.username(), ctx.stopTurn());
+        }
         if (slashResult != null) {
             var answer = new HashMap<String, Object>();
             answer.put(KEY_STATUS, "command");
@@ -547,10 +558,11 @@ public class ApiChatController extends Controller {
      * JCLAW-26: run {@code messageText} as a slash command, or return null when it is none, so it runs as normal
      * text. A missing {@code conversationId} addresses the agent's web conversation with {@code username}, created if
      * there is none, except for /new, which creates a fresh one; the others mutate or query that conversation. The
-     * model is never called.
+     * model is never called. A {@code /stop} stops only the turn {@code stopTurn} names, when it does (JF-226).
      */
     private static Commands.@Nullable Result runSlashCommand(Agent agent, String messageText,
-                                                             @Nullable Long conversationId, String username) {
+                                                             @Nullable Long conversationId, String username,
+                                                             @Nullable Long stopTurn) {
         var slashCmd = Commands.parse(messageText);
         if (slashCmd.isEmpty()) return null;
         var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
@@ -558,7 +570,7 @@ public class ApiChatController extends Controller {
         // and /model NAME don't fall through to the no-args summary branch on web, as JCLAW-109 fixed for Telegram.
         // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
         return Commands.execute(slashCmd.get(), agent, "web", username, slashConv,
-                Commands.extractArgs(messageText), true);
+                Commands.extractArgs(messageText), true, stopTurn);
     }
 
     /**
@@ -571,8 +583,9 @@ public class ApiChatController extends Controller {
      *         should proceed.
      */
     private static boolean handleStreamingSlashCommand(SseStream sse, Agent agent, String messageText,
-                                                       @Nullable Long conversationId, String username) {
-        var slashResult = runSlashCommand(agent, messageText, conversationId, username);
+                                                       @Nullable Long conversationId, String username,
+                                                       @Nullable Long stopTurn) {
+        var slashResult = runSlashCommand(agent, messageText, conversationId, username, stopTurn);
         if (slashResult == null) return false;
         if (slashResult.conversation() != null) {
             sse.send(TurnFrames.init(slashResult.conversation().id));

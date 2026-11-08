@@ -1363,6 +1363,134 @@ class ConversationQueueTest extends UnitTest {
         }
     }
 
+    // ── a Stop names the turn the page shows (JF-226) ──
+
+    @Test
+    void everyTurnThatOwnsTheConversationHasAnIdOfItsOwnDrainedAndRestoredOnesIncluded() {
+        long convId = 17013L;
+        long restoredId = 17014L;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            var a = ConversationQueue.ownerTurn(convId, gen);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+            assertEquals("B", ConversationQueue.drain(convId, gen).getFirst().text());
+            var b = ConversationQueue.ownerTurn(convId, gen);
+            assertEquals("C", ConversationQueue.drain(convId, gen).getFirst().text());
+            var c = ConversationQueue.ownerTurn(convId, gen);
+            var restoredGen = ConversationQueue.tryAcquireRestored(restoredId,
+                    List.of(new QueuedMessage("R", "web", "admin", agent)));
+            var r = ConversationQueue.ownerTurn(restoredId, restoredGen);
+            assertEquals(List.of(), ConversationQueue.drain(convId, gen));
+
+            var ids = java.util.Arrays.asList(a, b, c, r);
+            assertFalse(ids.contains(null), "every owner has an id: " + ids);
+            assertEquals(4, new java.util.HashSet<>(ids).size(), "no two owners share one: " + ids);
+            assertNull(ConversationQueue.ownerTurn(convId, gen), "a released conversation has no owner");
+            assertNull(ConversationQueue.ownerTurn(restoredId, restoredGen - 1), "nor a generation that is not its own");
+            assertNull(ConversationQueue.ownerTurn(17099L, 1), "nor a conversation with no queue");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+            ConversationQueue.forgetForTest(restoredId);
+        }
+    }
+
+    @Test
+    void aStopNamingADrainedTurnThatHandedTheConversationOnChangesNothingAndTheNextRunsOn() {
+        long convId = 17015L;
+        services.ConversationTurnStream.Turn running = null;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId,
+                    new QueuedMessage("X", "telegram", "peer", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "telegram", "peer", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "telegram", "peer", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "telegram", "peer", agent));
+            assertEquals("A", ConversationQueue.drain(convId, gen).getFirst().text());
+            var a = ConversationQueue.ownerTurn(convId, gen);
+            assertEquals("B", ConversationQueue.drain(convId, gen).getFirst().text());
+            var b = ConversationQueue.ownerTurn(convId, gen);
+            var bFlag = ConversationQueue.ownerCancel(convId, gen);
+            running = services.ConversationTurnStream.begin(convId, gen);
+
+            var heard = busyAnnouncedWhile(convId, () -> assertEquals(ConversationQueue.OperatorStop.IDLE,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram", true, a)));
+
+            assertFalse(bFlag.get(), "B was not told to stop");
+            assertNull(ConversationQueue.channelStop(bFlag), "B's channel is owed no notice");
+            assertEquals(List.of(), heard, "the conversation stayed busy with B");
+            assertEquals(b, ConversationQueue.ownerTurn(convId, gen), "B still owns it, at its generation");
+            assertEquals(1, ConversationQueue.getQueueSize(convId), "C still waits");
+            assertTrue(running.isOpen(), "B's turn goes on for its watchers");
+            assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram", true, b), "a stop naming B stops it");
+            assertTrue(bFlag.get());
+        } finally {
+            if (running != null) running.stop();
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void aStopNamingTheRunningWebTurnStopsItAndDropsItsQueueAsAStopNamingNoneDoes() {
+        long named = 17016L;
+        long unnamed = 17017L;
+        var namedFlag = new AtomicBoolean();
+        var unnamedFlag = new AtomicBoolean();
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(named, new QueuedMessage("A", "web", "admin", agent),
+                    namedFlag);
+            ConversationQueue.tryAcquire(named, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquireOwnership(unnamed, new QueuedMessage("A", "web", "admin", agent), unnamedFlag);
+            ConversationQueue.tryAcquire(unnamed, new QueuedMessage("B", "web", "admin", agent));
+
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(named, "web", true,
+                    ConversationQueue.ownerTurn(named, gen)));
+            assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(unnamed, "web", true, null));
+
+            for (var conv : List.of(named, unnamed)) {
+                assertFalse(ConversationQueue.isBusy(conv));
+                assertEquals(0, ConversationQueue.getQueueSize(conv));
+            }
+            assertTrue(namedFlag.get());
+            assertTrue(unnamedFlag.get());
+        } finally {
+            ConversationQueue.forgetForTest(named);
+            ConversationQueue.forgetForTest(unnamed);
+        }
+    }
+
+    @Test
+    void whileAStopsNoticeIsSentNoTurnOwnsTheConversationSoANamedStopFindsItIdle() throws Exception {
+        long convId = 17018L;
+        var sending = new CountDownLatch(1);
+        var sent = new CountDownLatch(1);
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent),
+                    new AtomicBoolean(), _ -> {
+                        sending.countDown();
+                        try {
+                            sent.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+            var a = ConversationQueue.ownerTurn(convId, gen);
+            assertEquals(ConversationQueue.OperatorStop.STOPPED,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram", true, a));
+            assertTrue(sending.await(10, TimeUnit.SECONDS), "test precondition: the notice is being sent");
+
+            assertTrue(ConversationQueue.isBusy(convId), "test precondition: the notice owns the conversation");
+            assertNull(ConversationQueue.ownerTurn(convId, ConversationQueue.currentGeneration(convId)));
+            assertEquals(ConversationQueue.OperatorStop.IDLE,
+                    ConversationQueue.stopOperatorTurn(convId, "telegram", true, a));
+        } finally {
+            sent.countDown();
+            for (int i = 0; i < 200 && ConversationQueue.isBusy(convId); i++) sleep(50);
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
     @Test
     void aSnapshotTakesBusySizeStoppableAndTheShownMessagesTogether() {
         long convId = 17006L;

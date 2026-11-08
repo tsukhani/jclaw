@@ -27,6 +27,8 @@ function row(id: number, role: string, content: string, over: Partial<Row> = {})
 /** What GET /api/conversations/{id}/queue answers, per conversation, as the test sets it. */
 let queues: Record<number, ConversationQueueStatus>
 let stops: number[]
+/** The body of each stop, in order; undefined for one sent with none. */
+let stopBodies: unknown[]
 
 function serveQueue(convoId: number, status: Partial<ConversationQueueStatus> = {}) {
   queues[convoId] = { busy: false, queueSize: 0, stoppable: false, pending: [], ...status }
@@ -41,7 +43,9 @@ function setQueue(convoId: number, status: Partial<ConversationQueueStatus>) {
 function serveStop(convoId: number, stopped = true) {
   registerEndpoint(`/api/conversations/${convoId}/stop`, {
     method: 'POST',
-    handler: () => {
+    handler: async (event) => {
+      const { readBody } = await import('h3')
+      stopBodies.push(await readBody(event))
       stops.push(convoId)
       if (stopped) {
         setQueue(convoId, { busy: false, stoppable: false, pending: [], queueSize: 0 })
@@ -61,6 +65,7 @@ beforeEach(() => {
   fakeConversationStreams()
   queues = {}
   stops = []
+  stopBodies = []
   clearNuxtData()
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
@@ -1045,6 +1050,116 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     await vi.waitFor(() => expect(progressLine(component).exists()).toBe(false))
     expect(component.text()).toContain('Done before the stop.')
     expect(component.text()).not.toContain('(stopped)')
+  })
+
+  it('stop names its turn: Stop posts the id the turn\'s init carried, as a page opened mid-turn has it from the replay', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true })
+    serveStop(5)
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5, startedAt: new Date().toISOString(), turn: 41 })
+    stream.send({ type: 'token', content: 'Half an answer' })
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
+
+    await stopButton(component).trigger('click')
+
+    await vi.waitFor(() => expect(stopBodies).toEqual([{ turn: 41 }]))
+    await vi.waitFor(() => expect(component.text()).toContain('(stopped)'))
+  })
+
+  it('stop names no turn when the turn\'s init carried no id, so it stops whatever runs, as before', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true })
+    serveStop(5)
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5 })
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
+
+    await stopButton(component).trigger('click')
+
+    await vi.waitFor(() => expect(stopBodies).toEqual([undefined]))
+  })
+
+  it('typed /stop names the turn the page shows; once that turn has ended it stops nothing and the page shows the turn running on', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true })
+    // As the server answers a /stop naming a turn that has already handed the conversation on.
+    const bodies = serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'Nothing to stop.', saved: false }))
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5, turn: 41 })
+    await vi.waitFor(() => expect(progressLine(component).exists()).toBe(true))
+
+    await type(component, '/stop')
+
+    await vi.waitFor(() => expect(component.text()).toContain('Nothing to stop.'))
+    expect(bodies).toEqual([{ agentId: 1, conversationId: 5, message: '/stop', attachments: [], stopTurn: 41 }])
+    expect(progressLine(component).exists()).toBe(true)
+  })
+
+  it('typed /stop after the shown reply ended, before the next turn\'s init, names the turn that ended', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true })
+    const bodies = serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'Nothing to stop.', saved: false }))
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5, turn: 41 })
+    await vi.waitFor(() => expect(progressLine(component).exists()).toBe(true))
+    stream.send({ type: 'complete', content: 'Done.' })
+    await vi.waitFor(() => expect(progressLine(component).exists()).toBe(false))
+
+    await type(component, '/stop')
+
+    await vi.waitFor(() => expect(component.text()).toContain('Nothing to stop.'))
+    expect(bodies).toEqual([{ agentId: 1, conversationId: 5, message: '/stop', attachments: [], stopTurn: 41 }])
+  })
+
+  it('typed /stop while a Stop is still answering names the turn shown as it was typed, not the one that runs next', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: false })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registerEndpoint('/api/conversations/5/stop', {
+      method: 'POST',
+      handler: async () => {
+        stops.push(5)
+        await gate
+        return { stopped: true }
+      },
+    })
+    const bodies = serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'Nothing to stop.', saved: false }))
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5, turn: 41 })
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
+
+    await stopButton(component).trigger('click')
+    await vi.waitFor(() => expect(stops).toEqual([5]))
+    await type(component, '/stop')
+    stream.send({ type: 'stopped' })
+    stream.send({ type: 'init', conversationId: 5, turn: 42 })
+    await flushPromises()
+    release()
+
+    await vi.waitFor(() => expect(bodies).toEqual([
+      { agentId: 1, conversationId: 5, message: '/stop', attachments: [], stopTurn: 41 },
+    ]))
+  })
+
+  it('only a /stop names the turn: another message typed mid-turn carries no id', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, { busy: true, stoppable: true })
+    const bodies = serveTurnStart(body => String(body.message).startsWith('/STOP')
+      ? { status: 'command', conversationId: 5, content: 'Stopped.', saved: false }
+      : { status: 'queued', conversationId: 5, position: 1 })
+    const { component, stream } = await openConversation(5)
+    stream.send({ type: 'init', conversationId: 5, turn: 41 })
+    await vi.waitFor(() => expect(progressLine(component).exists()).toBe(true))
+
+    await type(component, '/stopwatch please')
+    await type(component, '/STOP@jclaw now')
+
+    await vi.waitFor(() => expect(bodies.map(b => [b.message, b.stopTurn ?? null]))
+      .toEqual([['/stopwatch please', null], ['/STOP@jclaw now', 41]]))
   })
 
   it('stop, messages queued: Stop says it drops them, and after it no Queued row remains', async () => {

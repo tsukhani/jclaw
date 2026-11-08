@@ -36,6 +36,7 @@ import services.search.MessageSearch;
 import tools.CheckListTool;
 import utils.ApiResponses;
 import utils.JpqlFilter;
+import utils.JsonArgs;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -161,6 +162,9 @@ public class ApiConversationsController extends Controller {
      */
     public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable, boolean stopDropsQueue,
                                       List<ConversationQueue.PendingView> pending) {}
+
+    /** @param turn the id the turn's {@code init} carried; omitted, the stop stops whatever runs */
+    public record StopTurnRequest(@Nullable Long turn) {}
 
     public record StopTurnResponse(boolean stopped) {}
 
@@ -543,12 +547,18 @@ public class ApiConversationsController extends Controller {
      * starts a fresh run instead of being queued behind a turn that only notices the stop later. On a Telegram, Slack or
      * WhatsApp conversation the next queued message takes the conversation, and the person who sent the stopped
      * message is told (JF-197b). An app conversation has no Stop: 400.
+     *
+     * <p>A body naming the {@code turn} the page shows stops only that turn: once it has ended, the stop answers
+     * {@code stopped:false} and changes nothing, whatever runs now (JF-226).
      */
+    @RequestBody(content = @Content(schema = @Schema(implementation = StopTurnRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StopTurnResponse.class)))
     @Operation(summary = "Stop the turn running in a conversation")
     @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's chat Stop button")
     @NoTransaction
     public static void stopTurn(Long id) {
+        var body = JsonBodyReader.readJsonBody();
+        var turn = body != null ? JsonArgs.optLong(body, "turn") : null;
         // No request transaction: the stop marker must commit before the stop releases the conversation.
         var target = Tx.run(() -> {
             var conversation = requireConversation(id);
@@ -559,7 +569,8 @@ public class ApiConversationsController extends Controller {
         });
         var channelType = target.channelType();
         var pending = ConversationQueue.getQueueSize(id);
-        var stopped = ConversationQueue.stopOperatorTurn(id, channelType) == ConversationQueue.OperatorStop.STOPPED;
+        var stopped = ConversationQueue.stopOperatorTurn(id, channelType, true, turn)
+                == ConversationQueue.OperatorStop.STOPPED;
         if (stopped) {
             EventLogger.info("queue", target.agentName(), channelType,
                     "Stopped the turn in conversation %d, %s %d pending message(s)".formatted(id,
@@ -571,7 +582,7 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/{id}/stream — every turn the conversation runs, live, as SSE (JF-201): the chat stream's
      * frames, each with an {@code id:} line, from {@link ConversationTurnStream}, the turn's {@code init} also carrying
-     * its {@code startedAt}. A client gets what it missed of the turn in progress first, after the last id it names,
+     * its {@code startedAt} and its {@code turn}, the id the page's Stop names (JF-226). A client gets what it missed of the turn in progress first, after the last id it names,
      * with the deltas merged. When frames it cannot have are gone (dropped, or an id merged into a later frame), a
      * {@code resync} frame stands where they were, after the turn's {@code init} when that precedes them: the client
      * reloads the conversation's rows and rebuilds the turn from that {@code init} and the frames after the resync. The

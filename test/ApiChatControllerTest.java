@@ -944,13 +944,16 @@ class ApiChatControllerTest extends FunctionalTest {
                         "the user's message is saved by the time the turn is answered started");
                 assertEquals(List.of(), sink.raw().stream().filter(e -> e.contains("\"complete\"")).toList(),
                         "the answer came while the model was still held");
+                var owner = ConversationQueue.ownerTurn(chat.conversationId(),
+                        ConversationQueue.currentGeneration(chat.conversationId()));
                 model.release();
                 var heard = ConversationTurnStreamTest.data(sink.awaitData(COMPLETE_REPLY));
                 var init = JsonParser.parseString(heard.getFirst()).getAsJsonObject();
-                assertEquals(java.util.Set.of("type", "conversationId", "startedAt"), init.keySet());
+                assertEquals(java.util.Set.of("type", "conversationId", "startedAt", "turn"), init.keySet());
                 assertEquals("init", init.get("type").getAsString());
                 assertEquals(chat.conversationId(), init.get("conversationId").getAsLong());
                 assertDoesNotThrow(() -> Instant.parse(init.get("startedAt").getAsString()));
+                assertEquals(owner, init.get("turn").getAsLong(), "the id of the turn that owned the conversation");
                 assertEquals(TURN_REPLY, JsonParser.parseString(heard.get(1)).getAsJsonObject().get("content").getAsString());
                 assertEquals(1, heard.stream().filter(ApiChatControllerTest::isTerminal).count(), "one terminal: " + heard);
             } finally {
@@ -1211,6 +1214,89 @@ class ApiChatControllerTest extends FunctionalTest {
                 assertFalse(ConversationQueue.isBusy(chat.conversationId()), "the turn lost its conversation");
             } finally {
                 ConversationQueue.releaseOwnership(chat.conversationId(), generation);
+            }
+        }
+    }
+
+    // A /stop typed in Chat names the turn the page shows (JF-226).
+
+    private static String stopNaming(Seeded chat, Long turn) {
+        return "{\"agentId\": %d, \"conversationId\": %d, \"message\": \"/stop\", \"stopTurn\": %s}"
+                .formatted(chat.agentId(), chat.conversationId(), turn);
+    }
+
+    @Test
+    void aStopTypedNamingATurnThatEndedRepliesNothingToStopAndTheTurnNowRunningRunsOn() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var generation = ConversationQueue.tryAcquireOwnership(chat.conversationId(),
+                    running(chat.agentId(), "web"), null);
+            try {
+                var ended = ConversationQueue.ownerTurn(chat.conversationId(), generation);
+                assertFalse(ConversationQueue.tryAcquire(chat.conversationId(), running(chat.agentId(), "web")));
+                assertEquals(1, ConversationQueue.drain(chat.conversationId(), generation).size(),
+                        "test precondition: the queued message takes the conversation");
+                var now = ConversationQueue.ownerCancel(chat.conversationId(), generation);
+
+                var answer = json(POST("/api/chat/turn", "application/json", stopNaming(chat, ended)));
+
+                assertEquals(stopReply(chat.conversationId(), "Nothing to stop."), flat(answer));
+                assertFalse(now.get(), "the turn now running was not told to stop");
+                assertTrue(ConversationQueue.isBusy(chat.conversationId()));
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aStopTypedNamingTheTurnThatRunsStopsItAsTheStopButtonDoes() throws Exception {
+        login();
+        try (var model = HeldModel.answering()) {
+            var chat = seedWebChat(model);
+            var flag = new java.util.concurrent.atomic.AtomicBoolean();
+            var generation = ConversationQueue.tryAcquireOwnership(chat.conversationId(),
+                    running(chat.agentId(), "web"), flag);
+            try {
+                var answer = json(POST("/api/chat/turn", "application/json",
+                        stopNaming(chat, ConversationQueue.ownerTurn(chat.conversationId(), generation))));
+
+                assertEquals(stopReply(chat.conversationId(), "Stopped."), flat(answer));
+                assertTrue(flag.get(), "the running turn was told to stop");
+                assertFalse(ConversationQueue.isBusy(chat.conversationId()));
+            } finally {
+                ConversationQueue.forgetForTest(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
+    void aPageThatJoinsATurnLateStopsItByTheIdItsReplayedInitCarries() throws Exception {
+        login();
+        try (var model = HeldModel.held()) {
+            var chat = seedWebChat(model);
+            assertIsOk(POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?")));
+            assertTrue(model.called.await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
+            // Subscribed only now, so it has the turn from the replay, as a page opened mid-turn has.
+            var sink = new ConversationTurnStreamTest.RecordingSink();
+            var unsubscribe = ConversationTurnStream.subscribe(chat.conversationId(), null, sink);
+            try {
+                var init = JsonParser.parseString(sink.awaitUntil(heard -> !heard.isEmpty(), "heard the replay")
+                        .getFirst().data()).getAsJsonObject();
+                assertEquals("init", init.get("type").getAsString());
+                assertEquals(ConversationQueue.ownerTurn(chat.conversationId(),
+                        ConversationQueue.currentGeneration(chat.conversationId())), init.get("turn").getAsLong());
+
+                var stop = POST("/api/conversations/" + chat.conversationId() + "/stop", "application/json",
+                        "{\"turn\":" + init.get("turn").getAsLong() + "}");
+
+                assertEquals(JsonParser.parseString("{\"stopped\":true}"), json(stop));
+                sink.awaitData(STOPPED);
+            } finally {
+                model.release();
+                awaitIdle(chat.conversationId());
+                unsubscribe.run();
             }
         }
     }
@@ -2019,9 +2105,9 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     /**
-     * Frames as JSON trees, with what differs between two runs of one turn set aside: the conversation id, the first
-     * token's and the turn's start stamps, a status's timings (dropped, since a zero one is left out) and every other
-     * number it reports, token counts and context size alike.
+     * Frames as JSON trees, with what differs between two runs of one turn set aside: the conversation id and the turn's,
+     * the first token's and the turn's start stamps, a status's timings (dropped, since a zero one is left out) and
+     * every other number it reports, token counts and context size alike.
      */
     private static List<JsonElement> normalized(List<String> frames) {
         var trees = new java.util.ArrayList<JsonElement>();
@@ -2034,6 +2120,7 @@ class ApiChatControllerTest extends FunctionalTest {
                 }
             }
             if (tree.has("conversationId")) tree.addProperty("conversationId", 0);
+            if (tree.has("turn")) tree.addProperty("turn", 0);
             var content = tree.get("content");
             if ("status".equals(tree.get("type").getAsString()) && content.getAsString().startsWith("{")) {
                 tree.add("content", measuresSetAside(JsonParser.parseString(content.getAsString())));

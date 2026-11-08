@@ -3,6 +3,7 @@ package agents;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
+import services.ConversationQueue;
 import services.ConversationTurnStream;
 import services.EventLogger;
 import utils.AppClock;
@@ -18,7 +19,8 @@ import java.util.function.Supplier;
  * that cannot be built or published is logged and dropped: watching a turn must never break it.
  *
  * <p>An owning broadcast is the turn's own: it begins the turn when the turn acquires its conversation and publishes
- * its one terminal frame, and its {@code init} carries when it began, for a view that joins the turn late (JF-202). A
+ * its one terminal frame, and its {@code init} carries when it began, for a view that joins the turn late (JF-202), and
+ * the turn's id, which that view's Stop names (JF-226). A
  * joining one adds frames to the turn open in the conversation when it was made, an inline subagent's in its parent's
  * or a coding run's in the turn that started it, and never ends it; once that turn ends it publishes nothing, so a
  * later turn never gets its frames. Once the turn's cancel flag is set, its next frame of any kind ends it as stopped
@@ -30,6 +32,7 @@ public final class TurnBroadcast {
     private final @Nullable AtomicBoolean cancelled;
     private volatile ConversationTurnStream.@Nullable Turn turn;
     private volatile @Nullable Instant startedAt;
+    private volatile @Nullable Long ownerTurn;
 
     private TurnBroadcast(boolean owns, @Nullable AtomicBoolean cancelled) {
         this.owns = owns;
@@ -93,6 +96,8 @@ public final class TurnBroadcast {
     /** Begin the turn as it acquires {@code conversationId} at {@code generation}, before it writes anything. */
     void acquired(Long conversationId, long generation) {
         startedAt = AppClock.now();
+        // The turn owns the conversation now, a drained one too: its drain handed it over before the run began.
+        ownerTurn = ConversationQueue.ownerTurn(conversationId, generation);
         try {
             turn = ConversationTurnStream.begin(conversationId, generation);
         } catch (RuntimeException e) {
@@ -104,7 +109,7 @@ public final class TurnBroadcast {
     public void init(Agent agent, Conversation conversation) {
         // Read once the turn is open, which only acquired opens after setting it; a queued turn's init reaches here too.
         if (owns) publish(open -> open.publishInit(TurnFrames.json(
-                TurnFrames.init(agent, conversation, Objects.requireNonNull(startedAt)))));
+                TurnFrames.init(agent, conversation, Objects.requireNonNull(startedAt), ownerTurn))));
     }
 
     public void token(String content) {

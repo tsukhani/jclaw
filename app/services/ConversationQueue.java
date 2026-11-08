@@ -12,6 +12,7 @@ import models.Conversation;
 import models.PendingInbound;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
+import utils.AppClock;
 import utils.GsonHolder;
 
 import java.lang.reflect.Type;
@@ -54,6 +55,10 @@ public class ConversationQueue {
     private static final int MAX_QUEUE_SIZE = 20;
     // Process-wide so a state evicted and recreated under a still-running stopped turn never reissues its generation.
     private static final AtomicLong GENERATIONS = new AtomicLong();
+    // Not the generation: a drain hands the next message over under the same one, so two turns would share it. Seeded
+    // from the boot time, as ConversationTurnStream's event ids are, so an id a page kept from before a restart names no
+    // turn after it; about 1.8e15 now, under 2^53, so JavaScript reads it exactly.
+    private static final AtomicLong TURNS = new AtomicLong(AppClock.now().toEpochMilli() * 1_000L);
 
     /**
      * @param skipUserAppend JCLAW-273: this message's content is already a persisted
@@ -118,6 +123,8 @@ public class ConversationQueue {
         long generation = 0;
         /** The current owner's own cancel flag, which {@link #stop} flips; set on every acquire and hand-over. */
         @Nullable AtomicBoolean ownerCancel;
+        /** The current owner's {@link #ownerTurn id}, renewed with {@link #ownerCancel}; 0 while no turn owns it. */
+        long ownerTurn;
         /** The owner the last {@link #stop} ended, for a run of it that has yet to read its flag ({@link #ownerCancel}). */
         @Nullable StoppedOwner lastStopped;
         /** Where the owner's reply goes, so a stop sends its notice there itself (JF-197b); null when it cannot. */
@@ -138,6 +145,7 @@ public class ConversationQueue {
             boolean wasProcessing = processing;
             processing = false;
             ownerCancel = null;
+            ownerTurn = 0;
             ownerNotice = null;
             ownerRequestPending = false;
             return wasProcessing;
@@ -226,6 +234,7 @@ public class ConversationQueue {
             } else if (!state.processing) {
                 state.processing = true;
                 state.ownerCancel = ownerCancel != null ? ownerCancel : new AtomicBoolean(false);
+                state.ownerTurn = TURNS.incrementAndGet();
                 state.ownerNotice = ownerNotice;
                 state.ownerRequestPending = !message.skipUserAppend();
                 state.generation = GENERATIONS.incrementAndGet();
@@ -317,6 +326,7 @@ public class ConversationQueue {
             if (!state.processing) {
                 state.processing = true;
                 state.ownerCancel = new AtomicBoolean(false);
+                state.ownerTurn = TURNS.incrementAndGet();
                 state.ownerNotice = replyTarget(first);
                 state.ownerRequestPending = true;
                 state.generation = GENERATIONS.incrementAndGet();
@@ -359,7 +369,7 @@ public class ConversationQueue {
      *         otherwise
      */
     public static boolean stop(Long conversationId) {
-        return stopWhen(conversationId, null, _ -> true, null) == OperatorStop.STOPPED;
+        return stopWhen(conversationId, null, _ -> true, null, null) == OperatorStop.STOPPED;
     }
 
     /** What the operator's stop found (JF-202). */
@@ -409,9 +419,33 @@ public class ConversationQueue {
      * {@code /stop} they sent on the channel answers them itself.
      */
     public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType, boolean notice) {
+        return stopOperatorTurn(conversationId, channelType, notice, null);
+    }
+
+    /**
+     * {@link #stopOperatorTurn(Long, String, boolean)} of the turn whose {@link #ownerTurn id} is {@code turn}, the one
+     * the chat page shows (JF-226). Once that turn no longer owns the conversation the stop finds it
+     * {@link OperatorStop#IDLE} and changes nothing, so a click that lands after its reply cannot stop the message that
+     * runs next. Null stops whatever runs.
+     */
+    public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType, boolean notice,
+                                                @Nullable Long turn) {
         var owed = channelType != null && EXTERNAL_CHANNELS.contains(channelType)
                 ? (notice ? ChannelStop.NOTICE : ChannelStop.SILENT) : null;
-        return stopWhen(conversationId, channelType, state -> operatorStoppable(state, channelType), owed);
+        return stopWhen(conversationId, channelType, state -> operatorStoppable(state, channelType), owed, turn);
+    }
+
+    /**
+     * The id of the turn that owns {@code conversationId} at {@code generation}, which the page's Stop names (JF-226):
+     * unique to that turn, whereas a drained message runs under the generation of the turn before it. Null when no
+     * turn owns the conversation there: it is idle, a stop has made the generation stale, or a stop's notice owns it.
+     */
+    public static @Nullable Long ownerTurn(Long conversationId, long generation) {
+        var state = queues.get(conversationId);
+        if (state == null) return null;
+        synchronized (state) {
+            return state.generation == generation && stoppableFlag(state) != null ? state.ownerTurn : null;
+        }
     }
 
     /**
@@ -435,9 +469,12 @@ public class ConversationQueue {
     /**
      * @param channelType the conversation's, which decides whether the queue is dropped; null drops it
      * @param owed        what the stop owes the channel, recorded against the stopped flag; null when nothing
+     * @param turn        the {@link #ownerTurn id} of the turn to stop, which must still own the conversation; null
+     *                    stops whatever runs
      */
     private static OperatorStop stopWhen(Long conversationId, @Nullable String channelType,
-                                         Predicate<QueueState> allowed, @Nullable ChannelStop owed) {
+                                         Predicate<QueueState> allowed, @Nullable ChannelStop owed,
+                                         @Nullable Long turn) {
         var state = queues.get(conversationId);
         if (state == null) return OperatorStop.IDLE;
         AtomicBoolean stopped;
@@ -449,6 +486,8 @@ public class ConversationQueue {
         synchronized (state) {
             // A stop's notice owns it with no turn behind it (decision 6): nothing runs to stop.
             if (!state.processing || state.ownerCancel == null) return OperatorStop.IDLE;
+            // Under this lock, so the named turn cannot hand the conversation on between the check and the stop.
+            if (turn != null && turn != state.ownerTurn) return OperatorStop.IDLE;
             stopped = stoppableFlag(state);
             if (stopped == null || !allowed.test(state)) return OperatorStop.UNSTOPPABLE;
             // Committed before the release, so the next turn's request cannot land ahead of it. The reply's commit
@@ -482,6 +521,7 @@ public class ConversationQueue {
                 // it and a second Stop finds nothing to stop. Its thread hands the conversation on once it is sent.
                 handedGeneration = state.generation;
                 state.ownerCancel = null;
+                state.ownerTurn = 0;
                 state.ownerNotice = null;
                 state.ownerRequestPending = false;
             } else if (!stopDropsQueue(channelType) && !state.pending.isEmpty()) {
@@ -728,6 +768,7 @@ public class ConversationQueue {
      */
     private static List<QueuedMessage> handOver(QueueState state) {
         state.ownerCancel = new AtomicBoolean(false);
+        state.ownerTurn = TURNS.incrementAndGet();
         List<QueuedMessage> handed;
         if ("collect".equals(state.mode)) {
             handed = new ArrayList<>(state.pending);

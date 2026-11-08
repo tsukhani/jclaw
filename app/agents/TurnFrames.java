@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.ModelOverrideResolver;
 import utils.AppClock;
 import utils.ChannelErrorTemplates;
@@ -60,10 +61,16 @@ public final class TurnFrames {
         return initData;
     }
 
-    /** {@code init} as a conversation's watchers get it, carrying when the turn started for a view that joins it late. */
-    public static Map<String, Object> init(Agent agent, Conversation conversation, Instant startedAt) {
+    /**
+     * {@code init} as a conversation's watchers get it, carrying when the turn started, for a view that joins it late,
+     * and the turn's id, which the page's Stop names ({@link services.ConversationQueue#ownerTurn}, JF-226); a turn
+     * that owned no conversation as it began has none.
+     */
+    public static Map<String, Object> init(Agent agent, Conversation conversation, Instant startedAt,
+                                           @Nullable Long turn) {
         var initData = new HashMap<>(init(agent, conversation));
         initData.put("startedAt", startedAt.toString());
+        if (turn != null) initData.put("turn", turn);
         return initData;
     }
 
