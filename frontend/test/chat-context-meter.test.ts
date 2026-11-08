@@ -237,6 +237,19 @@ describe('ChatContextMeter — popover content', () => {
     await trigger.trigger('mouseleave')
   })
 
+  it('shows no count it has no value for, rather than a zero', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 100, completionTokens: 50, contextWindow: 50_000, messageCount: null, userPromptCount: null, compactionCount: null },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).not.toContain('Messages')
+    expect(html).not.toContain('Prompts')
+    expect(html).not.toContain('Compactions')
+    await trigger.trigger('mouseleave')
+  })
+
   it('shows the compactions row when compactionCount > 0', async () => {
     const component = await mountSuspended(ChatContextMeter, {
       props: {

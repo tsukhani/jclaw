@@ -235,7 +235,10 @@ function handleMouseLeave() {
           aria-hidden="true"
           class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
         />
-        <div class="flex items-center justify-between gap-4">
+        <div
+          v-if="messageCount != null"
+          class="flex items-center justify-between gap-4"
+        >
           <dt class="text-muted-foreground">
             Messages
           </dt>
@@ -243,7 +246,10 @@ function handleMouseLeave() {
             {{ (messageCount ?? 0).toLocaleString() }}
           </dd>
         </div>
-        <div class="flex items-center justify-between gap-4">
+        <div
+          v-if="userPromptCount != null"
+          class="flex items-center justify-between gap-4"
+        >
           <dt class="text-muted-foreground">
             Prompts
           </dt>
@@ -252,6 +258,7 @@ function handleMouseLeave() {
           </dd>
         </div>
         <div
+          v-if="compactionCount != null"
           class="flex items-center justify-between gap-4"
           title="Number of times this conversation's prefix has been summarized into a compaction. Each compaction resets the 'Current context' reading."
         >

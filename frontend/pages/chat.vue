@@ -378,6 +378,9 @@ const {
   conversationCostSummary,
 } = useChatUsageMeter(displayMessages, streaming, earlierUsages)
 
+// The meter's counts come from the open conversation's row, fetched when the sidebar's 50 do not include it.
+const meterConversation = useOpenConversationRow(selectedConvoId, currentConversation, streaming)
+
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
 const route = useRoute()
@@ -882,9 +885,9 @@ function exportConversation() {
             :cached-tokens="contextUsage.cached"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :cumulative-tokens="conversationCumulativeTokens"
-            :message-count="currentConversation?.messageRowCount ?? 0"
-            :user-prompt-count="currentConversation?.userPromptCount ?? 0"
-            :compaction-count="currentConversation?.compactionCount ?? 0"
+            :message-count="meterConversation?.messageRowCount ?? null"
+            :user-prompt-count="meterConversation?.userPromptCount ?? null"
+            :compaction-count="meterConversation?.compactionCount ?? null"
             :cost-label="conversationCostSummary?.label ?? null"
             :cost-tooltip="conversationCostSummary?.tooltip ?? null"
             :turn-count="conversationCostSummary?.turnCount ?? null"
