@@ -362,8 +362,23 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         }
     }
 
+    /**
+     * In an assistant thread the notice replaces the "is typing..." status line, as "is compacting this conversation
+     * (~85k tokens)..."; the next reply text or the seal clears it. Elsewhere it is a draft line like a tool's.
+     */
     @Override
     public void compacting(String notice) {
+        lock.lock();
+        try {
+            if (turnStopped || draftStopped) return;
+            if (statusSet) {
+                slacker.setStatus(channelId, threadTs, "is " + Character.toLowerCase(notice.charAt(0))
+                        + notice.substring(1).replace("…", "..."));
+                return;
+            }
+        } finally {
+            lock.unlock();
+        }
         toolProgress(notice);
     }
 

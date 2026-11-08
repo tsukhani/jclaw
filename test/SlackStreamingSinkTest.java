@@ -233,6 +233,16 @@ class SlackStreamingSinkTest extends UnitTest {
         assertEquals(List.of("the answer"), f.edited);
     }
 
+    @Test
+    void inAnAssistantThreadTheCompactionNoticeReplacesTheTypingStatus() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", "1700.0", "U1", f, 0L);
+        sink.begin();
+        sink.compacting("Compacting this conversation (~182k tokens)…");
+        assertEquals(List.of("is typing...", "is compacting this conversation (~182k tokens)..."), f.statuses);
+        assertTrue(f.posted.isEmpty(), "the status line carries it, not a draft");
+    }
+
     // ── Out-of-band generated-media delivery (generate_image et al.) ──
     //
     // A tool-generated attachment is persisted out-of-band and the generating tool
