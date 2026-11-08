@@ -14,8 +14,9 @@ export interface QuotedReplyParts {
   reply: string
 }
 
-// The server's QuotedReply.block: a bracketed source line, then every quoted line prefixed "> ".
-const HEADER = /^\[((?:Replying to|Quoting part of) [^\]\n]*)\]\n/
+// The server's QuotedReply.block: a bracketed source line, to its last "]" since a source can hold one, then every
+// quoted line prefixed "> ".
+const HEADER = /^\[((?:Replying to|Quoting part of) [^\n]*)\]\n/
 
 export function splitQuotedReply(content: string | null | undefined): QuotedReplyParts | null {
   if (!content) return null

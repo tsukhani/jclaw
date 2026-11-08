@@ -286,9 +286,12 @@ describe('Chat page — a turn the page is not streaming', () => {
 })
 
 describe('Chat page — a message another tab queues', () => {
-  it('shows it as a Queued row, and counts it on Stop, as soon as the busy event the queueing publishes arrives', async () => {
+  const queuedTexts = (component: VueWrapper) =>
+    component.findAll('[data-testid="queued-message"]').map(r => r.find('.rounded-2xl').text())
+
+  it('shows it as a Queued row as soon as the busy event the queueing publishes arrives, and Stop, which keeps it, says only Stop generating', async () => {
     serveConversation(5, [row(1, 'user', 'long job')])
-    let status: Record<string, unknown> = { busy: true, queueSize: 0, stoppable: true, pending: [] }
+    let status: Record<string, unknown> = { busy: true, queueSize: 0, stoppable: true, stopDropsQueue: false, pending: [] }
     serveQueue(5, async () => structuredClone(status) as { busy: boolean, queueSize: number })
     const component = await openConversation(5)
     const stream = streamOn(5)
@@ -301,10 +304,118 @@ describe('Chat page — a message another tab queues', () => {
     status = { ...status, queueSize: 1, pending: [{ text: 'sent from tab A', attachmentNames: [], position: 1 }] }
     emitBus('conversation.busy', { conversationId: 5, busy: true })
 
-    await vi.waitFor(() => expect(stop().text()).toBe('Stop and drop 1 queued'))
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual(['sent from tab A']))
     expect(queueReads[5]).toBe(reads + 1)
-    expect(component.findAll('[data-testid="queued-message"]').map(r => r.find('.rounded-2xl').text()))
-      .toEqual(['sent from tab A'])
+    expect(stop().attributes('title')).toBe('Stop generating')
+    expect(stop().text()).toBe('')
+  })
+
+  it('reads a queue that does not say what Stop does as one Stop keeps', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    serveQueue(5, async () => ({ busy: true, queueSize: 1, stoppable: true,
+      pending: [{ text: 'sent from tab A', attachmentNames: [], position: 1 }] }))
+    const component = await openConversation(5)
+    const stream = streamOn(5)
+    stream.open()
+    stream.send({ type: 'init', conversationId: 5 })
+    const stop = () => component.find('[data-testid="chat-stop"]')
+
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual(['sent from tab A']))
+    await vi.waitFor(() => expect(stop().exists()).toBe(true))
+    expect(stop().attributes('aria-label')).toBe('Stop generating')
+    expect(stop().text()).toBe('')
+  })
+
+  /** Conversation 5 with its turn streaming and two messages Queued behind it; `status` is what the queue answers. */
+  async function streamingWithTwoQueued() {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    const queue = { status: { busy: true, queueSize: 2, stoppable: true, stopDropsQueue: false, clears: 0, pending: [
+      { text: 'second', attachmentNames: [], position: 1 },
+      { text: 'third', attachmentNames: [], position: 2 },
+    ] } as Record<string, unknown> }
+    serveQueue(5, async () => structuredClone(queue.status) as { busy: boolean, queueSize: number })
+    const component = await openConversation(5)
+    const stream = streamOn(5)
+    stream.open()
+    stream.send({ type: 'init', conversationId: 5 })
+    stream.send({ type: 'token', content: 'Half an answer' })
+    // The init hides Stop until a read after it, the one the turn makes once its rows are in, says it may stop.
+    await vi.waitFor(() => expect(component.find('[data-testid="chat-stop"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual(['second', 'third']))
+    return { component, queue }
+  }
+
+  const streamingProgress = (component: VueWrapper) => component.find('[data-testid="stream-progress"]')
+
+  it('empties its Queued rows at once when a /queue clear drops them, while the turn streams on', async () => {
+    const { component, queue } = await streamingWithTwoQueued()
+
+    queue.status = { ...queue.status, queueSize: 0, pending: [], clears: 1 }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual([]))
+    expect(streamingProgress(component).exists()).toBe(true)
+  })
+
+  it('holds its Queued rows through a read that lists none while no clear has dropped them, as when a turn takes one', async () => {
+    const { component, queue } = await streamingWithTwoQueued()
+    const reads = queueReads[5]!
+
+    queue.status = { ...queue.status, queueSize: 0, pending: [] }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(queueReads[5]).toBe(reads + 1))
+    for (let i = 0; i < 5; i++) await flushPromises()
+    expect(queuedTexts(component)).toEqual(['second', 'third'])
+  })
+
+  it('holds its last Queued row through a hand-over after a clear, as it does before one', async () => {
+    const { component, queue } = await streamingWithTwoQueued()
+    queue.status = { ...queue.status, queueSize: 1, pending: [{ text: 'third', attachmentNames: [], position: 1 }],
+      clears: 1 }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual(['third']))
+    const reads = queueReads[5]!
+
+    queue.status = { ...queue.status, queueSize: 0, pending: [] }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(queueReads[5]).toBe(reads + 1))
+    for (let i = 0; i < 5; i++) await flushPromises()
+    expect(queuedTexts(component)).toEqual(['third'])
+  })
+
+  it('typed /queue clear: the command answers, and the busy event its clear publishes empties the Queued rows', async () => {
+    const bodies = serveTurnStart(() => ({ status: 'command', conversationId: 5, content: 'Dropped 2 waiting messages.',
+      saved: false }))
+    const { component, queue } = await streamingWithTwoQueued()
+
+    await component.find<HTMLTextAreaElement>('textarea').setValue('/queue clear')
+    await component.find('form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(component.text()).toContain('Dropped 2 waiting messages.'))
+    queue.status = { ...queue.status, queueSize: 0, pending: [], clears: 1 }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(queuedTexts(component)).toEqual([]))
+    expect(bodies.map(b => b.message)).toEqual(['/queue clear'])
+    expect(streamingProgress(component).exists()).toBe(true)
+  })
+
+  it('counts it on a voice conversation\'s Stop, which drops it', async () => {
+    serveConversation(5, [row(1, 'user', 'long job')])
+    let status: Record<string, unknown> = { busy: true, queueSize: 0, stoppable: true, stopDropsQueue: true, pending: [] }
+    serveQueue(5, async () => structuredClone(status) as { busy: boolean, queueSize: number })
+    const component = await openConversation(5)
+    const stream = streamOn(5)
+    stream.open()
+    stream.send({ type: 'init', conversationId: 5 })
+    const stop = () => component.find('[data-testid="chat-stop"]')
+    await vi.waitFor(() => expect(stop().attributes('title')).toBe('Stop generating'))
+
+    status = { ...status, queueSize: 1, pending: [{ text: 'said while it answered', attachmentNames: [], position: 1 }] }
+    emitBus('conversation.busy', { conversationId: 5, busy: true })
+
+    await vi.waitFor(() => expect(stop().text()).toBe('Stop and drop 1 queued'))
   })
 })
 

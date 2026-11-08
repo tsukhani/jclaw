@@ -39,7 +39,10 @@ function setQueue(convoId: number, status: Partial<ConversationQueueStatus>) {
   queues[convoId] = { ...queues[convoId]!, ...status }
 }
 
-/** As the server stops: drop the queue, release the conversation, and end the turn on its stream, then answer. */
+/**
+ * As the server stops a turn with nothing queued behind it, or a voice turn, whose queue it drops: empty the queue,
+ * release the conversation, and end the turn on its stream, then answer.
+ */
 function serveStop(convoId: number, stopped = true) {
   registerEndpoint(`/api/conversations/${convoId}/stop`, {
     method: 'POST',
@@ -843,14 +846,14 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(shown(component)).toEqual(['user: the other conversation'])
   })
 
-  it('typed /stop: on a stoppable turn the turn ends stopped and the queue empties, and its reply never pairs', async () => {
+  it('typed /stop: on a stoppable turn the turn ends stopped, its reply never pairs, and the queued message runs next', async () => {
     const rows = [row(1, 'user', 'long job')]
     serveConversation(5, rows)
-    serveQueue(5, { busy: true, stoppable: true, queueSize: 1,
+    serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: false, queueSize: 1,
       pending: [{ text: 'second', attachmentNames: [], position: 1 }] })
     serveTurnStart(() => {
-      // The stop commits its marker, then ends the turn on the stream, then answers.
-      setQueue(5, { busy: false, stoppable: false, pending: [], queueSize: 0 })
+      // The stop commits its marker, hands the conversation to the queued message, ends the turn on the stream, then answers.
+      setQueue(5, { busy: true, stoppable: true, pending: [], queueSize: 0 })
       rows.push(row(2, 'assistant', 'Half an answer'))
       for (const open of openStreamsOn(5)) open.send({ type: 'stopped' })
       return { status: 'command', conversationId: 5, content: 'Stopped.', saved: false }
@@ -858,16 +861,23 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     const { component, stream } = await openConversation(5)
     stream.send({ type: 'init', conversationId: 5 })
     stream.send({ type: 'token', content: 'Half an answer' })
-    await vi.waitFor(() => expect(stopButton(component).text()).toBe('Stop and drop 1 queued'))
+    await vi.waitFor(() => expect(stopButton(component).exists()).toBe(true))
+    expect(stopButton(component).attributes('title')).toBe('Stop generating')
+    expect(stopButton(component).text()).toBe('')
 
     await type(component, '/stop')
 
-    await vi.waitFor(() => expect(queuedRows(component)).toEqual([]))
-    expect(stopButton(component).exists()).toBe(false)
+    await vi.waitFor(() => expect(component.text()).toContain('(stopped)'))
     expect(progressLine(component).exists()).toBe(false)
-    expect(component.text()).toContain('(stopped)')
     // The stopped bubble takes the saved row's id; the command and its reply stay where they were sent, unpaired.
     await vi.waitFor(() => expect(vmOf(component).messages.map(m => m.id ?? m.content)).toEqual([1, 2, '/stop', 'Stopped.']))
+    expect(queuedRows(component)).toEqual(['second | Queued, position 1'])
+
+    rows.push(row(3, 'user', 'second'))
+    stream.send({ type: 'init', conversationId: 5 })
+
+    await vi.waitFor(() => expect(queuedRows(component)).toEqual([]))
+    expect(progressLine(component).exists()).toBe(true)
   })
 
   it('typed /stop: a turn chat cannot stop runs on, and an idle conversation says there is nothing to stop', async () => {
@@ -890,9 +900,9 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     await vi.waitFor(() => expect(component.text()).toContain('Nothing to stop.'))
   })
 
-  it('subagent result waiting: Stop counts the result it would drop, with no Queued row for it', async () => {
+  it('voice, subagent result waiting: Stop counts the result it would drop, with no Queued row for it', async () => {
     serveConversation(5, [row(1, 'user', 'long job')])
-    serveQueue(5, { busy: true, stoppable: true, queueSize: 1, pending: [] })
+    serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: true, queueSize: 1, pending: [] })
     const { component, stream } = await openConversation(5)
     stream.send({ type: 'init', conversationId: 5 })
 
@@ -1268,9 +1278,9 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
       .toEqual([['/stopwatch please', null], ['/STOP@jclaw now', 41]]))
   })
 
-  it('stop, messages queued: Stop says it drops them, and after it no Queued row remains', async () => {
+  it('stop, voice conversation, messages queued: Stop says it drops them, and after it no Queued row remains', async () => {
     serveConversation(5, [row(1, 'user', 'long job')])
-    serveQueue(5, { busy: true, stoppable: true, queueSize: 2, pending: [
+    serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: true, queueSize: 2, pending: [
       { text: 'second', attachmentNames: [], position: 1 },
       { text: 'third', attachmentNames: [], position: 2 },
     ] })
@@ -1288,13 +1298,13 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(stopButton(component).exists()).toBe(false)
   })
 
-  it('stop, channel conversation: Stop keeps the queue, says only Stop generating, and the next message runs', async () => {
+  it('stop, web or channel conversation: Stop keeps the queue, says only Stop generating, and the next message runs', async () => {
     serveConversation(5, [row(1, 'user', 'long job')])
     serveQueue(5, { busy: true, stoppable: true, stopDropsQueue: false, queueSize: 2, pending: [
       { text: 'second', attachmentNames: [], position: 1 },
       { text: 'third', attachmentNames: [], position: 2 },
     ] })
-    // As the server stops a Telegram, Slack, WhatsApp or voice turn: the next message takes the conversation.
+    // As the server stops any turn but a voice one: the next message takes the conversation.
     registerEndpoint('/api/conversations/5/stop', {
       method: 'POST',
       handler: () => {

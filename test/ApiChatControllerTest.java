@@ -1173,7 +1173,7 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aStopTypedOnAStoppableTurnEndsItStoppedEmptiesTheQueueAndRepliesStopped() throws Exception {
+    void aStopTypedOnAStoppableTurnEndsItStoppedRepliesStoppedAndTheQueuedMessagesRunInOrder() throws Exception {
         login();
         try (var model = HeldModel.held()) {
             var chat = seedWebChat(model);
@@ -1182,20 +1182,28 @@ class ApiChatControllerTest extends FunctionalTest {
             try {
                 assertIsOk(POST("/api/chat/turn", "application/json", turnBody(chat, "What time is it?")));
                 assertTrue(model.called.await(30, TimeUnit.SECONDS), "test precondition: the turn reached the model");
-                assertEquals("queued",
-                        json(POST("/api/chat/turn", "application/json", turnBody(chat, "And now?"))).get("status").getAsString());
+                for (var next : List.of("And now?", "And later?")) {
+                    assertEquals("queued", json(POST("/api/chat/turn", "application/json", turnBody(chat, next)))
+                            .get("status").getAsString());
+                }
 
                 var answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/stop")));
 
                 assertEquals(stopReply(chat.conversationId(), "Stopped."), flat(answer));
                 sink.awaitData(STOPPED);
-                assertEquals(new ConversationQueue.Snapshot(false, 0, false, true, List.of()),
-                        ConversationQueue.snapshot(chat.conversationId(), "web"));
-                assertEquals(1, model.calls.get(), "the queued message never ran");
+                assertEquals(new ConversationQueue.Snapshot(true, 1, true, false,
+                                List.of(new ConversationQueue.PendingView("And later?", List.of(), 1)), 0),
+                        ConversationQueue.snapshot(chat.conversationId(), "web"),
+                        "the first queued message took the conversation, and the second waits behind it");
             } finally {
                 model.release();
                 unsubscribe.run();
             }
+            awaitIdle(chat.conversationId());
+            assertEquals(List.of("user What time is it?", "assistant " + ConversationService.STOP_MARKER_CONTENT,
+                            "user And now?", "assistant " + TURN_REPLY, "user And later?", "assistant " + TURN_REPLY),
+                    transcript(chat.conversationId()));
+            assertEquals(3, model.calls.get());
         }
     }
 
@@ -1421,8 +1429,8 @@ class ApiChatControllerTest extends FunctionalTest {
                         "/stop with no current conversation", null)), heard);
                 assertEquals(JsonParser.parseString("{\"status\":\"command\",\"conversationId\":null,"
                         + "\"content\":\"No active conversation. Nothing to stop.\",\"saved\":false}"), answer[0]);
-                assertEquals(new ConversationQueue.Snapshot(true, 1, true, true,
-                                List.of(new ConversationQueue.PendingView("running", List.of(), 1))),
+                assertEquals(new ConversationQueue.Snapshot(true, 1, true, false,
+                                List.of(new ConversationQueue.PendingView("running", List.of(), 1)), 0),
                         ConversationQueue.snapshot(chat.conversationId(), "web"));
                 assertFalse(flag.get(), "the running turn was not told to stop");
             } finally {
@@ -2205,6 +2213,14 @@ class ApiChatControllerTest extends FunctionalTest {
             List<models.Message> rows = models.Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id DESC",
                     conversationId, "assistant").fetch();
             return rows.isEmpty() ? null : rows.getFirst().content;
+        });
+    }
+
+    /** Every row, oldest first, as its role and content. */
+    private static List<String> transcript(long conversationId) {
+        return commitInFreshTx(() -> {
+            List<models.Message> rows = models.Message.find("conversation.id = ?1 ORDER BY id", conversationId).fetch();
+            return rows.stream().map(m -> m.role + " " + m.content).toList();
         });
     }
 

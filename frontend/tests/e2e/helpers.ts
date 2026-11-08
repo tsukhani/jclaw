@@ -153,6 +153,7 @@ export type FakeQueue = {
   busy: boolean
   queueSize: number
   stoppable: boolean
+  stopDropsQueue?: boolean
   pending: Array<{ text: string, attachmentNames: string[], position: number }>
 }
 
@@ -168,8 +169,9 @@ type FakeTurns = {
  * Stand in, in the page, for the server's half of a chat turn (JF-202): `POST /api/chat/turn` answers `started` in
  * `conversationId` and records its body, and that conversation's stream (`GET /api/conversations/{id}/stream`) is an
  * EventSource the test feeds, which stays open as the server's does. Its queue (`GET .../queue`) answers what the
- * test last set, idle by default, and its Stop (`POST .../stop`) is counted, empties that queue and ends the turn
- * on the stream before it answers. The nth send's
+ * test last set, idle by default, and its Stop (`POST .../stop`) is counted, hands the conversation to the first
+ * queued message (or empties the queue when it says Stop drops it, as a voice one does) and ends the turn on the
+ * stream before it answers. The nth send's
  * turn plays `turns[n]` once the stream is open; a send past the list plays nothing, for a test that pushes a turn's
  * frames itself while it runs. Call before the first navigation: fetch and EventSource are replaced before the page's
  * scripts run, and every other request passes through.
@@ -208,9 +210,13 @@ export async function fakeChatTurns(page: Page, conversationId: number, turns: o
       const path = new URL(url, location.href).pathname
       if (path === `/api/conversations/${conversationId}/queue`) return json(fake.queue)
       if (path === `/api/conversations/${conversationId}/stop`) {
-        // As the server stops: drop the queue, end the turn on its stream, then answer.
+        // As the server stops: hand the conversation to the first queued message, or drop the queue where the queue
+        // says Stop does (a voice conversation's), end the turn on its stream, then answer.
         fake.stops++
-        fake.queue = { busy: false, queueSize: 0, stoppable: false, pending: [] }
+        const [, ...behind] = fake.queue.pending
+        fake.queue = fake.queue.stopDropsQueue === true || fake.queue.pending.length === 0
+          ? { busy: false, queueSize: 0, stoppable: false, pending: [] }
+          : { ...fake.queue, queueSize: fake.queue.queueSize - 1, pending: behind.map((p, i) => ({ ...p, position: i + 1 })) }
         push({ type: 'stopped' })
         return json({ stopped: true })
       }

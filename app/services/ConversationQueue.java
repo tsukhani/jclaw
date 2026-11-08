@@ -102,6 +102,11 @@ public class ConversationQueue {
         private QueuedMessage withPendingId(@Nullable Long id) {
             return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id, ownerInitiated);
         }
+
+        /** Each attachment's original file name, or its kind when it came without one. */
+        public List<String> attachmentNames() {
+            return attachments.stream().map(a -> a.originalFilename() != null ? a.originalFilename() : a.kind()).toList();
+        }
     }
 
     /** Channels that acknowledge a message to the platform before JClaw stores it, so a queued one is kept in a row. */
@@ -131,6 +136,11 @@ public class ConversationQueue {
         @Nullable Consumer<String> ownerNotice;
         /** Whether the owner's message has yet to be saved as its USER row, so its reply cannot have been saved. */
         boolean ownerRequestPending;
+        /**
+         * How many {@link #clearWaiting} calls dropped a message. A read after a clear lists fewer messages while busy,
+         * as one after a hand-over does, and the chat page tells the two apart by this count.
+         */
+        int clears;
         /**
          * Wall-clock ms of the last activity that touched this state (tryAcquire / drain /
          * releaseOwnership). Used by {@link #evictIdle} to skip recently-active entries.
@@ -360,10 +370,10 @@ public class ConversationQueue {
 
     /**
      * Stop the turn running in {@code conversationId}, whatever the channel (GH-12): set its owner's cancel flag, write
-     * the stop marker, drop the pending messages, release ownership so the next send acquires instead of queueing, and
-     * end the turn on the conversation's stream as stopped. The stopped turn's later release carries a stale generation
-     * and is a no-op. The operator's Stop makes this stop through {@link #stopOperatorTurn}; tests drive the queue
-     * through this one.
+     * the stop marker, hand the conversation to the next pending message or, with none, release it so the next send
+     * acquires instead of queueing, and end the turn on the conversation's stream as stopped. The stopped turn's later
+     * release carries a stale generation and is a no-op. The operator's Stop makes this stop through
+     * {@link #stopOperatorTurn}; tests drive the queue through this one.
      *
      * @return {@code true} when a turn owned the conversation and was stopped; {@code false}, changing nothing,
      *         otherwise
@@ -390,13 +400,6 @@ public class ConversationQueue {
             ChannelType.SLACK.value, ChannelType.WHATSAPP.value, ChannelType.VOICE.value);
 
     /**
-     * The conversations whose Stop leaves the queue to run: their messages are not the operator's to drop (JF-197b).
-     * Not voice's: its speaker is the operator, and a queued utterance's reply would never be spoken (JF-222).
-     */
-    private static final Set<String> STOP_KEEPS_QUEUE = Set.of(ChannelType.TELEGRAM.value, ChannelType.SLACK.value,
-            ChannelType.WHATSAPP.value);
-
-    /**
      * The flags stops of channel conversations' turns set, by identity, with what each stop owes the channel. Weak, so an
      * entry goes with the stopped turn that holds the flag, whichever way that turn ends.
      */
@@ -406,9 +409,9 @@ public class ConversationQueue {
     /**
      * The operator's Stop, from the chat page's button and from a {@code /stop} typed in Chat (JF-202): under one lock,
      * find the conversation idle, or its turn one the operator cannot stop ({@link #operatorStoppable}), or stop it as
-     * {@link #stop} does. Only a stopped turn changes anything. On a Telegram, Slack or WhatsApp conversation the next
-     * queued message takes the conversation instead of the queue being dropped, and the person who sent the stopped
-     * message is told (JF-197b).
+     * {@link #stop} does. Only a stopped turn changes anything. The next queued message then takes the conversation,
+     * unless {@link #stopDropsQueue} drops the queue, and on a Telegram, Slack or WhatsApp conversation the person who
+     * sent the stopped message is told (JF-197b).
      */
     public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType) {
         return stopOperatorTurn(conversationId, channelType, true);
@@ -461,13 +464,17 @@ public class ConversationQueue {
         return channelType != null && OPERATOR_STOPPABLE.contains(channelType);
     }
 
-    /** Whether Stop drops the messages queued behind the turn on {@code channelType}, as on web and voice, or runs the next. */
+    /**
+     * Whether Stop drops the messages queued behind the turn on {@code channelType} rather than running the next: only on
+     * voice, whose speaker is the operator and whose queued utterance's reply would never be spoken (JF-222). Everywhere
+     * else they run in arrival order (JF-197b, JF-227), and {@code /queue clear} is how they are dropped.
+     */
     public static boolean stopDropsQueue(@Nullable String channelType) {
-        return channelType == null || !STOP_KEEPS_QUEUE.contains(channelType);
+        return ChannelType.VOICE.value.equals(channelType);
     }
 
     /**
-     * @param channelType the conversation's, which decides whether the queue is dropped; null drops it
+     * @param channelType the conversation's, which decides whether the queue is dropped; null keeps it
      * @param owed        what the stop owes the channel, recorded against the stopped flag; null when nothing
      * @param turn        the {@link #ownerTurn id} of the turn to stop, which must still own the conversation; null
      *                    stops whatever runs
@@ -917,28 +924,71 @@ public class ConversationQueue {
      * @param pending        the waiting messages in the order they run; one that is already a saved row (a yield
      *                       resume's announce) is left out, since the conversation shows it, but keeps its place in
      *                       line
+     * @param clears         how many {@code /queue clear}s have dropped a message from this queue, so a reader can tell
+     *                       a shorter list that a clear left from one a hand-over left
      */
     public record Snapshot(boolean busy, int queueSize, boolean stoppable, boolean stopDropsQueue,
-                           List<PendingView> pending) {}
+                           List<PendingView> pending, int clears) {}
 
     /** {@link Snapshot} of the queue of {@code conversationId}, a conversation on {@code channelType}. */
     public static Snapshot snapshot(Long conversationId, @Nullable String channelType) {
         var state = queues.get(conversationId);
-        if (state == null) return new Snapshot(false, 0, false, stopDropsQueue(channelType), List.of());
+        if (state == null) return new Snapshot(false, 0, false, stopDropsQueue(channelType), List.of(), 0);
         var views = new ArrayList<PendingView>();
         synchronized (state) {
             int position = 0;
             for (var message : state.pending) {
                 position++;
                 if (message.skipUserAppend()) continue;
-                var names = message.attachments().stream()
-                        .map(a -> a.originalFilename() != null ? a.originalFilename() : a.kind())
-                        .toList();
-                views.add(new PendingView(message.text(), names, position));
+                views.add(new PendingView(message.text(), message.attachmentNames(), position));
             }
             return new Snapshot(state.processing, state.pending.size(), operatorStoppable(state, channelType),
-                    stopDropsQueue(channelType), views);
+                    stopDropsQueue(channelType), views, state.clears);
         }
+    }
+
+    /**
+     * The messages waiting in the queue of {@code conversationId}, in the order they run, as {@code /queue} lists them
+     * (JF-227): those {@code peerId} sent on {@code channelType}, or with a null {@code channelType} every sender's, as
+     * Chat's {@code /queue} lists them. A subagent result waiting to wake the agent is no sender's message, so it is
+     * left out.
+     */
+    public static List<QueuedMessage> waiting(Long conversationId, @Nullable String channelType,
+                                              @Nullable String peerId) {
+        var state = queues.get(conversationId);
+        if (state == null) return List.of();
+        synchronized (state) {
+            return state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId)).toList();
+        }
+    }
+
+    /**
+     * {@code /queue clear} (JF-227): drop the {@link #waiting} messages, and the rows that would run them again after a
+     * restart. The running turn carries on, and a subagent result waiting behind it keeps its place, as does every
+     * other sender's message.
+     *
+     * @return how many messages were dropped
+     */
+    public static int clearWaiting(Long conversationId, @Nullable String channelType, @Nullable String peerId) {
+        var state = queues.get(conversationId);
+        if (state == null) return 0;
+        List<QueuedMessage> dropped;
+        synchronized (state) {
+            dropped = state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId)).toList();
+            if (dropped.isEmpty()) return 0;
+            state.pending.removeIf(m -> isWaitingFrom(m, channelType, peerId));
+            state.clears++;
+            discardPending(pendingIdsOf(dropped));
+        }
+        // Something was queued, so a turn still holds the conversation; every tab open on it reads the queue again.
+        announceBusy(conversationId, true);
+        return dropped.size();
+    }
+
+    // A Chat send into a channel conversation waits as "web" from the operator, never as the channel's sender.
+    private static boolean isWaitingFrom(QueuedMessage message, @Nullable String channelType, @Nullable String peerId) {
+        return !message.skipUserAppend() && (channelType == null
+                || (channelType.equals(message.channelType()) && Objects.equals(peerId, message.peerId())));
     }
 
     /** Number of pending messages waiting in a conversation's queue (0 when it has no state). */

@@ -262,7 +262,7 @@ test.describe('UAT-15 chat', () => {
     await expect(page.getByTestId('stream-progress')).toHaveCount(0)
   })
 
-  test('Stop says what it drops, and after it no queued message remains', async ({ page }) => {
+  test('Stop keeps the queued messages, and the next one runs', async ({ page }) => {
     const blocked = await blockApiWrites(page)
     const turns = await fakeChatTurns(page, 990005)
     const stop = page.getByTestId('chat-stop')
@@ -273,23 +273,25 @@ test.describe('UAT-15 chat', () => {
     await page.getByPlaceholder('Send a message...').fill('a long job')
     await page.getByRole('button', { name: 'Send' }).click()
     await turns.opened()
-    await turns.setQueue({ busy: true, queueSize: 2, stoppable: true, pending: [
+    await turns.setQueue({ busy: true, queueSize: 2, stoppable: true, stopDropsQueue: false, pending: [
       { text: 'e2e-uat second', attachmentNames: [], position: 1 },
       { text: 'e2e-uat third', attachmentNames: [], position: 2 },
     ] })
     await turns.push({ type: 'init', conversationId: 990005 }, { type: 'token', content: 'Working on it' })
 
-    await expect(stop).toHaveText('Stop and drop 2 queued')
-    await expect(stop).toHaveAttribute('aria-label', 'Stop and drop 2 queued')
     await expect(queued.getByTestId('queued-label')).toHaveText(['Queued, position 1', 'Queued, position 2'])
+    await expect(stop).toHaveAttribute('aria-label', 'Stop generating')
+    await expect(stop).toHaveText('')
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 
     await stop.click()
     await expect.poll(() => turns.stops()).toBe(1)
-
-    await expect(queued).toHaveCount(0)
-    await expect(stop).toHaveCount(0)
     await expect(page.getByText('(stopped)')).toBeVisible()
+    await turns.push({ type: 'init', conversationId: 990005 })
+
+    await expect(queued).toHaveCount(1)
+    await expect(queued).toContainText('e2e-uat third')
+    await expect(queued.getByTestId('queued-label')).toHaveText(['Queued, position 1'])
     expect(blocked()).toEqual([])
   })
 

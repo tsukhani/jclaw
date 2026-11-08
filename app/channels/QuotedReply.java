@@ -3,7 +3,9 @@ package channels;
 import org.jspecify.annotations.Nullable;
 import slash.Commands;
 
+import java.util.Arrays;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * The message an operator replies to, carried into the user turn the agent sees (JCLAW-1295).
@@ -22,6 +24,9 @@ public final class QuotedReply {
             "delivered", "a message delivered to this chat",
             "reminder", "a reminder");
 
+    /** The first line {@link #block} writes, to its last {@code ]}: a source can hold one, as a display name can. */
+    private static final Pattern BLOCK_HEADER = Pattern.compile("\\[(?:Replying to|Quoting part of) [^\n]*\\]\n");
+
     private QuotedReply() {}
 
     /**
@@ -39,6 +44,22 @@ public final class QuotedReply {
         var sb = new StringBuilder("[").append(partial ? "Quoting part of " : "Replying to ").append(source).append(']');
         body.lines().forEach(line -> sb.append("\n>").append(line.isEmpty() ? "" : " " + line));
         return sb.toString();
+    }
+
+    /**
+     * The words that follow the {@link #block} {@link #fold} put at the start of {@code text}: empty when there are none,
+     * and null when {@code text} starts with no block. The chat's {@code splitQuotedReply} (frontend/utils/quoted-reply.ts)
+     * parses the block the same way, so a queued message reads alike in Chat's Queued row and in {@code /queue}.
+     */
+    public static @Nullable String wordsAfterBlock(String text) {
+        var header = BLOCK_HEADER.matcher(text);
+        if (!header.lookingAt()) return null;
+        var lines = text.substring(header.end()).split("\n", -1);
+        int end = 0;
+        while (end < lines.length && (lines[end].equals(">") || lines[end].startsWith("> "))) end++;
+        if (end == 0) return null;
+        if (end < lines.length && lines[end].isEmpty()) end++;
+        return String.join("\n", Arrays.asList(lines).subList(end, lines.length));
     }
 
     /** The block for a web chat reply quoting {@code quoted}, or null for a kind the chat never sends. */

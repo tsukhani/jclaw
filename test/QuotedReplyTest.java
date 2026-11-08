@@ -66,6 +66,42 @@ class QuotedReplyTest extends UnitTest {
     }
 
     @Test
+    void theWordsAfterAFoldedBlockAreTheSendersOwn() {
+        var text = QuotedReply.fold("my reply\n\n> my own quote", QuotedReply.block("x", "q\n\nr", false));
+
+        assertEquals("my reply\n\n> my own quote", QuotedReply.wordsAfterBlock(text));
+    }
+
+    @Test
+    void aFoldedBlockWithNoWordsAfterItLeavesNoWords() {
+        assertEquals("", QuotedReply.wordsAfterBlock(QuotedReply.fold("", QuotedReply.block("x", "q", false))));
+    }
+
+    @Test
+    void thePartialQuotesBlockIsSplitOffAlike() {
+        var text = QuotedReply.fold("ship it now", QuotedReply.block("a message from Bob", "ship it", true));
+
+        assertEquals("ship it now", QuotedReply.wordsAfterBlock(text));
+    }
+
+    @Test
+    void aSourceHoldingABracketIsSplitOffWhole() {
+        var text = QuotedReply.fold("on it", QuotedReply.block("a message from Bob [mod]", "ship it", true));
+
+        assertEquals("on it", QuotedReply.wordsAfterBlock(text));
+    }
+
+    @Test
+    void textThatStartsWithNoBlockHasNoWordsAfterOne() {
+        assertNull(QuotedReply.wordsAfterBlock("my reply"));
+        assertNull(QuotedReply.wordsAfterBlock(""));
+        assertNull(QuotedReply.wordsAfterBlock("> a quote of my own\n\nmy reply"));
+        assertNull(QuotedReply.wordsAfterBlock("[Replying to x] on one line"));
+        assertNull(QuotedReply.wordsAfterBlock("[Replying to x]\n\nmy reply"), "a header quoting no line");
+        assertNull(QuotedReply.wordsAfterBlock("[Forwarded from x]\n> q\n\nmy reply"));
+    }
+
+    @Test
     void aWebReplyNamesItsSourceByTheKindTheChatSent() {
         // JCLAW-1299
         assertEquals("[Replying to a reminder]\n> call the dentist", QuotedReply.webBlock("reminder", "call the dentist"));

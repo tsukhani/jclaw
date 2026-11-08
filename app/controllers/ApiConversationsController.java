@@ -159,12 +159,14 @@ public class ApiConversationsController extends Controller {
      * @param queueSize      every queued message, the ones {@code pending} leaves out included
      * @param stoppable      whether the operator's Stop can stop the running turn: any turn of a conversation but an
      *                       app's (JF-197, JF-197b)
-     * @param stopDropsQueue whether that Stop drops every queued message, as on a web or voice conversation, rather than
-     *                       running the next, as on a Telegram, Slack or WhatsApp one
+     * @param stopDropsQueue whether that Stop drops every queued message, as on a voice conversation, rather than running
+     *                       the next, as on every other (JF-227)
      * @param pending        the queued messages the chat shows, in the order they run, each with its place in line
+     * @param clears         how many {@code /queue clear}s have dropped a queued message, so the chat drops its Queued
+     *                       rows at once rather than holding them as it does through a hand-over (JF-227)
      */
     public record QueueStatusResponse(boolean busy, int queueSize, boolean stoppable, boolean stopDropsQueue,
-                                      List<ConversationQueue.PendingView> pending) {}
+                                      List<ConversationQueue.PendingView> pending, int clears) {}
 
     /** @param turn the id the turn's {@code init} carried; omitted, the stop stops whatever runs */
     public record StopTurnRequest(@Nullable Long turn) {}
@@ -561,15 +563,16 @@ public class ApiConversationsController extends Controller {
         var conversation = requireConversation(id);
         var queue = ConversationQueue.snapshot(id, conversation.channelType);
         renderJSON(gson.toJson(new QueueStatusResponse(queue.busy(), queue.queueSize(), queue.stoppable(),
-                queue.stopDropsQueue(), queue.pending())));
+                queue.stopDropsQueue(), queue.pending(), queue.clears())));
     }
 
     /**
-     * POST /api/conversations/{id}/stop — the chat's Stop button (GH-12). Cancels the in-flight turn at once. On a web or
-     * voice conversation it drops the messages queued behind the turn and releases the conversation, so the next send
-     * starts a fresh run instead of being queued behind a turn that only notices the stop later. On a Telegram, Slack or
-     * WhatsApp conversation the next queued message takes the conversation, and the person who sent the stopped
-     * message is told (JF-197b). An app conversation has no Stop: 400.
+     * POST /api/conversations/{id}/stop — the chat's Stop button (GH-12). Cancels the in-flight turn at once, and the next
+     * queued message takes the conversation, or with none queued the conversation is released, so the next send starts a
+     * fresh run instead of being queued behind a turn that only notices the stop later (JF-227). On a Telegram, Slack or
+     * WhatsApp conversation the person who sent the stopped message is told (JF-197b). On a voice conversation it drops
+     * the utterances queued behind the turn, whose replies would never be spoken (JF-222). An app conversation has no
+     * Stop: 400.
      *
      * <p>A body naming the {@code turn} the page shows stops only that turn: once it has ended, the stop answers
      * {@code stopped:false} and changes nothing, whatever runs now (JF-226).

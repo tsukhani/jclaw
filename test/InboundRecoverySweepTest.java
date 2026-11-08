@@ -456,18 +456,29 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void anOperatorStopDropsTheRowsOfTheMessagesItCleared() {
+    void noMessageAQueueClearDroppedRunsAfterARestart() throws Exception {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         commit();
-        assertNotEquals(ConversationQueue.NOT_ACQUIRED, ConversationQueue.tryAcquireOwnership(convo.id,
-                channelMessage(agent, convo, "owner turn"), new AtomicBoolean()));
+        hold(agent, convo);
         assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "queued one")));
         assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "queued two")));
+        assertEquals(List.of("queued one", "queued two"), pendingTexts(convo), "test precondition: both are stored");
 
-        assertTrue(ConversationQueue.stop(convo.id));
-
+        assertEquals("Dropped 2 waiting messages.", slash.Commands.execute(slash.Commands.Command.QUEUE, agent,
+                convo.channelType, convo.peerId, convo, "clear", false).responseText());
+        commit();
         assertEquals(List.of(), pendingTexts(convo));
+
+        // The restart: the held turn existed only in memory.
+        ConversationQueue.forgetForTest(convo.id);
+        backdate(convo);
+        var sweep = TelegramStreamingRecoveryJob.sweep(cutoff());
+        awaitIdle(convo);
+
+        assertEquals(0, sweep.requeued());
+        assertEquals(List.of(), rows(convo), "neither dropped message ran");
+        assertEquals(0, llmCalls.get());
     }
 
     @Test
@@ -483,6 +494,9 @@ class InboundRecoverySweepTest extends UnitTest {
                 assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
                 assertTrue(modelReached.await(30, TimeUnit.SECONDS), "test precondition: the restored message ran");
                 assertTrue(ConversationQueue.stop(convo.id), "the restored message's turn holds a flag of its own");
+                // The marker is written in this thread's transaction; until it commits, the run the stop handed the
+                // conversation to waits on its lock.
+                commit();
             } catch (InterruptedException e) {
                 throw new AssertionError(e);
             } finally {
@@ -491,11 +505,12 @@ class InboundRecoverySweepTest extends UnitTest {
             awaitLogged(seen, "Response generated");
         });
 
-        assertFalse(ConversationQueue.isBusy(convo.id));
+        awaitIdle(convo);
         assertEquals(List.of(new Row("user", "kept across the restart"),
-                new Row("assistant", ConversationService.STOP_MARKER_CONTENT)), rows(convo));
-        assertEquals(List.of(), pendingTexts(convo), "the restored message behind it is dropped with its row");
-        assertEquals(1, llmCalls.get());
+                new Row("assistant", ConversationService.STOP_MARKER_CONTENT), new Row("user", "also kept"),
+                new Row("assistant", "noted")), rows(convo), "the restored message behind it runs next");
+        assertEquals(List.of(), pendingTexts(convo), "its row was consumed with its USER row");
+        assertEquals(2, llmCalls.get());
     }
 
     // --- JF-197b: the operator's stop of a channel turn keeps the messages queued behind it ---

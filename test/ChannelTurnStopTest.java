@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import agents.QueueDrainOrchestrator;
 import agents.ToolContext;
 import agents.ToolRegistry;
@@ -58,6 +59,7 @@ class ChannelTurnStopTest extends UnitTest {
     private static final String MODEL = "channel-stop-model";
     private static final String ASK = "What time is it?";
     private static final String NEXT = "And the date?";
+    private static final String THIRD = "And the weather?";
     private static final String REPLY = "It is now.";
     private static final String QUEUED = "Your message has been queued and will be processed shortly.";
     private static final String NOTICE = "This reply was stopped.";
@@ -130,7 +132,7 @@ class ChannelTurnStopTest extends UnitTest {
         queued.awaitEnd();
 
         assertEquals(new ConversationQueue.Snapshot(true, 1, true, false,
-                        List.of(new ConversationQueue.PendingView(NEXT, List.of(), 1))),
+                        List.of(new ConversationQueue.PendingView(NEXT, List.of(), 1)), 0),
                 ConversationQueue.snapshot(convo.id, "telegram"), "Stop shows, and keeps the message waiting");
         try {
             assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id, "telegram"));
@@ -396,7 +398,7 @@ class ChannelTurnStopTest extends UnitTest {
                     }), null, null);
             assertTrue(answered.await(30, TimeUnit.SECONDS), "test precondition: the utterance queued");
             assertEquals(new ConversationQueue.Snapshot(true, 1, true, true,
-                            List.of(new ConversationQueue.PendingView(NEXT, List.of(), 1))),
+                            List.of(new ConversationQueue.PendingView(NEXT, List.of(), 1)), 0),
                     ConversationQueue.snapshot(convo.id, "voice"), "Stop shows, and says it drops the utterance");
             try {
                 assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id, "voice"));
@@ -413,6 +415,112 @@ class ChannelTurnStopTest extends UnitTest {
         assertEquals(0, ConversationQueue.getQueueSize(convo.id));
         assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id),
                 "the queued utterance never ran: its reply would never be spoken");
+        assertEquals(1, calls.get());
+    }
+
+    // --- a web turn's Stop keeps the queue (JF-227) ---
+
+    @Test
+    void aStopOfAWebTurnLeavesTheTwoMessagesQueuedBehindItToRunInTheOrderTheyWereSent() throws Exception {
+        var convo = seedConversation("web");
+        var release = new CountDownLatch(1);
+        first = heldAfterFirstToken(release);
+        var tokens = new CountDownLatch(1);
+        var queuedAnswers = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        AgentRunner.runStreaming(convo.agent, convo.id, "web", convo.peerId, ASK, new AtomicBoolean(),
+                callbacks(_ -> tokens.countDown(), _ -> { }), null, null);
+        assertTrue(tokens.await(30, TimeUnit.SECONDS), "test precondition: the answer is streaming");
+        for (var text : List.of(NEXT, THIRD)) {
+            var answered = new CountDownLatch(1);
+            AgentRunner.runStreaming(convo.agent, convo.id, "web", convo.peerId, text, new AtomicBoolean(),
+                    callbacks(_ -> { }, content -> {
+                        queuedAnswers.add(content);
+                        answered.countDown();
+                    }), null, null);
+            assertTrue(answered.await(30, TimeUnit.SECONDS), "test precondition: " + text + " queued");
+        }
+        assertEquals(new ConversationQueue.Snapshot(true, 2, true, false, List.of(
+                        new ConversationQueue.PendingView(NEXT, List.of(), 1),
+                        new ConversationQueue.PendingView(THIRD, List.of(), 2)), 0),
+                ConversationQueue.snapshot(convo.id, "web"), "Stop shows, and keeps both messages waiting");
+        try {
+            assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromTheChatPage(convo.id, "web"));
+        } finally {
+            release.countDown();
+        }
+        awaitIdle(convo.id);
+
+        assertEquals(List.of(QUEUED, QUEUED), queuedAnswers);
+        assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT, "user " + NEXT,
+                "assistant " + REPLY, "user " + THIRD, "assistant " + REPLY), rows(convo.id));
+        assertEquals(3, calls.get());
+    }
+
+    // --- in a group chat only the owner's /stop stops a reply, until JF-237 ---
+
+    @Test
+    void inASlackChannelAMembersBangStopLeavesTheReplyRunningAndTheOwnersStopsIt() throws Exception {
+        var convo = seedConversation("slack", provider, "C" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+        var release = new CountDownLatch(1);
+        first = heldAfterFirstToken(release);
+        var turn = new RecordingSink();
+        var memberReply = new RecordingSink();
+        var ownerReply = new RecordingSink();
+        streamOnChannel(convo, ASK, turn);
+        turn.awaitEvent("update Hel");
+        try {
+            streamOnChannel(convo, Commands.rewriteBangCommand("!stop"), memberReply, false);
+
+            assertEquals(List.of("seal In group chats, only the owner can stop a reply for now."),
+                    memberReply.events());
+            assertEquals(List.of("update Hel"), turn.events(), "the reply keeps running");
+            assertTrue(ConversationQueue.isBusy(convo.id));
+
+            streamOnChannel(convo, Commands.rewriteBangCommand("!stop"), ownerReply, true);
+        } finally {
+            release.countDown();
+        }
+        turn.awaitEnd();
+        awaitIdle(convo.id);
+
+        assertEquals(List.of("seal Stopped."), ownerReply.events());
+        assertEquals(List.of("update Hel", "stop null"), turn.events());
+        assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id));
+    }
+
+    // --- /queue (JF-227) ---
+
+    @Test
+    void inATelegramOneToOneChatQueueListsTheWaitingMessagesAndQueueClearDropsThemWhileTheReplyFinishes()
+            throws Exception {
+        var convo = seedConversation("telegram");
+        var release = new CountDownLatch(1);
+        first = heldAfterFirstToken(release);
+        var turn = new RecordingSink();
+        var listed = new RecordingSink();
+        var cleared = new RecordingSink();
+        streamOnChannel(convo, ASK, turn);
+        turn.awaitEvent("update Hel");
+        try {
+            for (var text : List.of(NEXT, THIRD)) {
+                var queued = new RecordingSink();
+                streamOnChannel(convo, text, queued);
+                queued.awaitEnd();
+            }
+
+            streamOnChannel(convo, "/queue", listed);
+            streamOnChannel(convo, "/queue clear", cleared);
+        } finally {
+            release.countDown();
+        }
+        turn.awaitEnd();
+        awaitIdle(convo.id);
+
+        assertEquals(List.of("seal 2 messages are waiting, answered in this order:\n1. " + NEXT + "\n2. " + THIRD),
+                listed.events());
+        assertEquals(List.of("seal Dropped 2 waiting messages."), cleared.events());
+        assertEquals(List.of("update Hel", "update lo", "seal Hello"), turn.events(), "the running reply finished");
+        assertEquals(List.of("user " + ASK, "assistant Hello"), rows(convo.id), "neither dropped message ran");
         assertEquals(1, calls.get());
     }
 
@@ -1086,6 +1194,15 @@ class ChannelTurnStopTest extends UnitTest {
                 text, _ -> sink));
     }
 
+    /** {@link #streamOnChannel(Conversation, String, ChannelStreamingSink)} from the binding's owner, or another member. */
+    private static void streamOnChannel(Conversation convo, String text, ChannelStreamingSink sink, boolean fromOwner)
+            throws InterruptedException {
+        onFreshThread(() -> DangerousActionGate.withOwnerInitiated(fromOwner, () -> {
+            AgentRunner.processInboundForAgentStreaming(convo.agent, convo.channelType, convo.peerId, text, _ -> sink);
+            return null;
+        }));
+    }
+
     private static void onFreshThread(Runnable body) throws InterruptedException {
         var failure = new AtomicReference<Throwable>();
         var thread = Thread.ofVirtual().start(() -> {
@@ -1227,13 +1344,17 @@ class ChannelTurnStopTest extends UnitTest {
     }
 
     private Conversation seedConversation(String channelType, String modelProvider) {
+        return seedConversation(channelType, modelProvider, channelType + "-peer-" + UUID.randomUUID());
+    }
+
+    private Conversation seedConversation(String channelType, String modelProvider, String peerId) {
         var agent = new Agent();
         agent.name = "channel-stop-agent-" + UUID.randomUUID().toString().substring(0, 8);
         agent.modelProvider = modelProvider;
         agent.modelId = MODEL;
         agent.enabled = true;
         agent.save();
-        var convo = ConversationService.create(agent, channelType, channelType + "-peer-" + UUID.randomUUID());
+        var convo = ConversationService.create(agent, channelType, peerId);
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
         return convo;

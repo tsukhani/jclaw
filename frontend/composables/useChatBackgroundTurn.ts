@@ -17,9 +17,11 @@ export interface ConversationQueueStatus {
   queueSize?: number
   /** Whether the operator's Stop can stop the running turn: any but an app conversation's (JF-202, JF-197b). */
   stoppable?: boolean
-  /** Whether Stop drops the messages queued behind the turn, as on a web or voice conversation; on a channel one the next runs. */
+  /** Whether Stop drops the messages queued behind the turn, as on a voice conversation; on every other the next runs. */
   stopDropsQueue?: boolean
   pending?: QueuedMessageView[]
+  /** How many `/queue clear`s have dropped a queued message: a read after one lists fewer, as after a hand-over (JF-227). */
+  clears?: number
 }
 
 export interface UseChatBackgroundTurnDeps {
@@ -69,9 +71,11 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
   const backgroundBusy = ref(false)
   const stoppable = ref(false)
   const queueSize = ref(0)
-  const stopDropsQueue = ref(true)
+  const stopDropsQueue = ref(false)
   const pending = ref<QueuedMessageView[]>([])
   const reads = useLatestRequest()
+  /** The `clears` of the last read applied to this conversation; null until one is. */
+  let appliedClears: number | null = null
 
   /** @param cued a busy event or a bus reopen asked for this read, so a turn may have ended unseen */
   async function refresh(cued = false, init = false): Promise<ConversationQueueStatus | null> {
@@ -81,7 +85,7 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
       backgroundBusy.value = false
       stoppable.value = false
       queueSize.value = 0
-      stopDropsQueue.value = true
+      stopDropsQueue.value = false
       pending.value = []
       return null
     }
@@ -101,12 +105,15 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
     if (status) {
       stoppable.value = status.stoppable === true
       queueSize.value = status.queueSize ?? 0
-      // A server that does not say predates JF-197b, when every Stop dropped the queue.
-      stopDropsQueue.value = status.stopDropsQueue !== false
+      stopDropsQueue.value = status.stopDropsQueue === true
       const next = status.pending ?? []
+      const clears = status.clears ?? 0
       // A message leaves the list when its turn takes it, before that turn's init brings its saved row: kept until then.
+      // A clear shortens it too, but for good, so a read whose `clears` moved is never held.
       const held = busy && !init && deps.streamUp?.value !== false && next.length < pending.value.length
+        && clears === appliedClears
       if (!held) pending.value = next
+      appliedClears = clears
     }
     if (unseenRows && busy === false) void fetchNewRows()
     return status
@@ -120,8 +127,9 @@ export function useChatBackgroundTurn(deps: UseChatBackgroundTurnDeps): UseChatB
   watch(selectedConvoId, () => {
     stoppable.value = false
     queueSize.value = 0
-    stopDropsQueue.value = true
+    stopDropsQueue.value = false
     pending.value = []
+    appliedClears = null
     reread()
   }, { immediate: true })
   // Each turn's end: a message queued behind it may run on before its init arrives.

@@ -17,6 +17,11 @@ describe('splitQuotedReply (JCLAW-1299)', () => {
       .toBe('Quoting part of a message from Bob')
   })
 
+  it('reads a source that holds a bracket, as a display name can', () => {
+    expect(splitQuotedReply('[Quoting part of a message from Bob [mod]]\n> ship it\n\non it'))
+      .toEqual({ label: 'Quoting part of a message from Bob [mod]', quoted: 'ship it', reply: 'on it' })
+  })
+
   it('keeps a group reply\'s sender tag on the reply', () => {
     expect(splitQuotedReply('[Replying to x]\n> q\n\n[Ada (id 42)]: why?')?.reply).toBe('[Ada (id 42)]: why?')
   })

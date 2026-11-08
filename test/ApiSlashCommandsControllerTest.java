@@ -54,6 +54,19 @@ class ApiSlashCommandsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listsQueueAfterStopWithItsDescription() {
+        var body = com.google.gson.JsonParser.parseString(getContent(GET("/api/slash-commands"))).getAsJsonArray();
+        var literals = new java.util.ArrayList<String>();
+        body.forEach(e -> literals.add(e.getAsJsonObject().get("literal").getAsString()));
+
+        assertEquals(java.util.List.of("/new", "/reset", "/compact", "/help", "/model", "/think", "/usage", "/stop",
+                "/queue", "/subagent", "/prompt"), literals);
+        assertEquals(com.google.gson.JsonParser.parseString(
+                        "{\"literal\":\"/queue\",\"name\":\"queue\",\"description\":\"Show or clear the waiting messages\"}"),
+                body.get(literals.indexOf("/queue")));
+    }
+
+    @Test
     void requiresAuthentication() {
         POST("/api/auth/logout", "application/json", "{}");
         var response = GET("/api/slash-commands");

@@ -74,6 +74,8 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(Commands.Command.THINK, Commands.parse("/think").orElseThrow());
         assertEquals(Commands.Command.USAGE, Commands.parse("/usage").orElseThrow());
         assertEquals(Commands.Command.STOP, Commands.parse("/stop").orElseThrow());
+        assertEquals(Commands.Command.QUEUE, Commands.parse("/queue").orElseThrow());
+        assertEquals(Commands.Command.QUEUE, Commands.parse("/queue@jclaw_bot clear").orElseThrow());
     }
 
     // ── JCLAW-349: Slack ! command rewrite + channel-aware help ─────────
@@ -84,6 +86,8 @@ class SlashCommandsTest extends UnitTest {
         assertEquals("/new", Commands.rewriteBangCommand("!new"));
         assertEquals("/stop", Commands.rewriteBangCommand("!stop"));
         assertEquals("/help", Commands.rewriteBangCommand("!help"));
+        assertEquals("/queue", Commands.rewriteBangCommand("!queue"));
+        assertEquals("/queue clear", Commands.rewriteBangCommand("!queue clear"));
         // Args survive the rewrite.
         assertEquals("/model openrouter/gpt-5", Commands.rewriteBangCommand("!model openrouter/gpt-5"));
     }
@@ -374,6 +378,7 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(Commands.HELP_TEXT.contains("/model"));
         assertTrue(Commands.HELP_TEXT.contains("/usage"));
         assertTrue(Commands.HELP_TEXT.contains("/stop"));
+        assertTrue(Commands.HELP_TEXT.contains("• /queue — show the waiting messages (/queue clear drops them)"));
     }
 
     // ── /model ─────────────────────────────────────────────────────────
@@ -762,6 +767,358 @@ class SlashCommandsTest extends UnitTest {
         }
     }
 
+    // ── In a group chat only the owner's /stop stops a reply, until JF-237 ──
+
+    @Test
+    void aSlackChannelMembersStopIsRefusedAndTheReplyRunsOnWhileTheOwnersStopsIt() {
+        var convo = ConversationService.findOrCreate(agent, "slack", "C0JF227");
+        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
+        services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("in-flight prompt", "slack", "C0JF227", agent), turnFlag);
+        var stop = Commands.parse(Commands.rewriteBangCommand("!stop")).orElseThrow();
+        try {
+            var member = Commands.execute(stop, agent, "slack", "C0JF227", convo, null, false);
+
+            assertEquals("In group chats, only the owner can stop a reply for now.", member.responseText());
+            assertFalse(turnFlag.get(), "the reply keeps running");
+            assertTrue(services.ConversationQueue.isBusy(convo.id));
+
+            var owner = Commands.execute(stop, agent, "slack", "C0JF227", convo, null, true);
+
+            assertEquals("Stopped.", owner.responseText());
+            assertTrue(turnFlag.get(), "the owner's stop stopped it");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({"telegram, -1001234567", "telegram, -1001234567:topic:7", "whatsapp, 120363000000000000@g.us"})
+    void aGroupMembersStopIsRefusedOnEveryChannel(String channelType, String groupPeer) {
+        var convo = ConversationService.findOrCreate(agent, channelType, groupPeer);
+        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
+        services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("in-flight prompt", channelType, groupPeer, agent), turnFlag);
+        try {
+            var result = Commands.execute(Commands.Command.STOP, agent, channelType, groupPeer, convo, null, false);
+
+            assertEquals("In group chats, only the owner can stop a reply for now.", result.responseText());
+            assertFalse(turnFlag.get(), "the reply keeps running");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({"slack, D0JF227", "telegram, 4242", "whatsapp, 6591234567"})
+    void aOneToOneSendersStopStopsTheReplyThoughTheyAreNotTheOwner(String channelType, String peer) {
+        // JF-197b: the person in a one-to-one chat may stop the reply to their own message.
+        var convo = ConversationService.findOrCreate(agent, channelType, peer);
+        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
+        services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("in-flight prompt", channelType, peer, agent), turnFlag);
+        try {
+            var result = Commands.execute(Commands.Command.STOP, agent, channelType, peer, convo, null, false);
+
+            assertEquals("Stopped.", result.responseText());
+            assertTrue(turnFlag.get());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    // ── /queue (JF-227) ─────────────────────────────────────────────────
+
+    /** Holds {@code convo} as a running turn does, with {@code texts} waiting behind it; returns the turn's flag. */
+    private java.util.concurrent.atomic.AtomicBoolean runningWith(models.Conversation convo, String... texts) {
+        // A queued channel message's row is written on a thread of its own, which must find the conversation committed.
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
+        services.ConversationQueue.tryAcquireOwnership(convo.id, new services.ConversationQueue.QueuedMessage(
+                "in-flight prompt", convo.channelType, convo.peerId, agent), turnFlag);
+        for (var text : texts) {
+            assertFalse(services.ConversationQueue.tryAcquire(convo.id,
+                    new services.ConversationQueue.QueuedMessage(text, convo.channelType, convo.peerId, agent)));
+        }
+        return turnFlag;
+    }
+
+    private static List<String> waitingTexts(models.Conversation convo) {
+        return services.ConversationQueue.waiting(convo.id, null, null).stream()
+                .map(services.ConversationQueue.QueuedMessage::text).toList();
+    }
+
+    @Test
+    void aQueueWithNothingWaitingSaysSo() {
+        var idle = ConversationService.findOrCreate(agent, "telegram", "4242");
+        var running = ConversationService.findOrCreate(agent, "web", "admin");
+        runningWith(running);
+        try {
+            assertEquals("Nothing is waiting.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", idle, null, false).responseText());
+            assertEquals("Nothing is waiting.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", running, null, true).responseText());
+            assertEquals("Nothing is waiting.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", null, null, true).responseText(),
+                    "a New conversation has no queue");
+        } finally {
+            services.ConversationQueue.forgetForTest(running.id);
+        }
+    }
+
+    @Test
+    void aQueueListsTheWaitingMessagesNumberedInArrivalOrderOneLineEachLeavingOutASubagentResult() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        var flag = runningWith(convo, "What is the weather\n  tomorrow?");
+        var photo = new services.AttachmentService.Input("att-1", "photo.jpg", "image/jpeg", 10, "image");
+        services.ConversationQueue.tryAcquire(convo.id,
+                new services.ConversationQueue.QueuedMessage("[subagent result]", "telegram", "4242", agent, true));
+        services.ConversationQueue.tryAcquire(convo.id,
+                new services.ConversationQueue.QueuedMessage("", "telegram", "4242", agent, List.of(photo)));
+        services.ConversationQueue.tryAcquire(convo.id, new services.ConversationQueue.QueuedMessage(
+                "x".repeat(79) + "yz and more", "telegram", "4242", agent));
+        try {
+            var result = Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", convo, null, false);
+
+            assertEquals("""
+                    3 messages are waiting, answered in this order:
+                    1. What is the weather tomorrow?
+                    2. (photo.jpg)
+                    3. %s…""".formatted("x".repeat(79)), result.responseText());
+            assertFalse(result.saved());
+            assertFalse(flag.get(), "listing never stops the reply");
+            assertEquals(4, services.ConversationQueue.getQueueSize(convo.id), "listing changes nothing");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueOfOneMessageSaysOne() {
+        var convo = ConversationService.findOrCreate(agent, "whatsapp", "6591234567");
+        runningWith(convo, "and the date?");
+        try {
+            assertEquals("1 message is waiting:\n1. and the date?", Commands.execute(Commands.Command.QUEUE, agent,
+                    "whatsapp", "6591234567", convo, null, false).responseText());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueLineOfEightyCharactersShowsWholeAndALongerOneIsCutToEightyWithItsEllipsis() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        runningWith(convo, "a".repeat(80), "b".repeat(81), "c".repeat(78) + "😀" + "tail");
+        var report = new services.AttachmentService.Input("att-1",
+                "quarterly-report-2026-final-version-for-the-board.pdf", "application/pdf", 10, "file");
+        var appendix = new services.AttachmentService.Input("att-2", "appendix-with-all-the-tables-and-figures.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 10, "file");
+        services.ConversationQueue.tryAcquire(convo.id, new services.ConversationQueue.QueuedMessage(
+                "", "telegram", "4242", agent, List.of(report, appendix)));
+        try {
+            assertEquals("""
+                    4 messages are waiting, answered in this order:
+                    1. %s
+                    2. %s…
+                    3. %s…
+                    4. (quarterly-report-2026-final-version-for-the-board.pdf, appendix-with-all-the-t…"""
+                    .formatted("a".repeat(80), "b".repeat(79), "c".repeat(78)),
+                    Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", convo, null, false)
+                            .responseText(), "the cut never splits the emoji's surrogate pair");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueuedReplyListsTheWordsItsSenderWroteAfterTheQuoteItCarries() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        var quote = channels.QuotedReply.block("a message this bot sent", "The forecast for\nThursday is rain.", false);
+        runningWith(convo, channels.QuotedReply.fold("and what about Friday?", quote));
+        var photo = new services.AttachmentService.Input("att-1", "photo.jpg", "image/jpeg", 10, "image");
+        services.ConversationQueue.tryAcquire(convo.id, new services.ConversationQueue.QueuedMessage(
+                channels.QuotedReply.fold("", quote), "telegram", "4242", agent, List.of(photo)));
+        services.ConversationQueue.tryAcquire(convo.id, new services.ConversationQueue.QueuedMessage(
+                channels.QuotedReply.fold("", quote), "telegram", "4242", agent));
+        try {
+            assertEquals("""
+                    3 messages are waiting, answered in this order:
+                    1. and what about Friday?
+                    2. (photo.jpg)
+                    3. [Replying to a message this bot sent] > The forecast for > Thursday is rain.""",
+                    Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", convo, null, false)
+                            .responseText());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueLineCollapsesEveryKindOfLineBreakAndSpaceIntoOne() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        runningWith(convo, (char) 0xA0 + "first line" + (char) 0x2028 + "second" + (char) 0x2029 + "third"
+                + (char) 0x85 + "fourth" + (char) 0xA0 + (char) 0xA0 + "fifth" + (char) 0x2028);
+        try {
+            assertEquals("1 message is waiting:\n1. first line second third fourth fifth", Commands.execute(
+                    Commands.Command.QUEUE, agent, "telegram", "4242", convo, null, false).responseText());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aChannelSendersQueueIsTheirOwnWhileChatsHoldsEverySendersMessage() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        runningWith(convo, "the customer's follow-up");
+        // A message the operator sends from Chat into the conversation waits as a web one from the operator.
+        assertFalse(services.ConversationQueue.tryAcquire(convo.id,
+                new services.ConversationQueue.QueuedMessage("the operator's note", "web", "admin", agent)));
+        try {
+            assertEquals("1 message is waiting:\n1. the customer's follow-up", Commands.execute(Commands.Command.QUEUE,
+                    agent, "telegram", "4242", convo, null, false).responseText());
+            assertEquals("2 messages are waiting, answered in this order:\n1. the customer's follow-up\n"
+                    + "2. the operator's note", Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", convo,
+                    null, true).responseText());
+
+            assertEquals("Dropped 1 waiting message.", Commands.execute(Commands.Command.QUEUE, agent, "telegram",
+                    "4242", convo, "clear", false).responseText());
+
+            assertEquals(List.of("the operator's note"), waitingTexts(convo));
+            assertEquals("Nothing is waiting.", Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242",
+                    convo, null, false).responseText());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueClearDropsTheWaitingMessagesSaysHowManyAndTheReplyRunsOn() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "4242");
+        var flag = runningWith(convo, "first", "second");
+        try {
+            var cleared = Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", convo, "clear", false);
+
+            assertEquals("Dropped 2 waiting messages.", cleared.responseText());
+            assertFalse(cleared.saved());
+            assertEquals(List.of(), waitingTexts(convo));
+            assertFalse(flag.get(), "the running reply was not stopped");
+            assertTrue(services.ConversationQueue.isBusy(convo.id), "and still holds the conversation");
+            assertEquals("Nothing is waiting.", Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242",
+                    convo, "CLEAR", false).responseText(), "a second clear finds nothing");
+
+            assertFalse(services.ConversationQueue.tryAcquire(convo.id,
+                    new services.ConversationQueue.QueuedMessage("third", "telegram", "4242", agent)));
+            assertEquals("Dropped 1 waiting message.", Commands.execute(Commands.Command.QUEUE, agent, "telegram",
+                    "4242", convo, "clear", false).responseText());
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aBangQueueClearOnASlackDirectMessageClearsItsQueue() {
+        var convo = ConversationService.findOrCreate(agent, "slack", "D0JF227");
+        runningWith(convo, "first", "second");
+        var typed = Commands.rewriteBangCommand("!queue clear");
+        try {
+            var result = Commands.execute(Commands.parse(typed).orElseThrow(), agent, "slack", "D0JF227", convo,
+                    Commands.extractArgs(typed), false);
+
+            assertEquals("Dropped 2 waiting messages.", result.responseText());
+            assertEquals(List.of(), waitingTexts(convo));
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueWithAnotherArgumentAnswersWithItsUsageAndDropsNothing() {
+        var telegram = ConversationService.findOrCreate(agent, "telegram", "4242");
+        var slack = ConversationService.findOrCreate(agent, "slack", "D0JF227");
+        runningWith(telegram, "first");
+        runningWith(slack, "first");
+        try {
+            assertEquals("Use /queue to see the waiting messages, or /queue clear to drop them.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", telegram, "all", false)
+                            .responseText());
+            assertEquals("Use !queue to see the waiting messages, or !queue clear to drop them.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "slack", "D0JF227", slack, "clear all", false)
+                            .responseText());
+            assertEquals(List.of("first"), waitingTexts(telegram));
+            assertEquals(List.of("first"), waitingTexts(slack));
+        } finally {
+            services.ConversationQueue.forgetForTest(telegram.id);
+            services.ConversationQueue.forgetForTest(slack.id);
+        }
+    }
+
+    @ParameterizedTest(name = "{0} {1}, owner {2}")
+    @CsvSource({
+            "slack,    C0JF227,                  true",
+            "slack,    C0JF227,                  false",
+            "telegram, -1001234567,              true",
+            "telegram, -1001234567:topic:7,      false",
+            "whatsapp, 120363000000000000@g.us,  false",
+    })
+    void aQueueInAGroupChatIsNotAvailableYetAndChangesNothing(String channelType, String groupPeer, boolean owner) {
+        var convo = ConversationService.findOrCreate(agent, channelType, groupPeer);
+        runningWith(convo, "first", "second");
+        try {
+            for (var args : java.util.Arrays.asList(null, "clear")) {
+                assertEquals("/queue isn't available in group chats yet.", Commands.execute(Commands.Command.QUEUE,
+                        agent, channelType, groupPeer, convo, args, owner).responseText());
+            }
+            assertEquals(List.of("first", "second"), waitingTexts(convo));
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aQueueTypedInChatActsOnTheOpenConversationWhateverItsChannel() {
+        // In Chat the queue is the operator's, a group conversation's included.
+        var group = ConversationService.findOrCreate(agent, "telegram", "-1001234567");
+        runningWith(group, "first", "second");
+        try {
+            assertEquals("2 messages are waiting, answered in this order:\n1. first\n2. second",
+                    Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", group, null, true).responseText());
+            assertEquals("Dropped 2 waiting messages.",
+                    Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", group, "clear", true).responseText());
+            assertEquals(List.of(), waitingTexts(group));
+        } finally {
+            services.ConversationQueue.forgetForTest(group.id);
+        }
+    }
+
+    // ── /queue in every command list ────────────────────────────────────
+
+    @Test
+    void theTelegramMenuListsEveryCommandInOrderQueueAmongThem() {
+        assertEquals(List.of("new", "reset", "compact", "help", "model", "think", "usage", "stop", "queue", "subagent",
+                        "prompt"),
+                jobs.TelegramCommandsRegistrationJob.toBotCommands().stream()
+                        .map(org.telegram.telegrambots.meta.api.objects.commands.BotCommand::getCommand).toList());
+    }
+
+    @Test
+    void theSlackHelpListsEveryCommandWithItsBangFormQueueAmongThem() {
+        assertEquals("""
+                Available commands — Slack reserves / for slash commands (which don't work in threads), so use a ! prefix:
+                • !new — Start a fresh conversation
+                • !reset — Clear the LLM's memory for this conversation
+                • !compact — Summarize older turns to free context
+                • !help — Show available commands
+                • !model — Show current model and its capabilities
+                • !think — Set reasoning effort for this conversation
+                • !usage — Show context usage for this conversation
+                • !stop — Interrupt the current generation
+                • !queue — Show or clear the waiting messages
+                • !subagent — Inspect, kill, or read transcripts of subagent runs
+                • !prompt — Use a saved prompt from your library
+                """, Commands.helpTextFor("slack"));
+    }
+
     // ── Result.saved: whether the reply is a row the chat page may pair its copy with (JF-202) ──
 
     @ParameterizedTest(name = "{0} {1} on {2}")
@@ -785,6 +1142,9 @@ class SlashCommandsTest extends UnitTest {
             "RESET,    -,                     web,      false",
             "STOP,     -,                     web,      false",
             "STOP,     -,                     telegram, false",
+            "QUEUE,    -,                     web,      false",
+            "QUEUE,    clear,                 web,      false",
+            "QUEUE,    -,                     telegram, false",
     })
     void aCommandSaysItSavedItsReplyExactlyWhenItAddedARowHoldingIt(Commands.Command command, String args,
                                                                     String channelType, boolean saved) {
@@ -827,7 +1187,7 @@ class SlashCommandsTest extends UnitTest {
     // too: with no provider its no-provider reply answers before it looks for the conversation, and with one it says
     // the conversation was deleted, which a live one never answers (the test below).
     @ParameterizedTest
-    @ValueSource(strings = {"HELP", "MODEL", "THINK", "USAGE", "PROMPT", "SUBAGENT", "RESET", "STOP"})
+    @ValueSource(strings = {"HELP", "MODEL", "THINK", "USAGE", "PROMPT", "SUBAGENT", "RESET", "STOP", "QUEUE"})
     void aCommandWhoseConversationIsGoneGivesItsUsualReplyAndSavesNothing(Commands.Command command) {
         var live = ConversationService.create(agent, "web", "twin");
         var usual = Commands.execute(command, agent, "web", "twin", live, null, true).responseText();
@@ -1527,7 +1887,8 @@ class SlashCommandsTest extends UnitTest {
         assertNotNull(p);
         assertTrue(p.toLowerCase().contains("introduce yourself"),
                 "must instruct a self-introduction: " + p);
-        for (var cmd : new String[]{"/new", "/reset", "/compact", "/help", "/model", "/usage", "/stop", "/subagent"}) {
+        for (var cmd : new String[]{"/new", "/reset", "/compact", "/help", "/model", "/usage", "/stop", "/queue",
+                "/subagent"}) {
             assertTrue(p.contains(cmd), "intro prompt must list " + cmd);
         }
     }

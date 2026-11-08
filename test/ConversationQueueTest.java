@@ -688,13 +688,11 @@ class ConversationQueueTest extends UnitTest {
         var gen = ConversationQueue.tryAcquireOwnership(convId,
                 new QueuedMessage("A", "web", "admin", agent), ownerCancel);
         assertNotEquals(ConversationQueue.NOT_ACQUIRED, gen);
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
 
         assertTrue(ConversationQueue.stop(convId));
 
-        assertFalse(ConversationQueue.isBusy(convId), "stop releases ownership at once");
+        assertFalse(ConversationQueue.isBusy(convId), "with nothing queued, stop releases ownership at once");
         assertTrue(ownerCancel.get(), "stop flips the stopped turn's own cancel flag");
-        assertEquals(0, ConversationQueue.getQueueSize(convId), "stop drops pending messages");
         assertFalse(ConversationQueue.cancellationFlag(convId).get(),
                 "the shared cancellation flag is untouched");
     }
@@ -741,11 +739,9 @@ class ConversationQueueTest extends UnitTest {
         long convId = 12005L;
         var gen = ConversationQueue.tryAcquireOwnership(convId,
                 new QueuedMessage("A", "web", "admin", agent), null);
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
 
         assertTrue(ConversationQueue.stop(convId), "every owner holds a flag the stop can set (JF-197)");
         assertFalse(ConversationQueue.isBusy(convId), "the conversation is released");
-        assertEquals(0, ConversationQueue.getQueueSize(convId), "pending is dropped");
         assertNotEquals(gen, ConversationQueue.currentGeneration(convId), "the stopped owner's generation is stale");
         assertTrue(ConversationQueue.drain(convId, gen).isEmpty(), "its late drain runs nothing");
     }
@@ -767,29 +763,31 @@ class ConversationQueueTest extends UnitTest {
                 new QueuedMessage("A", "web", "admin", agent), streamed);
         ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
         assertEquals(1, ConversationQueue.drain(convId, gen).size(), "B takes over through the drain");
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
 
         assertTrue(ConversationQueue.stop(convId), "the drained run holds a flag of its own");
 
         assertFalse(streamed.get(), "the finished turn's flag is not the drained run's");
         assertFalse(ConversationQueue.isBusy(convId), "the drained run lost the conversation");
-        assertEquals(0, ConversationQueue.getQueueSize(convId), "C, queued behind it, is dropped");
         assertTrue(ConversationQueue.drain(convId, gen).isEmpty(), "the drained run's late drain runs nothing");
         assertFalse(ConversationQueue.isBusy(convId));
     }
 
     @Test
-    void stopEndsARestoredMessagesRunAndDropsTheRestoredOnesBehindIt() {
+    void stopEndsARestoredMessagesRunAndTheRestoredOnesBehindItRunInOrder() {
         long convId = 12013L;
-        var gen = ConversationQueue.tryAcquireRestored(convId, List.of(
-                new QueuedMessage("R1", "telegram", "peer", agent), new QueuedMessage("R2", "telegram", "peer", agent)));
-        assertNotEquals(ConversationQueue.NOT_ACQUIRED, gen, "test precondition: R1 takes the conversation");
+        try {
+            var gen = ConversationQueue.tryAcquireRestored(convId, List.of(new QueuedMessage("R1", "telegram", "peer", agent),
+                    new QueuedMessage("R2", "telegram", "peer", agent), new QueuedMessage("R3", "telegram", "peer", agent)));
+            assertNotEquals(ConversationQueue.NOT_ACQUIRED, gen, "test precondition: R1 takes the conversation");
 
-        assertTrue(ConversationQueue.stop(convId), "a restored message's run holds a flag of its own");
+            assertTrue(ConversationQueue.stop(convId), "a restored message's run holds a flag of its own");
 
-        assertFalse(ConversationQueue.isBusy(convId));
-        assertEquals(0, ConversationQueue.getQueueSize(convId), "R2 is dropped");
-        assertTrue(ConversationQueue.drain(convId, gen).isEmpty());
+            // R2's run finds no conversation behind this id and only releases it, so R3 stays where it waits.
+            assertEquals(List.of("R3"), texts(ConversationQueue.waiting(convId, null, null)), "R2 took the conversation");
+            assertTrue(ConversationQueue.drain(convId, gen).isEmpty(), "the stopped run's late drain runs nothing");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
     }
 
     @Test
@@ -1216,15 +1214,19 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void anOperatorStopEndsAWebTurnThatPassedNoCancelFlagAndDropsItsQueue() {
+    void anOperatorStopEndsAWebTurnThatPassedNoCancelFlagAndKeepsItsQueueInOrder() {
         long convId = 17003L;
         try {
-            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            var flag = ConversationQueue.ownerCancel(convId, gen);
             ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
 
             assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
-            assertFalse(ConversationQueue.isBusy(convId));
-            assertEquals(0, ConversationQueue.getQueueSize(convId));
+
+            assertTrue(flag.get(), "A was told to stop");
+            // B's run finds no conversation behind this id and only releases it, so C stays where it waits.
+            assertEquals(List.of("C"), texts(ConversationQueue.waiting(convId, null, null)), "B took the conversation");
         } finally {
             ConversationQueue.forgetForTest(convId);
         }
@@ -1314,17 +1316,19 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void anOperatorStopEndsAWebTurnHoldingItsOwnFlagDropsItsQueueAndReleasesIt() {
+    void anOperatorStopEndsAWebTurnHoldingItsOwnFlagAndHandsTheConversationToTheMessageQueuedFirst() {
         long convId = 17005L;
         var flag = new AtomicBoolean();
         try {
             ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
             ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("D", "web", "admin", agent));
 
             assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(convId, "web"));
+
             assertTrue(flag.get());
-            assertFalse(ConversationQueue.isBusy(convId));
-            assertEquals(0, ConversationQueue.getQueueSize(convId));
+            assertEquals(List.of("C", "D"), texts(ConversationQueue.waiting(convId, null, null)), "B took the conversation");
         } finally {
             ConversationQueue.forgetForTest(convId);
         }
@@ -1431,7 +1435,7 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void aStopNamingTheRunningWebTurnStopsItAndDropsItsQueueAsAStopNamingNoneDoes() {
+    void aStopNamingTheRunningWebTurnStopsItAndKeepsItsQueueAsAStopNamingNoneDoes() {
         long named = 17016L;
         long unnamed = 17017L;
         var namedFlag = new AtomicBoolean();
@@ -1439,9 +1443,11 @@ class ConversationQueueTest extends UnitTest {
         try {
             var gen = ConversationQueue.tryAcquireOwnership(named, new QueuedMessage("A", "web", "admin", agent),
                     namedFlag);
-            ConversationQueue.tryAcquire(named, new QueuedMessage("B", "web", "admin", agent));
             ConversationQueue.tryAcquireOwnership(unnamed, new QueuedMessage("A", "web", "admin", agent), unnamedFlag);
-            ConversationQueue.tryAcquire(unnamed, new QueuedMessage("B", "web", "admin", agent));
+            for (var conv : List.of(named, unnamed)) {
+                ConversationQueue.tryAcquire(conv, new QueuedMessage("B", "web", "admin", agent));
+                ConversationQueue.tryAcquire(conv, new QueuedMessage("C", "web", "admin", agent));
+            }
 
             assertEquals(ConversationQueue.OperatorStop.STOPPED, ConversationQueue.stopOperatorTurn(named, "web", true,
                     ConversationQueue.ownerTurn(named, gen)));
@@ -1449,8 +1455,7 @@ class ConversationQueueTest extends UnitTest {
                     ConversationQueue.stopOperatorTurn(unnamed, "web", true, null));
 
             for (var conv : List.of(named, unnamed)) {
-                assertFalse(ConversationQueue.isBusy(conv));
-                assertEquals(0, ConversationQueue.getQueueSize(conv));
+                assertEquals(List.of("C"), texts(ConversationQueue.waiting(conv, null, null)), "B took the conversation");
             }
             assertTrue(namedFlag.get());
             assertTrue(unnamedFlag.get());
@@ -1507,16 +1512,179 @@ class ConversationQueueTest extends UnitTest {
 
             var pending = List.of(new ConversationQueue.PendingView("B", List.of("report.pdf", "image"), 1),
                     new ConversationQueue.PendingView("C", List.of(), 3));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, true, true, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, false, pending, 0),
                     ConversationQueue.snapshot(convId, "web"));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, true, false, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, false, pending, 0),
                     ConversationQueue.snapshot(convId, "telegram"));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, true, true, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, true, true, pending, 0),
                     ConversationQueue.snapshot(convId, "voice"));
-            assertEquals(new ConversationQueue.Snapshot(true, 3, false, true, pending),
+            assertEquals(new ConversationQueue.Snapshot(true, 3, false, false, pending, 0),
                     ConversationQueue.snapshot(convId, "app"));
-            assertEquals(new ConversationQueue.Snapshot(false, 0, false, true, List.of()),
+            assertEquals(new ConversationQueue.Snapshot(false, 0, false, false, List.of(), 0),
                     ConversationQueue.snapshot(17007L, "web"));
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+        }
+    }
+
+    @Test
+    void onlyAVoiceStopDropsTheQueue() {
+        assertTrue(ConversationQueue.stopDropsQueue("voice"));
+        for (var channel : java.util.Arrays.asList("web", "telegram", "slack", "whatsapp", "app", null)) {
+            assertFalse(ConversationQueue.stopDropsQueue(channel), "a stop on " + channel + " keeps the queue");
+        }
+    }
+
+    // ── /queue lists and clears the waiting messages (JF-227) ──
+
+    @Test
+    void theWaitingMessagesAreListedInArrivalOrderWithoutTheSubagentResultAmongThem() {
+        long convId = 18001L;
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "web", "admin", agent, true));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+
+            assertEquals(List.of("B", "C"), texts(ConversationQueue.waiting(convId, null, null)));
+            assertEquals(3, ConversationQueue.getQueueSize(convId), "listing changes nothing");
+            assertEquals(List.of(), ConversationQueue.waiting(18099L, null, null), "a conversation the queue holds nothing for");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void aClearDropsTheWaitingMessagesLeavesTheSubagentResultAndTheRunningTurnAndTellsEveryTab() {
+        long convId = 18002L;
+        var flag = new AtomicBoolean();
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "web", "admin", agent, true));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+
+            var dropped = new int[1];
+            var heard = busyAnnouncedWhile(convId, () -> dropped[0] = ConversationQueue.clearWaiting(convId, null, null));
+
+            assertEquals(2, dropped[0]);
+            assertEquals(List.of(busy(convId, true)), heard, "every open tab re-reads the queue");
+            assertEquals(List.of(), ConversationQueue.waiting(convId, null, null));
+            assertFalse(flag.get(), "the running turn was not told to stop");
+            assertEquals(gen, ConversationQueue.currentGeneration(convId), "and still owns the conversation");
+            var next = ConversationQueue.drain(convId, gen);
+            assertEquals(List.of("[subagent result]"), texts(next), "the subagent result still wakes the agent");
+            assertTrue(next.getFirst().skipUserAppend());
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void aClearWithNothingWaitingDropsNothingAndAnnouncesNothing() {
+        long convId = 18003L;
+        long unknown = 18004L;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "web", "admin", agent, true));
+
+            var heard = busyAnnouncedWhile(convId, () -> assertEquals(0, ConversationQueue.clearWaiting(convId, null, null)));
+
+            assertEquals(List.of(), heard);
+            assertEquals(1, ConversationQueue.getQueueSize(convId), "the subagent result keeps its place");
+            assertEquals(0, ConversationQueue.clearWaiting(unknown, null, null), "a conversation the queue holds nothing for");
+            assertEquals(1, ConversationQueue.drain(convId, gen).size(), "test precondition: the result takes over");
+            assertEquals(0, ConversationQueue.clearWaiting(convId, null, null), "nothing is left waiting");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+            ConversationQueue.forgetForTest(unknown);
+        }
+    }
+
+    @Test
+    void aClearOfTheOneMessageWaitingLetsTheRunningTurnEndWithNothingAfterIt() {
+        long convId = 18005L;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+            assertEquals(1, ConversationQueue.clearWaiting(convId, null, null));
+
+            assertTrue(ConversationQueue.isBusy(convId), "A still runs");
+            assertEquals(List.of(), ConversationQueue.drain(convId, gen), "A's end runs nothing");
+            assertFalse(ConversationQueue.isBusy(convId));
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void inCollectModeTheMessagesWaitingToBeBatchedAreListedAndClearedOneByOne() {
+        long convId = 18006L;
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            for (var text : List.of("B", "C", "D")) {
+                ConversationQueue.tryAcquire(convId, new QueuedMessage(text, "web", "admin", agent));
+            }
+
+            assertEquals(List.of("B", "C", "D"), texts(ConversationQueue.waiting(convId, null, null)));
+            assertEquals(3, ConversationQueue.clearWaiting(convId, null, null));
+            assertEquals(List.of(), ConversationQueue.drain(convId, gen), "no batch is left to run");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+        }
+    }
+
+    @Test
+    void aClearDeletesTheStoredRowsOfTheChannelMessagesItDrops() {
+        var conv = services.ConversationService.create(agent, "telegram", "jf227-clear-rows");
+        // A queued message's row is written on a thread of its own, which must find the conversation committed.
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+        try {
+            ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "telegram", conv.peerId, agent), null);
+            ConversationQueue.tryAcquire(conv.id, new QueuedMessage("B", "telegram", conv.peerId, agent));
+            ConversationQueue.tryAcquire(conv.id, new QueuedMessage("C", "telegram", conv.peerId, agent));
+            assertEquals(2L, models.PendingInbound.count("conversation.id = ?1", conv.id),
+                    "test precondition: the queued channel messages are stored");
+
+            assertEquals(2, ConversationQueue.clearWaiting(conv.id, null, null));
+
+            assertEquals(0L, models.PendingInbound.count("conversation.id = ?1", conv.id),
+                    "a restart finds none of them to run");
+        } finally {
+            ConversationQueue.forgetForTest(conv.id);
+        }
+    }
+
+    @Test
+    void theSnapshotCountsEachClearThatDroppedAMessageAndNoOther() {
+        long convId = 18007L;
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "queue");
+        try {
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            assertEquals(new ConversationQueue.Snapshot(true, 1, true, false,
+                            List.of(new ConversationQueue.PendingView("B", List.of(), 1)), 0),
+                    ConversationQueue.snapshot(convId, "web"));
+
+            assertEquals(1, ConversationQueue.clearWaiting(convId, null, null));
+            assertEquals(new ConversationQueue.Snapshot(true, 0, true, false, List.of(), 1),
+                    ConversationQueue.snapshot(convId, "web"));
+
+            assertEquals(0, ConversationQueue.clearWaiting(convId, null, null));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "web", "admin", agent, true));
+            assertEquals(0, ConversationQueue.clearWaiting(convId, null, null));
+            assertEquals(new ConversationQueue.Snapshot(true, 1, true, false, List.of(), 1),
+                    ConversationQueue.snapshot(convId, "web"), "a clear that dropped nothing is not counted");
+
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+            assertEquals(1, ConversationQueue.clearWaiting(convId, null, null));
+            assertEquals(new ConversationQueue.Snapshot(true, 1, true, false, List.of(), 2),
+                    ConversationQueue.snapshot(convId, "web"));
         } finally {
             ConversationQueue.forgetForTest(convId);
             services.ConfigService.delete("agent.queue-test-agent.queue.mode");
@@ -1707,6 +1875,10 @@ class ConversationQueueTest extends UnitTest {
                                 "{\"type\":\"conversation.busy\",\"data\":{\"conversationId\":" + convId + ",\"busy\":false}}")),
                 lines.stream().map(line -> com.google.gson.JsonParser.parseString(
                         line.substring("data: ".length()).strip())).toList());
+    }
+
+    private static List<String> texts(List<QueuedMessage> messages) {
+        return messages.stream().map(QueuedMessage::text).toList();
     }
 
     /** The {@code conversation.busy} payloads published for {@code convId} while {@code body} runs. */

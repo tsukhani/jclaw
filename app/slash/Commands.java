@@ -2,6 +2,8 @@ package slash;
 
 import agents.CompactionGate;
 import agents.SummaryModels;
+import agents.SystemPromptAssembler;
+import channels.QuotedReply;
 import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
@@ -101,6 +103,7 @@ public final class Commands {
         THINK("/think", "Set reasoning effort for this conversation"),
         USAGE("/usage", "Show context usage for this conversation"),
         STOP("/stop", "Interrupt the current generation"),
+        QUEUE("/queue", "Show or clear the waiting messages"),
         SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs"),
         // Deliberately channel-neutral: the web composer inserts the text for
         // editing, every other channel replies with it to copy — a bot cannot
@@ -129,6 +132,7 @@ public final class Commands {
             • /think — reasoning effort for this conversation (/think off, /think level, /think reset)
             • /usage — show context usage for this conversation
             • /stop — interrupt the current generation
+            • /queue — show the waiting messages (/queue clear drops them)
             • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)
             • /prompt — use a saved prompt from your library (/prompt search-words)""";
 
@@ -155,6 +159,18 @@ public final class Commands {
 
     /** {@code /stop}'s reply when the conversation runs no turn. */
     public static final String NOTHING_TO_STOP = "Nothing to stop.";
+
+    /** {@code /queue}'s reply when no message waits. */
+    private static final String NOTHING_WAITING = "Nothing is waiting.";
+
+    // Until JF-237: a member must not see or drop another member's messages.
+    private static final String QUEUE_NOT_IN_GROUPS = "/queue isn't available in group chats yet.";
+
+    // Until JF-237: any member could otherwise cut off another member's reply.
+    private static final String ONLY_OWNER_STOPS_IN_GROUPS = "In group chats, only the owner can stop a reply for now.";
+
+    /** Longest excerpt of a waiting message {@code /queue} shows, in characters. */
+    private static final int QUEUE_EXCERPT_CHARS = 80;
 
     /** A reply and whether it was saved as the conversation's assistant row. */
     private record Canned(String text, boolean saved) {}
@@ -376,6 +392,11 @@ public final class Commands {
             // Not persisted: a guest's refused command must not write into the owner's transcript.
             return new Result(current, NOT_OWNER_MSG, cmd);
         }
+        if (cmd == Command.STOP && !ownerInitiated && isGroupChat(channelType, peerId)) {
+            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                    "Refused /stop from a member other than the owner in group chat peer=%s".formatted(peerId));
+            return new Result(current, ONLY_OWNER_STOPS_IN_GROUPS, cmd);
+        }
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
             case RESET -> executeReset(agent, channelType, current);
@@ -385,6 +406,7 @@ public final class Commands {
             case THINK -> executeThink(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
             case STOP -> executeStop(agent, channelType, current, stopTurn);
+            case QUEUE -> executeQueue(agent, channelType, peerId, current, args);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
             case PROMPT -> executePrompt(agent, channelType, current, args);
         };
@@ -479,7 +501,7 @@ public final class Commands {
         return switch (cmd) {
             case SUBAGENT, PROMPT -> true;
             case MODEL -> args != null && !args.isBlank() && !args.equalsIgnoreCase("status");
-            case NEW, RESET, COMPACT, HELP, THINK, USAGE, STOP -> false;
+            case NEW, RESET, COMPACT, HELP, THINK, USAGE, STOP, QUEUE -> false;
         };
     }
 
@@ -528,6 +550,7 @@ public final class Commands {
                 • /think — set reasoning effort for this chat
                 • /usage — show context usage for this chat
                 • /stop — interrupt a response in progress
+                • /queue — show or clear the messages waiting for a reply
                 • /subagent — inspect, kill, or read subagent transcripts
                 • /prompt — use a saved prompt from your library
                 Keep it concise and friendly.""";
@@ -614,6 +637,80 @@ public final class Commands {
             case UNSTOPPABLE -> "This turn can't be stopped.";
         };
         return new Result(current, reply, Command.STOP);
+    }
+
+    /**
+     * {@code /queue} lists the messages waiting behind the running turn, in the order they will be answered, and
+     * {@code /queue clear} drops them; the running turn carries on either way (JF-227). In a one-to-one chat the queue is
+     * the sender's own; typed in Chat it is the open conversation's, whatever its channel. Like {@code /stop}'s, the
+     * reply is not saved.
+     */
+    private static Result executeQueue(Agent agent, String channelType, String peerId, @Nullable Conversation current,
+                                       @Nullable String args) {
+        if (isGroupChat(channelType, peerId)) {
+            EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                    "Refused /queue in group chat peer=%s".formatted(peerId));
+            return new Result(current, QUEUE_NOT_IN_GROUPS, Command.QUEUE);
+        }
+        var form = args == null ? "" : args.strip();
+        boolean clear = form.equalsIgnoreCase("clear");
+        if (!form.isEmpty() && !clear) {
+            var prefix = ChannelType.SLACK.value.equals(channelType) ? "!" : "/";
+            return new Result(current, "Use %squeue to see the waiting messages, or %squeue clear to drop them."
+                    .formatted(prefix, prefix), Command.QUEUE);
+        }
+        // Chat's queue is the operator's, every sender's; a channel sender's is their own.
+        var senderChannel = ChannelType.WEB.value.equals(channelType) ? null : channelType;
+        String reply;
+        if (current == null) {
+            reply = NOTHING_WAITING;
+        } else if (clear) {
+            int dropped = ConversationQueue.clearWaiting(current.id, senderChannel, peerId);
+            reply = dropped == 0 ? NOTHING_WAITING
+                    : "Dropped %d waiting message%s.".formatted(dropped, dropped == 1 ? "" : "s");
+        } else {
+            reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId));
+        }
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                "/queue" + (clear ? " clear" : "") + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : "")
+                        + ": " + reply.lines().findFirst().orElse(""));
+        return new Result(current, reply, Command.QUEUE);
+    }
+
+    private static String renderWaiting(List<ConversationQueue.QueuedMessage> waiting) {
+        if (waiting.isEmpty()) return NOTHING_WAITING;
+        var sb = new StringBuilder(waiting.size() == 1 ? "1 message is waiting:"
+                : waiting.size() + " messages are waiting, answered in this order:");
+        for (int i = 0; i < waiting.size(); i++) {
+            sb.append('\n').append(i + 1).append(". ").append(excerpt(waiting.get(i)));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * One line of {@code message}, cut short: the sender's words, after the quote a reply carries ahead of them, as Chat's
+     * Queued row shows them; with no words, its attachments' names; with neither, a quote's whole text.
+     */
+    private static String excerpt(ConversationQueue.QueuedMessage message) {
+        var words = QuotedReply.wordsAfterBlock(message.text());
+        var line = oneLine(words != null ? words : message.text());
+        if (line.isEmpty()) {
+            var names = message.attachmentNames();
+            line = words != null && names.isEmpty() ? oneLine(message.text()) : "(" + String.join(", ", names) + ")";
+        }
+        if (line.length() <= QUEUE_EXCERPT_CHARS) return line;
+        int cut = QUEUE_EXCERPT_CHARS - 1;
+        if (Character.isHighSurrogate(line.charAt(cut - 1))) cut--;
+        return line.substring(0, cut) + "…";
+    }
+
+    private static String oneLine(String text) {
+        return text.replaceAll("(?U)\\s+", " ").strip();
+    }
+
+    /** Web and voice are never group chats. */
+    private static boolean isGroupChat(String channelType, String peerId) {
+        return Boolean.TRUE.equals(SystemPromptAssembler.isGroupChat(channelType, peerId));
     }
 
     /**

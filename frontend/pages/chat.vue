@@ -340,8 +340,8 @@ const {
   showQueued,
   clearStoppable,
 } = useChatBackgroundTurn({ selectedConvoId, streaming, fetchNewRows: pollForAnnounce, streamUp: conversationStreamUp })
-// On a web or voice conversation Stop discards everything queued behind the turn, a waiting subagent result too, so the
-// button says so (JF-202); on a Telegram, Slack or WhatsApp conversation the next message runs instead (JF-197b).
+// On a voice conversation Stop discards everything queued behind the turn, a waiting subagent result too, so the button
+// says so (JF-202); on every other conversation the next message runs instead (JF-197b, JF-227).
 const stopDrops = computed(() => (stopDropsQueue.value ? queueSize.value : 0))
 const stopLabel = computed(() => stopDrops.value
   ? `Stop and drop ${stopDrops.value} queued`
