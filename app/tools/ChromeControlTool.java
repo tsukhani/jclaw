@@ -16,6 +16,7 @@ import utils.AppClock;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -341,18 +342,26 @@ public class ChromeControlTool implements ToolRegistry.Tool {
             var el = e.getAsJsonObject();
             var ref = string(el, ARG_REF);
             LINKS.put(prefix + ref, el.has("link") && el.get("link").getAsBoolean());
-            out.append(ref).append(' ').append(string(el, "tag"));
-            var type = string(el, "type");
-            if ("input".equals(string(el, "tag")) && type != null && !type.isEmpty()) out.append('[').append(type).append(']');
-            out.append(' ').append(string(el, "text"));
-            var href = string(el, "href");
-            if (href != null && !href.isEmpty()) out.append(" -> ").append(href);
-            out.append('\n');
+            appendElement(out, el);
         }
         if (page.has("elementsTruncated") && page.get("elementsTruncated").getAsBoolean()) {
             out.append("[More elements exist than are listed.]\n");
         }
         return out.toString();
+    }
+
+    /** One element as the agent reads it: its ref, kind, visible text, what else describes it, and where a link goes. */
+    static void appendElement(StringBuilder out, JsonObject el) {
+        var tag = string(el, "tag");
+        out.append(string(el, ARG_REF)).append(' ').append(tag);
+        var type = string(el, "type");
+        if ("input".equals(tag) && type != null && !type.isEmpty()) out.append('[').append(type).append(']');
+        out.append(' ').append(string(el, "text"));
+        var hint = string(el, "hint");
+        if (hint != null && !hint.isEmpty()) out.append(" (").append(hint).append(')');
+        var href = string(el, "href");
+        if (href != null && !href.isEmpty()) out.append(" -> ").append(href);
+        out.append('\n');
     }
 
     private static String act(Agent agent, JsonObject args, String action) {
@@ -469,6 +478,11 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         if (query == null || query.isBlank()) return ERROR + "find needs a query.";
         var tab = longOf(args, ARG_TAB);
         if (tab == null) return ERROR + "find needs a tabId.";
+        var model = ChromeFinder.configured();
+        if (model != null) {
+            var answer = modelFind(agent, tab, query, model);
+            if (answer != null) return answer;
+        }
         return simple(agent, args, ACTION_FIND, r -> {
             var prefix = agent.name + ":" + tab + ":";
             var out = new StringBuilder(UNTRUSTED).append("\n\nMatches for \"").append(query).append("\":\n");
@@ -477,14 +491,39 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                 var el = e.getAsJsonObject();
                 var ref = string(el, ARG_REF);
                 LINKS.put(prefix + ref, el.has("link") && el.get("link").getAsBoolean());
-                out.append(ref).append(' ').append(string(el, "tag")).append(' ').append(string(el, "text"));
-                var href = string(el, "href");
-                if (href != null && !href.isEmpty()) out.append(" -> ").append(href);
-                out.append('\n');
+                appendElement(out, el);
             }
             if (matches.isEmpty()) out.append("(none)\n");
             return out.toString();
         }, ARG_QUERY);
+    }
+
+    /** Find by meaning with the operator's finder model; null when it cannot, so the word match answers instead. */
+    private static @Nullable String modelFind(Agent agent, long tab, String query, ChromeFinder.Model model) {
+        if (tabRefusal(agent, tab) != null) return null;
+        var page = ChromeBridge.call(ACTION_READ, withTab(tab)).getAsJsonObject();
+        var url = string(page, ARG_URL);
+        if (url == null || ChromeBridgePolicy.visitRefusal(agent, url) != null) return null;
+        var elements = new LinkedHashMap<String, JsonObject>();
+        var listing = new StringBuilder();
+        for (JsonElement e : page.has("elements") ? page.getAsJsonArray("elements") : new JsonArray()) {
+            var el = e.getAsJsonObject();
+            elements.put(string(el, ARG_REF), el);
+            listing.append(ChromeFinder.line(el)).append('\n');
+        }
+        var title = string(page, "title");
+        var picks = ChromeFinder.pick(model, title == null ? "" : title, query, listing.toString());
+        if (picks == null) return null;
+        var prefix = agent.name + ":" + tab + ":";
+        var out = new StringBuilder(UNTRUSTED).append("\n\nMatches for \"").append(query).append("\":\n");
+        for (var ref : picks) {
+            var el = elements.get(ref);
+            if (el == null) continue;
+            LINKS.put(prefix + ref, el.has("link") && el.get("link").getAsBoolean());
+            appendElement(out, el);
+        }
+        if (picks.isEmpty()) out.append("(none)\n");
+        return out.toString();
     }
 
     private static String console(Agent agent, JsonObject args) {

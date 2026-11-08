@@ -5,6 +5,7 @@ import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { sectionGroups } from '~/components/settings/sections'
+import { pickValue, pickerValue } from './searchable-select-driver'
 
 /**
  * The Chrome settings panel: pairing, the per-agent site lists, and the two overrides only the main
@@ -12,6 +13,9 @@ import { sectionGroups } from '~/components/settings/sections'
  */
 
 const HELPER_KEY = 'agent.helper.chromeBridge.allowedSites'
+const FIND_PROVIDER = 'chromeBridge.find.provider'
+const FIND_MODEL = 'chromeBridge.find.model'
+const FIND_LABEL = 'Model that finds elements by meaning'
 
 let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>
@@ -52,6 +56,16 @@ function baseEndpoints(opts: { failSaves?: boolean } = {}) {
       return { status: 'ok' }
     },
   })
+  for (const key of [FIND_PROVIDER, FIND_MODEL]) {
+    registerEndpoint(`/api/config/${key}`, {
+      method: 'DELETE',
+      handler: () => {
+        deleted.push(key)
+        stored.delete(key)
+        return { status: 'ok' }
+      },
+    })
+  }
   registerEndpoint('/api/chrome-bridge', () => ({ paired }))
   registerEndpoint('/api/chrome-bridge/pairing', {
     method: 'POST',
@@ -214,5 +228,32 @@ describe('Settings page — Chrome', () => {
       { key: 'agent.main.chromeBridge.allowScript', value: 'true' },
     ])
     expect(checked(component, '[data-testid="chrome-allow-all"]')).toBe(true)
+  })
+
+  it('finds by word match until a model is picked, then stores both halves of it', async () => {
+    stored.set('provider.ollama-cloud.models', JSON.stringify([{ id: 'deepseek-v4.1-flash' }]))
+    baseEndpoints()
+    const component = await mountChrome()
+    expect(pickerValue(component, FIND_LABEL)).toBe('')
+
+    await pickValue(component, FIND_LABEL, 'ollama-cloud::deepseek-v4.1-flash')
+    await vi.waitFor(() => expect(posted).toHaveLength(2), { timeout: 5000 })
+
+    expect(posted).toEqual([
+      { key: FIND_PROVIDER, value: 'ollama-cloud' },
+      { key: FIND_MODEL, value: 'deepseek-v4.1-flash' },
+    ])
+  })
+
+  it('going back to the word match deletes both stored halves', async () => {
+    stored.set('provider.ollama-cloud.models', JSON.stringify([{ id: 'deepseek-v4.1-flash' }]))
+    stored.set(FIND_PROVIDER, 'ollama-cloud')
+    stored.set(FIND_MODEL, 'deepseek-v4.1-flash')
+    baseEndpoints()
+    const component = await mountChrome()
+    expect(pickerValue(component, FIND_LABEL)).toBe('ollama-cloud::deepseek-v4.1-flash')
+
+    await pickValue(component, FIND_LABEL, '')
+    await vi.waitFor(() => expect(deleted).toEqual([FIND_PROVIDER, FIND_MODEL]), { timeout: 5000 })
   })
 })

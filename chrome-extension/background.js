@@ -1,5 +1,13 @@
-const GROUP_TITLE = 'JClaw'
-const GROUP_COLOR = 'orange'
+const GROUP_NAME = 'JClaw'
+// Chrome gives a group a title and a colour but no icon, so the lobster rides in the title. A group the
+// operator named plain "JClaw" by hand is still the JClaw group, and takes the emoji at startup.
+const GROUP_TITLE = '\u{1F99E} JClaw'
+const isJClawTitle = (title) => title === GROUP_NAME || title === GROUP_TITLE
+async function jclawGroups() {
+  return (await chrome.tabGroups.query({})).filter((g) => isJClawTitle(g.title))
+}
+// Chrome's group colours are a fixed palette with no emerald; green is the nearest, and matches JClaw's theme.
+const GROUP_COLOR = 'green'
 const KEEPALIVE_MS = 20_000
 const MAX_TEXT = 20_000
 const MAX_ELEMENTS = 200
@@ -53,25 +61,30 @@ async function connect() {
 // The JClaw tab group is the only boundary. Found by title on every call rather than cached, so a
 // service worker restart or a group the operator created by hand behaves the same.
 async function groupIds() {
-  return (await chrome.tabGroups.query({ title: GROUP_TITLE })).map((g) => g.id)
+  return (await jclawGroups()).map((g) => g.id)
 }
+
+// A group made before this title and colour were chosen, or by hand, takes them when the extension starts.
+void jclawGroups().then((groups) => {
+  for (const g of groups) void chrome.tabGroups.update(g.id, { title: GROUP_TITLE, color: GROUP_COLOR })
+})
 
 async function groupedTab(tabId) {
   if (!Number.isInteger(tabId)) throw new Error('tabId is required')
   let tab
   try { tab = await chrome.tabs.get(tabId) } catch { throw new Error(`no tab ${tabId}`) }
   if (!(await groupIds()).includes(tab.groupId)) {
-    throw new Error(`tab ${tabId} is not in the ${GROUP_TITLE} tab group`)
+    throw new Error(`tab ${tabId} is not in the ${GROUP_NAME} tab group`)
   }
   if (BLOCKED.test(tab.url ?? '')) throw new Error(`refusing to touch ${tab.url}`)
   return tab
 }
 
 async function openGroupedTab(url) {
-  const [existing] = await chrome.tabGroups.query({ title: GROUP_TITLE })
+  const [existing] = await jclawGroups()
   const tab = await chrome.tabs.create({ url: 'about:blank', active: false, ...(existing && { windowId: existing.windowId }) })
   const groupId = await chrome.tabs.group({ tabIds: [tab.id], ...(existing && { groupId: existing.id }) })
-  if (!existing) await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: GROUP_COLOR })
+  await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: GROUP_COLOR })
   await chrome.tabs.update(tab.id, { url })
   await waitForLoad(tab.id)
   return tab
@@ -393,65 +406,50 @@ async function handle(msg) {
       return run(tab.id, (query, limit) => {
         const words = String(query).toLowerCase().split(/\s+/).filter(Boolean)
         if (!window.__agentRefs) window.__agentRefs = new Map()
+        const hintOf = (el, text) => {
+          const parts = []
+          const add = (key, value) => {
+            const v = String(value ?? '').replace(/\s+/g, ' ').trim()
+            if (v && v.toLowerCase() !== text.toLowerCase()) parts.push(`${key}: ${v.slice(0, 60)}`)
+          }
+          add('label', el.getAttribute('aria-label'))
+          const by = el.getAttribute('aria-labelledby')
+          if (by) add('label', by.split(/\s+/).map((id) => document.getElementById(id)?.innerText ?? '').join(' '))
+          if (el.labels) add('label', [...el.labels].map((l) => l.innerText).join(' '))
+          add('placeholder', el.placeholder)
+          add('title', el.title)
+          if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
+            add('name', el.name)
+            if (el.autocomplete && !['on', 'off'].includes(el.autocomplete)) add('autocomplete', el.autocomplete)
+          }
+          return [...new Set(parts)].join('; ').slice(0, 160)
+        }
         const hits = []
         let n = window.__agentRefs.size
         for (const el of document.querySelectorAll('a[href],button,input,textarea,select,[role=button],[onclick],h1,h2,h3,label')) {
           const b = el.getBoundingClientRect()
           if (b.width === 0 || b.height === 0) continue
           const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80)
-          const hay = `${text} ${el.getAttribute('aria-label') ?? ''} ${el.placeholder ?? ''} ${el.name ?? ''} ${el.id ?? ''}`.toLowerCase()
+          const hint = hintOf(el, text)
+          const hay = `${text} ${hint} ${el.id ?? ''}`.toLowerCase()
           const score = words.filter((w) => hay.includes(w)).length
           if (score === 0) continue
-          hits.push({ score, el, text })
+          hits.push({ score, el, text, hint })
         }
         hits.sort((a, b) => b.score - a.score)
         return {
-          matches: hits.slice(0, limit).map(({ el, text }) => {
+          matches: hits.slice(0, limit).map(({ el, text, hint }) => {
             const ref = `f${++n}`
             window.__agentRefs.set(ref, el)
             return {
-              ref, tag: el.tagName.toLowerCase(), text,
+              ref, tag: el.tagName.toLowerCase(), text, hint: hint || undefined,
+              type: el.tagName === 'INPUT' ? el.type : undefined,
               href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
               link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
             }
           }),
         }
       }, [msg.query, 10])
-    }
-    case 'javascript': {
-      const tab = await groupedTab(msg.tabId)
-      const r = await cdp(tab.id, 'Runtime.evaluate', {
-        expression: String(msg.expression), returnByValue: true, awaitPromise: true, timeout: 5000, userGesture: false,
-      })
-      if (r.exceptionDetails) {
-        throw new Error(`script error: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`.slice(0, 500))
-      }
-      const v = r.result
-      const value = v.type === 'undefined' ? 'undefined' : typeof v.value === 'string' ? v.value : JSON.stringify(v.value ?? v.description ?? null)
-      return { value, type: v.type }
-    }
-    case 'upload': {
-      const tab = await groupedTab(msg.tabId)
-      const nonce = crypto.randomUUID()
-      const tagged = await run(tab.id, (ref, mark) => {
-        const el = window.__agentRefs?.get(ref)
-        if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
-        if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { error: 'that element is not a file input' }
-        el.setAttribute('data-jclaw-upload', mark)
-        return { done: 'tagged' }
-      }, [msg.ref, nonce])
-      try {
-        const doc = await cdp(tab.id, 'DOM.getDocument', { depth: 0 })
-        const found = await cdp(tab.id, 'DOM.querySelector', { nodeId: doc.root.nodeId, selector: `[data-jclaw-upload="${nonce}"]` })
-        if (!found.nodeId) throw new Error('could not reach the file input')
-        await cdp(tab.id, 'DOM.setFileInputFiles', { nodeId: found.nodeId, files: [String(msg.path)] })
-      } finally {
-        await run(tab.id, (mark) => {
-          document.querySelector(`[data-jclaw-upload="${mark}"]`)?.removeAttribute('data-jclaw-upload')
-          return { done: 'untagged' }
-        }, [nonce])
-      }
-      return { done: tagged.done === 'tagged' ? 'uploaded' : 'failed' }
     }
     case 'resize': {
       const tab = await groupedTab(msg.tabId)
@@ -480,6 +478,26 @@ async function handle(msg) {
 // Injected into the page: must be self-contained.
 function readPage(maxText, maxElements, offset) {
   window.__agentRefs = new Map()
+  // What else describes a control when its visible text does not: its label, placeholder, title and name. A bare
+  // input says nothing about what it is for, and a model asked to pick "the email box" would guess.
+  const hintOf = (el, text) => {
+    const parts = []
+    const add = (key, value) => {
+      const v = String(value ?? '').replace(/\s+/g, ' ').trim()
+      if (v && v.toLowerCase() !== text.toLowerCase()) parts.push(`${key}: ${v.slice(0, 60)}`)
+    }
+    add('label', el.getAttribute('aria-label'))
+    const by = el.getAttribute('aria-labelledby')
+    if (by) add('label', by.split(/\s+/).map((id) => document.getElementById(id)?.innerText ?? '').join(' '))
+    if (el.labels) add('label', [...el.labels].map((l) => l.innerText).join(' '))
+    add('placeholder', el.placeholder)
+    add('title', el.title)
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
+      add('name', el.name)
+      if (el.autocomplete && !['on', 'off'].includes(el.autocomplete)) add('autocomplete', el.autocomplete)
+    }
+    return [...new Set(parts)].join('; ').slice(0, 160)
+  }
   const sel = 'a[href],button,input,textarea,select,[role=button],[onclick]'
   const elements = []
   let n = 0
@@ -493,11 +511,14 @@ function readPage(maxText, maxElements, offset) {
     }
     const ref = `e${++n}`
     window.__agentRefs.set(ref, el)
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80)
     elements.push({
       ref,
       tag: el.tagName.toLowerCase(),
-      type: el.getAttribute('type') ?? undefined,
-      text: (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80),
+      // The resolved type, so a bare <input> reads as input[text] and not as nothing.
+      type: el.tagName === 'INPUT' ? el.type : (el.getAttribute('type') ?? undefined),
+      text,
+      hint: hintOf(el, text) || undefined,
       // The absolute address, so the agent can see where a link goes before it clicks.
       href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
       // A plain link: the only click the server lets an agent make without asking. A click handler on

@@ -529,6 +529,34 @@ class ChromeControlToolTest extends UnitTest {
     }
 
     @Test
+    void anInputWithNoVisibleTextIsDescribedByItsLabelPlaceholderAndName() throws Exception {
+        allow(helper(), "example.com");
+        var fake = scripted(Map.of("tab_info", ok("{\"url\":\"https://example.com/\"}"),
+                "read", ok("{\"title\":\"Form\",\"url\":\"https://example.com/\",\"text\":\"\",\"textOffset\":0,\"textLength\":0,"
+                        + "\"elements\":[{\"ref\":\"e1\",\"tag\":\"input\",\"type\":\"text\",\"text\":\"\","
+                        + "\"hint\":\"label: Full name; name: fullName\"},"
+                        + "{\"ref\":\"e2\",\"tag\":\"input\",\"type\":\"email\",\"text\":\"\","
+                        + "\"hint\":\"placeholder: Email; name: email\"},"
+                        + "{\"ref\":\"e3\",\"tag\":\"button\",\"text\":\"Save\"}]}")));
+        ChromeBridgeSync.with(fake, () ->
+                assertEquals(UNTRUSTED + "\n\nForm\nhttps://example.com/\n\n\n\nElements:\n"
+                                + "e1 input[text]  (label: Full name; name: fullName)\n"
+                                + "e2 input[email]  (placeholder: Email; name: email)\n"
+                                + "e3 button Save\n",
+                        run(helper(), "{\"action\":\"read\",\"tabId\":7}")));
+    }
+
+    @Test
+    void findShowsTheSameHintAndTheInputType() throws Exception {
+        allow(helper(), "example.com");
+        var fake = onAllowedTab("find", "{\"matches\":[{\"ref\":\"f1\",\"tag\":\"input\",\"type\":\"email\",\"text\":\"\","
+                + "\"hint\":\"label: Your email\"}]}");
+        ChromeBridgeSync.with(fake, () ->
+                assertEquals(UNTRUSTED + "\n\nMatches for \"email\":\nf1 input[email]  (label: Your email)\n",
+                        run(helper(), "{\"action\":\"find\",\"tabId\":7,\"query\":\"email\"}")));
+    }
+
+    @Test
     void theRegistryGatesTheSameCallAndFencesTheToolToOperatorTurns() throws Exception {
         var agent = AgentService.create("chrome-tool-" + UUID.randomUUID().toString().substring(0, 8), "openrouter", "gpt-4.1");
         try {

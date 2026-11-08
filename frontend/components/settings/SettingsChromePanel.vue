@@ -3,8 +3,9 @@
 // main agent has. Every value is an ordinary /api/config row under agent.<name>.chromeBridge., which
 // is operator-only to write, so an agent cannot widen its own reach through jclaw_api.
 import type { Agent } from '~/types/api'
+import type { SearchableOption } from '~/components/SearchableSelect.vue'
 
-const { configValue, saving, refresh } = useSettingsConfig()
+const { configData, configValue, saving, refresh, getProviderModels } = useSettingsConfig()
 const { saveError, attempt } = useSaveAttempt()
 const { mutate, errorDetails: pairError } = useApiMutation()
 
@@ -53,6 +54,44 @@ const isOn = (agent: Agent, setting: string) => configValue(keyFor(agent, settin
 async function setOverride(agent: Agent, setting: string, on: boolean) {
   saving.value = true
   await attempt(() => $fetch('/api/config', { method: 'POST', body: { key: keyFor(agent, setting), value: String(on) } }))
+  await refresh()
+  saving.value = false
+}
+
+// The model that answers "find" by meaning. Unset keeps the plain word match, which sends nothing anywhere.
+const FIND_PROVIDER = 'chromeBridge.find.provider'
+const FIND_MODEL = 'chromeBridge.find.model'
+const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
+
+const findValue = computed(() => {
+  const p = configValue(FIND_PROVIDER)
+  const m = configValue(FIND_MODEL)
+  return p && m ? `${p}::${m}` : ''
+})
+
+const findOptions = computed<SearchableOption[]>(() => {
+  const names = new Set<string>()
+  for (const e of configData.value?.entries ?? []) {
+    if (!e.key.startsWith('provider.')) continue
+    const name = e.key.split('.')[1]!
+    if (!IMAGE_ONLY_PROVIDERS.has(name)) names.add(name)
+  }
+  return [{ value: '', label: 'Word match (no model call)' }, ...providerModelOptions(names, getProviderModels)]
+})
+
+async function saveFindModel(value: string) {
+  saving.value = true
+  await attempt(async () => {
+    if (value) {
+      const sep = value.indexOf('::')
+      await $fetch('/api/config', { method: 'POST', body: { key: FIND_PROVIDER, value: value.slice(0, sep) } })
+      await $fetch('/api/config', { method: 'POST', body: { key: FIND_MODEL, value: value.slice(sep + 2) } })
+    }
+    else {
+      await $fetch(`/api/config/${FIND_PROVIDER}`, { method: 'DELETE' })
+      await $fetch(`/api/config/${FIND_MODEL}`, { method: 'DELETE' })
+    }
+  })
   await refresh()
   saving.value = false
 }
@@ -208,6 +247,41 @@ async function unpair() {
           </span>
         </label>
       </div>
+    </section>
+
+    <section
+      class="space-y-2"
+      aria-labelledby="chrome-find-heading"
+    >
+      <h3
+        id="chrome-find-heading"
+        class="text-xs font-medium text-fg-muted"
+      >
+        Finding elements
+      </h3>
+      <p class="text-xs text-fg-muted">
+        When an agent asks for "the box for my email" or "the way to sign in", a model can pick the
+        element by meaning where a word match cannot. It reads the labels of the page's links, buttons and
+        fields, so with a model named here those words are sent to that model's provider, and to ollama.com
+        for an Ollama cloud model. Left on word match, nothing leaves this machine.
+      </p>
+      <div class="bg-surface-elevated border border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+        <span class="text-xs font-mono text-fg-muted w-40 max-sm:w-full shrink-0">find model</span>
+        <SearchableSelect
+          :model-value="findValue"
+          :options="findOptions"
+          placeholder="Word match (no model call)"
+          label="Model that finds elements by meaning"
+          :disabled="saving"
+          search-label="Type to filter models"
+          empty-text="No matching models."
+          content-class="font-mono"
+          class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+          data-testid="chrome-find-model"
+          @update:model-value="saveFindModel"
+        />
+      </div>
+      <ApiErrorAlert :error="saveError" />
     </section>
 
     <section

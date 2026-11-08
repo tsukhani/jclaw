@@ -32,6 +32,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   // so leftover playwright.enabled / playwright.headless rows on upgraded
   // installs don't surface as "Unmanaged" diagnostic noise.
   'skillsPromotion.', // Skills promotion sanitization — Settings
+  'chromeBridge.', // Model that answers the Chrome tool's find (chromeBridge.find.provider and .model) — Settings (Chrome)
   'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
   'ollama.', // Ollama provider-specific settings — Settings
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings

@@ -910,7 +910,7 @@ Anything missing downloads the first time an agent uses the browser: the officia
 
 ## Chrome
 
-Lets an agent work in your own Chrome, signed in as you, but only inside a tab group named **JClaw**. It uses a small extension in your browser. The extension reaches nothing outside that group: tabs you open yourself stay private unless you drag one into it.
+Lets an agent work in your own Chrome, signed in as you, but only inside a tab group named **JClaw**. It uses a small extension in your browser. The extension reaches nothing outside that group: tabs you open yourself stay private unless you drag one into it. The group is green, the closest colour Chrome offers to JClaw's emerald, and its title carries a lobster emoji, because Chrome gives a tab group a title and a colour but no icon. A group you named **JClaw** by hand is recognised too, and takes the emoji and colour when the extension starts.
 
 A page an agent opens in the group sees your saved logins. That is why each agent has its own list of sites it may open, and why you pair the extension yourself.
 
@@ -923,6 +923,8 @@ An agent can use Chrome only after you turn on the `chrome_control` tool on that
 Two more abilities are separate tools, so approving clicks never covers them. `chrome_upload` attaches one file from the agent's own workspace to a file input on the page (never a file outside the workspace, a persona file, or anything over 25 MB). `chrome_script` runs JavaScript in the page; it is off for every agent until you tick **Run page script** below, and only the main agent can have it. A script can read what the page keeps and act as you, so every call waits for your approval.
 
 Pressing a key, dragging, and clicking at a point count as clicks for approval, because they can activate anything. Chrome shows a bar saying **JClaw Bridge started debugging this browser** on a tab the agent is using. The extension needs that permission to send real clicks and keys, and to take screenshots of a tab you are not looking at. The bar goes when the tab closes or you dismiss it.
+
+**Finding elements.** By default an agent's "find" is a word match on each element's text, label and name. Under **Finding elements** you can name a model, such as DeepSeek 4.1 Flash on Ollama cloud, to pick elements by meaning instead, so "the box for my email" finds the right field. It makes one call per find and reads the labels of the page's links, buttons and fields, so those words are sent to that model's provider, and to ollama.com for an Ollama cloud model. If the call fails, the word match answers. Choose **Word match (no model call)** to turn it off.
 
 **Sites each agent may open.** Each agent has a box with one site per line. `example.com` allows that site only. `*.example.com` allows its subdomains, but not `example.com` itself. An empty box opens nothing. Only you can change these lists; an agent cannot change its own.
 
