@@ -601,8 +601,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // reload. The tool's PUT commits in its own Tx mid-turn, well before the
     // terminal frame, so the new value is already persisted by now.
     refreshAgents()
-    // Every engine commits the reply before it publishes the terminal frame, so the bubble pairs with it now.
-    void mergeRows()
+    // Every engine commits the reply before it publishes the terminal frame, so the bubble pairs with it now. The saved
+    // rows can render taller than the bubble, with no frame after them, so a reader at the bottom follows them (JF-229).
+    void mergeRows().then(() => nextTick(followToBottom))
   }
 
   /**

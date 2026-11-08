@@ -637,8 +637,38 @@ describe('useChatStream', () => {
       { type: 'complete', content: 'Hi' })
     await flushPromises()
     expect(deps.scrollToBottom).toHaveBeenCalledTimes(1)
-    // init, reasoning, token, tool_call, usage, complete, and the end of the turn.
-    expect(followToBottom).toHaveBeenCalledTimes(7)
+    // init, reasoning, token, tool_call, usage, complete, the end of the turn, and its saved rows once merged.
+    expect(followToBottom).toHaveBeenCalledTimes(8)
+  })
+
+  it('follows the turn\'s saved rows once they have merged, not before', async () => {
+    serveTurnStart(() => ({ status: 'started', conversationId: 42 }))
+    const followToBottom = vi.fn()
+    let hold = false
+    let release!: () => void
+    const mergeSavedRows = vi.fn(() => {
+      if (!hold) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        release = resolve
+      })
+    })
+    const deps = onConversation(42, { followToBottom, mergeSavedRows })
+    const { api } = await mountStream(deps)
+    await send(api, deps, 'hello')
+    const stream = streamOn(42)
+    stream.send({ type: 'init', conversationId: 42, startedAt: '2026-11-07T10:00:00Z' })
+    stream.send({ type: 'token', content: 'Hi' })
+    await flushPromises()
+    hold = true
+    stream.send({ type: 'complete', content: 'Hi' })
+    await flushPromises()
+    // init, token, complete and the end of the turn; the merge is still in flight.
+    expect(followToBottom).toHaveBeenCalledTimes(4)
+
+    release()
+    await flushPromises()
+    await nextTick()
+    expect(followToBottom).toHaveBeenCalledTimes(5)
   })
 
   it('shows why a send was refused on a reply row that pairs with nothing', async () => {

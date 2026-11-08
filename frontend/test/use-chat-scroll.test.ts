@@ -211,6 +211,147 @@ describe('useChatScroll', () => {
     expect(el.scrollTop).toBe(1300)
   })
 
+  it('keeps following when the scroll event its own scroll caused arrives after the content grew', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+
+    // Opening a conversation pins it; a running turn's replay renders before the write's scroll event fires.
+    api.scrollToBottom()
+    flushRaf()
+    layout({ scrollTop: el.scrollTop, scrollHeight: 1400, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    api.followToBottom()
+    flushRaf()
+
+    expect(el.scrollTop).toBe(1400)
+  })
+
+  it('knows its own scroll by the position the browser clamped the write to', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const el = document.createElement('div')
+    el.appendChild(document.createElement('div'))
+    const box = { top: 800, height: 1000, client: 200 }
+    // As a browser does: scrollTop cannot pass the last position the viewport can reach.
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => box.top,
+      set: (v: number) => { box.top = Math.max(0, Math.min(v, box.height - box.client)) },
+    })
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => box.height })
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => box.client })
+    api.messagesEl.value = el
+    await nextTick()
+
+    box.top = 700
+    api.scrollToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(800)
+    // The content grows before the write's own event fires, at the clamped 800.
+    box.height = 1400
+    el.dispatchEvent(new Event('scroll'))
+    api.followToBottom()
+    flushRaf()
+
+    expect(el.scrollTop).toBe(1200)
+  })
+
+  it('takes a scroll that overtakes its own write for the reader\'s, and the event of a write that lands at the bottom for following', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+
+    // The page writes the bottom, but the reader scrolls up before its event fires: one event, at the reader's place.
+    api.scrollToBottom()
+    flushRaf()
+    layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 300, scrollHeight: 1100, clientHeight: 200 })
+    api.followToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(300)
+
+    // An explicit pin then puts them at the bottom; a scroll in the frame before its write does not undo it.
+    api.scrollToBottom()
+    layout({ scrollTop: 250, scrollHeight: 1100, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    flushRaf()
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: el.scrollTop, scrollHeight: 1300, clientHeight: 200 })
+    api.followToBottom()
+    flushRaf()
+    expect(el.scrollTop).toBe(1300)
+  })
+
+  it('keeps following when older rows load above a reader at the bottom', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+
+    await api.keepViewport(() => layout({ scrollTop: 800, scrollHeight: 1500, clientHeight: 200 }))
+    expect(el.scrollTop).toBe(1300)
+    // A turn's replay grows the list before the keep's own scroll event fires.
+    layout({ scrollTop: 1300, scrollHeight: 1700, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    api.followToBottom()
+    flushRaf()
+
+    expect(el.scrollTop).toBe(1700)
+  })
+
+  it('follows again once a conversation is opened, though the reader had scrolled up in the one before', async () => {
+    stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+
+    // The next conversation opens in the same list, which is pinned to its bottom.
+    layout({ scrollTop: 300, scrollHeight: 600, clientHeight: 200 })
+    api.scrollToBottom()
+    flushRaf()
+    layout({ scrollTop: el.scrollTop, scrollHeight: 900, clientHeight: 200 })
+    api.followToBottom()
+    flushRaf()
+
+    expect(el.scrollTop).toBe(900)
+  })
+
+  it('follows content that grows while a turn streams for a reader at the bottom, but not for one scrolled up', async () => {
+    const resize = stubResizeObserver()
+    const { api, streaming } = mountScroll()
+    const { el, content, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    streaming.value = true
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+
+    // A late render grows the turn's bubble with no frame after it.
+    layout({ scrollTop: 800, scrollHeight: 1300, clientHeight: 200 })
+    resize.fire([content])
+    expect(el.scrollTop).toBe(1300)
+
+    layout({ scrollTop: 400, scrollHeight: 1300, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 400, scrollHeight: 1600, clientHeight: 200 })
+    resize.fire([content])
+    expect(el.scrollTop).toBe(400)
+  })
+
   it('leaves a reader who scrolls up between a token and its frame where they went', async () => {
     stubResizeObserver()
     const { api } = mountScroll()

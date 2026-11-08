@@ -35,12 +35,32 @@ export function useChatScroll(
   const messagesEl = ref<HTMLElement | null>(null)
   let scrollRaf: number | null = null
 
+  // A viewport that shrinks (an expanded subagent chip above it) keeps scrollTop, dropping a reader off the bottom.
+  const BOTTOM_SLACK_PX = 24
+  let pinnedToBottom = true
+  // Set by the reader's own scrolling alone: content that grows under a reader at the bottom leaves them following a turn.
+  let readerAbove = false
+  function atBottom(el: HTMLElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
+  }
+
+  // The page's own scrollTop writes fire scroll events too, and content that grows before one fires leaves it short of
+  // the bottom: the event a write caused is not the reader scrolling up (JF-229).
+  let writtenTop: number | null = null
+  function setScrollTop(el: HTMLElement, top: number) {
+    const before = el.scrollTop
+    el.scrollTop = top
+    // Read back: the browser clamps the write to the last position it can reach. A write that moved nothing fires no
+    // event, so it records nothing, or the next scroll at that offset would pass for the page's own.
+    if (el.scrollTop !== before) writtenTop = el.scrollTop
+  }
+
   async function keepViewport(prepend: () => void): Promise<boolean> {
     const el = messagesEl.value
     const fromBottom = el ? el.scrollHeight - el.scrollTop : 0
     prepend()
     await nextTick()
-    if (el) el.scrollTop = el.scrollHeight - fromBottom
+    if (el) setScrollTop(el, el.scrollHeight - fromBottom)
     return true
   }
 
@@ -62,9 +82,14 @@ export function useChatScroll(
   }
 
   function scrollToBottom() {
+    // Every caller puts the reader at the bottom on purpose (a conversation opening, the operator's own send, a command's
+    // answer, rows appended for a reader at the bottom), so the view follows again whatever the reader did before: the
+    // list is reused across conversations.
+    readerAbove = false
+    pinnedToBottom = true
     if (scrollRaf) return
     scrollRaf = requestAnimationFrame(() => {
-      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+      if (messagesEl.value) setScrollTop(messagesEl.value, messagesEl.value.scrollHeight)
       scrollRaf = null
     })
   }
@@ -92,34 +117,42 @@ export function useChatScroll(
     })
   })
 
-  // A viewport that shrinks (an expanded subagent chip above it) keeps scrollTop, dropping a reader off the bottom.
-  const BOTTOM_SLACK_PX = 24
-  let pinnedToBottom = true
-  // Set by scroll events alone: content that grows under a reader at the bottom leaves them following a turn.
-  let readerAbove = false
-  function atBottom(el: HTMLElement): boolean {
-    return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
-  }
   function trackPinned(e: Event) {
-    pinnedToBottom = atBottom(e.currentTarget as HTMLElement)
-    readerAbove = !pinnedToBottom
+    const el = e.currentTarget as HTMLElement
+    const own = writtenTop != null && Math.abs(el.scrollTop - writtenTop) <= 1
+    writtenTop = null
+    if (own) {
+      // Content that grew since the page's own write moved the bottom, not the reader. A write that put them at the
+      // bottom puts them back to following, though they scrolled in the frame before it.
+      if (atBottom(el)) readerAbove = false
+      pinnedToBottom = !readerAbove
+    }
+    else {
+      pinnedToBottom = atBottom(el)
+      readerAbove = !pinnedToBottom
+    }
     void pullOlderNearTop()
   }
-  // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the bottom.
+  // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the
+  // bottom. While a turn streams, growth with no frame after it (a merge mid-turn, a late render) is followed instead,
+  // unless the reader scrolled away (JF-229). The end-of-turn merge lands with streaming already off: endTurn follows it.
   const resizeObserver = typeof ResizeObserver === 'undefined'
     ? null
     : new ResizeObserver((entries) => {
         const el = messagesEl.value
         if (!el) return
-        if (pinnedToBottom && entries.some(entry => entry.target === el)) el.scrollTop = el.scrollHeight
+        const viewportResized = entries.some(entry => entry.target === el)
+        if ((pinnedToBottom && viewportResized) || (streaming.value && !readerAbove)) setScrollTop(el, el.scrollHeight)
         pinnedToBottom = atBottom(el)
         void pullOlderNearTop()
       })
   let observedContent: Element | null = null
   watch(messagesEl, (el, prev) => {
-    // A new list (an empty chat's first turn mounts one) starts with its reader at the bottom.
+    // A new list (an empty chat's first turn mounts one) starts with its reader at the bottom, and the old list's pending
+    // scroll event never arrives.
     pinnedToBottom = true
     readerAbove = false
+    writtenTop = null
     if (!resizeObserver) return
     if (prev instanceof HTMLElement) {
       prev.removeEventListener('scroll', trackPinned)
@@ -148,7 +181,7 @@ export function useChatScroll(
     if (readerAbove || followRaf != null) return
     followRaf = requestAnimationFrame(() => {
       followRaf = null
-      if (!readerAbove && messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+      if (!readerAbove && messagesEl.value) setScrollTop(messagesEl.value, messagesEl.value.scrollHeight)
     })
   }
 
