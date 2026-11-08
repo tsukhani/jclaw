@@ -278,6 +278,10 @@ public class ToolRegistry {
          *  will receive, so the classification matches the call that would run. */
         default boolean dangerous(String argsJson) { return dangerous(); }
 
+        /** As {@link #dangerous(String)}, for a tool whose danger depends on which agent is calling:
+         *  {@code chrome_control} lets only the main agent be exempt from approving a form submit. */
+        default boolean dangerous(String argsJson, Agent agent) { return dangerous(argsJson); }
+
         /** The specific call {@code argsJson} makes, in a few words, for the approval prompt and the gate's log
          *  lines; {@code null} when the tool's name says enough. A standing grant covers the whole tool, so for a
          *  tool that reaches many different actions ({@code jclaw_api}) this is what says which one the gate let by. */
@@ -462,6 +466,12 @@ public class ToolRegistry {
     public static boolean isDangerous(@Nullable String toolName, String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous(argsJson);
+    }
+
+    /** {@link #isDangerous(String, String)} for a tool whose danger depends on the calling agent. */
+    public static boolean isDangerous(@Nullable String toolName, String argsJson, Agent agent) {
+        var tool = tools.get(toolName);
+        return tool != null && tool.dangerous(argsJson, agent);
     }
 
     /** {@link Tool#describeCall} of the registered tool, or {@code null} when there is none or no args. */
@@ -798,12 +808,16 @@ public class ToolRegistry {
      *  purpose-built agent stays a single click. */
     private static final String JCLAW_API_TOOL = "jclaw_api";
 
+    /** Drives the operator's own signed-in Chrome, so no agent has it until the operator grants it, and
+     *  a turn is offered it only where the owner reads the reply alone. */
+    private static final String CHROME_CONTROL_TOOL = "chrome_control";
+
     /**
      * JF-148: tools a turn is offered only where the owner reads the reply alone, whatever the agent was
      * granted. {@code jclaw_api} reaches JClaw's whole agent-callable API, and only its writes wait for
      * approval, so a guest's message could otherwise drive its reads, and a group would read the result.
      */
-    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL);
+    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL, CHROME_CONTROL_TOOL);
 
     /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
      *  with the other cross-turn-reach tools rather than defaulting on. */
@@ -847,7 +861,8 @@ public class ToolRegistry {
      * {@code filesystem}.
      */
     private static final List<String> OPT_IN_FOR_EVERY_AGENT = List.of(
-            GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL);
+            GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL,
+            CHROME_CONTROL_TOOL);
 
     /**
      * Tools main holds by default and every other agent has to be granted. The split is

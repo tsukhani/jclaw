@@ -107,7 +107,7 @@ class CredentialEncryptionConformanceTest extends UnitTest {
 
     /** Persistent attributes whose names read as credentials but hold none: a hash, a config key's name, a search key. */
     private static final Set<String> NOT_CREDENTIALS = Set.of(
-            "ApiToken.secretHash", "Config.key", "Memory.retrievalKey");
+            "ApiToken.secretHash", "ChromeBridgeToken.secretHash", "Config.key", "Memory.retrievalKey");
 
     /** The Config keys that hold third-party credentials today. Only asked, never written: other classes read them. */
     private static final List<String> CREDENTIAL_KEYS = List.of(

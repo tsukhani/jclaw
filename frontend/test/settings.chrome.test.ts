@@ -188,7 +188,7 @@ describe('Settings page — Chrome', () => {
 
     expect(component.html()).toContain('Main agent only')
     expect(checked(component, '[data-testid="chrome-allow-all"]')).toBe(false)
-    expect(checked(component, '[data-testid="chrome-submit-free"]')).toBe(false)
+    expect(checked(component, '[data-testid="chrome-click-free"]')).toBe(false)
     expect(component.findAll('[data-testid="chrome-allow-all"]')).toHaveLength(1)
   })
 
@@ -198,13 +198,13 @@ describe('Settings page — Chrome', () => {
 
     await component.find('[data-testid="chrome-allow-all"]').setValue(true)
     await vi.waitFor(() =>
-      expect(component.find('[data-testid="chrome-submit-free"]').attributes('disabled')).toBeUndefined())
-    await component.find('[data-testid="chrome-submit-free"]').setValue(true)
+      expect(component.find('[data-testid="chrome-click-free"]').attributes('disabled')).toBeUndefined())
+    await component.find('[data-testid="chrome-click-free"]').setValue(true)
     await vi.waitFor(() => expect(posted).toHaveLength(2))
 
     expect(posted).toEqual([
       { key: 'agent.main.chromeBridge.allowAllSites', value: 'true' },
-      { key: 'agent.main.chromeBridge.submitWithoutApproval', value: 'true' },
+      { key: 'agent.main.chromeBridge.clickWithoutApproval', value: 'true' },
     ])
     expect(checked(component, '[data-testid="chrome-allow-all"]')).toBe(true)
   })

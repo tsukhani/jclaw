@@ -17,7 +17,7 @@ class ChromeBridgePolicyTest extends UnitTest {
 
     private static final String NEVER = "loopback, private-network and malformed addresses are never allowed";
     private static final String MAIN_ONLY =
-            "Allowing every site and submitting without approval can only be set for the main agent.";
+            "Allowing every site and clicking without approval can only be set for the main agent.";
 
     private static final Map<String, String> HOSTS = Map.of(
             "example.com", "93.184.216.34",
@@ -32,7 +32,7 @@ class ChromeBridgePolicyTest extends UnitTest {
     void clear() {
         for (var name : List.of("main", "helper", "second")) {
             for (var setting : List.of(ChromeBridgePolicy.ALLOWED_SITES, ChromeBridgePolicy.ALLOW_ALL_SITES,
-                    ChromeBridgePolicy.SUBMIT_WITHOUT_APPROVAL)) {
+                    ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL)) {
                 ConfigService.delete(ChromeBridgePolicy.key(name, setting));
             }
         }
@@ -165,18 +165,18 @@ class ChromeBridgePolicyTest extends UnitTest {
     }
 
     @Test
-    void submitsNeedApprovalByDefaultForEveryAgent() {
-        assertTrue(ChromeBridgePolicy.submitNeedsApproval(unsaved("main")));
-        assertTrue(ChromeBridgePolicy.submitNeedsApproval(unsaved("helper")));
+    void clicksNeedApprovalByDefaultForEveryAgent() {
+        assertTrue(ChromeBridgePolicy.clickNeedsApproval(unsaved("main")));
+        assertTrue(ChromeBridgePolicy.clickNeedsApproval(unsaved("helper")));
     }
 
     @Test
-    void theSubmitOverrideReachesTheMainAgentOnly() {
-        set(unsaved("main"), ChromeBridgePolicy.SUBMIT_WITHOUT_APPROVAL, "true");
-        set(unsaved("helper"), ChromeBridgePolicy.SUBMIT_WITHOUT_APPROVAL, "true");
+    void theClickOverrideReachesTheMainAgentOnly() {
+        set(unsaved("main"), ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL, "true");
+        set(unsaved("helper"), ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL, "true");
 
-        assertFalse(ChromeBridgePolicy.submitNeedsApproval(unsaved("main")));
-        assertTrue(ChromeBridgePolicy.submitNeedsApproval(unsaved("helper")));
+        assertFalse(ChromeBridgePolicy.clickNeedsApproval(unsaved("main")));
+        assertTrue(ChromeBridgePolicy.clickNeedsApproval(unsaved("helper")));
     }
 
     @Test
@@ -211,7 +211,7 @@ class ChromeBridgePolicyTest extends UnitTest {
 
     @Test
     void theTwoPrivilegeKeysTakeTrueOrFalseForTheMainAgent() {
-        for (var setting : List.of(ChromeBridgePolicy.ALLOW_ALL_SITES, ChromeBridgePolicy.SUBMIT_WITHOUT_APPROVAL)) {
+        for (var setting : List.of(ChromeBridgePolicy.ALLOW_ALL_SITES, ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL)) {
             var main = unsaved("main");
             var key = ChromeBridgePolicy.key(main.name, setting);
             assertNull(ChromeBridgePolicy.rejectionFor(key, "true", main));
@@ -223,7 +223,7 @@ class ChromeBridgePolicyTest extends UnitTest {
     @Test
     void theTwoPrivilegeKeysAreRefusedForEveryOtherAgent() {
         var other = saved();
-        for (var setting : List.of(ChromeBridgePolicy.ALLOW_ALL_SITES, ChromeBridgePolicy.SUBMIT_WITHOUT_APPROVAL)) {
+        for (var setting : List.of(ChromeBridgePolicy.ALLOW_ALL_SITES, ChromeBridgePolicy.CLICK_WITHOUT_APPROVAL)) {
             assertEquals(MAIN_ONLY, ChromeBridgePolicy.rejectionFor(ChromeBridgePolicy.key(other.name, setting), "true"));
         }
     }

@@ -9,6 +9,7 @@ import services.EventLogger;
 import tools.AppInstallTool;
 import tools.CcrRetrieveTool;
 import tools.CheckListTool;
+import tools.ChromeControlTool;
 import tools.ConversationHistoryTool;
 import tools.ConversationListTool;
 import tools.ConversationSearchTool;
@@ -90,6 +91,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // page; per-agent disable still applies, and printing is physical and
         // irreversible, so most agents should leave it off.
         toolList.add(new PrinterTool());
+        toolList.add(new ChromeControlTool());
         // JCLAW-172: registered unconditionally — the old global `playwright.enabled` / `shell.enabled`
         // gates duplicated the per-agent enable on the Tools page (each agent's AgentToolConfig row decides).
         toolList.add(new PlaywrightBrowserTool());

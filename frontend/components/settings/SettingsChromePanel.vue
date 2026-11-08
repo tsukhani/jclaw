@@ -10,7 +10,7 @@ const { mutate, errorDetails: pairError } = useApiMutation()
 
 const SITES = 'allowedSites'
 const ALLOW_ALL = 'allowAllSites'
-const SUBMIT_FREE = 'submitWithoutApproval'
+const CLICK_FREE = 'clickWithoutApproval'
 const keyFor = (agent: Agent, setting: string) => `agent.${agent.name}.chromeBridge.${setting}`
 
 const agents = ref<Agent[]>([])
@@ -165,22 +165,22 @@ async function unpair() {
           </span>
         </label>
         <label
-          for="chrome-submit-free"
+          for="chrome-click-free"
           class="px-4 py-2.5 flex items-start gap-3 cursor-pointer"
         >
           <input
-            id="chrome-submit-free"
+            id="chrome-click-free"
             type="checkbox"
             class="mt-0.5 accent-emerald-600"
-            data-testid="chrome-submit-free"
-            :checked="isOn(mainAgent, SUBMIT_FREE)"
+            data-testid="chrome-click-free"
+            :checked="isOn(mainAgent, CLICK_FREE)"
             :disabled="saving"
-            @change="setOverride(mainAgent, SUBMIT_FREE, ($event.target as HTMLInputElement).checked)"
+            @change="setOverride(mainAgent, CLICK_FREE, ($event.target as HTMLInputElement).checked)"
           >
           <span class="text-sm text-fg-primary">
-            Submit forms without asking
+            Click without asking
             <span class="block text-xs text-fg-muted">
-              Every other agent asks you before it submits a form.
+              Every other agent asks you before it clicks anything except a plain link.
             </span>
           </span>
         </label>

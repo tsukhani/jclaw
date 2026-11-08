@@ -260,7 +260,7 @@ public final class DangerousActionGate {
      */
     public static Decision guard(Agent agent, @Nullable Long conversationId,
                                  @Nullable String toolName, String argsJson) {
-        if (agent == null || !ToolRegistry.isDangerous(toolName, argsJson)) {
+        if (agent == null || !ToolRegistry.isDangerous(toolName, argsJson, agent)) {
             return Decision.PROCEED;
         }
         return arbitrate(agent, conversationId, toolName, argsJson);

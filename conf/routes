@@ -337,6 +337,7 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 GET     /api/chrome-bridge                      ApiChromeBridgeController.status
 POST    /api/chrome-bridge/pairing              ApiChromeBridgeController.pair
 DELETE  /api/chrome-bridge/pairing              ApiChromeBridgeController.unpair
+WS      /api/chrome-bridge/socket               ChromeBridgeSocketController.socket
 
 # Software Factory status, board and story logs (JCLAW-1391)
 GET     /api/factory                            ApiFactoryController.status

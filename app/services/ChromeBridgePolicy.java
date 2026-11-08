@@ -26,12 +26,12 @@ public final class ChromeBridgePolicy {
 
     public static final String ALLOWED_SITES = "allowedSites";
     public static final String ALLOW_ALL_SITES = "allowAllSites";
-    public static final String SUBMIT_WITHOUT_APPROVAL = "submitWithoutApproval";
+    public static final String CLICK_WITHOUT_APPROVAL = "clickWithoutApproval";
 
     static final int MAX_PATTERNS = 200;
 
     private static final Pattern KEY = Pattern.compile(
-            "agent\\.(.+)\\.chromeBridge\\.(" + ALLOWED_SITES + "|" + ALLOW_ALL_SITES + "|" + SUBMIT_WITHOUT_APPROVAL + ")");
+            "agent\\.(.+)\\.chromeBridge\\.(" + ALLOWED_SITES + "|" + ALLOW_ALL_SITES + "|" + CLICK_WITHOUT_APPROVAL + ")");
 
     private static final Pattern HOST_PATTERN = Pattern.compile(
             "(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+");
@@ -73,9 +73,9 @@ public final class ChromeBridgePolicy {
         return null;
     }
 
-    /** True when a form submission by {@code agent} must be approved by the operator first. */
-    public static boolean submitNeedsApproval(Agent agent) {
-        return !(agent.isMain() && ConfigService.getBoolean(key(agent.name, SUBMIT_WITHOUT_APPROVAL), false));
+    /** True when a click by {@code agent} must be approved by the operator first, unless it is on a plain link. */
+    public static boolean clickNeedsApproval(Agent agent) {
+        return !(agent.isMain() && ConfigService.getBoolean(key(agent.name, CLICK_WITHOUT_APPROVAL), false));
     }
 
     public static List<String> allowedSites(Agent agent) {
@@ -103,7 +103,7 @@ public final class ChromeBridgePolicy {
         var setting = m.group(2);
         if (setting.equals(ALLOWED_SITES)) return sitesRejection(key, value);
         if (!agent.isMain()) {
-            return "Allowing every site and submitting without approval can only be set for the main agent.";
+            return "Allowing every site and clicking without approval can only be set for the main agent.";
         }
         return value.equals("true") || value.equals("false") ? null : key + " must be true or false.";
     }

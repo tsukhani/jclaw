@@ -908,6 +908,33 @@ The `browser` tool needs two things on this machine: a driver, which is a copy o
 
 Anything missing downloads the first time an agent uses the browser: the official Node.js release from nodejs.org, checked against a hash built into JClaw, then Chromium from Playwright's own servers. Together that is roughly 300 MB, so that first reply waits a few minutes, and the chat shows a progress bar under it while it does. **Download now** fetches both ahead of time, with the same progress shown here. In Docker both land on the `data` volume, so they download once rather than on every image upgrade. A download needs access to nodejs.org and Playwright's download servers; on a machine without it, set `PLAYWRIGHT_NODEJS_PATH` to a Node.js you have installed. If a download fails, the panel says why and offers the button again.
 
+## Chrome
+
+Lets an agent work in your own Chrome, signed in as you, but only inside a tab group named **JClaw**. It uses a small extension in your browser. The extension reaches nothing outside that group: tabs you open yourself stay private unless you drag one into it.
+
+A page an agent opens in the group sees your saved logins. That is why each agent has its own list of sites it may open, and why you pair the extension yourself.
+
+**Pair the extension.** Click **Pair extension**. JClaw shows a token once. Load the extension from the `chrome-extension` folder of this install (in Chrome, `chrome://extensions`, turn on Developer mode, **Load unpacked**), click its icon, and paste the token. The status then reads **Paired**. **Pair again** makes a new token and cancels the old one. **Unpair** cancels the token, and the extension can no longer connect.
+
+An agent can use Chrome only after you turn on the `chrome_control` tool on that agent's own page, under [Agents](/guide#agents), and only in a chat where you are the one reading the reply.
+
+**Sites each agent may open.** Each agent has a box with one site per line. `example.com` allows that site only. `*.example.com` allows its subdomains, but not `example.com` itself. An empty box opens nothing. Only you can change these lists; an agent cannot change its own.
+
+**Main agent only.** Two options belong to the main agent and cannot be set for any other agent:
+
+- **Allow any site** skips the list. Loopback and private-network addresses, including this JClaw instance, stay blocked, because your browser is signed in to JClaw.
+- **Click without asking** lets the main agent click without waiting for your approval. Every other agent asks you before it clicks anything except a plain link, so a button, a form control or a styled box with a click handler all wait for you.
+
+A plain link does not ask. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through without asking, and so does a link whose page runs a script on click.
+
+A page can contain text that tries to give the agent instructions. JClaw marks page text as untrusted when it hands it to the agent, but that is a help and not a guarantee. Keep the lists short. The site list is the stronger protection, and the approval prompt is a second check, not a guarantee.
+
+| Key | Meaning |
+|---|---|
+| `agent.<name>.chromeBridge.allowedSites` | The sites that agent may open, separated by spaces. |
+| `agent.main.chromeBridge.allowAllSites` | `true` or `false`. JClaw refuses it for any agent but `main`. |
+| `agent.main.chromeBridge.clickWithoutApproval` | `true` or `false`. JClaw refuses it for any agent but `main`. |
+
 ## Tasks
 
 Five knobs for the [Tasks](/guide#tasks) subsystem:

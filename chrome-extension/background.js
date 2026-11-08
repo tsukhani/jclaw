@@ -17,16 +17,23 @@ async function config() {
 async function connect() {
   const { token, port } = await config()
   if (!token || ws) return
-  const sock = new WebSocket(`ws://127.0.0.1:${port}/chrome-bridge?token=${encodeURIComponent(token)}`)
+  const sock = new WebSocket(`ws://127.0.0.1:${port}/api/chrome-bridge/socket`)
   ws = sock
-  sock.onopen = () => {
-    retry = 1000
-    chrome.storage.local.set({ status: 'connected' })
-    keepalive = setInterval(() => sock.send(JSON.stringify({ type: 'ping' })), KEEPALIVE_MS)
-  }
+  // The token goes in the first frame, never the URL, so it stays out of access logs.
+  sock.onopen = () => sock.send(JSON.stringify({ type: 'hello', token }))
   sock.onmessage = async (ev) => {
     const msg = JSON.parse(ev.data)
     if (msg.type === 'pong') return
+    if (msg.type === 'ready') {
+      retry = 1000
+      chrome.storage.local.set({ status: 'connected' })
+      keepalive = setInterval(() => sock.send(JSON.stringify({ type: 'ping' })), KEEPALIVE_MS)
+      return
+    }
+    if (msg.type === 'error') {
+      chrome.storage.local.set({ status: 'refused: ' + msg.message })
+      return
+    }
     try {
       sock.send(JSON.stringify({ id: msg.id, ok: true, result: await handle(msg) }))
     } catch (e) {
@@ -96,11 +103,18 @@ async function handle(msg) {
     }
     case 'navigate': {
       if (typeof msg.url !== 'string' || BLOCKED.test(msg.url) || !/^https?:/i.test(msg.url)) throw new Error('only http(s) URLs are allowed')
-      if (msg.tabId === undefined) return { tabId: (await openGroupedTab(msg.url)).id }
+      if (msg.tabId === undefined) {
+        const opened = await openGroupedTab(msg.url)
+        return { tabId: opened.id, url: (await chrome.tabs.get(opened.id)).url }
+      }
       const tab = await groupedTab(msg.tabId)
       await chrome.tabs.update(tab.id, { url: msg.url })
       await waitForLoad(tab.id)
-      return { tabId: tab.id }
+      return { tabId: tab.id, url: (await chrome.tabs.get(tab.id)).url }
+    }
+    case 'tab_info': {
+      const tab = await groupedTab(msg.tabId)
+      return { tabId: tab.id, url: tab.url, title: tab.title }
     }
     case 'close': {
       const tab = await groupedTab(msg.tabId)
@@ -162,6 +176,9 @@ function readPage(maxText, maxElements) {
       type: el.getAttribute('type') ?? undefined,
       text: (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80),
       href: el.getAttribute('href') ?? undefined,
+      // A plain link: the only click the server lets an agent make without asking. A click handler on
+      // a link, or a javascript: href, is not plain, so it is not flagged.
+      link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
     })
     if (n >= maxElements) break
   }
