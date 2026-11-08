@@ -404,6 +404,13 @@ public final class DangerousActionGate {
         if ("ask".equalsIgnoreCase(policy)) {
             return askViaTelegram(agent, toolName, argsJson, chan);
         }
+        if (ToolRegistry.neverRunsUnasked(toolName)) {
+            EventLogger.warn(LOG_CATEGORY, agent.name, chan,
+                    "Dangerous tool %s on trusted origin '%s' never runs unasked and %s=allow asks no one — denying; "
+                            .formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY)
+                            + "set it to ask to confirm in the bound Telegram DM");
+            return Decision.ABORT;
+        }
         EventLogger.info(LOG_CATEGORY, agent.name, chan,
                 "Dangerous tool %s on trusted origin '%s' — proceeding ungated (%s=allow)"
                         .formatted(subject(toolName, argsJson), chan, CFG_OFF_CHANNEL_POLICY));

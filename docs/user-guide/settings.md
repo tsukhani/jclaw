@@ -918,14 +918,18 @@ A page an agent opens in the group sees your saved logins. That is why each agen
 
 An agent can use Chrome only after you turn on the `chrome_control` tool on that agent's own page, under [Agents](/guide#agents), and only in a chat where you are the one reading the reply.
 
+**What an agent can do.** Open a page, read it (its text, and each button and link with where the link goes; a long page is read in pieces), find an element by its words, take a screenshot, click, type, choose a dropdown option or tick a box, press a key, scroll, hover, drag, resize the window, and see the page's console messages and the addresses it requested. A screenshot is saved to the agent's workspace and shown in the chat. Network lists show addresses only, without the part after `?`, and never headers or contents. Running a script on the page and uploading a file are not offered.
+
+Pressing a key, dragging, and clicking at a point count as clicks for approval, because they can activate anything. Chrome shows a bar saying **JClaw Bridge started debugging this browser** on a tab the agent is using. The extension needs that permission to send real clicks and keys, and to take screenshots of a tab you are not looking at. The bar goes when the tab closes or you dismiss it.
+
 **Sites each agent may open.** Each agent has a box with one site per line. `example.com` allows that site only. `*.example.com` allows its subdomains, but not `example.com` itself. An empty box opens nothing. Only you can change these lists; an agent cannot change its own.
 
 **Main agent only.** Two options belong to the main agent and cannot be set for any other agent:
 
 - **Allow any site** skips the list. Loopback and private-network addresses, including this JClaw instance, stay blocked, because your browser is signed in to JClaw.
-- **Click without asking** lets the main agent click without any approval step. For every other agent, a click on anything except a plain link goes through [Tool Approvals](#settings-tool-approvals): with the default `allow` it runs, with `ask` you confirm it in the agent's bound Telegram DM, and with `deny` it is refused. A button, a form control and a styled box with a click handler are all treated alike.
+- **Click without asking** lets the main agent click without any approval step. For every other agent, a click on anything except a plain link is **refused**, whatever [Tool Approvals](#settings-tool-approvals) is set to, unless that setting is `ask`: then JClaw sends a confirmation to the agent's bound Telegram DM and the click waits for your answer. A button, a form control and a styled box with a click handler are all treated alike. The model is told the action was not approved.
 
-A plain link never goes through approval. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through, and so does a link whose page runs a script on click. Because the default is `allow`, nothing asks you in the web chat unless you change that setting.
+A plain link never needs approval. A link that changes something when it is opened, such as a sign-out or a confirm link, goes through, and so does a link whose page runs a script on click.
 
 A page can contain text that tries to give the agent instructions. JClaw marks page text as untrusted when it hands it to the agent, but that is a help and not a guarantee. Keep the lists short. The site list is the stronger protection, and the approval prompt is a second check, not a guarantee.
 
@@ -1001,6 +1005,8 @@ What a dangerous action does when it cannot reach you for approval. It covers ev
 |-----|---------|---------|
 | `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` (see below). |
 | `telegram.approval.timeout-seconds` | 300 | How long an approval prompt in Telegram or Slack waits for your answer before it expires unanswered. Minimum 1. |
+
+One tool is stricter than this setting. A click by the `chrome_control` tool on anything except a plain link is refused under `allow`, because the page it clicks is your own signed-in browser; `ask` and `deny` behave as the table says. The main agent can be exempted in [Settings → Chrome](#settings-chrome).
 
 This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted (the channel already established that the sender was you), so this policy is what decides them:
 

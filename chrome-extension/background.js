@@ -86,6 +86,85 @@ function waitForLoad(tabId) {
   })
 }
 
+// Real browser input and screenshots need the debugger API: a scripted DOM event is untrusted, so a
+// synthetic Enter does not submit a form. It shows Chrome's "started debugging this browser" bar on an
+// attached tab. Every use goes through groupedTab first, which is the only thing keeping this to the group.
+const CDP_VERSION = '1.3'
+const MAX_BUFFER = 200
+const attached = new Map()
+
+async function ensureAttached(tabId) {
+  if (attached.has(tabId)) return attached.get(tabId)
+  try {
+    await chrome.debugger.attach({ tabId }, CDP_VERSION)
+  } catch (e) {
+    // A restarted service worker forgets what it attached; Chrome still has the tab attached.
+    if (!/already attached/i.test(String(e.message ?? e))) throw e
+  }
+  const state = { console: [], network: [] }
+  attached.set(tabId, state)
+  for (const domain of ['Runtime', 'Network', 'Page']) await chrome.debugger.sendCommand({ tabId }, `${domain}.enable`)
+  return state
+}
+
+async function cdp(tabId, method, params = {}) {
+  await ensureAttached(tabId)
+  return chrome.debugger.sendCommand({ tabId }, method, params)
+}
+
+function remember(list, entry) {
+  list.push(entry)
+  if (list.length > MAX_BUFFER) list.shift()
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  const state = attached.get(source.tabId)
+  if (!state) return
+  if (method === 'Runtime.consoleAPICalled') {
+    remember(state.console, `${params.type}: ${params.args.map((a) => a.value ?? a.description ?? a.type).join(' ')}`.slice(0, 500))
+  } else if (method === 'Runtime.exceptionThrown') {
+    remember(state.console, `exception: ${params.exceptionDetails.text} ${params.exceptionDetails.exception?.description ?? ''}`.slice(0, 500))
+  } else if (method === 'Network.requestWillBeSent') {
+    // The address without its query: a query string is where a token would be, and headers and bodies are never read.
+    const u = new URL(params.request.url)
+    remember(state.network, { id: params.requestId, method: params.request.method, url: u.origin + u.pathname })
+  } else if (method === 'Network.responseReceived') {
+    const row = state.network.findLast((r) => r.id === params.requestId)
+    if (row) row.status = params.response.status
+  }
+})
+chrome.debugger.onDetach.addListener((source) => attached.delete(source.tabId))
+chrome.tabs.onRemoved.addListener((tabId) => attached.delete(tabId))
+
+const MODIFIERS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
+const KEYS = {
+  Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ' ': 32, Home: 36, End: 35,
+  PageUp: 33, PageDown: 34, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+}
+
+async function pointOf(tabId, msg) {
+  if (Number.isFinite(msg.x) && Number.isFinite(msg.y)) return { x: msg.x, y: msg.y }
+  if (!msg.ref) throw new Error('give a ref or x and y')
+  const r = await run(tabId, (ref) => {
+    const el = window.__agentRefs?.get(ref)
+    if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+    el.scrollIntoView({ block: 'center', inline: 'center' })
+    const b = el.getBoundingClientRect()
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+  }, [msg.ref])
+  return r
+}
+
+async function mouse(tabId, type, x, y, extra = {}) {
+  await cdp(tabId, 'Input.dispatchMouseEvent', { type, x, y, button: 'none', ...extra })
+}
+
+async function pressAt(tabId, x, y, button = 'left', count = 1) {
+  await mouse(tabId, 'mouseMoved', x, y)
+  await mouse(tabId, 'mousePressed', x, y, { button, clickCount: count })
+  await mouse(tabId, 'mouseReleased', x, y, { button, clickCount: count })
+}
+
 // A click can start a navigation that has not begun when the script returns. Without waiting, the agent's
 // next read still sees the page it just left.
 async function settleAfterClick(tabId, before) {
@@ -140,7 +219,7 @@ async function handle(msg) {
     }
     case 'read': {
       const tab = await groupedTab(msg.tabId)
-      return run(tab.id, readPage, [MAX_TEXT, MAX_ELEMENTS])
+      return run(tab.id, readPage, [MAX_TEXT, MAX_ELEMENTS, Math.max(0, Number(msg.offset) || 0)])
     }
     case 'click': {
       const tab = await groupedTab(msg.tabId)
@@ -169,9 +248,139 @@ async function handle(msg) {
     }
     case 'screenshot': {
       const tab = await groupedTab(msg.tabId)
-      // captureVisibleTab only sees the focused tab of its window.
-      await chrome.tabs.update(tab.id, { active: true })
-      return { dataUrl: await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }) }
+      const shot = await cdp(tab.id, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: msg.fullPage === true })
+      return { data: shot.data, url: (await chrome.tabs.get(tab.id)).url }
+    }
+    case 'scroll': {
+      const tab = await groupedTab(msg.tabId)
+      return run(tab.id, (ref, dx, dy) => {
+        if (ref) {
+          const el = window.__agentRefs?.get(ref)
+          if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+          el.scrollIntoView({ block: 'center' })
+        } else {
+          window.scrollBy(dx, dy)
+        }
+        return { scrollY: Math.round(window.scrollY), maxScrollY: Math.round(document.documentElement.scrollHeight - window.innerHeight) }
+      }, [msg.ref ?? null, Number(msg.deltaX) || 0, Number(msg.deltaY) || 0])
+    }
+    case 'hover': {
+      const tab = await groupedTab(msg.tabId)
+      const p = await pointOf(tab.id, msg)
+      if (p.error) throw new Error(p.error)
+      await mouse(tab.id, 'mouseMoved', p.x, p.y)
+      return { done: 'hovered' }
+    }
+    case 'click_at': {
+      const tab = await groupedTab(msg.tabId)
+      const before = tab.url
+      await pressAt(tab.id, msg.x, msg.y, msg.button ?? 'left', msg.count ?? 1)
+      await settleAfterClick(tab.id, before)
+      return { done: 'clicked' }
+    }
+    case 'drag': {
+      const tab = await groupedTab(msg.tabId)
+      await mouse(tab.id, 'mouseMoved', msg.x, msg.y)
+      await mouse(tab.id, 'mousePressed', msg.x, msg.y, { button: 'left', clickCount: 1 })
+      for (let i = 1; i <= 8; i++) {
+        await mouse(tab.id, 'mouseMoved', msg.x + ((msg.toX - msg.x) * i) / 8, msg.y + ((msg.toY - msg.y) * i) / 8, { button: 'left' })
+      }
+      await mouse(tab.id, 'mouseReleased', msg.toX, msg.toY, { button: 'left', clickCount: 1 })
+      return { done: 'dragged' }
+    }
+    case 'key': {
+      const tab = await groupedTab(msg.tabId)
+      const key = String(msg.key)
+      const code = KEYS[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : undefined)
+      if (code === undefined) throw new Error(`unknown key ${key}`)
+      const modifiers = (msg.modifiers ?? []).reduce((m, name) => m | (MODIFIERS[String(name).toLowerCase()] ?? 0), 0)
+      const text = key.length === 1 && !(modifiers & (MODIFIERS.ctrl | MODIFIERS.meta)) ? key : key === 'Enter' ? '\r' : undefined
+      const base = { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, windowsVirtualKeyCode: code, modifiers }
+      const before = tab.url
+      await cdp(tab.id, 'Input.dispatchKeyEvent', { ...base, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }) })
+      await cdp(tab.id, 'Input.dispatchKeyEvent', { ...base, type: 'keyUp' })
+      await settleAfterClick(tab.id, before)
+      return { done: 'pressed' }
+    }
+    case 'form_input': {
+      const tab = await groupedTab(msg.tabId)
+      return run(tab.id, (ref, value) => {
+        const el = window.__agentRefs?.get(ref)
+        if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+        const fire = () => {
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+        if (el instanceof HTMLSelectElement) {
+          const want = String(value).toLowerCase()
+          const option = [...el.options].find((o) => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want)
+          if (!option) return { error: `no option ${value}; options are ${[...el.options].map((o) => o.text.trim()).join(', ')}` }
+          el.value = option.value
+          fire()
+          return { done: `selected ${option.text.trim()}` }
+        }
+        if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+          el.checked = value === true || String(value).toLowerCase() === 'true'
+          fire()
+          return { done: el.checked ? 'checked' : 'unchecked' }
+        }
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+          Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, String(value))
+          fire()
+          return { done: 'set' }
+        }
+        return { error: 'that element takes no value' }
+      }, [msg.ref, msg.value])
+    }
+    case 'find': {
+      const tab = await groupedTab(msg.tabId)
+      return run(tab.id, (query, limit) => {
+        const words = String(query).toLowerCase().split(/\s+/).filter(Boolean)
+        if (!window.__agentRefs) window.__agentRefs = new Map()
+        const hits = []
+        let n = window.__agentRefs.size
+        for (const el of document.querySelectorAll('a[href],button,input,textarea,select,[role=button],[onclick],h1,h2,h3,label')) {
+          const b = el.getBoundingClientRect()
+          if (b.width === 0 || b.height === 0) continue
+          const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80)
+          const hay = `${text} ${el.getAttribute('aria-label') ?? ''} ${el.placeholder ?? ''} ${el.name ?? ''} ${el.id ?? ''}`.toLowerCase()
+          const score = words.filter((w) => hay.includes(w)).length
+          if (score === 0) continue
+          hits.push({ score, el, text })
+        }
+        hits.sort((a, b) => b.score - a.score)
+        return {
+          matches: hits.slice(0, limit).map(({ el, text }) => {
+            const ref = `f${++n}`
+            window.__agentRefs.set(ref, el)
+            return {
+              ref, tag: el.tagName.toLowerCase(), text,
+              href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
+              link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
+            }
+          }),
+        }
+      }, [msg.query, 10])
+    }
+    case 'resize': {
+      const tab = await groupedTab(msg.tabId)
+      await chrome.windows.update(tab.windowId, { state: 'normal', width: msg.width, height: msg.height })
+      return { done: 'resized' }
+    }
+    case 'console': {
+      const tab = await groupedTab(msg.tabId)
+      const state = await ensureAttached(tab.id)
+      const lines = [...state.console]
+      if (msg.clear) state.console.length = 0
+      return { lines }
+    }
+    case 'network': {
+      const tab = await groupedTab(msg.tabId)
+      const state = await ensureAttached(tab.id)
+      const rows = state.network.map(({ method, url, status }) => ({ method, url, status }))
+      if (msg.clear) state.network.length = 0
+      return { rows }
     }
     default:
       throw new Error(`unknown action ${msg.action}`)
@@ -179,14 +388,19 @@ async function handle(msg) {
 }
 
 // Injected into the page: must be self-contained.
-function readPage(maxText, maxElements) {
+function readPage(maxText, maxElements, offset) {
   window.__agentRefs = new Map()
   const sel = 'a[href],button,input,textarea,select,[role=button],[onclick]'
   const elements = []
   let n = 0
+  let more = false
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect()
     if (r.width === 0 || r.height === 0) continue
+    if (n >= maxElements) {
+      more = true
+      break
+    }
     const ref = `e${++n}`
     window.__agentRefs.set(ref, el)
     elements.push({
@@ -194,14 +408,23 @@ function readPage(maxText, maxElements) {
       tag: el.tagName.toLowerCase(),
       type: el.getAttribute('type') ?? undefined,
       text: (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 80),
-      href: el.getAttribute('href') ?? undefined,
+      // The absolute address, so the agent can see where a link goes before it clicks.
+      href: el.tagName === 'A' ? el.href.slice(0, 300) : undefined,
       // A plain link: the only click the server lets an agent make without asking. A click handler on
       // a link, or a javascript: href, is not plain, so it is not flagged.
       link: el.tagName === 'A' && el.hasAttribute('href') && !/^\s*javascript:/i.test(el.getAttribute('href')),
     })
-    if (n >= maxElements) break
   }
-  return { title: document.title, url: location.href, text: document.body.innerText.slice(0, maxText), elements }
+  const full = document.body.innerText
+  return {
+    title: document.title,
+    url: location.href,
+    text: full.slice(offset, offset + maxText),
+    textOffset: offset,
+    textLength: full.length,
+    elements,
+    elementsTruncated: more,
+  }
 }
 
 chrome.storage.onChanged.addListener((c) => { if (c.token || c.port) { ws?.close(); ws = null; connect() } })

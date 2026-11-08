@@ -282,6 +282,12 @@ public class ToolRegistry {
          *  {@code chrome_control} lets only the main agent be exempt from approving a form submit. */
         default boolean dangerous(String argsJson, Agent agent) { return dangerous(argsJson); }
 
+        /** A call this tool classifies dangerous never runs just because the off-channel policy is {@code allow}:
+         *  with nobody to ask, the gate refuses it. Only an operator-set {@code ask}, answered in the bound Telegram
+         *  DM, lets it through. {@code chrome_control} opts in, since the page it clicks is the operator's own,
+         *  signed-in one. */
+        default boolean neverRunsUnasked() { return false; }
+
         /** The specific call {@code argsJson} makes, in a few words, for the approval prompt and the gate's log
          *  lines; {@code null} when the tool's name says enough. A standing grant covers the whole tool, so for a
          *  tool that reaches many different actions ({@code jclaw_api}) this is what says which one the gate let by. */
@@ -466,6 +472,12 @@ public class ToolRegistry {
     public static boolean isDangerous(@Nullable String toolName, String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous(argsJson);
+    }
+
+    /** {@link Tool#neverRunsUnasked()} of the registered tool, false for an unknown name. */
+    public static boolean neverRunsUnasked(@Nullable String toolName) {
+        var tool = tools.get(toolName);
+        return tool != null && tool.neverRunsUnasked();
     }
 
     /** {@link #isDangerous(String, String)} for a tool whose danger depends on the calling agent. */

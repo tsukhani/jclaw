@@ -81,7 +81,7 @@ class DangerousActionGateTest extends UnitTest {
         // running class last published.
         ToolRegistrySync.canonicalForTest();
         ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false),
-                new tools.JClawApiTool()));
+                new tools.JClawApiTool(), new tools.ChromeControlTool()));
     }
 
     @AfterEach
@@ -465,6 +465,43 @@ class DangerousActionGateTest extends UnitTest {
                 DangerousActionGate.guard(agent, convId, JCLAW_API, MUTATION_ARGS));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a web-origin jclaw_api mutation proceeds unprompted");
+    }
+
+    private static final String CHROME_CONTROL = "chrome_control";
+    private static final String CHROME_CLICK = "{\"action\":\"click\",\"tabId\":7,\"ref\":\"e1\"}";
+
+    @Test
+    void aChromeClickOnTheWebIsRefusedEvenUnderTheAllowDefault() {
+        // chrome_control drives the operator's own signed-in browser, so "allow" asks no one and is not enough.
+        var agent = unboundAgent("gate-chrome-web");
+        var convId = webConvId(agent);
+
+        var logged = gateLines(() -> assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, CHROME_CONTROL, CHROME_CLICK)));
+
+        assertEquals(List.of("Dangerous tool 'chrome_control' (click e1 on tab 7) on trusted origin 'web' never runs "
+                + "unasked and tool.approval.offChannelPolicy=allow asks no one — denying; set it to ask to confirm "
+                + "in the bound Telegram DM"), logged);
+    }
+
+    @Test
+    void aChromeKeyPressOnTheWebIsRefusedToo() {
+        var agent = unboundAgent("gate-chrome-key");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.ABORT, DangerousActionGate.guard(agent, convId, CHROME_CONTROL,
+                "{\"action\":\"key\",\"tabId\":7,\"key\":\"Enter\"}"));
+    }
+
+    @Test
+    void aChromeActionThatIsNotAClickIsNotGated() {
+        var agent = unboundAgent("gate-chrome-nav");
+        var convId = webConvId(agent);
+
+        var logged = gateLines(() -> assertEquals(Decision.PROCEED, DangerousActionGate.guard(agent, convId,
+                CHROME_CONTROL, "{\"action\":\"navigate\",\"url\":\"https://example.com/\"}")));
+
+        assertEquals(List.of(), logged);
     }
 
     @Test

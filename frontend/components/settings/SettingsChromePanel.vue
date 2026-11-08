@@ -180,7 +180,8 @@ async function unpair() {
           <span class="text-sm text-fg-primary">
             Click without asking
             <span class="block text-xs text-fg-muted">
-              For every other agent, a click on anything except a plain link goes through Tool Approvals.
+              For every other agent, a click on anything except a plain link is refused, unless Tool
+              Approvals is set to ask, which sends a confirmation to the agent's Telegram DM.
             </span>
           </span>
         </label>
