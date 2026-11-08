@@ -101,15 +101,27 @@ async function ensureAttached(tabId) {
     // A restarted service worker forgets what it attached; Chrome still has the tab attached.
     if (!/already attached/i.test(String(e.message ?? e))) throw e
   }
-  const state = { console: [], network: [] }
+  const state = { console: [], network: [], dragData: null }
   attached.set(tabId, state)
   for (const domain of ['Runtime', 'Network', 'Page']) await chrome.debugger.sendCommand({ tabId }, `${domain}.enable`)
+  // The agent's tabs open in the background, and Chrome does not deliver real key events to a page that does
+  // not think it has focus.
+  await chrome.debugger.sendCommand({ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
   return state
 }
 
 async function cdp(tabId, method, params = {}) {
-  await ensureAttached(tabId)
-  return chrome.debugger.sendCommand({ tabId }, method, params)
+  try {
+    await ensureAttached(tabId)
+    return await chrome.debugger.sendCommand({ tabId }, method, params)
+  } catch (e) {
+    if (!/Cannot access a chrome-extension/i.test(String(e.message ?? e))) throw e
+    // Another extension's frame was mid-injection into the page; a clean re-attach clears it.
+    attached.delete(tabId)
+    await chrome.debugger.detach({ tabId }).catch(() => {})
+    await ensureAttached(tabId)
+    return chrome.debugger.sendCommand({ tabId }, method, params)
+  }
 }
 
 function remember(list, entry) {
@@ -120,7 +132,9 @@ function remember(list, entry) {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const state = attached.get(source.tabId)
   if (!state) return
-  if (method === 'Runtime.consoleAPICalled') {
+  if (method === 'Input.dragIntercepted') {
+    state.dragData = params.data
+  } else if (method === 'Runtime.consoleAPICalled') {
     remember(state.console, `${params.type}: ${params.args.map((a) => a.value ?? a.description ?? a.type).join(' ')}`.slice(0, 500))
   } else if (method === 'Runtime.exceptionThrown') {
     remember(state.console, `exception: ${params.exceptionDetails.text} ${params.exceptionDetails.exception?.description ?? ''}`.slice(0, 500))
@@ -150,7 +164,7 @@ async function pointOf(tabId, msg) {
     if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
     el.scrollIntoView({ block: 'center', inline: 'center' })
     const b = el.getBoundingClientRect()
-    return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2, zero: b.width === 0 || b.height === 0 }
   }, [msg.ref])
   return r
 }
@@ -223,15 +237,22 @@ async function handle(msg) {
     }
     case 'click': {
       const tab = await groupedTab(msg.tabId)
-      const clicked = await run(tab.id, (ref) => {
-        const el = window.__agentRefs?.get(ref)
-        if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
-        el.scrollIntoView({ block: 'center' })
-        el.click()
-        return { done: 'clicked' }
-      }, [msg.ref])
+      // A real click, so an input takes focus and a handler sees a trusted event; an element with no size
+      // cannot be pointed at, so it keeps the scripted click.
+      const p = await pointOf(tab.id, msg)
+      if (p.zero) {
+        const clicked = await run(tab.id, (ref) => {
+          const el = window.__agentRefs?.get(ref)
+          if (!el || !el.isConnected) return { error: `stale or unknown ref ${ref}` }
+          el.click()
+          return { done: 'clicked' }
+        }, [msg.ref])
+        await settleAfterClick(tab.id, tab.url)
+        return clicked
+      }
+      await pressAt(tab.id, p.x, p.y)
       await settleAfterClick(tab.id, tab.url)
-      return clicked
+      return { done: 'clicked' }
     }
     case 'type': {
       const tab = await groupedTab(msg.tabId)
@@ -248,7 +269,23 @@ async function handle(msg) {
     }
     case 'screenshot': {
       const tab = await groupedTab(msg.tabId)
-      const shot = await cdp(tab.id, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: msg.fullPage === true })
+      // One image pixel per page (CSS) pixel, so a point read off the image is the point click and hover take.
+      // Without the clip, a 2x display gives an image twice the size and every coordinate twice too far.
+      const m = await cdp(tab.id, 'Page.getLayoutMetrics')
+      // The clip's scale is multiplied by the display's pixel ratio, so ask for its inverse.
+      const dpr = (await cdp(tab.id, 'Runtime.evaluate', { expression: 'window.devicePixelRatio', returnByValue: true })).result.value || 1
+      const full = msg.fullPage === true
+      const v = m.cssVisualViewport
+      const base = full
+        ? { x: 0, y: 0, width: Math.min(m.cssContentSize.width, 4000), height: Math.min(m.cssContentSize.height, 16000) }
+        : { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight }
+      // A frame of a recording is smaller still: capped to maxWidth, in WebP or PNG as the recorder asks.
+      const shrink = Number(msg.maxWidth) > 0 ? Math.min(1, Number(msg.maxWidth) / base.width) : 1
+      const format = msg.format === 'webp' ? 'webp' : 'png'
+      const shot = await cdp(tab.id, 'Page.captureScreenshot', {
+        format, captureBeyondViewport: full, clip: { ...base, scale: shrink / dpr },
+        ...(format === 'webp' && { quality: Math.min(100, Math.max(1, Number(msg.quality) || 80)) }),
+      })
       return { data: shot.data, url: (await chrome.tabs.get(tab.id)).url }
     }
     case 'scroll': {
@@ -280,12 +317,30 @@ async function handle(msg) {
     }
     case 'drag': {
       const tab = await groupedTab(msg.tabId)
-      await mouse(tab.id, 'mouseMoved', msg.x, msg.y)
-      await mouse(tab.id, 'mousePressed', msg.x, msg.y, { button: 'left', clickCount: 1 })
-      for (let i = 1; i <= 8; i++) {
-        await mouse(tab.id, 'mouseMoved', msg.x + ((msg.toX - msg.x) * i) / 8, msg.y + ((msg.toY - msg.y) * i) / 8, { button: 'left' })
+      const state = await ensureAttached(tab.id)
+      state.dragData = null
+      // Without interception, pressing on an image or link starts a native drag session that blocks Chrome's
+      // input channel ("Detached while handling command"). Intercepted, the page's drag is finished by hand.
+      await cdp(tab.id, 'Input.setInterceptDrags', { enabled: true })
+      try {
+        await mouse(tab.id, 'mouseMoved', msg.x, msg.y)
+        await mouse(tab.id, 'mousePressed', msg.x, msg.y, { button: 'left', clickCount: 1 })
+        for (let i = 1; i <= 8; i++) {
+          await mouse(tab.id, 'mouseMoved', msg.x + ((msg.toX - msg.x) * i) / 8, msg.y + ((msg.toY - msg.y) * i) / 8, { button: 'left' })
+        }
+        if (state.dragData) {
+          for (const type of ['dragEnter', 'dragOver', 'drop']) {
+            await cdp(tab.id, 'Input.dispatchDragEvent', { type, x: msg.toX, y: msg.toY, data: state.dragData })
+          }
+        }
+        await mouse(tab.id, 'mouseReleased', msg.toX, msg.toY, { button: 'left', clickCount: 1 })
+      } catch (e) {
+        // Dropping a link on the page makes Chrome navigate to it, which detaches the debugger mid-command.
+        if (/Detached while handling command/i.test(String(e.message ?? e))) return { done: 'dragged (the page navigated)' }
+        throw e
+      } finally {
+        await cdp(tab.id, 'Input.setInterceptDrags', { enabled: false }).catch(() => {})
       }
-      await mouse(tab.id, 'mouseReleased', msg.toX, msg.toY, { button: 'left', clickCount: 1 })
       return { done: 'dragged' }
     }
     case 'key': {

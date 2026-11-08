@@ -47,6 +47,8 @@ public class ChromeControlTool implements ToolRegistry.Tool {
     private static final String ACTION_RESIZE = "resize";
     private static final String ACTION_CONSOLE = "console";
     private static final String ACTION_NETWORK = "network";
+    private static final String ACTION_RECORD_START = "record_start";
+    private static final String ACTION_RECORD_STOP = "record_stop";
     /** The extension's name for a click at a point, which has no ref to classify. */
     private static final String EXT_CLICK_AT = "click_at";
 
@@ -72,6 +74,11 @@ public class ChromeControlTool implements ToolRegistry.Tool {
     private static final String ARG_COUNT = "count";
     private static final String ARG_FULL_PAGE = "fullPage";
     private static final String ARG_CLEAR = "clear";
+    private static final String ARG_FORMAT = "format";
+    private static final String ARG_MAX_FRAMES = "maxFrames";
+    private static final String ARG_FRAME_MS = "frameMs";
+    /** The actions after which a recording adds a frame. */
+    private static final List<String> RECORDED = List.of(ACTION_NAVIGATE, ACTION_CLICK, ACTION_TYPE, ACTION_FORM_INPUT, ACTION_KEY, ACTION_DRAG, ACTION_SCROLL);
     /** A screenshot larger than this, as base64, is refused rather than written. */
     private static final int MAX_SHOT_BASE64 = 14_000_000;
     static final String ERROR = "Error: ";
@@ -103,7 +110,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
 
     @Override
     public String summary() {
-        return "Open, read and act on tabs in the operator's Chrome via 'action': tabs_list, navigate, read, find, screenshot, click, type, form_input, key, scroll, hover, drag, resize, console, network, close.";
+        return "Open, read and act on tabs in the operator's Chrome via 'action': tabs_list, navigate, read, find, screenshot, click, type, form_input, key, scroll, hover, drag, resize, console, network, record_start, record_stop, close.";
     }
 
     @Override
@@ -126,6 +133,9 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                 "drag" takes x, y, toX and toY. \
                 Use action="resize" with width and height to resize the browser window. \
                 Use action="console" or action="network" to see the page's console messages or its requests (addresses only), with clear=true to empty them. \
+                Use action="record_start" with a tabId to record the tab as an animated image, then action="record_stop" with the same tabId to save it; \
+                a small frame is added after each click, key, typing, scroll, form change, drag and navigation. format is webp (the default), gif or both; \
+                maxFrames (at most 100) and frameMs (100 to 5000) tune it. \
                 Use action="close" with a tabId to close a tab. \
                 Refs go stale when the page changes, so read again after navigating. Clicking anything but a plain link may wait \
                 for the operator to approve it.""";
@@ -149,6 +159,8 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                 new ToolAction(ACTION_RESIZE, "Resize the browser window"),
                 new ToolAction(ACTION_CONSOLE, "Read the page's console messages"),
                 new ToolAction(ACTION_NETWORK, "List the page's requests, addresses only"),
+                new ToolAction(ACTION_RECORD_START, "Start recording a tab as an animated image"),
+                new ToolAction(ACTION_RECORD_STOP, "Stop recording and save the animated image"),
                 new ToolAction(ACTION_CLOSE, "Close a tab of the group"));
     }
 
@@ -161,7 +173,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                                 SchemaKeys.ENUM, List.of(ACTION_TABS, ACTION_NAVIGATE, ACTION_READ, ACTION_FIND,
                                         ACTION_SCREENSHOT, ACTION_CLICK, ACTION_TYPE, ACTION_FORM_INPUT, ACTION_KEY,
                                         ACTION_SCROLL, ACTION_HOVER, ACTION_DRAG, ACTION_RESIZE, ACTION_CONSOLE,
-                                        ACTION_NETWORK, ACTION_CLOSE),
+                                        ACTION_NETWORK, ACTION_RECORD_START, ACTION_RECORD_STOP, ACTION_CLOSE),
                                 SchemaKeys.DESCRIPTION, "The action to perform")),
                         text(ARG_URL, "http(s) address to open, for navigate"),
                         number(ARG_TAB, "Tab id from tabs_list or navigate"),
@@ -187,7 +199,12 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                         Map.entry(ARG_FULL_PAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                                 SchemaKeys.DESCRIPTION, "Capture the whole page, not just what is on screen")),
                         Map.entry(ARG_CLEAR, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
-                                SchemaKeys.DESCRIPTION, "Empty the console or network list after reading it"))),
+                                SchemaKeys.DESCRIPTION, "Empty the console or network list after reading it")),
+                        Map.entry(ARG_FORMAT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("webp", "gif", "both"),
+                                SchemaKeys.DESCRIPTION, "Image format of a recording: webp (smaller, the default), gif, or both")),
+                        number(ARG_MAX_FRAMES, "Most frames a recording keeps, up to 100 (default 30)"),
+                        number(ARG_FRAME_MS, "Milliseconds each frame shows, 100 to 5000 (default 700)")),
                 SchemaKeys.REQUIRED, List.of(ARG_ACTION));
     }
 
@@ -243,7 +260,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         if (args == null) return ERROR + "the arguments were not valid JSON.";
         try {
             var action = String.valueOf(string(args, ARG_ACTION));
-            return switch (action) {
+            var result = switch (action) {
                 case ACTION_TABS -> ChromeBridge.call(ACTION_TABS, new JsonObject()).toString();
                 case ACTION_NAVIGATE -> navigate(agent, args);
                 case ACTION_READ -> read(agent, args);
@@ -259,9 +276,16 @@ public class ChromeControlTool implements ToolRegistry.Tool {
                 case ACTION_RESIZE -> resize(agent, args);
                 case ACTION_CONSOLE -> console(agent, args);
                 case ACTION_NETWORK -> network(agent, args);
-                case ACTION_CLOSE -> close(args);
+                case ACTION_RECORD_START -> recordStart(agent, args);
+                case ACTION_RECORD_STOP -> recordStop(agent, args);
+                case ACTION_CLOSE -> close(agent, args);
                 default -> ERROR + "unknown action.";
             };
+            var tab = longOf(args, ARG_TAB);
+            if (tab != null && !result.startsWith(ERROR) && RECORDED.contains(action) && !ACTION_NAVIGATE.equals(action)) {
+                ChromeRecorder.afterAction(agent, tab);
+            }
+            return result;
         } catch (ChromeBridge.BridgeException e) {
             return ERROR + e.getMessage();
         }
@@ -284,6 +308,7 @@ public class ChromeControlTool implements ToolRegistry.Tool {
             closeQuietly(tabId);
             return ERROR + "the page redirected somewhere not allowed (" + landedRefusal + "); the tab was closed.";
         }
+        ChromeRecorder.afterAction(agent, tabId);
         return "Opened tab " + tabId + ": " + landed;
     }
 
@@ -487,9 +512,24 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         }, ARG_CLEAR);
     }
 
-    private static String close(JsonObject args) {
+    private static String recordStart(Agent agent, JsonObject args) {
+        var tab = longOf(args, ARG_TAB);
+        if (tab == null) return ERROR + "record_start needs a tabId.";
+        var refusal = tabRefusal(agent, tab);
+        if (refusal != null) return ERROR + refusal;
+        return ChromeRecorder.start(agent, tab, args);
+    }
+
+    private static String recordStop(Agent agent, JsonObject args) {
+        var tab = longOf(args, ARG_TAB);
+        if (tab == null) return ERROR + "record_stop needs a tabId.";
+        return ChromeRecorder.stop(agent, tab);
+    }
+
+    private static String close(Agent agent, JsonObject args) {
         var tab = longOf(args, ARG_TAB);
         if (tab == null) return ERROR + "close needs a tabId.";
+        ChromeRecorder.discard(agent, tab);
         ChromeBridge.call(ACTION_CLOSE, withTab(tab));
         return "Closed tab " + tab + ".";
     }
