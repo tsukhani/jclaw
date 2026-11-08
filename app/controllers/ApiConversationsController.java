@@ -17,6 +17,7 @@ import llm.routing.ModelRouter;
 import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
+import models.MessageRole;
 import models.SessionCompaction;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
@@ -80,6 +81,7 @@ public class ApiConversationsController extends Controller {
                                    String thinkingModeOverride,
                                    Long parentConversationId,
                                    long compactionCount,
+                                   long userPromptCount,
                                    JsonArray checklist) {}
 
     /**
@@ -275,6 +277,7 @@ public class ApiConversationsController extends Controller {
         // conversations with no compactions are absent from the map (default 0).
         var convIds = convos.stream().map(c -> c.id).filter(Objects::nonNull).toList();
         Map<Long, Long> compactionCounts = Map.of();
+        Map<Long, Long> userPromptCounts = Map.of();
         if (!convIds.isEmpty()) {
             @SuppressWarnings("unchecked")
             var rows = (List<Object[]>) JPA.em().createQuery(
@@ -287,10 +290,23 @@ public class ApiConversationsController extends Controller {
                 m.put((Long) row[0], (Long) row[1]);
             }
             compactionCounts = m;
+            @SuppressWarnings("unchecked")
+            var promptRows = (List<Object[]>) JPA.em().createQuery(
+                    "SELECT m.conversation.id, COUNT(m) FROM Message m "
+                            + "WHERE m.conversation.id IN :ids AND m.role = :role GROUP BY m.conversation.id")
+                    .setParameter("ids", convIds)
+                    .setParameter("role", MessageRole.USER.value)
+                    .getResultList();
+            var prompts = HashMap.<Long, Long>newHashMap(promptRows.size());
+            for (var row : promptRows) {
+                prompts.put((Long) row[0], (Long) row[1]);
+            }
+            userPromptCounts = prompts;
         }
         final var counts = compactionCounts;
+        final var promptCounts = userPromptCounts;
         var result = convos.stream()
-                .map(c -> conversationToMap(c, counts.getOrDefault(c.id, 0L)))
+                .map(c -> conversationToMap(c, counts.getOrDefault(c.id, 0L), promptCounts.getOrDefault(c.id, 0L)))
                 .toList();
 
         renderJSON(gson.toJson(result));
@@ -363,7 +379,8 @@ public class ApiConversationsController extends Controller {
     public static void getConversation(Long id) {
         Conversation conversation = requireConversation(id);
         renderJSON(gson.toJson(conversationToMap(conversation,
-                SessionCompaction.count("conversation = ?1", conversation))));
+                SessionCompaction.count("conversation = ?1", conversation),
+                Message.count("conversation = ?1 AND role = ?2", conversation, MessageRole.USER.value))));
     }
 
     /**
@@ -1049,7 +1066,7 @@ public class ApiConversationsController extends Controller {
      * was the kind of subtle drift this codebase has accumulated bug fixes
      * for elsewhere.
      */
-    private static Map<String, Object> conversationToMap(Conversation c, long compactionCount) {
+    private static Map<String, Object> conversationToMap(Conversation c, long compactionCount, long userPromptCount) {
         var map = new HashMap<String, Object>();
         map.put("id", c.id);
         map.put(AGENT_ID, c.agent.id);
@@ -1084,6 +1101,9 @@ public class ApiConversationsController extends Controller {
         // is a fresh prompt or has been reset by compaction (and how many
         // times). Cheap COUNT on an indexed column; no need to denormalize.
         map.put("compactionCount", compactionCount);
+        // The chat-header meter shows prompts beside messageCount: a prompt is one USER row,
+        // while a turn the model answers can add many assistant and tool rows.
+        map.put("userPromptCount", userPromptCount);
         var checklist = CheckListTool.storedItems(c.checklist);
         if (checklist != null) map.put("checklist", checklist);
         return map;

@@ -162,6 +162,33 @@ class ApiConversationsControllerBranchTest extends FunctionalTest {
     }
 
     @Test
+    void listAndSingleGetCountOnlyUserRowsAsPrompts() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var agent = newAgent("prompt-count-agent");
+            var busy = ConversationService.create(agent, "web", "u-busy");
+            ConversationService.appendUserMessage(busy, "first");
+            ConversationService.appendAssistantMessage(busy, "reply one", null);
+            ConversationService.appendAssistantMessage(busy, "reply two", null);
+            ConversationService.appendUserMessage(busy, "second");
+            var quiet = ConversationService.create(agent, "web", "u-quiet");
+            ConversationService.appendAssistantMessage(quiet, "unprompted", null);
+            return new long[] {busy.id, quiet.id};
+        });
+
+        var rows = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations"))).getAsJsonArray();
+        var byId = new java.util.HashMap<Long, com.google.gson.JsonObject>();
+        for (var row : rows) byId.put(row.getAsJsonObject().get("id").getAsLong(), row.getAsJsonObject());
+        assertEquals(2, byId.get(ids[0]).get("userPromptCount").getAsInt());
+        assertEquals(4, byId.get(ids[0]).get("messageCount").getAsInt());
+        assertEquals(0, byId.get(ids[1]).get("userPromptCount").getAsInt());
+
+        var single = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations/" + ids[0])))
+                .getAsJsonObject();
+        assertEquals(2, single.get("userPromptCount").getAsInt());
+    }
+
+    @Test
     void listAndSingleGetCarryAStoredChecklistAsAnArray() {
         login();
         var id = commitInFreshTx(() -> {

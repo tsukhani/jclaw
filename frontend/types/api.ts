@@ -206,6 +206,8 @@ export interface Conversation {
    *  post-compaction prefix (and how many times the conversation has been
    *  compacted). Optional for backwards-compat; absent → treat as 0. */
   compactionCount?: number
+  /** Rows the operator sent (role user), shown beside `messageCount` in the context meter. Absent → 0. */
+  userPromptCount?: number
   /** JCLAW-1569: the agent's current list from its `checklist` tool; absent when it has set none. */
   checklist?: ChecklistItem[]
 }
