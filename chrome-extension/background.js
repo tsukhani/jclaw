@@ -11,6 +11,13 @@ async function jclawGroups() {
 // Chrome's group colours are a fixed palette with no emerald; green is the nearest, and matches JClaw's theme.
 const GROUP_COLOR = 'green'
 const KEEPALIVE_MS = 20_000
+// A server that stops answering without closing the socket looks alive to the browser, so a ping gets this long
+// to come back, and a socket gets this long to reach ready, before it is let go and retried.
+const PONG_TIMEOUT_MS = 10_000
+const CONNECT_TIMEOUT_MS = 10_000
+// A setTimeout does not survive Chrome stopping the idle service worker; an alarm does, and wakes it.
+const RECONNECT_ALARM = 'jclaw-reconnect'
+const RECONNECT_ALARM_MINUTES = 0.5
 const MAX_TEXT = 20_000
 const MAX_ELEMENTS = 200
 const BLOCKED = /^(chrome|chrome-extension|devtools|view-source|about):/i
@@ -18,10 +25,34 @@ const BLOCKED = /^(chrome|chrome-extension|devtools|view-source|about):/i
 let ws = null
 let retry = 1000
 let keepalive = null
+let pongTimer = null
+let stuckTimer = null
 
 async function config() {
   const { token = '', port = 9000 } = await chrome.storage.local.get(['token', 'port'])
   return { token, port }
+}
+
+// Lets go of a connection and schedules the next try. Idempotent, and a no-op for a socket that has already been
+// replaced, so a late close event from an old socket cannot clear the live one.
+function release(sock) {
+  if (ws !== sock) return
+  clearInterval(keepalive)
+  clearTimeout(pongTimer)
+  clearTimeout(stuckTimer)
+  ws = null
+  chrome.storage.local.set({ status: 'disconnected' })
+  setTimeout(connect, retry)
+  retry = Math.min(retry * 2, 15_000)
+}
+
+// A socket whose peer has stopped answering never completes the close handshake, so it is released first and
+// closed after, rather than waiting for an onclose that may not come.
+function drop(sock) {
+  release(sock)
+  sock.onclose = null
+  sock.onerror = null
+  try { sock.close() } catch { /* already closing */ }
 }
 
 async function connect() {
@@ -29,15 +60,23 @@ async function connect() {
   if (!token || ws) return
   const sock = new WebSocket(`ws://127.0.0.1:${port}/api/chrome-bridge/socket`)
   ws = sock
+  stuckTimer = setTimeout(() => drop(sock), CONNECT_TIMEOUT_MS)
   // The token goes in the first frame, never the URL, so it stays out of access logs.
   sock.onopen = () => sock.send(JSON.stringify({ type: 'hello', token }))
   sock.onmessage = async (ev) => {
+    // Anything the server sends shows it is alive, so it settles a ping that is still waiting.
+    clearTimeout(pongTimer)
+    clearTimeout(stuckTimer)
     const msg = JSON.parse(ev.data)
     if (msg.type === 'pong') return
     if (msg.type === 'ready') {
       retry = 1000
       chrome.storage.local.set({ status: 'connected' })
-      keepalive = setInterval(() => sock.send(JSON.stringify({ type: 'ping' })), KEEPALIVE_MS)
+      keepalive = setInterval(() => {
+        sock.send(JSON.stringify({ type: 'ping' }))
+        clearTimeout(pongTimer)
+        pongTimer = setTimeout(() => drop(sock), PONG_TIMEOUT_MS)
+      }, KEEPALIVE_MS)
       return
     }
     if (msg.type === 'error') {
@@ -50,13 +89,7 @@ async function connect() {
       sock.send(JSON.stringify({ id: msg.id, ok: false, error: String(e.message ?? e) }))
     }
   }
-  sock.onclose = () => {
-    clearInterval(keepalive)
-    ws = null
-    chrome.storage.local.set({ status: 'disconnected' })
-    setTimeout(connect, retry)
-    retry = Math.min(retry * 2, 15_000)
-  }
+  sock.onclose = () => release(sock)
   sock.onerror = () => sock.close()
 }
 
@@ -564,7 +597,15 @@ function readPage(maxText, maxElements, offset) {
   }
 }
 
-chrome.storage.onChanged.addListener((c) => { if (c.token || c.port) { ws?.close(); ws = null; connect() } })
+chrome.storage.onChanged.addListener((c) => {
+  if (!c.token && !c.port) return
+  // The old socket goes through drop so its timers stop with it; its pending retry finds a live socket and does nothing.
+  if (ws) drop(ws)
+  retry = 1000
+  connect()
+})
 chrome.runtime.onStartup.addListener(connect)
 chrome.runtime.onInstalled.addListener(connect)
+chrome.alarms.create(RECONNECT_ALARM, { periodInMinutes: RECONNECT_ALARM_MINUTES })
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === RECONNECT_ALARM && !ws) connect() })
 connect()

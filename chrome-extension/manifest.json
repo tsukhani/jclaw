@@ -3,7 +3,7 @@
   "name": "JClaw Bridge",
   "version": "0.0.1",
   "description": "Lets JClaw read and act on the tabs in this browser's JClaw tab group, and nothing else.",
-  "permissions": ["tabs", "tabGroups", "scripting", "storage", "debugger"],
+  "permissions": ["tabs", "tabGroups", "scripting", "storage", "debugger", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html" }
