@@ -180,7 +180,7 @@ importers:
         version: 2.2.0(vue@3.5.44(typescript@6.0.3))
       '@lucide/vue':
         specifier: ^1.25.0
-        version: 1.66.0(vue@3.5.44(typescript@6.0.3))
+        version: 1.69.0(vue@3.5.44(typescript@6.0.3))
       '@tanstack/vue-table':
         specifier: ^9.2.4
         version: 9.3.1(vue@3.5.44(typescript@6.0.3))
@@ -886,8 +886,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@lucide/vue@1.66.0':
-    resolution: {integrity: sha512-cyALYgAzCD2uZ557pM5I/dmFAyTKqtwY7PrdU67gzITkTH+V635u7Uv7VBpQ5hqvmlGqRtbqSDx08LCJHU+GAw==}
+  '@lucide/vue@1.69.0':
+    resolution: {integrity: sha512-uxR2FtureNe37HOQk/e92CZjlTjXVuNiYlD60Mgns0rmbs0wqDnHDgZPUooP6nvmFn/v7Ie6dKRKPzgR6HW5Tw==}
     peerDependencies:
       vue: '>=3.0.1'
 
@@ -5923,7 +5923,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@lucide/vue@1.66.0(vue@3.5.44(typescript@6.0.3))':
+  '@lucide/vue@1.69.0(vue@3.5.44(typescript@6.0.3))':
     dependencies:
       vue: 3.5.44(typescript@6.0.3)
 
