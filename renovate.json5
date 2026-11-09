@@ -42,6 +42,11 @@
   // Renovate v37; the old key still works but emits a deprecation warning.)
   minimumReleaseAge: "3 days",
 
+  // `vulnerabilityAlerts` reads GitHub's Dependabot alerts and does nothing on
+  // Bitbucket Server, so osv.dev is the only vulnerability source this runner
+  // has. It checks direct dependencies only.
+  osvVulnerabilityAlerts: true,
+
   // Backpressure caps. prConcurrentLimit caps total open PRs Renovate has
   // authored; prHourlyLimit caps how fast new ones land in a single run.
   // Both are kept at 10 so a weekly run can drain a normal week's drift in
