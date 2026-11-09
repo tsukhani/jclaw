@@ -7,7 +7,7 @@ metadata:
   jclaw-icon: "📄"
   jclaw-tools: filesystem exec
   jclaw-commands: typolint
-  version: "1.0.5"
+  version: "1.0.6"
 ---
 # Brochure Designer
 

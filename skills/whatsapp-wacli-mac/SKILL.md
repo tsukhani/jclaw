@@ -3,7 +3,7 @@ name: whatsapp-wacli-mac
 description: >-
   Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. macOS ARM64 binary.
 metadata:
-  version: "1.2.2"
+  version: "1.2.3"
   author: Tarun Sukhani
   jclaw-icon: "🍎"
   jclaw-tools: exec
@@ -416,3 +416,7 @@ exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli auth status"})
 6. **Store lock** — only one wacli process can run at a time. If you get a lock error, wait or kill the other process
 7. **Rate limits** — respect WhatsApp's sending limits
 8. **Third-party tool** — not affiliated with WhatsApp/Meta; uses WhatsApp Web protocol
+
+## Troubleshooting
+
+When a wacli command fails, read `references/troubleshooting.md`: the "Client outdated (405)" upgrade fix, stale `~/.wacli/LOCK` files, verifying delivery, and benign send warnings.

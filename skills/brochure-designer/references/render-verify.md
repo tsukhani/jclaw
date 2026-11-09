@@ -611,3 +611,7 @@ lint would then flag the resulting type size too.
 Do not deliver a PDF that reports FAIL, and do not lower a threshold to make it
 pass. Fix the page, re-render, re-run. If the operator wants the exception, get
 it in writing and record it in the delivery note.
+
+## Empty-band detector (learned 2026-11-06)
+
+Rasterize each page at 50 dpi and find runs of rows with under 0.3% ink. A run of 25 mm or more mid-page means content collapsed: fix the layout, do not add a page. This caught 46-70 mm gaps on 3 pages of the Abundent rebuild that a visual check missed.

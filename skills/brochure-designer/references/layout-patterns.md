@@ -443,3 +443,7 @@ recognizable at a glance and each has a fix.
 | Contact details only in the last 5 mm | Trimmed or missed | Give the contact block its own tinted panel |
 | Mixed folio styles | Looks assembled from pieces | One folio system, document-wide |
 | Decorative curves and swooshes | Dates instantly | Rules, blocks and type only |
+
+## Fill-the-sheet pattern (learned 2026-11-06)
+
+When text ends well above the footer, wrap the page body in `<div class="fill">` inside a `display:flex; flex-direction:column` page and give `.fill { flex:1 1 auto; justify-content:space-between }`. Absolutely positioned blocks (contact panels) collide with in-flow content once the page becomes flex, so move them into the flow.
