@@ -62,6 +62,7 @@ public final class BrowserScreenProxy implements AutoCloseable {
     private static final int ATYP_IPV4 = 0x01;
     private static final int ATYP_DOMAIN = 0x03;
     private static final int ATYP_IPV6 = 0x04;
+    private static final int MAX_SOCKS_NAME = 255;
     private static final int REP_OK = 0x00;
     private static final int REP_NOT_ALLOWED = 0x02;
     private static final int REP_HOST_UNREACHABLE = 0x04;
@@ -289,8 +290,19 @@ public final class BrowserScreenProxy implements AutoCloseable {
         throw new IOException("the proxy's answer to CONNECT ran past " + MAX_CONNECT_REPLY + " bytes");
     }
 
-    /** Null when the SOCKS5 proxy opened a tunnel to {@code host}:{@code port}, else why not. */
-    private static @Nullable String socksConnect(Socket socket, String host, int port) throws IOException {
+    /**
+     * Null when the SOCKS5 proxy opened a tunnel to {@code host}:{@code port}, else why not. Exposed
+     * for tests.
+     */
+    public static @Nullable String socksConnect(Socket socket, String host, int port) throws IOException {
+        // A name even for a literal, as the JDK's SOCKS client sends rung 1's unresolved address.
+        var bare = host.startsWith("[") ? host.substring(1, host.length() - 1) : host;
+        var name = bare.getBytes(StandardCharsets.ISO_8859_1);
+        // SOCKS5 gives a name's length one byte; a longer name would go out truncated.
+        if (name.length > MAX_SOCKS_NAME) {
+            return "the host name is longer than SOCKS5 can carry (" + name.length + " bytes, at most "
+                    + MAX_SOCKS_NAME + ")";
+        }
         var in = socket.getInputStream();
         var out = socket.getOutputStream();
         out.write(new byte[] {VERSION, 1, NO_AUTH});
@@ -299,9 +311,6 @@ public final class BrowserScreenProxy implements AutoCloseable {
         if ((method[0] & 0xFF) != VERSION || (method[1] & 0xFF) != NO_AUTH) {
             return "the proxy did not accept a SOCKS5 connection without authentication";
         }
-        // A name even for a literal, as the JDK's SOCKS client sends rung 1's unresolved address.
-        var bare = host.startsWith("[") ? host.substring(1, host.length() - 1) : host;
-        var name = bare.getBytes(StandardCharsets.ISO_8859_1);
         out.write(ByteBuffer.allocate(7 + name.length)
                 .put((byte) VERSION).put((byte) CMD_CONNECT).put((byte) 0).put((byte) ATYP_DOMAIN)
                 .put((byte) name.length).put(name).putShort((short) port).array());

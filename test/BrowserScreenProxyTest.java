@@ -17,7 +17,9 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -480,5 +482,59 @@ class BrowserScreenProxyTest extends UnitTest {
         }
         assertEquals(1, lines.size(), lines.toString());
         assertTrue(lines.getFirst().contains("resolves to blocked address 169.254.169.254"), lines.toString());
+    }
+
+    // SOCKS5 gives a name one length byte. The screen's own reader holds a name to 255, so these call
+    // the upstream handshake directly: no request through the screen can carry a longer one.
+
+    @Test
+    void aSocksUpstreamIsSentANameOfTheFull255BytesIntact() throws Exception {
+        var name = "a".repeat(251) + ".com";
+        var requests = new CopyOnWriteArrayList<String>();
+        try (var upstream = new StubUpstream(socket -> {
+            var in = socket.getInputStream();
+            var out = socket.getOutputStream();
+            in.readNBytes(3);
+            out.write(new byte[] {5, 0});
+            out.flush();
+            var request = in.readNBytes(5);
+            var sent = new String(in.readNBytes(request[4] & 0xFF), StandardCharsets.US_ASCII);
+            var port = ByteBuffer.wrap(in.readNBytes(2)).getShort() & 0xFFFF;
+            requests.add((request[4] & 0xFF) + " " + sent + ":" + port);
+            out.write(new byte[] {5, REP_OK, 0, 1, 0, 0, 0, 0, 0, 0});
+            out.flush();
+        });
+             var socket = new Socket(InetAddress.getLoopbackAddress(), upstream.port())) {
+            assertNull(BrowserScreenProxy.socksConnect(socket, name, PUBLIC_PORT));
+        }
+        assertEquals(List.of("255 " + name + ":443"), requests);
+    }
+
+    @Test
+    void aNameLongerThanSocksCanCarryIsRefusedBeforeAnyByteReachesTheUpstream() throws Exception {
+        var name = "a".repeat(252) + ".com";
+        var received = new CompletableFuture<Integer>();
+        String refusal;
+        try (var upstream = new StubUpstream(socket -> {
+            var in = socket.getInputStream();
+            var out = socket.getOutputStream();
+            var bytes = new ByteArrayOutputStream();
+            var greeting = in.readNBytes(3);
+            bytes.write(greeting);
+            if (greeting.length == 3) {
+                out.write(new byte[] {5, 0});
+                out.flush();
+                bytes.write(in.readNBytes(7 + 256));
+                out.write(new byte[] {5, 1, 0, 1, 0, 0, 0, 0, 0, 0});
+                out.flush();
+            }
+            received.complete(bytes.size());
+        })) {
+            try (var socket = new Socket(InetAddress.getLoopbackAddress(), upstream.port())) {
+                refusal = BrowserScreenProxy.socksConnect(socket, name, PUBLIC_PORT);
+            }
+            assertEquals(0, received.get(5, TimeUnit.SECONDS), "bytes the upstream received");
+        }
+        assertEquals("the host name is longer than SOCKS5 can carry (256 bytes, at most 255)", refusal);
     }
 }
