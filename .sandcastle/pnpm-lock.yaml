@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@ai-hero/sandcastle':
-        specifier: 0.12.0
-        version: 0.12.0
+        specifier: 0.14.0
+        version: 0.14.0
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -185,16 +185,25 @@ importers:
 
 packages:
 
-  '@ai-hero/sandcastle@0.12.0':
-    resolution: {integrity: sha512-kdQ414rM8t1QiWeqZ3Klz4KSd0PqQG4bRVuqGpRDUomWhojSZkEAc1tbcEcThVmBEaHkCt8LmYR49vqEPNIoYQ==}
+  '@ai-hero/sandcastle@0.14.0':
+    resolution: {integrity: sha512-s9B/23nPWL6y2sZkVxksqTge0MqGWr2HtjneGDf/V1npReiqDRlUJUvQ4+7K0oWORLqgHU5wLK0pfukg+UqTqQ==}
     hasBin: true
     peerDependencies:
-      '@daytona/sdk': ^0.164.0
+      '@daytona/sdk': '>=0.164.0 <1.0.0'
+      '@fly/sprites': '>=0.2.4 <1.0.0'
       '@vercel/sandbox': '>=1.0.0'
+      e2b: '>=2.62.0 <3.0.0'
+      modal: '>=0.11.0 <1.0.0'
     peerDependenciesMeta:
       '@daytona/sdk':
         optional: true
+      '@fly/sprites':
+        optional: true
       '@vercel/sandbox':
+        optional: true
+      e2b:
+        optional: true
+      modal:
         optional: true
 
   '@clack/core@1.5.1':
@@ -524,7 +533,7 @@ packages:
 
 snapshots:
 
-  '@ai-hero/sandcastle@0.12.0':
+  '@ai-hero/sandcastle@0.14.0':
     dependencies:
       '@clack/prompts': 1.8.1
 
