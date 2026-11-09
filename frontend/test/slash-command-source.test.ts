@@ -16,7 +16,7 @@ const COMMANDS: SlashCommand[] = [
   { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
   { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
   { literal: '/compact', name: 'compact', description: 'Summarize older turns to free context' },
-  { literal: '/stop', name: 'stop', description: 'Interrupt the current generation' },
+  { literal: '/stop', name: 'stop', description: 'Stop the current reply' },
 ]
 
 const PROVIDERS: Provider[] = [{ name: 'openrouter', models: [{ id: 'gpt-4.1' }] }]

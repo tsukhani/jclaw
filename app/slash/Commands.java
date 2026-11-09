@@ -105,8 +105,8 @@ public final class Commands {
         MODEL("/model", "Show current model and its capabilities"),
         THINK("/think", "Set reasoning effort for this conversation"),
         USAGE("/usage", "Show context usage for this conversation"),
-        STOP("/stop", "Interrupt the current generation"),
-        QUEUE("/queue", "Show or clear the waiting messages"),
+        STOP("/stop", "Stop the current reply"),
+        QUEUE("/queue", "Show or clear your waiting messages"),
         SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs"),
         // Deliberately channel-neutral: the web composer inserts the text for
         // editing, every other channel replies with it to copy — a bot cannot
@@ -687,7 +687,8 @@ public final class Commands {
             reply = dropped == 0 ? NOTHING_WAITING
                     : "Dropped %d waiting message%s.".formatted(dropped, dropped == 1 ? "" : "s");
         } else {
-            reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId, own));
+            reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId, own),
+                    ConversationQueue.EXTERNAL_CHANNELS.contains(current.channelType));
         }
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/queue" + (clear ? " clear" : "") + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : "")
@@ -695,10 +696,17 @@ public final class Commands {
         return new Result(current, reply, Command.QUEUE);
     }
 
-    private static String renderWaiting(List<ConversationQueue.QueuedMessage> waiting) {
+    /**
+     * The waiting list, numbered in the order it runs. On a Telegram, Slack or WhatsApp conversation one person's messages
+     * in a row run as one turn with one reply (JF-245), so the header says so rather than promise a reply each.
+     */
+    private static String renderWaiting(List<ConversationQueue.QueuedMessage> waiting, boolean batchedBySender) {
         if (waiting.isEmpty()) return NOTHING_WAITING;
         var sb = new StringBuilder(waiting.size() == 1 ? "1 message is waiting:"
-                : waiting.size() + " messages are waiting, answered in this order:");
+                : batchedBySender
+                        ? waiting.size() + " messages are waiting, in the order they will be answered. Messages one"
+                                + " person sent in a row get a single reply:"
+                        : waiting.size() + " messages are waiting, answered in this order:");
         for (int i = 0; i < waiting.size(); i++) {
             sb.append('\n').append(i + 1).append(". ").append(excerpt(waiting.get(i)));
         }

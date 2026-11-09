@@ -62,7 +62,7 @@ class ApiSlashCommandsControllerTest extends FunctionalTest {
         assertEquals(java.util.List.of("/new", "/reset", "/compact", "/help", "/model", "/think", "/usage", "/stop",
                 "/queue", "/subagent", "/prompt"), literals);
         assertEquals(com.google.gson.JsonParser.parseString(
-                        "{\"literal\":\"/queue\",\"name\":\"queue\",\"description\":\"Show or clear the waiting messages\"}"),
+                        "{\"literal\":\"/queue\",\"name\":\"queue\",\"description\":\"Show or clear your waiting messages\"}"),
                 body.get(literals.indexOf("/queue")));
     }
 

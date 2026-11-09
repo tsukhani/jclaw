@@ -565,7 +565,7 @@ class ChannelTurnStopTest extends UnitTest {
         turn.awaitEnd();
         awaitIdle(convo.id);
 
-        assertEquals(List.of("seal 2 messages are waiting, answered in this order:\n1. " + NEXT + "\n2. " + THIRD),
+        assertEquals(List.of("seal 2 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:\n1. " + NEXT + "\n2. " + THIRD),
                 listed.events());
         assertEquals(List.of("seal Dropped 2 waiting messages."), cleared.events());
         assertEquals(List.of("update Hel", "update lo", "seal Hello"), turn.events(), "the running reply finished");

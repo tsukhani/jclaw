@@ -88,10 +88,10 @@ class GroupChatCommandsTest extends UnitTest {
     void aMembersQueueListsTheirOwnWaitingMessagesOnly(String channelType, String groupPeer) {
         var convo = running(channelType, groupPeer, "B", "bea running", "A", "ada one", "B", "bea two", "A", "ada three");
         try {
-            assertEquals("2 messages are waiting, answered in this order:\n1. ada one\n2. ada three",
+            assertEquals("2 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:\n1. ada one\n2. ada three",
                     as("A", () -> Commands.execute(Commands.Command.QUEUE, agent, channelType, groupPeer, convo, null,
                             false).responseText()));
-            assertEquals("2 messages are waiting, answered in this order:\n1. ada one\n2. ada three",
+            assertEquals("2 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:\n1. ada one\n2. ada three",
                     as("A", () -> Commands.execute(Commands.Command.QUEUE, agent, channelType, groupPeer, convo, null,
                             true).responseText()), "the owner's own queue is their own messages too");
             assertEquals("1 message is waiting:\n1. bea two",

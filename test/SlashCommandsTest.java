@@ -840,13 +840,26 @@ class SlashCommandsTest extends UnitTest {
             var result = Commands.execute(Commands.Command.QUEUE, agent, "telegram", "4242", convo, null, false);
 
             assertEquals("""
-                    3 messages are waiting, answered in this order:
+                    3 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:
                     1. What is the weather tomorrow?
                     2. (photo.jpg)
                     3. %s…""".formatted("x".repeat(79)), result.responseText());
             assertFalse(result.saved());
             assertFalse(flag.get(), "listing never stops the reply");
             assertEquals(4, services.ConversationQueue.getQueueSize(convo.id), "listing changes nothing");
+        } finally {
+            services.ConversationQueue.forgetForTest(convo.id);
+        }
+    }
+
+    @Test
+    void aChatConversationsQueueListsEachMessageAsItsOwnTurnInOrder() {
+        // Chat never batches (JF-245), so its header promises the order and no shared reply.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        runningWith(convo, "first", "second");
+        try {
+            assertEquals("2 messages are waiting, answered in this order:\n1. first\n2. second",
+                    Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", convo, null, true).responseText());
         } finally {
             services.ConversationQueue.forgetForTest(convo.id);
         }
@@ -876,7 +889,7 @@ class SlashCommandsTest extends UnitTest {
                 "", "telegram", "4242", agent, List.of(report, appendix)));
         try {
             assertEquals("""
-                    4 messages are waiting, answered in this order:
+                    4 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:
                     1. %s
                     2. %s…
                     3. %s…
@@ -901,7 +914,7 @@ class SlashCommandsTest extends UnitTest {
                 channels.QuotedReply.fold("", quote), "telegram", "4242", agent));
         try {
             assertEquals("""
-                    3 messages are waiting, answered in this order:
+                    3 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:
                     1. and what about Friday?
                     2. (photo.jpg)
                     3. [Replying to a message this bot sent] > The forecast for > Thursday is rain.""",
@@ -935,7 +948,7 @@ class SlashCommandsTest extends UnitTest {
         try {
             assertEquals("1 message is waiting:\n1. the customer's follow-up", Commands.execute(Commands.Command.QUEUE,
                     agent, "telegram", "4242", convo, null, false).responseText());
-            assertEquals("2 messages are waiting, answered in this order:\n1. the customer's follow-up\n"
+            assertEquals("2 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:\n1. the customer's follow-up\n"
                     + "2. the operator's note", Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", convo,
                     null, true).responseText());
 
@@ -1017,7 +1030,7 @@ class SlashCommandsTest extends UnitTest {
         var group = ConversationService.findOrCreate(agent, "telegram", "-1001234567");
         runningWith(group, "first", "second");
         try {
-            assertEquals("2 messages are waiting, answered in this order:\n1. first\n2. second",
+            assertEquals("2 messages are waiting, in the order they will be answered. Messages one person sent in a row get a single reply:\n1. first\n2. second",
                     Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", group, null, true).responseText());
             assertEquals("Dropped 2 waiting messages.",
                     Commands.execute(Commands.Command.QUEUE, agent, "web", "admin", group, "clear", true).responseText());
@@ -1038,6 +1051,15 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
+    void theTelegramMenuDescribesStopAndQueueAsTheyWorkNow() {
+        var described = jobs.TelegramCommandsRegistrationJob.toBotCommands().stream().collect(java.util.stream.Collectors.toMap(
+                org.telegram.telegrambots.meta.api.objects.commands.BotCommand::getCommand,
+                org.telegram.telegrambots.meta.api.objects.commands.BotCommand::getDescription));
+        assertEquals("Stop the current reply", described.get("stop"));
+        assertEquals("Show or clear your waiting messages", described.get("queue"));
+    }
+
+    @Test
     void theSlackHelpListsEveryCommandWithItsBangFormQueueAmongThem() {
         assertEquals("""
                 Available commands — Slack reserves / for slash commands (which don't work in threads), so use a ! prefix:
@@ -1048,8 +1070,8 @@ class SlashCommandsTest extends UnitTest {
                 • !model — Show current model and its capabilities
                 • !think — Set reasoning effort for this conversation
                 • !usage — Show context usage for this conversation
-                • !stop — Interrupt the current generation
-                • !queue — Show or clear the waiting messages
+                • !stop — Stop the current reply
+                • !queue — Show or clear your waiting messages
                 • !subagent — Inspect, kill, or read transcripts of subagent runs
                 • !prompt — Use a saved prompt from your library
                 """, Commands.helpTextFor("slack"));

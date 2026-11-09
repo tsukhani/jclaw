@@ -10,7 +10,7 @@ const PROVIDERS: Provider[] = [{ name: 'openai', models: [{ id: 'gpt-4', name: '
 const SLASH_COMMANDS: SlashCommand[] = [
   { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
   { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
-  { literal: '/stop', name: 'stop', description: 'Interrupt the current generation' },
+  { literal: '/stop', name: 'stop', description: 'Stop the current reply' },
   { literal: '/prompt', name: 'prompt', description: 'Use a saved prompt from your library' },
 ]
 
