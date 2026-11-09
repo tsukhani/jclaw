@@ -72,10 +72,13 @@ public class ConversationQueue {
      * @param ownerInitiated JF-148: {@link DangerousActionGate#ownerInitiated} where the message was
      *                       enqueued, which its drained turn runs under. A row a restart restores has
      *                       none recorded, so it drains as a guest's.
+     * @param senderId       JF-237: the channel's id of the member who sent it, {@link DangerousActionGate#senderId}
+     *                       where it was enqueued; null where none was bound, and for a row stored before the column
+     *                       existed. In a group chat it is what makes the message one member's.
      */
     public record QueuedMessage(String text, String channelType, String peerId, Agent agent,
                                 boolean skipUserAppend, List<AttachmentService.Input> attachments,
-                                @Nullable Long pendingId, boolean ownerInitiated) {
+                                @Nullable Long pendingId, boolean ownerInitiated, @Nullable String senderId) {
         public QueuedMessage {
             attachments = List.copyOf(attachments);
         }
@@ -83,7 +86,7 @@ public class ConversationQueue {
         public QueuedMessage(String text, String channelType, String peerId, Agent agent,
                              boolean skipUserAppend, List<AttachmentService.Input> attachments) {
             this(text, channelType, peerId, agent, skipUserAppend, attachments, null,
-                    DangerousActionGate.ownerInitiated());
+                    DangerousActionGate.ownerInitiated(), DangerousActionGate.senderId());
         }
 
         public QueuedMessage(String text, String channelType, String peerId, Agent agent) {
@@ -100,7 +103,7 @@ public class ConversationQueue {
         }
 
         private QueuedMessage withPendingId(@Nullable Long id) {
-            return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id, ownerInitiated);
+            return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id, ownerInitiated, senderId);
         }
 
         /** Each attachment's original file name, or its kind when it came without one. */
@@ -134,6 +137,11 @@ public class ConversationQueue {
         @Nullable StoppedOwner lastStopped;
         /** Where the owner's reply goes, so a stop sends its notice there itself (JF-197b); null when it cannot. */
         @Nullable Consumer<String> ownerNotice;
+        /**
+         * The member whose message the running turn answers (JF-237); null when none is recorded, or when a collect-mode
+         * batch holds more than one member's.
+         */
+        @Nullable String ownerSender;
         /** Whether the owner's message has yet to be saved as its USER row, so its reply cannot have been saved. */
         boolean ownerRequestPending;
         /**
@@ -157,6 +165,7 @@ public class ConversationQueue {
             ownerCancel = null;
             ownerTurn = 0;
             ownerNotice = null;
+            ownerSender = null;
             ownerRequestPending = false;
             return wasProcessing;
         }
@@ -246,6 +255,7 @@ public class ConversationQueue {
                 state.ownerCancel = ownerCancel != null ? ownerCancel : new AtomicBoolean(false);
                 state.ownerTurn = TURNS.incrementAndGet();
                 state.ownerNotice = ownerNotice;
+                state.ownerSender = message.senderId();
                 state.ownerRequestPending = !message.skipUserAppend();
                 state.generation = GENERATIONS.incrementAndGet();
                 acquired = state.generation;
@@ -338,6 +348,7 @@ public class ConversationQueue {
                 state.ownerCancel = new AtomicBoolean(false);
                 state.ownerTurn = TURNS.incrementAndGet();
                 state.ownerNotice = replyTarget(first);
+                state.ownerSender = first.senderId();
                 state.ownerRequestPending = true;
                 state.generation = GENERATIONS.incrementAndGet();
                 acquired = state.generation;
@@ -379,11 +390,18 @@ public class ConversationQueue {
      *         otherwise
      */
     public static boolean stop(Long conversationId) {
-        return stopWhen(conversationId, null, _ -> true, null, null) == OperatorStop.STOPPED;
+        return stopWhen(conversationId, null, _ -> true, null, null, null) == OperatorStop.STOPPED;
     }
 
     /** What the operator's stop found (JF-202). */
-    public enum OperatorStop { STOPPED, IDLE, UNSTOPPABLE }
+    public enum OperatorStop {
+        STOPPED, IDLE, UNSTOPPABLE,
+        /** A group member's stop of a turn that answers someone else's message (JF-237): nothing changed. */
+        NOT_YOURS
+    }
+
+    /** A stop limited to the turn that answers {@code sender}'s message; a null sender, with none recorded, matches no turn. */
+    public record OwnMessageOnly(@Nullable String sender) {}
 
     /** What a stop of a Telegram, Slack or WhatsApp conversation's turn owes the person who sent its message (JF-197b). */
     public enum ChannelStop {
@@ -433,9 +451,20 @@ public class ConversationQueue {
      */
     public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType, boolean notice,
                                                 @Nullable Long turn) {
+        return stopOperatorTurn(conversationId, channelType, notice, turn, null);
+    }
+
+    /**
+     * {@link #stopOperatorTurn(Long, String, boolean, Long)} that, given {@code ownMessageOnly}, stops the turn only
+     * when it answers that member's message and otherwise changes nothing, answering {@link OperatorStop#NOT_YOURS}
+     * (JF-237): a group member's {@code /stop}. Idle is still {@link OperatorStop#IDLE}, which reveals nothing.
+     */
+    public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType, boolean notice,
+                                                @Nullable Long turn, @Nullable OwnMessageOnly ownMessageOnly) {
         var owed = channelType != null && EXTERNAL_CHANNELS.contains(channelType)
                 ? (notice ? ChannelStop.NOTICE : ChannelStop.SILENT) : null;
-        return stopWhen(conversationId, channelType, state -> operatorStoppable(state, channelType), owed, turn);
+        return stopWhen(conversationId, channelType, state -> operatorStoppable(state, channelType), owed, turn,
+                ownMessageOnly);
     }
 
     /**
@@ -478,10 +507,11 @@ public class ConversationQueue {
      * @param owed        what the stop owes the channel, recorded against the stopped flag; null when nothing
      * @param turn        the {@link #ownerTurn id} of the turn to stop, which must still own the conversation; null
      *                    stops whatever runs
+     * @param ownMessageOnly when set, the stop applies only to a turn answering that member's message
      */
     private static OperatorStop stopWhen(Long conversationId, @Nullable String channelType,
                                          Predicate<QueueState> allowed, @Nullable ChannelStop owed,
-                                         @Nullable Long turn) {
+                                         @Nullable Long turn, @Nullable OwnMessageOnly ownMessageOnly) {
         var state = queues.get(conversationId);
         if (state == null) return OperatorStop.IDLE;
         AtomicBoolean stopped;
@@ -497,6 +527,10 @@ public class ConversationQueue {
             if (turn != null && turn != state.ownerTurn) return OperatorStop.IDLE;
             stopped = stoppableFlag(state);
             if (stopped == null || !allowed.test(state)) return OperatorStop.UNSTOPPABLE;
+            if (ownMessageOnly != null
+                    && (ownMessageOnly.sender() == null || !ownMessageOnly.sender().equals(state.ownerSender))) {
+                return OperatorStop.NOT_YOURS;
+            }
             // Committed before the release, so the next turn's request cannot land ahead of it. The reply's commit
             // takes this lock too, so a request still unanswered, or not yet saved, is a reply not yet saved.
             boolean unanswered;
@@ -530,6 +564,7 @@ public class ConversationQueue {
                 state.ownerCancel = null;
                 state.ownerTurn = 0;
                 state.ownerNotice = null;
+                state.ownerSender = null;
                 state.ownerRequestPending = false;
             } else if (!stopDropsQueue(channelType) && !state.pending.isEmpty()) {
                 // JCLAW-117: the next message takes the conversation under this lock, so no arrival overtakes it.
@@ -784,6 +819,8 @@ public class ConversationQueue {
             handed = List.of(state.pending.removeFirst());
         }
         state.ownerNotice = replyTarget(handed.getFirst());
+        var sender = handed.getFirst().senderId();
+        state.ownerSender = handed.stream().allMatch(m -> Objects.equals(sender, m.senderId())) ? sender : null;
         state.ownerRequestPending = handed.stream().anyMatch(m -> !m.skipUserAppend());
         return handed;
     }
@@ -860,7 +897,8 @@ public class ConversationQueue {
     public static QueuedMessage restore(PendingInbound row) {
         List<AttachmentService.Input> attachments = row.attachments == null
                 ? List.of() : GsonHolder.GSON.fromJson(row.attachments, ATTACHMENT_LIST);
-        return new QueuedMessage(row.text, row.channelType, row.peerId, row.agent, false, attachments, row.id, false);
+        return new QueuedMessage(row.text, row.channelType, row.peerId, row.agent, false, attachments, row.id, false,
+                row.senderId);
     }
 
     private static boolean isStored(QueuedMessage message) {
@@ -875,6 +913,7 @@ public class ConversationQueue {
             row.agent = JPA.em().getReference(Agent.class, message.agent().id);
             row.channelType = message.channelType();
             row.peerId = message.peerId();
+            row.senderId = message.senderId();
             row.text = message.text();
             row.attachments = message.attachments().isEmpty() ? null : GsonHolder.GSON.toJson(message.attachments());
             row.save();
@@ -955,10 +994,20 @@ public class ConversationQueue {
      */
     public static List<QueuedMessage> waiting(Long conversationId, @Nullable String channelType,
                                               @Nullable String peerId) {
+        return waiting(conversationId, channelType, peerId, null);
+    }
+
+    /**
+     * {@link #waiting(Long, String, String)} narrowed, given {@code ownMessageOnly}, to the messages that member sent
+     * (JF-237): in a group chat {@code peerId} names the chat, so the sender is what makes a message theirs. A message
+     * with no sender recorded is no member's.
+     */
+    public static List<QueuedMessage> waiting(Long conversationId, @Nullable String channelType,
+                                              @Nullable String peerId, @Nullable OwnMessageOnly ownMessageOnly) {
         var state = queues.get(conversationId);
         if (state == null) return List.of();
         synchronized (state) {
-            return state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId)).toList();
+            return state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId, ownMessageOnly)).toList();
         }
     }
 
@@ -970,13 +1019,19 @@ public class ConversationQueue {
      * @return how many messages were dropped
      */
     public static int clearWaiting(Long conversationId, @Nullable String channelType, @Nullable String peerId) {
+        return clearWaiting(conversationId, channelType, peerId, null);
+    }
+
+    /** {@link #clearWaiting(Long, String, String)} of one member's messages only, as {@link #waiting(Long, String, String, OwnMessageOnly)}. */
+    public static int clearWaiting(Long conversationId, @Nullable String channelType, @Nullable String peerId,
+                                   @Nullable OwnMessageOnly ownMessageOnly) {
         var state = queues.get(conversationId);
         if (state == null) return 0;
         List<QueuedMessage> dropped;
         synchronized (state) {
-            dropped = state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId)).toList();
+            dropped = state.pending.stream().filter(m -> isWaitingFrom(m, channelType, peerId, ownMessageOnly)).toList();
             if (dropped.isEmpty()) return 0;
-            state.pending.removeIf(m -> isWaitingFrom(m, channelType, peerId));
+            state.pending.removeIf(m -> isWaitingFrom(m, channelType, peerId, ownMessageOnly));
             state.clears++;
             discardPending(pendingIdsOf(dropped));
         }
@@ -986,9 +1041,12 @@ public class ConversationQueue {
     }
 
     // A Chat send into a channel conversation waits as "web" from the operator, never as the channel's sender.
-    private static boolean isWaitingFrom(QueuedMessage message, @Nullable String channelType, @Nullable String peerId) {
+    private static boolean isWaitingFrom(QueuedMessage message, @Nullable String channelType, @Nullable String peerId,
+                                         @Nullable OwnMessageOnly ownMessageOnly) {
         return !message.skipUserAppend() && (channelType == null
-                || (channelType.equals(message.channelType()) && Objects.equals(peerId, message.peerId())));
+                || (channelType.equals(message.channelType()) && Objects.equals(peerId, message.peerId())
+                && (ownMessageOnly == null || (ownMessageOnly.sender() != null
+                        && ownMessageOnly.sender().equals(message.senderId())))));
     }
 
     /** Number of pending messages waiting in a conversation's queue (0 when it has no state). */

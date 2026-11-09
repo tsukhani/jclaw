@@ -85,10 +85,11 @@ public final class SlackInbound {
         final boolean ownerInitiated = binding.ownerUserId != null
                 && binding.ownerUserId.equals(message.userId());
         Thread.ofVirtual().name("slack-inbound").start(() ->
-                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
-                    processMessage(bindingId, botToken, teamId, message, parent);
-                    return null;
-                }));
+                DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                        () -> DangerousActionGate.withSender(message.userId(), () -> {
+                            processMessage(bindingId, botToken, teamId, message, parent);
+                            return null;
+                        })));
     }
 
     /**

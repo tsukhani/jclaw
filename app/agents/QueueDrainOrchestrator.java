@@ -1,11 +1,13 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -103,10 +105,11 @@ public final class QueueDrainOrchestrator {
      */
     public static void runOwned(Long conversationId, long generation, List<ConversationQueue.QueuedMessage> messages) {
         var drained = List.copyOf(messages);
-        startDrainThread(() -> DangerousActionGate.withOwnerInitiated(ownerInitiated(drained), () -> {
-            runDrained(conversationId, generation, drained);
-            return null;
-        }));
+        startDrainThread(() -> DangerousActionGate.withOwnerInitiated(ownerInitiated(drained),
+                () -> DangerousActionGate.withSender(singleSender(drained), () -> {
+                    runDrained(conversationId, generation, drained);
+                    return null;
+                })));
     }
 
     /**
@@ -115,6 +118,12 @@ public final class QueueDrainOrchestrator {
      */
     public static boolean ownerInitiated(List<ConversationQueue.QueuedMessage> drained) {
         return !drained.isEmpty() && drained.stream().allMatch(ConversationQueue.QueuedMessage::ownerInitiated);
+    }
+
+    /** The member every drained message came from, so what the run queues in turn is theirs; null when none or several. */
+    private static @Nullable String singleSender(List<ConversationQueue.QueuedMessage> drained) {
+        var sender = drained.getFirst().senderId();
+        return drained.stream().allMatch(m -> Objects.equals(sender, m.senderId())) ? sender : null;
     }
 
     private static void runDrained(Long conversationId, long generation, List<ConversationQueue.QueuedMessage> drained) {

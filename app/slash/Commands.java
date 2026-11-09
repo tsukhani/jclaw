@@ -1,6 +1,7 @@
 package slash;
 
 import agents.CompactionGate;
+import agents.DangerousActionGate;
 import agents.SummaryModels;
 import agents.SystemPromptAssembler;
 import channels.QuotedReply;
@@ -133,8 +134,8 @@ public final class Commands {
             • /model — show current model and its capabilities (/model NAME switches this conversation)
             • /think — reasoning effort for this conversation (/think off, /think level, /think reset)
             • /usage — show context usage for this conversation
-            • /stop — interrupt the current generation
-            • /queue — show the waiting messages (/queue clear drops them)
+            • /stop — interrupt the current generation (in a group, only a reply to your own message)
+            • /queue — show the waiting messages (/queue clear drops them; in a group, only your own)
             • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)
             • /prompt — use a saved prompt from your library (/prompt search-words)""";
 
@@ -165,11 +166,9 @@ public final class Commands {
     /** {@code /queue}'s reply when no message waits. */
     private static final String NOTHING_WAITING = "Nothing is waiting.";
 
-    // Until JF-237: a member must not see or drop another member's messages.
-    private static final String QUEUE_NOT_IN_GROUPS = "/queue isn't available in group chats yet.";
-
-    // Until JF-237: any member could otherwise cut off another member's reply.
-    private static final String ONLY_OWNER_STOPS_IN_GROUPS = "In group chats, only the owner can stop a reply for now.";
+    // Names no one: a member must not learn whose message the running reply answers.
+    private static final String STOP_ONLY_YOUR_OWN_IN_GROUPS =
+            "In group chats, you can only stop a reply to your own message.";
 
     /** Longest excerpt of a waiting message {@code /queue} shows, in characters. */
     private static final int QUEUE_EXCERPT_CHARS = 80;
@@ -397,16 +396,11 @@ public final class Commands {
     public static Result execute(Command cmd, Agent agent, String channelType, String peerId,
                                   @Nullable Conversation current, @Nullable String args,
                                   boolean ownerInitiated, @Nullable Long stopTurn) {
-        if (!ownerInitiated && ownerOnly(cmd, args)) {
+        if (!ownerInitiated && (ownerOnly(cmd, args) || ownerOnlyInTelegramOrWhatsAppGroup(cmd, channelType, peerId))) {
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "Refused %s from a non-owner turn on peer=%s".formatted(cmd.literal, peerId));
             // Not persisted: a guest's refused command must not write into the owner's transcript.
             return new Result(current, NOT_OWNER_MSG, cmd);
-        }
-        if (cmd == Command.STOP && !ownerInitiated && isGroupChat(channelType, peerId)) {
-            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
-                    "Refused /stop from a member other than the owner in group chat peer=%s".formatted(peerId));
-            return new Result(current, ONLY_OWNER_STOPS_IN_GROUPS, cmd);
         }
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
@@ -416,7 +410,7 @@ public final class Commands {
             case MODEL -> executeModel(agent, channelType, current, args);
             case THINK -> executeThink(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
-            case STOP -> executeStop(agent, channelType, current, stopTurn);
+            case STOP -> executeStop(agent, channelType, current, stopTurn, memberInGroup(channelType, peerId, ownerInitiated));
             case QUEUE -> executeQueue(agent, channelType, peerId, current, args);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
             case PROMPT -> executePrompt(agent, channelType, current, args);
@@ -516,6 +510,19 @@ public final class Commands {
         };
     }
 
+    /**
+     * Commands that reshape the group's one shared conversation: a Telegram or WhatsApp group member who is not the
+     * owner is refused them, as they could never run there before commands parsed in those groups (JF-237). A Slack
+     * channel has always run them for every member and keeps doing so.
+     */
+    private static boolean ownerOnlyInTelegramOrWhatsAppGroup(Command cmd, String channelType, String peerId) {
+        return switch (cmd) {
+            case NEW, RESET, COMPACT, THINK -> (ChannelType.TELEGRAM.value.equals(channelType)
+                    || ChannelType.WHATSAPP.value.equals(channelType)) && isGroupChat(channelType, peerId);
+            case HELP, USAGE, MODEL, STOP, QUEUE, SUBAGENT, PROMPT -> false;
+        };
+    }
+
     private static Result executeNew(Agent agent, String channelType, String peerId) {
         return greetNew(agent, channelType, peerId, () -> ConversationService.create(agent, channelType, peerId));
     }
@@ -612,14 +619,14 @@ public final class Commands {
      * skew {@code /usage} accounting.
      */
     private static Result executeStop(Agent agent, String channelType, @Nullable Conversation current,
-                                      @Nullable Long stopTurn) {
+                                      @Nullable Long stopTurn, ConversationQueue.@Nullable OwnMessageOnly ownMessageOnly) {
         if (current == null) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
         if (ConversationQueue.operatorStoppable(current.channelType)) {
-            return executeOperatorStop(agent, channelType, current, stopTurn);
+            return executeOperatorStop(agent, channelType, current, stopTurn, ownMessageOnly);
         }
         if (!ConversationQueue.isBusy(current.id)) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
@@ -637,15 +644,18 @@ public final class Commands {
      * the button does; sent on the channel, its own "Stopped." is their answer, so the stop adds none (JF-197b).
      */
     private static Result executeOperatorStop(Agent agent, String channelType, Conversation current,
-                                              @Nullable Long stopTurn) {
+                                              @Nullable Long stopTurn,
+                                              ConversationQueue.@Nullable OwnMessageOnly ownMessageOnly) {
         boolean typedInChat = ChannelType.WEB.value.equals(channelType);
-        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType, typedInChat, stopTurn);
+        var outcome = ConversationQueue.stopOperatorTurn(current.id, current.channelType, typedInChat, stopTurn,
+                ownMessageOnly);
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop for conversation %d: %s".formatted(current.id, outcome));
         var reply = switch (outcome) {
             case STOPPED -> "Stopped.";
             case IDLE -> NOTHING_TO_STOP;
             case UNSTOPPABLE -> "This turn can't be stopped.";
+            case NOT_YOURS -> STOP_ONLY_YOUR_OWN_IN_GROUPS;
         };
         return new Result(current, reply, Command.STOP);
     }
@@ -658,11 +668,6 @@ public final class Commands {
      */
     private static Result executeQueue(Agent agent, String channelType, String peerId, @Nullable Conversation current,
                                        @Nullable String args) {
-        if (isGroupChat(channelType, peerId)) {
-            EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
-                    "Refused /queue in group chat peer=%s".formatted(peerId));
-            return new Result(current, QUEUE_NOT_IN_GROUPS, Command.QUEUE);
-        }
         var form = args == null ? "" : args.strip();
         boolean clear = form.equalsIgnoreCase("clear");
         if (!form.isEmpty() && !clear) {
@@ -670,17 +675,19 @@ public final class Commands {
             return new Result(current, "Use %squeue to see the waiting messages, or %squeue clear to drop them."
                     .formatted(prefix, prefix), Command.QUEUE);
         }
-        // Chat's queue is the operator's, every sender's; a channel sender's is their own.
+        // Chat's queue is the operator's, every sender's; a channel sender's is their own, and in a group, where the
+        // peer is the chat, the owner's included (JF-237).
         var senderChannel = ChannelType.WEB.value.equals(channelType) ? null : channelType;
+        var own = isGroupChat(channelType, peerId) ? new ConversationQueue.OwnMessageOnly(DangerousActionGate.senderId()) : null;
         String reply;
         if (current == null) {
             reply = NOTHING_WAITING;
         } else if (clear) {
-            int dropped = ConversationQueue.clearWaiting(current.id, senderChannel, peerId);
+            int dropped = ConversationQueue.clearWaiting(current.id, senderChannel, peerId, own);
             reply = dropped == 0 ? NOTHING_WAITING
                     : "Dropped %d waiting message%s.".formatted(dropped, dropped == 1 ? "" : "s");
         } else {
-            reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId));
+            reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId, own));
         }
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/queue" + (clear ? " clear" : "") + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : "")
@@ -717,6 +724,13 @@ public final class Commands {
 
     private static String oneLine(String text) {
         return text.replaceAll("(?U)\\s+", " ").strip();
+    }
+
+    /** A non-owner's {@code /stop} in a group chat stops only the reply to their own message (JF-237); null otherwise. */
+    private static ConversationQueue.@Nullable OwnMessageOnly memberInGroup(String channelType, String peerId,
+                                                                           boolean ownerInitiated) {
+        return !ownerInitiated && isGroupChat(channelType, peerId)
+                ? new ConversationQueue.OwnMessageOnly(DangerousActionGate.senderId()) : null;
     }
 
     /** Web and voice are never group chats. */

@@ -456,27 +456,34 @@ class ChannelTurnStopTest extends UnitTest {
         assertEquals(3, calls.get());
     }
 
-    // --- in a group chat only the owner's /stop stops a reply, until JF-237 ---
+    // --- in a group chat a member's /stop stops only the reply to their own message (JF-237) ---
+
+    private static final String GROUP = "-1001234567";
+
+    /** The turn text a Telegram group message becomes, as the inbound turn builds it. */
+    private static String groupText(String text, String name, String id) {
+        return AgentRunner.telegramSenderAttributed(text, "supergroup", name, id);
+    }
 
     @Test
-    void inASlackChannelAMembersBangStopLeavesTheReplyRunningAndTheOwnersStopsIt() throws Exception {
-        var convo = seedConversation("slack", provider, "C" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+    void inATelegramGroupAMembersStopLeavesAnotherMembersReplyRunningAndTheOwnersStopsIt() throws Exception {
+        var convo = seedConversation("telegram", provider, GROUP);
         var release = new CountDownLatch(1);
         first = heldAfterFirstToken(release);
         var turn = new RecordingSink();
         var memberReply = new RecordingSink();
         var ownerReply = new RecordingSink();
-        streamOnChannel(convo, ASK, turn);
+        streamInGroup(convo, groupText(ASK, "Bea", "7"), turn, "7", false);
         turn.awaitEvent("update Hel");
         try {
-            streamOnChannel(convo, Commands.rewriteBangCommand("!stop"), memberReply, false);
+            streamInGroup(convo, groupText("/stop", "Ada", "42"), memberReply, "42", false);
 
-            assertEquals(List.of("seal In group chats, only the owner can stop a reply for now."),
+            assertEquals(List.of("seal In group chats, you can only stop a reply to your own message."),
                     memberReply.events());
             assertEquals(List.of("update Hel"), turn.events(), "the reply keeps running");
             assertTrue(ConversationQueue.isBusy(convo.id));
 
-            streamOnChannel(convo, Commands.rewriteBangCommand("!stop"), ownerReply, true);
+            streamInGroup(convo, groupText("/stop", "Owner", "99"), ownerReply, "99", true);
         } finally {
             release.countDown();
         }
@@ -485,7 +492,49 @@ class ChannelTurnStopTest extends UnitTest {
 
         assertEquals(List.of("seal Stopped."), ownerReply.events());
         assertEquals(List.of("update Hel", "stop null"), turn.events());
-        assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id));
+        assertEquals(List.of("user " + groupText(ASK, "Bea", "7"),
+                "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id));
+    }
+
+    @Test
+    void inATelegramGroupAMembersStopStopsTheReplyToTheirOwnMessage() throws Exception {
+        var convo = seedConversation("telegram", provider, GROUP);
+        var release = new CountDownLatch(1);
+        first = heldAfterFirstToken(release);
+        var turn = new RecordingSink();
+        var stopReply = new RecordingSink();
+        streamInGroup(convo, groupText(ASK, "Bea", "7"), turn, "7", false);
+        turn.awaitEvent("update Hel");
+        try {
+            streamInGroup(convo, groupText("/stop", "Bea", "7"), stopReply, "7", false);
+        } finally {
+            release.countDown();
+        }
+        turn.awaitEnd();
+        awaitIdle(convo.id);
+
+        assertEquals(List.of("seal Stopped."), stopReply.events());
+        assertEquals(List.of("update Hel", "stop null"), turn.events());
+    }
+
+    @Test
+    void aGroupMembersStopWithNothingRunningAnswersNothingToStopAndRevealsNoOneElsesMessage() throws Exception {
+        var convo = seedConversation("telegram", provider, GROUP);
+        var reply = new RecordingSink();
+
+        streamInGroup(convo, groupText("/stop", "Ada", "42"), reply, "42", false);
+
+        assertEquals(List.of("seal Nothing to stop."), reply.events());
+    }
+
+    private static void streamInGroup(Conversation convo, String text, ChannelStreamingSink sink, String senderId,
+                                      boolean fromOwner) throws InterruptedException {
+        onFreshThread(() -> DangerousActionGate.withOwnerInitiated(fromOwner,
+                () -> DangerousActionGate.withSender(senderId, () -> {
+                    AgentRunner.processInboundForAgentStreaming(convo.agent, convo.channelType, convo.peerId, text,
+                            _ -> sink);
+                    return null;
+                })));
     }
 
     // --- /queue (JF-227) ---
@@ -1192,15 +1241,6 @@ class ChannelTurnStopTest extends UnitTest {
             throws InterruptedException {
         onFreshThread(() -> AgentRunner.processInboundForAgentStreaming(convo.agent, convo.channelType, convo.peerId,
                 text, _ -> sink));
-    }
-
-    /** {@link #streamOnChannel(Conversation, String, ChannelStreamingSink)} from the binding's owner, or another member. */
-    private static void streamOnChannel(Conversation convo, String text, ChannelStreamingSink sink, boolean fromOwner)
-            throws InterruptedException {
-        onFreshThread(() -> DangerousActionGate.withOwnerInitiated(fromOwner, () -> {
-            AgentRunner.processInboundForAgentStreaming(convo.agent, convo.channelType, convo.peerId, text, _ -> sink);
-            return null;
-        }));
     }
 
     private static void onFreshThread(Runnable body) throws InterruptedException {

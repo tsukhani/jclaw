@@ -64,7 +64,8 @@ public final class TelegramInboundTurn {
             // to the planner on seal; the factory defers construction until AgentRunner has
             // resolved the conversation id. JCLAW-387 B4: the chat.type stamps the new
             // conversation (plain DM vs group history caps).
-            DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+            DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                    () -> DangerousActionGate.withSender(message.fromId(), () -> {
                 AgentRunner.processInboundForAgentStreaming(
                         runAgent, CHANNEL_NAME, peerId, turnText,
                         convId -> new TelegramStreamingSink(
@@ -72,7 +73,7 @@ public final class TelegramInboundTurn {
                                 message.messageId(), message.messageThreadId()),
                         inputs, chatType);
                 return null;
-            });
+            }));
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, Agent.nameOf(bindingAgent), CHANNEL_NAME,
                     "Error processing message for binding %d: %s".formatted(bindingId, e.getMessage()));

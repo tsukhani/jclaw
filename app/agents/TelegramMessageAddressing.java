@@ -1,6 +1,7 @@
 package agents;
 
 import org.jspecify.annotations.Nullable;
+import slash.Commands;
 
 /**
  * JCLAW-370: pure, side-effect-free Telegram conversation-keying and
@@ -68,7 +69,8 @@ public final class TelegramMessageAddressing {
      * ({@code chat.type == "private"}) and for blank text — DMs stay unannotated
      * exactly as before. The prefix carries the sender's display name (falling
      * back to the id when no name is set) plus the numeric id, e.g.
-     * {@code "[Ada Lovelace (id 42)]: hello"}.
+     * {@code "[Ada Lovelace (id 42)]: hello"}. A slash command is left bare: the dispatcher matches commands on the
+     * turn's first token, and the sender reaches it through {@link DangerousActionGate#senderId} instead (JF-237).
      *
      * @param text            the raw inbound message text
      * @param chatType        Telegram {@code chat.type} string (nullable → treated as group)
@@ -78,7 +80,8 @@ public final class TelegramMessageAddressing {
      */
     static String telegramSenderAttributed(String text, @Nullable String chatType,
                                            @Nullable String fromDisplayName, @Nullable String fromId) {
-        if (TELEGRAM_CHAT_TYPE_PRIVATE.equals(chatType) || text == null || text.isEmpty()) {
+        if (TELEGRAM_CHAT_TYPE_PRIVATE.equals(chatType) || text == null || text.isEmpty()
+                || Commands.parse(text).isPresent()) {
             return text;
         }
         var who = fromDisplayName != null && !fromDisplayName.isBlank() ? fromDisplayName : fromId;

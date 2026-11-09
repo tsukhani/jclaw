@@ -41,6 +41,10 @@ public class PendingInbound extends Model {
     @Column(name = "peer_id")
     public String peerId;
 
+    /** The channel's id of the member who sent it; null for a row stored before the column existed. */
+    @Column(name = "sender_id")
+    public String senderId;
+
     @Column(nullable = false, columnDefinition = "TEXT")
     public String text;
 

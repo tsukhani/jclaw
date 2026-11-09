@@ -378,7 +378,7 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(Commands.HELP_TEXT.contains("/model"));
         assertTrue(Commands.HELP_TEXT.contains("/usage"));
         assertTrue(Commands.HELP_TEXT.contains("/stop"));
-        assertTrue(Commands.HELP_TEXT.contains("• /queue — show the waiting messages (/queue clear drops them)"));
+        assertTrue(Commands.HELP_TEXT.contains("• /queue — show the waiting messages (/queue clear drops them; in a group, only your own)"));
     }
 
     // ── /model ─────────────────────────────────────────────────────────
@@ -767,48 +767,6 @@ class SlashCommandsTest extends UnitTest {
         }
     }
 
-    // ── In a group chat only the owner's /stop stops a reply, until JF-237 ──
-
-    @Test
-    void aSlackChannelMembersStopIsRefusedAndTheReplyRunsOnWhileTheOwnersStopsIt() {
-        var convo = ConversationService.findOrCreate(agent, "slack", "C0JF227");
-        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
-        services.ConversationQueue.tryAcquireOwnership(convo.id,
-                new services.ConversationQueue.QueuedMessage("in-flight prompt", "slack", "C0JF227", agent), turnFlag);
-        var stop = Commands.parse(Commands.rewriteBangCommand("!stop")).orElseThrow();
-        try {
-            var member = Commands.execute(stop, agent, "slack", "C0JF227", convo, null, false);
-
-            assertEquals("In group chats, only the owner can stop a reply for now.", member.responseText());
-            assertFalse(turnFlag.get(), "the reply keeps running");
-            assertTrue(services.ConversationQueue.isBusy(convo.id));
-
-            var owner = Commands.execute(stop, agent, "slack", "C0JF227", convo, null, true);
-
-            assertEquals("Stopped.", owner.responseText());
-            assertTrue(turnFlag.get(), "the owner's stop stopped it");
-        } finally {
-            services.ConversationQueue.forgetForTest(convo.id);
-        }
-    }
-
-    @ParameterizedTest(name = "{0} {1}")
-    @CsvSource({"telegram, -1001234567", "telegram, -1001234567:topic:7", "whatsapp, 120363000000000000@g.us"})
-    void aGroupMembersStopIsRefusedOnEveryChannel(String channelType, String groupPeer) {
-        var convo = ConversationService.findOrCreate(agent, channelType, groupPeer);
-        var turnFlag = new java.util.concurrent.atomic.AtomicBoolean();
-        services.ConversationQueue.tryAcquireOwnership(convo.id,
-                new services.ConversationQueue.QueuedMessage("in-flight prompt", channelType, groupPeer, agent), turnFlag);
-        try {
-            var result = Commands.execute(Commands.Command.STOP, agent, channelType, groupPeer, convo, null, false);
-
-            assertEquals("In group chats, only the owner can stop a reply for now.", result.responseText());
-            assertFalse(turnFlag.get(), "the reply keeps running");
-        } finally {
-            services.ConversationQueue.forgetForTest(convo.id);
-        }
-    }
-
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource({"slack, D0JF227", "telegram, 4242", "whatsapp, 6591234567"})
     void aOneToOneSendersStopStopsTheReplyThoughTheyAreNotTheOwner(String channelType, String peer) {
@@ -1050,28 +1008,6 @@ class SlashCommandsTest extends UnitTest {
         } finally {
             services.ConversationQueue.forgetForTest(telegram.id);
             services.ConversationQueue.forgetForTest(slack.id);
-        }
-    }
-
-    @ParameterizedTest(name = "{0} {1}, owner {2}")
-    @CsvSource({
-            "slack,    C0JF227,                  true",
-            "slack,    C0JF227,                  false",
-            "telegram, -1001234567,              true",
-            "telegram, -1001234567:topic:7,      false",
-            "whatsapp, 120363000000000000@g.us,  false",
-    })
-    void aQueueInAGroupChatIsNotAvailableYetAndChangesNothing(String channelType, String groupPeer, boolean owner) {
-        var convo = ConversationService.findOrCreate(agent, channelType, groupPeer);
-        runningWith(convo, "first", "second");
-        try {
-            for (var args : java.util.Arrays.asList(null, "clear")) {
-                assertEquals("/queue isn't available in group chats yet.", Commands.execute(Commands.Command.QUEUE,
-                        agent, channelType, groupPeer, convo, args, owner).responseText());
-            }
-            assertEquals(List.of("first", "second"), waitingTexts(convo));
-        } finally {
-            services.ConversationQueue.forgetForTest(convo.id);
         }
     }
 

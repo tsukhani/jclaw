@@ -1,6 +1,7 @@
 package channels;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import models.Agent;
 import models.DeliveredMessage;
 import models.WhatsAppAcceptedMessage;
@@ -9,6 +10,7 @@ import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
+import slash.Commands;
 import utils.AppClock;
 
 import java.util.Objects;
@@ -138,10 +140,14 @@ public final class WhatsAppInbound {
             var attachments = WhatsAppMediaDownloader.downloadAll(binding, msg, agent.name);
             var peerId = conversationPeerId(msg);
             var text = turnText(msg);
-            AgentRunner.processInboundForAgentStreaming(
-                    agent, CHANNEL_WHATSAPP, peerId, text,
-                    _ -> new WhatsAppStreamingSink(channel, peerId, agent, msg.messageId()),
-                    attachments, msg.chatType());
+            // In a group the sender is what makes a queued message one member's (JF-237).
+            DangerousActionGate.withSender(msg.from(), () -> {
+                AgentRunner.processInboundForAgentStreaming(
+                        agent, CHANNEL_WHATSAPP, peerId, text,
+                        _ -> new WhatsAppStreamingSink(channel, peerId, agent, msg.messageId()),
+                        attachments, msg.chatType());
+                return null;
+            });
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                     "Error processing message: %s".formatted(e.getMessage()));
@@ -180,12 +186,13 @@ public final class WhatsAppInbound {
 
     /**
      * Prefix sender attribution onto a group message so the agent knows who spoke
-     * in a shared group conversation. No-op for a DM or blank text. The local
+     * in a shared group conversation. No-op for a DM, blank text or a slash command, which the dispatcher matches on the
+     * turn's first token (JF-237). The local
      * analog of {@link AgentRunner#telegramSenderAttributed}.
      */
     public static @Nullable String senderAttributed(WhatsAppInboundMessage msg) {
         var text = msg.text();
-        if (!msg.isGroup() || text == null || text.isEmpty()) {
+        if (!msg.isGroup() || text == null || text.isEmpty() || Commands.parse(text).isPresent()) {
             return text;
         }
         var who = msg.senderDisplayName() != null && !msg.senderDisplayName().isBlank()

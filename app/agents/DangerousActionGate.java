@@ -155,6 +155,12 @@ public final class DangerousActionGate {
      */
     private static final InheritableThreadLocal<Boolean> OWNER_INITIATED = new InheritableThreadLocal<>();
 
+    /**
+     * The channel's own id of the member whose message this turn answers (JF-237), bound beside
+     * {@link #OWNER_INITIATED}. Inheritable for the same reason; the drain thread inherits none and rebinds it.
+     */
+    private static final InheritableThreadLocal<String> SENDER_ID = new InheritableThreadLocal<>();
+
     /** The gate's verdict for a single dispatch. */
     public enum Decision { PROCEED, ABORT }
 
@@ -182,6 +188,34 @@ public final class DangerousActionGate {
                 OWNER_INITIATED.set(previous);
             }
         }
+    }
+
+    /**
+     * Run {@code body} as the turn of the member {@code senderId}, the id the channel gives them (Telegram
+     * {@code fromId}, Slack user id, WhatsApp {@code from}). The queue records it on each message that waits, so a
+     * member's {@code /queue} and {@code /stop} act on their own messages only; null binds none.
+     */
+    public static <T> T withSender(@Nullable String senderId, Supplier<T> body) {
+        var previous = SENDER_ID.get();
+        if (senderId == null) {
+            SENDER_ID.remove();
+        } else {
+            SENDER_ID.set(senderId);
+        }
+        try {
+            return body.get();
+        } finally {
+            if (previous == null) {
+                SENDER_ID.remove();
+            } else {
+                SENDER_ID.set(previous);
+            }
+        }
+    }
+
+    /** The member this turn answers, or null when none is bound (Chat, a task, a restored message). */
+    public static @Nullable String senderId() {
+        return SENDER_ID.get();
     }
 
     /** Whether this turn was proven to come from the binding owner. Public because the slash
