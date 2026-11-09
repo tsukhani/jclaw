@@ -400,7 +400,8 @@ public final class HarnessSandbox {
             bwrapLaunched = true;
             return null;
         }
-        var output = probe.output() == null ? "" : probe.output().strip();
+        var raw = probe.output();
+        var output = raw == null ? "" : raw.strip();
         var firstLine = output.lines().findFirst().orElse("").strip();
         var reason = firstLine.isEmpty() ? probe.reason()
                 : firstLine.length() > PROBE_LINE_LIMIT ? firstLine.substring(0, PROBE_LINE_LIMIT) : firstLine;

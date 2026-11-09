@@ -366,8 +366,9 @@ public class ApiMetricsController extends Controller {
         int size = limit == null || limit <= 0
                 ? COMPRESSION_ROWS_DEFAULT_LIMIT : (int) Math.min(limit, COMPRESSION_ROWS_MAX_LIMIT);
 
-        var query = JPA.em().createQuery("SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since"
-                        + (before != null ? " AND m.id < :before" : "") + " ORDER BY m.id DESC",
+        var query = JPA.em().createQuery(before != null
+                        ? "SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since AND m.id < :before ORDER BY m.id DESC"
+                        : "SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since ORDER BY m.id DESC",
                         CompressionMetric.class)
                 .setParameter(KEY_SINCE, since)
                 .setMaxResults(size + 1);

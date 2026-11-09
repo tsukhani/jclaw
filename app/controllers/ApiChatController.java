@@ -588,8 +588,9 @@ public class ApiChatController extends Controller {
                                                        @Nullable Long stopTurn) {
         var slashResult = runSlashCommand(agent, messageText, conversationId, username, stopTurn);
         if (slashResult == null) return false;
-        if (slashResult.conversation() != null) {
-            sse.send(TurnFrames.init(slashResult.conversation().id));
+        var slashConversation = slashResult.conversation();
+        if (slashConversation != null) {
+            sse.send(TurnFrames.init(slashConversation.id));
         }
         sse.send(TurnFrames.complete(slashResult.responseText()));
         sse.close();
