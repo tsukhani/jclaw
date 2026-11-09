@@ -1,9 +1,9 @@
 ---
 name: jira-operations
 description: >-
-  Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint, epic linking via parent field). Includes sprint workflow helpers.
+  Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.5"
+  version: "1.0.6"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec filesystem
@@ -54,19 +54,17 @@ curl -sS -X PUT \
 
 ### Link Issue to Epic
 
-**MCP path:** `jira_link_to_epic(issue_key, epic_key)`  
-**Problem:** Works for most cases, but may not set the underlying Epic Link custom field on some Jira Server/DC instances  
+**MCP path:** `jira_update_issue(issue_key, fields="{}", additional_fields="{\"customfield_10002\": \"EPIC-123\"}")`. Both arguments are JSON strings, and `fields="{}"` leaves the other fields untouched.  
+**Do not use `jira_link_to_epic`:** on this Jira Server it answers "has been linked" but leaves the Epic Link field empty (verified 2026-11-08).  
 **Fallback:** Direct REST API with `customfield_10002` (Epic Link field)
 
 **How Epic Linking Works on Jira Server/DC:**
 - Epic Link is stored in `customfield_10002` (issue key of the Epic)
 - The `parent` field is for subtasks, not epic links
-- The `jira_link_to_epic` MCP command calls the Greenhopper API which may use `customfield_10002` internally
 
 **Procedure:**
-1. **Try `jira_link_to_epic(issue_key, epic_key)` first**
-   - This is the cleanest approach and works for most cases
-2. **If that fails or you need to verify the underlying field**:
+1. **Set the field with `jira_update_issue`** as above
+2. **If that fails**:
    a. Use direct REST API to set `customfield_10002`:
       ```bash
       curl -sS -X PUT \
@@ -75,8 +73,8 @@ curl -sS -X PUT \
         -d '{"fields": {"customfield_10002": "EPIC-123"}}' \
         "$JIRA_URL/rest/api/2/issue/{issueKey}"
       ```
-   b. Verify via `jira_get_issue(fields="customfield_10002")`
-3. **For label-based tracking** (optional):
+3. Verify with `jira_search(jql="\"Epic Link\" = EPIC-123 AND key = ISSUE-KEY")`; JQL `parent = EPIC-123` finds nothing on this instance
+4. **For label-based tracking** (optional):
    - Add epic name as label: `jira_update_issue` with `fields={"labels": ["epic-EPIC-123", ...existing_labels]}`
    - This enables JQL filtering like `labels = epic-EPIC-123`
 
@@ -96,7 +94,7 @@ curl -sS -X PUT \
 
 ### Create Story with Epic Link
 
-**Always use MCP** — `jira_create_issue` supports `additional_fields={"epicKey": "EPIC-123"}` or `{"parent": "EPIC-123"}`.
+**Always use MCP** — `jira_create_issue` with `additional_fields="{\"customfield_10002\": \"EPIC-123\"}"` (a JSON string) sets the Epic Link in the same call (verified 2026-11-09). Not `{"parent": "EPIC-123"}`, which is a subtask relationship. Creating never adds the issue to a sprint; that is a separate `jira_add_issues_to_sprint` call.
 
 ### Update Issue Fields (General)
 
