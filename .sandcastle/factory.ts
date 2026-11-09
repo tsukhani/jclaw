@@ -254,9 +254,19 @@ export const factorySandbox = () => {
       const writable = [path.join(COMMON_GIT, "objects"), path.join(COMMON_GIT, "refs/heads/agent"), path.join(COMMON_GIT, "logs/refs/heads/agent"), path.resolve(gitdir)];
       for (const dir of writable) fs.mkdirSync(dir, { recursive: true });
       if (!options.mounts.some((m) => path.resolve(m.hostPath) === COMMON_GIT)) throw new Error(`Sandcastle no longer mounts ${COMMON_GIT}; refusing to guess`);
+      // Sandcastle adds mounts of its own inside .git before this runs, 0.14's writable anchors on .git/worktrees and
+      // this worktree's admin dir among them, so each is read-only here unless the writable list above names it.
+      const inCommonGit = (dir: string) => dir === COMMON_GIT || dir.startsWith(COMMON_GIT + path.sep);
+      const fromSandcastle = options.mounts.map((m) => {
+        const host = path.resolve(m.hostPath);
+        if (writable.includes(host)) return { ...m, readonly: false };
+        return inCommonGit(host) ? { ...m, readonly: true } : m;
+      });
       const mounts = [
-        ...options.mounts.map((m) => (path.resolve(m.hostPath) === COMMON_GIT ? { ...m, readonly: true } : m)),
-        ...writable.map((dir) => ({ hostPath: dir, sandboxPath: dir, readonly: false })),
+        ...fromSandcastle,
+        ...writable
+          .filter((dir) => !fromSandcastle.some((m) => path.resolve(m.hostPath) === dir))
+          .map((dir) => ({ hostPath: dir, sandboxPath: dir, readonly: false })),
       ];
       const handle = await inner.create({ ...options, mounts });
       // Docker names a container's host after its ID.
