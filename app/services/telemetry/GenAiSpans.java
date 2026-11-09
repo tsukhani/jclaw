@@ -45,6 +45,7 @@ public final class GenAiSpans {
 
     public static final String OPERATION_CHAT = "chat";
     public static final String OPERATION_EMBEDDINGS = "embeddings";
+    public static final String FINISH_REASON_ERROR = "error";
 
     private static final String SCOPE = "jclaw";
 
@@ -272,6 +273,12 @@ public final class GenAiSpans {
             ended = true;
             span.recordException(t);
             span.setAttribute(ErrorAttributes.ERROR_TYPE, t.getClass().getName());
+            // Upstream reports a finish reason that was expected and never arrived as "error" rather than omitting it;
+            // an embeddings call expects none. Its "interrupted" belongs to realtime sessions, which jclaw never opens.
+            if (!OPERATION_EMBEDDINGS.equals(operation)) {
+                span.setAttribute(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS,
+                        finishReasons.isEmpty() ? List.of(FINISH_REASON_ERROR) : finishReasons);
+            }
             span.setStatus(StatusCode.ERROR, t.getClass().getSimpleName());
             span.end();
             record(t.getClass().getName());

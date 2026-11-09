@@ -452,6 +452,37 @@ class GenAiSpansTest extends UnitTest {
         assertNoSeries(metrics, "mute-metric.example.test", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME);
     }
 
+    @Test
+    void aChatCallThatFailsBeforeAnyFinishReasonReportsError() {
+        var chat = one(OtelRuntime.captureForTest(() ->
+                GenAiSpans.start(openAiAt("no-finish.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", false, null)
+                        .failed(new IllegalStateException("refused"))), "chat gpt-x");
+        assertEquals(List.of("error"), chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+    }
+
+    @Test
+    void aStreamThatFailsAfterItsFinishReasonKeepsIt() {
+        var finished = new ChatCompletionChunk("chatcmpl-f", "gpt-x-2024", List.of(new ChunkChoice(0, null, "length")), null);
+        var chat = one(OtelRuntime.captureForTest(() -> failStream("cut-after-finish.example.test", finished)), "chat gpt-x");
+        assertEquals(List.of("length"), chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+    }
+
+    @Test
+    void aFailedEmbeddingsCallReportsNoFinishReason() {
+        var span = one(OtelRuntime.captureForTest(() ->
+                GenAiSpans.start(openAiAt("embeds-no-finish.example.test"), GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null)
+                        .failed(new IllegalStateException("refused"))), "embeddings embed-x");
+        assertNull(span.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+    }
+
+    @Test
+    void aSuccessfulCallWithoutAFinishReasonReportsNone() {
+        var chat = one(OtelRuntime.captureForTest(() ->
+                GenAiSpans.start(openAiAt("ok-no-finish.example.test"), GenAiSpans.OPERATION_CHAT, "gpt-x", false, null)
+                        .succeeded()), "chat gpt-x");
+        assertNull(chat.getAttributes().get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+    }
+
     private static void assertNoInferenceMetrics(Collection<MetricData> metrics, String host) {
         assertNoSeries(metrics, host, RETIRED_OPERATION_DURATION,
                 GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME,
