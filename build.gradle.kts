@@ -390,7 +390,7 @@ dependencies {
 
     // jsoup 1.23.2 is the version Tika 4.1.0's parent POM pins for its
     // parser modules; keeps resolved/declared in sync.
-    implementation("org.jsoup:jsoup:1.23.2")
+    implementation("org.jsoup:jsoup:1.24.1")
 
     // crawler-commons — Googlebot-compatible robots.txt parsing and sitemap handling
     // for web_scrape (JCLAW-1084). The same SimpleRobotRulesParser Nutch and
