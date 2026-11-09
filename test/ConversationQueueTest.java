@@ -165,69 +165,14 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void interruptModeAllowsExactlyOneAcquirerAtATime() throws Exception {
-        // Verifies the TOCTOU fix: in interrupt mode, only one thread at a time
-        // should believe it acquired the conversation for processing.
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
-
-        int iterations = 100;
-        var doubleAcquire = new AtomicBoolean(false);
-
-        for (int iter = 0; iter < iterations; iter++) {
-            long convId = 4000L + iter;
-            int threadCount = 8;
-            var barrier = new CyclicBarrier(threadCount);
-            var latch = new CountDownLatch(threadCount);
-            var acquiredCount = new AtomicInteger(0);
-
-            for (int t = 0; t < threadCount; t++) {
-                final int idx = t;
-                Thread.ofVirtual().start(() -> {
-                    try {
-                        barrier.await();
-                        var msg = new QueuedMessage("Thread " + idx, "web", "admin", agent);
-                        if (ConversationQueue.tryAcquire(convId, msg)) {
-                            acquiredCount.incrementAndGet();
-                        }
-                    } catch (Exception _) {
-                    } finally {
-                        latch.countDown();
-                    }
-                });
-            }
-
-            assertTrue(latch.await(10, TimeUnit.SECONDS));
-
-            // In interrupt mode, multiple threads may return true (the interrupter
-            // returns true to signal "take over"), but the processing flag should
-            // ensure only one thread transitions from not-processing to processing.
-            // Additional acquirers in interrupt mode clear the queue and return true
-            // to signal the caller to proceed — but the caller must still be the one
-            // that set processing=true, or the one that interrupted.
-            // The key invariant: acquiredCount >= 1 (at least one), and the queue
-            // state should be consistent (not corrupted).
-            assertTrue(acquiredCount.get() >= 1,
-                    "At least one thread must acquire in interrupt mode");
-
-            // Drain and reset
-            ConversationQueue.drain(convId);
-            while (!ConversationQueue.drain(convId).isEmpty()) {}
-        }
-
-        assertFalse(doubleAcquire.get());
-        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
-    }
-
-    @Test
     void getQueueSizeReturnsZeroForUnknownConversation() {
         assertEquals(0, ConversationQueue.getQueueSize(9999L));
     }
 
     @Test
-    void concurrentInterruptModeDoesNotCorruptArrayDeque() throws Exception {
-        // Task 3.7: Two virtual threads call tryAcquire in interrupt mode simultaneously.
+    void concurrentArrivalsAndDrainsDoNotCorruptTheLine() throws Exception {
+        // Task 3.7: Arrivals and drains on one conversation at once.
         // Before the fix, the unsynchronized state.pending.clear() could corrupt the deque.
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
 
         int iterations = 50;
         var corrupted = new AtomicBoolean(false);
@@ -252,7 +197,7 @@ class ConversationQueueTest extends UnitTest {
                 Thread.ofVirtual().start(() -> {
                     try {
                         barrier.await();
-                        // Half interrupt (clear), half drain (poll)
+                        // Half arrive, half drain
                         if (idx % 2 == 0) {
                             ConversationQueue.tryAcquire(convId,
                                     new QueuedMessage("Interrupt " + idx, "web", "admin", agent));
@@ -274,7 +219,6 @@ class ConversationQueueTest extends UnitTest {
         }
 
         assertFalse(corrupted.get(), "ArrayDeque should not throw from concurrent access");
-        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
     }
 
     @Test
@@ -333,41 +277,166 @@ class ConversationQueueTest extends UnitTest {
         while (!ConversationQueue.drain(convId).isEmpty()) {}
     }
 
-    // --- Collect mode ---
+    // --- What runs next follows the conversation's channel (JF-245) ---
+
+    private QueuedMessage from(String text, String channel, String sender, boolean owner) {
+        return new QueuedMessage(text, channel, "peer", agent, false, List.of(), null, owner, sender);
+    }
 
     @Test
-    void collectModeReturnsAllPendingOnDrain() {
-        // In collect mode, drain must return the ENTIRE pending list (for the
-        // caller to fold into a single prompt) rather than a single message —
-        // contrast with queue mode which returns just the next one.
-        // Contract at ConversationQueue.java:133-137.
-        //
-        // Note: the first tryAcquire acquires processing without enqueueing;
-        // the caller processes "First" inline. Only subsequent messages land
-        // in the pending deque, so drain returns 2 (not 3) — this is the
-        // distinction collect mode makes: multiple-during-busy fold together.
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
-
+    void aSendersWaitingMessagesOnTelegramRunTogetherAsOneTurn() {
         long convId = 5000L;
-        assertTrue(ConversationQueue.tryAcquire(convId,
-                new QueuedMessage("First", "web", "admin", agent)));
-        assertFalse(ConversationQueue.tryAcquire(convId,
-                new QueuedMessage("Second", "web", "admin", agent)));
-        assertFalse(ConversationQueue.tryAcquire(convId,
-                new QueuedMessage("Third", "web", "admin", agent)));
+        assertTrue(ConversationQueue.tryAcquire(convId, from("First", "telegram", "u1", false)));
+        assertFalse(ConversationQueue.tryAcquire(convId, from("Second", "telegram", "u1", false)));
+        assertFalse(ConversationQueue.tryAcquire(convId, from("Third", "telegram", "u1", false)));
+        assertFalse(ConversationQueue.tryAcquire(convId, from("Fourth", "telegram", "u1", false)));
 
-        var drained = ConversationQueue.drain(convId);
-        assertEquals(2, drained.size(),
-                "collect mode must return all pending messages in one batch");
-        assertEquals("Second", drained.get(0).text());
-        assertEquals("Third", drained.get(1).text());
+        assertEquals(List.of("Second", "Third", "Fourth"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of(), ConversationQueue.drain(convId), "the batch emptied the line and released it");
+    }
 
-        // Contrast with queue mode: queue mode would return ["Second"] here,
-        // requiring a second drain to get "Third". Collect returns both
-        // in one shot so the caller can format them into a single prompt.
-        assertTrue(ConversationQueue.drain(convId).isEmpty(),
-                "collect drain must fully empty the pending deque");
-        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+    @Test
+    void waitingMessagesOnSlackAndWhatsAppRunTogetherToo() {
+        for (var channel : List.of("slack", "whatsapp")) {
+            long convId = 5010L + channel.length();
+            ConversationQueue.tryAcquire(convId, from("First", channel, "u1", false));
+            ConversationQueue.tryAcquire(convId, from("Second", channel, "u1", false));
+            ConversationQueue.tryAcquire(convId, from("Third", channel, "u1", false));
+
+            assertEquals(List.of("Second", "Third"), texts(ConversationQueue.drain(convId)), channel);
+            ConversationQueue.forgetForTest(convId);
+        }
+    }
+
+    @Test
+    void eachMembersRunOfMessagesInAGroupIsItsOwnTurnInArrivalOrder() {
+        long convId = 5020L;
+        ConversationQueue.tryAcquire(convId, from("running", "telegram", "u0", false));
+        for (var m : List.of(new String[]{"a1", "u1"}, new String[]{"a2", "u1"}, new String[]{"b1", "u2"},
+                new String[]{"a3", "u1"})) {
+            ConversationQueue.tryAcquire(convId, from(m[0], "telegram", m[1], false));
+        }
+
+        assertEquals(List.of("a1", "a2"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("b1"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("a3"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of(), ConversationQueue.drain(convId));
+    }
+
+    @Test
+    void anOwnersMessageFromChatNeverJoinsAChannelSendersBatch() {
+        long convId = 5030L;
+        ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", false));
+        ConversationQueue.tryAcquire(convId, from("customer 1", "telegram", "u1", false));
+        ConversationQueue.tryAcquire(convId, from("operator", "web", null, true));
+        ConversationQueue.tryAcquire(convId, from("customer 2", "telegram", "u1", false));
+
+        assertEquals(List.of("customer 1"), texts(ConversationQueue.drain(convId)));
+        var operator = ConversationQueue.drain(convId);
+        assertEquals(List.of("operator"), texts(operator));
+        assertEquals(List.of("customer 2"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void anOwnersAndAGuestsMessageFromOneSenderIdAreNotBatched() {
+        long convId = 5035L;
+        ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", true));
+        ConversationQueue.tryAcquire(convId, from("owner", "telegram", "u1", true));
+        ConversationQueue.tryAcquire(convId, from("guest", "telegram", "u1", false));
+
+        assertEquals(List.of("owner"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("guest"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void waitingMessagesInChatEachRunAsTheirOwnTurnInTheOrderSent() {
+        long convId = 5040L;
+        ConversationQueue.tryAcquire(convId, from("First", "web", null, true));
+        ConversationQueue.tryAcquire(convId, from("Second", "web", null, true));
+        ConversationQueue.tryAcquire(convId, from("Third", "web", null, true));
+
+        assertEquals(List.of("Second"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("Third"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of(), ConversationQueue.drain(convId));
+    }
+
+    @Test
+    void waitingMessagesInVoiceEachRunAsTheirOwnTurn() {
+        long convId = 5050L;
+        ConversationQueue.tryAcquire(convId, from("First", "voice", null, true));
+        ConversationQueue.tryAcquire(convId, from("Second", "voice", null, true));
+        ConversationQueue.tryAcquire(convId, from("Third", "voice", null, true));
+
+        assertEquals(List.of("Second"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("Third"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void aWaitingSubagentResultRunsAloneAndIsNotFoldedIntoASendersBatch() {
+        long convId = 5060L;
+        ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", false));
+        ConversationQueue.tryAcquire(convId, from("one", "telegram", "u1", false));
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "telegram", "peer", agent, true));
+        ConversationQueue.tryAcquire(convId, from("two", "telegram", "u1", false));
+
+        assertEquals(List.of("one"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("[subagent result]"), texts(ConversationQueue.drain(convId)));
+        assertEquals(List.of("two"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void aBatchKeepsOwnershipSoANewArrivalQueuesBehindIt() {
+        long convId = 7004L;
+        try {
+            ConversationQueue.tryAcquire(convId, from("A", "telegram", "u1", false));
+            ConversationQueue.tryAcquire(convId, from("B", "telegram", "u1", false));
+            ConversationQueue.tryAcquire(convId, from("C", "telegram", "u1", false));
+
+            assertEquals(2, ConversationQueue.drain(convId).size());
+            assertFalse(ConversationQueue.tryAcquire(convId, from("D", "telegram", "u1", false)));
+        } finally {
+            while (!ConversationQueue.drain(convId).isEmpty()) {}
+            ConversationQueue.releaseOwnership(convId);
+        }
+    }
+
+    @Test
+    void aMessageArrivingWhileAReplyRunsNeverCancelsIt() {
+        long convId = 5100L;
+        ConversationQueue.tryAcquire(convId, from("In-flight", "web", null, true));
+        var flag = ConversationQueue.cancellationFlag(convId);
+
+        ConversationQueue.tryAcquire(convId, from("Barge-in", "web", null, true));
+
+        assertFalse(flag.get());
+        assertEquals(List.of("Barge-in"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void theTwentyFirstWaitingMessageDropsTheOldest() {
+        long convId = 5110L;
+        ConversationQueue.tryAcquire(convId, from("running", "web", null, true));
+        for (int i = 1; i <= 21; i++) ConversationQueue.tryAcquire(convId, from("m" + i, "web", null, true));
+
+        assertEquals(20, ConversationQueue.getQueueSize(convId));
+        assertEquals(List.of("m2"), texts(ConversationQueue.drain(convId)));
+    }
+
+    @Test
+    void theMessagesWaitingInChatAreListedAndClearedOneByOne() {
+        long convId = 18006L;
+        try {
+            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+            for (var text : List.of("B", "C", "D")) {
+                ConversationQueue.tryAcquire(convId, new QueuedMessage(text, "web", "admin", agent));
+            }
+
+            assertEquals(List.of("B", "C", "D"), texts(ConversationQueue.waiting(convId, null, null)));
+            assertEquals(3, ConversationQueue.clearWaiting(convId, null, null));
+            assertEquals(List.of(), ConversationQueue.drain(convId, gen), "nothing is left to run");
+        } finally {
+            ConversationQueue.forgetForTest(convId);
+        }
     }
 
     @Test
@@ -391,34 +460,6 @@ class ConversationQueueTest extends UnitTest {
     }
 
     // --- Interrupt mode cancellation signal ---
-
-    @Test
-    void interruptModeSetsCancellationFlagForActiveProcessor() {
-        // When interrupt fires, the in-flight processor must observe the
-        // cancelled flag via cancellationFlag(). Drain then clears it so
-        // the next run starts fresh. This is the contract AgentRunner
-        // relies on for barge-in behavior.
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
-
-        long convId = 5100L;
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("In-flight", "web", "admin", agent));
-
-        var flag = ConversationQueue.cancellationFlag(convId);
-        assertFalse(flag.get(), "flag starts clear");
-
-        // Second message in interrupt mode triggers cancellation
-        ConversationQueue.tryAcquire(convId, new QueuedMessage("Barge-in", "web", "admin", agent));
-        assertTrue(flag.get(), "interrupt must raise cancellation flag");
-
-        // Drain gives the next run a fresh flag and leaves the interrupted run's flag set
-        ConversationQueue.drain(convId);
-        assertFalse(ConversationQueue.cancellationFlag(convId).get(), "drain gives the next run a clear flag");
-        assertTrue(flag.get(), "the interrupted run still reads itself as cancelled");
-
-        // Cleanup any pending
-        while (!ConversationQueue.drain(convId).isEmpty()) {}
-        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
-    }
 
     // ── JCLAW-117: atomic ownership transfer on drain ──
 
@@ -481,31 +522,6 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(1, drained.size());
         assertEquals("B", drained.get(0).text());
         ConversationQueue.releaseOwnership(convId);
-    }
-
-    @Test
-    void drainOverCollectModeKeepsOwnership() {
-        long convId = 7004L;
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
-        try {
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
-
-            var drained = ConversationQueue.drain(convId);
-            assertEquals(2, drained.size(), "collect returns all pending");
-
-            // Ownership transferred — new inbound queues behind.
-            var acquired = ConversationQueue.tryAcquire(convId,
-                    new QueuedMessage("D", "web", "admin", agent));
-            assertFalse(acquired, "collect drain also keeps ownership");
-
-            ConversationQueue.releaseOwnership(convId);
-        } finally {
-            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
-            while (!ConversationQueue.drain(convId).isEmpty()) {}
-            ConversationQueue.releaseOwnership(convId);
-        }
     }
 
     // ── JCLAW-286: idle eviction ──
@@ -776,8 +792,9 @@ class ConversationQueueTest extends UnitTest {
     void stopEndsARestoredMessagesRunAndTheRestoredOnesBehindItRunInOrder() {
         long convId = 12013L;
         try {
-            var gen = ConversationQueue.tryAcquireRestored(convId, List.of(new QueuedMessage("R1", "telegram", "peer", agent),
-                    new QueuedMessage("R2", "telegram", "peer", agent), new QueuedMessage("R3", "telegram", "peer", agent)));
+            // Three members' messages, so the drain hands them on one at a time rather than as one sender's batch.
+            var gen = ConversationQueue.tryAcquireRestored(convId, List.of(from("R1", "telegram", "m1", false),
+                    from("R2", "telegram", "m2", false), from("R3", "telegram", "m3", false)));
             assertNotEquals(ConversationQueue.NOT_ACQUIRED, gen, "test precondition: R1 takes the conversation");
 
             assertTrue(ConversationQueue.stop(convId), "a restored message's run holds a flag of its own");
@@ -943,20 +960,6 @@ class ConversationQueueTest extends UnitTest {
         try (var _ = agents.TurnCancellation.register(ConversationQueue.cancellationFlag(convId), ran::countDown)) {
             ConversationQueue.cancelTurn(convId);
             assertTrue(ran.await(5, TimeUnit.SECONDS), "/stop ran the turn's cancel action");
-        }
-        ConversationQueue.releaseOwnership(convId, gen);
-    }
-
-    @Test
-    void anInterruptModeArrivalRunsActionsRegisteredOnTheConversationFlag() throws Exception {
-        long convId = 14003L;
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
-        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
-        var ran = new CountDownLatch(1);
-        try (var _ = agents.TurnCancellation.register(ConversationQueue.cancellationFlag(convId), ran::countDown)) {
-            assertEquals(ConversationQueue.NOT_ACQUIRED, ConversationQueue.tryAcquireOwnership(convId,
-                    new QueuedMessage("B", "web", "admin", agent), null));
-            assertTrue(ran.await(5, TimeUnit.SECONDS), "the interrupting arrival ran the turn's cancel action");
         }
         ConversationQueue.releaseOwnership(convId, gen);
     }
@@ -1404,11 +1407,11 @@ class ConversationQueueTest extends UnitTest {
         long convId = 17015L;
         services.ConversationTurnStream.Turn running = null;
         try {
-            var gen = ConversationQueue.tryAcquireOwnership(convId,
-                    new QueuedMessage("X", "telegram", "peer", agent), null);
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "telegram", "peer", agent));
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "telegram", "peer", agent));
-            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "telegram", "peer", agent));
+            // Each from its own member, so each drain hands on one turn rather than one sender's batch.
+            var gen = ConversationQueue.tryAcquireOwnership(convId, from("X", "telegram", "mX", false), null);
+            ConversationQueue.tryAcquire(convId, from("A", "telegram", "mA", false));
+            ConversationQueue.tryAcquire(convId, from("B", "telegram", "mB", false));
+            ConversationQueue.tryAcquire(convId, from("C", "telegram", "mC", false));
             assertEquals("A", ConversationQueue.drain(convId, gen).getFirst().text());
             var a = ConversationQueue.ownerTurn(convId, gen);
             assertEquals("B", ConversationQueue.drain(convId, gen).getFirst().text());
@@ -1501,8 +1504,6 @@ class ConversationQueueTest extends UnitTest {
         long convId = 17006L;
         var report = new services.AttachmentService.Input("att-1", "report.pdf", "application/pdf", 10, "file");
         var photo = new services.AttachmentService.Input("att-2", null, "image/png", 20, "image");
-        // Queue mode, whatever an earlier test left set: interrupt mode would clear the line on each arrival.
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "queue");
         try {
             ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent),
                     new AtomicBoolean());
@@ -1524,7 +1525,6 @@ class ConversationQueueTest extends UnitTest {
                     ConversationQueue.snapshot(17007L, "web"));
         } finally {
             ConversationQueue.forgetForTest(convId);
-            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
         }
     }
 
@@ -1620,25 +1620,6 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void inCollectModeTheMessagesWaitingToBeBatchedAreListedAndClearedOneByOne() {
-        long convId = 18006L;
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
-        try {
-            var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
-            for (var text : List.of("B", "C", "D")) {
-                ConversationQueue.tryAcquire(convId, new QueuedMessage(text, "web", "admin", agent));
-            }
-
-            assertEquals(List.of("B", "C", "D"), texts(ConversationQueue.waiting(convId, null, null)));
-            assertEquals(3, ConversationQueue.clearWaiting(convId, null, null));
-            assertEquals(List.of(), ConversationQueue.drain(convId, gen), "no batch is left to run");
-        } finally {
-            ConversationQueue.forgetForTest(convId);
-            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
-        }
-    }
-
-    @Test
     void aClearDeletesTheStoredRowsOfTheChannelMessagesItDrops() {
         var conv = services.ConversationService.create(agent, "telegram", "jf227-clear-rows");
         // A queued message's row is written on a thread of its own, which must find the conversation committed.
@@ -1663,7 +1644,6 @@ class ConversationQueueTest extends UnitTest {
     @Test
     void theSnapshotCountsEachClearThatDroppedAMessageAndNoOther() {
         long convId = 18007L;
-        services.ConfigService.set("agent.queue-test-agent.queue.mode", "queue");
         try {
             ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
             ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
@@ -1687,7 +1667,6 @@ class ConversationQueueTest extends UnitTest {
                     ConversationQueue.snapshot(convId, "web"));
         } finally {
             ConversationQueue.forgetForTest(convId);
-            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
         }
     }
 

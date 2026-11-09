@@ -1679,7 +1679,7 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                 </button>
-                <!-- Only for a turn the server can stop (JF-202); Send stays beside it, and a message sent mid-turn follows the queue mode. -->
+                <!-- Only for a turn the server can stop (JF-202); Send stays beside it, and a message sent mid-turn waits in line. -->
                 <button
                   v-if="streaming && stoppable"
                   type="button"

@@ -763,7 +763,7 @@ public final class ToolCallLoopRunner {
 
     /**
      * JF-219: from the round whose {@code subagent_yield} calls suspended the turn on {@code yieldedOn} until the turn
-     * lets go of its conversation, a cancel of the turn's flag, by a stop or interrupt mode, kills those runs, at once
+     * lets go of its conversation, a cancel of the turn's flag, by a stop or any other cancel, kills those runs, at once
      * when the flag is already set: each one's end would otherwise wake the stopped conversation and reply into it.
      * Killed as a sync spawn's child is when its parent turn stops, a run announces nothing and resumes nothing.
      */

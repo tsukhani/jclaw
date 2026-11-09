@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import agents.SkillLoader;
 import agents.ToolResultVerifier;
 import models.Agent;
+import models.Config;
 import play.Logger;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
@@ -516,6 +517,16 @@ public class DefaultConfigJob extends Job<Void> {
 
         raiseHistoryLimitsOnce();
         adoptRollingSummariesOnce();
+        dropQueueModeRows();
+    }
+
+    /** JF-245: nothing reads a per-agent queue mode any more, so each stored row goes. */
+    public static void dropQueueModeRows() {
+        List<String> keys = Tx.run(() -> {
+            List<Config> rows = Config.find("key like ?1 and key like ?2", "agent.%", "%.queue.mode").fetch();
+            return rows.stream().map(c -> c.key).toList();
+        });
+        for (var key : keys) ConfigService.delete(key);
     }
 
     /** One-shot: a seeded row still holding {@code oldDefault} takes {@code newDefault}; an operator's own value stays. */

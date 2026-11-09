@@ -647,30 +647,6 @@ class ChannelTurnStopTest extends UnitTest {
     }
 
     @Test
-    void anInterruptModeArrivalDuringAYieldRoundKillsTheRunItWaitedOn() throws Exception {
-        var convo = seedConversation("telegram");
-        warmQueue(convo);
-        interruptMode(convo);
-        try {
-            var runId = seedRunningRun(convo);
-            var started = new CountDownLatch(1);
-            ToolRegistry.publish(List.of(new SubagentYieldTool(), holdAfterYield(runId, started)));
-            first = exchange -> LlmReplyFixture.send(exchange, yieldAndHold(runId));
-            var turn = new RecordingSink();
-            streamOnChannel(convo, ASK, turn);
-            assertTrue(started.await(30, TimeUnit.SECONDS), "test precondition: the turn yielded on the run");
-
-            streamOnChannel(convo, NEXT, new RecordingSink());
-            turn.awaitEnd();
-            awaitIdle(convo.id);
-
-            assertEquals(KILLED_FOR_THE_STOP, awaitRunState(runId, KILLED_FOR_THE_STOP));
-        } finally {
-            ConfigService.delete("agent." + convo.agent.name + ".queue.mode");
-        }
-    }
-
-    @Test
     void aStopAfterASyncYieldRoundReturnedBeforeTheReleaseStillKillsTheRunItWaitsOn() throws Exception {
         var convo = seedConversation("web");
         var runId = seedRunningRun(convo);
@@ -815,37 +791,7 @@ class ChannelTurnStopTest extends UnitTest {
                 "assistant " + REPLY), rows(convo.id));
     }
 
-    // --- interrupt mode, the stopped turn's error, and its tool frames ---
-
-    @Test
-    void anInterruptModeArrivalOnlyCancelsTheStreamedChannelTurnAndSendsNoNotice() throws Exception {
-        var convo = seedConversation("telegram");
-        warmQueue(convo);
-        interruptMode(convo);
-        try {
-            var release = new CountDownLatch(1);
-            first = heldAfterFirstToken(release);
-            var turn = new RecordingSink();
-            var arrival = new RecordingSink();
-            streamOnChannel(convo, ASK, turn);
-            turn.awaitEvent("update Hel");
-            try {
-                streamOnChannel(convo, NEXT, arrival);
-                arrival.awaitEnd();
-            } finally {
-                release.countDown();
-            }
-            turn.awaitEnd();
-            awaitIdle(convo.id);
-
-            assertEquals(List.of("update Hel", "update lo", "cancel"), turn.events());
-            assertEquals(List.of("seal " + QUEUED), arrival.events());
-            assertEquals(List.of("user " + ASK, "assistant " + ConversationService.STOP_MARKER_CONTENT,
-                    "user " + NEXT, "assistant " + REPLY), rows(convo.id));
-        } finally {
-            ConfigService.delete("agent." + convo.agent.name + ".queue.mode");
-        }
-    }
+    // --- the stopped turn's error, and its tool frames ---
 
     @Test
     void aStoppedChannelTurnThatThenFailsEndsStoppedNotWithTheErrorReply() throws Exception {
@@ -1087,12 +1033,6 @@ class ChannelTurnStopTest extends UnitTest {
     private static void warmQueue(Conversation convo) {
         var earlier = new ConversationQueue.QueuedMessage("earlier", convo.channelType, convo.peerId, convo.agent);
         ConversationQueue.releaseOwnership(convo.id, ConversationQueue.tryAcquireOwnership(convo.id, earlier, null));
-    }
-
-    private static void interruptMode(Conversation convo) {
-        ConfigService.set("agent." + convo.agent.name + ".queue.mode", "interrupt");
-        JPA.em().getTransaction().commit();
-        JPA.em().getTransaction().begin();
     }
 
     private static String yieldOnly(long runId) {

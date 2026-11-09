@@ -306,23 +306,6 @@ class FencedPromptCatalogTest extends UnitTest {
         assertFalse(drained.catalog().contains(JCLAW_API), drained.catalog().toString());
     }
 
-    @Test
-    void aCollectedBatchWithAGuestsMessageInItIsTheGuestsTurn() throws Exception {
-        grantJclawApi();
-        var mode = "agent." + Tx.run(() -> ((Agent) Agent.findById(agentId)).name) + ".queue.mode";
-        ConfigService.set(mode, "collect");
-        JPA.em().getTransaction().commit();
-        JPA.em().getTransaction().begin();
-        try {
-            var drained = drainedTurn(true, false);
-
-            assertFalse(drained.offered().contains(JCLAW_API), drained.offered().toString());
-            assertFalse(drained.catalog().contains(JCLAW_API), drained.catalog().toString());
-        } finally {
-            ConfigService.delete(mode);
-        }
-    }
-
     /** What one turn put in front of the model: the request's tools, the prompt's Tool Catalog and its skills. */
     private record Turn(Set<String> offered, Set<String> catalog, Set<String> skills) {}
 

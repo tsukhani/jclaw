@@ -37,18 +37,6 @@ There is no free-form prompt field. The platform assembles what the model sees b
 
 You can preview exactly what the agent will receive, including any standing context the platform adds from workspace files and skills. Click **Inspect prompt** at the top of the edit form. The breakdown shows each section with character and token counts.
 
-### Queue Mode
-
-This controls what happens when a new message arrives while the agent is already busy on this conversation:
-
-| Mode | Effect |
-|-------------------|-----------------------------------------------------------------------------------------------------|
-| **Queue (FIFO)** | Queue the new message; the agent processes it after the current turn finishes. The default. |
-| **Collect (batch)** | Hold the new message until the current turn finishes, then process all queued messages as a single batched turn. Best for noisy channels where rapid follow-ups read as one thought. |
-| **Interrupt** | Cancel the in-flight generation and start over with the latest message. |
-
-Use **Queue (FIFO)** by default. Use **Collect** when users tend to send a burst of related messages. Use **Interrupt** for live-feeling chat where the latest message always wins.
-
 ### Tools
 
 Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others). Tools from [MCP Servers](/mcp-servers) are not listed here. Switch a server on in the **MCP Servers** section below.

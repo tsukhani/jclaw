@@ -296,7 +296,7 @@ final class StreamingAgentRunner {
         );
     }
 
-    /** Whether a stop, not interrupt mode, set the turn's flag before its reply's commit, which the sink then refused. */
+    /** Whether a stop, not a bare cancel, set the turn's flag before its reply's commit, which the sink then refused. */
     private static boolean stoppedBeforeTheReply(AtomicBoolean isCancelled, ConversationSink[] sinkRef) {
         var sink = sinkRef[0];
         return sink != null && sink.refused() && ConversationQueue.channelStop(isCancelled) != null;

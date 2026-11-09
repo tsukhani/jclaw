@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Actions to run when a turn is canceled, keyed by the turn's own cancel flag (by identity).
  * Every path that cancels a turn calls {@link #cancel}, so a tool registers once and is reached
- * by a stop, an SSE disconnect or interrupt mode alike, with no poller and no interrupt.
+ * by a stop or an SSE disconnect alike, with no poller and no interrupt.
  */
 public final class TurnCancellation {
 

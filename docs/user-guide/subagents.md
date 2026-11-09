@@ -86,7 +86,7 @@ For long-running async work where the parent eventually needs the child's reply,
 
 1. Parent calls `subagent_spawn` with `async=true, mode=session, task="..."`. It receives a `runId` immediately.
 2. Parent does whatever else is useful. For example, it can talk to you, call other tools, or summarize the spawn intent.
-3. When the parent needs the child's result, it calls `subagent_yield` with that `runId`. The parent's turn ends without emitting a final assistant reply. A turn can wait only on a run started from its own conversation. A `runId` from another conversation is refused, and the turn carries on. If you stop the turn while it makes this call, or a message sent then in the **Interrupt** [Queue Mode](/guide#agents-queue-mode) cancels it, the run is killed, with the reason "Killed because the parent turn was stopped", so it never wakes the conversation.
+3. When the parent needs the child's result, it calls `subagent_yield` with that `runId`. The parent's turn ends without emitting a final assistant reply. A turn can wait only on a run started from its own conversation. A `runId` from another conversation is refused, and the turn carries on. If you stop the turn while it makes this call, or the sender types `/stop`, the run is killed, with the reason "Killed because the parent turn was stopped", so it never wakes the conversation.
 4. When the child terminates, JClaw delivers the child's reply back as the parent's next user-role message and resumes the parent's loop. The parent picks up the conversation seamlessly with the child's output as fresh user input.
 
 :::note

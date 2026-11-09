@@ -73,7 +73,6 @@ function setupApi() {
   registerEndpoint('/api/agents/2/skills', () => [])
   registerEndpoint('/api/agents/2/shell/effective-allowlist', () => ({ global: [], bySkill: {} }))
   registerEndpoint('/api/agents/2/workspace/AGENT.md', () => ({ content: 'helper instructions' }))
-  registerEndpoint('/api/config/agent.helper.queue.mode', () => ({ value: 'collect' }))
   registerEndpoint('/api/config/agent.helper.shell.bypassAllowlist', () => ({ value: 'false' }))
   registerEndpoint('/api/config/agent.helper.shell.allowGlobalPaths', () => ({ value: 'false' }))
 }

@@ -114,7 +114,7 @@ public final class QueueDrainOrchestrator {
 
     /**
      * JF-148: the drain thread inherits no trust, so the turn is the owner's only when every message it
-     * runs was enqueued on one of the owner's turns; a collect-mode batch holding a guest's runs as theirs.
+     * runs was enqueued on one of the owner's turns; a batch holds one sender's messages, so a guest's never ride on the owner's trust.
      */
     public static boolean ownerInitiated(List<ConversationQueue.QueuedMessage> drained) {
         return !drained.isEmpty() && drained.stream().allMatch(ConversationQueue.QueuedMessage::ownerInitiated);

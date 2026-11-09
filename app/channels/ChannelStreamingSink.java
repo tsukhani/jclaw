@@ -34,7 +34,7 @@ public interface ChannelStreamingSink {
     /** Error: deliver a failure notice and finalize. */
     void errorFallback(Exception e);
 
-    /** Cancellation with no stop behind it, as interrupt mode's: quiesce any live indicator/stream. */
+    /** Cancellation with no stop behind it: quiesce any live indicator/stream. */
     void cancel();
 
     /**

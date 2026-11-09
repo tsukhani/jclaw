@@ -582,6 +582,22 @@ class AgentSystemTest extends UnitTest {
         assertEquals("25", ConfigService.get("chat.maxToolRounds"));
     }
 
+    @Test
+    void bootDeletesEveryStoredQueueModeRowAndLeavesOtherAgentKeys() {
+        ConfigService.set("agent.main.queue.mode", "interrupt");
+        ConfigService.set("agent.helper.queue.mode", "collect");
+        ConfigService.set("agent.helper.shell.allowGlobalPaths", "true");
+        ConfigService.clearCache();
+
+        DefaultConfigJob.dropQueueModeRows();
+
+        assertNull(ConfigService.get("agent.main.queue.mode"));
+        assertNull(ConfigService.get("agent.helper.queue.mode"));
+        Tx.run(() -> assertNull(Config.findByKey("agent.main.queue.mode")));
+        assertEquals("true", ConfigService.get("agent.helper.shell.allowGlobalPaths"));
+        ConfigService.delete("agent.helper.shell.allowGlobalPaths");
+    }
+
     // --- Cascade delete ---
 
     @Test

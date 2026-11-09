@@ -117,9 +117,8 @@ class QueuedAttachmentDrainTest extends UnitTest {
     }
 
     @Test
-    void collectModeSavesEveryQueuedAttachmentOnOneRowInArrivalOrder() throws Exception {
+    void aSendersQueuedAttachmentsAreSavedOnOneRowInArrivalOrder() throws Exception {
         var agent = persistAgent();
-        ConfigService.set("agent." + agent.name + ".queue.mode", "collect");
         var convo = persistConversation(agent);
         var first = stage(agent, "first.txt", "the first attachment");
         var second = stage(agent, "second.txt", "the second attachment");
@@ -138,28 +137,6 @@ class QueuedAttachmentDrainTest extends UnitTest {
                 userRows(convo));
         assertFalse(staged(agent, first), "the first staged file left staging");
         assertFalse(staged(agent, second), "the second staged file left staging");
-    }
-
-    @Test
-    void interruptModeSavesTheReplacingMessagesAttachmentOnTheNextTurn() throws Exception {
-        var agent = persistAgent();
-        ConfigService.set("agent." + agent.name + ".queue.mode", "interrupt");
-        var convo = persistConversation(agent);
-        var replaced = stage(agent, "replaced.txt", "the replaced attachment");
-        var replacing = stage(agent, "replacing.txt", "the replacing attachment");
-        commit();
-        hold(agent, convo);
-
-        assertEquals(QUEUED, queueFromChannel(agent, convo, "first try", replaced));
-        assertEquals(QUEUED, queueFromChannel(agent, convo, "second try", replacing));
-        assertTrue(ConversationQueue.cancellationFlag(convo.id).get(), "the arrivals signalled the running turn");
-        finishOwnerTurn(agent, convo);
-
-        assertEquals(List.of(new UserRow("owner turn", List.of()),
-                        new UserRow("second try", List.of(replacing.attachmentId()))),
-                userRows(convo));
-        assertFalse(staged(agent, replacing), "the replacing message's staged file left staging");
-        assertTrue(finalized(agent, convo, replacing), "the replacing message's file moved into the conversation");
     }
 
     @Test

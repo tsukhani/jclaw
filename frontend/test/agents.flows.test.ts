@@ -16,7 +16,7 @@ import { openPicker, pickerOption, pickerOptions, pickerValue, typeInPicker } fr
  * page's logic:
  *
  *   - Edit flow: clicking a custom agent populates the form and pulls
- *     the agent's tools / skills / workspace file / queue mode / exec
+ *     the agent's tools / skills / workspace file / exec
  *     config / effective allowlist from the API.
  *   - Create flow: clicking New Agent opens the form, typing a name then
  *     clicking Save POSTs /api/agents with the form payload.
@@ -31,7 +31,6 @@ import { openPicker, pickerOption, pickerOptions, pickerValue, typeInPicker } fr
  *     enabled flag; bulk-toggle fans out.
  *   - Workspace file: switching tabs fetches the new file; saving
  *     PUTs the textarea contents.
- *   - Queue mode: changing the dropdown POSTs to /api/config.
  *   - Inspect prompt: opening the dialog fetches /api/agents/:id/prompt-breakdown,
  *     channel switch refetches, Escape and close button dismiss.
  */
@@ -167,9 +166,7 @@ function setupAgentsApi(opts?: {
   registerEndpoint('/api/agents/1/workspace/AGENT.md', () => ({ content: 'agent 1 instructions' }))
   registerEndpoint('/api/agents/2/workspace/AGENT.md', () => ({ content: 'helper instructions' }))
   registerEndpoint('/api/agents/2/workspace/SOUL.md', () => ({ content: 'helper soul' }))
-  // Per-agent config endpoints — queue mode + exec privileges.
-  registerEndpoint('/api/config/agent.main.queue.mode', () => ({ value: 'queue' }))
-  registerEndpoint('/api/config/agent.helper.queue.mode', () => ({ value: 'collect' }))
+  // Per-agent config endpoints — exec privileges.
   registerEndpoint('/api/config/agent.main.shell.bypassAllowlist', () => ({ value: 'false' }))
   registerEndpoint('/api/config/agent.main.shell.allowGlobalPaths', () => ({ value: 'false' }))
   registerEndpoint('/api/config/agent.helper.shell.bypassAllowlist', () => ({ value: 'false' }))
@@ -279,10 +276,10 @@ describe('Agents page — edit flow opens form and pulls per-agent state', () =>
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]!.element.value).toContain('helper instructions')
 
-    // Queue mode dropdown reflects the per-agent config value.
-    const queueSelect = selects.find(s => Array.from(s.element.options).some(o => o.value === 'collect'))
-    expect(queueSelect, 'queue mode select should render').toBeTruthy()
-    expect(queueSelect!.element.value).toBe('collect')
+    // JF-245: waiting messages follow the channel, so the agent has no Queue Mode card.
+    expect(component.find('[data-testid="agent-queue-mode"]').exists()).toBe(false)
+    expect(text).not.toContain('Queue Mode')
+    expect(selects.some(s => Array.from(s.element.options).some(o => o.value === 'collect'))).toBe(false)
   })
 })
 
@@ -1522,38 +1519,6 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
     expect(checked(component, 'code-review skill')).toBe('false')
     expect(checked(component, 'web-search skill')).toBe('true')
     expect(checked(component, 'All skills for this agent')).toBe('false')
-  })
-})
-
-describe('Agents page — Queue Mode select', () => {
-  let unregister: Array<() => void> = []
-
-  afterEach(async () => {
-    unregister.forEach(off => off())
-    unregister = []
-    await useRouter().replace('/agents')
-  })
-
-  it('puts the saved mode back and names the request when the save fails', async () => {
-    setupAgentsApi()
-    unregister.push(registerEndpoint('/api/config', {
-      method: 'POST',
-      handler: async (event) => {
-        const { setResponseStatus } = await import('h3')
-        setResponseStatus(event, 502)
-        return '<html><body>Bad Gateway</body></html>'
-      },
-    }))
-    const component = await mountSuspended(Agents, { route: '/agents/helper' })
-    const select = () => component.find('[data-testid="agent-queue-mode"] select')
-    await vi.waitFor(() => expect((select().element as HTMLSelectElement).value).toBe('collect'))
-
-    await select().setValue('interrupt')
-    const alert = '[data-testid="agent-queue-mode"] [data-testid="api-error"]'
-    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
-
-    expect(component.find(alert).text()).toContain('/api/config')
-    expect((select().element as HTMLSelectElement).value).toBe('collect')
   })
 })
 

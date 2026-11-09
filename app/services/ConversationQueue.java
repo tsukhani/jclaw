@@ -38,17 +38,16 @@ import java.util.function.Supplier;
  * Per-conversation message queue that serializes agent processing.
  * Prevents state corruption when multiple messages arrive simultaneously.
  *
- * Three modes:
- * - "queue" (default): FIFO, process one at a time
- * - "collect": Batch pending messages into a single prompt
- * - "interrupt": Cancel in-flight via {@link #cancellationFlag(Long)}, queue new message for drain
+ * A message that arrives while a turn runs waits in line (JF-245). What runs next follows the conversation's
+ * channel: on Telegram, Slack and WhatsApp the waiting messages of the sender at the front run together as one
+ * turn, and everywhere else each runs as its own.
  *
  * A message queued from an external channel is also kept in a {@link PendingInbound} row until its
  * USER row is appended, so a restart re-queues it (JCLAW-1521).
  */
 public class ConversationQueue {
 
-    /** Default queue mode and the event-log category tag for queue events. */
+    /** The event-log category tag for queue events. */
     private static final String QUEUE = "queue";
 
     private static final ConcurrentHashMap<Long, QueueState> queues = new ConcurrentHashMap<>();
@@ -124,8 +123,7 @@ public class ConversationQueue {
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         boolean processing = false; // all reads/writes guarded by synchronized(this)
-        @Nullable String mode = QUEUE;
-        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain, replaced by {@link #stop}. */
+        /** Signals in-flight processing to cancel. Set by {@link #cancelTurn}, renewed on drain, replaced by {@link #stop}. */
         volatile AtomicBoolean cancelled = new AtomicBoolean(false);
         /** Renewed on every acquire and every {@link #stop}; a release carrying another value is a no-op. */
         long generation = 0;
@@ -138,8 +136,8 @@ public class ConversationQueue {
         /** Where the owner's reply goes, so a stop sends its notice there itself (JF-197b); null when it cannot. */
         @Nullable Consumer<String> ownerNotice;
         /**
-         * The member whose message the running turn answers (JF-237); null when none is recorded, or when a collect-mode
-         * batch holds more than one member's.
+         * The member whose message the running turn answers (JF-237); null when none is recorded, or when a batch
+         * on a channel holds more than one member's.
          */
         @Nullable String ownerSender;
         /** Whether the owner's message has yet to be saved as its USER row, so its reply cannot have been saved. */
@@ -186,7 +184,7 @@ public class ConversationQueue {
      * @return {@code true} when acquired (caller should process the
      *         message), {@code false} when the conversation is already
      *         being processed and the message was queued / handled
-     *         per the agent's queue mode
+     *         in line (JF-245)
      */
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
         return tryAcquireOwnership(conversationId, message, null) != NOT_ACQUIRED;
@@ -214,24 +212,17 @@ public class ConversationQueue {
                                            @Nullable Consumer<String> ownerNotice) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
 
-        // Read config BEFORE entering the synchronized block — ConfigService.get()
-        // may hit the DB, and we don't want to hold the state lock during I/O.
-        var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", QUEUE);
-
-        // All mode-read + processing-flag + queue decisions must be atomic to prevent
+        // All processing-flag + queue decisions must be atomic to prevent
         // TOCTOU races where two threads both believe they acquired the conversation.
         // We only DECIDE under the lock; the EventLogger emits (synchronous file-append
         // + a batched DB flush) happen AFTER releasing it, mirroring the "Message queued"
         // log below — never hold the ingress lock across that I/O.
-        boolean interrupted = false;
         boolean droppedOverflow = false;
         @Nullable RuntimeException storeFailure = null;
-        AtomicBoolean interruptedFlag = state.cancelled;
         long acquired = NOT_ACQUIRED;
         List<QueuedMessage> handed = List.of();
         long handedGeneration = 0;
         synchronized (state) {
-            state.mode = mode;
             state.lastActivityMs = System.currentTimeMillis();
 
             if (!state.processing && ownerCancel != null && CHANNEL_STOPS.containsKey(ownerCancel)) {
@@ -260,17 +251,8 @@ public class ConversationQueue {
                 state.generation = GENERATIONS.incrementAndGet();
                 acquired = state.generation;
             } else {
-                interrupted = "interrupt".equals(mode);
                 var dropped = new ArrayList<QueuedMessage>();
-                if (interrupted) {
-                    // Signal the in-flight processor to cancel, then queue this message
-                    // so drain() will pick it up after the current run finishes.
-                    interruptedFlag = state.cancelled;
-                    interruptedFlag.set(true);
-                    dropped.addAll(state.pending);
-                    state.pending.clear();
-                } else if (state.pending.size() >= MAX_QUEUE_SIZE) {
-                    // Queue and collect modes: drop the oldest
+                if (state.pending.size() >= MAX_QUEUE_SIZE) {
                     var oldest = state.pending.pollFirst();
                     if (oldest != null) dropped.add(oldest);
                     droppedOverflow = true;
@@ -304,14 +286,6 @@ public class ConversationQueue {
             return NOT_ACQUIRED;
         }
 
-        if (interrupted) {
-            TurnCancellation.cancel(interruptedFlag);
-            EventLogger.info(QUEUE, message.agent().name, message.channelType(),
-                    "Interrupt mode: signalled cancellation for conversation %d, queued new message"
-                            .formatted(conversationId));
-            return NOT_ACQUIRED;
-        }
-
         if (droppedOverflow) {
             EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
                     "Queue overflow for conversation %d, dropped oldest message".formatted(conversationId));
@@ -326,7 +300,7 @@ public class ConversationQueue {
 
     /**
      * {@link #tryAcquireOwnership} for the stored messages a restart left on one conversation (JCLAW-1521).
-     * They predate everything this process received, so in every mode none interrupts: the first acquires
+     * They predate everything this process received, so none interrupts: the first acquires
      * when no turn holds the conversation, and the rest queue ahead of the messages that arrived since the
      * restart, in their own order. Overflow drops the oldest, as for any arrival; none is stored again.
      *
@@ -337,11 +311,9 @@ public class ConversationQueue {
     public static long tryAcquireRestored(Long conversationId, List<QueuedMessage> restored) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
         var first = restored.getFirst();
-        var mode = ConfigService.get("agent." + first.agent().name + ".queue.mode", QUEUE);
         long acquired = NOT_ACQUIRED;
         var dropped = new ArrayList<QueuedMessage>();
         synchronized (state) {
-            state.mode = mode;
             var queued = restored;
             if (!state.processing) {
                 state.processing = true;
@@ -482,7 +454,7 @@ public class ConversationQueue {
 
     /**
      * What the stop that set {@code flag} owes the channel its turn replies on; null when no stop of a Telegram, Slack or
-     * WhatsApp conversation set it, as for interrupt mode's cancel (JF-197b).
+     * WhatsApp conversation set it, as for a cancel with no stop behind it (JF-197b).
      */
     public static @Nullable ChannelStop channelStop(AtomicBoolean flag) {
         return CHANNEL_STOPS.get(flag);
@@ -774,8 +746,8 @@ public class ConversationQueue {
      * permanently orphan the conversation. Idle entries are harmless (empty
      * deque + processing=false) and will be reused on the next message.
      *
-     * <p>In "collect" mode, returns all pending messages combined. In "queue"
-     * mode, returns just the next message.
+     * <p>On Telegram, Slack and WhatsApp returns the front sender's waiting messages together; elsewhere just the
+     * next message.
      *
      * @param conversationId the conversation being drained
      * @param generation     the generation the caller acquired with; a stale one
@@ -804,7 +776,7 @@ public class ConversationQueue {
 
     /**
      * Under the state lock, with a message pending: the message(s) the drain returns, all of them in
-     * collect mode. Ownership transfers to the caller — processing stays true — with a fresh cancel
+     * the front sender's run on a Telegram, Slack or WhatsApp conversation ({@link #batchesBySender}). Ownership transfers to the caller — processing stays true — with a fresh cancel
      * flag of its own, which {@link #ownerCancel} hands the drained run, and the channel its reply goes
      * to, where a stop sends its notice.
      */
@@ -812,17 +784,37 @@ public class ConversationQueue {
         state.ownerCancel = new AtomicBoolean(false);
         state.ownerTurn = TURNS.incrementAndGet();
         List<QueuedMessage> handed;
-        if ("collect".equals(state.mode)) {
-            handed = new ArrayList<>(state.pending);
-            state.pending.clear();
+        var first = state.pending.removeFirst();
+        if (batchesBySender(first)) {
+            handed = new ArrayList<>(List.of(first));
+            while (!state.pending.isEmpty() && sameSendersRun(first, state.pending.peekFirst())) {
+                handed.add(state.pending.removeFirst());
+            }
         } else {
-            handed = List.of(state.pending.removeFirst());
+            handed = List.of(first);
         }
         state.ownerNotice = replyTarget(handed.getFirst());
         var sender = handed.getFirst().senderId();
         state.ownerSender = handed.stream().allMatch(m -> Objects.equals(sender, m.senderId())) ? sender : null;
         state.ownerRequestPending = handed.stream().anyMatch(m -> !m.skipUserAppend());
         return handed;
+    }
+
+    /** Whether the messages waiting behind {@code message} run together: a sender's on Telegram, Slack and WhatsApp. */
+    private static boolean batchesBySender(QueuedMessage message) {
+        return !message.skipUserAppend() && EXTERNAL_CHANNELS.contains(message.channelType());
+    }
+
+    /**
+     * Whether {@code next} joins the batch {@code first} starts: the same sender, trust and reply target, so a batch
+     * keeps the owner's trust only when every message is the owner's and its reply goes where each was sent from.
+     */
+    private static boolean sameSendersRun(QueuedMessage first, QueuedMessage next) {
+        return batchesBySender(next)
+                && first.ownerInitiated() == next.ownerInitiated()
+                && Objects.equals(first.senderId(), next.senderId())
+                && Objects.equals(first.channelType(), next.channelType())
+                && Objects.equals(first.peerId(), next.peerId());
     }
 
     /**

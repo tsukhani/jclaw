@@ -33,7 +33,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   // installs don't surface as "Unmanaged" diagnostic noise.
   'skillsPromotion.', // Skills promotion sanitization — Settings
   'chromeBridge.', // Model that answers the Chrome tool's find (chromeBridge.find.provider and .model) — Settings (Chrome)
-  'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
+  'agent.', // Per-agent config (shell privileges, etc.) — Agents page
   'ollama.', // Ollama provider-specific settings — Settings
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
   'auth.', // Admin password hash — Settings (Password section, not rendered as a row)

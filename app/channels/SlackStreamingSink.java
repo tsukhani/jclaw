@@ -187,7 +187,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     }
 
     /** JCLAW-442: {@link ChannelStreamingSink} cancellation with no stop behind it
-     *  (interrupt mode) — clear the "is typing…" status; a stop calls {@link #stop}. */
+     *  — clear the "is typing…" status; a stop calls {@link #stop}. */
     @Override
     public void cancel() {
         lock.lock();

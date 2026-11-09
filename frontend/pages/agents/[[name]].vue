@@ -498,13 +498,8 @@ function toggleMcpExpand(server: string) {
   expandedMcpServer.value = expandedMcpServer.value === server ? null : server
 }
 
-const queueMode = ref('queue')
-const savedQueueMode = ref('queue')
-const savingQueueMode = ref(false)
-const queueModeSave = useSaveAttempt()
-const queueModeError = queueModeSave.saveError
 // JCLAW-465: per-agent content-compression enable, managed in its own
-// Optimization card (immediate-save on toggle, like Queue Mode). Initialised
+// Optimization card (immediate-save on toggle). Initialised
 // from the agent's effective value when the edit form opens.
 const compressionEnabled = ref(false)
 // JCLAW-463/464: per-type sub-toggles, gated by the master above.
@@ -620,7 +615,6 @@ const agentProviderId = useId()
 const agentModelId = useId()
 const agentFallbackProviderId = useId()
 const agentFallbackModelId = useId()
-const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 const agentMemoryProviderId = useId()
 const agentMemoryModelId = useId()
@@ -1058,7 +1052,6 @@ function editAgent(agent: Agent) {
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
   loadEffectiveAllowlist(agent.id)
-  loadQueueMode(agent.name)
   loadExecConfig(agent.name)
 }
 
@@ -1288,32 +1281,6 @@ async function loadEffectiveAllowlist(agentId: number) {
   catch {
     if (editing.value?.id === agentId) effectiveAllowlist.value = null
   }
-}
-
-async function loadQueueMode(agentName: string) {
-  queueModeError.value = null
-  let mode = 'queue'
-  try {
-    const config = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.queue.mode`)
-    mode = config.value || 'queue'
-  }
-  catch { /* the stored default */ }
-  if (editing.value?.name !== agentName) return
-  queueMode.value = mode
-  savedQueueMode.value = mode
-}
-
-async function saveQueueMode() {
-  if (!editing.value) return
-  savingQueueMode.value = true
-  const key = `agent.${editing.value.name}.queue.mode`
-  const ok = await queueModeSave.attempt(() => $fetch('/api/config', {
-    method: 'POST',
-    body: { key, value: queueMode.value },
-  }))
-  if (ok) savedQueueMode.value = queueMode.value
-  else queueMode.value = savedQueueMode.value
-  savingQueueMode.value = false
 }
 
 // JCLAW-465: immediate-save the per-agent compression toggle via a partial PUT
@@ -1767,7 +1734,6 @@ function cancel() {
   creating.value = false
   agentTools.value = []
   agentSkills.value = []
-  queueMode.value = 'queue'
   // Only the edit form has a URL of its own; the create form lives on /agents.
   if (route.params.name) router.push('/agents')
 }
@@ -2181,48 +2147,6 @@ const agentKinds = [
             {{ saveError }}
           </p>
         </div>
-      </div>
-
-      <!-- Queue Mode -->
-      <div
-        v-if="editing"
-        class="bg-surface-elevated border border-border p-4"
-        data-testid="agent-queue-mode"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <span class="text-sm font-medium text-fg-strong">Queue Mode</span>
-            <div class="text-xs text-fg-muted mt-0.5">
-              How to handle messages when the agent is busy
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <label :for="agentQueueModeId">
-              <span class="sr-only">Queue mode</span>
-              <select
-                :id="agentQueueModeId"
-                v-model="queueMode"
-                :disabled="savingQueueMode"
-                class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden focus:border-ring disabled:opacity-50"
-                @change="saveQueueMode"
-              >
-                <option value="queue">
-                  Queue (FIFO)
-                </option>
-                <option value="collect">
-                  Collect (batch)
-                </option>
-                <option value="interrupt">
-                  Interrupt
-                </option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <ApiErrorAlert
-          :error="queueModeError"
-          class="mt-2"
-        />
       </div>
 
       <!-- JCLAW-500: per-agent ACP external-harness grant. The acp runtime

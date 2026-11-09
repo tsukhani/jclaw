@@ -49,7 +49,7 @@ class AgentRenameMigrationTest extends UnitTest {
     void renameMovesWorkspaceAndReKeysConfig() throws Exception {
         var agent = AgentService.create("ren-src", "openrouter", "gpt-4.1");
         Files.writeString(AgentService.workspacePath("ren-src").resolve("MARKER.txt"), "hi");
-        ConfigService.set("agent.ren-src.queue.mode", "collect");
+        ConfigService.set("agent.ren-src.shell.allowGlobalPaths", "true");
 
         AgentService.update(agent, "ren-dst", "openrouter", "gpt-4.1", true);
 
@@ -57,9 +57,9 @@ class AgentRenameMigrationTest extends UnitTest {
                 "workspace contents must follow the rename");
         assertFalse(Files.exists(AgentService.workspacePath("ren-src")),
                 "old workspace directory must be gone after the rename");
-        assertEquals("collect", ConfigService.get("agent.ren-dst.queue.mode"),
+        assertEquals("true", ConfigService.get("agent.ren-dst.shell.allowGlobalPaths"),
                 "config key must be re-keyed to the new name");
-        assertNull(ConfigService.get("agent.ren-src.queue.mode"),
+        assertNull(ConfigService.get("agent.ren-src.shell.allowGlobalPaths"),
                 "old config key must no longer resolve");
     }
 

@@ -576,8 +576,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     }
 
     /**
-     * Called when the turn was canceled with no stop behind it, as interrupt mode
-     * cancels it (JCLAW-181 follow-up: typing-indicator leak on cancel); a stop
+     * Called when the turn was canceled with no stop behind it
+     * (JCLAW-181 follow-up: typing-indicator leak on cancel); a stop
      * calls {@link #stop} instead. Quiesces the sink without sending anything new:
      * cancels the typing heartbeat, drops any pending flush, marks the sink
      * sealed so late tokens become no-ops, and clears stream-checkpoint state

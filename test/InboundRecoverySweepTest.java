@@ -359,28 +359,12 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void interruptModeKeepsOnlyTheReplacingMessagesRow() {
-        var agent = persistAgent();
-        ConfigService.set("agent." + agent.name + ".queue.mode", "interrupt");
-        var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
-        commit();
-        hold(agent, convo);
-
-        assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "first try")));
-        assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "second try")));
-
-        assertEquals(List.of("second try"), pendingTexts(convo));
-    }
-
-    @Test
     void aRestoredMessageNeitherCancelsALiveTurnNorDropsAMessageSentSinceTheRestart() throws Exception {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         commit();
         storeBeforeRestart(agent, convo, List.of("sent before the restart"));
         var liveTurnCancel = holdWithQueued(agent, convo, List.of("sent after the restart"));
-        // Queued in interrupt mode, the fresh message would itself have cancelled the turn.
-        interruptMode(agent);
 
         assertEquals(1, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
 
@@ -388,33 +372,31 @@ class InboundRecoverySweepTest extends UnitTest {
         assertEquals(2, ConversationQueue.getQueueSize(convo.id));
         assertEquals(List.of("sent before the restart", "sent after the restart"), pendingTexts(convo));
         finishHeldTurn(convo);
-        assertEquals(List.of(new UserRow("sent before the restart", List.of()),
-                new UserRow("sent after the restart", List.of())), userRows(convo));
+        assertEquals(List.of(new UserRow(batch("sent before the restart", "sent after the restart"), List.of())),
+                userRows(convo), "one sender's waiting messages run as one turn, the restored one first");
         assertEquals(List.of(), pendingTexts(convo));
-        assertEquals(2, llmCalls.get());
+        assertEquals(1, llmCalls.get());
     }
 
     @Test
-    void restoredMessagesKeepTheirOrderAheadOfAFreshOneInInterruptMode() throws Exception {
+    void restoredMessagesKeepTheirOrderAheadOfAFreshOneIn() throws Exception {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         commit();
         storeBeforeRestart(agent, convo, List.of("first before", "second before"));
         var liveTurnCancel = holdWithQueued(agent, convo, List.of("after"));
-        interruptMode(agent);
 
         assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
 
         assertFalse(liveTurnCancel.get(), "no restored message cancelled the live turn");
         assertEquals(List.of("first before", "second before", "after"), pendingTexts(convo));
         finishHeldTurn(convo);
-        assertEquals(List.of(new UserRow("first before", List.of()), new UserRow("second before", List.of()),
-                new UserRow("after", List.of())), userRows(convo));
+        assertEquals(List.of(new UserRow(batch("first before", "second before", "after"), List.of())), userRows(convo));
         assertEquals(List.of(), pendingTexts(convo));
     }
 
     @Test
-    void inQueueModeRestoredMessagesRunBeforeOnesThatArrivedSinceTheRestart() throws Exception {
+    void restoredMessagesRunBeforeOnesThatArrivedSinceTheRestart() throws Exception {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         commit();
@@ -425,8 +407,7 @@ class InboundRecoverySweepTest extends UnitTest {
 
         assertFalse(liveTurnCancel.get());
         finishHeldTurn(convo);
-        assertEquals(List.of(new UserRow("first before", List.of()), new UserRow("second before", List.of()),
-                new UserRow("after", List.of())), userRows(convo));
+        assertEquals(List.of(new UserRow(batch("first before", "second before", "after"), List.of())), userRows(convo));
         assertEquals(List.of(), pendingTexts(convo));
     }
 
@@ -446,13 +427,13 @@ class InboundRecoverySweepTest extends UnitTest {
 
         assertEquals(20, ConversationQueue.getQueueSize(full.id));
         assertEquals(twenty, pendingTexts(full));
-        assertEquals(List.of("m0"), drainedTexts(full));
+        assertEquals(twenty, drainedTexts(full), "one sender's waiting messages drain together");
         var roomyExpected = new ArrayList<String>();
         roomyExpected.add("sent before the restart");
         roomyExpected.addAll(twenty.subList(0, 19));
         assertEquals(20, ConversationQueue.getQueueSize(roomy.id));
         assertEquals(roomyExpected, pendingTexts(roomy));
-        assertEquals(List.of("sent before the restart"), drainedTexts(roomy));
+        assertEquals(roomyExpected, drainedTexts(roomy));
     }
 
     @Test
@@ -566,8 +547,9 @@ class InboundRecoverySweepTest extends UnitTest {
             TelegramChannel.installForTest(token, telegram.telegramUrl());
             try {
                 hold(agent, convo);
-                assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "stopped first")));
-                assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "runs next")));
+                // Two senders, so "runs next" is not drawn into the stopped turn's batch.
+                assertFalse(ConversationQueue.tryAcquire(convo.id, fromMember(agent, convo, "stopped first", "m1")));
+                assertFalse(ConversationQueue.tryAcquire(convo.id, fromMember(agent, convo, "runs next", "m2")));
                 long generation = ConversationQueue.currentGeneration(convo.id);
                 var handed = ConversationQueue.drain(convo.id, generation);
                 assertEquals(List.of("stopped first"), handed.stream().map(ConversationQueue.QueuedMessage::text).toList());
@@ -587,6 +569,44 @@ class InboundRecoverySweepTest extends UnitTest {
         assertEquals(List.of(new UserRow("runs next", List.of())), userRows(convo));
         assertEquals(List.of(), pendingTexts(convo), "the stopped message is not run again after a restart");
         assertEquals(1, llmCalls.get());
+    }
+
+    @Test
+    void stoppingOneSendersBatchBeforeItIsSavedDropsEveryMessageInItAndTellsTheSenderOnce() throws Exception {
+        var agent = persistAgent();
+        var peer = "245" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf245-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        commit();
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            try {
+                hold(agent, convo);
+                for (var text : List.of("first", "second", "third")) {
+                    assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, text)));
+                }
+                long generation = ConversationQueue.currentGeneration(convo.id);
+                var handed = ConversationQueue.drain(convo.id, generation);
+                assertEquals(List.of("first", "second", "third"),
+                        handed.stream().map(ConversationQueue.QueuedMessage::text).toList());
+
+                assertEquals(ConversationQueue.OperatorStop.STOPPED, stopFromChat(convo));
+                QueueDrainOrchestrator.runOwned(convo.id, generation, handed);
+                awaitIdle(convo);
+                sent = awaitSent(telegram, 1);
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+
+        assertEquals(List.of(new Sent(peer, AgentRunner.STOP_NOTICE)), sent);
+        assertEquals(List.of(), userRows(convo), "no message of the stopped batch is saved");
+        assertEquals(List.of(), pendingTexts(convo), "none of them runs again after a restart");
+        assertEquals(0, llmCalls.get());
     }
 
     /** The chat page's Stop, on a thread with no transaction of the test's, so its marker commits before it returns. */
@@ -675,6 +695,18 @@ class InboundRecoverySweepTest extends UnitTest {
         return new ConversationQueue.QueuedMessage(text, convo.channelType, convo.peerId, agent);
     }
 
+    private static ConversationQueue.QueuedMessage fromMember(Agent agent, Conversation convo, String text, String sender) {
+        return new ConversationQueue.QueuedMessage(text, convo.channelType, convo.peerId, agent, false, List.of(), null,
+                false, sender);
+    }
+
+    /** The USER row a batch of one sender's waiting messages is saved as. */
+    private static String batch(String... texts) {
+        var sb = new StringBuilder("[Queued messages while agent was busy]\n");
+        for (int i = 0; i < texts.length; i++) sb.append("\n---\nMessage ").append(i + 1).append(":\n").append(texts[i]).append("\n");
+        return sb.toString();
+    }
+
     private static AttachmentService.Input stage(Agent agent, String filename, String body) throws IOException {
         var id = UUID.randomUUID().toString();
         var staging = AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
@@ -726,17 +758,12 @@ class InboundRecoverySweepTest extends UnitTest {
     /** Holds the conversation for a live turn with {@code texts} queued behind it, returning the turn's cancel flag. */
     private static AtomicBoolean holdWithQueued(Agent agent, Conversation convo, List<String> texts) {
         hold(agent, convo);
-        // A channel turn polls the conversation's flag, the one interrupt mode sets.
         var turnCancel = ConversationQueue.cancellationFlag(convo.id);
         for (var text : texts) assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, text)));
         return turnCancel;
     }
 
-    private static void interruptMode(Agent agent) {
-        ConfigService.set("agent." + agent.name + ".queue.mode", "interrupt");
-    }
-
-    /** Stands in for the held turn ending: its drain runs what queued behind it, one turn at a time. */
+    /** Stands in for the held turn ending: its drain runs what queued behind it. */
     private static void finishHeldTurn(Conversation convo) throws InterruptedException {
         long generation = ConversationQueue.currentGeneration(convo.id);
         QueueDrainOrchestrator.runOwned(convo.id, generation, ConversationQueue.drain(convo.id, generation));

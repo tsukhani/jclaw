@@ -262,7 +262,7 @@ final class ChannelInboundDispatcher {
     }
 
     /**
-     * Whether a stop, not interrupt mode, set the turn's flag (JF-197b): nothing more of the turn reaches the channel,
+     * Whether a stop, not a bare cancel, set the turn's flag (JF-197b): nothing more of the turn reaches the channel,
      * the fallback text a stopped tool round writes included.
      */
     private static boolean stopped(AtomicBoolean isCancelled) {
@@ -271,7 +271,7 @@ final class ChannelInboundDispatcher {
 
     /**
      * A stopped turn ends as its stop decided (JF-197b): with nothing more when the stop already ended the sink with
-     * its notice. Interrupt mode's cancel only quiesces the sink, as before.
+     * its notice. A cancel with no stop behind it only quiesces the sink.
      */
     private static void endCancelled(ChannelStreamingSink sink, AtomicBoolean isCancelled) {
         var stop = ConversationQueue.channelStop(isCancelled);
