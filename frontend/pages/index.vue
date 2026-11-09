@@ -267,13 +267,17 @@ async function resetLatency() {
 }
 
 // All three dashboard panels (Chat Performance, Recent Activity, Chat Cost)
-// refresh on the same 5 s tick. ChatCostSection owns its own useFetch but
+// refresh from one 5 s timer. ChatCostSection owns its own useFetch but
 // exposes refresh() via defineExpose so we can drive it from here. Keeping
 // the single timer in one place is what guarantees the panels never drift
 // out of phase — staggered timers produced a per-panel pending flicker
 // that looked like the dashboard flashing on every refresh.
 const chatCostRef = ref<{ refresh: () => Promise<void> } | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+// The cost read returns every usage row in the window (1.57 MB on 2026-11-09). Re-read every 5 s, it held
+// /api/status past its 5 s abort over the Tailscale Funnel relay and showed the offline banner. JF-212 replaces
+// the rows with totals; until then the panel refreshes once a minute.
+const COST_REFRESH_EVERY_TICKS = 12
 /**
  * Format the Recent Activity timestamp as "MMM D, YYYY · h:mm:ss AM/PM".
  * Uses the browser's locale-resolved separators but pins the format to
@@ -297,14 +301,16 @@ function formatActivityTimestamp(iso: string): string {
 }
 
 onMounted(() => {
+  let ticks = 0
   pollTimer = setInterval(() => {
+    ticks += 1
     refreshLatency()
     refreshLogs()
     // Only poll video jobs while their view is showing — no cost when the operator is on the events feed.
     if (activityView.value === 'video') refreshVideoJobs()
     if (activityView.value === 'scrapes') refreshScrapeJobs()
     if (activityView.value === 'coding') refreshCodingRuns()
-    chatCostRef.value?.refresh()
+    if (ticks % COST_REFRESH_EVERY_TICKS === 0) chatCostRef.value?.refresh()
     // The server answers with its last count and says when a newer one is running (JF-35); re-read until it lands.
     if (workspaceStats.value?.counting) refreshWorkspaceStats()
     // Keep the per-status task counts in lockstep with the rest of the

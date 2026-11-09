@@ -42,7 +42,7 @@ async function settle() {
   for (let i = 0; i < 4; i++) await flushPromises()
 }
 
-// The 5 s tick refreshes Chat Cost too, so a test that advances it needs a stub with the refresh the page calls.
+// The dashboard's timer refreshes Chat Cost too, so a test that advances it needs a stub with the refresh the page calls.
 const TICKING_STUBS = {
   ...STUBS,
   ChatCostSection: defineComponent({
@@ -278,6 +278,59 @@ describe('Dashboard — workspace disk footprint line', () => {
       vi.advanceTimersByTime(10000)
       await settle()
       expect(calls).toBe(3)
+      c.unmount()
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('Dashboard — Chat Cost refresh cadence', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('refreshes Chat Cost once a minute while the other panels keep the 5 s tick', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      setupApi()
+      let logReads = 0
+      registerEndpoint('/api/logs', () => {
+        logReads += 1
+        return { events: [] }
+      })
+      let costRefreshes = 0
+      const CountingCost = defineComponent({
+        setup(_, { expose }) {
+          expose({
+            refresh: async () => {
+              costRefreshes += 1
+            },
+          })
+          return () => h('div')
+        },
+      })
+      const c = await mountSuspended(Index, { global: { stubs: { ...STUBS, ChatCostSection: CountingCost } } })
+      await flushPromises()
+      expect(logReads).toBe(1)
+      // One tick at a time, so each log read lands before the next tick's refresh could cancel it.
+      const ticks = async (n: number) => {
+        for (let i = 0; i < n; i++) {
+          vi.advanceTimersByTime(5000)
+          await settle()
+        }
+      }
+
+      await ticks(11)
+      expect(costRefreshes).toBe(0)
+      expect(logReads).toBe(12)
+
+      await ticks(1)
+      expect(costRefreshes).toBe(1)
+      expect(logReads).toBe(13)
+
+      await ticks(12)
+      expect(costRefreshes).toBe(2)
+      expect(logReads).toBe(25)
       c.unmount()
     }
     finally {
