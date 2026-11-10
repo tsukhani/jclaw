@@ -1012,7 +1012,9 @@ export interface SubagentRunView {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'KILLED' | 'TIMEOUT'
   startedAt: string | null
   endedAt: string | null
+  /** From the list, an excerpt that `outcomeTruncated` marks when cut; GET /api/subagent-runs/{id} returns it whole. */
   outcome: string | null
+  outcomeTruncated: boolean
   /** The coding harness's working directory; null for a native subagent run. */
   workdir: string | null
 }

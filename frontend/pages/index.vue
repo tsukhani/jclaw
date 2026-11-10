@@ -1103,7 +1103,6 @@ onBeforeUnmount(() => {
         :key="openCodingRunId"
         :run-id="openCodingRunId"
         :recorded-status="openCodingRun?.status"
-        :recorded-outcome="openCodingRun?.outcome"
         expanded
       />
     </PeekPanel>

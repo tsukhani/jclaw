@@ -24,6 +24,7 @@ import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.JpqlFilter;
 import utils.JsonArgs;
+import utils.Strings;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -72,6 +73,18 @@ public class ApiSubagentRunsController extends Controller {
             + "LEFT JOIN FETCH r.parentConversation JOIN FETCH r.childConversation "
             + "LEFT JOIN FETCH r.parentTaskRun tr LEFT JOIN FETCH tr.task";
 
+    /**
+     * Longest outcome a list row carries before {@link Strings#truncate} cuts it. With every other field at its
+     * longest a row runs to about 1,600 characters, so a page of {@link #LIST_DEFAULT_LIMIT} comes to about 44,000,
+     * under {@link tools.JClawApiTool#MAX_RESPONSE_CHARS}; on 2026-10-27 full outcomes made a page of 100 1.10 MB.
+     */
+    public static final int OUTCOME_EXCERPT_CHARS = 200;
+    public static final int LIST_DEFAULT_LIMIT = 25;
+
+    /**
+     * One run. In a list row {@code outcome} is cut to {@link #OUTCOME_EXCERPT_CHARS} and {@code outcomeTruncated}
+     * says whether it was; {@link #get} returns it whole.
+     */
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, @Nullable Long parentAgentId, @Nullable String parentAgentName,
                                   @Nullable Long childAgentId, @Nullable String childAgentName,
@@ -79,7 +92,8 @@ public class ApiSubagentRunsController extends Controller {
                                   @Nullable Long parentTaskId, @Nullable String parentTaskName,
                                   @Nullable Long childConversationId,
                                   @Nullable String label, @Nullable String mode, @Nullable String status, @Nullable String startedAt,
-                                  @Nullable String endedAt, String outcome, String workdir) {}
+                                  @Nullable String endedAt, @Nullable String outcome, boolean outcomeTruncated,
+                                  String workdir) {}
 
     public record KillRequest(String reason) {}
 
@@ -98,12 +112,12 @@ public class ApiSubagentRunsController extends Controller {
      * (operators would otherwise see a broader result set than they asked
      * for and assume the filter applied).
      *
-     * <p>Pagination follows the existing convention: capped at 500,
-     * defaults to 100, surfaced as {@code X-Total-Count} header for
-     * client-side range display.
+     * <p>Pagination: capped at 500, defaults to {@link #LIST_DEFAULT_LIMIT},
+     * surfaced as {@code X-Total-Count} header for client-side range display.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
-    @Operation(summary = "List subagent runs with optional filters and pagination")
+    @Operation(summary = "List subagent runs with optional filters and pagination; each outcome is an excerpt, "
+            + "and a run's whole outcome comes from GET /api/subagent-runs/{id}")
     @AgentAccess(value = OWN_ONLY,
             reason = "the parent-agent filter is pinned to the caller before the query runs; main reaches every agent's")
     public static void list(Long parentAgentId, Long parentConversationId, Long parentTaskRunId, Boolean coding,
@@ -145,7 +159,7 @@ public class ApiSubagentRunsController extends Controller {
             where = where.isEmpty() ? "r.id IN (:fts)" : where + " AND r.id IN (:fts)";
         }
 
-        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 100;
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : LIST_DEFAULT_LIMIT;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
         // JCLAW-722: WHERE -> bind -> COUNT -> paginate assembled once. The named
@@ -176,8 +190,27 @@ public class ApiSubagentRunsController extends Controller {
         // category, and the result-set size is bounded by `effectiveLimit`.
         Map<Long, String> modeByRunId = collectModesForRuns(runs);
 
-        var result = runs.stream().map(r -> toView(r, modeByRunId)).toList();
+        var result = runs.stream().map(r -> toView(r, modeByRunId, false)).toList();
         renderJSON(gson.toJson(result));
+    }
+
+    /** GET /api/subagent-runs/{id} — one run with its whole outcome, which a list row carries only an excerpt of. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SubagentRunView.class)))
+    @Operation(summary = "Get one subagent run with its whole outcome")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "a run's outcome is read only by the agent that started it; main reaches every agent's")
+    public static void get(Long id) {
+        if (id == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
+            return;
+        }
+        var run = SubagentRegistry.findRunById(id);
+        if (run == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Run " + id + " not found.");
+            return;
+        }
+        requireOwnRun(run);
+        renderJSON(gson.toJson(toView(run, collectModesForRuns(List.of(run)), true)));
     }
 
     /**
@@ -245,7 +278,8 @@ public class ApiSubagentRunsController extends Controller {
         }
     }
 
-    private static SubagentRunView toView(SubagentRun r, Map<Long, String> modeByRunId) {
+    private static SubagentRunView toView(SubagentRun r, Map<Long, String> modeByRunId, boolean wholeOutcome) {
+        boolean cut = !wholeOutcome && r.outcome != null && r.outcome.length() > OUTCOME_EXCERPT_CHARS;
         return new SubagentRunView(
                 r.id,
                 r.parentAgent != null ? r.parentAgent.id : null,
@@ -262,7 +296,8 @@ public class ApiSubagentRunsController extends Controller {
                 r.status != null ? r.status.name() : null,
                 r.startedAt != null ? r.startedAt.toString() : null,
                 r.endedAt != null ? r.endedAt.toString() : null,
-                r.outcome,
+                cut ? Strings.truncate(r.outcome, OUTCOME_EXCERPT_CHARS) : r.outcome,
+                cut,
                 r.workdir
         );
     }

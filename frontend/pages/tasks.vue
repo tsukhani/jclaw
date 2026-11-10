@@ -576,7 +576,7 @@ type TraceParts = [TaskRunMessageView[], SubagentRunView[]]
 function fetchTrace(runId: number): Promise<TraceParts> {
   return Promise.all([
     $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`),
-    $fetch<SubagentRunView[]>(`/api/subagent-runs?coding=true&parentTaskRunId=${runId}`),
+    $fetch<SubagentRunView[]>(`/api/subagent-runs?coding=true&parentTaskRunId=${runId}&limit=100`),
   ])
 }
 async function loadTrace(runId: number, title: string, subtitle: string, taskId: number | null = null) {
@@ -2019,7 +2019,6 @@ function zoneForTaskRender(task: Task): string | undefined {
           :key="run.id"
           :run-id="run.id"
           :recorded-status="run.status"
-          :recorded-outcome="run.outcome"
         />
       </div>
       <p

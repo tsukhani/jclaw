@@ -14,7 +14,7 @@ export interface SubagentChip {
   /** ISO instants from the run row; a RUNNING run has no endedAt. */
   startedAt: string | null
   endedAt: string | null
-  /** A completed run's reply, or the reason a run failed, timed out or was killed. */
+  /** The list's excerpt of a completed run's reply, or of why a run failed, timed out or was killed. */
   outcome: string | null
 }
 

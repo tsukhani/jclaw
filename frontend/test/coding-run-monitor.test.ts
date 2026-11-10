@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
@@ -115,11 +115,11 @@ describe('CodingRunMonitor — opened on a run that already ended', () => {
   // No codingrun.done arrives for a finished run, and the transcript holds no terminal step.
   it('shows the status its parent recorded and withdraws the Kill control', async () => {
     registerEndpoint('/api/subagent-runs/7/steps', () => [{ seq: 1, kind: 'token', text: 'all done' }])
+    const off = registerEndpoint('/api/subagent-runs/7', () => ({ id: 7, status: 'FAILED', outcome: 'harness exited 3', outcomeTruncated: false }))
+    onTestFinished(off)
 
     const completed = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'COMPLETED' } })
-    const failed = await mountSuspended(CodingRunMonitor, {
-      props: { runId: 7, recordedStatus: 'FAILED', recordedOutcome: 'harness exited 3' },
-    })
+    const failed = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'FAILED' } })
     await flushPromises()
 
     expect(completed.text()).toContain('Completed')
@@ -127,6 +127,58 @@ describe('CodingRunMonitor — opened on a run that already ended', () => {
     expect(failed.text()).toContain('Failed')
     expect(failed.text()).toContain('harness exited 3')
     expect(failed.text()).not.toContain('Kill')
+  })
+
+  // A list row's outcome is an excerpt, so the footer reads the run whole from GET /api/subagent-runs/{id} (JF-140).
+  it('shows the whole outcome from the run\'s own read', async () => {
+    const whole = `ACP harness failed: ${'the build broke on step 4; '.repeat(20)}see the log.`
+    let reads = 0
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+    const off = registerEndpoint('/api/subagent-runs/7', () => {
+      reads++
+      return { id: 7, status: 'TIMEOUT', outcome: whole, outcomeTruncated: false }
+    })
+    onTestFinished(off)
+
+    const component = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'TIMEOUT' } })
+    await vi.waitFor(() => expect(component.find('[data-testid="coding-run-outcome"]').exists()).toBe(true))
+
+    expect(component.find('[data-testid="coding-run-outcome"]').text()).toBe(whole)
+    expect(reads).toBe(1)
+  })
+
+  it('does not read the run when it completed or is still running', async () => {
+    let reads = 0
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+    const off = registerEndpoint('/api/subagent-runs/7', () => {
+      reads++
+      return { id: 7, status: 'COMPLETED', outcome: 'done', outcomeTruncated: false }
+    })
+    onTestFinished(off)
+
+    const completed = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'COMPLETED' } })
+    const running = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'RUNNING' } })
+    await flushPromises()
+
+    expect(reads).toBe(0)
+    expect(completed.find('[data-testid="coding-run-outcome"]').exists()).toBe(false)
+    expect(running.find('[data-testid="coding-run-outcome"]').exists()).toBe(false)
+  })
+
+  it('says why when the run\'s own read fails', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+    const off = registerEndpoint('/api/subagent-runs/7', async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 404)
+      return { type: 'error', code: 'not_found', message: 'Run 7 not found.' }
+    })
+    onTestFinished(off)
+
+    const component = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'KILLED' } })
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+
+    expect(component.find('[data-testid="api-error"]').text()).toBe('Run 7 not found.')
+    expect(component.find('[data-testid="coding-run-outcome"]').exists()).toBe(false)
   })
 
   it('still offers Kill while the recorded status is running', async () => {

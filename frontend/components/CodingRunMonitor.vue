@@ -14,7 +14,7 @@
  */
 import { z } from 'zod'
 import { CommandLineIcon, DocumentIcon, PhotoIcon, StopIcon, WrenchIcon } from '@heroicons/vue/24/outline'
-import type { MessageAttachment } from '~/types/api'
+import type { ApiErrorDetails, MessageAttachment } from '~/types/api'
 import { MessageAttachmentSchema } from '~/types/schemas'
 import { formatSize } from '~/utils/format'
 
@@ -25,8 +25,6 @@ const props = defineProps<{
   expanded?: boolean
   /** The run's recorded status, where the parent holds it: a monitor opened on a finished run hears no codingrun.done. */
   recordedStatus?: string
-  /** Why a run that did not complete ended, shown as the done event's outcome would be. */
-  recordedOutcome?: string | null
 }>()
 
 /**
@@ -56,6 +54,7 @@ const CodingStepSchema = z.object({
 }).loose()
 type CodingStep = z.infer<typeof CodingStepSchema>
 const CodingStepsSchema = z.array(CodingStepSchema)
+const RecordedRunSchema = z.object({ outcome: z.string().nullish() }).loose()
 
 interface CodingRunDoneEvent {
   runId?: number
@@ -78,6 +77,7 @@ const steps = ref<CodingStep[]>([])
 const seenSeqs = new Set<number>()
 const status = ref<string>('running')
 const outcome = ref<string | null>(null)
+const outcomeError = ref<ApiErrorDetails | null>(null)
 const loadError = ref<string | null>(null)
 const scrollEl = ref<HTMLElement | null>(null)
 
@@ -89,11 +89,23 @@ function normalizeStatus(raw?: string | null): string | null {
   return TERMINAL_KINDS[s] ?? s
 }
 
+/** Why a run that did not complete ended. A list row's outcome is only an excerpt, so it comes from the run's own read. */
+async function loadRecordedOutcome(): Promise<void> {
+  try {
+    const run = await fetchParsed(`/api/subagent-runs/${props.runId}`, RecordedRunSchema)
+    // A replayed terminal step or a live codingrun.done that landed first is the newer word.
+    if (outcome.value === null && run.outcome) outcome.value = run.outcome
+  }
+  catch (e: unknown) {
+    outcomeError.value = apiErrorDetails(e)
+  }
+}
+
 watch(() => props.recordedStatus, (recorded) => {
   const next = normalizeStatus(recorded)
   if (!next) return
   status.value = next
-  if (next !== 'running' && next !== 'completed' && props.recordedOutcome) outcome.value = props.recordedOutcome
+  if (next !== 'running' && next !== 'completed') void loadRecordedOutcome()
 }, { immediate: true })
 
 /** Insert a step in seq order, deduping by seq, and reflect terminal kinds. */
@@ -356,9 +368,15 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
       <div
         v-if="!isRunning && outcome"
         class="px-3 py-2 border-t border-border text-xs text-fg-muted whitespace-pre-wrap break-words"
+        data-testid="coding-run-outcome"
       >
         {{ outcome }}
       </div>
+      <ApiErrorAlert
+        v-else-if="!isRunning && outcomeError"
+        class="px-3 py-2 border-t border-border"
+        :error="outcomeError"
+      />
     </div>
   </section>
 </template>

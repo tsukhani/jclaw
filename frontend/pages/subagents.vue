@@ -29,7 +29,9 @@ interface SubagentRun {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'KILLED' | 'TIMEOUT'
   startedAt: string | null
   endedAt: string | null
+  /** An excerpt, marked by outcomeTruncated when cut; the run's own read has it whole. */
   outcome: string | null
+  outcomeTruncated: boolean
 }
 
 const parentAgentFilter = ref<string>('')
@@ -395,14 +397,32 @@ async function deleteAll() {
 // full chat viewer; this peek is the inline read-without-leaving glance.
 const peekOpen = ref(false)
 const selectedRun = ref<SubagentRun | null>(null)
+const selectedOutcome = ref<string | null>(null)
+const outcomeError = ref<ApiErrorDetails | null>(null)
 const peekMessages = ref<Message[]>([])
+const peekLoads = useLatestRequest()
 
 async function selectRun(run: SubagentRun) {
+  const request = peekLoads.begin()
   selectedRun.value = run
+  selectedOutcome.value = null
+  outcomeError.value = null
   peekOpen.value = true
-  peekMessages.value = run.childConversationId === null
+  void loadOutcome(run.id, request)
+  const messages = run.childConversationId === null
     ? []
     : (await fetchConversationMessages(run.childConversationId) ?? [])
+  if (peekLoads.isCurrent(request)) peekMessages.value = messages
+}
+
+async function loadOutcome(runId: number, request: number) {
+  try {
+    const run = await $fetch<SubagentRun>(`/api/subagent-runs/${runId}`)
+    if (peekLoads.isCurrent(request)) selectedOutcome.value = run.outcome
+  }
+  catch (e) {
+    if (peekLoads.isCurrent(request)) outcomeError.value = apiErrorDetails(e)
+  }
 }
 
 function closePeek() {
@@ -949,11 +969,16 @@ function closePeek() {
           <span v-if="durationSeconds(selectedRun) !== null">Duration: <strong class="text-fg-primary font-mono">{{ durationSeconds(selectedRun) }}s</strong></span>
         </div>
         <div
-          v-if="selectedRun.outcome"
+          v-if="selectedOutcome"
           class="mb-4 bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap break-words"
+          data-testid="subagent-run-outcome"
         >
-          {{ selectedRun.outcome }}
+          {{ selectedOutcome }}
         </div>
+        <ApiErrorAlert
+          class="mb-4"
+          :error="outcomeError"
+        />
         <div class="space-y-3">
           <div
             v-for="msg in peekMessages"

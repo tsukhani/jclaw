@@ -832,6 +832,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/slash-commands
             GET /api/status
             GET /api/subagent-runs
+            GET /api/subagent-runs/{id}
             GET /api/subagent-runs/{id}/steps
             GET /api/subagents/acp-command
             GET /api/subagents/acp-harnesses

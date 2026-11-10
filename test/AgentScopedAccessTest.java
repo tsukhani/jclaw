@@ -1,4 +1,5 @@
 import com.google.gson.JsonParser;
+import controllers.ApiSubagentRunsController;
 import controllers.RequestPrincipal;
 import llm.ProviderRegistry;
 import models.Agent;
@@ -320,6 +321,36 @@ class AgentScopedAccessTest extends FunctionalTest {
         var alien = asAgent(() -> GET(agentRequest(callerAgentId), "/api/subagent-runs/" + alienRunId + "/steps"));
         assertStatus(403, alien);
         assertTrue(getContent(alien).contains(AGENT_SCOPE), getContent(alien));
+    }
+
+    @Test
+    void anAgentReadsItsOwnRunWholeAndNotAnotherAgents() {
+        var outcome = "The harness exited 3.\n" + "x".repeat(ApiSubagentRunsController.OUTCOME_EXCERPT_CHARS * 5);
+        commit(() -> {
+            SubagentRun run = SubagentRun.findById(ownRunId);
+            run.outcome = outcome;
+            run.save();
+            return null;
+        });
+
+        var own = asAgent(() -> GET(agentRequest(callerAgentId), "/api/subagent-runs/" + ownRunId));
+        assertStatus(200, own);
+        var run = JsonParser.parseString(getContent(own)).getAsJsonObject();
+        assertEquals(ownRunId, run.get("id").getAsLong());
+        assertEquals(outcome, run.get("outcome").getAsString());
+        assertFalse(run.get("outcomeTruncated").getAsBoolean());
+
+        var alien = asAgent(() -> GET(agentRequest(callerAgentId), "/api/subagent-runs/" + alienRunId));
+        assertStatus(403, alien);
+        assertEquals(AGENT_SCOPE, field(alien, "code"));
+        assertEquals("Run " + alienRunId + " was started by another agent.", field(alien, "message"));
+    }
+
+    @Test
+    void anUnstampedBearerCannotReadARun() {
+        var resp = asAgent(() -> GET(bareBearerRequest(), "/api/subagent-runs/" + ownRunId));
+        assertStatus(403, resp);
+        assertEquals(AGENT_SCOPE, field(resp, "code"));
     }
 
     @Test

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { clearNuxtData } from '#app'
+import type { H3Event } from 'h3'
 import Subagents from '~/pages/subagents.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import PeekPanel from '~/components/PeekPanel.vue'
@@ -45,6 +46,7 @@ function run(over: Record<string, unknown> = {}) {
     startedAt: '2026-05-14T09:00:00Z',
     endedAt: '2026-05-14T09:00:30Z',
     outcome: 'Task done.',
+    outcomeTruncated: false,
     ...over,
   }
 }
@@ -55,6 +57,9 @@ let capturedQueries: Record<string, unknown>[] = []
 let deleteBody: Record<string, unknown> | null = null
 let rowsFor: ((query: Record<string, unknown>) => unknown[]) | null = null
 let listGate: { when: (query: Record<string, unknown>) => boolean, promise: Promise<void> } | null = null
+// GET /api/subagent-runs/{id}: the run whole, as the peek reads it.
+let readRun: (id: number, event: H3Event) => unknown = id => run({ id })
+let runReads: number[] = []
 
 /** Holds every list response whose query matches until the returned release is called. */
 function gateList(when: (query: Record<string, unknown>) => boolean): () => void {
@@ -88,6 +93,15 @@ registerEndpoint('/api/subagent-runs', {
     return { deleted: totalCount }
   },
 })
+for (const id of [11, 12]) {
+  registerEndpoint(`/api/subagent-runs/${id}`, {
+    method: 'GET',
+    handler: async (event) => {
+      runReads.push(id)
+      return await readRun(id, event)
+    },
+  })
+}
 registerEndpoint('/api/conversations/6/messages', () => [
   { id: 1, role: 'user', content: 'delegate this', createdAt: '2026-05-14T09:00:00Z' },
   { id: 2, role: 'assistant', content: 'on it', createdAt: '2026-05-14T09:00:10Z' },
@@ -104,6 +118,8 @@ beforeEach(() => {
   deleteBody = null
   rowsFor = null
   listGate = null
+  readRun = id => run({ id })
+  runReads = []
 })
 
 afterEach(() => {
@@ -233,6 +249,8 @@ describe('Subagents — quick preview peek panel', () => {
 
     // First row's quick-preview button (child conversation #6).
     await component.findAll('button[title="Quick preview"]')[0]!.trigger('click')
+    // The outcome arrives on the run's own read, beside the transcript's.
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="subagent-run-outcome"]')).not.toBeNull())
     await flushPromises()
     await nextTick()
 
@@ -254,6 +272,68 @@ describe('Subagents — quick preview peek panel', () => {
     panel.vm.$emit('update:open', false)
     await nextTick()
     expect(panel.props('open')).toBe(false)
+  })
+})
+
+describe('Subagents — quick preview reads the run whole (JF-140)', () => {
+  const outcomeBlock = () => document.body.querySelector('[data-slot="sheet-content"] [data-testid="subagent-run-outcome"]')
+
+  it('shows the whole outcome from the run\'s own read, not the list row\'s excerpt', async () => {
+    const whole = `Built the parser. ${'Every fixture passes. '.repeat(20)}Done.`
+    listRows = [run({ outcome: `${whole.slice(0, 20)}…`, outcomeTruncated: true })]
+    readRun = id => run({ id, outcome: whole })
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await component.findAll('button[title="Quick preview"]')[0]!.trigger('click')
+    await vi.waitFor(() => expect(outcomeBlock()).not.toBeNull())
+
+    expect(outcomeBlock()!.textContent!.trim()).toBe(whole)
+    expect(runReads).toEqual([11])
+  })
+
+  it('says why when the run\'s own read fails, and shows no outcome', async () => {
+    readRun = async (_id, event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 404)
+      return { type: 'error', code: 'not_found', message: 'Run 11 not found.' }
+    }
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await component.findAll('button[title="Quick preview"]')[0]!.trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-slot="sheet-content"] [data-testid="api-error"]')).not.toBeNull())
+
+    expect(document.body.querySelector('[data-slot="sheet-content"] [data-testid="api-error"]')!.textContent!.trim()).toBe('Run 11 not found.')
+    expect(outcomeBlock()).toBeNull()
+  })
+
+  it('keeps the run opened last when the read of one opened earlier lands after it', async () => {
+    let releaseFirst!: () => void
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstAnswered = false
+    onTestFinished(registerEndpoint('/api/conversations/7/messages', () => []))
+    readRun = async (id) => {
+      if (id === 11) {
+        await firstHeld
+        firstAnswered = true
+      }
+      return run({ id, outcome: `outcome of run ${id}` })
+    }
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    const previews = component.findAll('button[title="Quick preview"]')
+    await previews[0]!.trigger('click')
+    await previews[1]!.trigger('click')
+    await vi.waitFor(() => expect(outcomeBlock()?.textContent?.trim()).toBe('outcome of run 12'))
+    releaseFirst()
+    await vi.waitFor(() => expect(firstAnswered).toBe(true))
+    await flushPromises()
+
+    expect(outcomeBlock()!.textContent!.trim()).toBe('outcome of run 12')
   })
 })
 

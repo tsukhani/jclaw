@@ -109,7 +109,7 @@ class ApiSubagentRunsControllerBranchTest extends FunctionalTest {
         });
 
         // Negative values are rejected by the guards and fall through to the
-        // default page (limit 100, offset 0) — every row is returned, not zero.
+        // default page (offset 0) — every row is returned, not zero.
         var resp = GET("/api/subagent-runs?limit=-5&offset=-3");
         assertIsOk(resp);
         var body = getContent(resp);
