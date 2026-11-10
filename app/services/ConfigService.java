@@ -58,7 +58,6 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -115,29 +114,13 @@ public class ConfigService {
         // for the same key invoke the loader at most once.
         return cache.get(key, k -> {
             var config = Tx.run(() -> Config.findByKey(k));
-            return loaded(k, config != null ? config.value : null);
+            var stored = opened(k, config != null ? config.value : null);
+            // JCLAW-1022: privileged keys are capped by application.conf, which the config table
+            // cannot reach. Applied inside the loader so the cost lands once per key rather than
+            // per read, and here rather than at each sink because provider.*.baseUrl alone has
+            // nine of them.
+            return new Read(PrivilegedConfig.reconcile(k, stored.value()), stored.unreadable());
         });
-    }
-
-    private static Read loaded(String key, @Nullable String value) {
-        var stored = opened(key, value);
-        // JCLAW-1022: privileged keys are capped by application.conf, which the config table
-        // cannot reach. Applied when a value is loaded so the cost lands once per key rather than
-        // per read, and here rather than at each sink because provider.*.baseUrl alone has
-        // nine of them.
-        return new Read(PrivilegedConfig.reconcile(key, stored.value()), stored.unreadable());
-    }
-
-    /**
-     * Loads every stored key into the cache in one query, for a burst of reads that would otherwise query one key at
-     * a time (the boot's seeding, JF-270). A key a writer has cached meanwhile keeps the writer's value.
-     */
-    public static void preloadAll() {
-        List<Config> rows = new ArrayList<>();
-        for (Config row : Tx.run(() -> Config.<Config>findAll())) rows.add(row);
-        for (var row : rows) {
-            if (cache.getIfPresent(row.key) == null) cache.put(row.key, loaded(row.key, row.value));
-        }
     }
 
     /** The configured value, or {@code defaultValue} when the key is unset. Callers wanting

@@ -60,8 +60,6 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        // Every seed below reads its key first: one query instead of one per key.
-        ConfigService.preloadAll();
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
