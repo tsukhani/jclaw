@@ -250,7 +250,7 @@ A depth limit of `1` means the top-level agent can spawn children, but those chi
 
 Both caps are shared with [`agent_spawn`](/guide#subagents-agent-spawn). A hand-off counts as one level of depth, and a hand-off and a subagent count together toward the parent's running children. So at the default depth of `1`, an agent that was handed work can neither hand it on nor spawn a subagent.
 
-The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300). These are the fallbacks for a spawn or yield that omits its own timeout. The section also holds an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's. The harness command and its model override live in Settings → **Coding**.
+The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300). These are the fallbacks for a spawn or yield that omits its own timeout. The section also holds an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's; an agent that `agent_spawn` hands work to always runs on its own model. The harness command and its model override live in Settings → **Coding**.
 
 ## Inspecting what a child did
 

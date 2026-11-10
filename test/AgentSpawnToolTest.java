@@ -367,6 +367,8 @@ class AgentSpawnToolTest extends UnitTest {
         assertEquals(STATIC_DESCRIPTION + "- b: (no purpose given)", agentSpawnDescription(a));
         assertEquals(STATIC_DESCRIPTION + "- A: Makes videos", agentSpawnDescription(b));
         assertEquals(STATIC_DESCRIPTION + "(listed per agent)", new AgentSpawnTool().description());
+        assertEquals(STATIC_DESCRIPTION + "- A: Makes videos\n- b: (no purpose given)", new AgentSpawnTool().description(null),
+                "defs built for no agent exclude no caller");
     }
 
     @Test
@@ -484,6 +486,124 @@ class AgentSpawnToolTest extends UnitTest {
         assertEquals(new TreeSet<>(Set.of("agent_spawn", "datetime")), requests.getFirst().tools());
     }
 
+    @Test
+    void atDepthLimitTwoTheSecondSpecialistsHandOffIsRefusedAtDepthTwo() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var b = createAgent("analyst");
+        var c = createAgent("auditor");
+        var web = ConversationService.create(main, "web", "u-depth2");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "agent_spawn",
+                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
+        scripts.add(new Script("Analyse the figures.", "agent_spawn",
+                Map.of("agent", "auditor", "task", "Audit the numbers."), "analyst saw: "));
+        scripts.add(Script.replies("Audit the numbers.", "AUDITED"));
+
+        var result = withDepthLimit("2",
+                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
+
+        JPA.em().clear();
+        SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
+        SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
+        assertNotNull(toB, result);
+        var bResult = expectedResult(toB,
+                "analyst saw: Agent hand-off refused: depth limit 2 exceeded (current depth: 2).", b);
+        assertEquals(expectedResult(toA, "researcher saw: " + bResult, a), result);
+        assertEquals(0, SubagentRun.count("childAgent.id = ?1", c.id), "no run for the refused hand-off");
+    }
+
+    @Test
+    void aCalleesBatchClonesRunOneLevelBelowIt() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var web = ConversationService.create(main, "web", "u-batch-depth");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "subagent_spawn",
+                Map.of("tasks", List.of("Clone the work.")), "researcher saw: "));
+        scripts.add(new Script("Clone the work.", "subagent_spawn", Map.of("task", "Go deeper."), "clone saw: "));
+        scripts.add(Script.replies("Go deeper.", "DEEPER"));
+
+        var outcome = withDepthLimit("2", () -> {
+            handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}");
+            return awaitCloneOutcome(a.id);
+        });
+
+        assertEquals("clone saw: Subagent spawn refused: depth limit 2 exceeded (current depth: 2).", outcome);
+        JPA.em().clear();
+        SubagentRun clone = SubagentRun.find("parentAgent.id = ?1", a.id).first();
+        assertEquals(0, SubagentRun.count("parentAgent.id = ?1", clone.childAgent.id), "the clone spawned nothing");
+    }
+
+    /** The outcome of the batch child {@code parentId} started, once its detached run has ended. */
+    private static String awaitCloneOutcome(Long parentId) throws InterruptedException {
+        var deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline) {
+            String outcome = inFreshTx(() -> {
+                SubagentRun run = SubagentRun.find("parentAgent.id = ?1 AND status = ?2",
+                        parentId, SubagentRun.Status.COMPLETED).first();
+                return run == null ? null : run.outcome;
+            });
+            if (outcome != null) return outcome;
+            Thread.sleep(50);
+        }
+        fail("the batch child did not complete within 30s");
+        return null;
+    }
+
+    @Test
+    void theBreadthCapIsSharedWithSubagentSpawn() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var web = ConversationService.create(main, "web", "u-breadth");
+        for (int i = 0; i < SubagentSpawnTool.DEFAULT_BREADTH_LIMIT; i++) {
+            var child = createAgent("main-sub-" + i);
+            child.parentAgent = main;
+            child.save();
+            var run = new SubagentRun();
+            run.parentAgent = main;
+            run.childAgent = child;
+            run.parentConversation = web;
+            run.childConversation = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
+            run.status = SubagentRun.Status.RUNNING;
+            run.save();
+        }
+        commitAndReopen();
+        var caller = (Agent) Agent.findById(main.id);
+        var result = new AtomicReference<String>();
+
+        // On the test thread, so captureForTest sees the event; the cap refuses before the transaction check.
+        var events = EventLogger.captureForTest(() -> result.set(ToolContext.withConversation(web.id,
+                () -> new AgentSpawnTool().execute("{\"agent\":\"researcher\",\"task\":\"x\"}", caller))));
+
+        assertEquals("Agent hand-off refused: breadth limit 5 exceeded (running children: 5).", result.get());
+        JPA.em().clear();
+        assertEquals(SubagentSpawnTool.DEFAULT_BREADTH_LIMIT, SubagentRun.count(), "no new run row");
+        var limits = events.stream().filter(e -> EventLogger.SUBAGENT_LIMIT_EXCEEDED.equals(e.category())).toList();
+        assertEquals(1, limits.size(), events.toString());
+        assertEquals("main", limits.getFirst().agentId());
+        assertEquals("breadth limit 5 exceeded (running children: 5).",
+                JsonParser.parseString(limits.getFirst().details()).getAsJsonObject().get("reason").getAsString());
+    }
+
+    @Test
+    void aFireOfATaskAGuestSetUpAsksNoAgent() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var taskRunId = seedTaskRun(main, null, "telegram");
+        commitAndReopen();
+
+        var result = onVirtualThread(() -> {
+            var caller = Tx.run(() -> (Agent) Agent.findById(main.id));
+            return DangerousActionGate.withFireOrigin("telegram", () -> ToolContext.withScope(null, taskRunId,
+                    () -> new AgentSpawnTool().execute("{\"agent\":\"researcher\",\"task\":\"x\"}", caller)));
+        });
+
+        assertEquals("Error: agent_spawn is available only on a turn the owner reads alone; no agent was asked.", result);
+        assertNoRuns();
+        assertTrue(requests.isEmpty(), requests.toString());
+    }
+
     // ---- helpers ----
 
     private String agentSpawnDescription(Agent caller) {
@@ -584,11 +704,15 @@ class AgentSpawnToolTest extends UnitTest {
     }
 
     private static Long seedTaskRun(Agent agent, String enabledToolNames) {
+        return seedTaskRun(agent, enabledToolNames, "web");
+    }
+
+    private static Long seedTaskRun(Agent agent, String enabledToolNames, String originChannel) {
         var task = new models.Task();
         task.enabledToolNames = enabledToolNames;
         task.agent = agent;
         task.name = "fenced-" + agent.name;
-        task.originChannel = "web";
+        task.originChannel = originChannel;
         task.type = models.Task.Type.IMMEDIATE;
         task.status = models.Task.Status.RUNNING;
         task.nextRunAt = java.time.Instant.now();

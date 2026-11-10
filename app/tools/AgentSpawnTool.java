@@ -74,7 +74,8 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public String description(Agent caller) {
+    public String description(@Nullable Agent caller) {
+        // McpDiscoveryTest builds defs for no agent; such a list excludes no caller.
         var reachable = reachableFrom(caller);
         if (reachable.isEmpty()) return DESCRIPTION + "none";
         var lines = new ArrayList<String>();
@@ -115,11 +116,11 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
     public record Reachable(Long id, String name, @Nullable String purpose) {}
 
     /**
-     * The agents {@code caller} may hand work to, by name, case-insensitively: every enabled top-level agent but
+     * The agents {@code caller} may hand work to, sorted by name ignoring case: every enabled top-level agent but
      * {@code main}, the agents JClaw runs for itself and the caller. The description lists them and
-     * {@link #execute} refuses any other.
+     * {@link #execute} refuses any other; {@link #execute} matches a name exactly.
      */
-    public static List<Reachable> reachableFrom(Agent caller) {
+    public static List<Reachable> reachableFrom(@Nullable Agent caller) {
         return Tx.run(() -> {
             List<Agent> candidates = Agent.find("enabled = true AND parentAgent IS NULL").fetch();
             var out = new ArrayList<Reachable>();
@@ -131,9 +132,9 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
         });
     }
 
-    private static boolean reachable(Agent agent, Agent caller) {
+    private static boolean reachable(Agent agent, @Nullable Agent caller) {
         return agent.enabled && agent.parentAgent == null && !agent.isMain()
-                && !INTERNAL_AGENTS.contains(agent.name) && !agent.id.equals(caller.id);
+                && !INTERNAL_AGENTS.contains(agent.name) && (caller == null || !agent.id.equals(caller.id));
     }
 
     @Override

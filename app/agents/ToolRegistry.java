@@ -150,7 +150,7 @@ public class ToolRegistry {
         String execute(String argsJson, Agent agent);
 
         /** The description {@code caller} is offered; a tool whose text depends on who calls it overrides this. */
-        default String description(Agent caller) { return description(); }
+        default String description(@Nullable Agent caller) { return description(); }
 
         /**
          * JCLAW-170: rich-output variant. Defaults to wrapping {@link #execute} in a
