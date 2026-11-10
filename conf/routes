@@ -95,6 +95,7 @@ POST    /api/scrape/proxy/test                   ApiScrapeProxyController.test
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTaskStatsController.stats
+GET     /api/tasks/{id}                         ApiTasksController.get
 GET     /api/tasks/{id}/runs                    ApiTaskRunsController.runs
 GET     /api/tasks/{id}/delivery-advisory       ApiSchedulingMetaController.deliveryAdvisory
 GET     /api/task-runs/search                   ApiTaskSearchController.searchTranscripts
@@ -183,6 +184,7 @@ POST    /api/prompts/generate                   ApiPromptsController.generate
 GET     /api/prompts/export                     ApiPromptsController.export
 POST    /api/prompts/import                     ApiPromptsController.importPrompts
 GET     /api/prompts                            ApiPromptsController.list
+GET     /api/prompts/{id}                       ApiPromptsController.get
 POST    /api/prompts                            ApiPromptsController.create
 PUT     /api/prompts/{id}                       ApiPromptsController.update
 DELETE  /api/prompts/{id}                       ApiPromptsController.delete

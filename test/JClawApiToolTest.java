@@ -809,6 +809,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/prompts
             GET /api/prompts/categories
             GET /api/prompts/export
+            GET /api/prompts/{id}
             GET /api/providers
             GET /api/providers/{name}/embedding-models
             GET /api/providers/{name}/models
@@ -843,6 +844,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/task-runs/{id}/messages
             GET /api/tasks
             GET /api/tasks/stats
+            GET /api/tasks/{id}
             GET /api/tasks/{id}/delivery-advisory
             GET /api/tasks/{id}/runs
             GET /api/timezones

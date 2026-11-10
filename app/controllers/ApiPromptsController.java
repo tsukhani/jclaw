@@ -15,6 +15,7 @@ import play.mvc.With;
 import services.PromptGenerationService;
 import services.PromptImportExportService;
 import utils.ApiResponses;
+import utils.Strings;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -42,6 +43,9 @@ public class ApiPromptsController extends Controller {
     private static final String KEY_TAGS = "tags";
     private static final String KEY_CATEGORY = "category";
 
+    /** Characters of {@code content} an agent's list row keeps; the whole prompt comes from {@link #get}. */
+    public static final int CONTENT_PREVIEW_CHARS = 200;
+
     /** Wire shape for a prompt: the stored fields plus the category flattened to
      *  its stable value + display label. The category glyph is a frontend
      *  concern (value → Heroicon), so no icon travels on the wire. */
@@ -56,6 +60,21 @@ public class ApiPromptsController extends Controller {
         }
     }
 
+    /** An agent's list row: the content gives way to a preview, so the list fits {@code jclaw_api}'s response cap. */
+    public record PromptSummaryView(Long id, String title, String tags,
+                                    String category, String categoryLabel,
+                                    String contentPreview, boolean contentTruncated,
+                                    @Nullable String createdAt, @Nullable String updatedAt) {
+        static PromptSummaryView of(Prompt p) {
+            return new PromptSummaryView(p.id, p.title, p.tags,
+                    p.category.name(), p.category.label,
+                    Strings.truncate(p.content, CONTENT_PREVIEW_CHARS),
+                    p.content.length() > CONTENT_PREVIEW_CHARS,
+                    p.createdAt == null ? null : p.createdAt.toString(),
+                    p.updatedAt == null ? null : p.updatedAt.toString());
+        }
+    }
+
     /** Wire shape for one entry in the fixed category list (value + label; the
      *  frontend maps the value to a Heroicon). */
     public record CategoryView(String value, String label) {
@@ -65,7 +84,8 @@ public class ApiPromptsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PromptView.class))))
-    @Operation(summary = "List saved prompts, newest-edited first, with an optional title filter (case-insensitive substring)")
+    @Operation(summary = "List saved prompts, newest-edited first, with an optional title filter (case-insensitive substring); "
+            + "an agent's rows carry a contentPreview in place of content, and the whole prompt comes from GET /api/prompts/{id}")
     @AgentAccess(OPEN)
     public static void list(@Nullable String title) {
         var prompts = Prompt.findAllOrdered().stream();
@@ -73,7 +93,17 @@ public class ApiPromptsController extends Controller {
             var needle = title.strip().toLowerCase(Locale.ROOT);
             prompts = prompts.filter(p -> p.title.toLowerCase(Locale.ROOT).contains(needle));
         }
-        renderJSON(gson.toJson(prompts.map(PromptView::of).toList()));
+        // The operator's rows stay whole: the Prompts page and chat's prompt picker search, copy and insert the content (JF-144).
+        renderJSON(RequestPrincipal.isAgentOriginated()
+                ? gson.toJson(prompts.map(PromptSummaryView::of).toList())
+                : gson.toJson(prompts.map(PromptView::of).toList()));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
+    @Operation(summary = "Get one saved prompt by id, its content whole")
+    @AgentAccess(OPEN)
+    public static void get(Long id) {
+        renderJSON(gson.toJson(PromptView.of(requirePrompt(id))));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = CategoryView.class))))

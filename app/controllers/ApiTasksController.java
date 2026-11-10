@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -31,6 +32,7 @@ import services.Tx;
 import utils.ApiResponses;
 import utils.AppClock;
 import utils.ChannelOriginTrust;
+import utils.Strings;
 
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -70,6 +72,9 @@ public class ApiTasksController extends Controller {
                               String delivery, String payloadType, String modelProvider, String modelId,
                               List<String> enabledToolNames, Boolean autoDeleteOnComplete,
                               Boolean paused, String timezone) {}
+
+    /** Characters of {@code description} an agent's list row keeps; the whole task comes from {@link #get}. */
+    public static final int DESCRIPTION_PREVIEW_CHARS = 200;
 
     /** Asserted after a mutation re-reads the row it just wrote. */
     private static final String TASK_DELETED_MID_REQUEST = "task deleted mid-request";
@@ -202,7 +207,8 @@ public class ApiTasksController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
-    @Operation(summary = "List tasks filtered by status/type/agent/payloadType and full-text q, paginated with X-Total-Count")
+    @Operation(summary = "List tasks filtered by status/type/agent/payloadType and full-text q, paginated with X-Total-Count; "
+            + "an agent's rows carry a descriptionPreview in place of description, and the whole task comes from GET /api/tasks/{id}")
     @AgentAccess(OPEN)
     public static void list(String status, String type, Long agentId, String q,
                              String payloadType, String excludePayloadType,
@@ -227,8 +233,40 @@ public class ApiTasksController extends Controller {
         var taskIds = tasks.stream().map(t -> t.id).filter(Objects::nonNull).toList();
         final var fired = TaskRunQueryService.lastFiredAtByTask(taskIds);
         final var running = TaskRunQueryService.runningRunIdByTask(taskIds);
-        renderJSON(gson.toJson(tasks.stream()
-                .map(t -> TaskView.of(t, fired.get(t.id), running.get(t.id))).toList()));
+        var views = tasks.stream().map(t -> TaskView.of(t, fired.get(t.id), running.get(t.id))).toList();
+        // The operator's rows stay whole: the Reminders page shows a task's description as the reminder's text (JF-144).
+        renderJSON(RequestPrincipal.isAgentOriginated() ? gson.toJson(agentRows(views)) : gson.toJson(views));
+    }
+
+    /** An agent's list rows: the description gives way to a preview, so the list fits {@code jclaw_api}'s response cap. */
+    private static JsonArray agentRows(List<TaskView> views) {
+        var rows = new JsonArray();
+        for (var view : views) {
+            var row = gson.toJsonTree(view).getAsJsonObject();
+            row.remove("description");
+            var description = view.description();
+            row.addProperty("descriptionPreview",
+                    description == null ? null : Strings.truncate(description, DESCRIPTION_PREVIEW_CHARS));
+            row.addProperty("descriptionTruncated",
+                    description != null && description.length() > DESCRIPTION_PREVIEW_CHARS);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Get one task by id, its description whole")
+    @AgentAccess(OPEN)
+    public static void get(Long id) {
+        Task task = TaskService.findById(id);
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        var ids = List.of(task.id);
+        renderJSON(gson.toJson(TaskView.of(task,
+                TaskRunQueryService.lastFiredAtByTask(ids).get(task.id),
+                TaskRunQueryService.runningRunIdByTask(ids).get(task.id))));
     }
 
     @SuppressWarnings("java:S2259")
