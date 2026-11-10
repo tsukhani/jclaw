@@ -1041,7 +1041,8 @@ export interface TaskRunMessageView {
 export interface TranscriptSearchHit {
   messageId: number
   role: string | null
-  content: string | null
+  /** Up to 200 characters around the first match, `…` at each cut end; the whole message comes from GET /api/task-runs/{id}/messages. */
+  snippet: string
   createdAt: string | null
   taskRunId: number | null
   taskId: number | null

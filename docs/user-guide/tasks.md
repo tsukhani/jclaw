@@ -86,7 +86,7 @@ The top of the page is a filter bar. It accepts free-text keywords and typed key
 | `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED`, or `PAUSED`, which matches suspended live schedules. |
 | `type:`   | `type:CRON`          | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                 |
 | `agent:`  | `agent:morning-bot`  | Tasks owned by an agent matching this string.                                    |
-| `transcript:` | `transcript:"daily briefing"` | Full-text search over the transcripts of past fires. Hits are listed in a panel below the bar rather than filtering the table; click one to open that run's trace. Quote phrases; `AND` / `OR` / `NOT` and a trailing `*` prefix wildcard work. |
+| `transcript:` | `transcript:"daily briefing"` | Full-text search over the transcripts of past fires. Hits are listed in a panel below the bar rather than filtering the table, each with a short excerpt around the match; click one to open that run's full trace. Quote phrases; `AND` / `OR` / `NOT` and a trailing `*` prefix wildcard work. |
 
 Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks containing "summary."
 

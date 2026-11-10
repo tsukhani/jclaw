@@ -1161,8 +1161,8 @@ function zoneForTaskRender(task: Task): string | undefined {
                 class="text-[10px] text-fg-muted ml-auto"
               >{{ new Date(hit.createdAt).toLocaleString() }}</span>
             </div>
-            <p class="text-xs text-fg-muted line-clamp-2 whitespace-pre-wrap break-words">
-              {{ hit.content }}
+            <p class="text-xs text-fg-muted break-words">
+              {{ hit.snippet }}
             </p>
           </button>
         </li>

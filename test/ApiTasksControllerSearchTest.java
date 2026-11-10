@@ -1,3 +1,7 @@
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import controllers.ApiTaskSearchController;
 import models.MessageRole;
 import models.Task;
 import models.TaskRun;
@@ -9,8 +13,12 @@ import org.junit.jupiter.api.Test;
 import play.db.DB;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import tools.JClawApiTool;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -63,9 +71,13 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     private Long seedAgent() {
+        return seedAgent("task-search-agent");
+    }
+
+    private Long seedAgent(String name) {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "task-search-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(name));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -116,6 +128,18 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
         if (err.get() != null) throw new RuntimeException(err.get());
     }
 
+    private JsonArray hits(String query) {
+        var resp = GET("/api/task-runs/search?q=" + query);
+        assertIsOk(resp);
+        return JsonParser.parseString(getContent(resp)).getAsJsonArray();
+    }
+
+    private List<String> snippets(String query) {
+        var out = new ArrayList<String>();
+        for (var hit : hits(query)) out.add(((JsonObject) hit).get("snippet").getAsString());
+        return out;
+    }
+
     private static String extractId(String json) {
         var m = Pattern.compile("\"id\":(\\d+)").matcher(json);
         if (!m.find()) throw new AssertionError("no id in: " + json);
@@ -144,13 +168,86 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
                 "the quick brown fox jumps over the lazy dog",
                 "completely unrelated content about cats");
 
-        var resp = GET("/api/task-runs/search?q=fox");
-        assertIsOk(resp);
-        var body = getContent(resp);
-        assertTrue(body.contains("the quick brown fox"),
-                "expected the fox message in results; got: " + body);
-        assertFalse(body.contains("about cats"),
-                "non-matching message should not appear; got: " + body);
+        assertEquals(List.of("the quick brown fox jumps over the lazy dog"), snippets("fox"));
+    }
+
+    @Test
+    void hitCarriesTheSnippetInPlaceOfTheFullContent() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "shape-task");
+        seedTranscript(taskId, "a shapekeyword message");
+
+        var hits = hits("shapekeyword");
+        assertEquals(1, hits.size(), hits.toString());
+        assertEquals(List.of("messageId", "role", "snippet", "createdAt", "taskRunId", "taskId", "taskName",
+                        "agentId", "agentName"),
+                new ArrayList<>(hits.get(0).getAsJsonObject().keySet()));
+    }
+
+    @Test
+    void aMessageShorterThanTheBoundIsItsOwnSnippetUnmarked() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "short-task");
+        seedTranscript(taskId, "a short zebra message");
+
+        assertEquals(List.of("a short zebra message"), snippets("zebra"));
+    }
+
+    @Test
+    void aMatchNearTheStartShowsTheOpeningCutOnlyAtTheEnd() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "start-task");
+        seedTranscript(taskId, "A".repeat(49) + " zebra " + "B".repeat(944));
+
+        assertEquals(List.of("A".repeat(49) + " zebra " + "B".repeat(144) + "…"), snippets("zebra"));
+    }
+
+    @Test
+    void aMatchInTheMiddleIsCentredAndCutAtBothEnds() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "middle-task");
+        seedTranscript(taskId, "A".repeat(500) + " zebra " + "B".repeat(500));
+
+        assertEquals(List.of("…" + "A".repeat(96) + " zebra " + "B".repeat(97) + "…"), snippets("zebra"));
+    }
+
+    @Test
+    void aMatchNearTheEndShowsTheCloseCutOnlyAtTheStart() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "end-task");
+        seedTranscript(taskId, "A".repeat(944) + " zebra " + "B".repeat(49));
+
+        assertEquals(List.of("…" + "A".repeat(144) + " zebra " + "B".repeat(49)), snippets("zebra"));
+    }
+
+    @Test
+    void theSnippetCentresOnTheMatchWhateverItsCase() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "case-task");
+        seedTranscript(taskId, "A".repeat(500) + " ZEBRA " + "B".repeat(500));
+
+        assertEquals(List.of("…" + "A".repeat(96) + " ZEBRA " + "B".repeat(97) + "…"), snippets("zebra"));
+    }
+
+    @Test
+    void aFullPageOfTheLongestHitsFitsUnderTheJclawApiCap() {
+        // Every field at its longest: a 255-character task name (the column), a 64-character agent
+        // name (the name pattern) and a snippet of quotes, which JSON escapes to twice their length.
+        var agent = seedAgent("a".repeat(64));
+        var taskId = seedTask(agent, "t".repeat(255));
+        var message = "\"".repeat(150) + " zebra " + "\"".repeat(1500);
+        seedTranscript(taskId, Collections.nCopies(ApiTaskSearchController.MAX_LIMIT + 1, message)
+                .toArray(String[]::new));
+
+        for (var query : List.of("q=zebra", "q=zebra&limit=50", "q=zebra&limit=51")) {
+            var resp = GET("/api/task-runs/search?" + query);
+            assertIsOk(resp);
+            var body = getContent(resp);
+            assertEquals(ApiTaskSearchController.MAX_LIMIT, JsonParser.parseString(body).getAsJsonArray().size(),
+                    query);
+            assertTrue(body.length() <= JClawApiTool.MAX_RESPONSE_CHARS,
+                    query + " returned " + body.length() + " characters");
+        }
     }
 
     @Test

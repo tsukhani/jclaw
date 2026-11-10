@@ -316,7 +316,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** Below this length a token matches exactly — a 1-char prefix would match
      *  almost everything and carry no signal. */
-    private static final int MIN_PREFIX_LEN = 2;
+    static final int MIN_PREFIX_LEN = 2;
 
     /**
      * Build the content-field query from free text: tokenize with the index-time
@@ -369,7 +369,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** Run {@link #CONTENT_ANALYZER} over {@code text} and collect the emitted
      *  tokens (lowercased, stopwords dropped). */
-    private static List<String> analyzeToTerms(String text) throws IOException {
+    static List<String> analyzeToTerms(String text) throws IOException {
         var terms = new ArrayList<String>();
         try (var ts = CONTENT_ANALYZER.tokenStream(LuceneIndexer.CONTENT_FIELD, text)) {
             var attr = ts.addAttribute(CharTermAttribute.class);

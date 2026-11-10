@@ -129,7 +129,8 @@ public class ApiTaskRunsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
-    @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing")
+    @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing; "
+            + "where a GET /api/task-runs/search hit's full message text comes from")
     @AgentAccess(OPEN)
     public static void runMessages(Long id) {
         TaskRun run = TaskService.findRunById(id);

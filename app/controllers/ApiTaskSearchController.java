@@ -12,6 +12,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.search.MessageSearch;
+import services.search.SearchSnippet;
 import utils.ApiResponses;
 
 import static controllers.AgentAccess.Level.OPEN;
@@ -30,22 +31,30 @@ public class ApiTaskSearchController extends Controller {
     private static final Gson gson = GSON;
 
     /**
-     * One hit from the transcript search: the matched
-     * {@link TaskRunMessage} content + role plus enough parent context
-     * (task id/name, taskRun id) for the UI to link back.
+     * Most hits one search returns, and the default. With every field at its longest (a 255-character task name,
+     * a 64-character agent name, 19-digit ids, a snippet of quotes JSON doubles) a hit runs to about 950
+     * characters, so a full page comes to about 48,000, under {@link tools.JClawApiTool#MAX_RESPONSE_CHARS}; on
+     * 2026-10-27 full contents made a page of 50 hits 961 KB.
      */
-    private record TranscriptSearchHit(Long messageId, @Nullable String role, String content,
+    public static final int MAX_LIMIT = 50;
+
+    /**
+     * One hit from the transcript search: the matched {@link TaskRunMessage}'s role and a
+     * {@link SearchSnippet} of its content, plus enough parent context (task id/name, taskRun id)
+     * for the UI to link back. The whole message comes from {@code GET /api/task-runs/{id}/messages}.
+     */
+    private record TranscriptSearchHit(Long messageId, @Nullable String role, String snippet,
                                         @Nullable String createdAt, @Nullable Long taskRunId,
                                         @Nullable Long taskId, @Nullable String taskName,
                                         @Nullable Long agentId, String agentName) {
-        static TranscriptSearchHit of(TaskRunMessage m) {
+        static TranscriptSearchHit of(TaskRunMessage m, String query) {
             var run = m.taskRun;
             var task = run != null ? run.task : null;
             var agent = task != null ? task.agent : null;
             return new TranscriptSearchHit(
                     m.id,
                     m.role != null ? m.role.wireValue() : null,
-                    m.content,
+                    SearchSnippet.around(m.content, query),
                     m.createdAt != null ? m.createdAt.toString() : null,
                     run != null ? run.id : null,
                     task != null ? task.id : null,
@@ -71,16 +80,18 @@ public class ApiTaskSearchController extends Controller {
     // S2259: Play 1.x halt methods (badRequest, notFound, etc.) throw a Result that Sonar can't see across the framework boundary.
     @SuppressWarnings({"java:S2259", "java:S1181"})
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
-    @Operation(summary = "Full-text search task-run transcripts (q, limit) returning matching messages with task/run context")
+    @Operation(summary = "Full-text search task-run transcripts (q, limit up to 50); each hit carries a snippet "
+            + "around the match with task/run context, and the message's full text comes from "
+            + "GET /api/task-runs/{id}/messages")
     @AgentAccess(OPEN)
     public static void searchTranscripts(String q, Integer limit) {
-        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, MAX_LIMIT) : MAX_LIMIT;
         if (q == null || q.isBlank()) {
             renderJSON("[]");
         }
         try {
             var hits = MessageSearch.search(q, effectiveLimit);
-            renderJSON(gson.toJson(hits.stream().map(TranscriptSearchHit::of).toList()));
+            renderJSON(gson.toJson(hits.stream().map(m -> TranscriptSearchHit.of(m, q)).toList()));
         } catch (Throwable e) {
             // Error subclasses escape a narrower catch as a generic Play 500 with no diagnostic; log the full stack.
             ApiResponses.errorAndLog(e, 500, ApiResponses.SEARCH_FAILED,

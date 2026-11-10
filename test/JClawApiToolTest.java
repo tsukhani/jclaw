@@ -647,6 +647,19 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
+    void discoverPointsATranscriptSearchHitAtItsRunsMessagesForTheFullText() {
+        var lines = asOwner("{\"action\":\"discover\",\"filter\":\"/api/task-runs/\"}", null).lines().toList();
+        assertEquals(List.of("- GET /api/task-runs/search - Full-text search task-run transcripts (q, limit up to 50); "
+                        + "each hit carries a snippet around the match with task/run context, and the message's "
+                        + "full text comes from GET /api/task-runs/{id}/messages"),
+                lines.stream().filter(l -> l.startsWith("- GET /api/task-runs/search ")).toList());
+        assertEquals(List.of("- GET /api/task-runs/{id}/messages - Turn-by-turn message trace for one TaskRun "
+                        + "(turnIndex order), 404 if run missing; where a GET /api/task-runs/search hit's full "
+                        + "message text comes from"),
+                lines.stream().filter(l -> l.startsWith("- GET /api/task-runs/{id}/messages ")).toList());
+    }
+
+    @Test
     void discoverIncludesOpenEndpoints() {
         var out = asOwner("{\"action\":\"discover\"}", null);
         assertTrue(out.contains("/api/status"), "OPEN /api/status must be discovered: " + out);
