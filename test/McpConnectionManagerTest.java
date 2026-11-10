@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -107,6 +108,12 @@ class McpConnectionManagerTest extends UnitTest {
             "if (m.method === 'tools/call' && m.params.name === 'die') { process.exit(0); }"
                     + " else if (m.method === 'tools/call') {");
 
+    /** Exits 300 ms after SIGTERM rather than at once, like a server finishing its own teardown. The
+     *  interval keeps it alive once the close has shut its stdin. */
+    private static final String SLOW_TO_EXIT_SCRIPT = FIXTURE_SCRIPT
+            + "setInterval(() => {}, 1000);\n"
+            + "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 300));\n";
+
     private Path fixturePath;
 
     @BeforeEach
@@ -133,6 +140,66 @@ class McpConnectionManagerTest extends UnitTest {
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
         // Re-run native tool registration so the next test sees the canonical set.
         ToolRegistrySync.release();
+    }
+
+    // ==================== shutdown ====================
+
+    @Test
+    void shutdownClosesSlowServersAtOnceRatherThanOneAfterAnother() throws Exception {
+        var names = List.of("slowone", "slowtwo", "slowthree");
+        for (var name : names) McpConnectionManager.connect(seedStdioServer(name, SLOW_TO_EXIT_SCRIPT));
+        for (var name : names) {
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertTrue(toolRegistered("mcp_" + name + "_echo"), name + " should have published its tool");
+        }
+
+        long started = System.nanoTime();
+        McpConnectionManager.shutdown();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        // At least one 300 ms exit was waited out, so this timed the closes; one after another is 900 ms.
+        assertTrue(elapsedMillis >= 300 && elapsedMillis < 600, "shutdown took " + elapsedMillis + " ms");
+        for (var name : names) {
+            assertEquals(McpServer.Status.DISCONNECTED, McpConnectionManager.status(name));
+            assertFalse(toolRegistered("mcp_" + name + "_echo"), name + "'s tool should be gone");
+        }
+    }
+
+    @Test
+    void aCloseThatThrowsIsReportedAndTheOthersStillFinish() {
+        var finished = new CopyOnWriteArrayList<String>();
+        var closers = new LinkedHashMap<String, Runnable>();
+        // First, so a wait that stopped at the failure would return before the others finished.
+        closers.put("broken", () -> { throw new IllegalStateException("transport wedged"); });
+        closers.put("slowone", () -> { pause(300); finished.add("slowone"); });
+        closers.put("slowtwo", () -> { pause(300); finished.add("slowtwo"); });
+
+        var events = EventLogger.captureForTest(() -> McpConnectionManager.closeAll(closers));
+
+        assertEquals(Set.of("slowone", "slowtwo"), Set.copyOf(finished));
+        assertEquals(List.of("WARN MCP_DISCONNECT MCP server 'broken' failed to close: "
+                        + "java.lang.IllegalStateException: transport wedged"),
+                events.stream().map(e -> e.level() + " " + e.category() + " " + e.message()).toList());
+    }
+
+    @Test
+    void moreClosersThanThreadsAllFinish() {
+        var finished = new CopyOnWriteArrayList<String>();
+        var closers = new LinkedHashMap<String, Runnable>();
+        for (int i = 1; i <= 9; i++) {  // one more than the pool's eight threads
+            var name = "server" + i;
+            closers.put(name, () -> { pause(50); finished.add(name); });
+        }
+
+        var events = EventLogger.captureForTest(() -> McpConnectionManager.closeAll(closers));
+
+        assertEquals(closers.keySet(), Set.copyOf(finished));
+        assertEquals(List.of(), events);
+    }
+
+    @Test
+    void nothingToCloseLogsNothing() {
+        assertEquals(List.of(), EventLogger.captureForTest(() -> McpConnectionManager.closeAll(Map.of())));
     }
 
     // ==================== happy path ====================

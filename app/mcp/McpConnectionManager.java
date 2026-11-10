@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -264,35 +266,95 @@ public final class McpConnectionManager {
     public static void stop(String serverName) {
         var entry = connections.remove(serverName);
         if (entry != null) {
-            if (entry.scheduledRetry != null) entry.scheduledRetry.cancel(false);
-            var client = entry.client;
+            var client = detach(entry);
             if (client != null) {
                 try { client.close(); } catch (RuntimeException _) { /* best effort */ }
             }
-            // JCLAW-288: unblock any caller awaiting the first-attempt future
-            // for this entry. Replacing the entry (via a subsequent connect)
-            // or explicitly stopping mid-handshake counts as "first attempt
-            // resolved" for the awaiter — they'll read DISCONNECTED status
-            // and decide what to do.
-            var pending = entry.firstAttemptFuture;
-            if (pending != null && !pending.isDone()) pending.cancel(false);
-            ToolRegistry.unpublishExternal(serverName);
+            release(serverName, entry);
         }
+        forget(serverName);
+    }
+
+    /** Cancels a removed entry's retry, so nothing reconnects it, and hands back its client to close. */
+    private static @Nullable McpClient detach(Entry entry) {
+        if (entry.scheduledRetry != null) entry.scheduledRetry.cancel(false);
+        return entry.client;
+    }
+
+    private static void release(String serverName, Entry entry) {
+        // JCLAW-288: unblock any caller awaiting the first-attempt future
+        // for this entry. Replacing the entry (via a subsequent connect)
+        // or explicitly stopping mid-handshake counts as "first attempt
+        // resolved" for the awaiter — they'll read DISCONNECTED status
+        // and decide what to do.
+        var pending = entry.firstAttemptFuture;
+        if (pending != null && !pending.isDone()) pending.cancel(false);
+        ToolRegistry.unpublishExternal(serverName);
+    }
+
+    private static void forget(String serverName) {
         // A deleted or reconfigured server keeps no breaker: the registry is what an ops
         // view enumerates, and a re-add must not inherit the old one's open state.
         CircuitBreakers.remove(BREAKER_PREFIX + serverName);
         clearAllowlistAndAudit(serverName);
     }
 
-    /** Stop all connections. Called from {@code ShutdownJob}. */
+    /** Stop all connections. Called from {@code ShutdownJob}. Each server goes through {@link #stop}'s
+     *  steps in its order, but the clients close at once: a stdio server is given up to 2 s to exit, and
+     *  24 closed one after another took 1.1 to 3.1 s of a shutdown (JF-268). */
     public static void shutdown() {
-        for (var name : new ArrayList<>(connections.keySet())) stop(name);
+        var names = new ArrayList<>(connections.keySet());
+        var removed = new LinkedHashMap<String, Entry>();
+        var closers = new LinkedHashMap<String, Runnable>();
+        for (var name : names) {
+            var entry = connections.remove(name);
+            if (entry == null) continue;
+            removed.put(name, entry);
+            var client = detach(entry);
+            if (client != null) closers.put(name, client::close);
+        }
+        closeAll(closers);
+        for (var name : names) {
+            var entry = removed.get(name);
+            if (entry != null) release(name, entry);
+            forget(name);
+        }
         var sched = scheduler;
         if (sched != null) {
             sched.shutdownNow();
             try { sched.awaitTermination(5, TimeUnit.SECONDS); }
             catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             scheduler = null;
+        }
+    }
+
+    /** Each close mostly waits for a child process to exit, so a few threads go a long way. */
+    private static final int MAX_CLOSE_THREADS = 8;
+
+    /**
+     * Runs every closer at once and returns when all of them have finished. A closer that throws is
+     * logged with its server's name and does not stop the others. Platform threads: a stdio close
+     * parks in a timed {@code waitFor}, the wait that starves virtual threads (JDK-8373224).
+     */
+    public static void closeAll(Map<String, Runnable> closers) {
+        if (closers.isEmpty()) return;
+        var pool = Executors.newFixedThreadPool(Math.min(closers.size(), MAX_CLOSE_THREADS),
+                Thread.ofPlatform().name("mcp-close-", 0).daemon(true).factory());
+        try {
+            var running = new LinkedHashMap<String, Future<?>>();
+            closers.forEach((name, closer) -> running.put(name, pool.submit(closer)));
+            for (var close : running.entrySet()) {
+                try {
+                    close.getValue().get();
+                } catch (ExecutionException e) {
+                    EventLogger.warn(CATEGORY_DISCONNECT,
+                            "MCP server '%s' failed to close: %s".formatted(close.getKey(), e.getCause()));
+                }
+            }
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        } finally {
+            pool.shutdown();
         }
     }
 
