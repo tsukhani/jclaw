@@ -17,6 +17,7 @@ import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.telegram.telegrambots.meta.TelegramUrl;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
@@ -179,6 +180,33 @@ class InboundRecoverySweepTest extends UnitTest {
         assertEquals(List.of(new Row("user", "summarize my inbox"),
                 new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(convo));
         assertEquals(0, llmCalls.get(), "the interrupted turn is not run again");
+    }
+
+    @Test
+    void aNoteTheChannelCannotDeliverIsLoggedWithItsConversation() throws Exception {
+        var agent = persistAgent();
+        var peer = "1521" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jclaw1521-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        appendUserRow(convo, "summarize my inbox");
+        commit();
+        backdate(convo);
+
+        List<EventLogger.Captured> events;
+        try {
+            // Nothing listens on port 1, so the send is refused at once.
+            TelegramChannel.installForTest(token, TelegramUrl.builder().schema("http").host("127.0.0.1").port(1).build());
+            events = EventLogger.captureForTest(() -> TelegramStreamingRecoveryJob.sweep(cutoff()));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of("WARN Boot recovery: the interrupt note for conversation " + convo.id + " was not delivered"),
+                events.stream().filter(e -> e.category().equals("queue") && e.level().equals("WARN"))
+                        .map(e -> e.level() + " " + e.message()).toList());
+        assertEquals(List.of(new Row("user", "summarize my inbox"),
+                new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(convo));
     }
 
     @Test

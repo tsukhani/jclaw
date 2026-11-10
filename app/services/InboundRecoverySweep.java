@@ -87,7 +87,9 @@ public final class InboundRecoverySweep {
                 notified++;
                 var channel = delivery.channel();
                 if (channel != null && !placeholderEdited.contains(conversationId)) {
-                    channel.sendText(delivery.peerId(), INTERRUPT_NOTE, delivery.agent());
+                    channel.sendTextWhenConnected(delivery.peerId(), INTERRUPT_NOTE, delivery.agent(),
+                            () -> EventLogger.warn(CATEGORY, "Boot recovery: the interrupt note for conversation %d was not delivered"
+                                    .formatted(conversationId)));
                 }
             } catch (RuntimeException e) {
                 EventLogger.warn(CATEGORY, "Boot recovery: no interrupt note for conversation %d: %s"

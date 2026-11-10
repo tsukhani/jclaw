@@ -8,6 +8,7 @@ import it.auties.whatsapp.model.message.standard.DocumentMessage;
 import it.auties.whatsapp.model.message.standard.DocumentMessageSimpleBuilder;
 import it.auties.whatsapp.model.message.standard.ImageMessage;
 import it.auties.whatsapp.model.message.standard.ImageMessageSimpleBuilder;
+import models.Agent;
 import models.WhatsAppBinding;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
@@ -78,6 +79,14 @@ public final class WhatsAppCobaltChannel implements Channel {
         if (text == null || text.isEmpty()) return SendResult.OK;
         var sent = sendWithRetryResult(peerId, WhatsAppMarkdownFormatter.format(text));
         return sent.ok() ? sent : SendResult.FAILED;
+    }
+
+    /** Held until the binding's session has logged in: at boot it is usually still reconnecting (JF-278). */
+    @Override
+    public void sendTextWhenConnected(String peerId, String text, Agent agent, Runnable undelivered) {
+        WhatsAppCobaltRunner.whenConnected(bindingId, () -> {
+            if (!sendText(peerId, text, agent).ok()) undelivered.run();
+        }, undelivered);
     }
 
     @Override

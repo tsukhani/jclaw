@@ -227,6 +227,7 @@ public final class WhatsAppCobaltSession {
         persistPairedJid(jid.toString());
         EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                 "WhatsApp-Web paired for binding %s as %s".formatted(bindingId, jid));
+        WhatsAppCobaltRunner.sessionConnected(bindingId);
     }
 
     /** Inbound seam: cache the live object, parse, hand to the shared dispatcher.

@@ -135,6 +135,16 @@ public interface Channel {
     }
 
     /**
+     * {@link #sendText(String, String, Agent)} for a message that may be sent while this channel is still connecting
+     * at boot (JF-278): at once here, since most channels send through the provider's API; a channel that sends
+     * through a live session holds it until the session is up. {@code undelivered} runs when it is not sent. Returns
+     * without waiting for a session.
+     */
+    default void sendTextWhenConnected(String peerId, String text, Agent agent, Runnable undelivered) {
+        if (!sendText(peerId, text, agent).ok()) undelivered.run();
+    }
+
+    /**
      * JCLAW-141: generic cross-channel photo send. {@code caption} (null/blank to
      * omit) rides with the image. Channels without a native photo-upload path
      * return {@link SendResult#FAILED} via this default so a caller can detect

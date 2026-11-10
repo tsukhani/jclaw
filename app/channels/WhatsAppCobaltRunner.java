@@ -5,10 +5,15 @@ import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
+import utils.RetryScheduler;
 
+import java.time.Duration;
 import java.util.HashSet;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -40,6 +45,62 @@ public final class WhatsAppCobaltRunner {
     private static final ConcurrentHashMap<Long, WhatsAppCobaltSession> HANDLES = new ConcurrentHashMap<>();
     /** bindingId → latest QR string awaiting a scan (cleared when the session closes). */
     private static final ConcurrentHashMap<Long, String> PENDING_QR = new ConcurrentHashMap<>();
+
+    /** How long a send held for a session that is still connecting waits before it is given up (JF-278). */
+    public static final Duration CONNECT_WAIT = Duration.ofMinutes(2);
+
+    /** A held send and what runs if it is never sent; whichever claims it first runs, and only once. */
+    private record Held(Runnable send, Runnable expire, AtomicBoolean claimed) {
+        boolean claim() {
+            return claimed.compareAndSet(false, true);
+        }
+    }
+
+    /** bindingId → sends waiting for that binding's session to log in. */
+    private static final ConcurrentHashMap<Long, Queue<Held>> HELD = new ConcurrentHashMap<>();
+
+    /** {@link #whenConnected(Long, Runnable, Runnable, Duration)} with {@link #CONNECT_WAIT}. */
+    public static void whenConnected(Long bindingId, Runnable send, Runnable expire) {
+        whenConnected(bindingId, send, expire, CONNECT_WAIT);
+    }
+
+    /**
+     * Runs {@code send} once the binding's session is connected: now if it is, otherwise when the session logs in,
+     * on a thread of its own. If that does not happen within {@code wait}, {@code expire} runs instead. Returns at
+     * once, so a boot that holds a send is not slowed by it.
+     */
+    public static void whenConnected(Long bindingId, Runnable send, Runnable expire, Duration wait) {
+        if (connected(bindingId)) {
+            send.run();
+            return;
+        }
+        var held = new Held(send, expire, new AtomicBoolean());
+        HELD.computeIfAbsent(bindingId, _ -> new ConcurrentLinkedQueue<>()).add(held);
+        RetryScheduler.schedule(() -> {
+            if (held.claim()) {
+                var queue = HELD.get(bindingId);
+                if (queue != null) queue.remove(held);
+                expire.run();
+            }
+            return null;
+        }, wait.toMillis());
+        // A login between the check above and the add would otherwise leave this send to expire.
+        if (connected(bindingId)) sessionConnected(bindingId);
+    }
+
+    /** From the session's logged-in listener: starts every send held for the binding. */
+    public static void sessionConnected(Long bindingId) {
+        var queue = HELD.get(bindingId);
+        if (queue == null) return;
+        for (Held held; (held = queue.poll()) != null; ) {
+            if (held.claim()) Thread.ofVirtual().name("whatsapp-held-send-" + bindingId).start(held.send());
+        }
+    }
+
+    private static boolean connected(Long bindingId) {
+        var session = HANDLES.get(bindingId);
+        return session != null && session.isConnected();
+    }
 
     private WhatsAppCobaltRunner() {}
 
