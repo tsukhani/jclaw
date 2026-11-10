@@ -9,6 +9,7 @@ import services.Tx;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -49,7 +50,14 @@ public final class WhatsAppCobaltRunner {
      * Synchronized so concurrent admin saves don't race, exactly like
      * {@link SlackSocketModeRunner#reconcile()}.
      */
-    public static synchronized void reconcile() {
+    public static void reconcile() {
+        reconcileUnless(EventLogger::isShuttingDown);
+    }
+
+    /** {@link #reconcile}, unless {@code stopping} says a stop has begun: checked under the lock {@link #stop}
+     *  takes, so a boot start that loses the race to a stop starts nothing (JF-277). */
+    public static synchronized void reconcileUnless(BooleanSupplier stopping) {
+        if (stopping.getAsBoolean()) return;
         var desired = Tx.run(() -> WhatsAppBinding.findAllEnabledByTransport(WhatsAppTransport.WHATSAPP_WEB));
         var desiredIds = new HashSet<Long>();
         for (var b : desired) desiredIds.add(b.id);

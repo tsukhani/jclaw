@@ -213,6 +213,18 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    void aStartThatLosesTheRaceToAStopRegistersNothing() {
+        Long id = seedPollingBinding("agent-stopping", "555:tokStop", "5", true);
+
+        TelegramPollingRunner.reconcileUnless(() -> true);
+        assertEquals(Set.of(), TelegramPollingRunner.activeBindingIds());
+        assertEquals(Set.of(), fakeApp.registeredTokens());
+
+        TelegramPollingRunner.reconcileUnless(() -> false);
+        assertEquals(Set.of(id), TelegramPollingRunner.activeBindingIds());
+    }
+
+    @Test
     void reconcileRegistersNewBindingsConcurrently() {
         Long a = seedPollingBinding("agent-par-a", "333:tokA", "3", true);
         Long b = seedPollingBinding("agent-par-b", "444:tokB", "4", true);

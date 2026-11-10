@@ -29,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -103,7 +104,14 @@ public final class TelegramPollingRunner {
      * start new bindings, stop removed/disabled ones, restart ones whose token
      * changed. Synchronized so concurrent admin saves don't race.
      */
-    public static synchronized void reconcile() {
+    public static void reconcile() {
+        reconcileUnless(EventLogger::isShuttingDown);
+    }
+
+    /** {@link #reconcile}, unless {@code stopping} says a stop has begun: checked under the lock {@link #stop}
+     *  takes, so a boot start that loses the race to a stop starts nothing (JF-277). */
+    public static synchronized void reconcileUnless(BooleanSupplier stopping) {
+        if (stopping.getAsBoolean()) return;
         var desired = Tx.run(() ->
                 TelegramBinding.findAllEnabledByTransport(ChannelTransport.POLLING));
         var desiredById = new HashMap<Long, TelegramBinding>();

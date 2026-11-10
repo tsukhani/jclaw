@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -47,7 +48,14 @@ public final class SlackSocketModeRunner {
      * disabled / app-token-rotated ones, open new ones. Synchronized so concurrent admin
      * saves don't race.
      */
-    public static synchronized void reconcile() {
+    public static void reconcile() {
+        reconcileUnless(EventLogger::isShuttingDown);
+    }
+
+    /** {@link #reconcile}, unless {@code stopping} says a stop has begun: checked under the lock {@link #stop}
+     *  takes, so a boot start that loses the race to a stop starts nothing (JF-277). */
+    public static synchronized void reconcileUnless(BooleanSupplier stopping) {
+        if (stopping.getAsBoolean()) return;
         var desired = Tx.run(() -> SlackBinding.findAllEnabledByTransport(ChannelTransport.SOCKET));
         var desiredById = new HashMap<Long, SlackBinding>();
         for (var b : desired) desiredById.put(b.id, b);
