@@ -138,6 +138,26 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
+    void anEmptyParseBeforeTheBootProbeHasRunAnswersAsItWouldAfter() throws Exception {
+        // The boot probe runs off the boot thread (JF-270), so a document can arrive before it has.
+        var saved = OcrHealthProbe.lastResult();
+        try {
+            var file = tmp.resolve("blank-early.png");
+            ImageIO.write(new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB), "png", file.toFile());
+            OcrHealthProbe.setForTest(null);
+
+            var early = DocumentsTool.readDocument(file);
+            var probed = OcrHealthProbe.lastResult();
+            OcrHealthProbe.setForTest(probed);
+
+            assertEquals(DocumentsTool.readDocument(file), early);
+            assertNotEquals("tesseract probe has not run yet", probed.reason());
+        } finally {
+            OcrHealthProbe.setForTest(saved);
+        }
+    }
+
+    @Test
     void readDocument_pdfWithEmbeddedImage_doesNotThrowOnInlineImageExtraction() throws Exception {
         // Regression for the JCLAW-177 follow-up: extractInlineImages=true
         // routes embedded PDF images through Tika's ImageGraphicsEngine, which

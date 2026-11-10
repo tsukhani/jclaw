@@ -574,7 +574,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
      * a misleading install hint.
      */
     private static @Nullable String ocrUnavailableHint() {
-        var probe = OcrHealthProbe.lastResult();
+        var probe = OcrHealthProbe.current();
         if (probe.available()) return null;
         return "Note: tesseract is unavailable (" + probe.reason() + "). "
                 + "OCR-dependent inputs (image-only PDFs, plain images, scanned documents) "

@@ -16,9 +16,10 @@ import services.OcrInstallHint;
  * <p>Run-once-at-boot is intentional: re-probing on every parse adds a
  * subprocess fork to the hot path for no benefit (operators install or remove
  * tesseract via the OS package manager, not at runtime). A restart picks up
- * the new state.
+ * the new state. Off the boot thread (JF-270): waiting for {@code tesseract --version}
+ * held the port closed for about 190 ms, and a reader that comes first probes itself.
  */
-@OnApplicationStart
+@OnApplicationStart(async = true)
 @NoTransaction // No DB access — just probes the tesseract binary; skip the JPA wrapper.
 public class TesseractProbeJob extends Job<Void> {
 

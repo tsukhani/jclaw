@@ -18,11 +18,9 @@ import services.SessionCompactor;
 import services.SkillPromotionService;
 import services.StealthSidecarManager;
 import services.Tx;
-import services.UvProbe;
 import services.decision.DecisionSettings;
 import services.scanners.ScannerRegistry;
 import services.transcription.AsrModel;
-import services.transcription.FfmpegProbe;
 import services.tts.TtsEngine;
 import services.tts.TtsModel;
 import tools.ShellExecTool;
@@ -62,6 +60,8 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        // Every seed below reads its key first: one query instead of one per key.
+        ConfigService.preloadAll();
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
@@ -71,14 +71,6 @@ public class DefaultConfigJob extends Job<Void> {
         seedVideoGen();
         SkillLoader.syncSkillConfigs();
         HttpFactories.applyDispatcherConfig();
-        // JCLAW-163: prime the ffmpeg cache so the Settings UI can render a
-        // "ffmpeg missing" banner without paying the probe cost on first
-        // page load. Cheap (~ms when ffmpeg is present, ~tens of ms when not).
-        FfmpegProbe.probe();
-        // JCLAW-226: prime the uv-availability cache so the Settings UI can render
-        // a "uv missing" banner for local image generation without paying the probe
-        // cost on first page load (cheap; same rationale as FfmpegProbe above).
-        UvProbe.probe();
         EventLogger.info(EVENT_CATEGORY_SYSTEM, "Default configuration seeded");
     }
 

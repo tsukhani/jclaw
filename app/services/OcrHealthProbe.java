@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>{@link jobs.TesseractProbeJob} runs {@link #probe()} once at boot and
  * logs at WARN if the binary is missing or returns non-zero. {@link tools.DocumentsTool}
- * consults {@link #lastResult()} when a parse returns empty text, and appends
+ * consults {@link #current()} when a parse returns empty text, and appends
  * a clear install hint instead of the silently-empty default.
  */
 public class OcrHealthProbe {
@@ -61,7 +61,7 @@ public class OcrHealthProbe {
      * repeatedly (e.g. from tests) — each call replaces the cached result.
      * Delegates the bounded child-process exec to
      * {@link ExecutableProbeSupport#probeCapturing} so a tesseract binary that
-     * accepts the invocation but never exits can't stall the synchronous boot
+     * accepts the invocation but never exits can't stall the boot
      * probe ({@link jobs.TesseractProbeJob}) forever — the shared helper caps
      * the wait and {@code destroyForcibly()}'s a hung child, yielding an
      * unavailable result instead of hanging. On success the printed version's
@@ -80,6 +80,12 @@ public class OcrHealthProbe {
         return CACHE.get();
     }
 
+    /** The boot probe's result, probing now if it has not run: it runs off the boot thread, and a document can come first. */
+    public static ProbeResult current() {
+        var cached = CACHE.get();
+        return CACHE.isUnrun(cached) ? probe() : cached;
+    }
+
     /**
      * Probe now and return the fresh result, for callers that must not serve a
      * stale answer. {@code /api/ocr/status} uses this: it backs the Settings
@@ -88,7 +94,7 @@ public class OcrHealthProbe {
      * told no until the next restart. Costs one bounded {@code tesseract
      * --version} fork (5s ceiling, ~30ms typical) per call, which a page load
      * and a tool call can both afford -- unlike {@link tools.DocumentsTool}, which
-     * stays on {@link #lastResult()} because it would fork on every empty parse.
+     * stays on {@link #current()} because it would fork on every empty parse.
      *
      * <p>A pinned test result wins over the probe. Without that, any test forcing
      * the unavailable path through {@link #setForTest} would fork the real binary

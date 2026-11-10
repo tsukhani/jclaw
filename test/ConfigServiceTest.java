@@ -939,6 +939,55 @@ class ConfigServiceTest extends UnitTest {
                         + "delete is removing; serving the value is what let it survive the commit");
     }
 
+    // --- JF-270: the boot's seeding reads every key from one preload ---
+
+    private static void changeBehindTheCache(String key, String value) {
+        Tx.run(() -> {
+            var row = Config.findByKey(key);
+            if (row == null) {
+                row = new Config();
+                row.key = key;
+            }
+            row.value = value;
+            row.save();
+        });
+    }
+
+    @Test
+    void aPreloadedKeyIsServedFromTheCacheWithItsCredentialOpened() {
+        ConfigService.set("jf270.plain", "one");
+        ConfigService.set("jf270.example.apiKey", "sk-preloaded");
+        assertTrue(storedValue("jf270.example.apiKey").startsWith("enc:v1:"), "stored sealed");
+        ConfigService.clearCache();
+
+        ConfigService.preloadAll();
+        changeBehindTheCache("jf270.plain", "changed in the table");
+
+        assertEquals("one", ConfigService.get("jf270.plain"));
+        assertEquals("sk-preloaded", ConfigService.get("jf270.example.apiKey"));
+    }
+
+    @Test
+    void aPreloadLeavesAKeyAlreadyCachedAsItWas() {
+        ConfigService.set("jf270.raced", "cached first");
+        ConfigService.clearCache();
+        assertEquals("cached first", ConfigService.get("jf270.raced"));
+        changeBehindTheCache("jf270.raced", "read later by the preload");
+
+        ConfigService.preloadAll();
+
+        assertEquals("cached first", ConfigService.get("jf270.raced"));
+    }
+
+    @Test
+    void aKeyMissingAtThePreloadIsStillReadFromTheTable() {
+        ConfigService.clearCache();
+        ConfigService.preloadAll();
+        changeBehindTheCache("jf270.late", "written after the preload");
+
+        assertEquals("written after the preload", ConfigService.get("jf270.late"));
+    }
+
     // --- JCLAW-1455: credentials encrypted at rest ---
 
     private static final String CREDENTIAL_KEY = "jclaw1455.example.apiKey";
