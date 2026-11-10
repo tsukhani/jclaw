@@ -109,7 +109,7 @@ public final class ConversationTurnStream {
         long merge(Frame frame, String content) {
             Objects.requireNonNull(text).append(content);
             id = frame.id();
-            long added = frame.json().length - Objects.requireNonNull(kind).overhead();
+            long added = (long) frame.json().length - Objects.requireNonNull(kind).overhead();
             bytes += added;
             return added;
         }

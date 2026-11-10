@@ -201,8 +201,9 @@ final class ChannelInboundDispatcher {
                         if (notice != null) compactSink.compacting(notice);
                     }).call(() -> Commands.execute(cmd, agent, channelType, peerId, current,
                             Commands.extractArgs(text), DangerousActionGate.ownerInitiated()));
-            var slashSink = compactSink != null ? compactSink : sinkFactory.apply(
-                    result.conversation() != null ? result.conversation().id : null);
+            var slashConvo = result.conversation();
+            Long slashConvoId = slashConvo != null ? slashConvo.id : null;
+            var slashSink = compactSink != null ? compactSink : sinkFactory.apply(slashConvoId);
             // JCLAW-109: an empty responseText is the handler's signal that
             // it already delivered the reply itself (e.g. /model on Telegram
             // sent an inline-keyboard message via a dedicated Bot API path).

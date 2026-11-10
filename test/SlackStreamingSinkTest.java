@@ -58,7 +58,7 @@ class SlackStreamingSinkTest extends UnitTest {
                 startEntered.countDown();
                 try {
                     release.await(10, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }

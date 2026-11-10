@@ -81,9 +81,9 @@ final class ChromeRecorder {
         if (format == null) format = "webp";
         if (!List.of("webp", "gif", "both").contains(format)) return ERROR + "format must be webp, gif or both.";
         var asked = ChromeControlTool.longOf(args, "maxFrames");
-        var frames = asked == null ? DEFAULT_FRAMES : (int) Math.max(2, Math.min(MAX_FRAMES, asked));
+        var frames = asked == null ? DEFAULT_FRAMES : Math.clamp(asked, 2, MAX_FRAMES);
         var pace = ChromeControlTool.longOf(args, "frameMs");
-        var frameMs = pace == null ? DEFAULT_FRAME_MS : (int) Math.max(MIN_FRAME_MS, Math.min(MAX_FRAME_MS, pace));
+        var frameMs = pace == null ? DEFAULT_FRAME_MS : Math.clamp(pace, MIN_FRAME_MS, MAX_FRAME_MS);
         var recording = new Recording(!format.equals("gif"), !format.equals("webp"), frames, frameMs);
         var key = key(agent, tab);
         if (RECORDINGS.size() >= MAX_RECORDINGS && !RECORDINGS.containsKey(key)) {

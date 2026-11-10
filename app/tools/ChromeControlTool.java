@@ -406,7 +406,8 @@ public class ChromeControlTool implements ToolRegistry.Tool {
     private static String simple(Agent agent, JsonObject args, String extensionAction, Function<JsonObject, String> format,
                                  String... fields) {
         var p = prepare(agent, args, fields);
-        if (p.error() != null) return p.error();
+        var error = p.error();
+        if (error != null) return error;
         var result = ChromeBridge.call(extensionAction, p.call());
         return format.apply(result.isJsonObject() ? result.getAsJsonObject() : new JsonObject());
     }
@@ -418,7 +419,8 @@ public class ChromeControlTool implements ToolRegistry.Tool {
 
     private static String screenshot(Agent agent, JsonObject args) {
         var p = prepare(agent, args, ARG_FULL_PAGE);
-        if (p.error() != null) return p.error();
+        var error = p.error();
+        if (error != null) return error;
         var shot = ChromeBridge.call(ACTION_SCREENSHOT, p.call()).getAsJsonObject();
         var url = string(shot, ARG_URL);
         var landed = url == null ? "the tab reported no address" : ChromeBridgePolicy.visitRefusal(agent, url);
@@ -488,7 +490,8 @@ public class ChromeControlTool implements ToolRegistry.Tool {
         var failed = false;
         if (model != null) {
             var found = modelFind(agent, tab, query, model);
-            if (found.text() != null) return found.text();
+            var text = found.text();
+            if (text != null) return text;
             failed = found.modelFailed();
         }
         var wordMatch = wordFind(agent, args, query, tab);

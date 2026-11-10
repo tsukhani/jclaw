@@ -94,7 +94,8 @@ public class ChromeScriptTool implements ToolRegistry.Tool {
         var args = ChromeControlTool.parse(argsJson);
         if (args == null) return null;
         var code = ChromeControlTool.string(args, ARG_EXPRESSION);
-        var shown = code == null ? "" : code.length() > 80 ? code.substring(0, 80) + "…" : code;
+        var shown = code == null ? "" : code;
+        if (shown.length() > 80) shown = shown.substring(0, 80) + "…";
         return "run script on tab " + ChromeControlTool.string(args, ARG_TAB) + ": " + shown;
     }
 

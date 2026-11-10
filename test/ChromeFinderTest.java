@@ -4,10 +4,7 @@ import tools.ChromeFinder;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-
-public class ChromeFinderTest extends UnitTest {
+class ChromeFinderTest extends UnitTest {
 
     private static final String LISTING = """
             e1 a Home -> https://example.com/
@@ -16,43 +13,43 @@ public class ChromeFinderTest extends UnitTest {
             e10 button Subscribe""";
 
     @Test
-    public void theRefsTheModelNamesComeBackBestFirst() {
+    void theRefsTheModelNamesComeBackBestFirst() {
         assertEquals(List.of("e2", "e3"), ChromeFinder.pick(_ -> "e2 e3", "Checkout", "my email", LISTING));
     }
 
     @Test
-    public void aRefTheListDoesNotHoldIsDropped() {
+    void aRefTheListDoesNotHoldIsDropped() {
         assertEquals(List.of("e2"), ChromeFinder.pick(_ -> "e99 e2 e7", "Checkout", "my email", LISTING));
     }
 
     @Test
-    public void aRefIsMatchedWholeSoE1DoesNotPickE10() {
+    void aRefIsMatchedWholeSoE1DoesNotPickE10() {
         assertEquals(List.of("e10"), ChromeFinder.pick(_ -> "e10", "Checkout", "subscribe", LISTING));
         assertEquals(List.of(), ChromeFinder.pick(_ -> "e100", "Checkout", "subscribe", LISTING));
     }
 
     @Test
-    public void aRefRepeatedIsReturnedOnce() {
+    void aRefRepeatedIsReturnedOnce() {
         assertEquals(List.of("e2", "e3"), ChromeFinder.pick(_ -> "e2, e2, e3", "Checkout", "my email", LISTING));
     }
 
     @Test
-    public void atMostThreeRefsAreReturned() {
+    void atMostThreeRefsAreReturned() {
         assertEquals(List.of("e1", "e2", "e3"), ChromeFinder.pick(_ -> "e1 e2 e3 e10", "Checkout", "anything", LISTING));
     }
 
     @Test
-    public void noneMeansNothingFits() {
+    void noneMeansNothingFits() {
         assertEquals(List.of(), ChromeFinder.pick(_ -> "NONE", "Checkout", "a teleporter", LISTING));
     }
 
     @Test
-    public void aReplyAroundTheRefsStillYieldsThem() {
+    void aReplyAroundTheRefsStillYieldsThem() {
         assertEquals(List.of("e2"), ChromeFinder.pick(_ -> "The best match is **e2**.", "Checkout", "my email", LISTING));
     }
 
     @Test
-    public void aFailedCallReturnsNullSoTheWordMatchAnswers() {
+    void aFailedCallReturnsNullSoTheWordMatchAnswers() {
         assertNull(ChromeFinder.pick(_ -> {
             throw new IllegalStateException("provider down");
         }, "Checkout", "my email", LISTING));
@@ -60,7 +57,7 @@ public class ChromeFinderTest extends UnitTest {
     }
 
     @Test
-    public void thePromptCarriesTheRequestAndTheListing() {
+    void thePromptCarriesTheRequestAndTheListing() {
         var prompt = ChromeFinder.prompt("Checkout", "my email", LISTING);
         assertEquals(true, prompt.startsWith("Web page: Checkout\nRequest: my email\n\nElements:\ne1 a Home"));
     }

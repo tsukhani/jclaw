@@ -328,7 +328,7 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
-    void slashCompactLogsTheDurationAndReportsTheTokensBeforeAndAfter() throws Exception {
+    void slashCompactLogsTheDurationAndReportsTheTokensBeforeAndAfter() {
         configure(1_000_000);
         var agent = fixedAgentOnA("jf-slash-log");
         var conv = ConversationService.create(agent, "web", "u-slash-log");

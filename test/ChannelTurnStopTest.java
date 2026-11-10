@@ -90,7 +90,7 @@ class ChannelTurnStopTest extends UnitTest {
                 exchange.getRequestBody().readAllBytes();
                 if (firstTaken.compareAndSet(false, true)) first.respond(exchange);
                 else LlmReplyFixture.send(exchange, FINAL_REPLY);
-            } catch (Exception e) {
+            } catch (Exception _) {
                 exchange.close();
             }
         });
@@ -171,7 +171,7 @@ class ChannelTurnStopTest extends UnitTest {
                             try {
                                 turn.awaitEvent("update " + REPLY);
                                 Thread.sleep(1000);
-                            } catch (InterruptedException e) {
+                            } catch (InterruptedException _) {
                                 Thread.currentThread().interrupt();
                             }
                             stop.set(ConversationQueue.stopOperatorTurn(convo.id, "telegram"));
@@ -724,7 +724,7 @@ class ChannelTurnStopTest extends UnitTest {
     }
 
     @Test
-    void aStopDuringASlowToolRoundTellsTheWhatsAppSenderOnceAndBeforeTheNextMessagesReply() throws Exception {
+    void aStopDuringASlowToolRoundTellsTheWhatsAppSenderOnceAndBeforeTheNextMessagesReply() {
         var convo = seedConversation("whatsapp");
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -794,7 +794,7 @@ class ChannelTurnStopTest extends UnitTest {
     // --- the stopped turn's error, and its tool frames ---
 
     @Test
-    void aStoppedChannelTurnThatThenFailsEndsStoppedNotWithTheErrorReply() throws Exception {
+    void aStoppedChannelTurnThatThenFailsEndsStoppedNotWithTheErrorReply() {
         // No provider: the turn fails, naming it, just after the prompt is assembled.
         var convo = seedConversation("telegram", "channel-stop-none-" + UUID.randomUUID().toString().substring(0, 8));
         var turn = new RecordingSink();
@@ -910,14 +910,12 @@ class ChannelTurnStopTest extends UnitTest {
      * Runs {@code turn} on its own thread and stops it from the chat page while it logs that its round yielded:
      * after the round's results are saved and its cancel checks are done, before the round ends.
      */
-    private ConversationQueue.OperatorStop stopWhenTheRoundYields(Conversation convo, Runnable turn)
-            throws InterruptedException {
+    private ConversationQueue.OperatorStop stopWhenTheRoundYields(Conversation convo, Runnable turn) {
         return stopWhenLogged(convo, "subagent_yield invoked", turn);
     }
 
     /** Runs {@code turn} on its own thread and stops it from the chat page while it logs {@code fragment}. */
-    private ConversationQueue.OperatorStop stopWhenLogged(Conversation convo, String fragment, Runnable turn)
-            throws InterruptedException {
+    private ConversationQueue.OperatorStop stopWhenLogged(Conversation convo, String fragment, Runnable turn) {
         var yielding = new CountDownLatch(1);
         var stopped = new CountDownLatch(1);
         var stop = new AtomicReference<ConversationQueue.OperatorStop>();
@@ -1282,7 +1280,7 @@ class ChannelTurnStopTest extends UnitTest {
     private static void await(CountDownLatch latch) {
         try {
             latch.await(30, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

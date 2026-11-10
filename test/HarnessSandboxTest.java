@@ -265,7 +265,6 @@ class HarnessSandboxTest extends UnitTest {
         assertEquals(List.of(), HarnessSandbox.homeReadReopens(null, "/h/x"));
     }
 
-    /** An entry through a symlink adds its canonical path when that is also below home, and only then. */
     /** The operator's folders join PATH's under the same rule: strictly below home, once each, PATH first. */
     @Test
     void homeReadReopensTakesTheOperatorsFoldersAfterPathUnderTheSameRule() {
@@ -296,6 +295,7 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.rejectionFor(key, "~/a\"b"));
     }
 
+    /** An entry through a symlink adds its canonical path when that is also below home, and only then. */
     @Test
     void homeReadReopensAddsACanonicalPathBelowHome() throws Exception {
         var base = SandboxHiddenRoots.canonical(session);

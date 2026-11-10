@@ -405,7 +405,7 @@ class ApiConversationStreamTest extends FunctionalTest {
     private static void sleepQuietly(long millis) {
         try {
             Thread.sleep(millis);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }
@@ -413,7 +413,7 @@ class ApiConversationStreamTest extends FunctionalTest {
     private static void join(Thread thread) {
         try {
             thread.join(10_000);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

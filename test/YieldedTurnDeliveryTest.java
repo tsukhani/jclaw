@@ -426,7 +426,7 @@ class YieldedTurnDeliveryTest extends UnitTest {
                         inPrologue.countDown();
                         try {
                             stopped.await(30, TimeUnit.SECONDS);
-                        } catch (InterruptedException ex) {
+                        } catch (InterruptedException _) {
                             Thread.currentThread().interrupt();
                         }
                     }
@@ -503,7 +503,7 @@ class YieldedTurnDeliveryTest extends UnitTest {
         while (seen.stream().noneMatch(e -> e.message().startsWith(prefix)) && System.nanoTime() < deadline) {
             try {
                 Thread.sleep(20);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return;
             }
@@ -587,7 +587,7 @@ class YieldedTurnDeliveryTest extends UnitTest {
             held.reached().countDown();
             try {
                 held.release().await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         }

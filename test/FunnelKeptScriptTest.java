@@ -170,7 +170,7 @@ class FunnelKeptScriptTest extends UnitTest {
         var p = pb.start();
         var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "the harness hung");
-        assertTrue(p.exitValue() != 99, out);
+        assertNotEquals(99, p.exitValue(), out);
         return new Run(p.exitValue(), out, Files.readString(calls));
     }
 }

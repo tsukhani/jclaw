@@ -373,7 +373,11 @@ public class ConversationQueue {
     }
 
     /** A stop limited to the turn that answers {@code sender}'s message; a null sender, with none recorded, matches no turn. */
-    public record OwnMessageOnly(@Nullable String sender) {}
+    public record OwnMessageOnly(@Nullable String sender) {
+        boolean sentBy(@Nullable String other) {
+            return sender != null && sender.equals(other);
+        }
+    }
 
     /** What a stop of a Telegram, Slack or WhatsApp conversation's turn owes the person who sent its message (JF-197b). */
     public enum ChannelStop {
@@ -433,8 +437,8 @@ public class ConversationQueue {
      */
     public static OperatorStop stopOperatorTurn(Long conversationId, @Nullable String channelType, boolean notice,
                                                 @Nullable Long turn, @Nullable OwnMessageOnly ownMessageOnly) {
-        var owed = channelType != null && EXTERNAL_CHANNELS.contains(channelType)
-                ? (notice ? ChannelStop.NOTICE : ChannelStop.SILENT) : null;
+        var stop = notice ? ChannelStop.NOTICE : ChannelStop.SILENT;
+        var owed = channelType != null && EXTERNAL_CHANNELS.contains(channelType) ? stop : null;
         return stopWhen(conversationId, channelType, state -> operatorStoppable(state, channelType), owed, turn,
                 ownMessageOnly);
     }
@@ -499,10 +503,7 @@ public class ConversationQueue {
             if (turn != null && turn != state.ownerTurn) return OperatorStop.IDLE;
             stopped = stoppableFlag(state);
             if (stopped == null || !allowed.test(state)) return OperatorStop.UNSTOPPABLE;
-            if (ownMessageOnly != null
-                    && (ownMessageOnly.sender() == null || !ownMessageOnly.sender().equals(state.ownerSender))) {
-                return OperatorStop.NOT_YOURS;
-            }
+            if (ownMessageOnly != null && !ownMessageOnly.sentBy(state.ownerSender)) return OperatorStop.NOT_YOURS;
             // Committed before the release, so the next turn's request cannot land ahead of it. The reply's commit
             // takes this lock too, so a request still unanswered, or not yet saved, is a reply not yet saved.
             boolean unanswered;
@@ -1037,8 +1038,7 @@ public class ConversationQueue {
                                          @Nullable OwnMessageOnly ownMessageOnly) {
         return !message.skipUserAppend() && (channelType == null
                 || (channelType.equals(message.channelType()) && Objects.equals(peerId, message.peerId())
-                && (ownMessageOnly == null || (ownMessageOnly.sender() != null
-                        && ownMessageOnly.sender().equals(message.senderId())))));
+                && (ownMessageOnly == null || ownMessageOnly.sentBy(message.senderId()))));
     }
 
     /** Number of pending messages waiting in a conversation's queue (0 when it has no state). */

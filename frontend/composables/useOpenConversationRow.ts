@@ -27,6 +27,6 @@ export function useOpenConversationRow(
 
   return computed<Conversation | null>(() => {
     if (listed.value) return listed.value
-    return fetched.value && fetched.value.id === selectedConvoId.value ? fetched.value : null
+    return fetched.value?.id === selectedConvoId.value ? fetched.value : null
   })
 }

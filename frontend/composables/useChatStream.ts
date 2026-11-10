@@ -507,7 +507,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   // reply, and only then the queue read that drops its Queued row.
   async function afterInit(bubble: StreamingMessage) {
     const gen = viewGen
-    if (sends.size) await Promise.allSettled([...sends])
+    if (sends.size) await Promise.allSettled(sends)
     if (gen !== viewGen || turn?.bubble !== bubble) return
     await mergeRows()
     if (gen !== viewGen || turn?.bubble !== bubble) return

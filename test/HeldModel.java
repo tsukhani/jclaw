@@ -78,7 +78,7 @@ public final class HeldModel implements AutoCloseable {
                 var request = JsonParser.parseString(
                         new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
                 responder.respond(this, exchange, request);
-            } catch (Exception e) {
+            } catch (Exception _) {
                 exchange.close();
             }
         });
@@ -139,7 +139,7 @@ public final class HeldModel implements AutoCloseable {
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

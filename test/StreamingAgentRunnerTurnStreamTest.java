@@ -84,7 +84,7 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
             try {
                 responder.respond(exchange, JsonParser.parseString(
                         new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
-            } catch (Exception e) {
+            } catch (Exception _) {
                 exchange.close();
             }
         });
@@ -916,7 +916,7 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
     private static void await(CountDownLatch latch) {
         try {
             latch.await(30, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

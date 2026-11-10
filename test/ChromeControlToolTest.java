@@ -57,10 +57,6 @@ class ChromeControlToolTest extends UnitTest {
         ConfigService.set(ChromeBridgePolicy.key(agent.name, ChromeBridgePolicy.ALLOWED_SITES), sites);
     }
 
-    private static JsonObject json(String s) {
-        return parseString(s).getAsJsonObject();
-    }
-
     private static Supplier<JsonObject> ok(String result) {
         return () -> ChromeBridgeSync.ok(parseString(result));
     }

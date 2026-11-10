@@ -1107,7 +1107,7 @@ class SubagentSpawnToolTest extends UnitTest {
             reached.countDown();
             try {
                 release.await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             LlmReplyFixture.send(exchange, simpleResponse("the child's answer"));

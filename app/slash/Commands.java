@@ -460,7 +460,7 @@ public final class Commands {
     private static Result pickModel(Agent agent, String args) {
         var result = switch (Tx.run(() -> chooseModel(args))) {
             case RefusedModel(var why) -> new Result(null, why, Command.MODEL);
-            case ChosenModel(var provider, var modelId, var _) -> new Result(null,
+            case ChosenModel(var provider, var modelId, _) -> new Result(null,
                     "This New conversation will use `" + provider + "/" + modelId + "`.\nAgent default ("
                             + agent.modelProvider + "/" + agent.modelId + ") is unchanged.",
                     Command.MODEL, false, Pick.model(provider, modelId));
@@ -684,8 +684,8 @@ public final class Commands {
             reply = NOTHING_WAITING;
         } else if (clear) {
             int dropped = ConversationQueue.clearWaiting(current.id, senderChannel, peerId, own);
-            reply = dropped == 0 ? NOTHING_WAITING
-                    : "Dropped %d waiting message%s.".formatted(dropped, dropped == 1 ? "" : "s");
+            var plural = dropped == 1 ? "" : "s";
+            reply = dropped == 0 ? NOTHING_WAITING : "Dropped %d waiting message%s.".formatted(dropped, plural);
         } else {
             reply = renderWaiting(ConversationQueue.waiting(current.id, senderChannel, peerId, own),
                     ConversationQueue.EXTERNAL_CHANNELS.contains(current.channelType));
@@ -702,11 +702,16 @@ public final class Commands {
      */
     private static String renderWaiting(List<ConversationQueue.QueuedMessage> waiting, boolean batchedBySender) {
         if (waiting.isEmpty()) return NOTHING_WAITING;
-        var sb = new StringBuilder(waiting.size() == 1 ? "1 message is waiting:"
-                : batchedBySender
-                        ? waiting.size() + " messages are waiting, in the order they will be answered. Messages one"
-                                + " person sent in a row get a single reply:"
-                        : waiting.size() + " messages are waiting, answered in this order:");
+        String header;
+        if (waiting.size() == 1) {
+            header = "1 message is waiting:";
+        } else if (batchedBySender) {
+            header = waiting.size() + " messages are waiting, in the order they will be answered. Messages one"
+                    + " person sent in a row get a single reply:";
+        } else {
+            header = waiting.size() + " messages are waiting, answered in this order:";
+        }
+        var sb = new StringBuilder(header);
         for (int i = 0; i < waiting.size(); i++) {
             sb.append('\n').append(i + 1).append(". ").append(excerpt(waiting.get(i)));
         }
@@ -1200,9 +1205,10 @@ public final class Commands {
                     .formatted(providerName, modelId);
         }
         var m = model.get();
+        var thinkingScope = CONVERSATION_OVERRIDE.equals(overridden)
+                ? ", conversation override" : ", picked for this New conversation";
         var thinkingLine = m.supportsThinking()
-                ? CAP_SUPPORTED + renderThinkingSelection(agent, current, m, CONVERSATION_OVERRIDE.equals(overridden)
-                        ? ", conversation override" : ", picked for this New conversation")
+                ? CAP_SUPPORTED + renderThinkingSelection(agent, current, m, thinkingScope)
                 : CAP_NOT_SUPPORTED;
         var sb = new StringBuilder();
         sb.append("Model: ").append(providerName).append('/').append(modelId).append('\n');

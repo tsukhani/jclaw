@@ -404,7 +404,7 @@ public final class HarnessSandbox {
         var output = raw == null ? "" : raw.strip();
         var firstLine = output.lines().findFirst().orElse("").strip();
         var reason = firstLine.isEmpty() ? probe.reason()
-                : firstLine.length() > PROBE_LINE_LIMIT ? firstLine.substring(0, PROBE_LINE_LIMIT) : firstLine;
+                : firstLine.substring(0, Math.min(firstLine.length(), PROBE_LINE_LIMIT));
         if ("1".equals(System.getenv("JCLAW_CONTAINER"))) {
             reason += "; in Docker, start the container with the seccomp profile docker-compose.yml names"
                     + " (seccomp-bwrap.json), as INSTALL.md describes";
@@ -436,11 +436,12 @@ public final class HarnessSandbox {
 
     /** {@code path} made absolute (a leading {@code ~/} is {@code home}) and normalized, or null when it is no valid path. */
     private static @Nullable String expandHome(String path, String home) {
+        if (!path.startsWith("~/")) {
+            var lexical = SandboxHiddenRoots.lexical(path);
+            return lexical == null ? null : lexical.toString();
+        }
         var homePath = SandboxHiddenRoots.lexical(home);
-        var expanded = path.startsWith("~/")
-                ? (homePath == null ? null : homePath.resolve(path.substring(2)).normalize())
-                : SandboxHiddenRoots.lexical(path);
-        return expanded == null ? null : expanded.toString();
+        return homePath == null ? null : homePath.resolve(path.substring(2)).normalize().toString();
     }
 
     /** Why one {@link #HOME_READS_KEY} entry is refused, or null when it is a folder strictly below {@code home}. */

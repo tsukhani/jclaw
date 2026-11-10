@@ -1338,7 +1338,7 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    void anOperatorStopEndsTheTurnOnItsStreamAsStoppedBeforeItReturns() throws Exception {
+    void anOperatorStopEndsTheTurnOnItsStreamAsStoppedBeforeItReturns() {
         // The chat page ends the turn on the stop's answer, so the stopped frame must already be published by then.
         long convId = 17008L;
         var sink = new ConversationTurnStreamTest.RecordingSink();
@@ -1479,7 +1479,7 @@ class ConversationQueueTest extends UnitTest {
                         sending.countDown();
                         try {
                             sent.await(10, TimeUnit.SECONDS);
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException _) {
                             Thread.currentThread().interrupt();
                         }
                     });
@@ -1882,7 +1882,7 @@ class ConversationQueueTest extends UnitTest {
     private static void sleep(long ms) {
         try {
             Thread.sleep(ms);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

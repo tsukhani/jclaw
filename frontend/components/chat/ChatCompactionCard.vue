@@ -12,7 +12,9 @@ import type { CompactionCard } from '~/composables/useChatStream'
 const props = defineProps<{ card: CompactionCard }>()
 
 function tokens(n: number): string {
-  return n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
 }
 
 const running = computed(() => props.card.phase === 'start')
@@ -44,10 +46,16 @@ onBeforeUnmount(() => {
   if (ticker) clearInterval(ticker)
 })
 
-const took = computed(() => (props.card.ms != null ? `${(props.card.ms / 1000).toFixed(props.card.ms < 10_000 ? 1 : 0)} s` : null))
+const took = computed(() => {
+  const ms = props.card.ms
+  if (ms == null) return null
+  const digits = ms < 10_000 ? 1 : 0
+  return `${(ms / 1000).toFixed(digits)} s`
+})
 const summary = computed(() => {
   const { tokensBefore, total } = props.card
-  const rows = total ? `${total} earlier message${total === 1 ? '' : 's'}` : 'earlier messages'
+  const plural = total === 1 ? '' : 's'
+  const rows = total ? `${total} earlier message${plural}` : 'earlier messages'
   return tokensBefore ? `Summarizing ${rows} · ${tokens(tokensBefore)} tokens` : `Summarizing ${rows}`
 })
 </script>

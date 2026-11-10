@@ -95,7 +95,7 @@ class InboundRecoverySweepTest extends UnitTest {
                 modelReached.countDown();
                 try {
                     held.await(30, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }
@@ -183,7 +183,7 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void aNoteTheChannelCannotDeliverIsLoggedWithItsConversation() throws Exception {
+    void aNoteTheChannelCannotDeliverIsLoggedWithItsConversation() {
         var agent = persistAgent();
         var peer = "1521" + (System.nanoTime() % 1_000_000);
         var convo = persistConversation(agent, "telegram", peer);
@@ -833,7 +833,7 @@ class InboundRecoverySweepTest extends UnitTest {
         while (seen.stream().noneMatch(e -> e.message().startsWith(prefix)) && System.nanoTime() < deadline) {
             try {
                 Thread.sleep(20);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return;
             }

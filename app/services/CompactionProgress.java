@@ -22,12 +22,12 @@ public final class CompactionProgress {
 
     private static final ScopedValue<CompactionProgress> CURRENT = ScopedValue.newInstance();
 
-    private final @Nullable Consumer<String> sink;
+    private final @Nullable Consumer<String> boundSink;
     private final int tokensBefore;
     private boolean announced;
 
-    private CompactionProgress(@Nullable Consumer<String> sink, int tokensBefore) {
-        this.sink = sink;
+    private CompactionProgress(@Nullable Consumer<String> boundSink, int tokensBefore) {
+        this.boundSink = boundSink;
         this.tokensBefore = tokensBefore;
     }
 
@@ -38,7 +38,7 @@ public final class CompactionProgress {
 
     /** Runs {@code body}, the compaction, with this tracker as the one the compactor reports to. */
     public <T> T around(Supplier<T> body) {
-        if (sink == null) return body.get();
+        if (boundSink == null) return body.get();
         return ScopedValue.where(CURRENT, this).call(body::get);
     }
 
@@ -76,7 +76,7 @@ public final class CompactionProgress {
     }
 
     private void emit(String frame) {
-        if (sink != null) sink.accept(frame);
+        if (boundSink != null) boundSink.accept(frame);
     }
 
     /**

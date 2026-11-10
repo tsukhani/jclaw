@@ -443,7 +443,7 @@ class CompactionGateTest extends UnitTest {
     }
 
     @Test
-    void aConversationWithNothingToCutReportsNoProgress() throws Exception {
+    void aConversationWithNothingToCutReportsNoProgress() {
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
         configureProviderWithModel("test-model", 2000, 1024);
