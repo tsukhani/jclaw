@@ -270,6 +270,36 @@ class JClawApiToolTest extends UnitTest {
         assertNull(sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
     }
 
+    private static String readReturning(String body) {
+        return HttpFactories.callWith(replying(new AtomicReference<>(), 200, body),
+                () -> asOwner("{\"method\":\"GET\",\"path\":\"/api/agents\"}", null));
+    }
+
+    @Test
+    void aResponseAtTheCapIsShownWhole() {
+        var body = "a".repeat(50_000);
+
+        assertEquals("HTTP 200\n" + body, readReturning(body));
+    }
+
+    @Test
+    void aResponseOneCharacterOverTheCapIsCutAndSaysWhatWasDroppedAndHowToReadIt() {
+        var kept = "a".repeat(50_000);
+
+        assertEquals("HTTP 200\n" + kept + "\n\n[Truncated: 50000 of 50001 characters shown, 1 dropped. The dropped part "
+                + "was not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through its "
+                + "own route, or pass a limit or a filter.]", readReturning(kept + "b"));
+    }
+
+    @Test
+    void theMarkerCountsWhatAFarLongerResponseDropped() {
+        var kept = "a".repeat(50_000);
+
+        assertEquals("HTTP 200\n" + kept + "\n\n[Truncated: 50000 of 120000 characters shown, 70000 dropped. The dropped "
+                + "part was not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through "
+                + "its own route, or pass a limit or a filter.]", readReturning(kept + "b".repeat(70_000)));
+    }
+
     /** A task run of a task recorded with {@code origin} and {@code ownerReadsAlone}, in the ambient transaction. */
     private static Long taskRun(Agent agent, String origin, Boolean ownerReadsAlone) {
         var task = new models.Task();

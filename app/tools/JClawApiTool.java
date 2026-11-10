@@ -99,6 +99,14 @@ public class JClawApiTool implements ToolRegistry.Tool {
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     public static final int MAX_RESPONSE_CHARS = 50_000;
+
+    /**
+     * Appended to a response cut at {@link #MAX_RESPONSE_CHARS}: shown, full length, dropped. The stored tool message is
+     * the cut copy, so {@code ccr_retrieve} has nothing more to return, which a model expected it to (JF-145).
+     */
+    private static final String TRUNCATED = "\n\n[Truncated: %d of %d characters shown, %d dropped. The dropped part was "
+            + "not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through its own "
+            + "route, or pass a limit or a filter.]";
     private static final List<String> ALLOWED_METHODS =
             List.of("GET", "POST", "PUT", "PATCH", "DELETE");
 
@@ -291,9 +299,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
             var text = response.body().string();
             logCall(agent, origin, call + ": HTTP " + status + (status >= 400 ? errorCode(text) : ""), status < 400);
             if (text.length() > MAX_RESPONSE_CHARS) {
-                text = text.substring(0, MAX_RESPONSE_CHARS)
-                        + "\n\n[Truncated: response exceeds %d characters]"
-                                .formatted(MAX_RESPONSE_CHARS);
+                text = text.substring(0, MAX_RESPONSE_CHARS) + TRUNCATED.formatted(MAX_RESPONSE_CHARS, text.length(),
+                        text.length() - MAX_RESPONSE_CHARS);
             }
             var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
             return note == null || note.isBlank()
