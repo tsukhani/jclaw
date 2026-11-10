@@ -3472,6 +3472,8 @@ RESTART_PHASE_FAILS=""
 RESTART_FAIL_REASON=""
 NARRATOR_JOB=""
 NARRATOR_PID_FILE="$SCRIPT_DIR/logs/restart-narrator.pid"
+FUNNEL_RESET_NOTE=""
+TAILSCALE_MAC_APP="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 
 # Rewrites the status file whole through a temp file, as upgrade_status does, so a reader never sees half of one.
 restart_status() {
@@ -3528,13 +3530,37 @@ restart_finish() {
 
 # A restart that dies leaves its failure for the panels, with a narrator to serve it while no JVM does.
 restart_on_exit() {
-    local code=$?
+    local code=$? reason
     [[ -n "${RESTART_STATUS_FILE:-}" ]] || return 0
     if [[ "$code" != 0 ]]; then
-        restart_status failed "${RESTART_FAIL_REASON:-${RESTART_PHASE_FAILS:-the restart stopped early}}"
+        funnel_reset_kept
+        reason="${RESTART_FAIL_REASON:-${RESTART_PHASE_FAILS:-the restart stopped early}}"
+        restart_status failed "${reason}${FUNNEL_RESET_NOTE:+; $FUNNEL_RESET_NOTE}"
         narrator_start || true
     else
         narrator_stop || true
+    fi
+}
+
+# The JVM a restart stops leaves the Tailscale Funnel on, forwarding to the narrator, and records that in
+# data/ (JF-269, the path TailscaleFunnel.keptFile names) for the next boot to take over. With no JVM of this
+# install left to do that, the funnel would keep publishing a stopped install, so it is reset here.
+funnel_reset_kept() {
+    local kept="$SCRIPT_DIR/data/tailscale-funnel.kept" pid bin
+    FUNNEL_RESET_NOTE=""
+    [[ -f "$kept" ]] || return 0
+    pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+    bin=$(command -v tailscale 2>/dev/null || true)
+    if [[ -z "$bin" && -x "$TAILSCALE_MAC_APP" ]]; then bin="$TAILSCALE_MAC_APP"; fi
+    if [[ -n "$bin" ]] && "$bin" funnel reset >/dev/null 2>&1; then
+        rm -f "$kept"
+        FUNNEL_RESET_NOTE="the Tailscale Funnel was switched off"
+        echo "==> Switched the Tailscale Funnel off, as JClaw is not running"
+    else
+        FUNNEL_RESET_NOTE="the Tailscale Funnel could not be switched off"
+        echo "Warning: JClaw is not running, but the Tailscale Funnel could not be switched off."
+        echo "         Run 'tailscale funnel reset' to stop publishing this machine."
     fi
 }
 
@@ -7247,6 +7273,8 @@ case "$COMMAND" in
         else
             do_stop_prod
         fi
+        # A restart killed outright leaves the funnel it kept with no JVM to take it over.
+        funnel_reset_kept
         ;;
     restart)
         check_prereqs

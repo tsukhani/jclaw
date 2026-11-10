@@ -262,6 +262,11 @@ public final class RestartService {
         return progress;
     }
 
+    /** True while a {@code jclaw.sh restart} that began after this JVM started is under way, so the stop now running is that restart's. */
+    public static boolean restartInProgress() {
+        return RestartNarrator.runningSince(statusFile(), Play.startedAt / 1000);
+    }
+
     /**
      * What a fresh JVM is still bringing up when it first answers.
      *

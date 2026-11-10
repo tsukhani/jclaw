@@ -11,6 +11,7 @@ import services.Tx;
 import utils.HttpFactories;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -19,7 +20,8 @@ import java.util.function.BooleanSupplier;
  * Re-establish the Tailscale Funnel at boot when it's enabled (JCLAW-84).
  *
  * <p>{@code funnel --bg} config is daemon-persistent, but {@link ShutdownJob}
- * tears it down on graceful stop, so we re-create it here on the next start.
+ * tears it down on graceful stop, so we re-create it here on the next start. A
+ * restart's stop leaves it on instead (JF-269), and this boot takes it over first.
  * It runs off the boot thread (JF-16), and the fork starts an async job before the
  * server binds, so it first waits for the funnelled port to answer: a funnel opened
  * earlier forwards to a closed port. Free when the feature is disabled — the common
@@ -37,10 +39,14 @@ public class TailscaleFunnelBootJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        if (Play.runningInTestMode()) {
+        // A training run boots and stops between a restart's two JVMs: the funnel that restart left on is the next one's.
+        if (Play.runningInTestMode()
+                || TelegramStreamingRecoveryJob.isAotTrainingRun(ManagementFactory.getRuntimeMXBean().getInputArguments())) {
             return;
         }
+        boolean kept = TailscaleFunnel.adoptKept();
         if (!Boolean.TRUE.equals(Tx.run(TailscaleFunnel::isFunnelEnabled))) {
+            if (kept) TailscaleFunnel.disable();
             return;
         }
         int port = Tx.run(TailscaleFunnel::configuredPort);

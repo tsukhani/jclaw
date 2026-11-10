@@ -48,7 +48,7 @@ class RestartProgressScriptTest extends UnitTest {
             "upgrade_install_kind", "aot_cache_file", "aot_store_dir", "aot_java_version", "aot_jdk_has_fix",
             "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare", "system_out_size",
             "print_startup_error_block", "wait_for_backend_ready",
-            "restart_status", "restart_phase_end", "restart_phase", "restart_begin", "restart_finish", "restart_on_exit",
+            "restart_status", "restart_phase_end", "restart_phase", "restart_begin", "restart_finish", "restart_on_exit", "funnel_reset_kept",
             "narrator_running", "narrator_bound", "restart_shell_pid", "narrator_start", "narrator_stop", "narrator_is",
             "narrator_reap_stale", "restart_narrate", "do_restart_prod", "do_stop_prod", "do_start_prod");
 

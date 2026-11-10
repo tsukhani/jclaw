@@ -11,6 +11,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -100,10 +102,10 @@ public final class TailscaleFunnel {
     /** The node's public HTTPS base URL (e.g. {@code https://host.tailnet.ts.net}), or null. */
     public static @Nullable String publicBaseUrl() { return publicBaseUrl(PROCESS_RUNNER); }
 
-    /** True once this JVM has started a funnel. Teardown consults this instead of the config
-     *  table so shutdown needs no database (JCLAW-1143), and it is also the question teardown
-     *  actually has: an operator who toggles the config off while a funnel is live would
-     *  otherwise leave it running with nothing to tear it down. */
+    /** True once this JVM has started a funnel, or taken over one a restart left on. Teardown consults
+     *  this instead of the config table so shutdown needs no database (JCLAW-1143), and it is also the
+     *  question teardown actually has: an operator who toggles the config off while a funnel is live
+     *  would otherwise leave it running with nothing to tear it down. */
     private static volatile boolean funnelStartedHere = false;
 
     /** Serializes every funnel change: the boot reconcile runs after the port opens (JF-16), so a
@@ -194,16 +196,66 @@ public final class TailscaleFunnel {
 
     /** Tear down the funnel on shutdown, but only if this instance enabled it. */
     public static void disableIfEnabled() {
-        disableIfEnabled(PROCESS_RUNNER);
+        disableIfEnabled(PROCESS_RUNNER, keptFile(), RestartService.restartInProgress());
         invalidateStatusCache();
     }
 
-    /** Waits for an enable in flight, so a stop during the boot reconcile still tears it down. */
-    public static void disableIfEnabled(Runner runner) {
+    /**
+     * Waits for an enable in flight, so a stop during the boot reconcile still tears it down. A restart leaves
+     * the funnel on, forwarding to the narrator that holds the port (JF-269), once {@code keptFile} records it
+     * for the next boot to take over and for a failed restart's jclaw.sh to reset. A funnel it cannot record is
+     * reset, as on any other stop.
+     */
+    public static void disableIfEnabled(Runner runner, Path keptFile, boolean restarting) {
         stopping = true;
         MUTATION.lock();
         try {
-            if (funnelStartedHere) disable(runner);
+            if (!funnelStartedHere) return;
+            if (restarting && recordKept(keptFile)) {
+                EventLogger.info(CATEGORY, null, null, "Funnel left on for the restart");
+                return;
+            }
+            disable(runner);
+        } finally {
+            MUTATION.unlock();
+        }
+    }
+
+    /** Where a stop records the funnel it left on for a restart; jclaw.sh reads the same path. The autotest server, which shares the checkout, keeps its own. */
+    public static Path keptFile() {
+        var root = Play.applicationPath.toPath();
+        return root.resolve(Play.runningInTestMode() ? "tmp/test-funnel/tailscale-funnel.kept" : "data/tailscale-funnel.kept");
+    }
+
+    private static boolean recordKept(Path keptFile) {
+        try {
+            var dir = keptFile.toAbsolutePath().getParent();
+            if (dir != null) Files.createDirectories(dir);
+            Files.writeString(keptFile, "");
+            return true;
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, null, null, "Funnel reset rather than left on for the restart: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** At boot: takes over the funnel a restart left on, so this JVM's stop resets it. True when there was one. */
+    public static boolean adoptKept() {
+        return adoptKept(keptFile());
+    }
+
+    public static boolean adoptKept(Path keptFile) {
+        MUTATION.lock();
+        try {
+            if (!Files.exists(keptFile)) return false;
+            funnelStartedHere = true;
+            try {
+                Files.delete(keptFile);
+            } catch (IOException e) {
+                EventLogger.warn(CATEGORY, null, null, "Could not remove " + keptFile + ": " + e.getMessage());
+            }
+            EventLogger.info(CATEGORY, null, null, "Funnel kept on across the restart");
+            return true;
         } finally {
             MUTATION.unlock();
         }

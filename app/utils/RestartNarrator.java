@@ -306,6 +306,17 @@ public final class RestartNarrator {
         }
     }
 
+    /** True when the status file records a restart still running that began at or after {@code sinceSeconds}; false when it is missing or not whole. */
+    public static boolean runningSince(Path statusFile, long sinceSeconds) {
+        try {
+            return Json.parse(Files.readString(statusFile, StandardCharsets.UTF_8)) instanceof Map<?, ?> root
+                    && "running".equals(text(root, "state"))
+                    && number(root, "startedAt") >= sinceSeconds;
+        } catch (IOException | IllegalArgumentException _) {
+            return false;
+        }
+    }
+
     private static Step step(Map<?, ?> phase, String state, long finishedAt, long nowSeconds) {
         long start = number(phase, "start");
         long end = number(phase, "end");

@@ -1,8 +1,12 @@
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.TailscaleFunnel;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -309,14 +313,14 @@ class TailscaleFunnelTest extends UnitTest {
     @Test
     void reconcileDoesNothingOnceAStopHasBegun() {
         var fake = new FakeRunner(cmd -> ok(""));
-        TailscaleFunnel.disableIfEnabled(fake);
+        plainStop(fake);
 
         assertEquals(new TailscaleFunnel.Status(false, null, "JClaw is stopping"), TailscaleFunnel.reconcile());
     }
 
     /** Starts a stop on its own thread and returns once it has finished or queued behind the lock. */
-    private static Thread startStopAndAwaitIt(FakeRunner fake) throws InterruptedException {
-        var stopper = Thread.ofPlatform().start(() -> TailscaleFunnel.disableIfEnabled(fake));
+    private Thread startStopAndAwaitIt(FakeRunner fake) throws InterruptedException {
+        var stopper = Thread.ofPlatform().start(() -> plainStop(fake));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (stopper.isAlive() && stopper.getState() != Thread.State.WAITING) {
             assertTrue(System.nanoTime() < deadline, "the stop neither finished nor queued behind the enable");
@@ -335,10 +339,100 @@ class TailscaleFunnelTest extends UnitTest {
     @Test
     void noEnableRunsOnceAStopHasBegun() {
         var fake = new FakeRunner(cmd -> cmd.contains("which") ? ok("/usr/bin/tailscale") : ok(SERVING_STATUS));
-        TailscaleFunnel.disableIfEnabled(fake);
+        plainStop(fake);
 
         assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
         assertEquals(List.of(), fake.calls);
+        assertFalse(TailscaleFunnel.funnelStartedHere());
+    }
+
+    // ---- JF-269: a restart leaves the funnel on for the next boot to take over ----
+
+    @TempDir Path tmp;
+
+    private void plainStop(FakeRunner fake) {
+        TailscaleFunnel.disableIfEnabled(fake, tmp.resolve("absent.kept"), false);
+    }
+
+    private static FakeRunner serving() {
+        return new FakeRunner(cmd -> cmd.contains("which") ? ok("/usr/bin/tailscale") : ok(SERVING_STATUS));
+    }
+
+    private static List<String> logged(List<EventLogger.Captured> events) {
+        return events.stream().map(e -> e.level() + " " + e.message()).toList();
+    }
+
+    @Test
+    void aRestartLeavesTheFunnelOnAndRecordsItForTheNextBoot() {
+        var fake = serving();
+        assertTrue(TailscaleFunnel.enable(9000, fake, 1, 0));
+        var kept = tmp.resolve("data/tailscale-funnel.kept");
+
+        var events = EventLogger.captureForTest(() -> TailscaleFunnel.disableIfEnabled(fake, kept, true));
+
+        assertEquals(List.of("--bg", "status"), funnelVerbs(fake), "no reset after the enable");
+        assertTrue(Files.exists(kept));
+        assertEquals(List.of("INFO Funnel left on for the restart"), logged(events));
+    }
+
+    @Test
+    void aPlainStopResetsTheFunnelAndRecordsNothing() {
+        var fake = serving();
+        assertTrue(TailscaleFunnel.enable(9000, fake, 1, 0));
+        var kept = tmp.resolve("data/tailscale-funnel.kept");
+
+        TailscaleFunnel.disableIfEnabled(fake, kept, false);
+
+        assertEquals(List.of("--bg", "status", "reset"), funnelVerbs(fake));
+        assertFalse(Files.exists(kept));
+        assertFalse(TailscaleFunnel.funnelStartedHere());
+    }
+
+    @Test
+    void aRestartThatCannotRecordTheFunnelResetsIt() throws Exception {
+        var fake = serving();
+        assertTrue(TailscaleFunnel.enable(9000, fake, 1, 0));
+        // A file where the directory should be, so the record cannot be written.
+        var kept = Files.writeString(tmp.resolve("data"), "").resolve("tailscale-funnel.kept");
+
+        var events = EventLogger.captureForTest(() -> TailscaleFunnel.disableIfEnabled(fake, kept, true));
+
+        assertEquals(List.of("--bg", "status", "reset"), funnelVerbs(fake));
+        assertFalse(Files.exists(kept));
+        var lines = logged(events);
+        assertEquals(2, lines.size(), lines::toString);
+        assertTrue(lines.get(0).startsWith("WARN Funnel reset rather than left on for the restart: "), lines.get(0));
+        assertEquals("INFO Funnel reset", lines.get(1));
+    }
+
+    @Test
+    void aRestartTouchesNoFunnelThisJvmNeverStarted() {
+        var fake = serving();
+        var kept = tmp.resolve("data/tailscale-funnel.kept");
+
+        TailscaleFunnel.disableIfEnabled(fake, kept, true);
+
+        assertEquals(List.of(), fake.calls);
+        assertFalse(Files.exists(kept));
+    }
+
+    @Test
+    void theNextBootTakesOverTheKeptFunnelSoItsOwnStopResetsIt() throws Exception {
+        var kept = Files.writeString(Files.createDirectories(tmp.resolve("data")).resolve("tailscale-funnel.kept"), "");
+
+        var events = EventLogger.captureForTest(() -> assertTrue(TailscaleFunnel.adoptKept(kept)));
+
+        assertTrue(TailscaleFunnel.funnelStartedHere());
+        assertFalse(Files.exists(kept), "taken over, so a later failed restart has nothing of this one's to reset");
+        assertEquals(List.of("INFO Funnel kept on across the restart"), logged(events));
+        var fake = serving();
+        plainStop(fake);
+        assertEquals(List.of("reset"), funnelVerbs(fake));
+    }
+
+    @Test
+    void aBootWithNothingKeptTakesNothingOver() {
+        assertFalse(TailscaleFunnel.adoptKept(tmp.resolve("data/tailscale-funnel.kept")));
         assertFalse(TailscaleFunnel.funnelStartedHere());
     }
 }

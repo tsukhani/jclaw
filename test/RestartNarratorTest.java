@@ -253,6 +253,23 @@ class RestartNarratorTest extends UnitTest {
     }
 
     @Test
+    void aRestartStillRunningCountsFromTheSecondItBegan() throws Exception {
+        var running = writeStatus("{\"startedAt\":%d,\"state\":\"running\",\"phases\":[]}".formatted(NOW));
+        assertTrue(RestartNarrator.runningSince(running, NOW));
+        assertFalse(RestartNarrator.runningSince(running, NOW + 1), "a restart that began before this JVM is not this JVM's");
+    }
+
+    @Test
+    void aRestartThatEndedOrCannotBeReadIsNotRunning() throws Exception {
+        for (var state : List.of("done", "failed")) {
+            var ended = writeStatus("{\"startedAt\":%d,\"state\":\"%s\",\"finishedAt\":%d,\"phases\":[]}".formatted(NOW, state, NOW + 5));
+            assertFalse(RestartNarrator.runningSince(ended, NOW), state);
+        }
+        assertFalse(RestartNarrator.runningSince(tmp.resolve("missing.json"), NOW));
+        assertFalse(RestartNarrator.runningSince(writeStatus("{\"startedAt\":%d,\"state\":\"runn".formatted(NOW)), NOW));
+    }
+
+    @Test
     void stringsKeepTheirEscapes() throws Exception {
         var status = writeStatus("{\"state\":\"failed\",\"reason\":\"a \\\"quoted\\\" \\\\ path\\u00e9\",\"finishedAt\":5,\"phases\":[]}");
         assertEquals("a \"quoted\" \\ pathé", RestartNarrator.readProgress(status, NOW).orElseThrow().failure());
