@@ -29,8 +29,8 @@ const ALWAYS_SUFFIX = "ConformanceTest";
 export const isRuleCheck = (test) => ALWAYS.includes(test) || test.endsWith(ALWAYS_SUFFIX);
 
 // A change to any of these reaches tests no class graph shows.
-const FULL_PATHS = [/^conf\/(?!application\.conf$)/, /^build\.gradle\.kts$/, /^settings\.gradle\.kts$/, /^\.play-version$/,
-  /^gradle\//, /^lib\//, /^app\/(?!.*\.java$)/];
+const FULL_PATHS = [/^conf\/(?!application\.conf$)/, /^build\.gradle\.kts$/, /^settings\.gradle\.kts$/, /^gradle\.lockfile$/,
+  /^\.play-version$/, /^gradle\//, /^lib\//, /^app\/(?!.*\.java$)/];
 // No backend test reads these; the frontend gate and the harness's own checks cover them.
 const NO_BACKEND = [/^frontend\//, /^docs\//, /^\.sandcastle\//, /^[^/]+\.md$/, /^\.github\//, /^_bmad/];
 

@@ -65,7 +65,7 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 2. List candidates: `/usr/bin/git branch -r --list 'origin/renovate/*'`. Drop any already merged: skip a branch where `/usr/bin/git merge-base --is-ancestor origin/renovate/<b> main` is true (nothing new to bring in). Apply the `$ARGUMENTS` filter.
 3. **Classify each surviving branch by its changed files** (authoritative — branch names are only a hint): `/usr/bin/git diff --name-only main...origin/renovate/<b>`.
    - Touches any `frontend/**` (typically `frontend/package.json`, `frontend/pnpm-lock.yaml`) → **FRONTEND**.
-   - Touches `build.gradle.kts`, `settings.gradle.kts`, `gradle/**`, `*.gradle.kts`, or `gradle.properties` → **BACKEND**.
+   - Touches `build.gradle.kts`, `settings.gradle.kts`, `gradle/**`, `*.gradle.kts`, `gradle.properties`, `gradle.lockfile` or `.play-version` → **BACKEND**.
    - Touches `.sandcastle/**` (the AFK factory's `package.json` / `pnpm-lock.yaml`) → **FACTORY**.
    - Touches both → **BOTH** (run both suites).
    - Touches neither code path (e.g. only `.github/**` or a renovate config) → **DOCS/CONFIG** (merge, no suite — note it).
@@ -81,9 +81,15 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 
 Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — backend and frontend are each batch-merged and validated with **one suite run** (dependency bumps within an ecosystem rarely interact; one suite per ecosystem is the cost/confidence sweet spot). The factory is the exception: it is validated before its merge (step 9), because the live factory picks up a merge at once.
 
-7. **Backend: merge all, then one suite** —
-   - Merge every backend branch in sequence: `/usr/bin/git merge --no-edit origin/renovate/<b>`. On a `build.gradle.kts` version-pin conflict, resolve toward the renovate bump (take the higher/incoming version) and note it; on a non-trivial code conflict, stop and surface it.
-   - After the last backend merge, run `play autotest` **once**. **Pass** → all backend bumps are in. **Fail** → bisect by peeling merges off the top (`/usr/bin/git reset --keep HEAD~1`, re-run the suite) until it passes, marking each peeled branch **FAILED/skipped**; with ≤3 branches, peeling newest-first converges in at most N−1 extra runs and only pays that cost on the rare failure. Never guess the culprit without a passing baseline. `--keep`, never `--hard`: other sessions share this checkout, and `--hard` discards their uncommitted edits where `--keep` refuses. Not `git revert` either: a reverted merge still counts the branch's commits as merged, so merging that branch again later brings none of them back.
+7. **Backend: merge all, rewrite the lock, then one suite** —
+   - Merge every backend branch in sequence: `/usr/bin/git merge --no-edit origin/renovate/<b>`. On a `build.gradle.kts` version-pin conflict, resolve toward the renovate bump (take the higher/incoming version) and note it; on a non-trivial code conflict, stop and surface it. For a `.play-version` branch, check out the matching tag in `/opt/play1` first (its PR note).
+   - **Then rewrite `gradle.lockfile`, which no Renovate branch updates.** Every resolution must match the lock (JF-176), and Renovate's Gradle manager rewrites it only by running `./gradlew :dependencies --update-locks <deps>`, which it does only when the self-hosted config's `allowedUnsafeExecutions` lists `gradleWrapper`; `Jenkinsfile.renovate` sets none, and its container has no `/opt/play1` for `settings.gradle.kts` anyway. So a merged bump fails resolution (`Dependency version enforced by Dependency Locking`) until:
+     ```bash
+     ./gradlew dependencies --write-locks > build/relock.log 2>&1
+     /usr/bin/git diff gradle.lockfile
+     ```
+     Leave the rewrite uncommitted for now, and read the diff: expect the bumped modules and what they bring in or drop. A rewrite with nothing bumped reproduced the committed lock byte for byte (2026-11-11), so report any other move before running the suite. A fork bump moves the lock only when the fork starts or stops shipping a library, since the plugin leaves framework/lib's libraries out of the graph.
+   - After the rewrite, run `play autotest` **once**. **Pass** → commit the lock (`/usr/bin/git add gradle.lockfile && /usr/bin/git commit -S -m "chore(deps): rewrite gradle.lockfile after renovate backend merges"`), and all backend bumps are in. **Fail** → bisect by peeling merges off the top (`/usr/bin/git reset --keep HEAD~1`, rewrite the lock again, re-run the suite) until it passes, marking each peeled branch **FAILED/skipped**; with ≤3 branches, peeling newest-first converges in at most N−1 extra runs and only pays that cost on the rare failure. Never guess the culprit without a passing baseline. `--keep`, never `--hard`: other sessions share this checkout, and `--hard` discards their uncommitted edits where `--keep` refuses. Not `git revert` either: a reverted merge still counts the branch's commits as merged, so merging that branch again later brings none of them back.
 
 8. **Frontend: merge all, regen, then one gate** — Renovate frontend branches are usually **lockfile-only** (`^x.y.z` ranges in `package.json` already cover minor/patch), so they conflict with each other in sequence:
    - Merge each: `/usr/bin/git merge --no-edit origin/renovate/<b>`, falling back to `/usr/bin/git merge --no-edit -X theirs origin/renovate/<b>` on a `pnpm-lock.yaml` conflict.
@@ -135,7 +141,7 @@ Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — back
 - **Never `git push` or run `/deploy`** as part of this command — stop at the local merge commits. The lone exception is the Phase-4 branch-deletion push, and only when the user explicitly asks for cleanup.
 - Never `--no-verify`, `--force`, `JCLAW_SKIP_TESTS=1`, or any other hook/signing bypass.
 - The frontend **lockfile regen is mandatory** after the merge cascade — a plain `pnpm install` is not sufficient and gives false greens.
-- Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `pnpm install --frozen-lockfile` + `pnpm run check`, plus `sandbox-check.ts` diffed against the current version for a Sandcastle bump, in a scratch export **before** the merge, never in the live `.sandcastle/`. A BOTH branch runs both.
+- Validate by ecosystem: backend → rewrite `gradle.lockfile`, then `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `pnpm install --frozen-lockfile` + `pnpm run check`, plus `sandbox-check.ts` diffed against the current version for a Sandcastle bump, in a scratch export **before** the merge, never in the live `.sandcastle/`. A BOTH branch runs both.
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
 - A failing backend bump is undone (`reset --keep HEAD~1`) and skipped, not forced through; a failing frontend batch is reported for the user to triage; a factory bump that fails its scratch checks is never merged.
 - **Never lift a version cap without the user choosing it.** Report the verdict and the cost; the decision is theirs. A lift and the upgrade behind it land in one commit, never separately.

@@ -179,16 +179,26 @@
       automergeType: "branch",
     },
 
-    // Carve Java/Gradle minors back out of the catch-all above. Tika,
+    // Carve Java/Gradle bumps back out of the catch-all above. Tika,
     // Playwright, and OkHttp minors have historically required exclude-graph
     // adjustments in build.gradle.kts (the long `exclude(group = ...)` lists
     // for tika-core / tika-parsers-standard-package / flexmark / telegrambots
     // exist precisely because each minor reshuffles the transitive set).
-    // Patches still auto-merge — they almost never reshape transitives.
+    // Gradle patches wait too: a dependency bump has to rewrite
+    // gradle.lockfile (JF-176), which this runner leaves stale, since Renovate
+    // runs ./gradlew only when the admin config's allowedUnsafeExecutions lists
+    // gradleWrapper, and its container has no /opt/play1 for
+    // settings.gradle.kts. Until /renovate rewrites the lock, the branch fails
+    // to resolve. Plugin bumps leave the lock alone but wait with them;
+    // gradle-wrapper patches still auto-merge.
     // Must sit after the catch-all because Renovate evaluates packageRules
     // in order, last match wins.
     {
-      matchManagers: ["gradle", "gradle-wrapper"],
+      matchManagers: ["gradle"],
+      automerge: false,
+    },
+    {
+      matchManagers: ["gradle-wrapper"],
       matchUpdateTypes: ["minor"],
       automerge: false,
     },
@@ -210,7 +220,7 @@
       matchDepNames: ["tsukhani/play1"],
       automerge: false,
       prBodyNotes: [
-        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging.",
+        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging, then rewrite `gradle.lockfile` (`./gradlew dependencies --write-locks`): a library the fork starts or stops shipping changes the locked graph.",
       ],
     },
   ],

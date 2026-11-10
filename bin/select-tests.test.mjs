@@ -78,7 +78,7 @@ test("a changed controller also selects the tests that call its routes over HTTP
 });
 
 test("a shared file runs the whole suite", () => {
-  for (const path of ["conf/routes", "build.gradle.kts", ".play-version", "app/views/main.html"]) {
+  for (const path of ["conf/routes", "build.gradle.kts", "gradle.lockfile", ".play-version", "app/views/main.html"]) {
     deepStrictEqual(select([{ status: "M", path }], graph(), false), { mode: "all", tests: [], fullBecause: [path], reasons: {} }, path);
   }
 });

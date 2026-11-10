@@ -14,6 +14,7 @@ JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
 - Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork. `settings.gradle.kts` resolves that plugin from a flat `file:///opt/play1/framework/gradle-plugin-repo` Maven repo — **not** `includeBuild("/opt/play1")`, which builds the plugin from source and needs write access into the fork, so it fails on read-only installs. The plugin version is read from the installed fork's `framework/src/play/version`, and `build.gradle.kts` cross-checks that against `.play-version` (plus a pinned range), failing the build on drift. To bump the fork: edit `.play-version` **and** check out the matching version in `/opt/play1`.
   - Consequence: `/opt/play1` is a separate root build with its own Gradle wrapper, so builds there start their own daemon.
+- Every resolvable configuration resolves from the committed `gradle.lockfile` in STRICT mode (JF-176), the playClasspath and playBundle classpaths included: a version above the lock, a module the lock lacks, or a lock entry nothing resolves fails the build. A dependency change rewrites the lock with `./gradlew dependencies --write-locks`, and the rewrite goes in the same commit. A declaration below the locked version resolves to the lock's version without a word, so a downgrade needs the rewrite too. sherpa-onnx's native-lib jar is left out of the lock, being the one module whose name depends on the build host.
 - Tests in `test/` — JUnit 6 (Jupiter 6.1.3, bundled by the play1 fork in `framework/lib`), extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
@@ -25,7 +26,7 @@ JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java
 
 ## Fork and production start
 
-- Bumping the fork is two-sided: `.play-version` and `/opt/play1` at the same tag, rebuilt (`framework/src/play/version` is a build artifact); a mismatch fails Gradle configure, which pre-push reports as "spotlessCheck failed without reporting format violations".
+- Bumping the fork is two-sided: `.play-version` and `/opt/play1` at the same tag, rebuilt (`framework/src/play/version` is a build artifact); a mismatch fails Gradle configure, which pre-push reports as "spotlessCheck failed without reporting format violations". Then rewrite `gradle.lockfile`: the plugin leaves every library framework/lib ships out of the graph, so a fork that starts or stops shipping one the graph reaches fails resolution against the old lock.
 - A production start keeps the JDK's AOT cache current (`aot_prepare` in `jclaw.sh`; the Docker `CMD` calls it as `jclaw.sh aot-cache`): when the JDK, the JVM options or the jars changed, it first trains a cache with a full start and stop of the real instance on spare ports (`BACKEND_PORT` + 1000 up, so 9000 and 9443 stay dark), and it never uses one on a JDK without JDK-8377932's fix (25.0.4, 26.0.2, 27), where a stale cache serves old library classes. A changed application class is still loaded fresh, so a code-only restart keeps the cache. `JCLAW_AOT=off` starts without one.
 
 ## Serving and git hooks

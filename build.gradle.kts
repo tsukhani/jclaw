@@ -1,5 +1,6 @@
 import net.ltgt.gradle.errorprone.CheckSeverity
 import net.ltgt.gradle.errorprone.errorprone
+import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.process.CommandLineArgumentProvider
 
 plugins {
@@ -303,6 +304,22 @@ repositories {
         metadataSources { artifact() }
         content { includeGroup("com.k2fsa.sherpa.onnx") }
     }
+}
+
+// JF-176: every resolvable configuration of the project resolves to the versions in gradle.lockfile,
+// and a resolution that differs fails the build, so a BOM or a transitive cannot move unseen. STRICT
+// also fails a configuration with no lock state, so a new one cannot resolve unlocked. The
+// playClasspath and playBundle classpaths are runtimeClasspath plus playFramework, both locked. A
+// dependency change, or a fork bump that changes what framework/lib ships, rewrites the lock:
+// `./gradlew dependencies --write-locks`. The plugins block's buildscript classpath is not locked:
+// its versions are exact, and the play1 plugin's moves with every fork bump.
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
+    // The graph's one host-specific module (sherpaNativeClassifier below): locked on one platform it
+    // would fail the build on every other. It is pinned exactly, and its artifact-only Ivy metadata
+    // declares no dependencies, so ignoring it leaves nothing unlocked.
+    ignoredDependencies.add("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-*")
 }
 
 dependencies {
