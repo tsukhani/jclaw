@@ -5,8 +5,7 @@ import java.util.List;
 
 /**
  * Whether a JVM is the AOT cache's training run, which {@code play aot-gen} boots and stops on spare ports between a
- * restart's two JVMs. JDK types only: a {@code conf/play.plugins} plugin reads it, and such a plugin compiles before
- * the application.
+ * restart's two JVMs; start jobs that must not act in it ask here.
  */
 public final class AotTraining {
 

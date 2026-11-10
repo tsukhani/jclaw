@@ -634,46 +634,6 @@ public final class RestartNarrator {
         });
     }
 
-    // ==================== the handover to the next JVM ====================
-
-    /** Written beside the pid file by the JVM a restart starts, to ask jclaw.sh for the port; jclaw.sh removes it once the port is free. */
-    public static final String HANDOVER_FILE = "restart-handover.ready";
-
-    private static final long HANDOVER_POLL_MILLIS = 20;
-
-    public enum Handover { NONE, TAKEN, TIMED_OUT }
-
-    /**
-     * For the JVM a restart starts, just before it binds (JF-273): when a live narrator holds the port, writes
-     * {@code request} and waits until jclaw.sh, having stopped the narrator, removes it, so the narrator answers for
-     * the whole boot. {@code NONE} when no narrator holds the port; {@code TIMED_OUT} when jclaw.sh did not answer in
-     * {@code budget}, after which the JVM binds anyway.
-     */
-    public static Handover awaitHandover(Path pidFile, Path request, long budgetNanos) throws IOException, InterruptedException {
-        if (!holdsThePort(pidFile)) return Handover.NONE;
-        Files.writeString(request, ProcessHandle.current().pid() + "\n");
-        long deadline = System.nanoTime() + budgetNanos;
-        while (Files.exists(request)) {
-            if (System.nanoTime() - deadline >= 0) {
-                Files.deleteIfExists(request);
-                return Handover.TIMED_OUT;
-            }
-            Thread.sleep(HANDOVER_POLL_MILLIS);
-        }
-        return Handover.TAKEN;
-    }
-
-    /** True when {@code pidFile} names a live process that has written {@code bound} under its pid. */
-    static boolean holdsThePort(Path pidFile) {
-        try {
-            var lines = Files.readAllLines(pidFile, StandardCharsets.UTF_8);
-            if (lines.isEmpty() || !lines.contains("bound")) return false;
-            return ProcessHandle.of(Long.parseLong(lines.getFirst().strip())).map(ProcessHandle::isAlive).orElse(false);
-        } catch (IOException | NumberFormatException _) {
-            return false;
-        }
-    }
-
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
