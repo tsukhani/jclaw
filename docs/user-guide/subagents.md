@@ -223,7 +223,7 @@ A failed run gives its reason in three places: in the log, on the [Subagents](/s
 
 `subagent_spawn` runs a helper copy of the calling agent. To give a task to a different agent, one you made on the [Agents](/agents) page, the agent calls `agent_spawn` with that agent's name and the task. It waits for that agent's reply. Use it to keep specialists small: each one has its own short prompt and its own tools, and `main` passes work to whichever one fits.
 
-**Who can reach whom.** `main` can hand work to any of your other agents, and any of your agents can hand work to any other one. No agent can hand work to `main`, to itself, to a disabled agent, or to an agent JClaw runs for itself (`__loadtest__`, `__loadtest_tools__`, `__evaltest__`). The tool's description lists the agents the caller can reach, each with the description you gave it on the Agents page.
+**Who can reach whom.** `main` can hand work to any of your other agents, and any of your agents can hand work to any other one. No agent can hand work to `main`, to itself, to a disabled agent, or to an agent JClaw runs for itself (`__loadtest__`, `__loadtest_tools__`, `__evaltest__`). The tool's description lists the agents the caller can reach, each with the description you gave it on the Agents page. A subagent cannot hand work to anyone: only an agent can. One agent can be handed work more than once in the same chain. For example, `legal` hands work to `finance`, and `finance` asks `legal` to confirm a point while the first `legal` is still waiting. Each visit starts in a new conversation that holds only its own task.
 
 **No tool comparison.** The agent that takes the task works with its own tools, its own model, and its own prompt. It can use a tool the caller does not have. For example, `main` can hand a video to an agent that has `generate_video` turned on, while `main` has it off. Nothing is copied onto the agent that takes the task.
 
@@ -235,7 +235,7 @@ A failed run gives its reason in three places: in the log, on the [Subagents](/s
 
 **Files.** A file the other agent saves stays in that agent's workspace. The result carries a `files_url`, and the caller links a file as `files_url` followed by the file's path, for example `/api/agents/7/files/out/clip.mp4`. Chat shows that link as a file button.
 
-A chain of specialists needs `subagent.maxDepth` above 1. Raising it lets ordinary subagents nest deeper too, which can multiply cost.
+**How far a chain can go.** `subagent.maxDepth` does not limit hand-offs. Instead, every hand-off a turn starts, and every hand-off under it, counts toward one budget: `subagent.maxHandOffs`, 10 by default. When the budget is used up, the next hand-off is refused, and the agent replies with what it has. An agent that was handed work can still start its own subagents, under the usual `subagent.maxDepth`.
 
 ## Recursion limits
 
@@ -245,10 +245,11 @@ To stop a subagent from spawning grandchildren that spawn great-grandchildren, J
 |---------------------------------|---------|------------------------------------------------------------------|
 | `subagent.maxDepth`             | 1       | How deep the parent → child → grandchild chain can go.           |
 | `subagent.maxChildrenPerParent` | 5       | How many concurrently-running children a single parent can have. |
+| `subagent.maxHandOffs`          | 10      | How many `agent_spawn` hand-offs one turn can start, counting every hand-off down the chain. |
 
 A depth limit of `1` means the top-level agent can spawn children, but those children cannot spawn further children. Bump it for explicit fan-in patterns. Keep it conservative for runaway protection.
 
-Both caps are shared with [`agent_spawn`](/guide#subagents-agent-spawn). A hand-off counts as one level of depth, and a hand-off and a subagent count together toward the parent's running children. So at the default depth of `1`, an agent that was handed work can neither hand it on nor spawn a subagent.
+[`agent_spawn`](/guide#subagents-agent-spawn) shares `subagent.maxChildrenPerParent`: a hand-off and a subagent count together toward the parent's running children. It does not share `subagent.maxDepth`. An agent that was handed work counts as a top-level agent, so at the default depth of `1` it can spawn subagents, and those subagents cannot spawn more. `subagent.maxHandOffs` limits hand-offs instead.
 
 The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300). These are the fallbacks for a spawn or yield that omits its own timeout. The section also holds an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's; an agent that `agent_spawn` hands work to always runs on its own model. The harness command and its model override live in Settings → **Coding**.
 

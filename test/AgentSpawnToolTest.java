@@ -33,6 +33,7 @@ import tools.AgentSpawnTool;
 import tools.SubagentSpawnTool;
 import utils.CircuitBreakers;
 import utils.GsonHolder;
+import utils.LatencyTrace;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -48,6 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -182,55 +184,161 @@ class AgentSpawnToolTest extends UnitTest {
         assertNull(calleeConv.modelIdOverride);
     }
 
-    // ── depth ──
+    // ── depth and the hand-off budget ──
 
     @Test
-    void aChainOfSpecialistsPassesEachReplyUpWhenTheDepthLimitIsTwo() throws Exception {
+    void aChainOfSpecialistsPassesEachReplyUpAtTheDefaultDepthLimit() throws Exception {
         var main = createAgent("main");
         var a = createAgent("researcher");
         var b = createAgent("analyst");
+        var c = createAgent("auditor");
         var web = ConversationService.create(main, "web", "u-chain");
         commitAndReopen();
         scripts.add(new Script("Research the market.", "agent_spawn",
                 Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
-        scripts.add(Script.replies("Analyse the figures.", "FIGURES_ANALYSED"));
+        scripts.add(new Script("Analyse the figures.", "agent_spawn",
+                Map.of("agent", "auditor", "task", "Audit the numbers."), "analyst saw: "));
+        scripts.add(Script.replies("Audit the numbers.", "AUDITED"));
 
-        var result = withDepthLimit("2",
+        var result = withConfig(SubagentSpawnTool.DEPTH_LIMIT_KEY, "1",
                 () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
 
         JPA.em().clear();
         SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
         SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
-        assertNotNull(toB, "the researcher handed off to the analyst: " + result);
+        SubagentRun toC = SubagentRun.find("childAgent.id = ?1", c.id).first();
+        assertNotNull(toC, "the analyst handed off to the auditor: " + result);
         assertEquals(a.id, toB.parentAgent.id);
         assertEquals(toA.childConversation.id, toB.parentConversation.id);
-        var bResult = expectedResult(toB, "FIGURES_ANALYSED", b);
+        assertEquals(toB.childConversation.id, toC.parentConversation.id);
+        var cResult = expectedResult(toC, "AUDITED", c);
+        var bResult = expectedResult(toB, "analyst saw: " + cResult, b);
         assertEquals(expectedResult(toA, "researcher saw: " + bResult, a), result);
     }
 
     @Test
-    void atDepthLimitOneASpecialistsHandOffIsRefusedAndMainsHandOffStillCompletes() throws Exception {
+    void aChainMayHandWorkBackToAnAgentAlreadyInIt() throws Exception {
+        var main = createAgent("main");
+        var legal = createAgent("legal");
+        var finance = createAgent("finance");
+        var web = ConversationService.create(main, "web", "u-revisit");
+        commitAndReopen();
+        scripts.add(new Script("Review the contract.", "agent_spawn",
+                Map.of("agent", "finance", "task", "Price the deal."), "legal saw: "));
+        scripts.add(new Script("Price the deal.", "agent_spawn",
+                Map.of("agent", "legal", "task", "Confirm clause 4."), "finance saw: "));
+        scripts.add(Script.replies("Confirm clause 4.", "CLAUSE_4_CONFIRMED"));
+
+        var result = handOff(main.id, web.id, false, "{\"agent\":\"legal\",\"task\":\"Review the contract.\"}");
+
+        JPA.em().clear();
+        List<SubagentRun> toLegal = SubagentRun.find("childAgent.id = ?1 ORDER BY id", legal.id).fetch();
+        SubagentRun toFinance = SubagentRun.find("childAgent.id = ?1", finance.id).first();
+        assertEquals(2, toLegal.size(), "legal was handed work twice: " + result);
+        var confirm = toLegal.get(1);
+        assertEquals(finance.id, confirm.parentAgent.id);
+        assertNotEquals(toLegal.getFirst().childConversation.id, confirm.childConversation.id,
+                "the second visit runs in a conversation of its own");
+        var confirmResult = expectedResult(confirm, "CLAUSE_4_CONFIRMED", legal);
+        var financeResult = expectedResult(toFinance, "finance saw: " + confirmResult, finance);
+        assertEquals(expectedResult(toLegal.getFirst(), "legal saw: " + financeResult, legal), result);
+    }
+
+    @Test
+    void agentsHandingWorkBackAndForthStopAtTheHandOffBudget() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("ping");
+        var b = createAgent("pong");
+        var web = ConversationService.create(main, "web", "u-ping-pong");
+        commitAndReopen();
+        scripts.add(new Script("Ping.", "agent_spawn", Map.of("agent", "pong", "task", "Pong."), "ping saw: "));
+        scripts.add(new Script("Pong.", "agent_spawn", Map.of("agent", "ping", "task", "Ping."), "pong saw: "));
+
+        var result = withConfig(AgentSpawnTool.MAX_HAND_OFFS_KEY, "3",
+                () -> handOff(main.id, web.id, false, "{\"agent\":\"ping\",\"task\":\"Ping.\"}"));
+
+        JPA.em().clear();
+        List<SubagentRun> toA = SubagentRun.find("childAgent.id = ?1 ORDER BY id", a.id).fetch();
+        SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
+        assertEquals(2, toA.size(), result);
+        assertEquals(3, SubagentRun.count(), "three hand-offs, and the fourth refused: " + result);
+        var innermost = expectedResult(toA.get(1),
+                "ping saw: Agent hand-off refused: hand-off limit 3 reached (hand-offs so far: 3). Reply with what you have.",
+                a);
+        var bResult = expectedResult(toB, "pong saw: " + innermost, b);
+        assertEquals(expectedResult(toA.getFirst(), "ping saw: " + bResult, a), result);
+    }
+
+    @Test
+    void everyHandOffUnderOneTurnDrawsFromTheSameBudget() throws Exception {
         var main = createAgent("main");
         var a = createAgent("researcher");
         var b = createAgent("analyst");
-        var web = ConversationService.create(main, "web", "u-depth1");
+        var c = createAgent("writer");
+        var d = createAgent("editor");
+        var web = ConversationService.create(main, "web", "u-turn-budget");
         commitAndReopen();
         scripts.add(new Script("Research the market.", "agent_spawn",
                 Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
         scripts.add(Script.replies("Analyse the figures.", "FIGURES_ANALYSED"));
+        scripts.add(new Script("Write the summary.", "agent_spawn",
+                Map.of("agent", "editor", "task", "Edit the summary."), "writer saw: "));
+        scripts.add(Script.replies("Edit the summary.", "EDITED"));
 
-        var result = withDepthLimit("1",
-                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
+        var results = withConfig(AgentSpawnTool.MAX_HAND_OFFS_KEY, "3", () -> inOneTurn(main.id, web.id,
+                "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}",
+                "{\"agent\":\"writer\",\"task\":\"Write the summary.\"}"));
 
         JPA.em().clear();
         SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
-        assertEquals(expectedResult(toA,
-                "researcher saw: Agent hand-off refused: depth limit 1 exceeded (current depth: 1).", a), result);
-        assertEquals(0, SubagentRun.count("childAgent.id = ?1", b.id), "no run for the refused hand-off");
+        SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
+        SubagentRun toC = SubagentRun.find("childAgent.id = ?1", c.id).first();
+        assertEquals(List.of(
+                expectedResult(toA, "researcher saw: " + expectedResult(toB, "FIGURES_ANALYSED", b), a),
+                expectedResult(toC, "writer saw: Agent hand-off refused: hand-off limit 3 reached (hand-offs so far: 3)."
+                        + " Reply with what you have.", c)),
+                results, "main's second chain started with the first chain's two hand-offs already counted");
+        assertEquals(0, SubagentRun.count("childAgent.id = ?1", d.id), "no run for the refused hand-off");
     }
 
     @Test
-    void aCalleeAtDepthLimitOneCannotSpawnASubagent() throws Exception {
+    void theLastHandOffTheBudgetAllowsRunsAndTheNextIsRefusedAndLogged() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var web = ConversationService.create(main, "web", "u-budget-edge");
+        commitAndReopen();
+        scripts.add(Script.replies("Look it up.", "LOOKED_UP"));
+        var caller = (Agent) Agent.findById(main.id);
+        var call = "{\"agent\":\"researcher\",\"task\":\"Look it up.\"}";
+        var trace = LatencyTrace.forTurn("web", null);
+
+        trace.handOffs().set(AgentSpawnTool.DEFAULT_MAX_HAND_OFFS - 1);
+        var last = onVirtualThread(() -> {
+            try (var _ = LatencyTrace.bind(trace)) {
+                return ToolContext.withConversation(web.id, () -> new AgentSpawnTool().execute(call, caller));
+            }
+        });
+        var refused = new AtomicReference<String>();
+        var events = EventLogger.captureForTest(() -> {
+            try (var _ = LatencyTrace.bind(trace)) {
+                refused.set(ToolContext.withConversation(web.id, () -> new AgentSpawnTool().execute(call, caller)));
+            }
+        });
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.find("childAgent.id = ?1", a.id).first();
+        assertEquals(expectedResult(run, "LOOKED_UP", a), last);
+        assertEquals("Agent hand-off refused: hand-off limit 10 reached (hand-offs so far: 10). Reply with what you have.",
+                refused.get());
+        assertEquals(1, SubagentRun.count(), "the refused hand-off wrote no run");
+        var limits = events.stream().filter(e -> EventLogger.SUBAGENT_LIMIT_EXCEEDED.equals(e.category())).toList();
+        assertEquals(1, limits.size(), events.toString());
+        assertEquals("hand-off limit 10 reached (hand-offs so far: 10).",
+                JsonParser.parseString(limits.getFirst().details()).getAsJsonObject().get("reason").getAsString());
+    }
+
+    @Test
+    void aCalleeSpawnsItsOwnSubagentAtTheDefaultDepthLimit() throws Exception {
         var main = createAgent("main");
         var a = createAgent("researcher");
         var web = ConversationService.create(main, "web", "u-callee-spawn");
@@ -239,14 +347,63 @@ class AgentSpawnToolTest extends UnitTest {
                 Map.of("task", "Collect the raw figures."), "researcher saw: "));
         scripts.add(Script.replies("Collect the raw figures.", "RAW"));
 
-        var result = withDepthLimit("1",
+        var result = withConfig(SubagentSpawnTool.DEPTH_LIMIT_KEY, "1",
                 () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
 
         JPA.em().clear();
         SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
-        assertEquals(expectedResult(toA,
-                "researcher saw: Subagent spawn refused: depth limit 1 exceeded (current depth: 1).", a), result);
-        assertEquals(1, SubagentRun.count(), "the callee spawned nothing");
+        SubagentRun toClone = SubagentRun.find("parentAgent.id = ?1", a.id).first();
+        assertNotNull(toClone, "the callee spawned a subagent: " + result);
+        assertEquals(a.id, toClone.childAgent.parentAgent.id, "the subagent is a helper copy of the callee");
+        assertEquals(expectedResult(toA, "researcher saw: " + expectedSpawnResult(toClone, "RAW"), a), result);
+        var calleeTools = requestFor("Research the market.").tools();
+        var subagentTools = requestFor("Collect the raw figures.").tools();
+        assertTrue(calleeTools.contains("agent_spawn"), "the callee may hand work on: " + calleeTools);
+        assertFalse(subagentTools.contains("agent_spawn"), "its subagent may not: " + subagentTools);
+    }
+
+    @Test
+    void aCalleesBatchSubagentsSitOneLevelBelowIt() throws Exception {
+        var main = createAgent("main");
+        var a = createAgent("researcher");
+        var web = ConversationService.create(main, "web", "u-batch-depth");
+        commitAndReopen();
+        scripts.add(new Script("Research the market.", "subagent_spawn",
+                Map.of("tasks", List.of("Clone the work.")), "researcher saw: "));
+        scripts.add(new Script("Clone the work.", "subagent_spawn", Map.of("task", "Go deeper."), "clone saw: "));
+        scripts.add(Script.replies("Go deeper.", "DEEPER"));
+
+        var outcome = withConfig(SubagentSpawnTool.DEPTH_LIMIT_KEY, "1", () -> {
+            handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}");
+            return awaitCloneOutcome(a.id);
+        });
+
+        assertEquals("clone saw: Subagent spawn refused: depth limit 1 exceeded (current depth: 1).", outcome);
+        JPA.em().clear();
+        SubagentRun clone = SubagentRun.find("parentAgent.id = ?1", a.id).first();
+        assertEquals(0, SubagentRun.count("parentAgent.id = ?1", clone.childAgent.id), "the clone spawned nothing");
+    }
+
+    @Test
+    void aSubagentIsNeverOfferedAgentSpawnAndItsDirectCallIsRefused() throws Exception {
+        var main = createAgent("main");
+        createAgent("researcher");
+        var clone = createAgent("main-sub-1");
+        clone.parentAgent = main;
+        clone.save();
+        setTool(clone, "agent_spawn", true);
+        var conv = ConversationService.create(clone, "web", "u-subagent");
+        commitAndReopen();
+        var cloneAgent = (Agent) Agent.findById(clone.id);
+        ToolRegistry.invalidateDisabledToolsCache(cloneAgent);
+
+        var offered = ToolRegistry.getToolDefsForAgent(cloneAgent).stream().map(d -> d.function().name()).toList();
+
+        assertFalse(offered.contains(AgentSpawnTool.TOOL_NAME), "not even a grant offers it: " + offered);
+        assertTrue(offered.contains("subagent_spawn"), offered.toString());
+        assertEquals("Error: a subagent cannot hand work to another agent. Return what you have to the agent that "
+                + "spawned you.", handOff(clone.id, conv.id, false, "{\"agent\":\"researcher\",\"task\":\"x\"}"));
+        assertNoRuns();
     }
 
     // ── who may be reached ──
@@ -486,55 +643,6 @@ class AgentSpawnToolTest extends UnitTest {
         assertEquals(new TreeSet<>(Set.of("agent_spawn", "datetime")), requests.getFirst().tools());
     }
 
-    @Test
-    void atDepthLimitTwoTheSecondSpecialistsHandOffIsRefusedAtDepthTwo() throws Exception {
-        var main = createAgent("main");
-        var a = createAgent("researcher");
-        var b = createAgent("analyst");
-        var c = createAgent("auditor");
-        var web = ConversationService.create(main, "web", "u-depth2");
-        commitAndReopen();
-        scripts.add(new Script("Research the market.", "agent_spawn",
-                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
-        scripts.add(new Script("Analyse the figures.", "agent_spawn",
-                Map.of("agent", "auditor", "task", "Audit the numbers."), "analyst saw: "));
-        scripts.add(Script.replies("Audit the numbers.", "AUDITED"));
-
-        var result = withDepthLimit("2",
-                () -> handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}"));
-
-        JPA.em().clear();
-        SubagentRun toA = SubagentRun.find("childAgent.id = ?1", a.id).first();
-        SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
-        assertNotNull(toB, result);
-        var bResult = expectedResult(toB,
-                "analyst saw: Agent hand-off refused: depth limit 2 exceeded (current depth: 2).", b);
-        assertEquals(expectedResult(toA, "researcher saw: " + bResult, a), result);
-        assertEquals(0, SubagentRun.count("childAgent.id = ?1", c.id), "no run for the refused hand-off");
-    }
-
-    @Test
-    void aCalleesBatchClonesRunOneLevelBelowIt() throws Exception {
-        var main = createAgent("main");
-        var a = createAgent("researcher");
-        var web = ConversationService.create(main, "web", "u-batch-depth");
-        commitAndReopen();
-        scripts.add(new Script("Research the market.", "subagent_spawn",
-                Map.of("tasks", List.of("Clone the work.")), "researcher saw: "));
-        scripts.add(new Script("Clone the work.", "subagent_spawn", Map.of("task", "Go deeper."), "clone saw: "));
-        scripts.add(Script.replies("Go deeper.", "DEEPER"));
-
-        var outcome = withDepthLimit("2", () -> {
-            handOff(main.id, web.id, false, "{\"agent\":\"researcher\",\"task\":\"Research the market.\"}");
-            return awaitCloneOutcome(a.id);
-        });
-
-        assertEquals("clone saw: Subagent spawn refused: depth limit 2 exceeded (current depth: 2).", outcome);
-        JPA.em().clear();
-        SubagentRun clone = SubagentRun.find("parentAgent.id = ?1", a.id).first();
-        assertEquals(0, SubagentRun.count("parentAgent.id = ?1", clone.childAgent.id), "the clone spawned nothing");
-    }
-
     /** The outcome of the batch child {@code parentId} started, once its detached run has ended. */
     private static String awaitCloneOutcome(Long parentId) throws InterruptedException {
         var deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
@@ -629,27 +737,57 @@ class AgentSpawnToolTest extends UnitTest {
         assertEquals(0, SubagentRun.count(), "a refused hand-off writes no run");
     }
 
-    /** {@code body} with {@code subagent.maxDepth} at {@code limit}, restored afterwards. */
-    private static String withDepthLimit(String limit, ThrowingSupplier body) throws Exception {
-        var prior = inFreshTx(() -> ConfigService.get(SubagentSpawnTool.DEPTH_LIMIT_KEY));
+    /** {@code body} with config {@code key} at {@code value}, restored afterwards. */
+    private static <T> T withConfig(String key, String value, ThrowingSupplier<T> body) throws Exception {
+        var prior = inFreshTx(() -> ConfigService.get(key));
         inFreshTx(() -> {
-            ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, limit);
+            ConfigService.set(key, value);
             return null;
         });
         try {
             return body.get();
         } finally {
             inFreshTx(() -> {
-                if (prior == null) ConfigService.delete(SubagentSpawnTool.DEPTH_LIMIT_KEY);
-                else ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, prior);
+                if (prior == null) ConfigService.delete(key);
+                else ConfigService.set(key, prior);
                 return null;
             });
         }
     }
 
+    /** Several {@code agent_spawn} calls made one after another by a single chat turn, which a trace binds. */
+    private static List<String> inOneTurn(Long callerId, Long conversationId, String... calls) throws Exception {
+        return onVirtualThread(() -> {
+            var caller = Tx.run(() -> (Agent) Agent.findById(callerId));
+            var out = new ArrayList<String>();
+            try (var _ = LatencyTrace.bind(LatencyTrace.forTurn("web", null))) {
+                for (var call : calls) {
+                    out.add(DangerousActionGate.withOwnerInitiated(false, () -> ToolContext.withConversation(
+                            conversationId, () -> new AgentSpawnTool().execute(call, caller))));
+                }
+            }
+            return out;
+        });
+    }
+
+    private Request requestFor(String marker) {
+        return requests.stream().filter(r -> marker.equals(r.marker())).findFirst()
+                .orElseThrow(() -> new AssertionError("no model call for " + marker + ": " + requests));
+    }
+
+    /** What {@code subagent_spawn} returns for a synchronous child that completed with {@code reply}. */
+    private static String expectedSpawnResult(SubagentRun run, String reply) {
+        var expected = new LinkedHashMap<String, Object>();
+        expected.put("run_id", String.valueOf(run.id));
+        expected.put("conversation_id", String.valueOf(run.childConversation.id));
+        expected.put("reply", reply);
+        expected.put("status", "COMPLETED");
+        return GsonHolder.GSON.toJson(expected, Map.class);
+    }
+
     @FunctionalInterface
-    private interface ThrowingSupplier {
-        String get() throws Exception;
+    private interface ThrowingSupplier<T> {
+        T get() throws Exception;
     }
 
     /** {@code agent_spawn} as a chat turn's tool call runs it: on its own thread, in the conversation, with its sender. */
@@ -671,7 +809,7 @@ class AgentSpawnToolTest extends UnitTest {
         var handOff = argsClass.getDeclaredMethod("handOff", String.class, String.class, Long.class, int.class);
         handOff.setAccessible(true);
         var spawnOne = SubagentSpawnTool.class.getDeclaredMethod("spawnOne", JsonObject.class, Agent.class,
-                argsClass, String.class, Map.class);
+                argsClass, String.class, Map.class, AtomicInteger.class);
         spawnOne.setAccessible(true);
         var parsed = handOff.invoke(null, task, null, calleeId, 300);
         return onVirtualThread(() -> {
@@ -680,7 +818,7 @@ class AgentSpawnToolTest extends UnitTest {
                     () -> {
                         try {
                             return (String) spawnOne.invoke(null, new JsonObject(), caller, parsed,
-                                    "Agent hand-off refused: ", Map.of());
+                                    "Agent hand-off refused: ", Map.of(), null);
                         } catch (ReflectiveOperationException e) {
                             throw new AssertionError(e);
                         }

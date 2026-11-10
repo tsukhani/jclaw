@@ -789,8 +789,9 @@ Caps, timeout defaults and the model for [Subagents](/guide#subagents):
 
 | Key                               | Default | Meaning                                                                                |
 |-----------------------------------|---------|----------------------------------------------------------------------------------------|
-| `subagent.maxDepth`               | 1       | How deep the parent → child chain can go, subagents and `agent_spawn` hand-offs alike (1 = no grandchildren). |
+| `subagent.maxDepth`               | 1       | How deep the parent → child chain of subagents can go (1 = no grandchildren). An agent that `agent_spawn` hands work to starts at the top again. |
 | `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children, subagents and hand-offs together, a single parent can have in flight. |
+| `subagent.maxHandOffs`            | 10      | How many `agent_spawn` hand-offs one turn can start, counting every hand-off down the chain, a second visit to the same agent included. The next one is refused. |
 | `subagent.defaultRunTimeoutSeconds` | 300   | Idle budget (seconds with no activity) for a `subagent_spawn` call that omits `runTimeoutSeconds`. A call-site value overrides. Must be positive; anything else falls back to 300. |
 | `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. It applies only when the yield ends the turn to wait: a yield that waits inline (for a `tasks` batch child, or in a task fire) uses the child's own run timeout. |
 | `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it (e.g. a cheaper one for large evaluations). An agent that `agent_spawn` hands work to always runs on its own model. |

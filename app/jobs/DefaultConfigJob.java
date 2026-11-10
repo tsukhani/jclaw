@@ -23,6 +23,7 @@ import services.scanners.ScannerRegistry;
 import services.transcription.AsrModel;
 import services.tts.TtsEngine;
 import services.tts.TtsModel;
+import tools.AgentSpawnTool;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
@@ -354,6 +355,8 @@ public class DefaultConfigJob extends Job<Void> {
                 String.valueOf(SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
         seedIfAbsent(SubagentSpawnTool.BREADTH_LIMIT_KEY,
                 String.valueOf(SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
+        // JF-164: agent_spawn chains are bounded by a hand-off budget per turn, not by maxDepth.
+        seedIfAbsent(AgentSpawnTool.MAX_HAND_OFFS_KEY, String.valueOf(AgentSpawnTool.DEFAULT_MAX_HAND_OFFS));
         // JCLAW-424: absolute wall-clock ceiling on a single subagent run — the
         // runaway guard the idle budget (an active child never trips it) cannot
         // provide. Operator-only; 0 disables. Read by the

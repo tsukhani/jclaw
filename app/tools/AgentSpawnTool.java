@@ -9,8 +9,11 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
+import services.EventLogger;
 import services.LoadTestRunner;
+import services.SubagentRegistry;
 import services.Tx;
+import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,13 +21,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * JF-164: hands a task to another of the operator's agents and waits for its reply. The callee runs as itself, with
  * its own tools, model and prompt, in a fresh conversation of its own, through {@link SubagentSpawnTool}'s single-spawn
- * pipeline: the run row, the recursion caps, kill and the trust and task-fence inheritance are that pipeline's. No tool
+ * pipeline: the run row, the breadth cap, kill and the trust and task-fence inheritance are that pipeline's. No tool
  * comparison bounds the callee, so the tool is offered only on a turn the owner reads alone
  * ({@code ToolRegistry.OPERATOR_TURN_ONLY}).
+ *
+ * <p>Only an agent hands work on: a subagent is never offered the tool. A caller is therefore always a top-level
+ * agent, at depth 0, so {@code subagent.maxDepth} never refuses a hand-off. A chain may visit an agent again; what
+ * bounds it is the hand-off budget, {@link #MAX_HAND_OFFS_KEY}, which every hand-off under one turn nobody handed
+ * work to draws from.
  */
 public class AgentSpawnTool implements ToolRegistry.Tool {
 
@@ -35,6 +44,12 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
     static final String NOT_AN_OWNER_TURN =
             "Error: agent_spawn is available only on a turn the owner reads alone; no agent was asked.";
     static final String HAND_OFF_REFUSED = "Agent hand-off refused: ";
+    static final String NOT_FOR_A_SUBAGENT = "Error: a subagent cannot hand work to another agent. Return what you "
+            + "have to the agent that spawned you.";
+
+    /** Config-DB key (seeded by {@link jobs.DefaultConfigJob}, editable from Settings): the hand-off budget. */
+    public static final String MAX_HAND_OFFS_KEY = "subagent.maxHandOffs";
+    public static final int DEFAULT_MAX_HAND_OFFS = 10;
 
     private static final Set<String> INTERNAL_AGENTS = Set.of(LoadTestRunner.LOADTEST_AGENT_NAME,
             LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME, Agent.EVALTEST_AGENT_NAME);
@@ -145,6 +160,8 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
         var offered = turnConversationId != null ? DangerousActionGate.ownerReadsAlone(turnConversationId)
                 : AgentRunner.fireOffersOwnerTools(ToolContext.taskRunId());
         if (!offered) return NOT_AN_OWNER_TURN;
+        // Also withheld from a subagent's tools; this is the net for a call that arrives anyway.
+        if (caller.parentAgent != null) return NOT_FOR_A_SUBAGENT;
 
         JsonObject args;
         try {
@@ -163,6 +180,15 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
         var calleeId = target.id();
         var calleeName = target.name();
 
+        var handOffs = handOffCounter();
+        var budget = SubagentLimits.readPositiveIntConfig(MAX_HAND_OFFS_KEY, DEFAULT_MAX_HAND_OFFS);
+        if (handOffs.get() >= budget) {
+            var reason = "hand-off limit %d reached (hand-offs so far: %d).".formatted(budget, handOffs.get());
+            EventLogger.recordSubagentLimitExceeded(caller.name, reason);
+            return HAND_OFF_REFUSED + reason + " Reply with what you have.";
+        }
+        handOffs.incrementAndGet();
+
         var parsed = SubagentSpawnArgs.handOff(task, SubagentSpawnArgs.optString(args, SubagentSpawnTool.FIELD_LABEL),
                 calleeId, SubagentSpawnArgs.timeoutSeconds(args));
         var extras = new LinkedHashMap<String, Object>();
@@ -170,7 +196,18 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
         extras.put("agent_id", calleeId);
         extras.put("files_url", "/api/agents/" + calleeId + "/files/");
         // An empty argument object: the hand-off always runs natively.
-        return SubagentSpawnTool.spawnOne(new JsonObject(), caller, parsed, HAND_OFF_REFUSED, extras);
+        return SubagentSpawnTool.spawnOne(new JsonObject(), caller, parsed, HAND_OFF_REFUSED, extras, handOffs);
+    }
+
+    /**
+     * The counter this hand-off draws from: the one its caller's own run carries when the caller was handed work,
+     * else the calling turn's. A call outside any turn (no trace bound) counts on its own.
+     */
+    private static AtomicInteger handOffCounter() {
+        var tree = SubagentRegistry.currentHandOffs();
+        if (tree != null) return tree;
+        var turn = LatencyTrace.current();
+        return turn != null ? turn.handOffs() : new AtomicInteger();
     }
 
     /** {@code target} null refuses the hand-off with {@code error}. */

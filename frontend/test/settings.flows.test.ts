@@ -112,6 +112,7 @@ function defaultConfigEntries() {
     { key: 'verification.skipTools', value: '', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'subagent.maxDepth', value: '1', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'subagent.maxChildrenPerParent', value: '5', updatedAt: '2026-04-22T10:00:00Z' },
+    { key: 'subagent.maxHandOffs', value: '10', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'dispatcher.llm.maxRequestsPerHost', value: '64', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'dispatcher.llm.maxRequests', value: '128', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'upload.maxImageBytes', value: String(20 * 1024 * 1024),
@@ -2167,6 +2168,58 @@ describe('Settings page — Subagents maxChildrenPerParent', () => {
     const hit = captured.find(b => b.key === 'subagent.maxChildrenPerParent')
     expect(hit).toBeTruthy()
     expect(String(hit!.value)).toBe('10')
+  })
+})
+
+describe('Settings page — Subagents maxHandOffs', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('shows the seeded budget and POSTs subagent.maxHandOffs when the operator saves the field', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSettingsSection('subagents')
+
+    const editBtns = component.findAll('button[title="Edit"]')
+    const target = editBtns.find(btn => (btn.element.parentElement?.textContent ?? '').includes('maxHandOffs'))
+    expect(target).toBeTruthy()
+    expect(target!.element.parentElement!.textContent).toContain('10')
+    await target!.trigger('click')
+    await flushPromises()
+
+    const input = component.find('input[aria-label="Max hand-offs per turn"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('4')
+
+    const saveBtn = component.findAll('button[title="Save"]').find(b =>
+      b.element.parentElement?.querySelector('input[aria-label="Max hand-offs per turn"]'),
+    )
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    // A number input's v-model posts a number, as the other cap rows do.
+    expect(captured.filter(b => b.key === 'subagent.maxHandOffs')).toEqual([{ key: 'subagent.maxHandOffs', value: 4 }])
+  })
+
+  it('posts nothing when the operator cancels the edit', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSettingsSection('subagents')
+
+    const target = component.findAll('button[title="Edit"]')
+      .find(btn => (btn.element.parentElement?.textContent ?? '').includes('maxHandOffs'))
+    await target!.trigger('click')
+    await flushPromises()
+    await component.find('input[aria-label="Max hand-offs per turn"]').setValue('4')
+    const cancelBtn = component.findAll('button[title="Cancel"]').find(b =>
+      b.element.parentElement?.querySelector('input[aria-label="Max hand-offs per turn"]'),
+    )
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(captured.filter(b => b.key === 'subagent.maxHandOffs')).toEqual([])
+    expect(component.find('input[aria-label="Max hand-offs per turn"]').exists()).toBe(false)
   })
 })
 

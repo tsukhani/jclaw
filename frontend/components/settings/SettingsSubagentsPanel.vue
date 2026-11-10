@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Subagents settings panel (JCLAW-266, moved in JCLAW-680). Recursion caps for
-// the subagent_spawn tool plus the pinned subagent model; the coding-harness
+// the subagent_spawn tool, agent_spawn's hand-off budget (JF-164) and the
+// pinned subagent model; the coding-harness
 // rows live in SettingsCodingPanel. Reads the shared config store +
 // provider-model catalog; derives agent routing from its own (Nuxt-deduped)
 // /api/agents fetch.
@@ -45,6 +46,12 @@ const subagentMaxDepth = computed(() => {
 const subagentMaxChildrenPerParent = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find(e => e.key === 'subagent.maxChildrenPerParent')?.value ?? '5'
+})
+
+// The fallback mirrors AgentSpawnTool.DEFAULT_MAX_HAND_OFFS.
+const subagentMaxHandOffs = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find(e => e.key === 'subagent.maxHandOffs')?.value ?? '10'
 })
 
 // JCLAW-812: global defaults for the per-call subagent_spawn runTimeoutSeconds
@@ -123,13 +130,15 @@ async function saveSubagentModel(value: string) {
     </h2>
     <p class="text-xs text-fg-muted">
       Recursion caps for the <span class="font-mono">subagent_spawn</span> tool,
-      shared with <span class="font-mono">agent_spawn</span>: a hand-off to another
-      agent counts as one level of depth and as one running child.
+      and the hand-off budget for <span class="font-mono">agent_spawn</span>.
       <span class="font-mono">maxDepth</span> bounds how deep the parent-child
-      chain may go (1 = top-level agents may spawn, grandchildren refused);
-      <span class="font-mono">maxChildrenPerParent</span> bounds how many
-      concurrent <span class="font-mono">RUNNING</span> children a single parent
-      may have in flight. On violation the tool emits
+      chain of subagents may go (1 = top-level agents may spawn, grandchildren
+      refused); an agent that was handed work starts at the top again for its
+      own subagents. <span class="font-mono">maxChildrenPerParent</span> bounds
+      how many concurrent <span class="font-mono">RUNNING</span> children,
+      subagents and hand-offs together, a single parent may have in flight.
+      <span class="font-mono">maxHandOffs</span> bounds how many hand-offs one
+      turn may start, counting every hand-off down the chain. On violation the tool emits
       <span class="font-mono">SUBAGENT_LIMIT_EXCEEDED</span> and returns a
       plain-text refusal to the model. The two
       <span class="font-mono">default…TimeoutSeconds</span> rows set the fallback
@@ -145,7 +154,7 @@ async function saveSubagentModel(value: string) {
               label="About maxDepth"
               content-class="w-64 font-mono"
             >
-              Max recursion depth for subagent_spawn and agent_spawn alike. 1 = only top-level agents may spawn or hand off; a child, or an agent that was handed work, is refused.
+              Max recursion depth for subagent_spawn. 1 = only top-level agents may spawn; a subagent trying to spawn its own is refused. An agent that agent_spawn hands work to is a top-level agent, so its own subagents count from 0.
             </InfoTip>
           </span>
           <template v-if="editingSubagentField === 'maxDepth'">
@@ -238,6 +247,60 @@ async function saveSubagentModel(value: string) {
               class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
               title="Edit"
               @click="editingSubagentField = 'maxChildrenPerParent'; subagentFieldEdit = subagentMaxChildrenPerParent"
+            >
+              <PencilIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </div>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
+            maxHandOffs
+            <InfoTip
+              label="About maxHandOffs"
+              content-class="w-64 font-mono"
+            >
+              Max agent_spawn hand-offs one turn may start, counting every hand-off down the chain, a second visit to the same agent included. The next one is refused, and the agent replies with what it has.
+            </InfoTip>
+          </span>
+          <template v-if="editingSubagentField === 'maxHandOffs'">
+            <input
+              v-model="subagentFieldEdit"
+              type="number"
+              min="1"
+              max="100"
+              aria-label="Max hand-offs per turn"
+              class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              @click="saveSubagentField('subagent.maxHandOffs', subagentFieldEdit)"
+            >
+              <CheckIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              @click="editingSubagentField = null"
+            >
+              <XMarkIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 text-sm text-fg-primary font-mono">{{ subagentMaxHandOffs }}</span>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Edit"
+              @click="editingSubagentField = 'maxHandOffs'; subagentFieldEdit = subagentMaxHandOffs"
             >
               <PencilIcon
                 class="w-3.5 h-3.5"

@@ -855,6 +855,9 @@ public class ToolRegistry {
         for (var entry : explicitState.entrySet()) {
             if (Boolean.FALSE.equals(entry.getValue())) disabled.add(entry.getKey());
         }
+        // JF-164: a subagent is a helper copy working for its parent, not a member of the hand-off graph, so no
+        // grant gives it agent_spawn.
+        if (agent.parentAgent != null) disabled.add(AGENT_SPAWN_TOOL);
         // JCLAW-883: the eval agent inverts the default — every tool is opt-in, not
         // just the costly ones below. An eval sweep runs unattended and its suites
         // deliberately provoke tool selection, so a tool nobody granted must not be

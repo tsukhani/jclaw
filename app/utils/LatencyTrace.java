@@ -68,6 +68,7 @@ public final class LatencyTrace {
     private final AtomicInteger llmCachedCallCount = new AtomicInteger();
     private final AtomicInteger toolVerifyCount = new AtomicInteger();
     private final AtomicInteger toolVerifyFailedCount = new AtomicInteger();
+    private final AtomicInteger handOffs = new AtomicInteger();
     private final AtomicBoolean ended = new AtomicBoolean();
 
     // Turn binding for the provider dispatch point (JCLAW-882). LlmProvider holds
@@ -305,6 +306,15 @@ public final class LatencyTrace {
      */
     public int llmCallCount() {
         return llmCallCount.get();
+    }
+
+    /**
+     * The {@code agent_spawn} hand-offs this turn started, counting every hand-off under them, which the hand-off
+     * budget ({@code subagent.maxHandOffs}) is checked against (JF-164). The trace holds it because the trace is the
+     * one object a turn's tool threads share: {@link agents.ParallelToolExecutor} binds it on each.
+     */
+    public AtomicInteger handOffs() {
+        return handOffs;
     }
 
     /**

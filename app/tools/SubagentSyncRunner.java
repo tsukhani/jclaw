@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * JCLAW-677: synchronous child dispatch and the timeout/cancel policy,
@@ -59,7 +60,8 @@ final class SubagentSyncRunner {
     @SuppressWarnings("java:S1181")
     static SyncRunOutcome runChildSynchronously(Long runId, @Nullable Long childAgentId,
                                                 @Nullable Long childConvId, String task,
-                                                int timeoutSeconds, boolean inlineMode, int depth) {
+                                                int timeoutSeconds, boolean inlineMode,
+                                                @Nullable AtomicInteger handOffs) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
@@ -70,7 +72,7 @@ final class SubagentSyncRunner {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                future.complete(SubagentRegistry.callAsRun(runId, depth,
+                future.complete(SubagentRegistry.callAsRun(runId, handOffs,
                         () -> SubagentAcpRunner.executeChildRun(runId, childAgent, childConv, task, inlineMode)));
             } catch (Throwable t) {
                 future.completeExceptionally(t);

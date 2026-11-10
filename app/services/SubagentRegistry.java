@@ -24,6 +24,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -92,11 +93,13 @@ public final class SubagentRegistry {
     /**
      * A child thread's run and its stop flag. The awaiting side unregisters a timed-out or
      * killed run while the child can still be mid-tool, so the child keeps the flag itself.
+     * {@code handOffs} counts the {@code agent_spawn} hand-offs of the tree this run belongs to: one counter,
+     * shared by the first hand-off and every hand-off under it. Null for a run no hand-off started.
      */
-    public record RunScope(Long runId, AtomicBoolean stopFlag, int depth) {
-        /** A run whose depth nobody recorded, which can only be a first-level child. */
+    public record RunScope(Long runId, AtomicBoolean stopFlag, @Nullable AtomicInteger handOffs) {
+        /** A run no hand-off started. */
         public RunScope(Long runId, AtomicBoolean stopFlag) {
-            this(runId, stopFlag, 1);
+            this(runId, stopFlag, null);
         }
 
         public boolean stopRequested() {
@@ -155,28 +158,28 @@ public final class SubagentRegistry {
         ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false), new AtomicLong(System.nanoTime())));
     }
 
-    /** {@link #callAsRun(Long, int, CallableOp)} for a first-level child. */
+    /** {@link #callAsRun(Long, AtomicInteger, CallableOp)} for a run no hand-off started. */
     public static <R, X extends Throwable> R callAsRun(Long runId, CallableOp<R, X> body) throws X {
-        return callAsRun(runId, 1, body);
+        return callAsRun(runId, null, body);
     }
 
     /**
-     * Call {@code body} as run {@code runId}'s child thread, {@code depth} spawns below a top-level turn; a run that
+     * Call {@code body} as run {@code runId}'s child thread, in the hand-off tree {@code handOffs} counts; a run that
      * isn't registered calls it unbound.
      */
-    public static <R, X extends Throwable> R callAsRun(Long runId, int depth, CallableOp<R, X> body) throws X {
+    public static <R, X extends Throwable> R callAsRun(Long runId, @Nullable AtomicInteger handOffs,
+                                                       CallableOp<R, X> body) throws X {
         var entry = ACTIVE.get(runId);
         if (entry == null) return body.call();
-        return ScopedValue.where(CURRENT_RUN, new RunScope(runId, entry.cancelRequested(), depth)).call(body);
+        return ScopedValue.where(CURRENT_RUN, new RunScope(runId, entry.cancelRequested(), handOffs)).call(body);
     }
 
     /**
-     * How many spawns below a top-level turn this thread runs: 0 outside a run. An {@code agent_spawn} callee is a
-     * top-level agent, so only the run chain counts it; a {@link ScopedValue} does not cross a new thread, so read
-     * it on the spawning thread.
+     * The hand-off counter of the tree this thread's run belongs to, or null outside one. A {@link ScopedValue} does
+     * not cross a new thread, so read it on the spawning thread.
      */
-    public static int currentRunDepth() {
-        return CURRENT_RUN.isBound() ? CURRENT_RUN.get().depth() : 0;
+    public static @Nullable AtomicInteger currentHandOffs() {
+        return CURRENT_RUN.isBound() ? CURRENT_RUN.get().handOffs() : null;
     }
 
     /** The run bound to this thread by {@link #callAsRun}, or null when the thread runs no child. */
