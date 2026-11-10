@@ -484,11 +484,13 @@ class ControllerApiTest extends FunctionalTest {
             assertContentType("application/json", response);
             var content = getContent(response);
             assertTrue(content.startsWith("["), "response is a JSON array");
-            // Backend taxonomy — every tool must carry category/icon/shortDescription/actions.
+            // Backend taxonomy — every tool must carry category/icon/shortDescription and its action count;
+            // the actions themselves come from GET /api/tools/{name} (JF-142).
             assertTrue(content.contains("\"category\""),         "carries category");
             assertTrue(content.contains("\"icon\""),             "carries icon");
             assertTrue(content.contains("\"shortDescription\""), "carries shortDescription");
-            assertTrue(content.contains("\"actions\""),          "carries actions");
+            assertTrue(content.contains("\"actionCount\""),      "carries the action count");
+            assertFalse(content.contains("\"actions\""),         "leaves the actions to the single read");
             // Concrete category values from the published tool set.
             assertTrue(content.contains("\"System\""),    "exec is System-category");
             assertTrue(content.contains("\"Files\""),     "filesystem is Files");

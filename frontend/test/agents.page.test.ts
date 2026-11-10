@@ -48,13 +48,13 @@ function setupAgentsApi() {
   }))
   registerEndpoint('/api/tools/meta', () => [
     { name: 'exec', category: 'System', icon: 'terminal',
-      shortDescription: 'Shell', system: false, actions: [] },
+      shortDescription: 'Shell', group: null, enabled: true, requiresConfig: null, actionCount: 1 },
   ])
   registerEndpoint('/api/agents/1/tools', () => [
-    { name: 'exec', description: 'Execute shell', system: false, enabled: true },
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: true },
   ])
   registerEndpoint('/api/agents/2/tools', () => [
-    { name: 'exec', description: 'Execute shell', system: false, enabled: false },
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: false },
   ])
   registerEndpoint('/api/agents/1/skills', () => [])
   registerEndpoint('/api/agents/2/skills', () => [])

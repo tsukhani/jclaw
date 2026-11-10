@@ -1,10 +1,27 @@
+import agents.ToolAction;
+import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import mcp.McpServerTool;
+import mcp.McpToolAdapter;
+import mcp.McpToolDef;
 import models.Agent;
 import models.AgentToolConfig;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.AgentService;
+import services.ConfigService;
+import tools.JClawApiTool;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 class ApiToolsControllerTest extends FunctionalTest {
 
@@ -123,8 +140,7 @@ class ApiToolsControllerTest extends FunctionalTest {
             var group = obj.get("group");
             boolean isNative = group == null || group.isJsonNull();
             if (!isNative) continue;
-            var actions = obj.getAsJsonArray("actions");
-            if (actions == null || actions.size() == 0) {
+            if (obj.get("actionCount").getAsInt() == 0) {
                 offenders.add(obj.get("name").getAsString());
             }
         }
@@ -158,7 +174,7 @@ class ApiToolsControllerTest extends FunctionalTest {
 
         var body = getContent(GET("/api/agents/" + id + "/tools"));
         // Gson emits no spaces, so a name/flag pair is contiguous per entry.
-        assertTrue(body.contains("\"name\":\"datetime\",\"description\""),
+        assertTrue(body.contains("\"name\":\"datetime\",\"group\""),
                 "sanity: the listing should include a default-ON native tool");
 
         // The bug this pins: these tools are hidden from the model unless a row
@@ -387,5 +403,282 @@ class ApiToolsControllerTest extends FunctionalTest {
         });
         assertTrue(survivorsIntact,
                 "the server-level row and the unrelated native row both survive");
+    }
+
+    // --- JF-142: catalog rows, and one tool's own read ---
+
+    /** A registry entry carrying only what the catalogs and the single read report; nothing executes it. */
+    private record CatalogTool(String name, @Nullable String group, boolean isServerLevel, String category, String icon,
+                               String shortDescription, String description, @Nullable String requiresConfig,
+                               List<ToolAction> actions) implements ToolRegistry.Tool {
+        @Override
+        public Map<String, Object> parameters() {
+            return Map.of("type", "object");
+        }
+
+        @Override
+        public String execute(String argsJson, Agent agent) {
+            throw new AssertionError("a catalog test runs no tool");
+        }
+    }
+
+    private static final List<ToolAction> FAKE_ACTIONS = List.of(
+            new ToolAction("create_issue", "Create an issue."),
+            new ToolAction("search_issues", "Search issues."),
+            new ToolAction("add_comment", "Comment on an issue."));
+
+    /** Every group published here, unpublished by {@link #withExternalGroups}. */
+    private final List<String> published = new ArrayList<>();
+
+    /** Runs {@code body} on the canonical natives plus each external group {@code publish} adds, holding the registry lock. */
+    private void withExternalGroups(ToolRegistrySync.ThrowingBody publish, ToolRegistrySync.ThrowingBody body) throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        try {
+            publish.run();
+            body.run();
+        } finally {
+            published.forEach(ToolRegistry::unpublishExternal);
+            published.clear();
+            ToolRegistrySync.release();
+        }
+    }
+
+    private void publishGroup(String group, List<ToolRegistry.Tool> tools) {
+        published.add(group);
+        ToolRegistry.publishExternal(group, tools);
+    }
+
+    /** An MCP-shaped group: its server-level handle {@code mcp_<server>} listing {@link #FAKE_ACTIONS}, and one adapter per action. */
+    private void publishFakeServer(String server) {
+        var tools = new ArrayList<ToolRegistry.Tool>();
+        tools.add(new CatalogTool("mcp_" + server, server, true, "MCP", "plug", "Handle for " + server + ".",
+                "MCP server " + server + ", in full.", null, FAKE_ACTIONS));
+        for (var action : FAKE_ACTIONS) {
+            tools.add(new CatalogTool("mcp_" + server + "_" + action.name(), server, false, "MCP", "plug",
+                    action.description(), action.description(), null, List.of(action)));
+        }
+        publishGroup(server, tools);
+    }
+
+    private static JsonArray readArray(String url) {
+        return JsonParser.parseString(getContent(GET(url))).getAsJsonArray();
+    }
+
+    private static @Nullable JsonObject rowNamed(JsonArray rows, String name) {
+        for (var e : rows) {
+            if (e.getAsJsonObject().get("name").getAsString().equals(name)) return e.getAsJsonObject();
+        }
+        return null;
+    }
+
+    private static List<String> names(JsonArray rows) {
+        var out = new ArrayList<String>();
+        for (var e : rows) out.add(e.getAsJsonObject().get("name").getAsString());
+        return out;
+    }
+
+    private static JsonObject json(String literal) {
+        return JsonParser.parseString(literal).getAsJsonObject();
+    }
+
+    @Test
+    void aCatalogRowIsTheNameGroupEnabledStateAndOneLineSummary() throws Exception {
+        login();
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var datetime = ToolRegistry.lookupTool("datetime");
+            assertNotNull(datetime);
+            var expected = new JsonObject();
+            expected.addProperty("name", "datetime");
+            expected.add("group", JsonNull.INSTANCE);
+            expected.addProperty("enabled", true);
+            expected.addProperty("shortDescription", datetime.shortDescription());
+
+            assertEquals(expected, rowNamed(readArray("/api/tools"), "datetime"));
+        });
+    }
+
+    @Test
+    void aMetaRowKeepsTheCardFieldsAndCountsTheActionsInPlaceOfListingThem() throws Exception {
+        login();
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var filesystem = ToolRegistry.lookupTool("filesystem");
+            assertNotNull(filesystem);
+            var expected = new JsonObject();
+            expected.addProperty("name", "filesystem");
+            expected.add("group", JsonNull.INSTANCE);
+            expected.addProperty("enabled", true);
+            expected.addProperty("shortDescription", filesystem.shortDescription());
+            expected.addProperty("category", "Files");
+            expected.addProperty("icon", filesystem.icon());
+            expected.add("requiresConfig", JsonNull.INSTANCE);
+            expected.addProperty("actionCount", filesystem.actions().size());
+
+            assertEquals(expected, rowNamed(readArray("/api/tools/meta"), "filesystem"));
+            assertTrue(filesystem.actions().size() > 1, "sanity: filesystem has several actions to count");
+        });
+    }
+
+    @Test
+    void anAgentRowIsTheNameGroupItsOwnEnabledStateAndOneLineSummary() throws Exception {
+        login();
+        var id = createAgent("tools-row-shape-agent");
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var rows = readArray("/api/agents/" + id + "/tools");
+            for (var pair : List.of(List.of("datetime", "true"), List.of("printer", "false"))) {
+                var tool = ToolRegistry.lookupTool(pair.get(0));
+                assertNotNull(tool);
+                var expected = new JsonObject();
+                expected.addProperty("name", pair.get(0));
+                expected.add("group", JsonNull.INSTANCE);
+                expected.addProperty("enabled", Boolean.parseBoolean(pair.get(1)));
+                expected.addProperty("shortDescription", tool.shortDescription());
+                assertEquals(expected, rowNamed(rows, pair.get(0)));
+            }
+        });
+    }
+
+    @Test
+    void theCatalogsListAnMcpServerOnceByItsHandleWithItsActionCount() throws Exception {
+        login();
+        var id = createAgent("tools-mcp-fold-agent");
+        var server = "jf142-" + UUID.randomUUID().toString().substring(0, 8);
+        withExternalGroups(() -> publishFakeServer(server), () -> {
+            var handle = "mcp_" + server;
+            for (var url : List.of("/api/tools", "/api/tools/meta", "/api/agents/" + id + "/tools")) {
+                var listed = names(readArray(url)).stream().filter(n -> n.startsWith(handle)).toList();
+                assertEquals(List.of(handle), listed, url + " lists the server by its handle alone");
+            }
+            var meta = rowNamed(readArray("/api/tools/meta"), handle);
+            assertNotNull(meta);
+            assertEquals(server, meta.get("group").getAsString());
+            assertEquals("MCP", meta.get("category").getAsString());
+            assertEquals(3, meta.get("actionCount").getAsInt());
+            var agentRow = rowNamed(readArray("/api/agents/" + id + "/tools"), handle);
+            assertNotNull(agentRow);
+            assertFalse(agentRow.get("enabled").getAsBoolean(), "an MCP server is off for a non-main agent until granted");
+        });
+    }
+
+    @Test
+    void theSingleReadReturnsOneToolsFullDescriptionAndActions() throws Exception {
+        login();
+        ToolRegistrySync.withCanonicalTools(() -> {
+            var filesystem = ToolRegistry.lookupTool("filesystem");
+            assertNotNull(filesystem);
+            var resp = GET("/api/tools/filesystem");
+            assertIsOk(resp);
+            assertContentType("application/json", resp);
+
+            var expected = new JsonObject();
+            expected.addProperty("name", "filesystem");
+            expected.add("group", JsonNull.INSTANCE);
+            expected.addProperty("enabled", true);
+            expected.addProperty("shortDescription", filesystem.shortDescription());
+            expected.addProperty("category", "Files");
+            expected.addProperty("icon", filesystem.icon());
+            expected.add("requiresConfig", JsonNull.INSTANCE);
+            expected.addProperty("description", filesystem.description());
+            expected.add("actions", utils.GsonHolder.GSON.toJsonTree(filesystem.actions()));
+            assertEquals(expected, json(getContent(resp)));
+        });
+    }
+
+    @Test
+    void theSingleReadOfAnMcpHandleListsTheServersActions() throws Exception {
+        login();
+        var server = "jf142-" + UUID.randomUUID().toString().substring(0, 8);
+        withExternalGroups(() -> publishFakeServer(server), () -> {
+            var body = json(getContent(GET("/api/tools/mcp_" + server)));
+            assertEquals("MCP server " + server + ", in full.", body.get("description").getAsString());
+            assertEquals(json("{\"a\":[{\"name\":\"create_issue\",\"description\":\"Create an issue.\"},"
+                            + "{\"name\":\"search_issues\",\"description\":\"Search issues.\"},"
+                            + "{\"name\":\"add_comment\",\"description\":\"Comment on an issue.\"}]}").get("a"),
+                    body.get("actions"));
+        });
+    }
+
+    @Test
+    void theSingleReadOfAnUnknownNameIsA404() {
+        login();
+        var resp = GET("/api/tools/no_such_tool_jf142");
+        assertEquals(404, resp.status.intValue());
+        var body = json(getContent(resp));
+        assertEquals("not_found", body.get("code").getAsString());
+        assertEquals("No tool named 'no_such_tool_jf142' is registered.", body.get("message").getAsString());
+    }
+
+    @Test
+    void theSingleReadRequiresAuth() {
+        assertEquals(401, GET("/api/tools/filesystem").status.intValue());
+    }
+
+    @Test
+    void aToolIsEnabledInTheCatalogsOnlyWhileTheConfigKeyItRequiresIsTrue() throws Exception {
+        login();
+        var suffix = UUID.randomUUID().toString().substring(0, 8);
+        var name = "jf142_gated_" + suffix;
+        var key = "jf142.test." + suffix + ".enabled";
+        withExternalGroups(() -> publishGroup("jf142-gated-" + suffix, List.of(new CatalogTool(name, null, false,
+                "Utilities", "wrench", "Gated.", "Gated, in full.", key, List.of(new ToolAction("run", "Run."))))), () -> {
+            try {
+                for (var value : java.util.Arrays.asList(null, "false", "true")) {
+                    if (value != null) ConfigService.set(key, value);
+                    var expected = "true".equals(value);
+                    for (var url : List.of("/api/tools", "/api/tools/meta")) {
+                        var row = rowNamed(readArray(url), name);
+                        assertNotNull(row, url);
+                        assertEquals(expected, row.get("enabled").getAsBoolean(), url + " with " + key + "=" + value);
+                    }
+                    assertEquals(expected, json(getContent(GET("/api/tools/" + name))).get("enabled").getAsBoolean());
+                    assertEquals(key, rowNamed(readArray("/api/tools/meta"), name).get("requiresConfig").getAsString());
+                }
+            } finally {
+                ConfigService.delete(key);
+            }
+        });
+    }
+
+    /**
+     * The live instance had 680 tools registered on 2026-10-27, 26 of them MCP server handles and most of the rest
+     * those servers' per-action adapters, when every catalog read came out over jclaw_api's cap.
+     */
+    @Test
+    void withSixHundredEightyToolsRegisteredEveryCatalogReadFitsUnderTheCap() throws Exception {
+        login();
+        var id = createAgent("tools-size-agent");
+        var servers = 26;
+        var description = "Searches the connected service for records matching a query and returns each match with "
+                + "its identifier, title, owner, status, timestamps and a link, paged by a cursor the caller passes "
+                + "back. Filters narrow by owner, status, label and date range; an empty query returns the most recent "
+                + "records first. Rate limits apply per token, and a refused call reports the wait.";
+        var adapterChars = new long[1];
+        var natives = new int[1];
+        withExternalGroups(() -> {
+            natives[0] = ToolRegistry.listTools().size();
+            var adapters = 680 - natives[0] - servers;
+            for (int i = 0; i < servers; i++) {
+                var server = "jf142-size-" + i + "-" + UUID.randomUUID().toString().substring(0, 4);
+                var tools = new ArrayList<ToolRegistry.Tool>();
+                tools.add(new McpServerTool(server));
+                for (int j = i; j < adapters; j += servers) {
+                    var def = new McpToolDef("search_records_number_" + j, description, new JsonObject());
+                    tools.add(new McpToolAdapter(server, def, (s, t, a) -> {
+                        throw new AssertionError("a catalog test runs no tool");
+                    }));
+                    adapterChars[0] += description.length();
+                }
+                publishGroup(server, tools);
+            }
+        }, () -> {
+            assertEquals(680, ToolRegistry.listTools().size(), "the registry holds the live instance's tool count");
+            assertTrue(adapterChars[0] > JClawApiTool.MAX_RESPONSE_CHARS,
+                    "sanity: the adapters' descriptions alone would not fit, so the check below measures the fold");
+            for (var url : List.of("/api/tools", "/api/tools/meta", "/api/agents/" + id + "/tools")) {
+                var body = getContent(GET(url));
+                assertEquals(natives[0] + servers, JsonParser.parseString(body).getAsJsonArray().size(), url);
+                assertTrue(body.length() < JClawApiTool.MAX_RESPONSE_CHARS,
+                        url + " is " + body.length() + " characters");
+            }
+        });
     }
 }

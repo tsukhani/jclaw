@@ -13,6 +13,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from '@lucide/vue'
+import AgentToolDetail from '~/components/agents/AgentToolDetail.vue'
 import AgentWorkspaceManager from '~/components/agents/AgentWorkspaceManager.vue'
 import { renderMarkdown } from '~/utils/chat-markdown'
 import {
@@ -26,10 +27,12 @@ import {
   withSentinels,
 } from '~/utils/injection-highlight'
 import { lineDiff } from '~/utils/line-diff'
+import type { ToolDetail } from '~/composables/useToolMeta'
 import type {
   Agent,
   AgentSkill,
   AgentTool,
+  ApiErrorDetails,
   ConfigResponse,
   ConfigValueResponse,
   CoreMigrationStatus,
@@ -337,7 +340,7 @@ const allowlistExpanded = ref(false)
 
 // Group agentTools by category, in the canonical order from useToolMeta.
 // Each entry is { category, tools[] } — empty categories are omitted.
-const { TOOL_META, getToolMeta, getPillClass, refresh: refreshTools } = useToolMeta()
+const { TOOL_META, getToolMeta, getPillClass, refresh: refreshTools, loadDetail } = useToolMeta()
 
 // Force a refetch on visit so the MCP rows in the agent's tools section
 // reflect live server state (an operator who disabled a server in
@@ -444,58 +447,59 @@ const toolsByCategory = computed(() => {
 type McpServerRow = {
   key: string
   server: string
+  /** The server-level handle (mcp_<server>): the row the toggle governs, and the tool whose read lists the actions. */
+  toolName: string
   enabled: boolean
-  /**
-   * Per-action read-only display: every tool the server advertises, minus
-   * the server-level handle itself. Post-Phase-6 these aren't individually
-   * toggleable — the agent gets the whole server or nothing — but the
-   * operator still wants to see what the agent has access to.
-   */
-  actions: { name: string, description: string }[]
+  actionCount: number
 }
 const mcpServerRows = computed<McpServerRow[]>(() => {
-  const buckets = new Map<string, AgentTool[]>()
-  for (const t of agentTools.value) {
-    const group = (t.group as string | undefined) ?? null
-    if (!group) continue
-    let bucket = buckets.get(group)
-    if (!bucket) {
-      bucket = []
-      buckets.set(group, bucket)
-    }
-    bucket.push(t)
-  }
+  // The tool list carries one handle per server; its per-action adapters fold into it (JF-142).
   const rows: McpServerRow[] = []
-  for (const [server, members] of buckets) {
-    // The server-level handle (mcp_<server>) is the row that the toggle
-    // governs and the only one with an explicit AgentToolConfig row post-
-    // Phase-6. Per-action members are shown read-only beneath the toggle.
-    const handleName = `mcp_${server}`
-    const serverHandle = members.find(m => m.name === handleName)
-    const actions = members
-      .filter(m => m.name !== handleName)
-      .map(m => ({ name: m.name, description: m.description ?? '' }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+  for (const t of agentTools.value) {
+    const server = t.group ?? null
+    if (!server) continue
     rows.push({
       key: `mcp:${server}`,
       server,
-      enabled: serverHandle?.enabled ?? false,
-      actions,
+      toolName: t.name,
+      enabled: t.enabled,
+      actionCount: getToolMeta(t.name)?.actionCount ?? 0,
     })
   }
-  // Sort alphabetically by server name for stable rendering.
   rows.sort((a, b) => a.server.localeCompare(b.server))
   return rows
 })
 
+function functionsLabel(name: string): string {
+  const count = getToolMeta(name)?.actionCount ?? 0
+  return `${count} function${count === 1 ? '' : 's'}`
+}
+
 /**
- * Per-server expanded-action-list disclosure state on the agent edit panel.
- * Tracks the server name (not key) so the state survives a re-fetch that
- * may rebuild row identities.
+ * The one tool row open on the editor, native or MCP. Its description and actions come from the tool's own read
+ * (the tool list carries only the action count), guarded so a slow read cannot fill a row opened after it. Tracked by
+ * tool name so it survives a re-fetch that rebuilds the rows.
  */
-const expandedMcpServer = ref<string | null>(null)
-function toggleMcpExpand(server: string) {
-  expandedMcpServer.value = expandedMcpServer.value === server ? null : server
+const openedTool = ref<string | null>(null)
+const openedToolDetail = ref<ToolDetail | null>(null)
+const openedToolError = ref<ApiErrorDetails | null>(null)
+const toolDetailLoads = useLatestRequest()
+async function toggleToolDetail(name: string) {
+  if (openedTool.value === name) {
+    openedTool.value = null
+    return
+  }
+  openedTool.value = name
+  openedToolDetail.value = null
+  openedToolError.value = null
+  const token = toolDetailLoads.begin()
+  try {
+    const detail = await loadDetail(name)
+    if (toolDetailLoads.isCurrent(token)) openedToolDetail.value = detail
+  }
+  catch (e) {
+    if (toolDetailLoads.isCurrent(token)) openedToolError.value = apiErrorDetails(e)
+  }
 }
 
 // JCLAW-465: per-agent content-compression enable, managed in its own
@@ -1182,10 +1186,9 @@ async function toggleTool(tool: AgentTool) {
 async function toggleToolGroup(group: string, enabled: boolean) {
   if (!editing.value) return
   // Optimistic local update so the toggle animates without a roundtrip.
-  // Only flip the server-level handle (mcp_<group>) — that's the single
-  // row the backend writes post-Phase-6; per-action wrappers no longer
-  // carry independent enablement, their `enabled` falls out of the
-  // default policy in ApiToolsController.listForAgent.
+  // Only the server-level handle (mcp_<group>) carries the server's
+  // enablement: it is the single row the backend writes post-Phase-6,
+  // and the server's only row in the agent's tool list.
   const handleName = `mcp_${group}`
   const handle = agentTools.value.find(t => t.name === handleName)
   const previous = handle?.enabled ?? false
@@ -2914,90 +2917,104 @@ const agentKinds = [
               <div
                 v-for="row in catGroup.rows"
                 :key="row.key"
-                class="px-4 py-3 flex items-center gap-3"
               >
-                <template v-if="row.kind === 'group'">
-                  <!-- Violet plug icon for MCP groups, matching the /tools page MCP card -->
-                  <div class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15">
-                    <PuzzlePieceIcon
-                      class="w-4 h-4 text-violet-700 dark:text-violet-400"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.group }}</span>
-                    <div class="mt-1.5">
-                      <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
-                        {{ row.functionCount }} function{{ row.functionCount === 1 ? '' : 's' }}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    :title="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
-                    role="switch"
-                    :aria-checked="row.enabled"
-                    :aria-label="`${row.group} for this agent`"
-                    :disabled="savingMcp"
-                    class="shrink-0 disabled:opacity-50"
-                    @click="toggleToolGroup(row.group, !row.enabled)"
-                  >
-                    <div
-                      class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                      :class="row.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
-                    >
-                      <div
-                        class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                        :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
+                <div class="px-4 py-3 flex items-center gap-3">
+                  <template v-if="row.kind === 'group'">
+                    <!-- Violet plug icon for MCP groups, matching the /tools page MCP card -->
+                    <div class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15">
+                      <PuzzlePieceIcon
+                        class="w-4 h-4 text-violet-700 dark:text-violet-400"
+                        aria-hidden="true"
                       />
                     </div>
-                  </button>
-                </template>
-                <template v-else>
-                  <!-- Single native tool: existing render -->
-                  <div
-                    class="w-8 h-8 rounded flex items-center justify-center shrink-0"
-                    :class="getToolMeta(row.tool.name)?.iconBg ?? 'bg-muted'"
-                  >
-                    <component
-                      :is="toolIconComponent(row.tool.name)"
-                      class="w-4 h-4"
-                      :class="[getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted', toolIconExtraClass(row.tool.name)]"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.tool.name }}</span>
-                    <div class="flex flex-wrap gap-1 mt-1.5">
-                      <span
-                        v-for="fn in (getToolMeta(row.tool.name)?.functions ?? [])"
-                        :key="fn.name"
-                        class="text-xs font-mono px-1.5 py-0.5 border rounded-sm"
-                        :class="getPillClass(row.tool.name)"
+                    <div class="flex-1 min-w-0">
+                      <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.group }}</span>
+                      <div class="mt-1.5">
+                        <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
+                          {{ row.functionCount }} function{{ row.functionCount === 1 ? '' : 's' }}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      :title="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
+                      role="switch"
+                      :aria-checked="row.enabled"
+                      :aria-label="`${row.group} for this agent`"
+                      :disabled="savingMcp"
+                      class="shrink-0 disabled:opacity-50"
+                      @click="toggleToolGroup(row.group, !row.enabled)"
+                    >
+                      <div
+                        class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                        :class="row.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
                       >
-                        {{ fn.name }}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    :title="row.tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
-                    :disabled="savingTools"
-                    class="shrink-0 disabled:opacity-50"
-                    role="switch"
-                    :aria-checked="row.tool.enabled"
-                    :aria-label="`${row.tool.name} tool for this agent`"
-                    @click="toggleTool(row.tool)"
-                  >
+                        <div
+                          class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                          :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
+                        />
+                      </div>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <!-- Single native tool: existing render -->
                     <div
-                      class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                      :class="row.tool.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
+                      class="w-8 h-8 rounded flex items-center justify-center shrink-0"
+                      :class="getToolMeta(row.tool.name)?.iconBg ?? 'bg-muted'"
                     >
-                      <div
-                        class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                        :class="row.tool.enabled ? 'left-[18px]' : 'left-0.5'"
+                      <component
+                        :is="toolIconComponent(row.tool.name)"
+                        class="w-4 h-4"
+                        :class="[getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted', toolIconExtraClass(row.tool.name)]"
+                        aria-hidden="true"
                       />
                     </div>
-                  </button>
-                </template>
+                    <div class="flex-1 min-w-0">
+                      <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.tool.name }}</span>
+                      <div class="mt-1.5">
+                        <button
+                          class="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 border rounded-sm"
+                          :class="getPillClass(row.tool.name)"
+                          :aria-expanded="openedTool === row.tool.name"
+                          :aria-label="`${functionsLabel(row.tool.name)} of ${row.tool.name}`"
+                          @click="toggleToolDetail(row.tool.name)"
+                        >
+                          {{ functionsLabel(row.tool.name) }}
+                          <ChevronDownIcon
+                            class="w-3 h-3 transition-transform duration-150"
+                            :class="{ 'rotate-180': openedTool === row.tool.name }"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      :title="row.tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
+                      :disabled="savingTools"
+                      class="shrink-0 disabled:opacity-50"
+                      role="switch"
+                      :aria-checked="row.tool.enabled"
+                      :aria-label="`${row.tool.name} tool for this agent`"
+                      @click="toggleTool(row.tool)"
+                    >
+                      <div
+                        class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                        :class="row.tool.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
+                      >
+                        <div
+                          class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                          :class="row.tool.enabled ? 'left-[18px]' : 'left-0.5'"
+                        />
+                      </div>
+                    </button>
+                  </template>
+                </div>
+                <AgentToolDetail
+                  v-if="row.kind === 'tool' && openedTool === row.tool.name"
+                  :detail="openedToolDetail"
+                  :error="openedToolError"
+                  heading="Functions"
+                  show-description
+                />
               </div>
             </div>
           </template>
@@ -3038,15 +3055,15 @@ const agentKinds = [
           >
             <div class="px-4 py-3 flex items-center gap-3">
               <button
-                :title="expandedMcpServer === row.server ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
-                :aria-label="expandedMcpServer === row.server ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
-                :aria-expanded="expandedMcpServer === row.server"
+                :title="openedTool === row.toolName ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
+                :aria-label="openedTool === row.toolName ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
+                :aria-expanded="openedTool === row.toolName"
                 class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15 hover:bg-violet-500/25 transition-colors"
-                @click="toggleMcpExpand(row.server)"
+                @click="toggleToolDetail(row.toolName)"
               >
                 <ChevronRightIcon
                   class="w-4 h-4 text-violet-700 dark:text-violet-400 transition-transform duration-150"
-                  :class="{ 'rotate-90': expandedMcpServer === row.server }"
+                  :class="{ 'rotate-90': openedTool === row.toolName }"
                   aria-hidden="true"
                 />
               </button>
@@ -3054,7 +3071,7 @@ const agentKinds = [
                 <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.server }}</span>
                 <div class="mt-1.5">
                   <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
-                    {{ row.actions.length }} action{{ row.actions.length === 1 ? '' : 's' }}
+                    {{ row.actionCount }} action{{ row.actionCount === 1 ? '' : 's' }}
                   </span>
                 </div>
               </div>
@@ -3083,45 +3100,12 @@ const agentKinds = [
                  the server level), but they still need visibility into
                  what each server exposes. Collapsed by default to keep
                  the agent edit panel scannable. -->
-            <!-- Same divider+ordinal layout used on the /mcp-servers page
-                 expanded tool list. Header bar names the row count so the
-                 operator can tell at a glance how many actions a server
-                 actually exposes; hairline dividers + zero-padded indices
-                 break up the otherwise-unstructured wall of names so a
-                 119-tool server (google-workspace) stays scannable. -->
-            <div
-              v-if="expandedMcpServer === row.server && row.actions.length"
-              class="px-4 pb-3 pl-14"
-            >
-              <div class="border border-border">
-                <div class="flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border">
-                  <span class="text-[11px] uppercase tracking-wider font-medium text-fg-muted">
-                    Actions
-                  </span>
-                  <span class="text-[11px] font-mono tabular-nums text-fg-muted">
-                    {{ row.actions.length }}
-                  </span>
-                </div>
-                <ol class="divide-y divide-border/60">
-                  <li
-                    v-for="(action, idx) in row.actions"
-                    :key="action.name"
-                    class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
-                  >
-                    <span class="text-xs font-mono tabular-nums text-fg-muted select-none">
-                      {{ String(idx + 1).padStart(3, '0') }}
-                    </span>
-                    <div class="flex flex-col gap-0.5 min-w-0">
-                      <span class="font-mono text-xs text-fg-strong">{{ action.name }}</span>
-                      <span
-                        v-if="action.description"
-                        class="text-xs text-fg-muted leading-relaxed"
-                      >{{ action.description }}</span>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-            </div>
+            <AgentToolDetail
+              v-if="openedTool === row.toolName"
+              :detail="openedToolDetail"
+              :error="openedToolError"
+              heading="Actions"
+            />
           </div>
         </div>
         <ApiErrorAlert

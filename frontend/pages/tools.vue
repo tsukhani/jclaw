@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMeta'
+import type { ApiErrorDetails } from '~/types/api'
 
 // JCLAW-173: this page is a read-only catalog. Per-tool enable/disable
 // lives on the agent detail page (pages/agents/[[name]].vue) — the tool registry
 // itself is global, but binding a tool to a specific agent is the only
 // meaningful axis. The previous "global toggle" was a fan-out that wrote
 // to every agent's AgentToolConfig row, which was a leaky abstraction.
-const { TOOL_META, ORDERED_TOOLS, getPillClass, refresh: refreshTools } = useToolMeta()
+const { TOOL_META, ORDERED_TOOLS, getPillClass, refresh: refreshTools, loadDetail } = useToolMeta()
 
 // Force a refetch on every visit so the MCP tab reflects live server
 // state. Without this the module-level cache means an operator who
@@ -42,7 +43,7 @@ interface ToolCard {
   iconColor: string
   iconKey: string
   description: string
-  functions: ToolAction[]
+  functionCount: number
 }
 
 function cardFromSingleTool(name: string, meta: ToolMeta): ToolCard {
@@ -54,7 +55,7 @@ function cardFromSingleTool(name: string, meta: ToolMeta): ToolCard {
     iconColor: meta.iconColor,
     iconKey: meta.icon,
     description: meta.shortDescription,
-    functions: meta.functions,
+    functionCount: meta.actionCount,
   }
 }
 
@@ -119,10 +120,47 @@ const displaySections = computed<{ category: ToolCategory, cards: ToolCard[] }[]
 
 const expandedSet = ref(new Set<string>())
 
+// JF-142: the catalog carries each card's function count; a card's functions come from its own tool's read the
+// first time it opens. One read per card at a time, so a slow response never lands over a later one.
+type FunctionsLoad
+  = | { status: 'loading' }
+    | { status: 'loaded', functions: ToolAction[] }
+    | { status: 'failed', error: ApiErrorDetails }
+const functionLoads = ref<Record<string, FunctionsLoad>>({})
+
+async function loadFunctions(key: string) {
+  const current = functionLoads.value[key]
+  if (current && current.status !== 'failed') return
+  functionLoads.value = { ...functionLoads.value, [key]: { status: 'loading' } }
+  let next: FunctionsLoad
+  try {
+    next = { status: 'loaded', functions: (await loadDetail(key)).actions }
+  }
+  catch (e) {
+    next = { status: 'failed', error: apiErrorDetails(e) }
+  }
+  functionLoads.value = { ...functionLoads.value, [key]: next }
+}
+
+function loadedFunctions(key: string): ToolAction[] | null {
+  const load = functionLoads.value[key]
+  return load?.status === 'loaded' ? load.functions : null
+}
+
+function functionsError(key: string): ApiErrorDetails | null {
+  const load = functionLoads.value[key]
+  return load?.status === 'failed' ? load.error : null
+}
+
 function toggleExpand(key: string) {
   const s = new Set(expandedSet.value)
-  if (s.has(key)) s.delete(key)
-  else s.add(key)
+  if (s.has(key)) {
+    s.delete(key)
+  }
+  else {
+    s.add(key)
+    loadFunctions(key)
+  }
   expandedSet.value = s
 }
 
@@ -137,6 +175,7 @@ function toggleAllExpanded() {
   }
   else {
     expandedSet.value = new Set(filteredCards.value.map(c => c.key))
+    for (const c of filteredCards.value) loadFunctions(c.key)
   }
 }
 </script>
@@ -204,6 +243,7 @@ function toggleAllExpanded() {
             v-for="card in section.cards"
             :key="card.key"
             class="bg-surface-elevated border border-border flex flex-col"
+            :data-testid="`tool-card-${card.key}`"
           >
             <!-- Card header -->
             <div class="p-4 flex items-start gap-3">
@@ -249,6 +289,7 @@ function toggleAllExpanded() {
             <button
               class="mt-auto px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
               :class="expandedSet.has(card.key) ? 'bg-muted' : 'hover:bg-muted'"
+              :aria-expanded="expandedSet.has(card.key)"
               @click="toggleExpand(card.key)"
             >
               <div class="flex items-center gap-2">
@@ -256,7 +297,7 @@ function toggleAllExpanded() {
                   Functions
                 </span>
                 <span class="text-xs text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
-                  {{ card.functions.length }}
+                  {{ card.functionCount }}
                 </span>
               </div>
               <ChevronDownIcon
@@ -270,15 +311,30 @@ function toggleAllExpanded() {
             <div
               v-if="expandedSet.has(card.key)"
               class="border-t border-border"
+              :data-testid="`tool-functions-${card.key}`"
             >
-              <div
-                v-for="fn in card.functions"
-                :key="fn.name"
-                class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
+              <ApiErrorAlert
+                v-if="functionsError(card.key)"
+                :error="functionsError(card.key)"
+                class="m-4"
+              />
+              <p
+                v-else-if="!loadedFunctions(card.key)"
+                role="status"
+                class="px-4 py-2 text-xs text-fg-muted"
               >
-                <code class="text-xs font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
-                <span class="text-xs text-fg-muted leading-relaxed">{{ fn.description }}</span>
-              </div>
+                Loading functions…
+              </p>
+              <template v-else>
+                <div
+                  v-for="fn in loadedFunctions(card.key)"
+                  :key="fn.name"
+                  class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
+                >
+                  <code class="text-xs font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
+                  <span class="text-xs text-fg-muted leading-relaxed">{{ fn.description }}</span>
+                </div>
+              </template>
             </div>
           </div>
         </div>

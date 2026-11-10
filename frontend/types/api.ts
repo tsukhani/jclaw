@@ -754,20 +754,18 @@ export interface LogEvent {
   agentId?: number | null
 }
 
-/** A tool binding for a specific agent, as returned by GET /api/agents/:id/tools. */
+/**
+ * A tool binding for a specific agent, as returned by GET /api/agents/:id/tools. An MCP server is one row, its
+ * server-level handle; a tool's description and actions come from GET /api/tools/:name.
+ */
 export interface AgentTool {
   name: string
-  /** Human-readable description from the backend tool registry — shown
-   *  inline beneath an MCP server's name in the read-only per-action
-   *  disclosure (Phase 6). May be empty for tools that don't advertise
-   *  one; the backend stamps an empty string in that case. */
-  description?: string
+  /** The tool's one-line summary. */
+  shortDescription?: string
   enabled: boolean
-  /** Optional grouping key: tools sharing one (currently MCP servers) fold
-   *  into a single agent-detail-page row with one toggle that flips every
-   *  member via PUT /api/agents/:id/tool-groups/:group. {@code undefined}
-   *  for native tools. */
-  group?: string
+  /** The MCP server's name on its handle, which toggles through PUT /api/agents/:id/tool-groups/:group.
+   *  Absent or null for native tools. */
+  group?: string | null
   [key: string]: unknown
 }
 

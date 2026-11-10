@@ -40,13 +40,13 @@ function setupMockApi() {
   // Supply a minimal fixture so agents.vue renders without errors.
   registerEndpoint('/api/tools/meta', () => [
     { name: 'exec', category: 'System', icon: 'terminal',
-      shortDescription: 'Shell', system: false, actions: [] },
+      shortDescription: 'Shell', group: null, enabled: true, requiresConfig: null, actionCount: 1 },
     { name: 'web_fetch', category: 'Web', icon: 'globe',
-      shortDescription: 'Fetch URLs', system: false, actions: [] },
+      shortDescription: 'Fetch URLs', group: null, enabled: true, requiresConfig: null, actionCount: 1 },
   ])
   registerEndpoint('/api/agents/1/tools', () => [
-    { name: 'exec', description: 'Execute shell', system: false, enabled: true },
-    { name: 'web_fetch', description: 'Fetch URLs', system: false, enabled: true },
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: true },
+    { name: 'web_fetch', group: null, shortDescription: 'Fetch URLs', enabled: true },
   ])
 }
 

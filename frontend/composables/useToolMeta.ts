@@ -2,10 +2,12 @@
  * Tool-metadata composable — thin consumer over GET /api/tools/meta.
  *
  * The backend is the authoritative source for name / category / icon /
- * shortDescription / actions / requiresConfig / system (JCLAW-72). This
- * composable only owns purely-presentational concerns that have no business
- * on the JVM: Tailwind class names keyed by category, and the SVG <path>
- * string dictionary keyed by the backend-supplied icon name.
+ * shortDescription / actionCount / requiresConfig (JCLAW-72), and GET
+ * /api/tools/{name} for one tool's description and actions, which the
+ * catalog leaves out (JF-142). This composable only owns purely-presentational
+ * concerns that have no business on the JVM: Tailwind class names keyed by
+ * category, and the SVG <path> string dictionary keyed by the backend-supplied
+ * icon name.
  *
  * Adding a new tool in app/tools/ is now a backend-only change. This file
  * should not need updates unless the category taxonomy grows or the
@@ -24,15 +26,22 @@ export interface ToolAction {
 /** Shape returned by GET /api/tools/meta. */
 export interface ToolApiMeta {
   name: string
+  /** Optional grouping key: an MCP server's handle carries the server name.
+   *  {@code null} for native tools. */
+  group?: string | null
+  /** False only while a config key the tool requires is not set to true. */
+  enabled: boolean
   category: ToolCategory
   icon: string
   shortDescription: string
-  requiresConfig?: string
-  /** Optional grouping key. Tools sharing the same group fold into a
-   *  single /tools-page card with their actions concatenated. Used by
-   *  MCP-discovered tools (group = MCP server name) so all tools from
-   *  one server render together. {@code undefined} for native tools. */
-  group?: string
+  requiresConfig?: string | null
+  /** How many actions GET /api/tools/{name} lists for this tool. */
+  actionCount: number
+}
+
+/** Shape returned by GET /api/tools/{name}: one tool with what the catalog leaves out. */
+export interface ToolDetail extends Omit<ToolApiMeta, 'actionCount'> {
+  description: string
   actions: ToolAction[]
 }
 
@@ -43,7 +52,6 @@ export interface ToolMeta extends ToolApiMeta {
   categoryColor: string
   iconBg: string
   iconColor: string
-  functions: ToolAction[] // legacy alias for actions; preserved for pages/tools.vue compatibility
 }
 
 // ───── Presentational mappings (frontend-only concerns) ──────────────────
@@ -143,8 +151,12 @@ function augment(api: ToolApiMeta): ToolMeta {
     categoryColor: styles.categoryColor,
     iconBg: styles.iconBg,
     iconColor: styles.iconColor,
-    functions: api.actions, // legacy name preserved for pages/tools.vue
   }
+}
+
+/** One tool's description and actions. Not cached: an MCP server's actions change while it stays connected. */
+function loadDetail(name: string): Promise<ToolDetail> {
+  return $fetch<ToolDetail>(`/api/tools/${encodeURIComponent(name)}`)
 }
 
 // ───── Public composable ────────────────────────────────────────────────
@@ -184,5 +196,7 @@ export function useToolMeta() {
     /** Drop the cache and re-fetch. Call on mount of pages that need to
      *  reflect live MCP server state (e.g. /tools, agent detail). */
     refresh,
+    /** GET /api/tools/{name}: the description and actions the catalog leaves out. */
+    loadDetail,
   }
 }

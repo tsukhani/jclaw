@@ -17,6 +17,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.ConfigService;
 import services.Tx;
 import utils.ApiResponses;
 
@@ -35,13 +36,18 @@ public class ApiToolsController extends Controller {
 
 
     // JCLAW-281: no `system` flag — there are no system tools (list_mcp_tools deleted, loadtest_sleep gated by conditional registration).
-    public record ToolListEntry(String name, String description) {}
+    // JF-142: a catalog row carries no description or actions. At 680 registered tools those made each catalog
+    // read several times jclaw_api's 50,000-character cap; GET /api/tools/{name} returns them for one tool.
+    public record ToolListEntry(String name, @Nullable String group, boolean enabled, String shortDescription) {}
 
-    public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
-                                @Nullable String requiresConfig, @Nullable String group,
-                                List<ToolAction> actions) {}
+    public record ToolMetaEntry(String name, @Nullable String group, boolean enabled, String shortDescription,
+                                String category, String icon, @Nullable String requiresConfig, int actionCount) {}
 
-    public record AgentToolEntry(String name, String description, @Nullable String group, boolean enabled) {}
+    public record AgentToolEntry(String name, @Nullable String group, boolean enabled, String shortDescription) {}
+
+    public record ToolDetail(String name, @Nullable String group, boolean enabled, String shortDescription,
+                             String category, String icon, @Nullable String requiresConfig,
+                             String description, List<ToolAction> actions) {}
 
     public record ToolToggleRequest(boolean enabled) {}
 
@@ -50,43 +56,75 @@ public class ApiToolsController extends Controller {
     public record ToolGroupToggleResponse(String group, boolean enabled, int count, String status) {}
 
     /**
-     * GET /api/tools — List all registered tools (global catalog).
+     * GET /api/tools — the global catalog.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolListEntry.class))))
-    @Operation(summary = "List all globally-registered tools (name, description)")
+    @Operation(summary = "List the tools (name, group, enabled, one-line summary); a tool's description and actions "
+            + "come from GET /api/tools/{name}, and an agent's own grants from GET /api/agents/{id}/tools")
     @AgentAccess(OPEN)
     public static void list() {
-        var result = ToolRegistry.listTools().stream()
-                .map(t -> new ToolListEntry(t.name(), t.description()))
+        var result = catalog().stream()
+                .map(t -> new ToolListEntry(t.name(), t.group(), usable(t), t.shortDescription()))
                 .toList();
         renderJSON(gson.toJson(result));
     }
 
     /**
-     * GET /api/tools/meta — Authoritative tool metadata for the admin UI.
+     * GET /api/tools/meta — the catalog with what a collapsed {@code /tools} card shows.
      *
-     * <p>Unlike {@link #list()} this returns the rich presentational shape the
-     * frontend's {@code useToolMeta} composable consumes. The backend is now
-     * the single source of truth for category, icon, short description, and the
-     * enumerated action list (JCLAW-72 migrated these off the hardcoded frontend
-     * dictionary). Purely static registry metadata — no per-agent filtering,
-     * no DB transaction.
+     * <p>The backend is the single source of truth for category, icon and short description
+     * (JCLAW-72 migrated these off a hardcoded frontend dictionary). No per-agent filtering.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolMetaEntry.class))))
-    @Operation(summary = "List tool metadata (category, icon, actions) for the admin UI")
+    @Operation(summary = "List tool metadata (category, icon, action count) for the admin UI; "
+            + "a tool's actions come from GET /api/tools/{name}")
     @AgentAccess(OPEN)
     public static void meta() {
-        var result = ToolRegistry.listTools().stream()
+        var result = catalog().stream()
                 .map(t -> new ToolMetaEntry(
                         t.name(),
+                        t.group(),
+                        usable(t),
+                        t.shortDescription(),
                         t.category(),
                         t.icon(),
-                        t.shortDescription(),
                         t.requiresConfig(),
-                        t.group(),
-                        t.actions()))
+                        t.actions().size()))
                 .toList();
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * GET /api/tools/{name} — one tool, with its full description and actions.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolDetail.class)))
+    @Operation(summary = "Get one tool by name, with its full description and actions")
+    @AgentAccess(OPEN)
+    public static void get(String name) {
+        var t = ToolRegistry.lookupTool(name);
+        if (t == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No tool named '" + name + "' is registered.");
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(gson.toJson(new ToolDetail(t.name(), t.group(), usable(t), t.shortDescription(), t.category(),
+                t.icon(), t.requiresConfig(), t.description(), t.actions())));
+    }
+
+    /**
+     * The tools a catalog lists. An MCP server's per-action adapters fold into its server-level
+     * handle, whose action count and detail stand for them, as they do in the model's own tool list:
+     * the 600-odd adapters alone would put a catalog over jclaw_api's cap.
+     */
+    private static List<ToolRegistry.Tool> catalog() {
+        return ToolRegistry.listTools().stream()
+                .filter(t -> t.group() == null || t.isServerLevel())
+                .toList();
+    }
+
+    /** Whether the tool can run on this instance at all: its {@code requiresConfig} key, when it names one, is true. */
+    private static boolean usable(ToolRegistry.Tool t) {
+        var key = t.requiresConfig();
+        return key == null || ConfigService.getBoolean(key, false);
     }
 
     /**
@@ -94,7 +132,8 @@ public class ApiToolsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
-    @Operation(summary = "List an agent's tools and their enabled state")
+    @Operation(summary = "List an agent's tools (name, group, enabled for this agent, one-line summary); "
+            + "a tool's description and actions come from GET /api/tools/{name}")
     @AgentAccess(OPEN)
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
@@ -110,9 +149,9 @@ public class ApiToolsController extends Controller {
         // box for a tool the agent could not call (found during JCLAW-911 UAT). One source of
         // truth also covers tools added to the default-off list later.
         var disabled = ToolRegistry.loadDisabledTools(agent);
-        var result = ToolRegistry.listTools().stream()
-                .map(t -> new AgentToolEntry(t.name(), t.description(), t.group(),
-                        !disabled.contains(t.name())))
+        var result = catalog().stream()
+                .map(t -> new AgentToolEntry(t.name(), t.group(), !disabled.contains(t.name()),
+                        t.shortDescription()))
                 .toList();
         renderJSON(gson.toJson(result));
     }

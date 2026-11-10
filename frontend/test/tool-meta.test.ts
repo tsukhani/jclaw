@@ -11,14 +11,14 @@ const FIXTURE_META = [
     category: 'System',
     icon: 'terminal',
     shortDescription: 'Execute shell commands on the host system.',
-    actions: [{ name: 'exec', description: 'Run a shell command' }],
+    actionCount: 1,
   },
   {
     name: 'web_fetch',
     category: 'Web',
     icon: 'globe',
     shortDescription: 'Fetch any URL.',
-    actions: [{ name: 'fetch (text)', description: 'Extract text' }],
+    actionCount: 2,
   },
   {
     // Stand-in utility tool for the fixture — exercises the composable's
@@ -28,7 +28,7 @@ const FIXTURE_META = [
     category: 'Utilities',
     icon: 'wrench',
     shortDescription: 'Stub utility tool used only by this fixture.',
-    actions: [{ name: 'inspect', description: 'Inspect something' }],
+    actionCount: 1,
   },
 ]
 
@@ -67,9 +67,27 @@ describe('useToolMeta (JCLAW-72 backend-driven metadata)', () => {
     expect(TOOL_META.value.introspect!.iconBg).toContain('emerald')
   })
 
-  it('preserves the legacy "functions" alias for pages/tools.vue compatibility', async () => {
+  it('carries each tool\'s action count from the catalog (JF-142)', async () => {
     const { TOOL_META } = await freshComposable()
-    expect(TOOL_META.value.exec!.functions).toEqual(TOOL_META.value.exec!.actions)
+    expect(TOOL_META.value.exec!.actionCount).toBe(1)
+    expect(TOOL_META.value.web_fetch!.actionCount).toBe(2)
+  })
+
+  it('loadDetail reads one tool\'s description and actions from its own route', async () => {
+    const detail = { ...FIXTURE_META[1], actionCount: undefined, description: 'Fetch any URL, in full.', actions: [{ name: 'fetch', description: 'Fetch.' }] }
+    let reads = 0
+    const off = registerEndpoint('/api/tools/web_fetch', () => {
+      reads++
+      return detail
+    })
+    try {
+      const { loadDetail } = await freshComposable()
+      expect(await loadDetail('web_fetch')).toEqual(JSON.parse(JSON.stringify(detail)))
+      expect(reads).toBe(1)
+    }
+    finally {
+      off()
+    }
   })
 
   it('getPillClass returns the right category pill classes', async () => {

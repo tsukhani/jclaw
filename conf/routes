@@ -193,6 +193,7 @@ GET     /api/slash-commands                     ApiSlashCommandsController.list
 # Tools API
 GET     /api/tools                              ApiToolsController.list
 GET     /api/tools/meta                         ApiToolsController.meta
+GET     /api/tools/{name}                       ApiToolsController.get
 GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
 PUT     /api/agents/{id}/tool-groups/{group}    ApiToolsController.updateGroupForAgent

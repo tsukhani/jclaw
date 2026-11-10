@@ -835,6 +835,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/timezones
             GET /api/tools
             GET /api/tools/meta
+            GET /api/tools/{name}
             GET /api/transcription/diarization/models
             GET /api/transcription/state
             GET /api/tts/state

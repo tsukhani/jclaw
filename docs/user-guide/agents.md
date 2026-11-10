@@ -39,7 +39,7 @@ You can preview exactly what the agent will receive, including any standing cont
 
 ### Tools
 
-Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others). Tools from [MCP Servers](/mcp-servers) are not listed here. Switch a server on in the **MCP Servers** section below.
+Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. Under the tool's name, a pill shows how many functions it has. Click the pill to read what the tool does and what each function is for, and click it again to close it. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others). Tools from [MCP Servers](/mcp-servers) are not listed here. Switch a server on in the **MCP Servers** section below.
 
 Tools that need extra setup (an API key, a workspace path, a shell allowlist entry) are configured under the matching [Settings](/guide#settings) section.
 

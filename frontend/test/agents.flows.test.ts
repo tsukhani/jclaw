@@ -56,6 +56,7 @@ function setupAgentsApi(opts?: {
   agent2Skills?: unknown[]
   agent1Core?: unknown
   agent2Core?: unknown
+  toolMeta?: unknown[]
 }) {
   // JCLAW-981: core-memory usage is per agent, so it is polled per agent.
   registerEndpoint('/api/agents/1/core-migration', () => opts?.agent1Core ?? ({
@@ -122,31 +123,35 @@ function setupAgentsApi(opts?: {
       },
     ],
   }))
-  registerEndpoint('/api/tools/meta', () => [
+  registerEndpoint('/api/tools/meta', () => opts?.toolMeta ?? [
     {
       name: 'exec',
+      group: null,
+      enabled: true,
       category: 'System',
       icon: 'terminal',
       shortDescription: 'Shell',
-      system: false,
-      actions: [],
+      requiresConfig: null,
+      actionCount: 1,
     },
     {
       name: 'filesystem',
+      group: null,
+      enabled: true,
       category: 'Files',
       icon: 'folder',
       shortDescription: 'Files',
-      system: false,
-      actions: [],
+      requiresConfig: null,
+      actionCount: 3,
     },
   ])
   registerEndpoint('/api/agents/1/tools', () => opts?.agent1Tools ?? [
-    { name: 'exec', description: 'Execute shell', system: false, enabled: true },
-    { name: 'filesystem', description: 'Filesystem', system: false, enabled: false },
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: true },
+    { name: 'filesystem', group: null, shortDescription: 'Filesystem', enabled: false },
   ])
   registerEndpoint('/api/agents/2/tools', () => opts?.agent2Tools ?? [
-    { name: 'exec', description: 'Execute shell', system: false, enabled: false },
-    { name: 'filesystem', description: 'Filesystem', system: false, enabled: true },
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: false },
+    { name: 'filesystem', group: null, shortDescription: 'Filesystem', enabled: true },
   ])
   registerEndpoint('/api/agents/1/skills', () => opts?.agent1Skills ?? [])
   registerEndpoint('/api/agents/2/skills', () => opts?.agent2Skills ?? [
@@ -1445,9 +1450,8 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
   it('puts an MCP server switch back when its save fails', async () => {
     setupAgentsApi({
       agent2Tools: [
-        { name: 'exec', description: 'Execute shell', system: false, enabled: false },
-        { name: 'mcp_github', description: 'GitHub', system: false, enabled: true, group: 'github' },
-        { name: 'github_search_issues', description: 'Search issues', system: false, enabled: true, group: 'github' },
+        { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: false },
+        { name: 'mcp_github', group: 'github', shortDescription: 'GitHub', enabled: true },
       ],
     })
     stubPut('/api/agents/2/tool-groups/github', badGateway)
@@ -1519,6 +1523,153 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
     expect(checked(component, 'code-review skill')).toBe('false')
     expect(checked(component, 'web-search skill')).toBe('true')
     expect(checked(component, 'All skills for this agent')).toBe('false')
+  })
+})
+
+describe('Agents page — an opened tool row reads its own tool (JF-142)', () => {
+  let unregister: Array<() => void> = []
+  let reads: Record<string, number> = {}
+
+  afterEach(async () => {
+    unregister.forEach(off => off())
+    unregister = []
+    reads = {}
+    await useRouter().replace('/agents')
+  })
+
+  const MCP_META = [
+    { name: 'exec', group: null, enabled: true, category: 'System', icon: 'terminal', shortDescription: 'Shell', requiresConfig: null, actionCount: 1 },
+    { name: 'filesystem', group: null, enabled: true, category: 'Files', icon: 'folder', shortDescription: 'Files', requiresConfig: null, actionCount: 3 },
+    { name: 'mcp_github', group: 'github', enabled: true, category: 'MCP', icon: 'plug', shortDescription: 'GitHub', requiresConfig: null, actionCount: 2 },
+  ]
+  const MCP_TOOLS = [
+    { name: 'exec', group: null, shortDescription: 'Execute shell', enabled: false },
+    { name: 'filesystem', group: null, shortDescription: 'Filesystem', enabled: true },
+    { name: 'mcp_github', group: 'github', shortDescription: 'GitHub', enabled: true },
+  ]
+  const FILESYSTEM_DETAIL = {
+    ...MCP_META[1],
+    actionCount: undefined,
+    description: 'Reads, writes and lists files in the agent workspace.',
+    actions: [
+      { name: 'readFile', description: 'Read a file.' },
+      { name: 'writeFile', description: 'Write a file.' },
+      { name: 'listFiles', description: 'List a directory.' },
+    ],
+  }
+  const GITHUB_DETAIL = {
+    ...MCP_META[2],
+    actionCount: undefined,
+    description: 'MCP server `github`. Call with no arguments to list the server\'s actions.',
+    actions: [
+      { name: 'search_issues', description: 'Search issues.' },
+      { name: 'create_issue', description: 'Create an issue.' },
+    ],
+  }
+
+  function stubDetail(name: string, handler: (event: H3Event) => unknown) {
+    unregister.push(registerEndpoint(`/api/tools/${name}`, (event: H3Event) => {
+      reads[name] = (reads[name] ?? 0) + 1
+      return handler(event)
+    }))
+  }
+
+  async function openHelper() {
+    setupAgentsApi({ toolMeta: MCP_META, agent2Tools: MCP_TOOLS })
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
+    await vi.waitFor(() => expect(component.find('button[aria-label="3 functions of filesystem"]').exists()).toBe(true))
+    await flushPromises()
+    return component
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  const texts = (wrapper: any, selector: string) => wrapper.findAll(selector).map((w: { text: () => string }) => w.text().trim())
+
+  it('shows each tool\'s function count and each server\'s action count from the catalog, reading no tool', async () => {
+    stubDetail('filesystem', () => FILESYSTEM_DETAIL)
+    const component = await openHelper()
+
+    expect(component.find('button[aria-label="3 functions of filesystem"]').text().trim()).toBe('3 functions')
+    expect(component.find('button[aria-label="1 function of exec"]').text().trim()).toBe('1 function')
+    expect(component.find('[data-testid="agent-mcp-servers"]').text()).toContain('2 actions')
+    expect(component.find('[data-testid="agent-tool-detail"]').exists()).toBe(false)
+    expect(reads).toEqual({})
+  })
+
+  it('opens a native tool\'s description and functions from its read, and closes them', async () => {
+    stubDetail('filesystem', () => FILESYSTEM_DETAIL)
+    const component = await openHelper()
+    const button = () => component.find('button[aria-label="3 functions of filesystem"]')
+
+    await button().trigger('click')
+    await vi.waitFor(() => expect(component.find('[data-testid="agent-tool-detail"]').exists()).toBe(true))
+    const detail = component.find('[data-testid="agent-tools"] [data-testid="agent-tool-detail"]')
+    expect(detail.find('p').text()).toBe('Reads, writes and lists files in the agent workspace.')
+    expect(texts(detail, 'li span.text-fg-strong')).toEqual(['readFile', 'writeFile', 'listFiles'])
+    expect(button().attributes('aria-expanded')).toBe('true')
+    expect(reads).toEqual({ filesystem: 1 })
+
+    await button().trigger('click')
+    await flushPromises()
+    expect(component.find('[data-testid="agent-tool-detail"]').exists()).toBe(false)
+    expect(button().attributes('aria-expanded')).toBe('false')
+  })
+
+  it('lists an MCP server\'s actions from its handle\'s read, without the calling convention', async () => {
+    stubDetail('mcp_github', () => GITHUB_DETAIL)
+    const component = await openHelper()
+
+    await component.find('button[aria-label="Expand github actions"]').trigger('click')
+    const detail = () => component.find('[data-testid="agent-mcp-servers"] [data-testid="agent-tool-detail"]')
+    await vi.waitFor(() => expect(detail().exists()).toBe(true))
+    expect(texts(detail(), 'li span.text-fg-strong')).toEqual(['search_issues', 'create_issue'])
+    expect(detail().text()).not.toContain('Call with no arguments')
+    expect(component.find('button[aria-label="Collapse github actions"]').attributes('aria-expanded')).toBe('true')
+    expect(reads).toEqual({ mcp_github: 1 })
+  })
+
+  it('shows the refusal when the tool\'s read finds no such tool', async () => {
+    stubDetail('mcp_github', async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 404)
+      return { type: 'error', code: 'not_found', message: 'No tool named \'mcp_github\' is registered.' }
+    })
+    const component = await openHelper()
+
+    await component.find('button[aria-label="Expand github actions"]').trigger('click')
+    const alert = '[data-testid="agent-mcp-servers"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+    expect(component.find(alert).text()).toContain('No tool named \'mcp_github\' is registered.')
+    expect(component.find('[data-testid="agent-tool-detail"]').exists()).toBe(false)
+  })
+
+  it('never fills a row with a slower read for a row opened before it', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let slowAnswered = false
+    stubDetail('filesystem', async () => {
+      await held
+      slowAnswered = true
+      return FILESYSTEM_DETAIL
+    })
+    stubDetail('mcp_github', () => GITHUB_DETAIL)
+    const component = await openHelper()
+
+    await component.find('button[aria-label="3 functions of filesystem"]').trigger('click')
+    await flushPromises()
+    await component.find('button[aria-label="Expand github actions"]').trigger('click')
+    const detail = () => component.find('[data-testid="agent-tool-detail"]')
+    await vi.waitFor(() => expect(texts(detail(), 'li span.text-fg-strong')).toEqual(['search_issues', 'create_issue']))
+
+    release()
+    await vi.waitFor(() => expect(slowAnswered).toBe(true))
+    // Let the slow response reach the page before asserting it was ignored.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(component.findAll('[data-testid="agent-tool-detail"]')).toHaveLength(1)
+    expect(texts(detail(), 'li span.text-fg-strong')).toEqual(['search_issues', 'create_issue'])
+    expect(component.find('button[aria-label="3 functions of filesystem"]').attributes('aria-expanded')).toBe('false')
   })
 })
 

@@ -402,6 +402,7 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
 
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools/meta")));
+        assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools/filesystem")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/tools")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/skills")));
     }
