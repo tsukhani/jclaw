@@ -3084,24 +3084,25 @@ probe_tcp_reachable() {
 # until OS-level timeout (often 60s+) before bailing without a useful
 # diagnostic.
 #
+# Without this check, H2 itself probes the dead address: 16 connect retries
+# inside a 2 s budget, twice, 3.4 s added to the boot check (JF-267).
+#
 # Behavior:
 #   - No lock file                 → no-op (fresh start)
-#   - File-mode lock (no server=)  → no-op (no AUTO_SERVER hint to verify)
-#   - Server-mode, reachable       → abort: a live holder owns the DB
-#   - Server-mode, unreachable     → remove stale lock; continue starting
+#   - Lock without a server= line  → no-op (nothing to probe; H2 judges it by age)
+#   - server= reachable            → abort: a live holder owns the DB
+#   - server= unreachable          → remove stale lock; continue starting
+#
+# The lock is a Java properties file: AUTO_SERVER writes method=file with a
+# server= line, and the port is escaped as "host\:port", so the method is no
+# guide and the backslash must go before the split.
 check_stale_h2_lock_or_exit() {
     local lock_file="$SCRIPT_DIR/data/jclaw.lock.db"
     [[ -f "$lock_file" ]] || return 0
 
-    local method
-    method=$(grep -iE "^method=" "$lock_file" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r')
-    case "$method" in
-        Server|SERVER|server) ;;
-        *) return 0 ;;
-    esac
-
     local server
-    server=$(grep -iE "^server=" "$lock_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r')
+    # `|| true`: a lock without a server= line makes grep fail, and under set -e that would end the start.
+    server=$(grep -iE "^server=" "$lock_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r\\' || true)
     server="${server#tcp://}"
     if [[ -z "$server" || "$server" != *:* ]]; then
         return 0
