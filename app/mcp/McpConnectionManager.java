@@ -334,28 +334,22 @@ public final class McpConnectionManager {
     /**
      * Runs every closer at once and returns when all of them have finished. A closer that throws is
      * logged with its server's name and does not stop the others. Platform threads: a stdio close
-     * parks in a timed {@code waitFor}, the wait that starves virtual threads (JDK-8373224).
+     * parks in a timed {@code waitFor}, the wait that starves virtual threads (JDK-8373224). The pool's
+     * {@code close()} waits for every closer, and an interrupt meanwhile interrupts them: they touch no database.
      */
     public static void closeAll(Map<String, Runnable> closers) {
         if (closers.isEmpty()) return;
-        var pool = Executors.newFixedThreadPool(Math.min(closers.size(), MAX_CLOSE_THREADS),
-                Thread.ofPlatform().name("mcp-close-", 0).daemon(true).factory());
-        try {
-            var running = new LinkedHashMap<String, Future<?>>();
+        var running = new LinkedHashMap<String, Future<?>>();
+        try (var pool = Executors.newFixedThreadPool(Math.min(closers.size(), MAX_CLOSE_THREADS),
+                Thread.ofPlatform().name("mcp-close-", 0).daemon(true).factory())) {
             closers.forEach((name, closer) -> running.put(name, pool.submit(closer)));
-            for (var close : running.entrySet()) {
-                try {
-                    close.getValue().get();
-                } catch (ExecutionException e) {
-                    EventLogger.warn(CATEGORY_DISCONNECT,
-                            "MCP server '%s' failed to close: %s".formatted(close.getKey(), e.getCause()));
-                }
-            }
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-        } finally {
-            pool.shutdown();
         }
+        running.forEach((name, close) -> {
+            if (close.state() == Future.State.FAILED) {
+                EventLogger.warn(CATEGORY_DISCONNECT,
+                        "MCP server '%s' failed to close: %s".formatted(name, close.exceptionNow()));
+            }
+        });
     }
 
     // ==================== queries ====================
