@@ -5,11 +5,13 @@ import play.test.UnitTest;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Runs jclaw.sh's {@code funnel_reset_kept} and {@code restart_on_exit} against a fake {@code tailscale} (JF-269).
@@ -17,11 +19,14 @@ import java.util.regex.Pattern;
  * that then fails, with no JVM of the install running, must take it down.
  *
  * <p>{@code tailscale funnel reset} clears the whole machine's serve config, and this machine may run the real
- * binary, so the harness runs on a PATH holding only the fake and the system directories, points the macOS app
- * fallback at nothing, and refuses to run when {@code tailscale} resolves to anything but the fake.
+ * binary, so the harness points the macOS app fallback at nothing, refuses to run when {@code tailscale} resolves to
+ * anything but the fake, and runs on a PATH of one directory: the fake and links to {@link #TOOLS}. The system
+ * directories stay off it because a Linux host keeps the real binary in {@code /usr/bin} (Jenkins build #1404).
  */
 class FunnelKeptScriptTest extends UnitTest {
     private static final List<String> FUNCTIONS = List.of("funnel_reset_kept", "restart_status", "restart_on_exit");
+    /** The external commands {@link #FUNCTIONS} run; the rest are bash builtins. */
+    private static final List<String> TOOLS = List.of("cat", "rm", "date", "mv");
 
     @TempDir Path tmp;
 
@@ -127,6 +132,13 @@ class FunnelKeptScriptTest extends UnitTest {
 
     private Run run(String command, int tailscaleExit, boolean withTailscale) throws Exception {
         var bin = Files.createDirectories(tmp.resolve("bin"));
+        for (var tool : TOOLS) {
+            var link = bin.resolve(tool);
+            if (Files.exists(link, LinkOption.NOFOLLOW_LINKS)) continue;
+            var target = Stream.of("/bin", "/usr/bin").map(dir -> Path.of(dir, tool)).filter(Files::isExecutable)
+                    .findFirst().orElseThrow(() -> new AssertionError("no " + tool + " in /bin or /usr/bin"));
+            Files.createSymbolicLink(link, target);
+        }
         var calls = tmp.resolve("calls.log");
         Files.writeString(calls, "");
         if (withTailscale) {
@@ -154,7 +166,7 @@ class FunnelKeptScriptTest extends UnitTest {
         harness.append(command).append('\n');
         if (command.equals("funnel_reset_kept")) harness.append("printf 'note=[%s]\\n' \"$FUNNEL_RESET_NOTE\"\n");
         var pb = new ProcessBuilder("/bin/bash", "-c", harness.toString()).redirectErrorStream(true);
-        pb.environment().put("PATH", bin + ":/usr/bin:/bin");
+        pb.environment().put("PATH", bin.toString());
         var p = pb.start();
         var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "the harness hung");
