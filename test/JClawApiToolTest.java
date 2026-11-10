@@ -767,6 +767,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/conversations/channels
             GET /api/conversations/{id}
             GET /api/conversations/{id}/messages
+            GET /api/conversations/{id}/messages/{messageId}
             GET /api/conversations/{id}/queue
             GET /api/imagegen/bfl/models
             GET /api/imagegen/capability

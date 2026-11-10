@@ -76,6 +76,26 @@ class ApiConversationsControllerSchemaDriftTest extends UnitTest {
     }
 
     @Test
+    void anAgentPageRowsKeysAreSubsetOfMessageView() throws Exception {
+        var msg = new Message();
+        msg.id = 1L;
+        msg.role = "assistant";
+        msg.content = "c".repeat(ApiConversationsController.MESSAGE_EXCERPT_CHARS + 1);
+        msg.reasoning = "r".repeat(ApiConversationsController.MESSAGE_EXCERPT_CHARS + 1);
+        msg.createdAt = Instant.now();
+
+        Map<String, Object> row = invoke("messageToMap",
+                new Class<?>[]{Message.class, List.class}, msg, List.of());
+        boolean cut = invoke("cutForAgent", new Class<?>[]{Map.class}, row);
+
+        assertTrue(cut);
+        var allowed = componentNames(MessageView.class);
+        assertTrue(allowed.containsAll(row.keySet()),
+                "agent-page keys not documented in MessageView @Schema record: "
+                        + missing(row.keySet(), allowed));
+    }
+
+    @Test
     void attachmentMapKeysAreSubsetOfMessageAttachmentView() {
         var att = new MessageAttachment();
         att.uuid = "u";

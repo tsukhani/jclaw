@@ -35,9 +35,11 @@ import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import tools.CheckListTool;
+import tools.JClawApiTool;
 import utils.ApiResponses;
 import utils.JpqlFilter;
 import utils.JsonArgs;
+import utils.Strings;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -70,6 +72,9 @@ public class ApiConversationsController extends Controller {
     private static final String AGENT_ID = "agentId";
     private static final String CREATED_AT = "createdAt";
     private static final String THINKING_MODE = "thinkingMode";
+    private static final String KEY_TOOL_CALLS = "toolCalls";
+    private static final String KEY_TOOL_RESULT_STRUCTURED = "toolResultStructured";
+    private static final String KEY_METADATA = "metadata";
     // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
     private static final int MAX_NAME_LENGTH = 100;
 
@@ -116,6 +121,9 @@ public class ApiConversationsController extends Controller {
      * @param truncated            {@code true} when the model output was
      *                             truncated; emitted only when true (JCLAW-291)
      * @param attachments          file attachments on the row
+     * @param cut                  on an agent's page only, the fields cut to
+     *                             {@link #MESSAGE_EXCERPT_CHARS} or left out;
+     *                             absent when none was
      */
     public record MessageView(Long id, String role, String content,
                               JsonElement toolCalls, String toolResults,
@@ -126,7 +134,27 @@ public class ApiConversationsController extends Controller {
                               String messageKind,
                               JsonElement metadata,
                               Boolean truncated,
-                              List<MessageAttachmentView> attachments) {}
+                              List<MessageAttachmentView> attachments,
+                              List<String> cut) {}
+
+    /**
+     * Longest a message's content, reasoning or tool-call arguments run on an agent's page before {@link
+     * Strings#truncate} cuts them. On 2026-10-27 one page of 200 rows measured 872 KB, 91% of it content.
+     */
+    public static final int MESSAGE_EXCERPT_CHARS = 1_000;
+
+    /**
+     * Messages on an agent's page that names no limit. Estimated on 2026-11-11 from the field lengths of every message
+     * on the live instance, any 20 in a row, cut to {@link #MESSAGE_EXCERPT_CHARS}, came to at most about 36,000
+     * characters.
+     */
+    public static final int AGENT_PAGE_DEFAULT_LIMIT = 20;
+
+    /**
+     * Longest an agent's page runs, in characters of JSON. The rows past it wait for the next page, so {@code
+     * jclaw_api} never cuts a page mid-row at {@link JClawApiTool#MAX_RESPONSE_CHARS}.
+     */
+    public static final int AGENT_PAGE_MAX_CHARS = JClawApiTool.MAX_RESPONSE_CHARS - 5_000;
 
     /**
      * Per-attachment metadata surfaced to the frontend in /messages.
@@ -395,10 +423,17 @@ public class ApiConversationsController extends Controller {
      * GET /api/conversations/{id}/messages — by offset, or by a message-id cursor: {@code latest=true} is the newest
      * page, {@code before} the page just older than that message, {@code after} the rows newer than it. Every mode
      * answers oldest first.
+     *
+     * <p>The operator's page is the chat's and carries every row whole. An agent's page holds {@link
+     * #AGENT_PAGE_DEFAULT_LIMIT} messages when it names no limit, each through {@link #cutForAgent}, and only as many as
+     * fit in {@link #AGENT_PAGE_MAX_CHARS}; {@link #getMessage} returns one message whole.
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
-    @Operation(summary = "List a conversation's messages in ascending order, by offset or by a message-id cursor")
+    @Operation(summary = "List a conversation's messages in ascending order, by offset or by a message-id cursor. "
+            + "For an agent a page holds " + AGENT_PAGE_DEFAULT_LIMIT + " messages unless it names a limit, fewer when "
+            + "they would run past " + AGENT_PAGE_MAX_CHARS + " characters, with each message's text cut at "
+            + MESSAGE_EXCERPT_CHARS + " characters; GET /api/conversations/{id}/messages/{messageId} returns one whole")
     @AgentAccess(value = OWN_ONLY,
             reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
     public static void getMessages(Long id, Integer limit, Integer offset,
@@ -408,8 +443,11 @@ public class ApiConversationsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Pass before or after, not both.");
         }
 
-        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
+        boolean forAgent = RequestPrincipal.isAgentOriginated();
+        int defaultLimit = forAgent ? AGENT_PAGE_DEFAULT_LIMIT : 200;
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : defaultLimit;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
+        boolean newestPage = after == null && (before != null || Boolean.TRUE.equals(latest));
 
         long total = Message.count("conversation = ?1", conversation);
         // A cursor counts by id rather than position, so a row deleted or added meanwhile cannot shift a page.
@@ -417,7 +455,7 @@ public class ApiConversationsController extends Controller {
         if (after != null) {
             messages = Message.find("conversation = ?1 AND id > ?2 ORDER BY id ASC", conversation, after)
                     .fetch(effectiveLimit);
-        } else if (before != null || Boolean.TRUE.equals(latest)) {
+        } else if (newestPage) {
             List<Message> newestFirst = before == null
                     ? Message.find("conversation = ?1 ORDER BY id DESC", conversation).fetch(effectiveLimit)
                     : Message.find("conversation = ?1 AND id < ?2 ORDER BY id DESC", conversation, before)
@@ -438,11 +476,164 @@ public class ApiConversationsController extends Controller {
         // bulk-fetch-then-group is the safe shape. Mirrors the compactionCounts
         // bulk-group in listConversations.
         var attachmentsByMessage = attachmentsForMessages(messages);
-        var result = messages.stream()
+        var rows = messages.stream()
                 .map(m -> messageToMap(m, attachmentsByMessage.getOrDefault(m.id, List.of())))
                 .toList();
 
-        renderJSON(gson.toJson(result));
+        if (!forAgent) {
+            renderJSON(gson.toJson(rows));
+        }
+        var page = agentPage(rows, newestPage);
+        String rest;
+        if (newestPage) {
+            rest = "before=" + page.firstId();
+        } else if (after != null) {
+            rest = "after=" + page.lastId();
+        } else {
+            rest = "offset=" + (effectiveOffset + page.rows().size());
+        }
+        var note = agentNote(conversation.id, page, rest);
+        if (note != null) {
+            response.setHeader(RequestPrincipal.AGENT_NOTE_HEADER, note);
+        }
+        renderJSON("[" + String.join(",", page.rows()) + "]");
+    }
+
+    /**
+     * GET /api/conversations/{id}/messages/{messageId} — one message whole, which an agent's page may carry cut.
+     * A message of another conversation is not found here, so a reachable conversation's id reaches no other's rows.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MessageView.class)))
+    @Operation(summary = "Get one message of a conversation whole")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "one message of a conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
+    public static void getMessage(Long id, Long messageId) {
+        Conversation conversation = requireConversation(id);
+        Message message = messageId == null ? null
+                : Message.find("conversation = ?1 AND id = ?2", conversation, messageId).first();
+        if (message == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND,
+                    "Message " + messageId + " not found in conversation " + id + ".");
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(gson.toJson(messageToMap(message,
+                attachmentsForMessages(List.of(message)).getOrDefault(message.id, List.of()))));
+    }
+
+    /**
+     * An agent's page as {@link #agentPage} builds it.
+     *
+     * @param rows     each row's JSON, oldest first
+     * @param cutIds   the ids of the rows on the page that were cut
+     * @param firstId  the oldest row's id, null on an empty page
+     * @param lastId   the newest row's id, null on an empty page
+     * @param heldBack the rows fetched that did not fit
+     */
+    private record AgentPage(List<String> rows, List<Long> cutIds, @Nullable Long firstId, @Nullable Long lastId,
+                             int heldBack) {}
+
+    /**
+     * Each row through {@link #cutForAgent}, then as many as fit in {@link #AGENT_PAGE_MAX_CHARS}, counted from the end
+     * paging goes on from: the newest of a {@code before} or {@code latest} page and the oldest of any other, so the
+     * page's first or last id leads to the rows left out.
+     */
+    private static AgentPage agentPage(List<HashMap<String, Object>> rows, boolean keepNewest) {
+        int n = rows.size();
+        var json = new String[n];
+        var cut = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            cut[i] = cutForAgent(rows.get(i));
+            json[i] = gson.toJson(rows.get(i));
+        }
+        // The brackets, then each row and the comma before it. The first row always goes, so a page always moves on.
+        int chars = 2;
+        int kept = 0;
+        while (kept < n) {
+            int next = json[keepNewest ? n - 1 - kept : kept].length() + (kept > 0 ? 1 : 0);
+            if (kept > 0 && chars + next > AGENT_PAGE_MAX_CHARS) break;
+            chars += next;
+            kept++;
+        }
+        int from = keepNewest ? n - kept : 0;
+        var cutIds = new ArrayList<Long>();
+        for (int i = from; i < from + kept; i++) {
+            if (cut[i]) cutIds.add((Long) rows.get(i).get("id"));
+        }
+        return new AgentPage(List.of(json).subList(from, from + kept), cutIds,
+                kept > 0 ? (Long) rows.get(from).get("id") : null,
+                kept > 0 ? (Long) rows.get(from + kept - 1).get("id") : null,
+                n - kept);
+    }
+
+    /**
+     * Cut one row for an agent's page: its content, reasoning and each tool call's arguments to {@link
+     * #MESSAGE_EXCERPT_CHARS} by {@link Strings#truncate}. A structured result or metadata whose JSON runs longer
+     * would no longer parse once cut, so it is left out. {@code cut} names each field cut or left out, and is absent
+     * when none was.
+     *
+     * @return whether anything was cut or left out
+     */
+    private static boolean cutForAgent(Map<String, Object> row) {
+        var cut = new ArrayList<String>();
+        for (var key : List.of("content", "reasoning")) {
+            if (row.get(key) instanceof String text && text.length() > MESSAGE_EXCERPT_CHARS) {
+                row.put(key, Strings.truncate(text, MESSAGE_EXCERPT_CHARS));
+                cut.add(key);
+            }
+        }
+        if (row.get(KEY_TOOL_CALLS) instanceof JsonArray calls && cutArguments(calls)) {
+            cut.add(KEY_TOOL_CALLS);
+        }
+        for (var key : List.of(KEY_TOOL_RESULT_STRUCTURED, KEY_METADATA)) {
+            if (row.get(key) instanceof JsonElement value && value.toString().length() > MESSAGE_EXCERPT_CHARS) {
+                row.remove(key);
+                cut.add(key);
+            }
+        }
+        if (cut.isEmpty()) return false;
+        row.put("cut", cut);
+        return true;
+    }
+
+    /** Cut each call's {@code function.arguments} longer than {@link #MESSAGE_EXCERPT_CHARS}; whether any was. */
+    private static boolean cutArguments(JsonArray calls) {
+        boolean cut = false;
+        for (var call : calls) {
+            if (!call.isJsonObject() || !(call.getAsJsonObject().get(KEY_FUNCTION) instanceof JsonObject fn)) continue;
+            var arguments = fn.get("arguments");
+            if (arguments == null || arguments.isJsonNull()) continue;
+            var text = arguments.isJsonPrimitive() ? arguments.getAsString() : arguments.toString();
+            if (text.length() > MESSAGE_EXCERPT_CHARS) {
+                fn.addProperty("arguments", Strings.truncate(text, MESSAGE_EXCERPT_CHARS));
+                cut = true;
+            }
+        }
+        return cut;
+    }
+
+    /**
+     * The note {@code jclaw_api} shows the model above an agent's page: which messages were cut and where each comes
+     * whole, and how the rows that did not fit are reached. Null when neither applies.
+     *
+     * @param rest the query that reaches the rows left out, e.g. {@code after=42}
+     */
+    private static @Nullable String agentNote(Long conversationId, AgentPage page, String rest) {
+        var notes = new ArrayList<String>();
+        var cutIds = page.cutIds();
+        if (!cutIds.isEmpty()) {
+            var which = cutIds.size() == 1
+                    ? "Message " + cutIds.getFirst() + " is"
+                    : "Messages " + String.join(", ", cutIds.stream().map(String::valueOf).toList()) + " are";
+            notes.add("%s cut at %d characters; GET /api/conversations/%d/messages/{messageId} returns one whole."
+                    .formatted(which, MESSAGE_EXCERPT_CHARS, conversationId));
+        }
+        if (page.heldBack() > 0) {
+            int held = page.rows().size();
+            notes.add("This page holds %d of %d messages, as many as fit in %d characters; the rest come with %s."
+                    .formatted(held, held + page.heldBack(), AGENT_PAGE_MAX_CHARS, rest));
+        }
+        return notes.isEmpty() ? null : String.join(" ", notes);
     }
 
     /**
@@ -500,10 +691,10 @@ public class ApiConversationsController extends Controller {
         // tool-call rows without maintaining a client-side name→icon
         // mapping. Parsed to a JsonArray so the enriched payload lands
         // as a real array in the response (not a stringified nested JSON).
-        map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls));
+        map.put(KEY_TOOL_CALLS, enrichToolCallsWithIcons(m.toolCalls));
         map.put("toolResults", m.toolResults);
         if (m.toolResultStructured != null) {
-            map.put("toolResultStructured", JsonParser.parseString(m.toolResultStructured));
+            map.put(KEY_TOOL_RESULT_STRUCTURED, JsonParser.parseString(m.toolResultStructured));
         }
         // Include reasoning text so the collapsible thinking bubble
         // re-renders identically after a conversation reload. Null for
@@ -531,7 +722,7 @@ public class ApiConversationsController extends Controller {
         if (m.messageKind != null) {
             map.put("messageKind", m.messageKind);
             if (m.metadata != null) {
-                map.put("metadata", JsonParser.parseString(m.metadata));
+                map.put(KEY_METADATA, JsonParser.parseString(m.metadata));
             }
         }
         // JCLAW-291: model-output truncation flag. Surfaced only when true
