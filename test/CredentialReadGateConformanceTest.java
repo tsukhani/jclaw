@@ -187,24 +187,30 @@ class CredentialReadGateConformanceTest extends UnitTest {
         var controller = ResourceLeakGateConformanceTest.withoutComments(
                 Files.readString(repo("app/controllers/ApiProvidersController.java")));
         var at = controller.indexOf("public static void discoverModels(");
-        assertTrue(at > 0, "ApiProvidersController.discoverModels not found — this check is stale");
+        assertTrue(at > 0, "ApiProvidersController.discoverModels not found — this check is stale. Point it at "
+                + "the action that now carries the SsrfGuard claim, or delete it with the claim");
         assertTrue(controller.substring(Math.max(0, at - 700), at).contains("SsrfGuard"),
                 "the @AgentAccess reason on discoverModels no longer names SsrfGuard; either it stopped "
-                        + "claiming the seam, or this check is pinned to the wrong action");
+                        + "claiming the seam, or this check is pinned to the wrong action. Delete this check with "
+                        + "the claim, or point it at the action that carries it");
 
         var body = controller.substring(at, Math.min(controller.length(), at + 1200));
         assertTrue(body.contains("ModelDiscoveryService.discover"),
                 "discoverModels no longer routes through ModelDiscoveryService, so the claimed seam is "
-                        + "no longer on its path: " + body.lines().limit(12).toList());
+                        + "no longer on its path. Route it through ModelDiscoveryService.discover again, or drop "
+                        + "SsrfGuard from its @AgentAccess reason and make it OPERATOR_ONLY: "
+                        + body.lines().limit(12).toList());
 
         var service = ResourceLeakGateConformanceTest.withoutComments(
                 Files.readString(repo("app/services/ModelDiscoveryService.java")));
         assertTrue(service.contains("SsrfGuard.assertProviderUrlSafe"),
                 "ModelDiscoveryService no longer screens the provider URL, so the annotation on "
-                        + "ApiProvidersController.discoverModels is now claiming a seam that is gone");
+                        + "ApiProvidersController.discoverModels is now claiming a seam that is gone: screen it "
+                        + "with SsrfGuard.assertProviderUrlSafe before the request again");
         assertTrue(service.contains("llmSingleShotGuarded"),
                 "ModelDiscoveryService no longer uses the SSRF-guarded transport, which is the half "
-                        + "of the seam that closes the DNS-rebinding window");
+                        + "of the seam that closes the DNS-rebinding window: send the request through "
+                        + "HttpFactories.llmSingleShotGuarded() again");
     }
 
     /** Guards the two assertions above against a parser that quietly stopped matching. */
@@ -212,19 +218,26 @@ class CredentialReadGateConformanceTest extends UnitTest {
     void theScanActuallyReadsTheRouteTableAndTheAnnotations() throws IOException {
         assertTrue(getRoutes().size() >= 100,
                 "expected 100+ GET /api routes, found " + getRoutes().size()
-                        + " — the routes parser stopped matching and both checks above would pass vacuously");
-        assertFalse(UNCHECKABLE_GET_ROUTES.isEmpty(), "the uncheckable list is empty");
+                        + " — the routes parser stopped matching and both checks above would pass vacuously. Fix "
+                        + "GET_ROUTE for conf/routes' current form");
+        assertFalse(UNCHECKABLE_GET_ROUTES.isEmpty(), "the uncheckable list is empty: if every GET route now "
+                + "declares its response type, delete this assertion");
         assertTrue(declaredResponseTypes().size() >= 70,
                 "expected 70+ declared response types, found " + declaredResponseTypes().size()
-                        + " — the annotation parser stopped matching");
-        assertFalse(recordComponentsByType().isEmpty(), "the record index is empty");
+                        + " — the annotation parser stopped matching. Fix DECLARED_RESPONSE for how actions now "
+                        + "declare @ApiResponse");
+        assertFalse(recordComponentsByType().isEmpty(), "the record index is empty: fix the record pattern in "
+                + "recordComponentsByType for how app/ now declares records");
 
         // A known credential-shaped member must be recognised, or the predicate proves nothing.
-        assertTrue(CREDENTIAL_NAME.matcher("botToken").find());
-        assertTrue(CREDENTIAL_NAME.matcher("signingSecret").find());
+        assertTrue(CREDENTIAL_NAME.matcher("botToken").find(), "CREDENTIAL_NAME no longer matches botToken: fix it");
+        assertTrue(CREDENTIAL_NAME.matcher("signingSecret").find(),
+                "CREDENTIAL_NAME no longer matches signingSecret: fix it");
         // ...and the counts that share those names must not be.
-        assertFalse(CREDENTIAL_NAME.matcher("maxTokens").find());
-        assertFalse(CREDENTIAL_NAME.matcher("promptTokens").find());
+        assertFalse(CREDENTIAL_NAME.matcher("maxTokens").find(),
+                "CREDENTIAL_NAME matches the count maxTokens: keep the token$ anchor");
+        assertFalse(CREDENTIAL_NAME.matcher("promptTokens").find(),
+                "CREDENTIAL_NAME matches the count promptTokens: keep the token$ anchor");
     }
 
     // --- scanning -----------------------------------------------------------------------------

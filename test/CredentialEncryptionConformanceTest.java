@@ -116,6 +116,10 @@ class CredentialEncryptionConformanceTest extends UnitTest {
             DataImpulsePlans.passwordKey("residential"), OtelConfig.KEY_SECRET_HEADERS, DecisionSettings.API_KEY,
             LayaDecision.API_KEY, BasetenDecision.API_KEY);
 
+    /** Where each kind of store seals its credential, for a failure that finds one in the clear. */
+    private static final String SEAL_IT = ": seal it on the write path — ConfigService.set for a Config key, a "
+            + "BindingCredentialConverter on a binding column, JsonCredential for a value in a JSON column";
+
     @Test
     void everyStoreKeepsItsCredentialEncrypted() {
         for (var store : STORES) {
@@ -123,11 +127,13 @@ class CredentialEncryptionConformanceTest extends UnitTest {
             long id = store.write(secret);
             try {
                 var column = rawColumn(store.rawColumnSql(), id);
-                assertNotNull(column, store.name() + ": the written row is missing");
-                assertFalse(column.contains(secret), store.name() + " stores the credential in plaintext");
+                assertNotNull(column, store.name() + ": the written row is missing — make the Store's write() and "
+                        + "rawColumnSql() name the same row");
+                assertFalse(column.contains(secret), store.name() + " stores the credential in plaintext" + SEAL_IT);
                 assertTrue(store.storedValue(column).startsWith(CredentialCipher.PREFIX),
-                        store.name() + " stores no ciphertext: " + store.storedValue(column));
-                assertEquals(secret, store.read(id), store.name() + ": the application reads back the original value");
+                        store.name() + " stores no ciphertext (" + store.storedValue(column) + ")" + SEAL_IT);
+                assertEquals(secret, store.read(id), store.name() + " does not read back the value it wrote: open the "
+                        + "stored value on the read path through the seam that sealed it");
             } finally {
                 store.delete(id);
             }
@@ -143,9 +149,11 @@ class CredentialEncryptionConformanceTest extends UnitTest {
             long id = store.write(token);
             try {
                 var column = rawColumn(store.rawColumnSql(), id);
-                assertNotNull(column, store.name());
-                assertTrue(column.startsWith(CredentialCipher.PREFIX), store.name() + " stores no ciphertext");
-                assertEquals(token, store.read(id), store.name());
+                assertNotNull(column, store.name() + ": the row a 512-character token was written to is missing");
+                assertTrue(column.startsWith(CredentialCipher.PREFIX), store.name() + " stores no ciphertext" + SEAL_IT);
+                assertEquals(token, store.read(id), store.name() + " does not read back a 512-character token: declare "
+                        + "the column columnDefinition = \"TEXT\", widened on an existing database by "
+                        + "BindingCredentialColumnsJob, with a converter that opens what it sealed");
             } finally {
                 store.delete(id);
             }
@@ -164,23 +172,31 @@ class CredentialEncryptionConformanceTest extends UnitTest {
                 var convert = field.getAnnotation(Convert.class);
                 assertNotNull(convert, name + " holds a credential with no BindingCredentialConverter: it is stored in "
                         + "plaintext. Add a BindingCredential column and its converter, or name it in NOT_CREDENTIALS.");
-                var converter = assertDoesNotThrow(() -> convert.converter().getConstructor().newInstance(), name);
-                var credential = assertInstanceOf(BindingCredentialConverter.class, converter, name).column();
-                assertEquals(credential.table, entity.getJavaType().getAnnotation(Table.class).name(), name);
+                var converter = assertDoesNotThrow(() -> convert.converter().getConstructor().newInstance(),
+                        name + ": give its converter the public no-argument constructor JPA builds it with");
+                var credential = assertInstanceOf(BindingCredentialConverter.class, converter,
+                        name + ": convert it with the BindingCredentialConverter subclass of its column").column();
+                assertEquals(credential.table, entity.getJavaType().getAnnotation(Table.class).name(),
+                        name + " is sealed under another table's BindingCredential: use the converter of its own column");
                 assertEquals(credential.column, field.getAnnotation(Column.class).name(),
-                        name + " is sealed under another column's name, which a value read raw will not open under");
-                assertEquals(BINDING_FIELDS.get(credential), attribute.getName(), name);
+                        name + " is sealed under another column's name, which a value read raw will not open under: use "
+                                + "the converter of its own column");
+                assertEquals(BINDING_FIELDS.get(credential), attribute.getName(),
+                        name + ": BINDING_FIELDS maps its BindingCredential to another field; correct the entry");
                 sealed.add(name);
             }
         }
         assertEquals(BindingCredential.values().length, sealed.size(),
-                "each binding credential column is one attribute the scan found: " + sealed);
+                "each binding credential column is one attribute the scan found: " + sealed + ". Map each "
+                        + "BindingCredential's column on its entity with its converter, or remove the constant");
     }
 
     @Test
     void everyConfigKeyThatHoldsACredentialIsEncrypted() {
         for (var key : CREDENTIAL_KEYS) {
-            assertTrue(ConfigService.encryptsAtRest(key), key);
+            assertTrue(ConfigService.encryptsAtRest(key), key + " holds a credential that ConfigService.encryptsAtRest "
+                    + "does not flag: outside auth., end the key's last word in key, keys or token, or put secret or "
+                    + "password in a word of it, or widen ConfigService.isSensitive to cover it");
         }
     }
 
@@ -194,14 +210,16 @@ class CredentialEncryptionConformanceTest extends UnitTest {
                 .should().setField("models.Config", "value")
                 .orShould().setField("models.Config", "key")
                 .orShould().callMethod("models.Config", "upsert", "java.lang.String", "java.lang.String")
-                .because("ConfigService is the Config seam of the credential cipher (JCLAW-1455)");
+                .because("ConfigService is the Config seam of the credential cipher (JCLAW-1455): write a Config "
+                        + "row through ConfigService.set, never by setting models.Config's fields or calling Config.upsert");
         rule.check(ArchitectureTest.APP_CLASSES);
 
         var writes = ArchitectureTest.APP_CLASSES.get("services.ConfigService").getFieldAccessesFromSelf().stream()
                 .filter(access -> access.getAccessType() == JavaFieldAccess.AccessType.SET)
                 .filter(access -> access.getTarget().getFullName().equals("models.Config.value"))
                 .count();
-        assertTrue(writes > 0, "the rule must still match the writes it guards");
+        assertTrue(writes > 0, "the rule must still match the writes it guards: ConfigService no longer sets "
+                + "models.Config.value itself, so point the rule at what it now writes the row through");
     }
 
     /** A Config key, written through {@link ConfigService#set}. */
@@ -333,7 +351,8 @@ class CredentialEncryptionConformanceTest extends UnitTest {
                 var section = path.substring(0, path.indexOf('.'));
                 var storedValue = stored.getAsJsonObject(section).get(path.substring(section.length() + 1)).getAsString();
                 assertEquals(value.endsWith("****"), CredentialCipher.isEncrypted(storedValue),
-                        "mcp_server " + path + ": the API masks exactly the values stored encrypted");
+                        "mcp_server " + path + ": the API masks exactly the values stored encrypted — make "
+                                + "McpServerService.View mask what JsonCredential.MCP_SERVER seals");
             });
         }
 
@@ -344,7 +363,8 @@ class CredentialEncryptionConformanceTest extends UnitTest {
         for (var name : masked.keySet()) {
             assertEquals(masked.get(name).getAsString().endsWith("****"),
                     CredentialCipher.isEncrypted(stored.get(name).getAsString()),
-                    "channel_config " + name + ": the API masks exactly the values stored encrypted");
+                    "channel_config " + name + ": the API masks exactly the values stored encrypted — make "
+                            + "ApiChannelsController.maskConfig mask what JsonCredential.CHANNEL_CONFIG seals");
         }
     }
 

@@ -56,17 +56,22 @@ class ResourceLeakGateConformanceTest extends UnitTest {
     void theCheckerIsWiredAtErrorSeverityOnBothCompiles() throws Exception {
         var script = buildScript();
         assertTrue(script.contains("com.google.errorprone:error_prone_annotations:"),
-                "@MustBeClosed itself must be a compile dependency, not only a tool one");
+                "@MustBeClosed itself must be a compile dependency, not only a tool one: restore "
+                        + "implementation(\"com.google.errorprone:error_prone_annotations:<version>\")");
 
         int testBlock = script.indexOf(TEST_COMPILE_BLOCK);
-        assertTrue(testBlock > 0, "compileTestJava carries its own Error Prone block");
+        assertTrue(testBlock > 0, "compileTestJava lost its own Error Prone block: restore "
+                + TEST_COMPILE_BLOCK + " after the shared one");
         assertTrue(script.substring(0, testBlock).contains(MUST_BE_CLOSED_AT_ERROR),
-                "MustBeClosed must fail the app/ compile, not warn — a warning nobody reads is not a gate");
+                "MustBeClosed must fail the app/ compile, not warn — a warning nobody reads is not a gate. Restore "
+                        + MUST_BE_CLOSED_AT_ERROR + " in the shared Error Prone block");
         assertTrue(script.indexOf(MUST_BE_CLOSED_AT_ERROR, testBlock) >= 0,
-                "test/ enforcement is what reaches LuceneTestSync's lock; app/-only cannot");
+                "test/ enforcement is what reaches LuceneTestSync's lock; app/-only cannot. Restore "
+                        + MUST_BE_CLOSED_AT_ERROR + " in the compileTestJava block");
         // Any of these leaves every token above intact while the checker checks nothing.
         for (var off : List.of("enabled.set(false)", "excludedPaths", "disable(\"MustBeClosed\")")) {
-            assertFalse(script.contains(off), off + " would switch the leak gate off silently");
+            assertFalse(script.contains(off), off + " would switch the leak gate off silently: remove it from "
+                    + "build.gradle.kts");
         }
     }
 
@@ -90,14 +95,18 @@ class ResourceLeakGateConformanceTest extends UnitTest {
                 offenders.add(file);
             }
         }
-        assertEquals(Set.of(), offenders, "AutoCloseable types in app/ whose factory carries no @MustBeClosed");
+        assertEquals(Set.of(), offenders, "AutoCloseable types in app/ whose factory carries no @MustBeClosed: "
+                + "annotate each one's constructor or factory with @MustBeClosed (docs/agents/resource-leaks.md)");
         // A hierarchy walk that silently stopped resolving would pass this test on an empty set.
-        assertTrue(scanned.size() >= 7, "the scan must still find the known AutoCloseable types, saw " + scanned);
+        assertTrue(scanned.size() >= 7, "the scan must still find the known AutoCloseable types, saw " + scanned
+                + ". If one was removed, lower the floor to the count found; otherwise the hierarchy walk has "
+                + "stopped resolving AutoCloseable");
     }
 
     private static String sourceFile(JavaClass javaClass) {
         var name = javaClass.getSource().flatMap(Source::getFileName)
-                .orElseThrow(() -> new AssertionError("no source file recorded for " + javaClass.getName()));
+                .orElseThrow(() -> new AssertionError("no source file recorded for " + javaClass.getName()
+                        + ": compileJava must keep javac's SourceFile attribute (no -g:none)"));
         return "app/" + javaClass.getPackageName().replace('.', '/') + "/" + name;
     }
 
@@ -127,7 +136,11 @@ class ResourceLeakGateConformanceTest extends UnitTest {
             }
         }
         assertEquals(List.of(), offenders,
-                "test classes that take the Lucene lock without releasing it in a teardown hook or finally");
-        assertTrue(acquirers >= 20, "the scan must still see the hook-pair callers, saw " + acquirers);
+                "test classes that take the Lucene lock without releasing it in a teardown hook or finally: call "
+                        + "LuceneTestSync.release() from an @AfterEach or @AfterAll or a finally, or hold "
+                        + "LuceneTestSync.openLease() in a try-with-resources instead");
+        assertTrue(acquirers >= 20, "the scan must still see the hook-pair callers, saw " + acquirers
+                + ". If callers moved to openLease(), lower the floor to the count found; otherwise the scan has "
+                + "stopped matching LuceneTestSync.openForTest( and closedForTest(");
     }
 }

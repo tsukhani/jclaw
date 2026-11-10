@@ -26,7 +26,8 @@ class PeriodicJobConformanceTest extends UnitTest {
             .that().areAnnotatedWith(Every.class).or().areAnnotatedWith(On.class)
             .should().beAssignableTo(PeriodicJob.class)
             .because("H2 closes the database at SIGTERM while Play still fires scheduled jobs, "
-                    + "and PeriodicJob skips a tick from then on (JF-23)");
+                    + "and PeriodicJob skips a tick from then on (JF-23). Extend jobs.PeriodicJob "
+                    + "instead of play.jobs.Job");
 
     @Test
     void everyScheduledJobExtendsPeriodicJob() {
@@ -40,7 +41,9 @@ class PeriodicJobConformanceTest extends UnitTest {
                 .map(JavaClass::getName)
                 .toList();
 
-        assertTrue(scheduled.contains("jobs.ScrapeJobRunner"), "the rule must see the scheduled jobs; it saw " + scheduled);
+        assertTrue(scheduled.contains("jobs.ScrapeJobRunner"), "the rule must see the scheduled jobs; it saw " + scheduled
+                + ". If ScrapeJobRunner is no longer scheduled, name a job that is; otherwise the import has stopped "
+                + "reading @Every and @On");
     }
 
     // Play compiles test/ in memory, leaving ArchUnit no bytecode to read, so the probe is compiled

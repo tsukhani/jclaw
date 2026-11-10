@@ -46,11 +46,11 @@ interval measurement in `utils.LatencyStats`.
 `conf/archunit.properties` pins both `freeze.store.default.allowStoreCreation=false` and
 `freeze.store.default.allowStoreUpdate=false`, so a run can neither mint a fresh baseline nor
 rewrite the committed one. That cuts both ways: a new read fails, and a listed read that migrates
-to `AppClock` also fails (`Updating frozen violations is disabled`) until its line is deleted from
-the store by hand. To regenerate deliberately, flip both lines for a single run and flip them
-back — `playAutotest` does not forward `-D` to the Play JVM, so the properties file is the only
-lever. The store key is the rule's description, so editing the rule's `because(...)` text fails
-the next run loudly rather than orphaning the baseline silently.
+to `AppClock` also fails, naming the line to delete from the store by hand. To regenerate
+deliberately, flip both lines for a single run and flip them back — `playAutotest` does not forward
+`-D` to the Play JVM, so the properties file is the only lever. The store key is the rule's
+description, so editing the rule's `because(...)` text fails the next run loudly, naming that run,
+rather than orphaning the baseline silently.
 
 **Writing a time-dependent test.** Bind a fixed clock instead of sleeping or asserting on a ±1s
 window: `TaskSchedulingServiceTest` and `TaskSchedulingTest.cronEveryMinute` are the worked examples.

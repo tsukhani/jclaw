@@ -56,9 +56,11 @@ class SpaBuildInputsConformanceTest extends UnitTest {
             }
             roots.add(repo().resolve(m.group()).normalize());
         }
-        assertFalse(roots.isEmpty(), () -> "no roots parsed from the gate line: " + line.group());
+        assertFalse(roots.isEmpty(), () -> "no roots parsed from the gate line: " + line.group()
+                + " — update PATHSPEC to the line's new form");
         for (var root : roots) {
-            assertTrue(Files.isDirectory(root), () -> "the gate probes a directory that does not exist: " + root);
+            assertTrue(Files.isDirectory(root), () -> "the gate probes a directory that does not exist: " + root
+                    + ". Remove it from the gate's git ls-files pathspecs in jclaw.sh, or restore the directory");
         }
         return roots;
     }
@@ -100,12 +102,16 @@ class SpaBuildInputsConformanceTest extends UnitTest {
         var roots = gateRoots();
         var inputs = escapingImports();
         assertTrue(inputs.size() >= KNOWN_ESCAPING_IMPORTS,
-                () -> "expected at least " + KNOWN_ESCAPING_IMPORTS + " imports reaching outside frontend/, found " + inputs);
+                () -> "expected at least " + KNOWN_ESCAPING_IMPORTS + " imports reaching outside frontend/, found " + inputs
+                        + ". If such an import was removed, lower KNOWN_ESCAPING_IMPORTS; otherwise ESCAPING_IMPORT has "
+                        + "stopped matching how the frontend imports and needs its new form");
         for (var input : inputs) {
-            assertTrue(Files.exists(input), () -> "imported file does not exist: " + input);
+            assertTrue(Files.exists(input), () -> "imported file does not exist: " + input
+                    + " — correct the import's specifier, or restore the file");
             assertTrue(roots.stream().anyMatch(input::startsWith),
                     () -> "the SPA staleness gate cannot see " + repo().relativize(input)
-                            + ", so editing it would not trigger a rebuild (JCLAW-1178). Gate roots: " + roots);
+                            + ", so editing it would not trigger a rebuild (JCLAW-1178). Add its directory to the "
+                            + "gate's git ls-files pathspecs in jclaw.sh. Gate roots: " + roots);
         }
     }
 }

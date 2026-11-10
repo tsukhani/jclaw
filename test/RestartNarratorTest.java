@@ -86,7 +86,8 @@ class RestartNarratorTest extends UnitTest {
         // a reference past these two modules fails at runtime, in the middle of a restart.
         ArchRule rule = classes().that().haveNameMatching("utils\\.RestartNarrator(\\$.*)?")
                 .should().onlyDependOnClassesThat(JAVA_BASE_OR_HTTPSERVER)
-                .because("jclaw.sh restart runs RestartNarrator out of process on the compiled classes alone");
+                .because("jclaw.sh restart runs RestartNarrator out of process on the compiled classes alone: "
+                        + "keep it on java.base and jdk.httpserver, and write what it needs from elsewhere into it");
         rule.check(ArchitectureTest.APP_CLASSES);
 
         var importer = ArchitectureTest.APP_CLASSES;

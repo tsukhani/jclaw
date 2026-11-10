@@ -108,7 +108,8 @@ class ReleaseSignatureTest extends UnitTest {
         // library on the classpath: a reference outside the JDK fails at runtime, in the middle of an upgrade.
         ArchRule rule = classes().that().haveNameMatching("utils\\.ReleaseSignature(\\$.*)?")
                 .should().onlyDependOnClassesThat(resideInAPackage("java..").or(type(ReleaseSignature.class)))
-                .because("jclaw.sh upgrade runs ReleaseSignature out of process on the compiled classes alone");
+                .because("jclaw.sh upgrade runs ReleaseSignature out of process on the compiled classes alone: "
+                        + "keep it on the JDK, and write what it needs from elsewhere into it");
         rule.check(ArchitectureTest.APP_CLASSES);
     }
 }

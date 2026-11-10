@@ -5,8 +5,6 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.Source;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
-import com.tngtech.archunit.library.freeze.FreezingArchRule;
-import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import utils.AppClock;
@@ -116,7 +114,8 @@ class WallClockDisciplineTest extends UnitTest {
                 .anyMatch(call -> "utils.AppClock".equals(call.getTargetOwner().getName()));
         assertTrue(readsTheAppClock,
                 "no call to utils.AppClock found in the imported classes — the scan is looking at "
-                        + "the wrong bytecode and every rule below would pass vacuously");
+                        + "the wrong bytecode and every rule below would pass vacuously. Run it through "
+                        + "playAutotest, whose compileJava refreshes build/classes/java/main");
 
         // The floor guards the deliberate regeneration run, when the store switches are on: a
         // predicate that had stopped matching would then prune the baseline to empty and pass.
@@ -130,15 +129,15 @@ class WallClockDisciplineTest extends UnitTest {
         assertTrue(intervalFiles.size() >= FROZEN_INTERVAL_FILES,
                 "expected at least " + FROZEN_INTERVAL_FILES + " source files with a frozen interval "
                         + "baseline, found " + intervalFiles.size() + " " + intervalFiles + " — the predicate "
-                        + "stopped matching. Lower the constant only once a holder was genuinely migrated");
+                        + "stopped matching. If a holder was genuinely migrated, lower the constant to the count "
+                        + "found; otherwise fix wallClockRead() until it finds them again");
 
-        ArchRule rule = FreezingArchRule.freeze(noClasses()
+        ArchRule rule = CapabilityRulesTest.frozen(noClasses()
                 .that().doNotHaveFullyQualifiedName("utils.AppClock")
                 .should().accessTargetWhere(wallClockRead())
                 .because("wall-clock reads go through utils.AppClock (JCLAW-1150) so tests can bind "
                         + "a fixed clock; the frozen entries are System.currentTimeMillis interval "
-                        + "baselines, not reads of the calendar"))
-                .persistIn(new TextFileBasedViolationStore(description -> "wall-clock-interval-baselines"));
+                        + "baselines, not reads of the calendar"), "wall-clock-interval-baselines");
         rule.check(APP_CLASSES);
     }
 

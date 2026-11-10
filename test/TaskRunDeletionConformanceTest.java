@@ -31,8 +31,11 @@ class TaskRunDeletionConformanceTest extends UnitTest {
             }
         }
         assertTrue(offenders.isEmpty(), "these files bulk-delete task runs without first deleting the "
-                + "subagent runs those task runs started: " + offenders);
-        assertTrue(sites >= 6, "the scan must still find the delete sites it guards; it found " + sites);
+                + "subagent runs those task runs started. Call SubagentRegistry.deleteRunsStartedBy with the "
+                + "same predicate over TaskRun r before each DELETE: " + offenders);
+        assertTrue(sites >= 6, "the scan must still find the delete sites it guards; it found " + sites
+                + ". If a delete site was removed, lower the floor to the count found; if the JPQL was "
+                + "respelled, update BULK_DELETE to match it");
     }
 
     private static int count(String source, String needle) {

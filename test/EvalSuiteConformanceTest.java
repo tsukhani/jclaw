@@ -44,9 +44,9 @@ class EvalSuiteConformanceTest extends UnitTest {
         // loadAll throws naming the offending file and case on any malformed suite.
         var suites = shippedSuites();
 
-        assertFalse(suites.isEmpty(), "expected at least one suite in evals/suites");
+        assertFalse(suites.isEmpty(), "expected at least one suite in evals/suites: restore the shipped suites");
         var cases = suites.stream().mapToInt(s -> s.cases().size()).sum();
-        assertTrue(cases >= suites.size(), "every suite carries at least one case");
+        assertTrue(cases >= suites.size(), "a suite under evals/suites carries no case: add one, or delete the suite");
     }
 
     @Test
@@ -62,7 +62,8 @@ class EvalSuiteConformanceTest extends UnitTest {
         var implemented = Arrays.stream(EvalCheck.Kind.values())
                 .map(EvalCheck.Kind::wire).collect(Collectors.toSet());
 
-        assertEquals(implemented, documented, "eval-suite.schema.json and EvalCheck.Kind disagree");
+        assertEquals(implemented, documented, "eval-suite.schema.json and EvalCheck.Kind disagree: add or remove the "
+                + "kind in both $defs.check.properties.kind.enum and EvalCheck.Kind");
     }
 
     @Test
@@ -77,6 +78,7 @@ class EvalSuiteConformanceTest extends UnitTest {
         var unused = EnumSet.allOf(EvalCheck.Kind.class);
         unused.removeAll(used);
 
-        assertTrue(unused.isEmpty(), "check kinds no shipped suite uses: " + unused);
+        assertTrue(unused.isEmpty(), "check kinds no shipped suite uses: " + unused
+                + ". Add a case checking each to a suite under evals/suites");
     }
 }

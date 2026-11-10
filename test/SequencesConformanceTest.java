@@ -81,31 +81,40 @@ class SequencesConformanceTest extends UnitTest {
     @Test
     void theCommittedSetParsesWithNoModel() throws IOException {
         var set = Sequences.load(Path.of(Play.applicationPath.getAbsolutePath(), Sequences.DEFAULT_PATH), SCHEMA);
-        assertEquals("Avery Lin", set.ownerName());
-        assertTrue(set.chains().size() >= 4, () -> set.chains().size() + " chains");
-        assertTrue(set.fingerprint().matches("sequences@[0-9a-f]{12}"), set.fingerprint());
+        assertEquals("Avery Lin", set.ownerName(), "sequences.json's userMd must read \"Name: Avery Lin\"");
+        assertTrue(set.chains().size() >= 4, () -> set.chains().size() + " chains: restore the committed set");
+        assertTrue(set.fingerprint().matches("sequences@[0-9a-f]{12}"),
+                () -> set.fingerprint() + ": Sequences.fingerprint must stay sequences@ and 12 hex digits, which "
+                        + "reports and frozen splits compare");
         var tags = new HashSet<String>();
         var memoryIds = new HashSet<String>();
         for (var chain : set.chains()) {
             tags.addAll(chain.tags());
-            assertFalse(chain.probes().isEmpty(), chain.id());
+            assertFalse(chain.probes().isEmpty(), () -> chain.id() + " has no probe: give it one");
             for (int i = 0; i < chain.memories().size(); i++) {
                 var memory = chain.memories().get(i);
-                assertTrue(memoryIds.add(memory.id()), memory.id());
+                assertTrue(memoryIds.add(memory.id()), () -> memory.id() + " is used twice: rename one");
                 if (i > 0) {
                     assertFalse(memory.labels().capturedAt()
-                            .isBefore(chain.memories().get(i - 1).labels().capturedAt()), memory.id());
+                            .isBefore(chain.memories().get(i - 1).labels().capturedAt()),
+                            () -> memory.id() + " is captured before the memory ahead of it: order the chain by capturedAt");
                 }
                 int self = i;
                 memory.supersedes().keySet().forEach(p -> assertTrue(chain.indexOf(p) >= 0
-                        && chain.indexOf(p) < self, () -> memory.id() + " supersedes " + p));
+                        && chain.indexOf(p) < self, () -> memory.id() + " supersedes " + p
+                        + ", which is not earlier in its chain: supersede an earlier memory of the same chain"));
                 if (chain.tags().contains(GraphCases.GUEST_ABOUT_OWNER)) {
-                    assertEquals(MemoryAuthorType.GUEST_TURN, memory.authorType(), memory.id());
+                    assertEquals(MemoryAuthorType.GUEST_TURN, memory.authorType(),
+                            () -> memory.id() + ": every memory of a guest-about-owner chain is a guest turn");
                 }
             }
-            for (var p : chain.probes()) assertTrue(chain.indexOf(p.memoryId()) >= 0, p::toString);
+            for (var p : chain.probes()) {
+                assertTrue(chain.indexOf(p.memoryId()) >= 0,
+                        () -> p + " reads a memory outside its chain: point it at one of the chain's memories");
+            }
         }
-        assertTrue(tags.containsAll(Sequences.CHAIN_TAGS), tags::toString);
+        assertTrue(tags.containsAll(Sequences.CHAIN_TAGS),
+                () -> tags + ": tag at least one chain with each of " + Sequences.CHAIN_TAGS);
     }
 
     private static Sequences committed() throws IOException {
@@ -117,21 +126,30 @@ class SequencesConformanceTest extends UnitTest {
         var set = committed();
         var memories = set.chains().stream().flatMap(c -> c.memories().stream()).toList();
         var probes = set.chains().stream().flatMap(c -> c.probes().stream()).toList();
-        assertEquals(60, set.chains().size());
-        assertEquals(150, memories.size());
-        assertEquals(30, set.chains().stream().filter(c -> c.memories().size() == 3).count());
+        assertEquals(60, set.chains().size(), composition("chains"));
+        assertEquals(150, memories.size(), composition("memories"));
+        assertEquals(30, set.chains().stream().filter(c -> c.memories().size() == 3).count(),
+                composition("three-memory chains"));
         for (var lineage : List.of("update:40", "restatement:25", "correction:25")) {
             var parts = lineage.split(":");
             assertEquals(Long.parseLong(parts[1]), memories.stream().flatMap(m -> m.supersedes().values().stream())
-                    .filter(l -> l.name().toLowerCase(Locale.ROOT).equals(parts[0])).count(), parts[0]);
+                    .filter(l -> l.name().toLowerCase(Locale.ROOT).equals(parts[0])).count(),
+                    composition(parts[0] + " links"));
         }
-        assertEquals(240, probes.size());
-        assertEquals(118, probes.stream().filter(p -> p.truth() == GraphView.Truth.YES).count());
-        assertEquals(74, probes.stream().filter(p -> p.truth() == GraphView.Truth.NO).count());
-        assertEquals(41, probes.stream().filter(Sequences.Probe::assumed).count());
-        assertEquals(72, probes.stream().filter(p -> p.before() != null).count());
-        assertEquals(6, set.chains().stream().filter(c -> c.tags().contains(GraphCases.GUEST_ABOUT_OWNER)).count());
-        assertEquals(3, memories.stream().filter(m -> m.authorType() == MemoryAuthorType.CONSOLIDATION_DERIVED).count());
+        assertEquals(240, probes.size(), composition("probes"));
+        assertEquals(118, probes.stream().filter(p -> p.truth() == GraphView.Truth.YES).count(), composition("YES probes"));
+        assertEquals(74, probes.stream().filter(p -> p.truth() == GraphView.Truth.NO).count(), composition("NO probes"));
+        assertEquals(41, probes.stream().filter(Sequences.Probe::assumed).count(), composition("assumed probes"));
+        assertEquals(72, probes.stream().filter(p -> p.before() != null).count(), composition("before probes"));
+        assertEquals(6, set.chains().stream().filter(c -> c.tags().contains(GraphCases.GUEST_ABOUT_OWNER)).count(),
+                composition("guest-about-owner chains"));
+        assertEquals(3, memories.stream().filter(m -> m.authorType() == MemoryAuthorType.CONSOLIDATION_DERIVED).count(),
+                composition("consolidation_derived memories"));
+    }
+
+    private static String composition(String what) {
+        return "sequences.json's count of " + what + " is not what evals/graph/README.md's \"The committed set\" "
+                + "states: restore the set, or change the README and this test's counts together";
     }
 
     /** {@code lineage:<later>:<earlier>:<lineage>} for each link, in file order. */
@@ -170,7 +188,8 @@ class SequencesConformanceTest extends UnitTest {
     void theSpotCheckIsTheSeededSampleOfTheCommittedLabels() throws IOException {
         var checks = JsonParser.parseString(Files.readString(Path.of(Play.applicationPath.getAbsolutePath(),
                 "evals/graph/sequence-label-checks.json"))).getAsJsonObject();
-        assertEquals("v3", checks.get("guide").getAsString());
+        assertEquals("v3", checks.get("guide").getAsString(),
+                "sequence-label-checks.json was judged against another GUIDE: redraw it under v3");
         int seed = checks.get("seed").getAsInt();
         var records = new ArrayList<String>();
         for (var e : checks.getAsJsonArray("checks")) {
@@ -178,15 +197,18 @@ class SequencesConformanceTest extends UnitTest {
             var record = check.get("record").getAsString();
             records.add(record);
             var chain = check.get("chain").getAsString();
-            assertTrue(record.contains(":" + chain), () -> record + " is not in chain " + chain);
-            assertTrue(List.of("pending", "agree", "disagree").contains(check.get("verdict").getAsString()), record);
+            assertTrue(record.contains(":" + chain), () -> record + " is not in chain " + chain + ": set its chain to "
+                    + "the one the record names");
+            assertTrue(List.of("pending", "agree", "disagree").contains(check.get("verdict").getAsString()),
+                    () -> record + ": a verdict is pending, agree or disagree");
         }
         var set = committed();
         long lineages = records.stream().filter(r -> r.startsWith("lineage:")).count();
         long probes = records.stream().filter(r -> r.startsWith("probe:")).count();
         var expected = new ArrayList<>(sample(lineageRecords(set), seed, lineages));
         expected.addAll(sample(probeRecords(set), seed, probes));
-        assertEquals(expected, records, "the checks are not the seed's sample of the committed labels");
+        assertEquals(expected, records, "the checks are not the seed's sample of the committed labels: redraw "
+                + "sequence-label-checks.json by the sampling rule in evals/graph/README.md with seed " + seed);
     }
 
     @Test

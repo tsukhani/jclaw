@@ -54,7 +54,10 @@ not. The predicates match accesses, so a method reference such as `ProcessBuilde
 or `Path::of` counts the same as a call. Each frozen rule is paired with a floor on its
 live match count, which guards the deliberate regeneration run: with the switches on, a
 predicate that had silently stopped matching would prune the store to empty and pass
-forever.
+forever. The store is keyed by each rule's full description, `because(...)` text included, so
+editing that text fails the next run, naming the regeneration: set both switches to `true`, run
+that class alone, set them back, delete the old key from `stored.rules` (ArchUnit writes the new
+one beside it), and diff the store file to confirm it lists the same sites.
 
 The filesystem authority is deliberately the narrow one: it covers paths resolved from
 tool arguments, since those are the only ones an operator does not control.

@@ -11,14 +11,17 @@ import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
 import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
+import com.tngtech.archunit.library.freeze.ViolationStore;
 import controllers.AgentAccess;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import play.Play;
 import play.test.UnitTest;
 import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,6 +29,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -48,9 +52,9 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * <p>Shell and filesystem have pre-existing holders, so they run as {@link FreezingArchRule}s
  * and the checked-in store under {@code archunit_store/} <em>is</em> the allowlist: a listed
  * site passes and a new one fails. {@code conf/archunit.properties} pins both store switches
- * off, so a listed site that stops matching fails too ("Updating frozen violations is
- * disabled") until its line is deleted by hand — the store changes only when a human edits
- * it. Line numbers are not part of the match, so editing a listed file does not red the build.
+ * off, so a listed site that stops matching fails too, naming the line to delete by hand — the
+ * store changes only when a human edits it. Line numbers are not part of the match, so editing a
+ * listed file does not red the build.
  *
  * <p>The predicates match accesses rather than calls, so a method reference
  * ({@code ProcessBuilder::start}, {@code Path::of}) counts the same as a call.
@@ -100,7 +104,10 @@ class CapabilityRulesTest extends UnitTest {
                 .should().accessTargetWhere(PROCESS_SPAWN)
                 .because("spawning an OS process is an unconfined authority — JEP 486 removed the "
                         + "SecurityManager, so the child is bounded only by the JVM's own user "
-                        + "(JCLAW-1152); the classes granted it are enumerated in archunit_store/");
+                        + "(JCLAW-1152). Start a sidecar through services.LocalSidecarDaemon, which "
+                        + "already holds it; wrap the argv of a process model output can steer with "
+                        + "tools.HarnessSandbox; grant a new holder by adding its lines below to "
+                        + "archunit_store/shell-process-spawners by hand");
         frozen(rule, "shell-process-spawners").check(APP_CLASSES);
     }
 
@@ -141,8 +148,10 @@ class CapabilityRulesTest extends UnitTest {
                 .that().resideInAPackage("tools..")
                 .should().accessTargetWhere(DIRECT_PATH_CONSTRUCTION)
                 .because("a path resolved from a tool argument must be contained by "
-                        + "WorkspacePathGuard, which tools.FsPaths reaches on the model-facing side "
-                        + "(JCLAW-1152); the sites predating that seam are listed in archunit_store/");
+                        + "WorkspacePathGuard (JCLAW-1152): resolve it through "
+                        + "tools.FsPaths.resolveTargetPath, which reaches the guard. A fixed path no "
+                        + "tool argument reaches is granted by adding its lines below to "
+                        + "archunit_store/filesystem-tool-paths by hand");
         frozen(rule, "filesystem-tool-paths").check(APP_CLASSES);
     }
 
@@ -224,16 +233,20 @@ class CapabilityRulesTest extends UnitTest {
                         .flatMap(c -> c.getAccessesFromSelf().stream())
                         .anyMatch(RAW_SOCKET_ACCESS),
                 "no socket call found inside " + PRINTING_PACKAGE + " — the exclusion is carrying "
-                        + "nothing, so the predicate has stopped matching and the rule passes vacuously");
+                        + "nothing, so the predicate has stopped matching and the rule passes vacuously. "
+                        + "Add what the printing stack now opens to RAW_SOCKET_ACCESS, or drop the "
+                        + "exclusion if it opens no socket at all");
         assertTrue(APP_CLASSES.get(BROWSER_PROXY_CLASS).getAccessesFromSelf().stream()
                         .anyMatch(RAW_SOCKET_ACCESS),
                 BROWSER_PROXY_CLASS + " matches no socket call, so its exemption guards nothing — if it "
-                        + "moved to SocketChannel the rule would keep passing while the exemption stood");
+                        + "moved to SocketChannel the rule would keep passing while the exemption stood. "
+                        + "Add what it now opens to RAW_SOCKET_ACCESS, or drop its exemption");
         assertTrue(APP_CLASSES.stream()
                         .filter(JavaClass.Predicates.belongToAnyOf(SsrfGuard.class))
                         .flatMap(c -> c.getAccessesFromSelf().stream())
                         .anyMatch(RAW_SOCKET_ACCESS),
-                "SsrfGuard matches no socket call, so its exemption guards nothing");
+                "SsrfGuard matches no socket call, so its exemption guards nothing. Add what its "
+                        + "provider-screen socket factory now opens to RAW_SOCKET_ACCESS, or drop the exemption");
     }
 
     /**
@@ -253,7 +266,9 @@ class CapabilityRulesTest extends UnitTest {
         }
         assertEquals(Set.of(BROWSER_PROXY_CLASS), readers,
                 "the permitted origin is read to allow a destination without screening it, so exactly "
-                        + "one caller may read it — and a rename that matches nothing fails here too");
+                        + "one caller may read it — and a rename that matches nothing fails here too. Screen "
+                        + "a new reader's destinations through SsrfGuard instead of reading permittedOrigin(), "
+                        + "or point PERMITTED_ORIGIN_READ at the method's new name");
     }
 
     private static final DescribedPredicate<JavaAccess<?>> PERMITTED_ORIGIN_READ = DescribedPredicate.describe(
@@ -271,7 +286,8 @@ class CapabilityRulesTest extends UnitTest {
     void noJdkHttpClientInApp() {
         ArchRule rule = noClasses()
                 .should().dependOnClassesThat().resideInAnyPackage("java.net.http..")
-                .because("outbound HTTP is OkHttp-only in app/ (JCLAW-185..188); the JDK HttpClient was removed");
+                .because("outbound HTTP is OkHttp-only in app/ (JCLAW-185..188); the JDK HttpClient was "
+                        + "removed, so take a client from utils.HttpFactories instead");
         rule.check(APP_CLASSES);
     }
 
@@ -332,7 +348,9 @@ class CapabilityRulesTest extends UnitTest {
                 .toList();
 
         assertFalse(roots.isEmpty(),
-                "no shutdown component method references resolved — the rule would pass vacuously");
+                "no shutdown component method references resolved — the rule would pass vacuously. "
+                        + "ShutdownJob.doJob no longer lists its components as method references: teach "
+                        + "this test the new shape before trusting a pass");
 
         var offenders = new ArrayList<String>();
         for (JavaMethod root : roots) {
@@ -340,7 +358,9 @@ class CapabilityRulesTest extends UnitTest {
             if (path != null) offenders.add(path);
         }
         assertTrue(offenders.isEmpty(),
-                "shutdown components must not reach the database:\n  " + String.join("\n  ", offenders));
+                "shutdown components must not reach the database. Move the database work off the stop "
+                        + "path, or skip it while EventLogger.isShuttingDown() is true, as "
+                        + "McpConnectionManager.clearAllowlistAndAudit does:\n  " + String.join("\n  ", offenders));
     }
 
     /** BFS from a component's stop method; returns a readable call path to a DB sink, or null. */
@@ -431,7 +451,8 @@ class CapabilityRulesTest extends UnitTest {
         }
         assertTrue(unresolved.isEmpty(),
                 "these routes resolve to no imported controller action, so the rule below cannot "
-                        + "see them and would pass over a genuinely undeclared endpoint: " + unresolved);
+                        + "see them and would pass over a genuinely undeclared endpoint. Point each at an "
+                        + "existing controllers action in conf/routes, or delete it: " + unresolved);
 
         classes()
                 .that().resideInAPackage("controllers")
@@ -571,12 +592,15 @@ class CapabilityRulesTest extends UnitTest {
         if (mutating && level != AgentAccess.Level.OPERATOR_ONLY && reason.isBlank()) {
             violations.add(route + " -> " + where + " is " + level + " but names nothing that "
                     + "bounds it. A mutating route left open without its grounds reads as "
-                    + "adjudicated when it was only unannotated");
+                    + "adjudicated when it was only unannotated. Name the seam that bounds it in "
+                    + "@AgentAccess(reason = ...), or make it OPERATOR_ONLY");
         }
         if (level == AgentAccess.Level.OWN_ONLY && !reachesOwnershipCheck) {
             violations.add(route + " -> " + where + " is OWN_ONLY but reaches none of "
                     + "RequestPrincipal." + OWNERSHIP_CHECKS + ". Only the action knows which row "
-                    + "it is about, so the level declares the intent and the action enforces it");
+                    + "it is about, so the level declares the intent and the action enforces it: "
+                    + "refuse a row it does not own with mayReachAgentScopedRow, or pin a list query "
+                    + "to callingAgent");
         }
     }
 
@@ -650,12 +674,14 @@ class CapabilityRulesTest extends UnitTest {
                         .noneMatch(m -> m.getName().equals(method)))
                 .forEach(method -> missing.add(owner + "." + method)));
         assertTrue(missing.isEmpty(),
-                missing + " is gone, so this rule would pass while guarding nothing");
+                missing + " is gone, so this rule would pass while guarding nothing. Rename its entry "
+                        + "in TEST_SEAMS to the seam's new name, or delete the entry if the seam was removed");
 
         ArchRule rule = noClasses()
                 .should().accessTargetWhere(TEST_SEAM_ACCESS)
                 .because("a test-only seam binds a ScopedValue for everything that runs inside it; "
-                        + "production never binds one (JCLAW-1277, JCLAW-1282)");
+                        + "production never binds one (JCLAW-1277, JCLAW-1282). Remove the call from "
+                        + "app/ and let the test bind the seam around the production path");
         rule.check(APP_CLASSES);
     }
 
@@ -682,7 +708,8 @@ class CapabilityRulesTest extends UnitTest {
                 .filter(control)
                 .findFirst();
         assertTrue(matched.isPresent(),
-                "the rule's predicate no longer matches even AppClock.now(), so the seam rule guards nothing");
+                "the rule's predicate no longer matches even AppClock.now(), so the seam rule guards nothing. "
+                        + "Fix seamAccess for how ArchUnit now names an access's owner and target");
     }
 
     private static boolean isListed(String owner, String method) {
@@ -713,7 +740,8 @@ class CapabilityRulesTest extends UnitTest {
                 }
             }
         }
-        assertTrue(unlisted.isEmpty(), unlisted + " binds a ScopedValue for a test but is not in TEST_SEAMS");
+        assertTrue(unlisted.isEmpty(), unlisted + " binds a ScopedValue for a test but is not in TEST_SEAMS: "
+                + "add it there");
     }
 
     // ===== Graph store reads =====
@@ -733,7 +761,8 @@ class CapabilityRulesTest extends UnitTest {
                 .filter(method -> !APP_CLASSES.contain(GRAPH_STORE) || APP_CLASSES.get(GRAPH_STORE).getMethods()
                         .stream().noneMatch(m -> m.getName().equals(method)))
                 .forEach(method -> missing.add(GRAPH_STORE + "." + method));
-        assertTrue(missing.isEmpty(), missing + " is gone, so this rule would pass while guarding nothing");
+        assertTrue(missing.isEmpty(), missing + " is gone, so this rule would pass while guarding nothing. "
+                + "Point GRAPH_STORE_METHODS at the methods that now hand out the raw records");
         // The allowed callers prove the predicate still matches something.
         assertFloor(sourceFilesAccessing(GRAPH_STORE_READ, c -> true), 1, "GraphStore read/update/index callers");
 
@@ -741,8 +770,101 @@ class CapabilityRulesTest extends UnitTest {
                 .that().resideOutsideOfPackages("memory.graph..", "services.grapheval..")
                 .should().accessTargetWhere(GRAPH_STORE_READ)
                 .because("a Relation's claims are combined by memory.graph.GraphView; reading the raw records "
-                        + "takes a former, denied, retracted or guest claim for a current fact (JCLAW-1364)");
+                        + "takes a former, denied, retracted or guest claim for a current fact (JCLAW-1364). "
+                        + "Read the graph through GraphView instead");
         rule.check(APP_CLASSES);
+    }
+
+    // ===== The frozen stores' own failures =====
+
+    /** One site on the real import, so each store below lists a violation ArchUnit genuinely reports. */
+    private static final ArchRule PROBE_RULE = noClasses()
+            .that().haveFullyQualifiedName("utils.AppClock")
+            .should().haveSimpleName("AppClock")
+            .because("the store tests need exactly one site");
+
+    private static final String GONE_SITE =
+            "Method <tools.Gone.run()> calls method <java.lang.ProcessBuilder.start()> in (Gone.java:9)";
+
+    private static List<String> probeSites() {
+        var sites = PROBE_RULE.evaluate(APP_CLASSES).getFailureReport().getDetails();
+        assertEquals(1, sites.size(), "the probe rule must report exactly one site: " + sites);
+        return sites;
+    }
+
+    /** A store in {@code folder} listing {@code sites} under {@code description}, updates on only if asked. */
+    private static Allowlist storeAt(Path folder, String description, List<String> sites, boolean updates)
+            throws IOException {
+        var keys = new Properties();
+        keys.setProperty(description, "probe");
+        try (var out = Files.newOutputStream(folder.resolve("stored.rules"))) {
+            keys.store(out, null);
+        }
+        Files.writeString(folder.resolve("probe"), String.join("\n", sites) + "\n");
+        return new Allowlist("probe", Map.of("default.path", folder.toString(),
+                "default.allowStoreUpdate", Boolean.toString(updates)));
+    }
+
+    private static Properties storedRules(Path folder) throws IOException {
+        var keys = new Properties();
+        try (var in = Files.newInputStream(folder.resolve("stored.rules"))) {
+            keys.load(in);
+        }
+        return keys;
+    }
+
+    @Test
+    void aFrozenRuleWhoseStoreStillListsEverySitePasses(@TempDir Path folder) throws IOException {
+        var store = storeAt(folder, PROBE_RULE.getDescription(), probeSites(), false);
+
+        FreezingArchRule.freeze(PROBE_RULE).persistIn(store).check(APP_CLASSES);
+
+        assertEquals(probeSites().getFirst() + "\n", Files.readString(folder.resolve("probe")));
+    }
+
+    @Test
+    void aListedSiteThatStopsMatchingFailsNamingTheLineToDelete(@TempDir Path folder) throws IOException {
+        var listed = List.of(probeSites().getFirst(), GONE_SITE);
+        var store = storeAt(folder, PROBE_RULE.getDescription(), listed, false);
+
+        var error = assertThrows(AssertionError.class,
+                () -> FreezingArchRule.freeze(PROBE_RULE).persistIn(store).check(APP_CLASSES));
+
+        assertEquals("these sites listed in " + folder + "/probe no longer match the rule: delete each line "
+                + "from that file by hand. Store updates stay off in conf/archunit.properties, so the allowlist "
+                + "shrinks only by an edit someone reviews:\n" + GONE_SITE, error.getMessage());
+        assertEquals(String.join("\n", listed) + "\n", Files.readString(folder.resolve("probe")));
+    }
+
+    @Test
+    void aFrozenRuleWhoseTextChangedFailsNamingTheRegenerationRun(@TempDir Path folder) throws IOException {
+        var store = storeAt(folder, "an earlier description of the rule", probeSites(), false);
+
+        var error = assertThrows(AssertionError.class,
+                () -> FreezingArchRule.freeze(PROBE_RULE).persistIn(store).check(APP_CLASSES));
+
+        assertEquals(folder + "/stored.rules has no key for this rule, so its description changed: the "
+                + "because-text is part of the key. Regenerate the store deliberately: set "
+                + "freeze.store.default.allowStoreCreation and allowStoreUpdate to true in conf/archunit.properties, "
+                + "run this class alone, set both back, delete the old key (the other line ending =probe) from "
+                + "stored.rules, and check that " + folder + "/probe still lists the same sites "
+                + "(docs/agents/capabilities.md). The rule now reads: " + PROBE_RULE.getDescription(),
+                error.getMessage());
+        assertEquals(Set.of("an earlier description of the rule"), storedRules(folder).stringPropertyNames());
+    }
+
+    /** What the regeneration run that message asks for does: the sites move to the new key, the old key stays. */
+    @Test
+    void theRegenerationRunStoresTheSitesUnderTheNewKeyAndLeavesTheOldOne(@TempDir Path folder) throws IOException {
+        var store = storeAt(folder, "an earlier description of the rule", List.of(GONE_SITE), true);
+
+        FreezingArchRule.freeze(PROBE_RULE).persistIn(store).check(APP_CLASSES);
+
+        assertEquals(probeSites().getFirst() + "\n", Files.readString(folder.resolve("probe")));
+        var keys = storedRules(folder);
+        assertEquals(Set.of("an earlier description of the rule", PROBE_RULE.getDescription()),
+                keys.stringPropertyNames());
+        assertEquals("probe", keys.getProperty(PROBE_RULE.getDescription()));
     }
 
     // ===== Shared machinery =====
@@ -752,9 +874,72 @@ class CapabilityRulesTest extends UnitTest {
      * replaces ArchUnit's default random UUID so the checked-in allowlist can be read, reviewed
      * and counted down as a file rather than chased through {@code stored.rules}.
      */
-    private static ArchRule frozen(ArchRule rule, String storeFileName) {
-        return FreezingArchRule.freeze(rule)
-                .persistIn(new TextFileBasedViolationStore(description -> storeFileName));
+    static ArchRule frozen(ArchRule rule, String storeFileName) {
+        return FreezingArchRule.freeze(rule).persistIn(new Allowlist(storeFileName, Map.of()));
+    }
+
+    /**
+     * The checked-in store, whose refusal to be rewritten names the fix. ArchUnit's own refusal names
+     * the switch that turns store updates on, which is the one fix that re-freezes whatever the run
+     * found. {@code overrides} replace {@code freeze.store.*} settings, so a test can aim it at a copy.
+     */
+    static final class Allowlist implements ViolationStore {
+        private final TextFileBasedViolationStore files;
+        private final String fileName;
+        private final Map<String, String> overrides;
+        private boolean updatesAllowed;
+        private String folder = "archunit_store";
+
+        Allowlist(String fileName, Map<String, String> overrides) {
+            this.files = new TextFileBasedViolationStore(description -> fileName);
+            this.fileName = fileName;
+            this.overrides = overrides;
+        }
+
+        @Override
+        public void initialize(Properties properties) {
+            var configured = new Properties();
+            configured.putAll(properties);
+            configured.putAll(overrides);
+            // TextFileBasedViolationStore's own defaults, which it does not expose.
+            updatesAllowed = Boolean.parseBoolean(configured.getProperty("default.allowStoreUpdate", "true"));
+            folder = configured.getProperty("default.path", "archunit_store");
+            files.initialize(configured);
+        }
+
+        @Override
+        public boolean contains(ArchRule rule) {
+            return files.contains(rule);
+        }
+
+        @Override
+        public List<String> getViolations(ArchRule rule) {
+            return files.getViolations(rule);
+        }
+
+        @Override
+        public void save(ArchRule rule, List<String> violations) {
+            if (updatesAllowed) {
+                files.save(rule, violations);
+                return;
+            }
+            if (!files.contains(rule)) {
+                throw new AssertionError(folder + "/stored.rules has no key for this rule, so its description "
+                        + "changed: the because-text is part of the key. Regenerate the store deliberately: set "
+                        + "freeze.store.default.allowStoreCreation and allowStoreUpdate to true in "
+                        + "conf/archunit.properties, run this class alone, set both back, delete the old key (the "
+                        + "other line ending =" + fileName + ") from stored.rules, and check that " + folder + "/"
+                        + fileName + " still lists the same sites (docs/agents/capabilities.md). The rule now "
+                        + "reads: " + rule.getDescription());
+            }
+            // FreezingArchRule saves the stored lines that still match, so the rest are the solved ones.
+            var solved = new ArrayList<>(files.getViolations(rule));
+            solved.removeAll(violations);
+            throw new AssertionError("these sites listed in " + folder + "/" + fileName + " no longer match the "
+                    + "rule: delete each line from that file by hand. Store updates stay off in "
+                    + "conf/archunit.properties, so the allowlist shrinks only by an edit someone reviews:\n"
+                    + String.join("\n", solved));
+        }
     }
 
     /**
@@ -767,8 +952,9 @@ class CapabilityRulesTest extends UnitTest {
         assertTrue(matched.size() >= floor,
                 "expected at least " + floor + " " + what + ", found " + matched.size()
                         + " " + matched + " — the predicate stopped matching, and the frozen rule would "
-                        + "prune its baseline to empty and pass. Lower the constant only once a holder "
-                        + "was genuinely removed");
+                        + "prune its baseline to empty and pass. If a holder was genuinely removed, lower "
+                        + "the constant to the count found; otherwise fix the predicate until it finds "
+                        + "them again");
     }
 
     private static boolean isToolsClass(JavaClass javaClass) {

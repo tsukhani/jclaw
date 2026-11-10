@@ -162,7 +162,9 @@ class ArchitectureTest extends UnitTest {
         }
         assertTrue(scanned >= KNOWN_ALLOWLIST_GATED_CONTROLLERS,
                 "expected at least " + KNOWN_ALLOWLIST_GATED_CONTROLLERS + " allowlist-gated controllers, "
-                        + "scanned " + scanned + " — the scan matched nothing and would pass vacuously");
+                        + "scanned " + scanned + " — the scan matched nothing and would pass vacuously. If a "
+                        + "controller dropped its @Before(only = …), lower KNOWN_ALLOWLIST_GATED_CONTROLLERS; "
+                        + "otherwise fix the scan until it finds them");
     }
 
     /**
@@ -182,7 +184,8 @@ class ArchitectureTest extends UnitTest {
                 .that().doNotHaveFullyQualifiedName("utils.GsonHolder")
                 .should().callConstructorWhere(constructorCall("com.google.gson.Gson", true))
                 .because("a bare `new Gson()` bypasses GsonHolder.GSON's serializeNulls / "
-                        + "Instant-adapter / HTML-escape contract (JCLAW-686/730)");
+                        + "Instant-adapter / HTML-escape contract (JCLAW-686/730). Use utils.GsonHolder.GSON, "
+                        + "or a GsonBuilder configured for the purpose");
         rule.check(APP_CLASSES);
     }
 

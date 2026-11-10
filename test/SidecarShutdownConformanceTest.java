@@ -19,8 +19,11 @@ class SidecarShutdownConformanceTest extends UnitTest {
         var managers = SidecarDefaultPortsConformanceTest.managerSources().keySet().stream()
                 .map(file -> file.getFileName().toString().replace(".java", ""))
                 .toList();
-        assertTrue(managers.size() >= SidecarDefaultPortsConformanceTest.KNOWN_MANAGERS, () -> "scan found only " + managers);
+        assertTrue(managers.size() >= SidecarDefaultPortsConformanceTest.KNOWN_MANAGERS, () -> "scan found only "
+                + managers + ". If a sidecar was removed, lower SidecarDefaultPortsConformanceTest.KNOWN_MANAGERS; "
+                + "otherwise managerSources() has stopped matching `new LocalSidecarDaemon(`");
         var unstopped = managers.stream().filter(manager -> !shutdownJob.contains(manager + "::stop")).toList();
-        assertEquals(List.of(), unstopped, () -> "ShutdownJob does not stop " + unstopped);
+        assertEquals(List.of(), unstopped, () -> "ShutdownJob does not stop " + unstopped
+                + ". Add a new Component(\"<name>\", <Manager>::stop) for each to ShutdownJob's component list");
     }
 }

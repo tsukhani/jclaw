@@ -212,7 +212,9 @@ class EvalRunnerTest extends UnitTest {
                         resideInAnyPackage("java..", "com.google.gson..", "org.jspecify..")
                                 .or(DescribedPredicate.describe("are offline eval classes",
                                         (JavaClass c) -> c.getBaseComponentType().getName().matches(OFFLINE_CLASSES))))
-                .because("jclaw.sh runs the offline eval CLI on the framework's lib/ alone (JF-157)");
+                .because("jclaw.sh runs the offline eval CLI on the framework's lib/ alone (JF-157): keep these "
+                        + "classes on the JDK, Gson and JSpecify, and move anything else they need into one of them "
+                        + "or out to a caller jclaw.sh does not run");
         rule.check(ArchitectureTest.APP_CLASSES);
     }
 

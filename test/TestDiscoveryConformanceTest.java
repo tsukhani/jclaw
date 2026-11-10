@@ -61,7 +61,8 @@ class TestDiscoveryConformanceTest extends UnitTest {
             }
         }
         // A scan that silently matched nothing would report the same empty list as a clean tree.
-        assertTrue(examined > 400, "the scan reached only " + examined + " files — it is not measuring the suite");
+        assertTrue(examined > 400, "the scan reached only " + examined + " files — it is not measuring the suite. "
+                + "If test/ genuinely shrank, lower the floor; otherwise the walk is not reaching test/");
         assertTrue(offenders.isEmpty(),
                 "these declare tests the runner never reaches; extend UnitTest or FunctionalTest: " + offenders);
     }

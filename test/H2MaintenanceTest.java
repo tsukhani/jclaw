@@ -703,7 +703,9 @@ class H2MaintenanceTest extends UnitTest {
         ArchRule rule = classes().that().haveNameMatching("services\\.database\\.(H2Maintenance|CredentialCopies|H2TraceMask)(\\$.*)?")
                 .should().onlyDependOnClassesThat()
                 .resideInAnyPackage("java..", "org.h2..", "com.google.gson..", "org.jspecify..", "services.database")
-                .because("jclaw.sh runs H2Maintenance out of process on the H2 and Gson jars alone (JCLAW-1165)");
+                .because("jclaw.sh runs H2Maintenance out of process on the H2 and Gson jars alone (JCLAW-1165): "
+                        + "keep these classes on the JDK, H2, Gson and services.database, and move anything else "
+                        + "they need into services.database or out to a caller jclaw.sh does not run");
         rule.check(ArchitectureTest.APP_CLASSES);
     }
 }

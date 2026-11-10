@@ -154,7 +154,8 @@ class GraphCasesConformanceTest extends UnitTest {
 
     @Test
     void theCommittedSetMeetsEveryCompositionTarget() throws Exception {
-        assertEquals(List.of(), shortfalls(committed()));
+        assertEquals(List.of(), shortfalls(committed()), GraphCases.DEFAULT_PATH + " misses these composition targets: "
+                + "add or relabel cases until each holds, per evals/graph/README.md and GUIDE.md");
     }
 
     @Test
@@ -347,29 +348,35 @@ class GraphCasesConformanceTest extends UnitTest {
 
     @Test
     void theCommittedCasesStaySyntheticAndOperatorVoiced() throws Exception {
-        assertEquals(OWNER, GraphCases.ownerName(tracked()));
+        assertEquals(OWNER, GraphCases.ownerName(tracked()), GraphCases.DEFAULT_PATH + "'s userMd must name the "
+                + "owner the cases are written about: set it to \"Name: " + OWNER + "\"");
         var cases = committed();
         for (var c : cases) {
             var m = URL.matcher(c.text());
             while (m.find()) {
                 var host = m.group().replaceFirst("https?://", "").split("/")[0];
-                assertTrue(host.equals("example.com") || host.endsWith(".example.com"), c.id() + ": " + m.group());
+                assertTrue(host.equals("example.com") || host.endsWith(".example.com"),
+                        c.id() + ": " + m.group() + " is a real host; use example.com or a subdomain of it");
             }
             if (guest(c)) {
-                assertNull(guestViolation(c));
+                assertNull(guestViolation(c), () -> guestViolation(c) + ": relabel the guest case per GUIDE.md");
                 continue;
             }
             assertTrue(GraphCases.operatorVoice(c.text(), OWNER),
-                    c.id() + " opens neither with \"The user\", \"" + OWNER + "\" nor a subjectless verb");
-            assertEquals(1, c.entities().stream().filter(Entity::operator).count(), c.id() + ": exactly one operator");
+                    c.id() + " opens neither with \"The user\", \"" + OWNER + "\" nor a subjectless verb: reword "
+                            + "its opening, or tag it guest");
+            assertEquals(1, c.entities().stream().filter(Entity::operator).count(),
+                    c.id() + ": label exactly one entity the operator");
             boolean user = c.text().toLowerCase().contains("the user");
             boolean named = c.text().contains(OWNER);
-            assertFalse(user && named, c.id() + ": says both \"" + OWNER + "\" and \"the user\"");
+            assertFalse(user && named, c.id() + ": says both \"" + OWNER + "\" and \"the user\"; keep one");
             var operator = c.entity(GraphCases.OPERATOR);
             assertEquals(!user && !named, operator != null && operator.implicit(),
-                    c.id() + ": the operator is implicit exactly when the text names neither the owner nor the user");
+                    c.id() + ": the operator is implicit exactly when the text names neither the owner nor the user; "
+                            + "set its implicit flag to match the text");
         }
-        assertTrue(cases.stream().anyMatch(c -> CandidateGenerator.subjectless(c.text())), "some cases are subjectless");
+        assertTrue(cases.stream().anyMatch(c -> CandidateGenerator.subjectless(c.text())),
+                "no case is subjectless: add one that opens with its verb");
     }
 
     @Test

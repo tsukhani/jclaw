@@ -54,26 +54,33 @@ class NullnessGateConformanceTest extends UnitTest {
 
     private static List<String> annotatedPackages() throws IOException {
         var matcher = ANNOTATED_PACKAGES.matcher(buildScript());
-        assertTrue(matcher.find(), "build.gradle.kts declares NullAway:AnnotatedPackages");
+        assertTrue(matcher.find(), "build.gradle.kts no longer declares NullAway:AnnotatedPackages: restore "
+                + "option(\"NullAway:AnnotatedPackages\", \"<packages>\") in compileJava's Error Prone block");
         return Arrays.stream(matcher.group(1).split(",")).map(String::strip).filter(s -> !s.isEmpty()).toList();
     }
 
     @Test
     void theCheckerIsWiredAtErrorSeverity() throws Exception {
         var script = buildScript();
-        assertTrue(script.contains("id(\"net.ltgt.errorprone\")"), "Error Prone plugin is applied");
-        assertTrue(script.contains("com.uber.nullaway:nullaway:"), "NullAway is on the errorprone configuration");
+        assertTrue(script.contains("id(\"net.ltgt.errorprone\")"),
+                "the Error Prone plugin is no longer applied: restore id(\"net.ltgt.errorprone\") in build.gradle.kts");
+        assertTrue(script.contains("com.uber.nullaway:nullaway:"),
+                "NullAway is off the errorprone configuration: restore errorprone(\"com.uber.nullaway:nullaway:<version>\")");
         assertTrue(script.contains("enabled.set(name == \"compileJava\")"),
-                "the checker stays scoped to compileJava");
+                "the checker is no longer scoped to compileJava: restore enabled.set(name == \"compileJava\") in the "
+                        + "shared Error Prone block");
         int testBlock = script.indexOf(TEST_COMPILE_BLOCK);
-        assertTrue(testBlock > 0, "compileTestJava carries its own Error Prone block");
+        assertTrue(testBlock > 0, "compileTestJava lost its own Error Prone block: restore "
+                + TEST_COMPILE_BLOCK + " after the shared one");
         var mainBlock = script.substring(0, testBlock);
         assertTrue(mainBlock.contains("check(\"NullAway\", CheckSeverity.ERROR)"),
-                "NullAway must fail the app/ compile, not warn — a warning nobody reads is not a gate");
+                "NullAway must fail the app/ compile, not warn — a warning nobody reads is not a gate. Restore "
+                        + "check(\"NullAway\", CheckSeverity.ERROR) in the shared Error Prone block");
         assertFalse(mainBlock.contains("check(\"NullAway\", CheckSeverity.OFF)"),
-                "NullAway is OFF for compileTestJava only");
+                "NullAway is OFF for compileTestJava only: move check(\"NullAway\", CheckSeverity.OFF) into that block");
         for (var off : SILENT_SWITCH_OFFS) {
-            assertFalse(script.contains(off), off + " would leave every token above intact while the checker checks nothing");
+            assertFalse(script.contains(off), off + " would leave every token above intact while the checker checks "
+                    + "nothing: remove it from build.gradle.kts");
         }
     }
 
@@ -82,7 +89,8 @@ class NullnessGateConformanceTest extends UnitTest {
         // JPA populates entity fields reflectively after construction, so every non-null
         // column would report as uninitialised. Re-adding it needs a plan, not a typo.
         assertFalse(annotatedPackages().contains("models"),
-                "models is excluded on purpose — see the comment in build.gradle.kts");
+                "models is excluded on purpose — see the comment in build.gradle.kts. Remove it from "
+                        + "NullAway:AnnotatedPackages");
     }
 
     @Test
@@ -90,7 +98,8 @@ class NullnessGateConformanceTest extends UnitTest {
         var missing = new ArrayList<String>();
         for (var root : annotatedPackages()) {
             var dir = repo("app", root.replace('.', '/'));
-            assertTrue(Files.isDirectory(dir), "annotated package " + root + " has a source directory");
+            assertTrue(Files.isDirectory(dir), "annotated package " + root + " has no source directory: remove it "
+                    + "from NullAway:AnnotatedPackages, or correct its name");
             try (Stream<Path> tree = Files.walk(dir)) {
                 for (var pkgDir : tree.filter(Files::isDirectory).toList()) {
                     if (!hasJavaSource(pkgDir)) {
@@ -106,7 +115,8 @@ class NullnessGateConformanceTest extends UnitTest {
                 }
             }
         }
-        assertEquals(List.of(), missing, "packages under the NullAway scope with no @NullMarked package-info");
+        assertEquals(List.of(), missing, "packages under the NullAway scope with no @NullMarked package-info: give "
+                + "each a package-info.java declaring @NullMarked on its package (docs/agents/nullness.md)");
     }
 
     @Test
@@ -123,7 +133,9 @@ class NullnessGateConformanceTest extends UnitTest {
             }
         }
         assertEquals(List.of(), unaccounted,
-                "top-level app/ packages neither in NullAway:AnnotatedPackages nor excluded on purpose");
+                "top-level app/ packages neither in NullAway:AnnotatedPackages nor excluded on purpose: add each to "
+                        + "NullAway:AnnotatedPackages with a @NullMarked package-info, or to EXCLUDED_PACKAGES here "
+                        + "with its reason");
     }
 
     private static boolean treeHoldsJavaSource(Path root) throws IOException {

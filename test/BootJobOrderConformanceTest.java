@@ -53,14 +53,16 @@ class BootJobOrderConformanceTest extends UnitTest {
         var priorities = declaredPriorities();
 
         assertTrue(priorities.containsKey(MIGRATION) && priorities.containsKey(MINTER),
-                "both jobs must exist for this check to mean anything; saw " + priorities.keySet());
+                "both jobs must exist for this check to mean anything; saw " + priorities.keySet()
+                        + ". If one was renamed, update MIGRATION or MINTER to its new name");
 
         int migration = priorities.get(MIGRATION);
         int minter = priorities.get(MINTER);
         assertTrue(migration < minter,
                 MIGRATION + " (priority " + migration + ") must run before " + MINTER + " (priority "
                         + minter + "), which mints the internal token. Lower runs earlier. At or after "
-                        + "it, an upgraded database dies inside the mint and this migration never runs.");
+                        + "it, an upgraded database dies inside the mint and this migration never runs. Give "
+                        + MIGRATION + " an @OnApplicationStart priority below " + minter + ".");
     }
 
     @Test
@@ -76,7 +78,8 @@ class BootJobOrderConformanceTest extends UnitTest {
         assertTrue(earlier.isEmpty(),
                 "these jobs run at or before " + MIGRATION + " (priority " + migration + "). Anything "
                         + "touching api_token or the config table from there would run against the "
-                        + "un-migrated schema: " + earlier);
+                        + "un-migrated schema. Give each a priority above " + migration + ", or lower the "
+                        + "migration's below theirs: " + earlier);
     }
 
     @Test
@@ -86,9 +89,11 @@ class BootJobOrderConformanceTest extends UnitTest {
         int pass = priorities.get("CredentialEncryptionJob");
         // A long token's ciphertext does not fit the 255-character column the widening replaces (JCLAW-1455).
         assertTrue(columns < pass, "BindingCredentialColumnsJob (" + columns + ") must run before CredentialEncryptionJob ("
-                + pass + "), or the pass fails on a token whose ciphertext the old column cannot hold");
+                + pass + "), or the pass fails on a token whose ciphertext the old column cannot hold. Give "
+                + "BindingCredentialColumnsJob a priority below " + pass);
         assertTrue(pass < priorities.get("ChannelRunnerJob") && pass < priorities.get("McpStartupJob"),
-                "the pass runs before the channel runners and the MCP connections read a credential");
+                "CredentialEncryptionJob must run before the channel runners and the MCP connections read a credential: "
+                        + "give it a priority below ChannelRunnerJob's and McpStartupJob's");
     }
 
     /** A regex that stopped matching would make both checks above pass on an empty reading. */
@@ -96,12 +101,14 @@ class BootJobOrderConformanceTest extends UnitTest {
     void theScanActuallyReadsTheAnnotations() throws IOException {
         var priorities = declaredPriorities();
         assertTrue(priorities.size() >= 30,
-                "expected 30+ job classes under app/jobs, found " + priorities.size());
+                "expected 30+ job classes under app/jobs, found " + priorities.size() + ". If jobs were removed, "
+                        + "lower the floor; otherwise the walk is not reaching app/jobs");
         assertEquals(-100, priorities.get(MINTER),
                 "DefaultConfigJob's priority is the anchor this check compares against; if it moved, "
                         + "re-derive the migration's rather than trusting the comparison");
         assertTrue(priorities.containsValue(100),
                 "expected DbSchedulerBootstrapJob's +100 to still be read, or the parser is matching "
-                        + "nothing and every comparison above is vacuous");
+                        + "nothing and every comparison above is vacuous. If its priority moved, check for the "
+                        + "new value; otherwise fix PRIORITY for the annotation's current form");
     }
 }
