@@ -3520,6 +3520,7 @@ restart_begin() {
     RESTART_DONE=""
     trap restart_on_exit EXIT
     narrator_reap_stale
+    rm -f "$SCRIPT_DIR/logs/restart-handover.ready"
     restart_phase stop "Stopping JClaw" "JClaw did not stop"
 }
 
@@ -3643,6 +3644,15 @@ narrator_stop() {
     NARRATOR_JOB=""
     rm -f "$NARRATOR_PID_FILE"
     wait_for_port_free "$BACKEND_PORT" 10
+}
+
+# The JVM a restart starts writes logs/restart-handover.ready just before it binds and binds once the file is gone
+# (JF-273, RestartNarrator.awaitHandover), so the narrator answers through the whole boot. Served from the ready wait.
+narrator_hand_over() {
+    local request="$SCRIPT_DIR/logs/restart-handover.ready"
+    [[ -f "$request" ]] || return 0
+    if narrator_running; then narrator_stop || true; fi
+    rm -f "$request"
 }
 
 # True when pid $1 is a narrator, by its command line, so a reused pid is never killed.
@@ -4073,7 +4083,10 @@ do_start_prod() {
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
     aot_prepare --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
     restart_phase start "Starting JClaw (connecting channels)" "JClaw did not start"
-    if ! narrator_stop; then
+    # A narrator holding the port answers until the JVM asks for it; the ready wait, which needs curl, hands it over.
+    if narrator_bound && command -v curl >/dev/null 2>&1; then
+        :
+    elif ! narrator_stop; then
         echo "Error: something already answers on port $BACKEND_PORT."
         echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
         RESTART_FAIL_REASON="something else answers on port $BACKEND_PORT"
@@ -5428,6 +5441,7 @@ wait_for_backend_ready() {
     echo "==> Waiting for the backend to answer on port ${BACKEND_PORT}..."
     local deadline=$((SECONDS + 120)) pid
     while true; do
+        narrator_hand_over
         pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
         if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
             echo "Error: Play backend exited during startup (pid $pid no longer alive)." >&2

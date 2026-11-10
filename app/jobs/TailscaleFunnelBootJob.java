@@ -8,10 +8,10 @@ import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TailscaleFunnel;
 import services.Tx;
+import utils.AotTraining;
 import utils.HttpFactories;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -40,8 +40,7 @@ public class TailscaleFunnelBootJob extends Job<Void> {
     @Override
     public void doJob() {
         // A training run boots and stops between a restart's two JVMs: the funnel that restart left on is the next one's.
-        if (Play.runningInTestMode()
-                || TelegramStreamingRecoveryJob.isAotTrainingRun(ManagementFactory.getRuntimeMXBean().getInputArguments())) {
+        if (Play.runningInTestMode() || AotTraining.thisJvm()) {
             return;
         }
         boolean kept = TailscaleFunnel.adoptKept();

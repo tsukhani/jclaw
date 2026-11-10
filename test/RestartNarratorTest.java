@@ -68,7 +68,8 @@ class RestartNarratorTest extends UnitTest {
 
     private static final DescribedPredicate<JavaClass> JAVA_BASE_OR_HTTPSERVER = DescribedPredicate.describe(
             "in the java.base or jdk.httpserver module, or the narrator itself",
-            c -> c.getName().startsWith("utils.RestartNarrator") || moduleOf(c).map(m -> m.equals("java.base") || m.equals("jdk.httpserver")).orElse(false));
+            c -> c.getBaseComponentType().getName().startsWith("utils.RestartNarrator")
+                    || moduleOf(c).map(m -> m.equals("java.base") || m.equals("jdk.httpserver")).orElse(false));
 
     private static Optional<String> moduleOf(JavaClass c) {
         var base = c.getBaseComponentType();
@@ -93,6 +94,67 @@ class RestartNarratorTest extends UnitTest {
         assertTrue(JAVA_BASE_OR_HTTPSERVER.test(importer.get(RestartNarrator.class)));
         assertFalse(JAVA_BASE_OR_HTTPSERVER.test(importer.get("utils.AppClock")), "an app class is not a JDK module");
         assertFalse(JAVA_BASE_OR_HTTPSERVER.test(importer.get("utils.GsonHolder")));
+    }
+
+    // --- JF-273: the JVM a restart starts takes the port over ---
+
+    private Path narratorPidFile(long pid, boolean bound) throws IOException {
+        return Files.writeString(tmp.resolve("narrator-" + System.nanoTime() + ".pid"), pid + (bound ? "\nbound\n" : "\n"));
+    }
+
+    private static long exitedPid() throws Exception {
+        var gone = new ProcessBuilder("true").start();
+        assertTrue(gone.waitFor(10, TimeUnit.SECONDS));
+        return gone.pid();
+    }
+
+    @Test
+    void aJvmAsksForThePortAndWaitsUntilJclawShHasHandedItOver() throws Exception {
+        var pidFile = narratorPidFile(ProcessHandle.current().pid(), true);
+        var request = tmp.resolve("handover-taken.ready");
+        var outcome = CompletableFuture.supplyAsync(() -> {
+            try {
+                return RestartNarrator.awaitHandover(pidFile, request, TimeUnit.SECONDS.toNanos(10));
+            } catch (IOException | InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!Files.exists(request)) {
+            assertTrue(System.nanoTime() < deadline, "no request was written");
+            Thread.sleep(10);
+        }
+        Thread.sleep(200);
+
+        assertFalse(outcome.isDone(), "the JVM binds only once jclaw.sh has removed the request");
+        assertEquals(ProcessHandle.current().pid() + "\n", Files.readString(request));
+        Files.delete(request);
+        assertEquals(RestartNarrator.Handover.TAKEN, outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void withNoLiveBoundNarratorTheJvmAsksForNothing() throws Exception {
+        var request = tmp.resolve("handover-none.ready");
+        for (var pidFile : List.of(tmp.resolve("absent.pid"), narratorPidFile(ProcessHandle.current().pid(), false),
+                narratorPidFile(exitedPid(), true))) {
+            assertEquals(RestartNarrator.Handover.NONE, RestartNarrator.awaitHandover(pidFile, request, TimeUnit.SECONDS.toNanos(10)),
+                    pidFile.toString());
+            assertFalse(Files.exists(request), pidFile.toString());
+        }
+    }
+
+    @Test
+    void aJclawShThatNeverAnswersLeavesTheJvmToBindAfterTheBudget() throws Exception {
+        var request = tmp.resolve("handover-late.ready");
+        long started = System.nanoTime();
+
+        var outcome = RestartNarrator.awaitHandover(narratorPidFile(ProcessHandle.current().pid(), true), request,
+                TimeUnit.MILLISECONDS.toNanos(200));
+
+        long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertEquals(RestartNarrator.Handover.TIMED_OUT, outcome);
+        assertTrue(waited >= 200 && waited < 3000, "waited " + waited + " ms");
+        assertFalse(Files.exists(request), "withdrawn, so a late jclaw.sh stops no narrator for a JVM that has moved on");
     }
 
     // --- who it answers ---

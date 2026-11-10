@@ -50,7 +50,7 @@ class RestartProgressScriptTest extends UnitTest {
             "print_startup_error_block", "wait_for_backend_ready",
             "restart_status", "restart_phase_end", "restart_phase", "restart_begin", "restart_finish", "restart_on_exit", "funnel_reset_kept",
             "narrator_running", "narrator_bound", "restart_shell_pid", "narrator_start", "narrator_stop", "narrator_is",
-            "narrator_reap_stale", "restart_narrate", "do_restart_prod", "do_stop_prod", "do_start_prod");
+            "narrator_reap_stale", "narrator_hand_over", "restart_narrate", "do_restart_prod", "do_stop_prod", "do_start_prod");
 
     /** What the stubs leave out of a real start; wait_for_backend_ready stays real where a test asks for it. */
     private static final String STUBBED = """
@@ -75,7 +75,13 @@ class RestartProgressScriptTest extends UnitTest {
             }
             """;
 
-    private static final String READY = "wait_for_backend_ready() { echo ready >> \"$STUB_CALLS\"; }\n";
+    /** As the real ready wait does on each poll: hands the port over when the JVM asks for it, until the JVM has bound. */
+    private static final String READY = """
+            wait_for_backend_ready() {
+                for _ in $(seq 1 100); do narrator_hand_over; [ -e "$STUB_BOUND" ] && break; sleep 0.1; done
+                echo ready >> "$STUB_CALLS"
+            }
+            """;
 
     // A JVM that reports 25.0.5 for the AOT gate and runs everything else; on Windows the narrator is a sleep.
     private static final String JAVA = """
@@ -127,7 +133,17 @@ class RestartProgressScriptTest extends UnitTest {
                     if (exec 3<>"/dev/tcp/127.0.0.1/$STUB_PORT") 2>/dev/null; then echo "port held at start" >> "$STUB_CALLS"
                     else echo "port free at start" >> "$STUB_CALLS"; fi
                     [ -n "${STUB_START_FAIL:-}" ] && exit 1
-                    echo $$ > server.pid ;;
+                    echo $$ > server.pid
+                    # As RestartHandoverPlugin does just before the JVM binds: ask for the port while a narrator holds it.
+                    if grep -qx bound "$STUB_PIDFILE" 2>/dev/null; then
+                        printf '%s\\n' "$$" > logs/restart-handover.ready
+                        ( for _ in $(seq 1 100); do [ -e logs/restart-handover.ready ] || break; sleep 0.1; done
+                          if (exec 3<>"/dev/tcp/127.0.0.1/$STUB_PORT") 2>/dev/null; then echo "port held when the JVM binds" >> "$STUB_CALLS"
+                          else echo "port free when the JVM binds" >> "$STUB_CALLS"; fi
+                          touch "$STUB_BOUND" ) </dev/null >/dev/null 2>&1 &
+                    else
+                        touch "$STUB_BOUND"
+                    fi ;;
             esac
             """;
 
@@ -183,7 +199,7 @@ class RestartProgressScriptTest extends UnitTest {
     }
 
     @Test
-    void aPlainRestartIsTheStopThenTheStartAndTheNarratorIsGoneBeforeTheJvmBinds() throws Exception {
+    void aPlainRestartIsTheStopThenTheStartAndTheNarratorAnswersUntilTheJvmTakesThePort() throws Exception {
         distInstall();
         var run = restart(Map.of("JCLAW_AOT", "off", "STUB_HTTPS", "1", "STUB_AWAIT_NARRATOR", "1"), false);
         assertEquals(0, run.exit(), run.out());
@@ -195,8 +211,10 @@ class RestartProgressScriptTest extends UnitTest {
         // The narrator's own launch line can land anywhere around play stop's; what the stop saw is the fact.
         assertTrue(calls.contains("stop finds a narrator"), "it binds the moment the old JVM lets go: " + calls);
         assertTrue(calls.indexOf("play stop") < calls.indexOf("play start"), calls.toString());
-        assertEquals("port free at start", calls.get(calls.indexOf("play start") + 1), "the JVM binds a free port: " + calls);
-        assertFalse(calls.contains("a narrator pid file at start"), calls.toString());
+        int start = calls.indexOf("play start");
+        assertEquals(List.of("play start", "a narrator pid file at start", "port held at start"), calls.subList(start, start + 3),
+                "the narrator still answers while the JVM boots: " + calls);
+        assertTrue(calls.contains("port free when the JVM binds"), "the JVM binds a port the narrator handed over: " + calls);
         assertEquals(1, calls.stream().filter(c -> c.startsWith("narrator ")).count(), calls.toString());
         assertEquals("narrator -cp " + home.resolve("precompiled/classes.jar") + " utils.RestartNarrator --status "
                         + statusFile() + " --pid-file " + home.resolve("logs/restart-narrator.pid")
@@ -319,7 +337,7 @@ class RestartProgressScriptTest extends UnitTest {
         assertEquals("JClaw did not start", status().get("reason").getAsString());
         assertEquals(0, status().getAsJsonArray("phases").get(1).getAsJsonObject().get("end").getAsLong(), "the phase it failed in stays open");
 
-        // The trap starts a narrator once the JVM that failed has gone; it outlives the shell that started it.
+        // No JVM took the port from the restart's narrator, which serves the failure past the shell's exit.
         var pidFile = home.resolve("logs/restart-narrator.pid");
         waitFor(() -> lines(pidFile).contains("bound"));
         var answer = get(RestartNarrator.PROGRESS_PATH);
@@ -361,9 +379,9 @@ class RestartProgressScriptTest extends UnitTest {
                         + " --parent " + run.pid() + " --now " + nowArg(calls) + " --http " + port,
                 calls.get(narrator));
         int taskkill = indexOf(calls, "taskkill ");
-        assertTrue(taskkill > narrator && taskkill < calls.indexOf("play start"), calls.toString());
+        assertTrue(taskkill > calls.indexOf("play start") && taskkill < calls.indexOf("port free when the JVM binds"),
+                "stopped at the handover, after the JVM has booted: " + calls);
         assertTrue(calls.get(taskkill).matches("taskkill //PID \\d+ //F"), calls.get(taskkill));
-        assertEquals("port free at start", calls.get(calls.indexOf("play start") + 1));
     }
 
     @Test
@@ -510,6 +528,8 @@ class RestartProgressScriptTest extends UnitTest {
         penv.put("PATH", stubs() + File.pathSeparator + System.getenv("PATH"));
         penv.put("REAL_JAVA", Path.of(System.getProperty("java.home"), "bin", "java").toString());
         penv.put("STUB_CALLS", tmp.resolve("calls.log").toString());
+        Files.deleteIfExists(tmp.resolve("jvm-bound"));
+        penv.put("STUB_BOUND", tmp.resolve("jvm-bound").toString());
         penv.put("STUB_PORT", Integer.toString(port));
         penv.put("STUB_PIDFILE", home.resolve("logs/restart-narrator.pid").toString());
         penv.put("STUB_NARRATOR_JVM", tmp.resolve("narrator-jvm.pid").toString());

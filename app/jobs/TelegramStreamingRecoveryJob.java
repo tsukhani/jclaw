@@ -11,6 +11,7 @@ import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.InboundRecoverySweep;
 import services.Tx;
+import utils.AotTraining;
 
 import java.lang.management.ManagementFactory;
 import java.time.Instant;
@@ -63,13 +64,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
     public void doJob() {
         var runtime = ManagementFactory.getRuntimeMXBean();
         // jclaw.sh stops a training JVM right after its first answered request: a re-queued turn would die mid-call.
-        if (isAotTrainingRun(runtime.getInputArguments())) return;
+        if (AotTraining.isTrainingRun(runtime.getInputArguments())) return;
         sweep(Instant.ofEpochMilli(runtime.getStartTime()));
-    }
-
-    /** Whether these JVM options record the AOT cache, as {@code play aot-gen} starts its training run. */
-    public static boolean isAotTrainingRun(List<String> jvmArgs) {
-        return jvmArgs.stream().anyMatch(arg -> arg.startsWith("-XX:AOTCacheOutput=") || arg.equals("-XX:AOTMode=record"));
     }
 
     /**

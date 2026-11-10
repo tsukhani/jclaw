@@ -266,13 +266,13 @@ class InboundRecoverySweepTest extends UnitTest {
 
     @Test
     void onlyAJvmRecordingTheAotCacheIsATrainingRun() {
-        assertTrue(TelegramStreamingRecoveryJob.isAotTrainingRun(
+        assertTrue(utils.AotTraining.isTrainingRun(
                 List.of("--enable-native-access=ALL-UNNAMED", "-XX:AOTCacheOutput=app.aot.new", "-Xmx2g")));
-        assertTrue(TelegramStreamingRecoveryJob.isAotTrainingRun(
+        assertTrue(utils.AotTraining.isTrainingRun(
                 List.of("-XX:AOTMode=record", "-XX:AOTConfiguration=app.aotconf")));
-        assertFalse(TelegramStreamingRecoveryJob.isAotTrainingRun(List.of("-XX:AOTCache=app.aot", "-Xmx2g")));
-        assertFalse(TelegramStreamingRecoveryJob.isAotTrainingRun(List.of("-XX:AOTMode=off")));
-        assertFalse(TelegramStreamingRecoveryJob.isAotTrainingRun(List.of()));
+        assertFalse(utils.AotTraining.isTrainingRun(List.of("-XX:AOTCache=app.aot", "-Xmx2g")));
+        assertFalse(utils.AotTraining.isTrainingRun(List.of("-XX:AOTMode=off")));
+        assertFalse(utils.AotTraining.isTrainingRun(List.of()));
     }
 
     @Test
