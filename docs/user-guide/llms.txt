@@ -8,7 +8,7 @@ The JClaw app shows the same text on its User Guide page. The pages are written 
 
 - [Getting Started](getting-started.md): what JClaw is, your first five minutes, the sidebar, and the Guided Tour
 - [Chat](chat.md): picking an agent, sending messages, attachments, voice mode, slash commands, tool calls, exports, and coding runs
-- [Prompts](prompts.md): the Prompts Library of saved prompts, which you run with any agent, and the prompts an agent saved for itself
+- [Prompts](prompts.md): the Prompts Library of saved prompts, which you run with any agent, the prompts an agent owns, and how to change a prompt's owner
 - [Agents](agents.md): the main agent and custom agents, and setting an agent's model, system prompt, tools, skills, and MCP servers
 - [Conversations & Channels](conversations-and-channels.md): searching and exporting conversations, and connecting agents to Slack, Telegram, and WhatsApp
 - [Subagents](subagents.md): child agents an agent starts during a turn, their spawn and context modes, external coding harnesses, and sandboxing

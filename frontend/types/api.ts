@@ -1278,7 +1278,7 @@ export interface Prompt {
   tags: string | null
   category: string
   categoryLabel: string
-  /** JF-292: the agent that created the prompt through the API; null or absent on the operator's own. */
+  /** The agent that owns the prompt (JF-292): picked at creation (JF-307), changed by the operator or main on an edit (JF-308); null or absent on the operator's own. */
   ownerAgentId?: number | null
   ownerAgentName?: string | null
   createdAt: string | null
