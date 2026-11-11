@@ -17,6 +17,7 @@ import services.Tx;
 import utils.ChannelOriginTrust;
 
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -662,17 +663,43 @@ public final class DangerousActionGate {
                 + "whatever else you can do without it.").formatted(toolName);
     }
 
+    /** How many characters of a call's arguments a prompt shows from the start, and how many from the end. */
+    private static final int ARGS_SHOWN_HEAD = 400;
+    private static final int ARGS_SHOWN_TAIL = 200;
+
+    /**
+     * A call's arguments as a prompt shows them: whole when they fit in {@link #ARGS_SHOWN_HEAD} plus
+     * {@link #ARGS_SHOWN_TAIL} characters, else their start and end around a {@code …} line, with {@code cut}
+     * saying how much is missing. The end is kept because the model writes the arguments and orders their keys, so
+     * the part that matters can sit past any cut from the front: a command's last clause, or an MCP server's
+     * {@code command} after a long {@code args} list (JF-294).
+     *
+     * @param cut the sentence for the prompt's own line, outside the block the arguments could imitate it in; null
+     *            when nothing was cut
+     */
+    private record ShownArgs(String text, @Nullable String cut) {
+        static ShownArgs of(@Nullable String argsJson) {
+            var args = argsJson == null ? "" : argsJson;
+            int shown = ARGS_SHOWN_HEAD + ARGS_SHOWN_TAIL;
+            if (args.length() <= shown) {
+                return new ShownArgs(args, null);
+            }
+            return new ShownArgs(
+                    args.substring(0, ARGS_SHOWN_HEAD) + "\n…\n" + args.substring(args.length() - ARGS_SHOWN_TAIL),
+                    String.format(Locale.ROOT, "showing the first %,d and the last %,d of %,d characters (%,d not shown).",
+                            ARGS_SHOWN_HEAD, ARGS_SHOWN_TAIL, args.length(), args.length() - shown));
+        }
+    }
+
     /**
      * HTML-safe prompt body. Telegram renders {@code parseMode=HTML}, so the
      * tool name and args are escaped before interpolation; the args are
-     * length-capped so an oversized payload can't blow the 4096-char message
-     * budget the keyboard send assumes.
+     * length-capped ({@link ShownArgs}) so an oversized payload can't blow the
+     * 4096-char message budget the keyboard send assumes.
      */
     private static String buildPrompt(@Nullable String toolName, @Nullable String argsJson) {
-        var args = argsJson == null ? "" : argsJson;
-        if (args.length() > 600) {
-            args = args.substring(0, 600) + "… (truncated)";
-        }
+        var args = ShownArgs.of(argsJson);
+        var cutLine = args.cut() == null ? "" : "<b>Arguments cut:</b> " + args.cut() + "\n";
         var call = ToolRegistry.describeCall(toolName, argsJson);
         var callLine = call == null ? "" : "<b>Call:</b> " + TelegramMarkdownFormatter.escapeHtml(call) + "\n";
         var why = extractWhy(argsJson);
@@ -680,7 +707,8 @@ public final class DangerousActionGate {
                 : "<b>Why:</b> " + TelegramMarkdownFormatter.escapeHtml(why) + "\n";
         return "⚠ <b>Approval required</b>\n"
                 + "The agent wants to run the <b>" + TelegramMarkdownFormatter.escapeHtml(toolName)
-                + "</b> action:\n" + callLine + whyLine + "<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
+                + "</b> action:\n" + callLine + whyLine + cutLine
+                + "<pre>" + TelegramMarkdownFormatter.escapeHtml(args.text()) + "</pre>";
     }
 
     /**
@@ -690,16 +718,14 @@ public final class DangerousActionGate {
      * is not HTML.
      */
     private static String buildSlackPrompt(@Nullable String toolName, @Nullable String argsJson) {
-        var args = argsJson == null ? "" : argsJson;
-        if (args.length() > 600) {
-            args = args.substring(0, 600) + "… (truncated)";
-        }
+        var args = ShownArgs.of(argsJson);
+        var cutLine = args.cut() == null ? "" : "*Arguments cut:* " + args.cut() + "\n";
         var call = ToolRegistry.describeCall(toolName, argsJson);
         var callLine = call == null ? "" : "*Call:* " + slackSafe(call) + "\n";
         var why = extractWhy(argsJson);
         var whyLine = why == null ? "" : "*Why:* " + slackSafe(why) + "\n";
         return "The agent wants to run the *" + slackSafe(toolName) + "* action:\n"
-                + callLine + whyLine + "```" + slackSafe(args) + "```";
+                + callLine + whyLine + cutLine + "```" + slackSafe(args.text()) + "```";
     }
 
     /**
