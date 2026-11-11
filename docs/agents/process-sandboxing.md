@@ -67,14 +67,13 @@ handshake has two steps: SIGQUIT makes the JVM look for a trigger file (`.attach
 working directory or its temp directory) and start a listener, and the client then connects to the
 listener's socket, `.java_pid<pid>` in that temp directory. Both are refused, and both rules are
 the custom agent's alone: `main`'s `exec` and a coding harness keep their profiles
-(`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheJvmAttachDenies`).
+(`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheLocalServiceSignalAndJvmAttachDenies`).
 
 - **macOS** — `customAgentMacosProfile` ends the profile with two denies, last so that no grant
-  outranks them. `(deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))`:
-  SIGQUIT reaches only the run's own processes. Every other signal still reaches outside, because
-  `same-sandbox` is one `sandbox-exec` launch, and a later `exec` has to be able to stop what an
-  earlier one left in the background. `(deny network-outbound file-write* file-link (regex
-  #"/\.java_pid[^/]*$"))`: the socket takes no connection, and no rename, unlink or hard link that
+  outranks them. `(deny signal (require-not (target same-sandbox)))`: SIGQUIT, like every other
+  signal since JF-303 (below), reaches only the run's own processes.
+  `(deny network-outbound file-write* file-link (regex #"/\.java_pid[^/]*$"))`: the socket takes no
+  connection, and no rename, unlink or hard link that
   would give it a name the rule misses (measured: a symlink, a case variant and a `/.vol` path all
   resolve to the same name and are refused). The temp directory stays writable, as `TMPDIR` needs.
   The rule goes by name, not owner, so a JVM started inside the sandbox cannot be attached to
@@ -87,17 +86,77 @@ the custom agent's alone: `main`'s `exec` and a coding harness keep their profil
   none unless asked, so `inOwnUserNamespace` adds `--unshare-user` to a custom agent's argv when
   `linuxArgv` has not (measured with a setuid bwrap: the flag is what makes the attempt fail). The
   non-root readiness probe does not carry the flag, so on a setuid bwrap whose kernel makes no user
-  namespace the probe would pass and the run itself fail with bwrap's error, starting nothing (an
-  inference, not measured). A JVM inside the sandbox can still be attached to from inside it
-  (measured). Signals are not filtered: a SIGQUIT from the sandbox reaches a JVM outside and prints
-  a thread dump, but starts no listener, and a `kill` from the sandbox stops a process outside
-  (both measured). A PID namespace would refuse both, and is not used for the reason the macOS
-  rule denies one signal only: a later run could then not stop what an earlier one left in the
-  background (measured: the earlier run's process keeps running and the later run finds no such
-  process). It is not `/proc` that rules it out: `--unshare-pid` beside the argv's `--proc /proc`
-  fails in the container with `Can't mount proc on /newroot/proc` under `seccomp-bwrap.json`, but
-  without `--proc`, keeping the `/proc` the root bind brings, bwrap starts and the signal is
-  refused (measured as root and as uid 1000).
+  namespace that probe would pass; the namespace probe that follows it (JF-303, below) does carry it,
+  so the run is refused with bwrap's own line (an inference, not measured). A JVM inside the sandbox can still be attached to from inside it
+  (measured). A SIGQUIT from the sandbox finds no JVM outside it either, since JF-303 put the run
+  in a PID namespace of its own (below).
+
+**A custom agent's shell signals no process outside its run (JF-303).** A `kill` from a custom
+agent's `exec` used to stop a process of the operator's (measured with throwaway processes on macOS
+and in both container images), and JClaw runs as that same user. Now a signal reaches only the
+processes of the run that sends it. Each run
+is a sandbox of its own, so it does not reach what an earlier run of the same agent left in the
+background either: `exec` stops that for the agent, from the JVM. The rule is the custom agent's
+alone: `main`'s `exec` and a coding harness signal as before
+(`SandboxSignalTest.mainsExecStillSignalsAProcessOutsideItWithAndWithoutTheKey`,
+`HarnessSandboxTest.linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespace`).
+
+- **macOS** — `(deny signal (require-not (target same-sandbox)))`, where `same-sandbox` is one
+  `sandbox-exec` launch. Measured on 27.0.1 with throwaway `sleep` processes: each of signal 0, HUP,
+  INT, QUIT, KILL, USR1, TERM, STOP and CONT fails with `Operation not permitted` at a process started
+  outside, at a process group outside, and at a process an earlier launch of the same profile left
+  running; inside one launch a child, a grandchild and the run's own shell still take a signal. Under
+  the rule it replaces, `kill` succeeded for every one of those but QUIT. launchd needs no rule:
+  `launchctl kill`, `stop`, `kickstart -k`, `bootout` and `remove` against a throwaway job outside all
+  came back `Not privileged` or `Operation not permitted` from inside a profile of `(allow default)`
+  plus this rule, and the same `kill` outside ended the job.
+- **Linux** — bwrap has no rule for a signal's target, so the run gets a PID namespace
+  (`--unshare-pid`, `HarnessSandbox.LinuxPids`): a process outside has no pid there and `kill`
+  answers `No such process`. Its `--proc /proc` is then that namespace's own procfs, where the kernel
+  mounts one. In Docker it does not: the runtime mounts over parts of `/proc`, and the kernel then
+  refuses a new procfs to a user namespace (`Can't mount proc on /newroot/proc: Operation not
+  permitted`, under `seccomp-bwrap.json`, as root and as uid 1000). So `customAgentPids` starts
+  `pidNamespaceProbe` with `--proc /proc`, and where that fails, without it, keeping the `/proc` the
+  root bind brings (`LinuxPids.OWN_UNDER_OUTER_PROC`, logged once). A success is kept for the JVM's
+  life; where neither starts, the run is refused with `shell_sandbox_unavailable`, never started in
+  JClaw's own namespace. What the kept `/proc` costs, measured in both images: it is read-only and
+  lists the processes outside by pids that mean nothing inside, so `ps` fails (`fatal library error,
+  lookup self`), `pgrep` prints those pids and `pkill` signals nothing of the run's own, and
+  `/proc/<pid>` of the run's own child does not exist. `/proc/self` still resolves, shell process
+  substitution works, a JVM, node and python3 start, and the JVM starts and stops a child; its
+  `ProcessHandle.info()` is empty and `allProcesses()` lists the processes outside. Naming them
+  gives no way to signal them: `pidfd_send_signal` on an open `/proc/<pid>` directory fails with
+  `Invalid argument`, the kernel's refusal of a signal from a PID namespace to its ancestor, and
+  `pidfd_open` finds no such process (measured with python3, where both land under the argv
+  without the namespace). With a procfs of its own (measured in the same images started with
+  `systempaths=unconfined`, standing in for a host that is not a container) all of that is
+  consistent and `ps` lists only the run. Both shapes were also built and started by JClaw's own
+  compiled `HarnessSandbox` in the dev image, as root and as uid 1000; the Linux run tests skip on
+  the build host, so `HarnessSandboxTest` pins the argv.
+- **Stopping across runs** — `exec` takes `"stop": <pid>` in place of a command
+  (`ShellExecTool.stopBackground`) and calls `BackgroundProcesses.stop`, which already tracked what
+  each agent's commands left running: the processes holding, on descriptor 4, an output file `exec`
+  itself made in that agent's workspace. `POST /api/processes/{pid}/stop` goes the same way. A pid
+  that is not among the calling agent's holders is answered as a pid that names nothing, whether it
+  is another agent's process, one JClaw never started or none at all, and the refusal lists the pids
+  the agent can stop (`ExecStopBackgroundTest`). The pid is the one the earlier result named, as
+  JClaw sees it: on Linux `$!` inside the run is the namespace's own number. From outside, the
+  namespace's processes are ordinary ones: `BackgroundProcesses.pidsHolding` found the background
+  process of a PID-namespace run and `terminate` ended it, after which bwrap's own init exited
+  (measured with the compiled classes, both shapes). A foreground command killed on timeout or by a
+  stopped turn is ended the same way: TERM to the tree took the command, its shell, bwrap and that
+  init (measured from a shell). The run's pipe still closes within milliseconds of a foreground
+  command's exit, so the one-second grace that tells a command that left something running is
+  unchanged (measured over 30 runs a shape). The tracker's limit is the stop's limit: a process that
+  closes the descriptors it inherited is in no list, and since no later run can signal it either,
+  only the operator or `main` stops it. Before JF-303 a later `kill` did.
+- **`--die-with-parent` is not used.** Under the PID namespace it ends a background command the
+  moment the call returns, because the namespace's init then dies with the outer bwrap, which exits
+  with the shell (measured: `background` left nothing running). Without the namespace the flag
+  changes nothing for the processes the shell started (measured: a foreground and a background
+  `sleep` both survived the launcher's SIGKILL, with the flag as without it). And `exec` promises
+  the opposite: a background process outlives the call and a restart, is found again after one, and
+  ends on its lifetime, with its conversation or agent, or on a stop.
 
 **A custom agent's shell reaches no local service outside it through a socket file (JF-302).** The
 sandbox bounds files, and a service that runs unconfined as the operator acts outside it for whoever
@@ -109,7 +168,7 @@ naming the known ones: on the Mac it was measured on, the shared temp folder alo
 sockets of several other programs, none of them a container runtime, which no list would have named.
 Like the JVM attach rules it is the custom agent's alone: `main`'s `exec` and a coding harness keep their
 profiles (`SandboxLocalServiceTest.mainConfinedUnderTheKeyStillConnectsToASocketOutsideItsWorkspace`,
-`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheLocalServiceAndJvmAttachDenies`).
+`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheLocalServiceSignalAndJvmAttachDenies`).
 
 - **macOS** — `customAgentMacosProfile` adds `(deny network-outbound (remote unix-socket))`, then an
   allow for the workspace, for the run's own temp folder and for `/private/var/run/mDNSResponder`, which
@@ -199,6 +258,8 @@ the compose seccomp profile under `JCLAW_CONTAINER=1`; a success is cached for t
 failure is probed again on the next call. On macOS it is still the `sandbox-exec` lookup. Where it
 fails, a custom agent's `exec` returns `ToolErrorTemplates.shellSandboxUnavailable`
 (`shell_sandbox_unavailable`) and starts nothing; `main`'s keeps the `SandboxUnavailableException` abort.
+On Linux a custom agent's run needs one launch more, `customAgentPids` (above), which picks its PID
+namespace and refuses the run the same way where none starts; `GET /api/sandbox` does not report it.
 
 **Docker.** The image installs `bubblewrap`, and `docker-compose.yml` starts the container with
 `security_opt: ["seccomp=./seccomp-bwrap.json"]`: Docker's default profile (moby/profiles
@@ -249,7 +310,8 @@ resets it to `CustomAgentOverride.NONE`. The override is read only by
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.
 A test that needs a JVM to attach to starts a throwaway one and stops it (`SandboxJvmAttachTest`),
-never a JVM that is already running. A test that needs a local service starts its own Unix socket server at
+never a JVM that is already running. A test that sends a signal aims it at a throwaway `sleep` it
+started (`SandboxSignalTest`), never at a pid it did not start and never at `-1`. A test that needs a local service starts its own Unix socket server at
 the path in question (`SandboxLocalServiceTest`): it never connects to a real runtime's socket and never
 starts a container. A test that sends SIGQUIT inside a run aims it at the run's
 shell from a subshell, `(kill -QUIT $$)`: `sh` starts a background job with SIGQUIT ignored, so

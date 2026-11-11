@@ -66,7 +66,9 @@ import java.util.Map;
  * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}. That run
  * also cannot attach to a JVM outside it, and with the network allowed it still reaches no local service
  * through a socket file outside its workspace and its own temp and runtime folders, nor moves one into
- * them: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}.
+ * them: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}. Nor does a
+ * signal from it reach a process outside the run (JF-303): a Seatbelt rule on macOS, a PID namespace of its
+ * own on Linux ({@link LinuxPids}).
  */
 public final class HarnessSandbox {
 
@@ -113,16 +115,23 @@ public final class HarnessSandbox {
     private static final String UNSHARE_USER = "--unshare-user";
 
     /**
-     * HotSpot's attach handshake, refused at both steps. SIGQUIT starts a JVM's attach listener, so it
-     * reaches only this sandbox's own processes; every other signal still reaches outside, which is how a
-     * later run stops what an earlier one left in the background. The listener's socket,
-     * {@code .java_pid<pid>} in the temp directory, takes no connection, and no rename, unlink or hard link
-     * that would give it a name the rule misses. The rule goes by name, not owner, so a JVM started inside
-     * the sandbox cannot be attached to either.
+     * A signal from the run reaches only the processes of that run: {@code same-sandbox} is one
+     * {@code sandbox-exec} launch. So {@code kill} fails with EPERM for every signal, 0 included, at a
+     * process of the operator's, at another agent's, and at one an earlier run of the same agent left in the
+     * background, which {@code exec} stops for the agent from outside the sandbox
+     * ({@code services.BackgroundProcesses}). SIGQUIT is among them, the first step of HotSpot's attach
+     * handshake: it starts a JVM's attach listener.
+     */
+    private static final String MAC_DENY_SIGNALS_OUTSIDE = "(deny signal (require-not (target same-sandbox)))\n";
+
+    /**
+     * The second step of HotSpot's attach handshake. The listener's socket, {@code .java_pid<pid>} in the
+     * temp directory, takes no connection, and no rename, unlink or hard link that would give it a name the
+     * rule misses. The rule goes by name, not owner, so a JVM started inside the sandbox cannot be attached
+     * to either.
      */
     private static final String MAC_DENY_JVM_ATTACH =
-            "(deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))\n"
-                    + "(deny network-outbound file-write* file-link (regex #\"/\\.java_pid[^/]*$\"))\n";
+            "(deny network-outbound file-write* file-link (regex #\"/\\.java_pid[^/]*$\"))\n";
 
     /** The one socket outside a run's own folders that its commands need: macOS resolves names through it. */
     private static final String MAC_MDNS_SOCKET = "/private/var/run/mDNSResponder";
@@ -181,6 +190,9 @@ public final class HarnessSandbox {
     /** Only a success is kept: a host whose namespaces are fixed later is re-probed rather than refused for the JVM's life. */
     private static volatile boolean bwrapLaunched;
 
+    /** Which PID namespace a custom agent's run gets here, once a launch has shown it; a failure is probed again. */
+    private static volatile @Nullable LinuxPids customAgentPids;
+
     private static final java.util.concurrent.atomic.AtomicReference<CustomAgentOverride> CUSTOM_AGENT_OVERRIDE =
             new java.util.concurrent.atomic.AtomicReference<>(CustomAgentOverride.NONE);
 
@@ -200,6 +212,28 @@ public final class HarnessSandbox {
         } catch (LinkageError | RuntimeException _) {
             return false;
         }
+    }
+
+    /**
+     * The processes a bwrap run can signal. Linux has no rule for a signal's target, so a run that must reach
+     * none outside it gets a PID namespace of its own: no process outside has a pid there, and {@code kill}
+     * answers "No such process". Each run is its own namespace, so it does not reach what an earlier run of
+     * the same agent left in the background either; {@code exec} stops that from outside
+     * ({@code services.BackgroundProcesses}), where the namespace's processes have ordinary pids.
+     */
+    public enum LinuxPids {
+        /** JClaw's own namespace: {@code main}'s {@code exec} and a coding harness, as before. */
+        SHARED,
+        /** A namespace of the run's own, with that namespace's procfs on {@code /proc}. */
+        OWN,
+        /**
+         * A namespace of the run's own under the {@code /proc} the root bind brings. A container runtime mounts
+         * over parts of {@code /proc}, and the kernel then refuses a new procfs to a user namespace (bwrap:
+         * {@code Can't mount proc on /newroot/proc}). That {@code /proc} is read-only and lists the processes
+         * outside by pids that mean nothing inside, so {@code ps} fails there and {@code pgrep} and
+         * {@code pkill} match nothing of the run's own; a JVM, node and python3 start as usual (measured).
+         */
+        OWN_UNDER_OUTER_PROC
     }
 
     /** JCLAW-709: how broadly the OS sandbox applies, from {@link #ACP_SANDBOX_KEY}. */
@@ -328,8 +362,8 @@ public final class HarnessSandbox {
      * Wrap a custom agent's {@code exec} run: confined whatever {@link #SHELL_SANDBOX_KEY} says, with
      * writes limited to {@code writeRoot} and the network cut under {@link #SHELL_NETWORK_KEY}{@code =deny}.
      * On macOS the profile is {@link #customAgentMacosProfile}; on Linux it is {@link #linuxArgv}, which
-     * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own} and with
-     * {@link #linuxOwnRuntime runtime folders of its own}.
+     * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own}, with
+     * {@link #linuxOwnRuntime runtime folders of its own} and in a {@link LinuxPids PID namespace of its own}.
      *
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
@@ -347,7 +381,7 @@ public final class HarnessSandbox {
             var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
             return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, extraReads, home,
                     linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()),
-                    deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime)), Map.of());
+                    deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids())), Map.of());
         }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
         var temp = customAgentTempDir(writeRoot);
@@ -500,16 +534,59 @@ public final class HarnessSandbox {
             bwrapLaunched = true;
             return null;
         }
-        var raw = probe.output();
-        var output = raw == null ? "" : raw.strip();
-        var firstLine = output.lines().findFirst().orElse("").strip();
-        var reason = firstLine.isEmpty() ? probe.reason()
-                : firstLine.substring(0, Math.min(firstLine.length(), PROBE_LINE_LIMIT));
+        var reason = failureLine(probe);
         if ("1".equals(System.getenv("JCLAW_CONTAINER"))) {
             reason += "; in Docker, start the container with the seccomp profile docker-compose.yml names"
                     + " (seccomp-bwrap.json), as INSTALL.md describes";
         }
         return reason;
+    }
+
+    /** What a failed probe printed first, cut to {@link #PROBE_LINE_LIMIT}, or the probe's own reason when it printed nothing. */
+    private static String failureLine(ExecutableProbeSupport.CapturedResult probe) {
+        var raw = probe.output();
+        var firstLine = (raw == null ? "" : raw.strip()).lines().findFirst().orElse("").strip();
+        return firstLine.isEmpty() ? probe.reason()
+                : firstLine.substring(0, Math.min(firstLine.length(), PROBE_LINE_LIMIT));
+    }
+
+    /**
+     * The PID namespace a custom agent's run gets on this host: {@link LinuxPids#OWN} where a launch shows the
+     * kernel mounts its procfs, else {@link LinuxPids#OWN_UNDER_OUTER_PROC}. Never {@link LinuxPids#SHARED}:
+     * where neither starts, the run is refused.
+     */
+    private static LinuxPids customAgentPids() {
+        var known = customAgentPids;
+        if (known != null) return known;
+        var failure = "";
+        for (var pids : List.of(LinuxPids.OWN, LinuxPids.OWN_UNDER_OUTER_PROC)) {
+            var probe = ExecutableProbeSupport.probeCapturing(pidNamespaceProbe(pids, RUNS_AS_ROOT), "");
+            if (probe.available()) {
+                if (pids == LinuxPids.OWN_UNDER_OUTER_PROC) {
+                    EventLogger.info("tool", "Sandbox: no new /proc can be mounted here (" + failure + "), so a custom"
+                            + " agent's commands run in their own PID namespace under this host's /proc: ps fails in them");
+                }
+                customAgentPids = pids;
+                return pids;
+            }
+            failure = failureLine(probe);
+        }
+        throw new SandboxUnavailableException(
+                "'%s' cannot start a custom agent's namespaces: %s".formatted(BWRAP, failure));
+    }
+
+    /**
+     * {@link #BWRAP_PROBE} as a custom agent's run starts it: in a user namespace and the PID namespace
+     * {@code pids} names. Public so a test can pin it on any host.
+     */
+    public static List<String> pidNamespaceProbe(LinuxPids pids, boolean asRoot) {
+        var out = new ArrayList<String>(inOwnUserNamespace(asRoot ? BWRAP_PROBE_AS_ROOT : BWRAP_PROBE));
+        out.add(out.indexOf("--ro-bind"), "--unshare-pid");
+        if (pids == LinuxPids.OWN_UNDER_OUTER_PROC) {
+            int proc = out.indexOf("--proc");
+            out.subList(proc, proc + 2).clear();
+        }
+        return List.copyOf(out);
     }
 
     /** Whether a run confined under {@code configKey} loses the network: only a native tool's, and only on {@code deny}. */
@@ -678,8 +755,8 @@ public final class HarnessSandbox {
     /**
      * A custom agent's Seatbelt profile, public so a test can pin its text on any host: {@code $HOME} hidden
      * except the write root and {@code homeReads} (the {@code $HOME} directories on JClaw's own PATH,
-     * {@link #homeReadReopens}), then the local services outside the sandbox refused, and the JVM attach
-     * handshake denied last, where no grant outranks it.
+     * {@link #homeReadReopens}), then the local services outside the sandbox refused, and last, where no grant
+     * outranks them, every signal to a process outside the run and the JVM attach socket.
      *
      * <p>A service that runs unconfined as the operator acts outside the sandbox for whoever connects: a
      * container runtime mounts any host folder. So with the network, a Unix socket takes the run's connection
@@ -699,7 +776,7 @@ public final class HarnessSandbox {
                 + socketAllow("path-literal", MAC_MDNS_SOCKET);
         return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads)
                 + sockets + sharedTempStaysInPlace(writeRoot.getAbsolutePath(), ownTemp)
-                + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_JVM_ATTACH;
+                + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_SIGNALS_OUTSIDE + MAC_DENY_JVM_ATTACH;
     }
 
     private static String socketAllow(String filter, String path) {
@@ -807,14 +884,27 @@ public final class HarnessSandbox {
     @SuppressWarnings("java:S107") // one sandbox's whole shape, each part resolved by the caller
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String home,
                                          List<Path> hidden, boolean denyNetwork, boolean asRoot, List<String> ownRuntime) {
+        return linuxArgv(argv, writeRoot, allowances, home, hidden, denyNetwork, asRoot, ownRuntime, LinuxPids.SHARED);
+    }
+
+    /**
+     * {@link #linuxArgv(List, File, List, String, List, boolean, boolean, List)} with the run's PID namespace
+     * given. {@code --proc /proc} is the namespace's own procfs under {@code --unshare-pid}, and is left out
+     * for {@link LinuxPids#OWN_UNDER_OUTER_PROC}, where bwrap could not mount one and would start nothing.
+     */
+    @SuppressWarnings("java:S107") // one sandbox's whole shape, each part resolved by the caller
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String home,
+                                         List<Path> hidden, boolean denyNetwork, boolean asRoot, List<String> ownRuntime,
+                                         LinuxPids pids) {
         var out = new ArrayList<String>(List.of(BWRAP));
         if (asRoot) out.addAll(ROOT_FLAGS);
         if (denyNetwork) out.add("--unshare-net");
+        if (pids != LinuxPids.SHARED) out.add("--unshare-pid");
         out.addAll(List.of(
                 "--ro-bind", "/", "/",
                 "--dev", "/dev",
-                "--tmpfs", "/tmp",
-                "--proc", "/proc"));
+                "--tmpfs", "/tmp"));
+        if (pids != LinuxPids.OWN_UNDER_OUTER_PROC) out.addAll(List.of("--proc", "/proc"));
         out.addAll(ownRuntime);
         // an empty HOME by default; the write root and the harness's own state
         // paths are bound back below (secrets not listed stay absent).

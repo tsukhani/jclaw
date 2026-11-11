@@ -234,8 +234,8 @@ class SandboxJvmAttachTest extends UnitTest {
     }
 
     /**
-     * Only SIGQUIT is held inside the sandbox on macOS. A process outside refuses it and still takes SIGTERM,
-     * which is how a later run stops what an earlier one left in the background; inside the run it is delivered.
+     * SIGQUIT, the signal that starts a JVM's attach listener, stays inside the sandbox on macOS: a process
+     * outside refuses it, and inside the run it is delivered. {@link SandboxSignalTest} covers the other signals.
      */
     @Test
     @EnabledOnOs(OS.MAC)
@@ -246,11 +246,6 @@ class SandboxJvmAttachTest extends UnitTest {
         var quit = run(agent, "kill -QUIT %d; echo quit=$?".formatted(outside.pid()));
         assertEquals("quit=1", lines(quit).getLast(), quit.toString());
         assertTrue(outside.isAlive(), "SIGQUIT must not have reached the process outside the sandbox");
-
-        var term = run(agent, "kill %d; echo term=$?".formatted(outside.pid()));
-        assertEquals(List.of("term=0"), lines(term));
-        assertTrue(outside.waitFor(10, TimeUnit.SECONDS), "SIGTERM must still reach a process outside the sandbox");
-        assertEquals(143, outside.exitValue());
 
         // Sent to the run's shell from a subshell: sh starts a background job with SIGQUIT ignored, so one
         // takes the signal only when it arrives before the job has set that up.

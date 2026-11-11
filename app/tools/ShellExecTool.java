@@ -3,6 +3,7 @@ package tools;
 import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -102,6 +103,12 @@ import java.util.stream.Collectors;
  * folder, such as a container runtime's control socket. Where no sandbox can start, its command is refused
  * with {@link ToolErrorTemplates#shellSandboxUnavailable} and nothing runs.
  *
+ * <p>A signal from such a run reaches only the processes of that run: not the operator's, not JClaw, not
+ * another agent's. Each run is a sandbox of its own, so it does not reach what an earlier run of the same
+ * agent left in the background either. {@link #stopBackground} is how the agent stops that: a call with
+ * {@code stop} set to the pid, which {@link BackgroundProcesses} ends from outside the sandbox when the
+ * process is one that agent's own commands left running, and refuses otherwise.
+ *
  * <p>{@code main} follows JCLAW-1153's tri-state {@code shell.sandbox} — {@code false} (shipped
  * default) | {@code true} (confine every run) | {@code untrusted} (confine only runs whose origin channel
  * is not the operator's own web chat or voice mode) — through the same macOS Seatbelt / Linux bwrap
@@ -139,6 +146,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static final String PARAM_WORKDIR = "workdir";
     private static final String PARAM_TIMEOUT = "timeout";
     private static final String PARAM_BACKGROUND = "background";
+    private static final String PARAM_STOP = "stop";
+
+    private static final String SHELL_STOP_NOT_RUNNING = "shell_stop_not_running";
+    private static final String SHELL_STOP_INVALID = "shell_stop_invalid";
+    private static final String SHELL_STOP_WITH_COMMAND = "shell_stop_with_command";
+
+    /** The longest command line a refused stop quotes for one of the agent's running processes. */
+    private static final int STOP_LISTING_COMMAND_CHARS = 80;
 
     /**
      * Field names of the JSON envelope {@link #execute} returns as its result text.
@@ -207,17 +222,30 @@ public class ShellExecTool implements ToolRegistry.Tool {
         );
     }
 
+    private static final String DESCRIPTION_HEAD = """
+            Execute a shell command on the host system. Commands are validated against an \
+            allowlist of permitted binaries. Working directory defaults to the agent workspace. \
+            Returns exit code, output, and execution metadata. A command still in the foreground when \
+            its timeout passes is killed, so start a server or a long build with "background": true \
+            rather than appending &: the call returns at once, and the command keeps writing its \
+            output to a file the result names with its pid, which you can read later.\s""";
+
+    private static final String DESCRIPTION_TAIL =
+            " Bind a server you start to 127.0.0.1 unless the user asks for another address.";
+
     @Override
     public String description() {
-        return """
-                Execute a shell command on the host system. Commands are validated against an \
-                allowlist of permitted binaries. Working directory defaults to the agent workspace. \
-                Returns exit code, output, and execution metadata. A command still in the foreground when \
-                its timeout passes is killed, so start a server or a long build with "background": true \
-                rather than appending &: the call returns at once, and the command keeps writing its \
-                output to a file the result names with its pid, which you can read later. The operator, \
-                or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. Bind a server \
-                you start to 127.0.0.1 unless the user asks for another address.""";
+        return DESCRIPTION_HEAD + "The operator, or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it."
+                + DESCRIPTION_TAIL;
+    }
+
+    /** A custom agent's {@code kill} reaches nothing an earlier command left, so it alone is sent to {@code stop}. */
+    @Override
+    public String description(@Nullable Agent caller) {
+        if (caller == null || mainRooted(caller)) return description();
+        return DESCRIPTION_HEAD + "To stop it, call exec with \"stop\" set to that pid and no command: each of your"
+                + " commands runs in a sandbox of its own, so kill and pkill in a later command cannot reach it."
+                + " The operator can stop it too." + DESCRIPTION_TAIL;
     }
 
     @Override
@@ -226,7 +254,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
                         PARAM_COMMAND, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Shell command to execute"),
+                                SchemaKeys.DESCRIPTION, "Shell command to execute; required unless 'stop' is given"),
                         PARAM_WHY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "One sentence: why you are running this command / what it "
                                         + "accomplishes. Shown to the operator in the run log and in any approval prompt."),
@@ -237,11 +265,16 @@ public class ShellExecTool implements ToolRegistry.Tool {
                         PARAM_BACKGROUND, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                                 SchemaKeys.DESCRIPTION, "Run the command in the background and return at once with its output "
                                         + "file and pid, for a server or a long build. Do not also append &."),
+                        PARAM_STOP, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Instead of a command: the pid of a background process an earlier "
+                                        + "call of yours left running, as its result named it. Stops that process and "
+                                        + "every process it started."),
                         "env", Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "Additional environment variables as key-value pairs",
                                 SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
                 ),
-                SchemaKeys.REQUIRED, List.of(PARAM_COMMAND, PARAM_WHY)
+                // Not the command: a stop sends none, and execute still refuses a call with neither.
+                SchemaKeys.REQUIRED, List.of(PARAM_WHY)
         );
     }
 
@@ -289,16 +322,20 @@ public class ShellExecTool implements ToolRegistry.Tool {
         long startTime = System.currentTimeMillis();
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
 
-        var command = args.has(PARAM_COMMAND) ? args.get(PARAM_COMMAND).getAsString().strip() : "";
-        if (command.isEmpty()) {
-            return ToolErrorTemplates.render(ToolErrorTemplates.shellEmptyCommand());
-        }
+        var command = args.has(PARAM_COMMAND) && !args.get(PARAM_COMMAND).isJsonNull()
+                ? args.get(PARAM_COMMAND).getAsString().strip() : "";
         // JClaw operator audit trail: the schema marks `why` required so the model
         // articulates intent, but execution never hard-fails on a missing rationale
         // (keeps existing programmatic callers working). It rides in the tool-call
         // arguments (persisted + shown in the UI) and the approval prompt regardless.
         var why = args.has(PARAM_WHY) && !args.get(PARAM_WHY).isJsonNull()
                 ? args.get(PARAM_WHY).getAsString().strip() : "";
+        if (args.has(PARAM_STOP) && !args.get(PARAM_STOP).isJsonNull()) {
+            return stopBackground(args.get(PARAM_STOP), command, why, agent);
+        }
+        if (command.isEmpty()) {
+            return ToolErrorTemplates.render(ToolErrorTemplates.shellEmptyCommand());
+        }
 
         // Allowlist validation (bypass only for the main agent — identity-checked by name, not config)
         boolean bypassAllowlist = agent.isMain() && "true".equals(
@@ -342,6 +379,47 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 why.isEmpty() ? "" : " — why: " + why));
 
         return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent, background);
+    }
+
+    /**
+     * Stops background process {@code stop} for {@code agent}, from this JVM and so from outside any sandbox:
+     * the one way a custom agent ends what an earlier run of its own left, since its shell signals nothing
+     * outside the run it is in. Only a process {@link BackgroundProcesses} finds among those the agent's own
+     * commands left running is stopped. Any other pid, another agent's process included, is answered as a
+     * pid that names nothing, with the pids the agent can stop.
+     */
+    private static String stopBackground(JsonElement stop, String command, String why, Agent agent) {
+        if (!command.isEmpty()) {
+            return ToolErrorTemplates.render(new ErrorTemplate(SHELL_STOP_WITH_COMMAND,
+                    "'stop' and 'command' cannot be sent in one call.",
+                    "A call either runs a command or stops a background process. Nothing was run and nothing was stopped.",
+                    "Send the stop on its own, then the command in a second call."));
+        }
+        long pid;
+        try {
+            if (!stop.isJsonPrimitive()) throw new NumberFormatException();
+            pid = stop.getAsBigDecimal().longValueExact();
+        } catch (NumberFormatException | ArithmeticException _) {
+            var given = stop.toString();
+            return ToolErrorTemplates.render(new ErrorTemplate(SHELL_STOP_INVALID,
+                    "'stop' must be the pid of a background process, as a whole number.",
+                    "The 'stop' argument was %s.".formatted(given.length() > STOP_LISTING_COMMAND_CHARS
+                            ? given.substring(0, STOP_LISTING_COMMAND_CHARS) + "…" : given),
+                    "Re-send with 'stop' set to the pid an earlier result named, and no 'command'."));
+        }
+        EventLogger.info("tool", agent.name, "exec", "exec: stop background process %d%s".formatted(
+                pid, why.isEmpty() ? "" : " — why: " + why));
+        if (BackgroundProcesses.stop(agent, pid)) {
+            return "Stopped background process %d and every process it started.".formatted(pid);
+        }
+        var running = BackgroundProcesses.list(List.of(agent)).stream()
+                .map(entry -> entry.label(STOP_LISTING_COMMAND_CHARS)).collect(Collectors.joining(", "));
+        var scope = "exec stops only a process this agent's own commands left running, by the pid their result named. ";
+        return ToolErrorTemplates.render(new ErrorTemplate(SHELL_STOP_NOT_RUNNING,
+                "No background process %d of this agent's is running.".formatted(pid),
+                scope + (running.isEmpty() ? "None is running now, so it may have exited already."
+                        : "Running now: " + running + "."),
+                running.isEmpty() ? null : "Re-send with 'stop' set to one of those pids."));
     }
 
     /**
@@ -638,10 +716,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * ends at a parentless {@code main}; a chain the walk gives up on counts as custom, so it fails closed.
      */
     public static Confinement confinement(Agent agent, boolean trustedOrigin) {
-        var root = WorkspaceFiles.workspaceOwner(agent);
-        if (root.parentAgent != null || !root.isMain()) return Confinement.CUSTOM_AGENT;
+        if (!mainRooted(agent)) return Confinement.CUSTOM_AGENT;
         return HarnessSandbox.confines(HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin)
                 ? Confinement.KEY : Confinement.NONE;
+    }
+
+    private static boolean mainRooted(Agent agent) {
+        var root = WorkspaceFiles.workspaceOwner(agent);
+        return root.parentAgent == null && root.isMain();
     }
 
     /** Names the file and pids of what a command left running, or says a background command has already exited. */

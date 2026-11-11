@@ -47,6 +47,12 @@ import java.util.stream.Collectors;
  * file elsewhere, and a file it moves in keeps its own, so neither is recorded and whatever holds them is left
  * alone, however {@code lsof} matches by inode (JCLAW-1574). A process that closes the descriptor it inherits
  * is not found.
+ *
+ * <p>This JVM does the stopping, from outside any sandbox, and for a custom agent that is the only way: its
+ * shell signals nothing outside the run it is in, so a later run cannot {@code kill} what an earlier one left
+ * (JF-303). {@link #stop} is therefore what {@code exec}'s {@code stop} and {@code POST /api/processes/{pid}/stop}
+ * both call, and it takes a pid only from the holders of the calling agent's own workspace: another agent's
+ * process and one JClaw never started are not among them.
  */
 public final class BackgroundProcesses {
 
@@ -82,7 +88,15 @@ public final class BackgroundProcesses {
 
     /** One process left running, with the output file it holds and the TCP addresses it listens on. */
     public record Entry(long pid, Long agentId, String agentName, String outputFile, @Nullable Long conversationId,
-                        String command, @Nullable Instant started, List<String> listening) {}
+                        String command, @Nullable Instant started, List<String> listening) {
+
+        /** {@code pid 123 (command line)}, the command on one line and cut to {@code maxCommandChars}. */
+        public String label(int maxCommandChars) {
+            var oneLine = command.strip().replaceAll("\\s+", " ");
+            return "pid %d (%s)".formatted(pid,
+                    oneLine.length() > maxCommandChars ? oneLine.substring(0, maxCommandChars) + "…" : oneLine);
+        }
+    }
 
     private record Held(ProcessHandle process, Path file) {}
 

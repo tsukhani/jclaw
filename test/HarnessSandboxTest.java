@@ -126,9 +126,13 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     private static boolean bwrapLaunches() throws Exception {
+        return launches(List.of("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                "--tmpfs", "/tmp", "true"));
+    }
+
+    private static boolean launches(List<String> command) throws Exception {
         try {
-            var proc = new ProcessBuilder("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                    "--tmpfs", "/tmp", "true").redirectErrorStream(true).start();
+            var proc = new ProcessBuilder(command).redirectErrorStream(true).start();
             proc.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
             assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the probe finished");
             return proc.exitValue() == 0;
@@ -158,12 +162,13 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * On Linux a custom agent's run is linuxArgv in its own user namespace, under shell.sandbox's network rule,
-     * with the key itself unset, plus runtime folders of its own between /proc and the $HOME tmpfs. It has a
-     * /tmp of its own already, so its TMPDIR is left alone.
+     * On Linux a custom agent's run is linuxArgv in its own user and PID namespaces, under shell.sandbox's network
+     * rule, with the key itself unset, plus runtime folders of its own before the $HOME tmpfs. Its /proc is the PID
+     * namespace's own where this host mounts one, and the one the root bind brings where it does not. It has a /tmp
+     * of its own already, so its TMPDIR is left alone.
      */
     @Test
-    void linuxCustomAgentWrapIsTheShellArgvUnderTheNetworkRule() {
+    void linuxCustomAgentWrapIsTheShellArgvInItsOwnNamespacesUnderTheNetworkRule() throws Exception {
         var a = HarnessSandbox.availability();
         org.junit.jupiter.api.Assumptions.assumeTrue(a.available() && a.mechanism().equals("bwrap"),
                 "no working bwrap here: " + a);
@@ -178,14 +183,20 @@ class HarnessSandboxTest extends UnitTest {
                 assertEquals(Map.of(), confined.env(), "network=" + network);
                 assertEquals("--unshare-user", wrapped.get(1), "network=" + network);
                 assertEquals(network.equals("deny"), wrapped.contains("--unshare-net"), "network=" + network);
+                assertEquals("--unshare-pid", wrapped.get(wrapped.indexOf("--ro-bind") - 1), "argv=" + wrapped);
 
-                int afterProc = indexOfPair(wrapped, "--proc", "/proc") + 2;
+                boolean ownProc = indexOfPair(wrapped, "--proc", "/proc") >= 0;
+                assertEquals(launches(HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN,
+                        wrapped.contains("--cap-drop"))), ownProc, "a procfs of its own exactly where one mounts, argv=" + wrapped);
+                int afterMounts = indexOfPair(wrapped, "--tmpfs", "/tmp") + (ownProc ? 4 : 2);
                 int homeTmpfs = indexOfPair(wrapped, "--tmpfs", System.getProperty("user.home"));
-                assertEquals(List.of("--tmpfs", "/run"), wrapped.subList(afterProc, afterProc + 2), "argv=" + wrapped);
-                var withoutOwnRuntime = new ArrayList<>(wrapped);
-                withoutOwnRuntime.subList(afterProc, homeTmpfs).clear();
+                assertEquals(List.of("--tmpfs", "/run"), wrapped.subList(afterMounts, afterMounts + 2), "argv=" + wrapped);
+                var asMains = new ArrayList<>(wrapped);
+                asMains.subList(afterMounts, homeTmpfs).clear();
+                asMains.remove("--unshare-pid");
+                if (!ownProc) asMains.addAll(indexOfPair(asMains, "--tmpfs", "/tmp") + 2, List.of("--proc", "/proc"));
                 assertEquals(HarnessSandbox.inOwnUserNamespace(
-                        HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), withoutOwnRuntime,
+                        HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), asMains,
                         "network=" + network);
             }
         } finally {
@@ -271,13 +282,13 @@ class HarnessSandboxTest extends UnitTest {
 
     /**
      * A custom agent's profile is the hidden-home profile, then the local services outside it refused, then two
-     * rules last so that no grant outranks them: SIGQUIT only to its own sandbox, and a JVM's attach socket
+     * rules last so that no grant outranks them: a signal only to its own sandbox, and a JVM's attach socket
      * neither connected to nor renamed, removed or linked. With the network it connects to no Unix socket but
      * those in its workspace and its own temp folder, and mDNSResponder's, which resolves names. No socket and
      * no folder of the shared temp folders is renamed into those two, and its own temp folder stays at its name.
      */
     @Test
-    void macProfileForACustomAgentRefusesLocalServicesAndEndsWithTheJvmAttachDenies() {
+    void macProfileForACustomAgentRefusesLocalServicesAndEndsWithTheSignalAndJvmAttachDenies() {
         var root = new File("/h/u/jc/workspace/a");
         var hidden = List.of(Path.of("/h/u/jc/data"));
         var homeReads = List.of("/h/u/.local/bin");
@@ -290,7 +301,7 @@ class HarnessSandboxTest extends UnitTest {
                 (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
                 (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
                 (deny lsopen)
-                (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                (deny signal (require-not (target same-sandbox)))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
                 """, HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, false, homeReads, ownTemp));
     }
@@ -311,7 +322,7 @@ class HarnessSandboxTest extends UnitTest {
                 (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
                 (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
                 (deny lsopen)
-                (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                (deny signal (require-not (target same-sandbox)))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
                 """, denied);
         assertTrue(denied.startsWith("(version 1)\n(allow default)\n(deny network*)\n"), denied);
@@ -340,12 +351,12 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * The local-service and JVM-attach rules reach a custom agent's run alone: main's key-confined exec and a
+     * The local-service, signal and JVM-attach rules reach a custom agent's run alone: main's key-confined exec and a
      * coding harness keep their profile. The custom run's TMPDIR is the folder its profile names, made by the wrap.
      */
     @Test
     @EnabledOnOs(OS.MAC)
-    void macOnlyACustomAgentsRunCarriesTheLocalServiceAndJvmAttachDenies() throws Exception {
+    void macOnlyACustomAgentsRunCarriesTheLocalServiceSignalAndJvmAttachDenies() throws Exception {
         var temp = HarnessSandbox.customAgentTempDir(session.toFile());
         ShellSandboxSync.acquire();
         try {
@@ -373,7 +384,7 @@ class HarnessSandboxTest extends UnitTest {
                     (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "%2$s")) (require-not (subpath "%3$s"))))
                     (deny file-write-unlink (literal "%3$s"))
                     (deny lsopen)
-                    (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                    (deny signal (require-not (target same-sandbox)))
                     (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
                     """.formatted(System.getProperty("user.home"), session.toFile().getAbsolutePath(), temp.toRealPath())),
                     customProfile);
@@ -608,6 +619,64 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.inOwnUserNamespace(notRoot).subList(0, 6));
         assertEquals(asRoot, HarnessSandbox.inOwnUserNamespace(asRoot));
         assertFalse(notRoot.contains("--unshare-user"), notRoot.toString());
+    }
+
+    /**
+     * Only a custom agent's run is in a PID namespace of its own, where a signal finds no process outside it:
+     * --unshare-pid goes before the mounts, and --proc /proc is then that namespace's procfs, or is left out
+     * where the kernel refuses one. main's and a harness's argv have neither change.
+     */
+    @Test
+    void linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespace() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
+        var shared = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true, true,
+                List.of());
+        var own = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true, true,
+                List.of(), HarnessSandbox.LinuxPids.OWN);
+        var underOuterProc = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true,
+                true, List.of(), HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC);
+
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-net", "--unshare-pid",
+                "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--proc", "/proc",
+                "--tmpfs", "/home/operator"), own.subList(0, 17));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-net", "--unshare-pid",
+                "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp",
+                "--tmpfs", "/home/operator"), underOuterProc.subList(0, 15));
+        var ownWithoutTheFlag = new ArrayList<>(own);
+        ownWithoutTheFlag.remove("--unshare-pid");
+        assertEquals(shared, ownWithoutTheFlag);
+        var outerWithProcBack = new ArrayList<>(underOuterProc);
+        outerWithProcBack.remove("--unshare-pid");
+        outerWithProcBack.addAll(12, List.of("--proc", "/proc"));
+        assertEquals(shared, outerWithProcBack);
+        assertEquals(shared, HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true,
+                true, List.of(), HarnessSandbox.LinuxPids.SHARED));
+
+        for (var key : List.of(HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.ACP_SANDBOX_KEY)) {
+            var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), key);
+            assertFalse(argv.contains("--unshare-pid"), key + " shares JClaw's PID namespace, argv=" + argv);
+            assertTrue(indexOfPair(argv, "--proc", "/proc") >= 0, key + " keeps --proc /proc, argv=" + argv);
+        }
+    }
+
+    /**
+     * The launch that picks a custom agent's PID namespace is the readiness probe in a user namespace and a PID
+     * namespace: first with a procfs of its own, then without one.
+     */
+    @Test
+    void thePidNamespaceProbeIsTheReadinessProbeInItsOwnNamespaces() {
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
+                "--proc", "/proc", "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, false));
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
+                "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC, false));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--ro-bind", "/", "/",
+                "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, true));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--ro-bind", "/", "/",
+                "--dev", "/dev", "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC, true));
     }
 
     /**

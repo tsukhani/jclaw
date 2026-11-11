@@ -1059,13 +1059,13 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 
 An agent sometimes starts a program that keeps running after its command ends, such as a local web server. **Running in the background** lists these programs. Each row shows the command, the agent, when it started, the addresses it listens on, and the file its output goes to. **Stop** ends the program and anything it started. **Refresh** reads the list again.
 
-JClaw also stops such a program when its lifetime runs out, when you delete the conversation that started it, and when you delete the agent. Agents can see and stop their own programs too.
+JClaw also stops such a program when its lifetime runs out, when you delete the conversation that started it, and when you delete the agent. An agent can stop its own programs too. It asks JClaw to stop one, and JClaw refuses when another agent's command started the program, or when no agent's command did.
 
 :::gotcha
 *(every network interface)* after an address means other machines on your network can reach that program. Agents are told to use `127.0.0.1` unless you ask for something else. Stop a program you did not expect to see.
 :::
 
-A program that closes the files it was given when it started does not appear in the list.
+A program that closes the files it was given when it started does not appear in the list. A custom agent cannot stop such a program. You can stop it with `kill` in a terminal, and so can the Main Agent.
 
 :::gotcha
 The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can run only the commands their enabled skills allow.
@@ -1078,6 +1078,12 @@ On macOS a confined process runs under `sandbox-exec`: writes are denied outside
 On Linux a confined process runs under `bwrap`, which builds the visible filesystem from nothing: your home folder is empty, apart from the workspace when it lives there, and those secrets and JClaw's folders are absent rather than denied. This is the same for every agent.
 
 A custom agent's command also cannot attach to a Java program that runs outside the sandbox, JClaw included. On macOS it cannot attach to a Java program it starts itself either, so `jcmd`, `jstack` and a Java agent that attaches to its own program fail there.
+
+A custom agent's command also cannot send a signal to a program that runs outside it. So `kill` and `pkill` in its command do not stop your programs, JClaw itself or another agent's programs. Each command runs in a sandbox of its own, so they do not stop a program that an earlier command of the same agent left running in the background either. To stop that program, the agent asks JClaw, and JClaw stops it from outside the sandbox. Inside one command, signals work as usual: a command can stop a program that it started itself.
+
+:::gotcha
+When JClaw runs in Docker, `ps` does not work in a custom agent's command, and `pgrep` and `pkill` do not find the programs that the command started. Docker hides parts of `/proc`, so the command sees the container's process list, with numbers that mean nothing inside the sandbox. `kill` with a number the shell gives, such as `$!`, still works inside one command. On Linux outside a container these tools work, and they show only the command's own programs.
+:::
 
 A custom agent's command also cannot reach a program that runs outside the sandbox through a socket file. Such a program does what it is asked with your rights: Docker Desktop, Colima and Podman can start a container that sees any folder on your machine. So on macOS the command connects to a socket file only in its own workspace and in its own temp folder. JClaw makes that temp folder for the agent and points `TMPDIR` to it, because the usual temp folder is shared with every program you run. The command cannot move a socket, or the folder that holds one, from the shared temp folders into its own folders. One socket outside those folders stays open on macOS: the one the system uses to look up network names. On Linux the command gets empty `/tmp`, `/run` and `/var/run` folders of its own, so the Docker and Podman sockets and your session's D-Bus are not there. A socket file in another folder on Linux can still be reached: see the list below. On macOS the command also cannot have the system open an app or a file, so `open` fails.
 
@@ -1100,12 +1106,12 @@ For a custom agent's commands, the sandbox stops these:
 - On macOS, removing or renaming a folder in `/tmp` or in the shared temp folder.
 - Opening an app or a file with `open` on macOS.
 - Attaching to a Java program outside the sandbox.
+- Sending a signal to a program outside the command, for example with `kill`. That covers your programs, JClaw itself and other agents' programs.
 
 It does not stop these:
 
 - **The network**, while `shell.sandbox.network` is *Allow*. The command can connect to any address. That includes a program on this machine that listens on a network port, such as a database, or Docker when you have turned on its TCP port. *Deny* stops all of it.
 - **Reading files outside your home folder** that your account can read.
-- **Signals.** The command can stop another program of yours with `kill`.
 - **On Linux, a socket that has no file.** Some desktop programs listen on such an "abstract" socket, for example the X11 display, and on some systems your session's D-Bus. *Deny* stops these too, because they belong to the network.
 - **On Linux, a socket file in any other folder**, if your account may connect to it. LXD and Incus keep their control socket under `/var/lib` or `/var/snap`, and an account in their group can use it. *Deny* does not stop this.
 - **On macOS, system services that are not socket files.** A command can still read and change app preferences with `defaults`, and the keychain still answers its requests. Whether the keychain gives out a saved item without asking you was not tested.

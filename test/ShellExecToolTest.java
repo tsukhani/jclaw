@@ -282,7 +282,7 @@ class ShellExecToolTest extends UnitTest {
         var params = tool.parameters();
         @SuppressWarnings("unchecked")
         var required = (java.util.List<String>) params.get("required");
-        assertTrue(required.contains("command"), "command stays required");
+        assertFalse(required.contains("command"), "a call that stops a background process sends no command");
         assertTrue(required.contains("why"),
                 "why must be required so the model always states intent (operator audit trail)");
         @SuppressWarnings("unchecked")
