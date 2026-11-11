@@ -36,6 +36,8 @@ import static utils.GsonHolder.GSON;
 @With(AuthCheck.class)
 public class ApiSystemController extends Controller {
 
+    private static final String READ_STATUS = "read the restart and upgrade status";
+
     /**
      * @param available          whether a restart can be performed at all —
      *                           false when this install has no {@code jclaw.sh}
@@ -71,8 +73,10 @@ public class ApiSystemController extends Controller {
      * interrupt. Drives the confirmation dialog; performs nothing.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RestartPreflight.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's run mode and every agent's "
+            + "running work")
     public static void restartPreflight() {
+        RequestPrincipal.requireOperatorOrMain(READ_STATUS);
         var plan = RestartService.plan();
         var unavailable = RestartService.unavailableReason();
         var aot = RestartService.aotCacheState();
@@ -200,8 +204,10 @@ public class ApiSystemController extends Controller {
      * @param refresh bypass the cached release check (the "check again" control)
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradePreflight.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the install, every agent's running "
+            + "work, and a release check that dials out")
     public static void upgradePreflight(Boolean refresh) {
+        RequestPrincipal.requireOperatorOrMain(READ_STATUS);
         var unavailable = UpgradeService.unavailableReason();
         var current = UpgradeService.currentVersion();
         // Resolved even when this install cannot upgrade itself: without it the panel
@@ -265,8 +271,9 @@ public class ApiSystemController extends Controller {
      * 204 when no upgrade has ever run on this install.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradeService.Status.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the install's upgrade progress")
     public static void upgradeStatus() {
+        RequestPrincipal.requireOperatorOrMain(READ_STATUS);
         var status = UpgradeService.status();
         if (status == null) {
             response.status = 204;
@@ -310,8 +317,10 @@ public class ApiSystemController extends Controller {
      * @param refresh bypass the cached catalog check (the "Check again" control)
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JavaRuntimePreflight.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's Java runtime, and a catalog "
+            + "check that dials out")
     public static void javaRuntime(Boolean refresh) {
+        RequestPrincipal.requireOperatorOrMain(READ_STATUS);
         var env = JavaRuntimeService.environment();
         var latest = JavaRuntimeService.latest(Boolean.TRUE.equals(refresh));
         var latestVersion = latest == null ? null : latest.version();

@@ -65,8 +65,9 @@ public class ApiChannelsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))
     @Operation(summary = "List all stored channel configurations")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the channels are the instance's setup")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain("read the channel configurations");
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
         renderJSON(gson.toJson(result));

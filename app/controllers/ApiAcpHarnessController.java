@@ -31,6 +31,7 @@ public class ApiAcpHarnessController extends Controller {
 
     private static final Gson gson = GSON;
     private static final String COMMAND_FIELD = "command";
+    private static final String READ_HARNESSES = "read the coding harness commands";
 
     /** One probed harness: adapter {@code id}, a display {@code name}, the
      *  suggested {@code command} (the {@code subagent.acp.command} value), the
@@ -50,8 +51,10 @@ public class ApiAcpHarnessController extends Controller {
     /** GET /api/subagents/acp-harnesses — probe every known + custom harness. */
     @Operation(summary = "Detect installed ACP coding harnesses (claude/pi/codex/gemini/opencode + custom) on PATH")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessesResponse.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the stored harness commands and what "
+            + "the host has installed")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain(READ_HARNESSES);
         renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
     }
 
@@ -99,8 +102,9 @@ public class ApiAcpHarnessController extends Controller {
      *  model override's flags without storing them in the command. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AcpCommandPreview.class)))
     @Operation(summary = "Preview the effective ACP harness launch command")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the stored launch command")
     public static void commandPreview() {
+        RequestPrincipal.requireOperatorOrMain(READ_HARNESSES);
         renderJSON(gson.toJson(AcpCommandPreview.current()));
     }
 

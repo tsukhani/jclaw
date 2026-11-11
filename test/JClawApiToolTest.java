@@ -678,11 +678,12 @@ class JClawApiToolTest extends UnitTest {
         assertTrue(JClawApiTool.isCallable("DELETE", "/api/tasks/5"),
                 "OPEN DELETE task is callable -- it removes a task the agent can equally create");
         assertTrue(JClawApiTool.isCallable("POST", "/api/providers/refresh-prices"),
-                "OPEN refresh-prices is callable -- /api/providers is open by design");
+                "refresh-prices is callable -- the route itself answers only the operator and main (JF-292)");
         assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
                 "concrete path resolves against the route pattern");
         // JCLAW-1020: the read-only halves of the two operator-only system actions share their
-        // paths, so gating by verb is what keeps "what version am I on?" answerable.
+        // paths, so gating by verb is what keeps "what version am I on?" answerable to main,
+        // the one agent those reads answer (JF-292).
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/upgrade"),
                 "the upgrade preflight is read-only and stays callable");
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/restart"),
@@ -720,7 +721,8 @@ class JClawApiToolTest extends UnitTest {
                 "restart stops the instance -- OPERATOR_ONLY");
         // JCLAW-1022: the config table holds the instance's own security controls -- the shell
         // allowlist, the approval policy, the funnel switch -- so a caller able to write it
-        // widens every other gate rather than defeating one. Reads stay callable and masked.
+        // widens every other gate rather than defeating one. Reads stay callable, masked, and
+        // answer only main (JF-292).
         assertFalse(JClawApiTool.isCallable("POST", "/api/config"),
                 "writing config is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("DELETE", "/api/config/shell.allowlist"),

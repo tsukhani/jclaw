@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.Agent;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
 import org.jspecify.annotations.Nullable;
@@ -26,6 +27,7 @@ import java.util.List;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -81,13 +83,14 @@ public class ApiVideogenController extends Controller {
 
     /** GET /api/videogen/jobs?ids=1,2,3 — lightweight status for the chat poll loop.
      *
-     *  <p>No owner-scoping: JClaw is single-operator — there is no {@code User} entity or
-     *  owner FK (see {@code ApiToken}/{@code AuthCheck}), so the {@code AuthCheck}-gated operator owns
-     *  every job. This mirrors {@code ApiAttachmentsController},
-     *  which likewise serves rows by uuid to the one authenticated operator. */
-    @Operation(summary = "Status of video-generation jobs by id (chat progress polling)")
-    @AgentAccess(OPEN)
+     *  <p>The operator and {@code main} are answered for every job; any other agent only for its own
+     *  ({@link #ownerOf}), and another agent's id is left out as an unknown one is (JF-292). */
+    @Operation(summary = "Status of video-generation jobs by id (chat progress polling); an agent other than "
+            + "main is answered only for its own jobs")
+    @AgentAccess(OWN_ONLY)
     public static void jobs(String ids) {
+        // Null for the operator and main, who see every agent's.
+        var agentId = RequestPrincipal.scopedAgentId(null);
         var out = new ArrayList<LinkedHashMap<String, Object>>();
         if (ids != null && !ids.isBlank()) {
             var parts = ids.split(",");
@@ -96,10 +99,21 @@ public class ApiVideogenController extends Controller {
                 var id = parseId(parts[i]);
                 if (id == null) continue;
                 VideoGenerationJob job = VideoGenerationJobService.findById(id);
-                if (job != null) out.add(toStatusRow(job));
+                if (job != null && (agentId == null || isOwnedBy(job, agentId))) out.add(toStatusRow(job));
             }
         }
         renderJSON(gson.toJson(out));
+    }
+
+    /** The agent that asked for the video, else the agent of the conversation it came from; null when the job names neither. */
+    private static @Nullable Agent ownerOf(VideoGenerationJob job) {
+        if (job.agent != null) return job.agent;
+        return job.conversation == null ? null : job.conversation.agent;
+    }
+
+    private static boolean isOwnedBy(VideoGenerationJob job, Long agentId) {
+        var owner = ownerOf(job);
+        return owner != null && agentId.equals(owner.id);
     }
 
     /** Status row for one job — id, state, live progress, and the result uuid/size for the chat chip. */
@@ -144,10 +158,17 @@ public class ApiVideogenController extends Controller {
     }
 
     /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */
-    @Operation(summary = "Most-recent video-generation jobs (dashboard Recent Activity — video view)")
-    @AgentAccess(OPEN)
+    @Operation(summary = "Most-recent video-generation jobs (dashboard Recent Activity — video view); an agent "
+            + "other than main sees only its own")
+    @AgentAccess(OWN_ONLY)
     public static void recent() {
-        List<VideoGenerationJob> jobs = VideoGenerationJob.find("order by createdAt desc").fetch(20);
+        // Null for the operator and main, who see every agent's. The pin is in the query, ahead of the cap.
+        var agentId = RequestPrincipal.scopedAgentId(null);
+        List<VideoGenerationJob> jobs = agentId == null
+                ? VideoGenerationJob.find("order by createdAt desc").fetch(20)
+                : VideoGenerationJob.find("SELECT j FROM VideoGenerationJob j LEFT JOIN j.conversation c"
+                        + " WHERE j.agent.id = ?1 OR (j.agent IS NULL AND c.agent.id = ?1)"
+                        + " ORDER BY j.createdAt DESC", agentId).fetch(20);
         var out = new ArrayList<LinkedHashMap<String, Object>>();
         for (var job : jobs) {
             var m = new LinkedHashMap<String, Object>();

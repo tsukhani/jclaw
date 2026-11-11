@@ -52,8 +52,10 @@ public class ApiBreakersController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BreakerView.class)))
     @Operation(summary = "Every registered circuit breaker with its state, window counters and last reason")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the health of every subsystem the "
+            + "instance calls")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain("read the instance's metrics");
         var out = new ArrayList<BreakerView>();
         CircuitBreakers.snapshot().forEach((name, stats) -> out.add(view(name, stats)));
         renderJSON(GSON.toJson(out));

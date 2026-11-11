@@ -1278,6 +1278,9 @@ export interface Prompt {
   tags: string | null
   category: string
   categoryLabel: string
+  /** JF-292: the agent that created the prompt through the API; null or absent on the operator's own. */
+  ownerAgentId?: number | null
+  ownerAgentName?: string | null
   createdAt: string | null
   updatedAt: string | null
 }

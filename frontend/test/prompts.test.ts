@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { useConfirm } from '~/composables/useConfirm'
 import Prompts from '~/pages/prompts.vue'
+import type { Prompt } from '~/types/api'
 
 /**
  * Prompts Library page (JCLAW-813): rendering, client-side search + category
@@ -18,7 +19,7 @@ const CATEGORIES = [
   { value: 'CUSTOM', label: 'Custom' },
 ]
 
-function samplePrompts() {
+function samplePrompts(): Prompt[] {
   return [
     { id: 1, title: 'Code Review', content: 'Review this code', tags: 'review, quality',
       category: 'CODING', categoryLabel: 'Coding', createdAt: null, updatedAt: null },
@@ -57,6 +58,29 @@ describe('Prompts Library page', () => {
     expect(text).toContain('Code Review')
     expect(text).toContain('Coding')
     expect(text).toContain('#review')
+  })
+
+  it('names the agent that owns an agent\'s prompt and marks none on the operator\'s', async () => {
+    prompts = [
+      { ...samplePrompts()[0]!, ownerAgentId: 7, ownerAgentName: 'research-bot' },
+      { ...samplePrompts()[1]!, ownerAgentId: null, ownerAgentName: null },
+    ]
+    const c = await mountSuspended(Prompts)
+    await flushPromises()
+
+    const owner = c.find('[data-testid="prompt-owner-1"]')
+    expect(owner.exists()).toBe(true)
+    expect(owner.text()).toBe('Agent: research-bot')
+    expect(owner.attributes('title')).toBe('Created by the agent research-bot')
+    expect(c.find('[data-testid="prompt-owner-2"]').exists()).toBe(false)
+  })
+
+  it('marks no owner on a prompt whose row carries no owner fields', async () => {
+    const c = await mountSuspended(Prompts)
+    await flushPromises()
+
+    expect(c.find('[data-testid="prompt-card-1"]').exists()).toBe(true)
+    expect(c.find('[data-testid^="prompt-owner-"]').exists()).toBe(false)
   })
 
   it('shows the empty state when the library is empty', async () => {

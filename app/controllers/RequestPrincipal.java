@@ -164,6 +164,21 @@ public final class RequestPrincipal {
     }
 
     /**
+     * Refuses an agent other than {@code main} with 403 {@code agent_scope}; the operator and
+     * {@code main} pass. For a route that serves the instance rather than one agent's rows: its
+     * setup, its host, or a call that spends on an outside service (JF-285, JF-292).
+     *
+     * @param action what only they may do, completing "Only the operator or the main agent may …"
+     */
+    public static void requireOperatorOrMain(String action) {
+        if (!isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may " + action + ".");
+            throw ApiResponses.unreachable();
+        }
+    }
+
+    /**
      * The policy behind {@link #isOperatorOrMainAgent}, with the request read out of it.
      *
      * <p>Separated so the matrix — operator, main, a custom agent, an agent-originated request

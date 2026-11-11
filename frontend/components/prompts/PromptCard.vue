@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // One prompt card (JCLAW-813): title, category badge, truncated preview, tag
 // chips, and the Copy / Edit / Delete / Run actions. Copy is handled locally
-// (transient icon swap); the rest are emitted for the page to handle.
+// (transient icon swap); the rest are emitted for the page to handle. A prompt an
+// agent created names that agent (JF-292); the operator's own carry no owner.
 import { CheckIcon, ClipboardIcon, PencilIcon, PlayIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { BotMessageSquare } from '@lucide/vue'
 import type { Prompt } from '~/types/api'
 
 const props = defineProps<{ prompt: Prompt }>()
@@ -47,6 +49,18 @@ async function copy() {
     <p class="text-xs text-fg-muted line-clamp-3 whitespace-pre-wrap">
       {{ prompt.content }}
     </p>
+    <span
+      v-if="prompt.ownerAgentName"
+      class="self-start inline-flex items-center gap-1 text-[11px] text-fg-muted"
+      :title="`Created by the agent ${prompt.ownerAgentName}`"
+      :data-testid="`prompt-owner-${prompt.id}`"
+    >
+      <BotMessageSquare
+        class="w-3 h-3 shrink-0"
+        aria-hidden="true"
+      />
+      <span class="truncate">Agent: {{ prompt.ownerAgentName }}</span>
+    </span>
     <div
       v-if="tagList.length"
       class="flex flex-wrap gap-1"

@@ -180,8 +180,9 @@ public class ApiPrintersController extends Controller {
      * rather than as an empty form.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobOptionsResponse.class)))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials whichever host the caller names")
     public static void options(String host, Integer port, String protocol) {
+        RequestPrincipal.requireOperatorOrMain("read a printer's options");
         var protocols = List.of("IPP", "IPPS", "RAW", "LPD");
         if (host == null || host.isBlank()) {
             renderJSON(GSON.toJson(new JobOptionsResponse(List.of(), protocols, null, false)));

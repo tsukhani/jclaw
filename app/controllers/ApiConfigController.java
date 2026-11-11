@@ -51,6 +51,8 @@ public class ApiConfigController extends Controller {
     private static final String LOGGING_KEY_PREFIX = LoggerLevelService.PREFIX;
 
 
+    private static final String READ_CONFIG = "read the configuration";
+
     public record ConfigEntry(String key, @Nullable String value, String updatedAt) {}
 
     public record ConfigListResponse(List<ConfigEntry> entries) {}
@@ -76,8 +78,10 @@ public class ApiConfigController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
     @Operation(summary = "List all config rows (sensitive values masked)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the rows are the instance's setup, "
+            + "every agent's settings among them")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain(READ_CONFIG);
         var configs = ConfigService.listAll();
         var entries = configs.stream()
                 .filter(c -> !isReservedKey(c.key()))
@@ -88,8 +92,9 @@ public class ApiConfigController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
     @Operation(summary = "Read a config value by key")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292), as the list")
     public static void get(String key) {
+        RequestPrincipal.requireOperatorOrMain(READ_CONFIG);
         if (isReservedKey(key)) notFound();
         var config = ConfigService.entry(key);
         if (config == null) {

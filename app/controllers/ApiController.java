@@ -142,8 +142,9 @@ public class ApiController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = WorkspaceStatsResponse.class)))
     @Operation(summary = "Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the disk every agent's workspace takes")
     public static void workspaceStats() {
+        RequestPrincipal.requireOperatorOrMain("read the instance's metrics");
         var size = WorkspaceFiles.workspaceSize();
         renderJSON(GSON.toJson(new WorkspaceStatsResponse(size.bytes(), size.counting())));
     }

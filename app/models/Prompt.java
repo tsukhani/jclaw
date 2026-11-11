@@ -5,15 +5,19 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 
 import java.util.List;
 
 /**
  * A saved, reusable prompt in the operator's Prompts Library (JCLAW-813).
  *
- * <p>Operator-level — not scoped per agent or per user (JClaw is
- * single-operator, same convention as {@link McpServer}). A prompt is one
+ * <p>The operator's library, plus the prompts each agent saved for itself
+ * ({@link #ownerAgent}, JF-292). A prompt is one
  * title + free-form prompt text, filed under exactly one fixed {@link Category}
  * (the controlled, scannable axis) and tagged with an optional free-form,
  * comma-separated {@code tags} string (the unlimited, user-defined axis). The
@@ -82,8 +86,27 @@ public class Prompt extends TimestampedModel {
     @Column(nullable = false, length = 20)
     public Category category;
 
+    /**
+     * The agent that created this prompt through the API, or null for the operator's: one made on
+     * the Prompts page, by an import or by the seed job. An agent other than {@code main} reaches
+     * only its own (JF-292). Nullable, so rows that predate it are the operator's with no
+     * migration, and SET NULL, so deleting an agent leaves its prompts with the operator.
+     */
+    @ManyToOne
+    @JoinColumn(name = "owner_agent_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    public Agent ownerAgent;
+
     /** Newest-edited first — the order the library page renders. */
     public static List<Prompt> findAllOrdered() {
-        return Prompt.find("ORDER BY updatedAt DESC").fetch();
+        return findOrdered(null);
+    }
+
+    /** Newest-edited first: every prompt when {@code ownerAgentId} is null, else only those that agent owns. */
+    public static List<Prompt> findOrdered(Long ownerAgentId) {
+        return ownerAgentId == null
+                ? Prompt.find("SELECT p FROM Prompt p LEFT JOIN FETCH p.ownerAgent ORDER BY p.updatedAt DESC").fetch()
+                : Prompt.find("SELECT p FROM Prompt p JOIN FETCH p.ownerAgent a WHERE a.id = ?1"
+                        + " ORDER BY p.updatedAt DESC", ownerAgentId).fetch();
     }
 }

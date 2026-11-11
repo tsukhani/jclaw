@@ -2,7 +2,7 @@
 
 The **Prompts Library** is your personal collection of saved, reusable prompts: the paragraphs you keep re-typing into [Chat](/chat). Save one once, then use **Run** to load it into the composer whenever you need it. You can adjust it before you send. The [Prompts](/prompts) page is where you build, organize, search, and share that collection.
 
-Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. Prompts are operator-level: one library is shared across all your agents, not scoped per agent or per conversation.
+Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. The library is yours: you can run any prompt in it with any agent. An agent can save prompts of its own too (see [Prompts an agent saved](/guide#prompts-agent-prompts)).
 
 ## What a prompt is
 
@@ -24,6 +24,7 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view, the
 - **Category pills**: filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search**: the search box filters live across each prompt's **title, text, and tags**.
 - **Copy / Edit / Delete / Run**: the actions on every card. **Copy** puts the prompt text on your clipboard. The others are covered below.
+- **Agent: name**: a line on the card of a prompt that an agent saved. A prompt you made has no such line.
 - **Export · Import · New prompt**: the toolbar, left-aligned below the intro text.
 
 ## Creating a prompt
@@ -51,6 +52,14 @@ You can also reach the library from the chat composer with the `/prompt` slash c
 
 The pencil on a card reopens the form, pre-filled. **Save** updates the prompt in place. Its *updated* time bumps, and the library re-sorts newest-edited first. The trash button deletes the prompt behind a confirmation. Deletion cannot be undone.
 
+## Prompts an agent saved {#agent-prompts}
+
+An agent that calls JClaw's API can save a prompt. That prompt belongs to the agent, and its card shows **Agent:** and the agent's name. You see every prompt on this page, whoever saved it, and you can run, edit or delete any of them. So can the Main Agent.
+
+Any other agent sees only the prompts it saved itself. It cannot list, read, change or delete a prompt of yours or of another agent.
+
+When you delete an agent, the prompts it saved stay in the library. They become yours, and the **Agent:** line goes away.
+
 ## Import and export
 
 Your whole library is portable as a single JSON document:
@@ -60,10 +69,10 @@ Your whole library is portable as a single JSON document:
   - **Merge**: appends the imported prompts to your existing library.
   - **Replace all**: wipes the current library first, then imports.
 
-Import accepts either a full export document or a bare JSON array of prompts. So, a hand-authored list works too.
+Import accepts either a full export document or a bare JSON array of prompts. So, a hand-authored list works too. An export holds every prompt, the ones your agents saved included, but not who saved each one. An imported prompt is always yours.
 
 :::gotcha Replace is destructive
-**Replace all** deletes every prompt you currently have before importing. There is no undo. Use **Merge** unless you truly mean to start the library over from the imported file.
+**Replace all** deletes every prompt in the library before importing, the ones your agents saved included. There is no undo. Use **Merge** unless you truly mean to start the library over from the imported file.
 :::
 
 ## Where to go next

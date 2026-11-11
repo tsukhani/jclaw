@@ -39,7 +39,11 @@ public @interface AgentAccess {
 
     enum Level {
 
-        /** Any agent may call it. */
+        /**
+         * Any agent may call it, unless its {@link #reason} says the operator and {@code main}
+         * only: that action refuses every other agent itself, with
+         * {@link RequestPrincipal#requireOperatorOrMain}.
+         */
         OPEN,
 
         /**

@@ -45,6 +45,7 @@ import java.util.TreeSet;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -75,6 +76,7 @@ public class ApiMetricsController extends Controller {
     private static final String KEY_SINCE = "since";
     private static final String KEY_VALUE = "value";
     private static final String STATUS_RESET = "reset";
+    private static final String READ_INSTANCE_METRICS = "read the instance's metrics";
 
     /** Latency-store channel for the SPA's own INP reports; never part of a chat turn. */
     static final String BROWSER_CHANNEL = "browser";
@@ -173,8 +175,9 @@ public class ApiMetricsController extends Controller {
      *  schema since the shape is dictated at runtime by the segments that
      *  have observed traffic. */
     @Operation(summary = "Snapshot latency segment histograms as JSON")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the live histograms merge every agent's turns")
     public static void latency() {
+        RequestPrincipal.requireOperatorOrMain(READ_INSTANCE_METRICS);
         renderJSON(LatencyStats.snapshot().toString());
     }
 
@@ -201,12 +204,12 @@ public class ApiMetricsController extends Controller {
      * {@code segments} aggregates only the rows matching the channel filter — all channels
      * when omitted, with percentiles recomputed from raw samples (not merged).
      */
-    @Operation(summary = "Windowed latency percentiles by segment, filterable by agent and channel")
-    @AgentAccess(OPEN)
+    @Operation(summary = "Windowed latency percentiles by segment, filterable by agent and channel; an agent "
+            + "other than main reads only its own turns")
+    @AgentAccess(OWN_ONLY)
     public static void latencyRows() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
-        var agentIdParam = params.get("agentId");
-        var agentId = (agentIdParam != null && !agentIdParam.isBlank()) ? agentIdParam : null;
+        var agentId = pinnedAgent(optionalParam("agentId"));
         var channelParam = params.get("channel");
         var channel = (channelParam != null && !channelParam.isBlank()) ? channelParam : null;
 
@@ -341,12 +344,13 @@ public class ApiMetricsController extends Controller {
      * Ratios, ordering and alert thresholds are the panel's.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
-    @Operation(summary = "Compression totals; query params: since (ISO-8601, default 30 days back), agentId, channel")
-    @AgentAccess(OPEN)
+    @Operation(summary = "Compression totals; query params: since (ISO-8601, default 30 days back), agentId, channel; "
+            + "an agent other than main reads only its own")
+    @AgentAccess(OWN_ONLY)
     public static void compression() {
         var filter = new CompressionFilter(parseSinceParam(params.get(KEY_SINCE)),
-                optionalParam("agentId"), optionalParam("channel"));
-        renderJSON(GSON.toJson(compressionTotals(filter)));
+                pinnedAgent(optionalParam("agentId")), optionalParam("channel"));
+        renderJSON(GSON.toJson(compressionTotals(filter, pinnedAgent(null))));
     }
 
     /**
@@ -357,22 +361,26 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionRowsPage.class)))
     @Operation(summary = "Raw compression events, newest first; query params: since, limit (25, max 50),"
-            + " before (a page's nextBefore, sent with the same since)")
-    @AgentAccess(OPEN)
+            + " before (a page's nextBefore, sent with the same since); an agent other than main reads only its own")
+    @AgentAccess(OWN_ONLY)
+    @SuppressWarnings("java:S2077") // the JPQL is constant fragments; every value is bound
     public static void compressionRows() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
         Long before = parseOptionalLong("before");
         Long limit = parseOptionalLong("limit");
         int size = limit == null || limit <= 0
                 ? COMPRESSION_ROWS_DEFAULT_LIMIT : (int) Math.min(limit, COMPRESSION_ROWS_MAX_LIMIT);
+        // In the query, so the page size counts the caller's rows and not the ones it may not see.
+        var own = pinnedAgent(null);
 
-        var query = JPA.em().createQuery(before != null
-                        ? "SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since AND m.id < :before ORDER BY m.id DESC"
-                        : "SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since ORDER BY m.id DESC",
-                        CompressionMetric.class)
+        var query = JPA.em().createQuery("SELECT m FROM CompressionMetric m WHERE m.createdAt >= :since"
+                        + (before != null ? " AND m.id < :before" : "")
+                        + (own != null ? " AND m.agentId = :agentId" : "")
+                        + " ORDER BY m.id DESC", CompressionMetric.class)
                 .setParameter(KEY_SINCE, since)
                 .setMaxResults(size + 1);
         if (before != null) query.setParameter("before", before);
+        if (own != null) query.setParameter("agentId", own);
         var events = query.getResultList();
 
         var rows = new ArrayList<CompressionRow>(Math.min(events.size(), size));
@@ -401,12 +409,17 @@ public class ApiMetricsController extends Controller {
         }
     }
 
-    private static CompressionResponse compressionTotals(CompressionFilter f) {
+    /** @param own the agent the selects' choices are limited to, or null for the operator and main, who get the whole window */
+    @SuppressWarnings("java:S2077") // the JPQL is constant fragments; every value is bound
+    private static CompressionResponse compressionTotals(CompressionFilter f, @Nullable String own) {
         var agents = new TreeSet<String>();
         var channels = new TreeSet<String>();
-        for (var r : JPA.em().createQuery("SELECT DISTINCT m.agentId, m.channel FROM CompressionMetric m"
-                        + " WHERE m.createdAt >= :since", Object[].class)
-                .setParameter(KEY_SINCE, f.since()).getResultList()) {
+        var choices = JPA.em().createQuery("SELECT DISTINCT m.agentId, m.channel FROM CompressionMetric m"
+                        + " WHERE m.createdAt >= :since" + (own != null ? " AND m.agentId = :agentId" : ""),
+                        Object[].class)
+                .setParameter(KEY_SINCE, f.since());
+        if (own != null) choices.setParameter("agentId", own);
+        for (var r : choices.getResultList()) {
             if (r[0] != null) agents.add((String) r[0]);
             if (r[1] != null) channels.add((String) r[1]);
         }
@@ -508,6 +521,16 @@ public class ApiMetricsController extends Controller {
         return value == null || value.isBlank() ? null : value;
     }
 
+    /**
+     * The agent a metrics read is filtered to: the caller's own id for an agent other than
+     * {@code main}, whatever it asked for, and {@code requested} for the operator and {@code main}
+     * (JF-292). A string, as the metric tables store the id.
+     */
+    private static @Nullable String pinnedAgent(@Nullable String requested) {
+        var own = RequestPrincipal.scopedAgentId(null);
+        return own != null ? String.valueOf(own) : requested;
+    }
+
     @SuppressWarnings("java:S2259")
     private static @Nullable Long parseOptionalLong(String key) {
         var value = optionalParam(key);
@@ -528,8 +551,9 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DbPoolStats.class)))
     @Operation(summary = "Current HikariCP connection-pool occupancy (active, idle, total, awaiting, max)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's connection pool")
     public static void dbPool() {
+        RequestPrincipal.requireOperatorOrMain(READ_INSTANCE_METRICS);
         var stats = DbPoolStats.snapshot();
         if (stats.isEmpty()) {
             ApiResponses.error(503, ApiResponses.POOL_UNAVAILABLE,
@@ -549,8 +573,9 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JvmStats.class)))
     @Operation(summary = "JVM runtime state (heap, non-heap, RSS, GC, threads, uptime, CPU)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's memory, threads and CPU")
     public static void jvm() {
+        RequestPrincipal.requireOperatorOrMain(READ_INSTANCE_METRICS);
         renderJSON(GSON.toJson(JvmStats.snapshot()));
     }
 
@@ -562,8 +587,9 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.class)))
     @Operation(summary = "Disk used by the log directory (live file, archives, total)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's log directory")
     public static void logs() {
+        RequestPrincipal.requireOperatorOrMain(READ_INSTANCE_METRICS);
         renderJSON(GSON.toJson(LogFootprint.snapshot()));
     }
 
@@ -627,11 +653,12 @@ public class ApiMetricsController extends Controller {
      * anyway.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
-    @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation")
-    @AgentAccess(OPEN)
+    @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation; an agent other "
+            + "than main reads only its own turns")
+    @AgentAccess(OWN_ONLY)
     public static void cost() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
-        Long agentId = parseAgentIdParam(params.get("agentId"));
+        Long agentId = RequestPrincipal.scopedAgentId(parseAgentIdParam(params.get("agentId")));
         var channelTypeParam = params.get("channelType");
         String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())
                 ? channelTypeParam : null;

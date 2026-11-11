@@ -51,6 +51,9 @@ public class ApiProvidersController extends Controller {
 
     private static final Gson gson = GSON;
     private static final String PROVIDER_CONFIG_PREFIX = "provider.";
+    // The providers are the instance's setup, and a probe or a discovery dials one with its key (JF-292).
+    private static final String READ_PROVIDERS = "read the providers or their models";
+    private static final String DIAL_PROVIDER = "probe a provider or discover its models";
     private static final String BASE_URL_SUFFIX = ".baseUrl";
     private static final String API_KEY_SUFFIX = ".apiKey";
     private static final String SUPPORTS_VISION = "supportsVision";
@@ -97,8 +100,9 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ProviderInfo.class))))
     @Operation(summary = "List configured LLM providers")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the providers are the instance's setup")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain(READ_PROVIDERS);
         var infos = ProviderRegistry.listAll().stream()
                 .filter(p -> !isInternalProvider(p.config().name()))
                 .map(p -> {
@@ -126,9 +130,10 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @Operation(summary = "Discover a provider's available models from its live API")
-    @AgentAccess(value = OPEN,
-            reason = "/api/providers is agent-reachable by design; SsrfGuard and key masking are the seams")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials the provider with its key; "
+            + "SsrfGuard bounds the dial")
     public static void discoverModels(String name) {
+        RequestPrincipal.requireOperatorOrMain(DIAL_PROVIDER);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
 
@@ -162,8 +167,9 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259") // null guard halts via Play's renderJSON() throwing — baseUrl is non-null at the probe call (same as discoverModels)
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReachableResponse.class)))
     @Operation(summary = "Check whether a provider's endpoint is reachable right now")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials the provider")
     public static void reachable(String name) {
+        RequestPrincipal.requireOperatorOrMain(DIAL_PROVIDER);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
@@ -189,8 +195,9 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's video-capable models from its live API")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the same discovery as discover-models")
     public static void videoModels(String name) {
+        RequestPrincipal.requireOperatorOrMain(DIAL_PROVIDER);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
@@ -266,8 +273,9 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's configured models (id + display name)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the list is a config row")
     public static void models(String name) {
+        RequestPrincipal.requireOperatorOrMain(READ_PROVIDERS);
         requireConfiguredProvider(name);
         var arr = parseModelsArray(ConfigService.get(modelsKey(name)));
         var refs = new ArrayList<ModelRef>();
@@ -298,12 +306,9 @@ public class ApiProvidersController extends Controller {
     @Operation(summary = "Add a model to a provider by id")
     @AgentAccess(value = OPEN,
             reason = "extends a provider's model list, which every model picker shows: the operator and main only "
-                    + "(RequestPrincipal.isOperatorOrMainAgent); the baseUrl it dials stays behind SsrfGuard")
+                    + "(RequestPrincipal.requireOperatorOrMain); the baseUrl it dials stays behind SsrfGuard")
     public static void addModel(String name) {
-        if (!RequestPrincipal.isOperatorOrMainAgent()) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "Only the operator or the main agent may add a model to a provider.");
-        }
+        RequestPrincipal.requireOperatorOrMain("add a model to a provider");
         requireConfiguredProvider(name);
 
         var body = JsonBodyReader.readJsonBody();
@@ -366,8 +371,9 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's models unfiltered, for the embedding picker")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the same discovery as discover-models")
     public static void embeddingModels(String name) {
+        RequestPrincipal.requireOperatorOrMain(DIAL_PROVIDER);
         requireConfiguredProvider(name);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         // requireConfiguredProvider above 404s on a blank base URL, so this cannot be null.
@@ -394,8 +400,10 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Check whether a model serves embeddings, and at what dimension")
-    @AgentAccess(value = OPEN, reason = "probes a configured provider; SsrfGuard bounds the outbound dial")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): asks the provider for an embedding; "
+            + "SsrfGuard bounds the dial")
     public static void embeddingProbe(String name) {
+        RequestPrincipal.requireOperatorOrMain(DIAL_PROVIDER);
         requireConfiguredProvider(name);
         var body = JsonBodyReader.readJsonBody();
         var model = body == null ? "" : JsonArgs.optString(body, "model", "");
@@ -589,8 +597,10 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RefreshPricesResponse.class)))
     @Operation(summary = "Manually refresh LiteLLM model prices (synchronous)")
-    @AgentAccess(value = OPEN, reason = "pulls the LiteLLM price table from a fixed URL")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): pulls the LiteLLM price table from a "
+            + "fixed URL and rewrites every provider's model prices")
     public static void refreshPrices() {
+        RequestPrincipal.requireOperatorOrMain("refresh the model prices");
         var result = PricingRefreshService.refresh();
         renderJSON(gson.toJson(new RefreshPricesResponse(
                 result.skipped(),

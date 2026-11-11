@@ -34,6 +34,8 @@ import static utils.GsonHolder.GSON;
 @With(AuthCheck.class)
 public class ApiRouterController extends Controller {
 
+    private static final String READ_ROUTER = "read the model router's status and usage";
+
     /**
      * @param usageSource whether JClaw can read this provider's quota; without it only failed calls tell
      * @param windows     used fraction per quota window, empty when unknown
@@ -78,8 +80,10 @@ public class ApiRouterController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RouterStatusResponse.class)))
     @Operation(summary = "Model router availability, budget thresholds and per-provider quota usage")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the router's setup and each provider's "
+            + "quota, read from the provider")
     public static void status() {
+        RequestPrincipal.requireOperatorOrMain(READ_ROUTER);
         var policy = RouterPolicy.load();
         var names = new LinkedHashSet<String>();
         for (var taskClass : TaskClass.values()) {
@@ -108,8 +112,9 @@ public class ApiRouterController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CloudUsageResponse.class)))
     @Operation(summary = "Ollama Cloud request counts over the last 24 hours, 7 days or 30 days")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the instance's usage of a subscription")
     public static void ollamaCloudUsage(@Nullable String range) {
+        RequestPrincipal.requireOperatorOrMain(READ_ROUTER);
         var span = SubscriptionUsage.Range.parse(range);
         if (span == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "range must be 24h, 7d, or 30d");
@@ -134,13 +139,10 @@ public class ApiRouterController extends Controller {
             + "[{provider, model}], [] clears it; taskClass is chat, summarize, agentic, reasoning or coding. "
             + "The operator and the main agent only")
     @AgentAccess(value = OPEN, reason = "writes only the five router.<class>.models keys, through RouterPolicy's "
-            + "validation, and refuses every agent but main (RequestPrincipal.isOperatorOrMainAgent)")
+            + "validation, and refuses every agent but main (RequestPrincipal.requireOperatorOrMain)")
     public static void updateModels(String taskClass) {
         // Before anything else, so an agent that may not write learns only that.
-        if (!RequestPrincipal.isOperatorOrMainAgent()) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "Only the operator or the main agent may change the model router's lists.");
-        }
+        RequestPrincipal.requireOperatorOrMain("change the model router's lists");
         var target = TaskClass.fromId(taskClass);
         if (target == null) {
             var classes = Arrays.stream(TaskClass.values()).map(TaskClass::id).collect(Collectors.joining(", "));

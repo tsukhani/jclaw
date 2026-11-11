@@ -29,8 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 
 /**
  * JCLAW-764 / AD-2: the single-purpose App → Agent invoke endpoint. A hosted app
@@ -122,9 +122,10 @@ public class ApiAppInvokeController extends Controller {
      * requires the attachment's conversation to be this app's own ({@code channelType="app"},
      * {@code peerId=slug}) — so one app can never fetch another app's (or a chat's)
      * attachment by guessing a uuid. Only finalized, {@code generated}, non-deleted rows
-     * are served.
+     * are served. An agent other than {@code main} is served only a file of its own conversation
+     * (JF-292), as {@code ApiAttachmentsController.download} serves it.
      */
-    @AgentAccess(OPEN)
+    @AgentAccess(OWN_ONLY)
     public static void file(String slug, String uuid) {
         if (slug == null || !SLUG.matcher(slug).matches()) {
             notFound();
@@ -136,6 +137,9 @@ public class ApiAppInvokeController extends Controller {
         var conv = att.message.conversation;
         if (!APP_CHANNEL.equals(conv.channelType) || !slug.equals(conv.peerId)) {
             notFound(); // not this app's file — indistinguishable from a missing one
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(conv.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Attachment " + uuid + " belongs to another agent.");
         }
 
         // storagePath is workspace-relative "<agentName>/attachments/<convId>/<uuid>.<ext>";

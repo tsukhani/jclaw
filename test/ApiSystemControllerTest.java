@@ -278,7 +278,8 @@ class ApiSystemControllerTest extends FunctionalTest {
         clearCookies();
         var request = newRequest();
         request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
-        var agent = GET(request, "/api/system/restart");
+        // A route any agent may call: /api/system/restart refuses a bearer that names no agent (JF-292).
+        var agent = GET(request, "/api/timezones");
         assertIsOk(agent);
         try {
             var cookie = agent.cookies.get("PLAY_SESSION");

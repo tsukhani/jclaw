@@ -99,13 +99,18 @@ public class Notification extends Model {
         if (createdAt == null) createdAt = AppClock.now();
     }
 
-    /** Un-acknowledged notifications, newest first, capped at {@code limit}. */
-    public static List<Notification> findUnread(int limit) {
-        return Notification.find("acknowledgedAt IS NULL ORDER BY createdAt DESC").fetch(limit);
+    /** Un-acknowledged notifications, newest first, capped at {@code limit}; only {@code agentId}'s when one is given. */
+    public static List<Notification> findUnread(Long agentId, int limit) {
+        return agentId == null
+                ? Notification.find("acknowledgedAt IS NULL ORDER BY createdAt DESC").fetch(limit)
+                : Notification.find("agent.id = ?1 AND acknowledgedAt IS NULL ORDER BY createdAt DESC", agentId)
+                        .fetch(limit);
     }
 
-    /** All notifications, newest first, capped at {@code limit}. */
-    public static List<Notification> findAllNewestFirst(int limit) {
-        return Notification.find("ORDER BY createdAt DESC").fetch(limit);
+    /** All notifications, newest first, capped at {@code limit}; only {@code agentId}'s when one is given. */
+    public static List<Notification> findAllNewestFirst(Long agentId, int limit) {
+        return agentId == null
+                ? Notification.find("ORDER BY createdAt DESC").fetch(limit)
+                : Notification.find("agent.id = ?1 ORDER BY createdAt DESC", agentId).fetch(limit);
     }
 }

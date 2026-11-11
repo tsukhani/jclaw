@@ -87,6 +87,10 @@ public class ApiMcpServersController extends Controller {
     private static final String VIEW_CALL_FAILED = "The tool call failed.";
     private static final String VIEW_NOT_WEB_CHAT = "Views act only in web chat.";
 
+    // MCP servers are the instance's setup: a custom agent never reads, adds, changes, removes or tests one (JF-285, JF-292).
+    private static final String READ_SERVERS = "read the MCP servers";
+    private static final String CHANGE_SERVERS = "add, change or remove an MCP server";
+
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
@@ -98,15 +102,17 @@ public class ApiMcpServersController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.Summary.class))))
     @Operation(summary = "List MCP servers with status and tool count; a server's tools come from GET /api/mcp-servers/{id}")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the servers are the instance's setup")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain(READ_SERVERS);
         renderJSON(gson.toJson(McpServerService.listAll()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @Operation(summary = "Get a single MCP server by id")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the servers are the instance's setup")
     public static void get(Long id) {
+        RequestPrincipal.requireOperatorOrMain(READ_SERVERS);
         var row = requireServer(id);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
@@ -119,7 +125,7 @@ public class ApiMcpServersController extends Controller {
             reason = "the operator and main only (JF-285): a custom agent never adds a server to itself; "
                     + "DangerousActionGate bounds the verb; offerViewToolsEverywhere is operator-only")
     public static void create() {
-        requireOperatorOrMain();
+        RequestPrincipal.requireOperatorOrMain(CHANGE_SERVERS);
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -170,7 +176,7 @@ public class ApiMcpServersController extends Controller {
     @AgentAccess(value = OPEN,
             reason = "the operator and main only, as create (JF-285); offerViewToolsEverywhere is operator-only")
     public static void update(Long id) {
-        requireOperatorOrMain();
+        RequestPrincipal.requireOperatorOrMain(CHANGE_SERVERS);
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -247,7 +253,7 @@ public class ApiMcpServersController extends Controller {
     @AgentAccess(value = OPEN,
             reason = "the operator and main only, as create (JF-285); DangerousActionGate bounds it")
     public static void delete(Long id) {
-        requireOperatorOrMain();
+        RequestPrincipal.requireOperatorOrMain(CHANGE_SERVERS);
         var row = requireServer(id);
         // stop() handles every teardown concern: closes the McpClient,
         // unpublishes the tools from ToolRegistry, deletes allowlist rows,
@@ -264,16 +270,10 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
-    /** MCP servers are the instance's configuration: a custom agent never adds, changes or removes one (JF-285). */
-    private static void requireOperatorOrMain() {
-        if (!RequestPrincipal.isOperatorOrMainAgent()) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "Only the operator or the main agent may add, change or remove an MCP server.");
-        }
-    }
-
-    @AgentAccess(value = OPEN, reason = "probes an already-configured server and adds no reach")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the probe connects to the server, "
+            + "and starts a STDIO server's command")
     public static void test(Long id) {
+        RequestPrincipal.requireOperatorOrMain("test an MCP server");
         var row = requireServer(id);
         var result = McpServerService.testConnection(row);
         renderJSON(gson.toJson(result));

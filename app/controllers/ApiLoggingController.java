@@ -45,8 +45,10 @@ public class ApiLoggingController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LevelsResponse.class)))
     @Operation(summary = "List per-logger level overrides plus the valid level names")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the overrides are config rows, "
+            + "which GET /api/config leaves to this route")
     public static void list() {
+        RequestPrincipal.requireOperatorOrMain("read the configuration");
         var entries = LoggerLevelService.list().stream()
                 .map(l -> new LevelEntry(l.logger(), l.level()))
                 .toList();

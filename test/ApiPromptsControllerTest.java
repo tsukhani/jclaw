@@ -1,14 +1,19 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import controllers.ApiPromptsController;
+import controllers.RequestPrincipal;
+import models.Agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.Tx;
 import tools.JClawApiTool;
 
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
@@ -220,19 +225,22 @@ class ApiPromptsControllerTest extends FunctionalTest {
     }
 
     // ==================== an agent's list and single read (JF-144) ====================
+    // The agent is a custom one, and the prompts are the ones it created: it reaches no other (JF-292).
 
     private static final String AT_BOUND = "0123456789".repeat(ApiPromptsController.CONTENT_PREVIEW_CHARS / 10);
     private static final String LONG_CONTENT = AT_BOUND.repeat(25);
 
     @Test
     void anAgentsListRowKeepsContentAtTheBoundWholeAndUnmarked() {
-        login();
-        var id = createPrompt("Review", AT_BOUND, "CODING", "a, b");
+        var id = createPromptAsAgent("Review", AT_BOUND, "CODING", "a, b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts")));
 
         assertEquals(Set.of("id", "title", "tags", "category", "categoryLabel",
-                "contentPreview", "contentTruncated", "createdAt", "updatedAt"), row.keySet());
+                "contentPreview", "contentTruncated", "ownerAgentId", "ownerAgentName", "createdAt", "updatedAt"),
+                row.keySet());
+        assertEquals(List.of(String.valueOf(agentId()), AGENT_NAME),
+                List.of(row.get("ownerAgentId").getAsString(), row.get("ownerAgentName").getAsString()));
         assertEquals(id, row.get("id").getAsLong());
         assertEquals("Review", row.get("title").getAsString());
         assertEquals("a, b", row.get("tags").getAsString());
@@ -244,8 +252,7 @@ class ApiPromptsControllerTest extends FunctionalTest {
 
     @Test
     void anAgentsListRowCutsContentOneCharacterOverTheBoundAndMarksTheCut() {
-        login();
-        createPrompt("Review", AT_BOUND + "X", "CODING", "a, b");
+        createPromptAsAgent("Review", AT_BOUND + "X", "CODING", "a, b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts")));
 
@@ -255,9 +262,8 @@ class ApiPromptsControllerTest extends FunctionalTest {
 
     @Test
     void anAgentsTitleFilterStillApplies() {
-        login();
-        createPrompt("Article Creator", LONG_CONTENT, "WRITING", "a");
-        createPrompt("Code Review Checklist", LONG_CONTENT, "CODING", "b");
+        createPromptAsAgent("Article Creator", LONG_CONTENT, "WRITING", "a");
+        createPromptAsAgent("Code Review Checklist", LONG_CONTENT, "CODING", "b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts?title=article")));
 
@@ -273,15 +279,16 @@ class ApiPromptsControllerTest extends FunctionalTest {
         var row = onlyRow(GET("/api/prompts"));
 
         assertEquals(Set.of("id", "title", "content", "tags", "category", "categoryLabel",
-                "createdAt", "updatedAt"), row.keySet());
+                "ownerAgentId", "ownerAgentName", "createdAt", "updatedAt"), row.keySet());
         assertEquals(id, row.get("id").getAsLong());
         assertEquals(LONG_CONTENT, row.get("content").getAsString());
+        assertTrue(row.get("ownerAgentId").isJsonNull() && row.get("ownerAgentName").isJsonNull(), row.toString());
     }
 
     @Test
     void anAgentReadsOnePromptWhole() {
+        var id = createPromptAsAgent("Review", LONG_CONTENT, "CODING", "a, b");
         login();
-        var id = createPrompt("Review", LONG_CONTENT, "CODING", "a, b");
         var operatorRow = onlyRow(GET("/api/prompts"));
 
         var resp = asAgent(() -> GET(agentRequest(), "/api/prompts/" + id));
@@ -320,13 +327,16 @@ class ApiPromptsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void anAgentsExportStillCarriesTheWholeContent() {
+    void theExportCarriesAnAgentsPromptWholeAndIsRefusedToACustomAgent() {
+        createPromptAsAgent("Review", LONG_CONTENT, "CODING", "a, b");
+
+        var refused = asAgent(() -> GET(agentRequest(), "/api/prompts/export"));
+        assertEquals(403, refused.status.intValue());
+        assertEquals("Only the operator or the main agent may export the prompt library.",
+                JsonParser.parseString(getContent(refused)).getAsJsonObject().get("message").getAsString());
+
         login();
-        createPrompt("Review", LONG_CONTENT, "CODING", "a, b");
-
-        var doc = JsonParser.parseString(getContent(asAgent(() -> GET(agentRequest(), "/api/prompts/export"))))
-                .getAsJsonObject();
-
+        var doc = JsonParser.parseString(getContent(GET("/api/prompts/export"))).getAsJsonObject();
         var prompts = doc.getAsJsonArray("prompts");
         assertEquals(1, prompts.size());
         assertEquals(LONG_CONTENT, prompts.get(0).getAsJsonObject().get("content").getAsString());
@@ -335,9 +345,9 @@ class ApiPromptsControllerTest extends FunctionalTest {
     @Test
     void todaysPromptCountFitsUnderTheJClawApiCapForAnAgent() {
         // 21 prompts on the live instance on 2026-11-11, here at the title and tags column maxima.
-        login();
         for (int i = 0; i < 21; i++) {
-            createPrompt(("Prompt " + i + " ").repeat(40).substring(0, 200), LONG_CONTENT, "CODING", "t".repeat(500));
+            createPromptAsAgent(("Prompt " + i + " ").repeat(40).substring(0, 200), LONG_CONTENT, "CODING",
+                    "t".repeat(500));
         }
 
         var agentBody = getContent(asAgent(() -> GET(agentRequest(), "/api/prompts")));
@@ -370,6 +380,17 @@ class ApiPromptsControllerTest extends FunctionalTest {
         return JsonParser.parseString(getContent(resp)).getAsJsonObject().get("id").getAsLong();
     }
 
+    private long createPromptAsAgent(String title, String content, String category, String tags) {
+        var body = new JsonObject();
+        body.addProperty("title", title);
+        body.addProperty("content", content);
+        body.addProperty("category", category);
+        body.addProperty("tags", tags);
+        var resp = asAgent(() -> POST(agentRequest(), "/api/prompts", "application/json", body.toString()));
+        assertIsOk(resp);
+        return JsonParser.parseString(getContent(resp)).getAsJsonObject().get("id").getAsLong();
+    }
+
     private JsonObject onlyRow(Http.Response resp) {
         assertIsOk(resp);
         var rows = JsonParser.parseString(getContent(resp)).getAsJsonArray();
@@ -377,11 +398,40 @@ class ApiPromptsControllerTest extends FunctionalTest {
         return rows.get(0).getAsJsonObject();
     }
 
-    /** The agent principal: the internal bearer, which takes precedence over the operator's session cookie. */
+    private static final String AGENT_NAME = "prompts-test-agent";
+
+    /** The custom agent's id, seeded on first use after {@code setUp} wiped the database. */
+    private static long agentId() {
+        var holder = new AtomicLong();
+        var t = Thread.ofVirtual().start(() -> Tx.run(() -> {
+            Agent agent = Agent.findByName(AGENT_NAME);
+            if (agent == null) {
+                agent = new Agent();
+                agent.name = AGENT_NAME;
+                agent.modelProvider = "openrouter";
+                agent.modelId = "gpt-4.1";
+                agent.enabled = true;
+                agent.save();
+            }
+            holder.set(agent.id);
+        }));
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        return holder.get();
+    }
+
+    /** The agent principal: the internal bearer, which takes precedence over the operator's session cookie,
+     *  stamped with the calling agent as {@code jclaw_api} stamps it. */
     private static Http.Request agentRequest() {
         var request = newRequest();
         request.headers.put("authorization",
                 new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId())));
         return request;
     }
 

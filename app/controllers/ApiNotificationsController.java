@@ -13,8 +13,8 @@ import utils.AppClock;
 
 import java.util.List;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -28,8 +28,8 @@ import static utils.GsonHolder.GSON;
  * {@link #delete} call from the UI's dismiss button. {@link #ack} marks
  * a row read without removing it.
  *
- * <p>Single-operator by design: the one authenticated admin sees every
- * notification — there is no per-user scoping because there is only one user.
+ * <p>The operator and {@code main} see every notification; any other agent lists and
+ * acknowledges only the ones its own reminders raised (JF-292).
  */
 @With(AuthCheck.class)
 public class ApiNotificationsController extends Controller {
@@ -64,14 +64,17 @@ public class ApiNotificationsController extends Controller {
      * @param limit  hard cap on result count; defaults to 50
      */
     @SuppressWarnings("java:S2259")
-    @Operation(summary = "List notifications newest-first, filtered by unread/all status with a result cap")
-    @AgentAccess(OPEN)
+    @Operation(summary = "List notifications newest-first, filtered by unread/all status with a result cap; "
+            + "an agent other than main lists only its own")
+    @AgentAccess(OWN_ONLY)
     public static void list(String status, Integer limit) {
         int cap = limit != null && limit > 0 ? Math.min(limit, 500) : 50;
         var mode = status == null || status.isBlank() ? "unread" : status.toLowerCase();
+        // Null for the operator and main, who see every agent's.
+        var agentId = RequestPrincipal.scopedAgentId(null);
         List<Notification> rows = switch (mode) {
-            case "unread" -> Notification.findUnread(cap);
-            case "all" -> Notification.findAllNewestFirst(cap);
+            case "unread" -> Notification.findUnread(agentId, cap);
+            case "all" -> Notification.findAllNewestFirst(agentId, cap);
             default -> {
                 badRequest();
                 yield List.of();
@@ -89,11 +92,16 @@ public class ApiNotificationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Mark a notification acknowledged (idempotent), without deleting it")
-    @AgentAccess(value = OPEN, reason = "marks read; the row and the record it carries survive")
+    @AgentAccess(value = OWN_ONLY, reason = "marks read a notification the calling agent's own reminder raised; "
+            + "main reaches every agent's (JF-292)")
     public static void ack(Long id) {
         var n = NotificationService.findById(id);
         if (n == null) {
             notFound();
+            throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(n.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Notification " + id + " belongs to another agent.");
             throw ApiResponses.unreachable();
         }
         if (n.acknowledgedAt == null) {

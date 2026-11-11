@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import controllers.RequestPrincipal;
 import models.Agent;
 import models.AgentSkillConfig;
@@ -15,6 +16,7 @@ import services.Tx;
 import utils.TokenHasher;
 
 import java.nio.file.Files;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -507,12 +509,19 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
                 "the operator's config write must persist");
     }
 
-    /** CONTROL — config reads are masked already, so they stay open to both principals. */
+    /** JF-292: the config rows are the instance's setup, so a read answers only the operator and main. */
     @Test
-    void agentPrincipalCanStillReadConfig() {
+    void anAgentPrincipalThatIsNotMainCannotReadConfigAndTheOperatorStillDoes() {
         var token = AuthFixture.seedBearerToken();
 
-        assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/config")));
+        var resp = asAgent(() -> GET(requestWithToken(token), "/api/config"));
+
+        assertStatus(403, resp);
+        var body = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        assertEquals(List.of("agent_scope", "Only the operator or the main agent may read the configuration."),
+                List.of(body.get("code").getAsString(), body.get("message").getAsString()));
+        login();
+        assertIsOk(GET("/api/config"));
     }
 
     // --- JCLAW-1227: the routes the hand-maintained allowlist had missed ---
