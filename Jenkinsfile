@@ -245,7 +245,8 @@ pipeline {
                         // running it here fails a malformed suite in seconds
                         // instead of after the full suite — and exercises the
                         // operator-facing CLI, which is how command rot is caught.
-                        // Free: it reuses the classes precompile just produced.
+                        // Cheap: it runs from the classes compileJava produced for
+                        // precompile, so its own compileJava is up to date.
                         sh './jclaw.sh evals'
                     }
                 }

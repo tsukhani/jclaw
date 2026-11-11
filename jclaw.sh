@@ -5347,23 +5347,15 @@ do_evals() {
         fi
     done
 
-    # Recompile when the classes are missing OR stale (JCLAW-889). Checking only
-    # for a missing directory meant that after any source edit this command
-    # silently ran the previous build — and reported on it confidently, which is
-    # the worst failure mode for the thing that decides whether the dataset is
-    # valid. It is also what Jenkins runs. The find short-circuits on the first
-    # newer file, so the check costs milliseconds and the command stays fast.
-    local classes="$SCRIPT_DIR/precompiled/java"
-    local reason=""
-    if [[ ! -d "$classes" ]]; then
-        reason="No compiled classes yet"
-    elif [[ -n "$(find "$SCRIPT_DIR/app" -name '*.java' -newer "$classes" -print -quit 2>/dev/null)" ]]; then
-        reason="Sources are newer than precompiled/java"
-    fi
-    if [[ -n "$reason" ]]; then
-        echo "==> $reason — running 'play precompile' first..."
-        check_play
-        play precompile
+    # The CLI runs from Gradle's compile output, never from precompiled/: a production start
+    # runs from precompiled/, and rebuilding it here wiped the classes a running instance
+    # still loads on first use (JF-301). compileJava runs every time because a build older
+    # than its sources reported on the previous code, confidently (JCLAW-889); up to date
+    # it takes about a second, and Jenkins has run it already for precompile.
+    local classes="$SCRIPT_DIR/build/classes/java/main"
+    if ! ./gradlew --quiet compileJava; then
+        echo "Error: compileJava failed, so the eval CLI has no classes to run; see the output above."
+        exit 1
     fi
 
     # Gson ships in the framework's lib/, which is exactly where the H2 jar the
