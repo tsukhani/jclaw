@@ -239,6 +239,33 @@ describe('Settings page — provider section', () => {
   })
 })
 
+// The Search and Malware cards read the key's value too: both test it for the mask's characters.
+describe('Settings page — a card whose key reads back as the mask', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it.each([
+    ['search', 'search.exa.apiKey', 'Exa', 'Brave Search'],
+    ['malware', 'scanner.malwarebazaar.authKey', 'MalwareBazaar (abuse.ch)', 'VirusTotal'],
+  ])('%s: is active, and a card with no key asks for one', async (sectionId, key, withKey, withoutKey) => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => [])
+    registerEndpoint('/api/config', () => ({
+      entries: [{ key, value: '****', updatedAt: '2026-04-29T10:00:00Z' }],
+    }))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+
+    const component = await mountSettingsSection(sectionId)
+
+    const pill = (label: string) => component.findAll('div.bg-surface-elevated')
+      .find(card => card.find('.text-fg-strong').exists() && card.find('.text-fg-strong').text() === label)!
+      .find('.text-fg-strong + span').text()
+    expect([pill(withKey), pill(withoutKey)]).toEqual(['active', 'needs API key'])
+  })
+})
+
 describe('Settings page — form binding', () => {
   it('renders interactive buttons for the inline edit affordance', async () => {
     setupConfigApi()
