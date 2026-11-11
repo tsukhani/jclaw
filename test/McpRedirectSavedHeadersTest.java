@@ -136,6 +136,47 @@ class McpRedirectSavedHeadersTest extends UnitTest {
         }
     }
 
+    /** The address compared is the one the call was made to, not the hop before: a second hop elsewhere is still elsewhere. */
+    @Test
+    void aSecondRedirectAwayFromTheSavedAddressIsFollowedWithoutTheSavedHeaders() throws Exception {
+        try (var further = new MockWebServer()) {
+            further.start();
+            for (var last : List.of(elsewhere, further)) {
+                var when = last == elsewhere ? "on to the same other address" : "on to a third address";
+                saved.enqueue(redirect(elsewhere.url("/mcp")));
+                elsewhere.enqueue(redirect(last.url("/v2/mcp")));
+                last.enqueue(answer());
+                try (var transport = transport(saved.url("/mcp"), SAVED)) {
+                    assertEquals("answered 7", exchange(transport, "tools/list"), when);
+                }
+                assertCarriesSavedHeaders(saved.takeRequest(5, TimeUnit.SECONDS), when);
+                assertFollowedWithoutSavedHeaders(elsewhere.takeRequest(5, TimeUnit.SECONDS), when);
+                var landed = last.takeRequest(5, TimeUnit.SECONDS);
+                assertFollowedWithoutSavedHeaders(landed, when);
+                assertEquals("/v2/mcp", landed.getUrl().encodedPath(), when);
+            }
+        }
+    }
+
+    /** A 301, 302 or 303 turns the POST into a GET and a 308 sends it again; none takes a saved header along. */
+    @Test
+    void aRedirectOfAnyStatusIsFollowedWithoutTheSavedHeaders() throws Exception {
+        for (int status : new int[] {301, 302, 303, 308}) {
+            saved.enqueue(redirect(status, elsewhere.url("/mcp")));
+            elsewhere.enqueue(answer());
+            try (var transport = transport(saved.url("/mcp"), SAVED)) {
+                assertEquals("answered 7", exchange(transport, "tools/list"), "HTTP " + status);
+            }
+            assertCarriesSavedHeaders(saved.takeRequest(5, TimeUnit.SECONDS), "HTTP " + status);
+            var landed = elsewhere.takeRequest(5, TimeUnit.SECONDS);
+            assertNotNull(landed, "HTTP " + status);
+            assertEquals(status == 308 ? "POST" : "GET", landed.getMethod(), "HTTP " + status);
+            assertNull(landed.getHeaders().get("X-Api-Key"), "HTTP " + status);
+            assertNull(landed.getHeaders().get("Authorization"), "HTTP " + status);
+            assertEquals(VERSION, landed.getHeaders().get("MCP-Protocol-Version"), "HTTP " + status);
+        }
+    }
+
     // ==================== what keeps working ====================
 
     @Test
@@ -196,6 +237,23 @@ class McpRedirectSavedHeadersTest extends UnitTest {
             assertEquals(expected, failure.getMessage());
             assertEquals(expected, mcp.lastError());
             assertEquals(McpClient.State.DISCONNECTED, mcp.state());
+        }
+    }
+
+    /** A listen stream fails its subscription alone, which shows no error, so the log line is where the operator reads why. */
+    @Test
+    void aListenStreamRefusedWithoutTheHeadersFailsItsSubscriptionAndIsLogged() {
+        for (int status : new int[] {401, 403}) {
+            saved.enqueue(redirect(elsewhere.url("/mcp")));
+            elsewhere.enqueue(new MockResponse.Builder().code(status).build());
+            var events = eventsDuring(() -> {
+                try (var transport = transport(saved.url("/mcp"), SAVED)) {
+                    assertEquals("request failed: subscriptions/listen stream failed: MCP HTTP " + status
+                            + " after a redirect to " + origin(elsewhere) + ". " + WHY,
+                            exchange(transport, "subscriptions/listen"));
+                }
+            });
+            assertEquals(List.of(redirectWarning()), events, "HTTP " + status);
         }
     }
 
@@ -377,7 +435,11 @@ class McpRedirectSavedHeadersTest extends UnitTest {
     }
 
     private static MockResponse redirect(HttpUrl location) {
-        return new MockResponse.Builder().code(307).setHeader("Location", location.toString()).build();
+        return redirect(307, location);
+    }
+
+    private static MockResponse redirect(int status, HttpUrl location) {
+        return new MockResponse.Builder().code(status).setHeader("Location", location.toString()).build();
     }
 
     private static MockResponse answer() {

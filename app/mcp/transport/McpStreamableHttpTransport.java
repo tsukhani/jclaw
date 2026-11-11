@@ -195,7 +195,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onResponse(Call call, Response resp) {
                 try (resp) {
-                    checkRedirectedAnswer(call.request().url(), resp);
+                    checkRedirectedAnswer(call.request().url(), resp, isListen);
                     handleResponse(resp, requestId, isInitialize, carriedSession);
                 } catch (IOException e) {
                     if (!closed && !call.isCanceled()) ioFailure(e, requestId, isListen);
@@ -222,18 +222,20 @@ public final class McpStreamableHttpTransport implements McpTransport {
     /**
      * An answer from an address the saved headers were kept from. A 401 or 403 is that address asking for
      * them, which no retry cures, so it fails the connection under a message that says so. Any other answer
-     * is handled as usual, and the redirect is logged once.
+     * is handled as usual, and the redirect is logged once. A refused listen stream is logged too: it fails
+     * its subscription alone, which the client reopens without showing an error.
      */
-    private void checkRedirectedAnswer(HttpUrl sentTo, Response resp) throws IOException {
+    private void checkRedirectedAnswer(HttpUrl sentTo, Response resp, boolean isListen) throws IOException {
         var answered = resp.request().url();
         if (headers.isEmpty() || HttpFactories.sameOrigin(answered, sentTo)) return;
-        if (resp.code() == 401 || resp.code() == 403) {
-            throw new IOException("MCP HTTP %d after a redirect to %s. %s"
-                    .formatted(resp.code(), origin(answered), HEADERS_STAY));
-        }
-        if (redirectLogged.compareAndSet(false, true)) {
+        var refused = resp.code() == 401 || resp.code() == 403;
+        if ((!refused || isListen) && redirectLogged.compareAndSet(false, true)) {
             EventLogger.warn("MCP_CONNECT", "MCP server '%s' redirected a request to %s. %s"
                     .formatted(name, origin(answered), HEADERS_STAY));
+        }
+        if (refused) {
+            throw new IOException("MCP HTTP %d after a redirect to %s. %s"
+                    .formatted(resp.code(), origin(answered), HEADERS_STAY));
         }
     }
 
