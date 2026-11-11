@@ -89,7 +89,7 @@ the custom agent's alone: `main`'s `exec` and a coding harness keep their profil
   namespace that probe would pass; the namespace probe that follows it (JF-303, below) does carry it,
   so the run is refused with bwrap's own line (an inference, not measured). A JVM inside the sandbox can still be attached to from inside it
   (measured). A SIGQUIT from the sandbox finds no JVM outside it either, since JF-303 put the run
-  in a PID namespace of its own (below).
+  in a PID namespace and a session of its own (below).
 
 **A custom agent's shell signals no process outside its run (JF-303).** A `kill` from a custom
 agent's `exec` used to stop a process of the operator's (measured with throwaway processes on macOS
@@ -99,24 +99,41 @@ is a sandbox of its own, so it does not reach what an earlier run of the same ag
 background either: `exec` stops that for the agent, from the JVM. The rule is the custom agent's
 alone: `main`'s `exec` and a coding harness signal as before
 (`SandboxSignalTest.mainsExecStillSignalsAProcessOutsideItWithAndWithoutTheKey`,
-`HarnessSandboxTest.linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespace`).
+`HarnessSandboxTest.linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespaceAndSession`).
 
 - **macOS** — `(deny signal (require-not (target same-sandbox)))`, where `same-sandbox` is one
   `sandbox-exec` launch. Measured on 27.0.1 with throwaway `sleep` processes: each of signal 0, HUP,
   INT, QUIT, KILL, USR1, TERM, STOP and CONT fails with `Operation not permitted` at a process started
   outside, at a process group outside, and at a process an earlier launch of the same profile left
   running; inside one launch a child, a grandchild and the run's own shell still take a signal. Under
-  the rule it replaces, `kill` succeeded for every one of those but QUIT. launchd needs no rule:
+  the rule it replaces, `kill` succeeded for every one of those but QUIT. A signal to the caller's
+  own process group, which is the one JClaw started the run in, is checked member by member: TERM and
+  KILL ended the run's shell and left a throwaway launcher and the `sleep` beside it running, where
+  under the old rule both died (measured). launchd needs no rule:
   `launchctl kill`, `stop`, `kickstart -k`, `bootout` and `remove` against a throwaway job outside all
   came back `Not privileged` or `Operation not permitted` from inside a profile of `(allow default)`
   plus this rule, and the same `kill` outside ended the job.
 - **Linux** — bwrap has no rule for a signal's target, so the run gets a PID namespace
   (`--unshare-pid`, `HarnessSandbox.LinuxPids`): a process outside has no pid there and `kill`
-  answers `No such process`. Its `--proc /proc` is then that namespace's own procfs, where the kernel
-  mounts one. In Docker it does not: the runtime mounts over parts of `/proc`, and the kernel then
+  answers `No such process`. A PID namespace does not bound a process group, though, and JClaw starts
+  the run, so the run is born into JClaw's group: under `--unshare-pid` alone a signal to the caller's
+  own group (`kill 0`, TERM and KILL, from the command and from a background job of it) ended a
+  throwaway launcher and the `sleep` beside it along with the run (measured in the runtime image as
+  root and in the dev image as uid 1000, there with `/proc` unmasked too). So the run also gets a
+  session of its own (`--new-session`, bwrap's `setsid`), whose process groups hold only the run: the
+  same signals then end the run's shell and nothing outside it, a job of the run still takes a signal,
+  a background command still outlives the call, and the stop from outside finds and ends it as before
+  (measured in the same containers, and in the dev image with JClaw's compiled `HarnessSandbox`
+  building the argv, as root and as uid 1000, both `/proc` shapes;
+  `SandboxSignalTest.aSignalToTheRunsOwnProcessGroupReachesNothingOutsideTheRun`). The run then has no
+  controlling terminal: where its launcher has one, opening `/dev/tty` inside fails with `No such
+  device or address`, and without the flag it opened (measured in the dev image). A Ctrl-C in a
+  terminal JClaw was started from goes to JClaw's process group, so it no longer reaches such a run
+  (an inference, not measured); `jclaw.sh` stops JClaw by pid, which never reached one. The run's
+  `--proc /proc` is the PID namespace's own procfs, where the kernel mounts one. In Docker it does not: the runtime mounts over parts of `/proc`, and the kernel then
   refuses a new procfs to a user namespace (`Can't mount proc on /newroot/proc: Operation not
   permitted`, under `seccomp-bwrap.json`, as root and as uid 1000). So `customAgentPids` starts
-  `pidNamespaceProbe` with `--proc /proc`, and where that fails, without it, keeping the `/proc` the
+  `pidNamespaceProbe` (the readiness probe with `--unshare-user`, `--unshare-pid` and `--new-session`) with `--proc /proc`, and where that fails, without it, keeping the `/proc` the
   root bind brings (`LinuxPids.OWN_UNDER_OUTER_PROC`, logged once). A success is kept for the JVM's
   life; where neither starts, the run is refused with `shell_sandbox_unavailable`, never started in
   JClaw's own namespace. What the kept `/proc` costs, measured in both images: it is read-only and
@@ -311,7 +328,10 @@ must target a genuinely-denied path under `$HOME` — **not** the temp tree, whi
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.
 A test that needs a JVM to attach to starts a throwaway one and stops it (`SandboxJvmAttachTest`),
 never a JVM that is already running. A test that sends a signal aims it at a throwaway `sleep` it
-started (`SandboxSignalTest`), never at a pid it did not start and never at `-1`. A test that needs a local service starts its own Unix socket server at
+started (`SandboxSignalTest`), never at a pid it did not start and never at `-1`. A test that signals a
+whole process group (`kill 0`) builds the run's argv with `wrapCustomAgentShell` and starts it from a
+launcher that has made a session of its own and checked that it leads its group
+(`SandboxSignalTest.inAProcessGroupOfItsOwn`), never through `exec`, whose run is in the test JVM's group. A test that needs a local service starts its own Unix socket server at
 the path in question (`SandboxLocalServiceTest`): it never connects to a real runtime's socket and never
 starts a container. A test that sends SIGQUIT inside a run aims it at the run's
 shell from a subshell, `(kill -QUIT $$)`: `sh` starts a background job with SIGQUIT ignored, so

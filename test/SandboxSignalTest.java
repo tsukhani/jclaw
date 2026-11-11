@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -30,12 +31,17 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * JF-303: a signal from a custom agent's {@code exec} reaches only the processes of that same run. A process
  * outside its sandbox, and one an earlier run of its own left in the background, refuse it; {@code exec}
  * stops the second for the agent from outside the sandbox. {@code main}'s {@code exec} sends the same
- * signals as the control. Every process signaled here is a throwaway the test starts.
+ * signals as the control. Every process signaled here is a throwaway the test starts: a signal aimed at a
+ * whole process group is sent only inside a session the test starts for it, never in the test JVM's own.
  */
 class SandboxSignalTest extends UnitTest {
 
     private static final String AGENT = "signal-agent";
     private static final List<String> SIGNALS = List.of("0", "HUP", "INT", "QUIT", "USR1", "TERM", "STOP", "KILL");
+    private static final Path PERL = Path.of("/usr/bin/perl");
+
+    /** What a launcher in a process group of its own printed, how it ended, and whether the sleep it started is still running. */
+    private record GroupOutcome(String output, int exit, int sleepersLeft) {}
 
     private ShellExecTool tool;
     private Agent agent;
@@ -55,7 +61,7 @@ class SandboxSignalTest extends UnitTest {
     void teardown() {
         try {
             started.forEach(Process::destroyForcibly);
-            sleepers("sleep 4801", "sleep 4802", "sleep 4803").forEach(ProcessHandle::destroyForcibly);
+            sleepers("sleep 4801", "sleep 4802", "sleep 4803", "sleep 4804").forEach(ProcessHandle::destroyForcibly);
         } finally {
             ShellSandboxSync.release();
         }
@@ -178,6 +184,70 @@ class SandboxSignalTest extends UnitTest {
         stop.addProperty("stop", pid);
         assertEquals("Stopped background process %d and every process it started.".formatted(pid), exec(agent, stop));
         awaitGone("sleep 4801");
+    }
+
+    /**
+     * A signal a run aims at its own process group reaches only that run. JClaw starts the run, so the run is
+     * born into JClaw's process group, and a process group is not bounded by a PID namespace: the run needs a
+     * group of its own. A launcher stands in for JClaw here, in a session the test starts for it, with a sleep
+     * beside the run as JClaw's other process; unconfined, the same command ends both.
+     */
+    @Test
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    void aSignalToTheRunsOwnProcessGroupReachesNothingOutsideTheRun() throws Exception {
+        assumeWorkingSandbox();
+        assumeTrue(Files.isExecutable(PERL), "no perl here to start a session of the test's own");
+        var workspace = AgentService.workspacePath(AGENT);
+        Files.createDirectories(workspace);
+        for (var signal : List.of("TERM", "KILL")) {
+            int killedBy = 128 + (signal.equals("TERM") ? 15 : 9);
+            var shell = List.of("/bin/sh", "-c", "kill -%s 0".formatted(signal));
+            var confined = HarnessSandbox.wrapCustomAgentShell(shell, workspace.toFile());
+
+            var inside = inAProcessGroupOfItsOwn(confined.argv(), confined.env(), workspace);
+
+            assertEquals(new GroupOutcome("run=%d\n".formatted(killedBy), 0, 1), inside,
+                    "only the run's own shell took " + signal + ": the launcher went on and its sleep still runs");
+
+            var control = inAProcessGroupOfItsOwn(shell, Map.of(), workspace);
+
+            assertEquals(new GroupOutcome("", killedBy, 0), control,
+                    "unconfined, " + signal + " must end the launcher and its sleep or the test proves nothing");
+        }
+    }
+
+    /**
+     * Starts {@code run} from a launcher that leads a session and a process group of its own, beside a sleep the
+     * launcher starts first. The launcher prints the run's exit status and exits; it starts nothing unless it
+     * leads its group, so a signal to the group can only reach processes started here.
+     */
+    private GroupOutcome inAProcessGroupOfItsOwn(List<String> run, Map<String, String> env, Path workdir) throws Exception {
+        var argv = new ArrayList<>(List.of(PERL.toString(), "-MPOSIX", "-e",
+                "(POSIX::setsid() > 0 && getpgrp() == $$) or exit 97; exec @ARGV; exit 98",
+                "/bin/sh", "-c", "/bin/sleep 4804 >/dev/null 2>&1 &\n\"$@\"\necho \"run=$?\"", "launcher"));
+        argv.addAll(run);
+        // To a file, not a pipe: a process that outlived the launcher would hold a pipe open and the read would not end.
+        var printed = Files.createTempFile("jf303-group", ".out");
+        try {
+            // The launcher's shell reports a command a signal ended on stderr, with its pid.
+            var builder = new ProcessBuilder(argv).directory(workdir.toFile())
+                    .redirectOutput(printed.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
+            builder.environment().putAll(env);
+            var launcher = builder.start();
+            started.add(launcher);
+            assertTrue(launcher.waitFor(30, TimeUnit.SECONDS), "the launcher ended");
+            if (launcher.exitValue() != 0) {
+                // A signal that ended the launcher reached its sleep in the same call; the sleep is gone a moment later.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!sleepers("sleep 4804").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+            }
+            int left = sleepers("sleep 4804").size();
+            sleepers("sleep 4804").forEach(ProcessHandle::destroyForcibly);
+            awaitGone("sleep 4804");
+            return new GroupOutcome(Files.readString(printed), launcher.exitValue(), left);
+        } finally {
+            Files.deleteIfExists(printed);
+        }
     }
 
     /** main's exec is as before: unconfined and confined under shell.sandbox alike, its signal reaches a process outside. */

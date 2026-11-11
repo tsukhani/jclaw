@@ -162,13 +162,13 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * On Linux a custom agent's run is linuxArgv in its own user and PID namespaces, under shell.sandbox's network
-     * rule, with the key itself unset, plus runtime folders of its own before the $HOME tmpfs. Its /proc is the PID
-     * namespace's own where this host mounts one, and the one the root bind brings where it does not. It has a /tmp
-     * of its own already, so its TMPDIR is left alone.
+     * On Linux a custom agent's run is linuxArgv in its own user and PID namespaces and its own session, under
+     * shell.sandbox's network rule, with the key itself unset, plus runtime folders of its own before the $HOME
+     * tmpfs. Its /proc is the PID namespace's own where this host mounts one, and the one the root bind brings
+     * where it does not. It has a /tmp of its own already, so its TMPDIR is left alone.
      */
     @Test
-    void linuxCustomAgentWrapIsTheShellArgvInItsOwnNamespacesUnderTheNetworkRule() throws Exception {
+    void linuxCustomAgentWrapIsTheShellArgvInItsOwnNamespacesAndSessionUnderTheNetworkRule() throws Exception {
         var a = HarnessSandbox.availability();
         org.junit.jupiter.api.Assumptions.assumeTrue(a.available() && a.mechanism().equals("bwrap"),
                 "no working bwrap here: " + a);
@@ -183,7 +183,9 @@ class HarnessSandboxTest extends UnitTest {
                 assertEquals(Map.of(), confined.env(), "network=" + network);
                 assertEquals("--unshare-user", wrapped.get(1), "network=" + network);
                 assertEquals(network.equals("deny"), wrapped.contains("--unshare-net"), "network=" + network);
-                assertEquals("--unshare-pid", wrapped.get(wrapped.indexOf("--ro-bind") - 1), "argv=" + wrapped);
+                int rootBind = wrapped.indexOf("--ro-bind");
+                assertEquals(List.of("--unshare-pid", "--new-session"), wrapped.subList(rootBind - 2, rootBind),
+                        "argv=" + wrapped);
 
                 boolean ownProc = indexOfPair(wrapped, "--proc", "/proc") >= 0;
                 assertEquals(launches(HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN,
@@ -194,6 +196,7 @@ class HarnessSandboxTest extends UnitTest {
                 var asMains = new ArrayList<>(wrapped);
                 asMains.subList(afterMounts, homeTmpfs).clear();
                 asMains.remove("--unshare-pid");
+                asMains.remove("--new-session");
                 if (!ownProc) asMains.addAll(indexOfPair(asMains, "--tmpfs", "/tmp") + 2, List.of("--proc", "/proc"));
                 assertEquals(HarnessSandbox.inOwnUserNamespace(
                         HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), asMains,
@@ -622,12 +625,13 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * Only a custom agent's run is in a PID namespace of its own, where a signal finds no process outside it:
-     * --unshare-pid goes before the mounts, and --proc /proc is then that namespace's procfs, or is left out
-     * where the kernel refuses one. main's and a harness's argv have neither change.
+     * Only a custom agent's run is in a PID namespace and a session of its own, where a signal finds no process
+     * outside it by pid or through the process group JClaw started it in: --unshare-pid and --new-session go
+     * before the mounts, and --proc /proc is then that namespace's procfs, or is left out where the kernel
+     * refuses one. main's and a harness's argv have none of these changes.
      */
     @Test
-    void linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespace() {
+    void linuxOnlyACustomAgentsArgvIsInItsOwnPidNamespaceAndSession() {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
         var shared = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true, true,
                 List.of());
@@ -637,16 +641,16 @@ class HarnessSandboxTest extends UnitTest {
                 true, List.of(), HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC);
 
         assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-net", "--unshare-pid",
-                "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--proc", "/proc",
-                "--tmpfs", "/home/operator"), own.subList(0, 17));
+                "--new-session", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--proc", "/proc",
+                "--tmpfs", "/home/operator"), own.subList(0, 18));
         assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-net", "--unshare-pid",
-                "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp",
-                "--tmpfs", "/home/operator"), underOuterProc.subList(0, 15));
-        var ownWithoutTheFlag = new ArrayList<>(own);
-        ownWithoutTheFlag.remove("--unshare-pid");
-        assertEquals(shared, ownWithoutTheFlag);
+                "--new-session", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp",
+                "--tmpfs", "/home/operator"), underOuterProc.subList(0, 16));
+        var ownWithoutTheFlags = new ArrayList<>(own);
+        ownWithoutTheFlags.removeAll(List.of("--unshare-pid", "--new-session"));
+        assertEquals(shared, ownWithoutTheFlags);
         var outerWithProcBack = new ArrayList<>(underOuterProc);
-        outerWithProcBack.remove("--unshare-pid");
+        outerWithProcBack.removeAll(List.of("--unshare-pid", "--new-session"));
         outerWithProcBack.addAll(12, List.of("--proc", "/proc"));
         assertEquals(shared, outerWithProcBack);
         assertEquals(shared, HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true,
@@ -655,27 +659,28 @@ class HarnessSandboxTest extends UnitTest {
         for (var key : List.of(HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.ACP_SANDBOX_KEY)) {
             var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), key);
             assertFalse(argv.contains("--unshare-pid"), key + " shares JClaw's PID namespace, argv=" + argv);
+            assertFalse(argv.contains("--new-session"), key + " stays in JClaw's session, argv=" + argv);
             assertTrue(indexOfPair(argv, "--proc", "/proc") >= 0, key + " keeps --proc /proc, argv=" + argv);
         }
     }
 
     /**
-     * The launch that picks a custom agent's PID namespace is the readiness probe in a user namespace and a PID
-     * namespace: first with a procfs of its own, then without one.
+     * The launch that picks a custom agent's PID namespace is the readiness probe as that run starts: in a user
+     * namespace, a PID namespace and a session of its own, first with a procfs of its own, then without one.
      */
     @Test
-    void thePidNamespaceProbeIsTheReadinessProbeInItsOwnNamespaces() {
-        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
-                "--proc", "/proc", "--tmpfs", "/tmp", "true"),
-                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, false));
-        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
-                "--tmpfs", "/tmp", "true"),
-                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC, false));
-        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--ro-bind", "/", "/",
+    void thePidNamespaceProbeIsTheReadinessProbeInItsOwnNamespacesAndSession() {
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--new-session", "--ro-bind", "/", "/",
                 "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true"),
-                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, true));
-        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--ro-bind", "/", "/",
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, false));
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-pid", "--new-session", "--ro-bind", "/", "/",
                 "--dev", "/dev", "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC, false));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--new-session",
+                "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true"),
+                HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN, true));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--new-session",
+                "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "true"),
                 HarnessSandbox.pidNamespaceProbe(HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC, true));
     }
 

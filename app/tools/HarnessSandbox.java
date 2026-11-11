@@ -67,8 +67,8 @@ import java.util.Map;
  * also cannot attach to a JVM outside it, and with the network allowed it still reaches no local service
  * through a socket file outside its workspace and its own temp and runtime folders, nor moves one into
  * them: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}. Nor does a
- * signal from it reach a process outside the run (JF-303): a Seatbelt rule on macOS, a PID namespace of its
- * own on Linux ({@link LinuxPids}).
+ * signal from it reach a process outside the run (JF-303): a Seatbelt rule on macOS, a PID namespace and a
+ * session of its own on Linux ({@link LinuxPids}).
  */
 public final class HarnessSandbox {
 
@@ -113,6 +113,9 @@ public final class HarnessSandbox {
     private static final String BWRAP = "bwrap";
     private static final String SANDBOX_EXEC = "sandbox-exec";
     private static final String UNSHARE_USER = "--unshare-user";
+
+    /** What keeps a run's signals inside it: see {@link LinuxPids}. */
+    private static final List<String> OWN_PIDS_AND_SESSION = List.of("--unshare-pid", "--new-session");
 
     /**
      * A signal from the run reaches only the processes of that run: {@code same-sandbox} is one
@@ -220,6 +223,11 @@ public final class HarnessSandbox {
      * answers "No such process". Each run is its own namespace, so it does not reach what an earlier run of
      * the same agent left in the background either; {@code exec} stops that from outside
      * ({@code services.BackgroundProcesses}), where the namespace's processes have ordinary pids.
+     *
+     * <p>A PID namespace does not bound a process group. JClaw starts the run, so the run is born into
+     * JClaw's group, and a signal to the caller's own group ({@code kill 0}) reaches every member of it,
+     * whatever namespace each is in (measured). So a run in a PID namespace of its own is also in a session
+     * of its own ({@code --new-session}), whose process groups hold only the run.
      */
     public enum LinuxPids {
         /** JClaw's own namespace: {@code main}'s {@code exec} and a coding harness, as before. */
@@ -363,7 +371,8 @@ public final class HarnessSandbox {
      * writes limited to {@code writeRoot} and the network cut under {@link #SHELL_NETWORK_KEY}{@code =deny}.
      * On macOS the profile is {@link #customAgentMacosProfile}; on Linux it is {@link #linuxArgv}, which
      * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own}, with
-     * {@link #linuxOwnRuntime runtime folders of its own} and in a {@link LinuxPids PID namespace of its own}.
+     * {@link #linuxOwnRuntime runtime folders of its own} and in a
+     * {@link LinuxPids PID namespace and session of its own}.
      *
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
@@ -576,12 +585,12 @@ public final class HarnessSandbox {
     }
 
     /**
-     * {@link #BWRAP_PROBE} as a custom agent's run starts it: in a user namespace and the PID namespace
-     * {@code pids} names. Public so a test can pin it on any host.
+     * {@link #BWRAP_PROBE} as a custom agent's run starts it: in a user namespace, the PID namespace
+     * {@code pids} names and a session of its own. Public so a test can pin it on any host.
      */
     public static List<String> pidNamespaceProbe(LinuxPids pids, boolean asRoot) {
         var out = new ArrayList<String>(inOwnUserNamespace(asRoot ? BWRAP_PROBE_AS_ROOT : BWRAP_PROBE));
-        out.add(out.indexOf("--ro-bind"), "--unshare-pid");
+        out.addAll(out.indexOf("--ro-bind"), OWN_PIDS_AND_SESSION);
         if (pids == LinuxPids.OWN_UNDER_OUTER_PROC) {
             int proc = out.indexOf("--proc");
             out.subList(proc, proc + 2).clear();
@@ -889,8 +898,9 @@ public final class HarnessSandbox {
 
     /**
      * {@link #linuxArgv(List, File, List, String, List, boolean, boolean, List)} with the run's PID namespace
-     * given. {@code --proc /proc} is the namespace's own procfs under {@code --unshare-pid}, and is left out
-     * for {@link LinuxPids#OWN_UNDER_OUTER_PROC}, where bwrap could not mount one and would start nothing.
+     * given. A run in a namespace of its own is in a session of its own too. {@code --proc /proc} is the
+     * namespace's own procfs under {@code --unshare-pid}, and is left out for
+     * {@link LinuxPids#OWN_UNDER_OUTER_PROC}, where bwrap could not mount one and would start nothing.
      */
     @SuppressWarnings("java:S107") // one sandbox's whole shape, each part resolved by the caller
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String home,
@@ -899,7 +909,7 @@ public final class HarnessSandbox {
         var out = new ArrayList<String>(List.of(BWRAP));
         if (asRoot) out.addAll(ROOT_FLAGS);
         if (denyNetwork) out.add("--unshare-net");
-        if (pids != LinuxPids.SHARED) out.add("--unshare-pid");
+        if (pids != LinuxPids.SHARED) out.addAll(OWN_PIDS_AND_SESSION);
         out.addAll(List.of(
                 "--ro-bind", "/", "/",
                 "--dev", "/dev",
