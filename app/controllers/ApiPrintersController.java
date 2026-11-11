@@ -179,24 +179,28 @@ public class ApiPrintersController extends Controller {
      * <p>Without a reachable {@code host} the response carries no options and
      * {@code fromPrinter=false}, which the UI renders as "pick a printer first"
      * rather than as an empty form. A {@code host} in a range
-     * {@link PrintTargetGuard#isForbiddenDestination} never dials is a 400.
+     * {@link PrintTargetGuard#isForbiddenDestination} never dials is a 400, unless it
+     * is the saved default's.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobOptionsResponse.class)))
-    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials the host the caller names, which "
-            + "PrintTargetGuard screens")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials the saved default, or the host "
+            + "the caller names once PrintTargetGuard has screened it")
     public static void options(String host, Integer port, String protocol) {
         RequestPrincipal.requireOperatorOrMain("read a printer's options");
         var protocols = List.of("IPP", "IPPS", "RAW", "LPD");
         if (host == null || host.isBlank()) {
             renderJSON(GSON.toJson(new JobOptionsResponse(List.of(), protocols, null, false)));
         }
-        // The address is the caller's, so it meets the screen a print job's does, before anything dials (JF-294).
-        if (PrintTargetGuard.isForbiddenDestination(host)) {
+        var printer = PrinterDiscovery.direct(host, port, PrintProtocol.parse(protocol));
+        // The saved default is the operator's choice: Settings reads its options by this address, and a print job to
+        // it is dialed unscreened. Any other address is the caller's, so it meets the screen a named print target
+        // does before anything dials (JF-294).
+        if (!PrinterDefaults.load().matches(host, printer.port())
+                && PrintTargetGuard.isForbiddenDestination(host)) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "'%s' is a link-local, multicast or unspecified address, which is never a printer.".formatted(host));
         }
 
-        var printer = PrinterDiscovery.direct(host, port, PrintProtocol.parse(protocol));
         List<IppClient.JobOption> discovered;
         String mediaReady = null;
         try {

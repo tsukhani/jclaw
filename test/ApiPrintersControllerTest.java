@@ -230,6 +230,20 @@ class ApiPrintersControllerTest extends FunctionalTest {
     }
 
     @Test
+    void jobOptionsDialTheSavedDefaultWhateverItsAddress() {
+        // Settings reads the saved default's options by its address, and a print job to it is dialed unscreened.
+        // 0.0.0.0 stands in for any address the guard forbids: port 1 refuses at once, so the route reached the dial.
+        login();
+        assertIsOk(putJson("/api/printers/default", "{\"host\":\"0.0.0.0\",\"port\":1,\"protocol\":\"IPP\"}"));
+
+        assertEquals("200 {\"options\":[],\"protocols\":[\"IPP\",\"IPPS\",\"RAW\",\"LPD\"],\"mediaReady\":null,\"fromPrinter\":false}",
+                describe(GET(optionsUrl("0.0.0.0", 1))));
+        // Another port on that host is not the printer the operator saved.
+        assertEquals("400 invalid_request '0.0.0.0' is a link-local, multicast or unspecified address, which is never a printer.",
+                describe(GET(optionsUrl("0.0.0.0", 2))));
+    }
+
+    @Test
     void jobOptionsStillDialALoopbackAddress() {
         // Port 1 refuses at once, so the route reached the dial and reports what an absent printer reports.
         login();
