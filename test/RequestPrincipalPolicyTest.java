@@ -66,6 +66,20 @@ class RequestPrincipalPolicyTest extends UnitTest {
     }
 
     @Test
+    void mainKeepsTheAgentFilterItAskedForIncludingNone() {
+        assertEquals(Long.valueOf(7L), RequestPrincipal.scopedAgentId(main(), 7L));
+        assertNull(RequestPrincipal.scopedAgentId(main(), null), "main with no filter lists every agent's rows");
+    }
+
+    @Test
+    void aCustomAgentsListIsPinnedToItselfWhateverItAskedFor() {
+        var custom = agent(7L, "custom");
+        assertEquals(Long.valueOf(7L), RequestPrincipal.scopedAgentId(custom, null));
+        assertEquals(Long.valueOf(7L), RequestPrincipal.scopedAgentId(custom, 8L));
+        assertEquals(Long.valueOf(7L), RequestPrincipal.scopedAgentId(custom, 1L), "not even main's rows");
+    }
+
+    @Test
     void anUnidentifiedAgentReachesNothing() {
         // A bearer used outside jclaw_api carries no agent header. It must get less reach than
         // an identified agent, never more — including against an ownerless row.

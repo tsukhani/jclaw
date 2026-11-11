@@ -106,7 +106,7 @@ public class ApiScrapeJobsController extends Controller {
             reason = "the agent filter is pinned to the caller before the query runs (JCLAW-1272)")
     public static void list(Long agentId, String state, Integer limit, Integer offset) {
         var filter = new JpqlFilter()
-                .eq("agent.id", scopedAgentId(agentId))
+                .eq("agent.id", RequestPrincipal.scopedAgentId(agentId))
                 .eq(STATE, parseState(state));
         long total = ScrapeJob.count(filter.toWhereClause(), filter.params());
         List<ScrapeJob> jobs = ScrapeJob.find(filter.toWhereClause() + " ORDER BY id DESC", filter.params())
@@ -304,18 +304,6 @@ public class ApiScrapeJobsController extends Controller {
                     FIELD, STATE);
             throw ApiResponses.unreachable();
         }
-    }
-
-    /** The agent a list is scoped to: the caller itself, unless it is {@code main} or the operator. */
-    private static @Nullable Long scopedAgentId(@Nullable Long requested) {
-        if (!RequestPrincipal.isAgentOriginated()) return requested;
-        var caller = RequestPrincipal.callingAgent();
-        if (caller == null) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "This request is agent-originated but names no agent, so it cannot be scoped.");
-            throw ApiResponses.unreachable();
-        }
-        return caller.isMain() ? requested : caller.id;
     }
 
     /** The addressed job, or the request ends: 404 when it does not exist, 403 when another agent owns it. */

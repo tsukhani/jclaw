@@ -20,11 +20,8 @@ import java.util.List;
  * guards (badRequest/error/notFound) and response rendering stay in the
  * controller; only the pure JPQL aggregation moves here.
  *
- * <p>The {@code payloadType} / {@code excludePayloadType} pair scopes every
- * aggregate the same way {@code GET /api/tasks} scopes its list: {@code
- * payloadType} pins to one kind (e.g. reminder); {@code excludePayloadType}
- * excludes it while still matching the NULL payloadType of ordinary automation
- * tasks. Both null/blank counts everything.
+ * <p>A {@link Scope} narrows every aggregate the same way {@code GET /api/tasks}
+ * narrows its list.
  */
 public final class TaskStatsService {
 
@@ -38,26 +35,25 @@ public final class TaskStatsService {
     private static final String PARAM_PAUSED = "paused";
 
     public static long countRunsSince(Instant since, TaskRun.@Nullable Status status,
-                                      String payloadType, String excludePayloadType) {
+                                      Scope scope) {
         var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= :since"
                 + (status != null ? " AND r.status = :rstatus" : "")
-                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
+                + scopeWhere(RUN_TASK_ALIAS, scope);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("since", since);
         if (status != null) q.setParameter(PARAM_RSTATUS, status);
-        bindPayloadType(q, payloadType, excludePayloadType);
+        bindScope(q, scope);
         return q.getSingleResult();
     }
 
     /** Null when no completed run matches the window — {@code AVG} over an empty set. */
-    public static @Nullable Double avgCompletedDuration(Instant since, String payloadType,
-                                                        String excludePayloadType) {
+    public static @Nullable Double avgCompletedDuration(Instant since, Scope scope) {
         var jpql = "SELECT AVG(r.durationMs) FROM TaskRun r "
                 + "WHERE r.startedAt >= :since AND r.status = :rstatus AND r.durationMs IS NOT NULL"
-                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
+                + scopeWhere(RUN_TASK_ALIAS, scope);
         var q = JPA.em().createQuery(jpql)
                 .setParameter("since", since)
                 .setParameter(PARAM_RSTATUS, TaskRun.Status.COMPLETED);
-        bindPayloadType(q, payloadType, excludePayloadType);
+        bindScope(q, scope);
         return (Double) q.getSingleResult();
     }
 
@@ -68,13 +64,13 @@ public final class TaskStatsService {
      * Task#paused} is a flag, not a status.
      */
     public static long countTasks(Task.Status status, @Nullable Boolean paused,
-                                  String payloadType, String excludePayloadType) {
+                                  Scope scope) {
         var jpql = "SELECT COUNT(t) FROM Task t WHERE t.status = :status"
                 + (paused != null ? " AND t.paused = :paused" : "")
-                + payloadTypeWhere("t", payloadType, excludePayloadType);
+                + scopeWhere("t", scope);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("status", status);
         if (paused != null) q.setParameter(PARAM_PAUSED, paused);
-        bindPayloadType(q, payloadType, excludePayloadType);
+        bindScope(q, scope);
         return q.getSingleResult();
     }
 
@@ -83,15 +79,15 @@ public final class TaskStatsService {
      * to (PENDING one-shot waiting, ACTIVE recurring ongoing). A terminal
      * task's stale flag never counts: it has no scheduler row left to suspend.
      */
-    public static long countPausedTasks(String payloadType, String excludePayloadType) {
+    public static long countPausedTasks(Scope scope) {
         var jpql = "SELECT COUNT(t) FROM Task t WHERE t.paused = :paused "
                 + "AND t.status IN (:pending, :active)"
-                + payloadTypeWhere("t", payloadType, excludePayloadType);
+                + scopeWhere("t", scope);
         var q = JPA.em().createQuery(jpql, Long.class)
                 .setParameter(PARAM_PAUSED, true)
                 .setParameter("pending", Task.Status.PENDING)
                 .setParameter("active", Task.Status.ACTIVE);
-        bindPayloadType(q, payloadType, excludePayloadType);
+        bindScope(q, scope);
         return q.getSingleResult();
     }
 
@@ -99,51 +95,51 @@ public final class TaskStatsService {
      * Count task runs currently in flight ({@link TaskRun.Status#RUNNING}).
      * Unlike {@link #countRunsSince} this is deliberately not bounded by
      * "today" — a run that started before midnight and is still executing
-     * must still count. Scoped by payloadType like the other aggregates.
+     * must still count. Narrowed by the scope like the other aggregates.
      */
-    public static long countRunningRuns(String payloadType, String excludePayloadType) {
+    public static long countRunningRuns(Scope scope) {
         var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.status = :rstatus"
-                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
+                + scopeWhere(RUN_TASK_ALIAS, scope);
         var q = JPA.em().createQuery(jpql, Long.class)
                 .setParameter(PARAM_RSTATUS, TaskRun.Status.RUNNING);
-        bindPayloadType(q, payloadType, excludePayloadType);
+        bindScope(q, scope);
         return q.getSingleResult();
     }
 
     /**
      * Hard-delete terminal (non-RUNNING) task runs and their transcripts,
-     * scoped by the same {@code payloadType} filter the stats aggregates use.
+     * narrowed by the same scope the stats aggregates use.
      * In-flight RUNNING runs are preserved so a reset during an active fire
      * doesn't orphan it. Returns the number of TaskRun rows deleted. Flushes so
      * the delete is visible to a subsequent aggregate in the same transaction.
      */
-    public static int resetTerminalRuns(String payloadType, String excludePayloadType) {
+    public static int resetTerminalRuns(Scope scope) {
         var em = JPA.em();
         // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
         var idQ = em.createQuery("SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
-                        + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
+                        + scopeWhere("m.taskRun.task", scope))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
-        bindPayloadType(idQ, payloadType, excludePayloadType);
+        bindScope(idQ, scope);
         @SuppressWarnings("unchecked")
         List<Long> transcriptIds = idQ.getResultList();
 
         SubagentRegistry.deleteRunsStartedBy(
-                "r.status <> :running" + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType),
+                "r.status <> :running" + scopeWhere(RUN_TASK_ALIAS, scope),
                 q -> {
                     q.setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
-                    bindPayloadType(q, payloadType, excludePayloadType);
+                    bindScope(q, scope);
                 });
 
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
-                        + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
+                        + scopeWhere("m.taskRun.task", scope))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
-        bindPayloadType(msgQ, payloadType, excludePayloadType);
+        bindScope(msgQ, scope);
         msgQ.executeUpdate();
 
         var runQ = em.createQuery("DELETE FROM TaskRun r WHERE r.status <> :running"
-                        + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType))
+                        + scopeWhere(RUN_TASK_ALIAS, scope))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
-        bindPayloadType(runQ, payloadType, excludePayloadType);
+        bindScope(runQ, scope);
         int deleted = runQ.executeUpdate();
         em.flush();
         LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
@@ -151,28 +147,45 @@ public final class TaskStatsService {
     }
 
     /**
-     * JPQL fragment scoping an aggregate by payloadType, mirroring the
-     * {@code GET /api/tasks} list filter: {@code payloadType} pins to one kind
-     * (e.g. reminder); {@code excludePayloadType} excludes it while still
-     * matching the NULL payloadType of ordinary automation tasks. {@code alias}
-     * is the entity path to the column ({@code "t"} for Task, {@code "r.task"}
-     * for a TaskRun join).
+     * What an aggregate counts: {@code payloadType} pins to one kind (e.g. reminder), and
+     * {@code excludePayloadType} excludes it while still matching the NULL payloadType of ordinary
+     * automation tasks, mirroring the {@code GET /api/tasks} list filter. {@code agentId} pins to one
+     * agent's tasks, as an agent's own stats are (JF-284). Null or blank counts everything.
      */
-    private static String payloadTypeWhere(String alias, String payloadType, String excludePayloadType) {
+    public record Scope(@Nullable String payloadType, @Nullable String excludePayloadType, @Nullable Long agentId) {
+
+        /** Every agent's tasks, by payload type alone. */
+        public static Scope ofPayload(@Nullable String payloadType, @Nullable String excludePayloadType) {
+            return new Scope(payloadType, excludePayloadType, null);
+        }
+    }
+
+    /** The JPQL fragment for {@code scope}; {@code alias} is the path to the Task ({@code "t"}, or {@code "r.task"} for a run). */
+    private static String scopeWhere(String alias, Scope scope) {
         var sb = new StringBuilder();
-        if (payloadType != null && !payloadType.isBlank()) {
+        if (hasText(scope.payloadType())) {
             sb.append(" AND ").append(alias).append(".payloadType = :pt");
         }
-        if (excludePayloadType != null && !excludePayloadType.isBlank()) {
+        if (hasText(scope.excludePayloadType())) {
             sb.append(" AND (").append(alias).append(".payloadType <> :ept OR ")
               .append(alias).append(".payloadType IS NULL)");
+        }
+        if (scope.agentId() != null) {
+            sb.append(" AND ").append(alias).append(".agent.id = :agentId");
         }
         return sb.toString();
     }
 
-    private static void bindPayloadType(Query q,
-                                        String payloadType, String excludePayloadType) {
+    private static void bindScope(Query q, Scope scope) {
+        var payloadType = scope.payloadType();
         if (payloadType != null && !payloadType.isBlank()) q.setParameter("pt", payloadType);
+        var excludePayloadType = scope.excludePayloadType();
         if (excludePayloadType != null && !excludePayloadType.isBlank()) q.setParameter("ept", excludePayloadType);
+        var agentId = scope.agentId();
+        if (agentId != null) q.setParameter("agentId", agentId);
+    }
+
+    private static boolean hasText(@Nullable String value) {
+        return value != null && !value.isBlank();
     }
 }

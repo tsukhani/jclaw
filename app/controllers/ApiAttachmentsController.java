@@ -6,6 +6,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.AttachmentService;
+import utils.ApiResponses;
 import utils.HttpKeys;
 import utils.ServedFiles;
 
@@ -13,8 +14,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 
 /**
  * Download endpoint for persisted chat-message attachments (JCLAW-279).
@@ -35,12 +36,15 @@ public class ApiAttachmentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Stream the raw bytes of a persisted chat-message attachment (inline for media, attachment otherwise)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "an attachment in another agent's conversation is refused with agent_scope (JF-284)")
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         // JCLAW-209: a deleted attachment's bytes are gone from the workspace; the
         // row is retained only as a record, so there is nothing to stream.
         if (att == null || att.deleted) notFound();
+        if (!RequestPrincipal.mayReachAgentScopedRow(att.message.conversation.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Attachment " + uuid + " belongs to another agent.");
+        }
 
         // storagePath is workspace-relative and looks like
         // "<agentName>/attachments/<conversationId>/<uuid>.<ext>". Strip the

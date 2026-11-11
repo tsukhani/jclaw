@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import controllers.RequestPrincipal;
 import models.Agent;
 import models.Task;
@@ -153,7 +154,7 @@ class ApiTasksControllerRunTest extends FunctionalTest {
     }
 
     @Test
-    void anotherAgentRunningTheTaskIsNotToldHowItEnds() {
+    void anotherAgentCannotRunTheTaskOrBeToldHowItEnds() {
         var ownerId = seedAgent();
         var otherId = seedAgent("task-run-other-agent");
         var taskId = seedTask(ownerId, "someone-elses", "every 1h");
@@ -161,7 +162,9 @@ class ApiTasksControllerRunTest extends FunctionalTest {
 
         var resp = asAgent(() -> POST(agentRequest(otherId, otherChat), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
 
-        assertIsOk(resp);
+        assertStatus(403, resp);
+        assertEquals("Task " + taskId + " belongs to another agent.",
+                JsonParser.parseString(getContent(resp)).getAsJsonObject().get("message").getAsString());
         assertNull(resp.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
         assertNull(committed(() -> ((Task) Task.findById(taskId)).reportConversationId));
     }

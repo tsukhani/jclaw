@@ -2,6 +2,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import controllers.ApiTaskSearchController;
+import controllers.RequestPrincipal;
 import models.MessageRole;
 import models.Task;
 import models.TaskRun;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.DB;
+import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import tools.JClawApiTool;
@@ -203,6 +205,44 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
 
     private static String encoded(String query) {
         return URLEncoder.encode(query, StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void anAgentFindsOnlyItsOwnTasksTranscriptsAndAnotherAgentsHitsTakeNoPlaceOnThePage() {
+        var mine = seedAgent("search-scope-own");
+        var theirs = seedAgent("search-scope-theirs");
+        seedTranscript(seedTask(mine, "own-search-task"), "the quarterly zephyr report for its owner");
+        // Shorter, so they rank above the owner's hit: a filter applied after the limit would
+        // leave the owner's one-hit page empty.
+        seedTranscript(seedTask(theirs, "their-search-task"), "zephyr one", "zephyr two", "zephyr three");
+
+        assertEquals(List.of("the quarterly zephyr report for its owner"), agentSnippets(mine, "zephyr&limit=1"));
+        assertEquals(List.of("zephyr one", "zephyr three", "zephyr two"),
+                agentSnippets(theirs, "zephyr").stream().sorted().toList());
+        assertEquals(4, snippets("zephyr").size(), "the operator searches every agent's transcripts");
+    }
+
+    /** The snippets {@code agentId} gets for {@code query}, sent as jclaw_api sends it. */
+    private List<String> agentSnippets(Long agentId, String query) {
+        clearCookies();
+        try {
+            var request = newRequest();
+            request.headers.put("authorization",
+                    new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+            request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                    new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+            var resp = GET(request, "/api/task-runs/search?q=" + query);
+            assertIsOk(resp);
+            var out = new ArrayList<String>();
+            for (var hit : JsonParser.parseString(getContent(resp)).getAsJsonArray()) {
+                out.add(((JsonObject) hit).get("snippet").getAsString());
+            }
+            return out;
+        } finally {
+            // A bearer call answers with a cookie carrying the agent principal; the next request is the operator's.
+            clearCookies();
+            login();
+        }
     }
 
     @Test

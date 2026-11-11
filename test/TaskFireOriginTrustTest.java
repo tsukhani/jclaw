@@ -271,7 +271,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         // the jclaw_api tool sends. Stamping "web" for every POST would reopen the hole
         // through this door — an agent could schedule its own ungated exec.
         var agent = unboundAgent("rest-origin-agent");
-        var taskId = asAgent(() -> createTaskViaApi(agentRequest(), agent, "rest-origin-agent-task"));
+        var taskId = asAgent(() -> createTaskViaApi(agentRequest(agent), agent, "rest-origin-agent-task"));
 
         var origin = originChannelOf(taskId);
         assertFalse(ChannelOriginTrust.isOperatorOrigin(origin),
@@ -390,8 +390,8 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     void anAgentsRestTaskIsMarkedOnlyWhenItsCallWasStamped() {
         var agent = unboundAgent("owner-mark-rest-agent");
 
-        var stamped = asAgent(() -> createTaskViaApi(agentRequestFromTheOwnersDm(), agent, "owner-mark-stamped"));
-        var unstamped = asAgent(() -> createTaskViaApi(agentRequestFrom("telegram"), agent, "owner-mark-unstamped"));
+        var stamped = asAgent(() -> createTaskViaApi(agentRequestFromTheOwnersDm(agent), agent, "owner-mark-stamped"));
+        var unstamped = asAgent(() -> createTaskViaApi(agentRequestFrom(agent, "telegram"), agent, "owner-mark-unstamped"));
 
         assertEquals(Boolean.TRUE, ownerReadsAloneOf(stamped));
         assertNull(ownerReadsAloneOf(unstamped));
@@ -402,7 +402,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         var agent = unboundAgent("owner-mark-rest-patch");
         var taskId = persistTask(agent, "owner-mark-rest-patch-task", "telegram", Boolean.TRUE);
 
-        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom("telegram"), taskId)));
+        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom(agent, "telegram"), taskId)));
 
         assertNull(ownerReadsAloneOf(taskId));
     }
@@ -410,7 +410,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     @Test
     void agentCreatedRestTaskFromTheOperatorsWebTurnKeepsOperatorTrust() {
         var agent = unboundAgent("rest-origin-agent-web");
-        var taskId = asAgent(() -> createTaskViaApi(agentRequestFrom(WEB), agent, "rest-origin-agent-web-task"));
+        var taskId = asAgent(() -> createTaskViaApi(agentRequestFrom(agent, WEB), agent, "rest-origin-agent-web-task"));
 
         assertEquals(WEB, originChannelOf(taskId),
                 "the operator asked for this task in their own web chat; the door the agent used must not matter");
@@ -419,7 +419,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     @Test
     void agentCreatedRestTaskFromAnUntrustedTurnRecordsThatTurn() {
         var agent = unboundAgent("rest-origin-agent-tg");
-        var taskId = asAgent(() -> createTaskViaApi(agentRequestFrom("telegram"), agent, "rest-origin-agent-tg-task"));
+        var taskId = asAgent(() -> createTaskViaApi(agentRequestFrom(agent, "telegram"), agent, "rest-origin-agent-tg-task"));
 
         assertEquals("telegram", originChannelOf(taskId));
         assertEquals(Decision.ABORT,
@@ -432,7 +432,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         var agent = unboundAgent("rest-patch-web");
         var taskId = persistTask(agent, "rest-patch-web-task", WEB);
 
-        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom(WEB), taskId)));
+        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom(agent, WEB), taskId)));
 
         assertEquals(WEB, originChannelOf(taskId),
                 "editing a task from the operator's web chat through jclaw_api must not cost it web trust");
@@ -443,7 +443,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         var agent = unboundAgent("rest-patch-tg");
         var taskId = persistTask(agent, "rest-patch-tg-task", WEB);
 
-        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom("telegram"), taskId)));
+        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom(agent, "telegram"), taskId)));
 
         assertEquals("telegram", originChannelOf(taskId));
     }
@@ -453,7 +453,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         var agent = unboundAgent("rest-patch-bare");
         var taskId = persistTask(agent, "rest-patch-bare-task", WEB);
 
-        assertIsOk(asAgent(() -> patchViaApi(agentRequest(), taskId)));
+        assertIsOk(asAgent(() -> patchViaApi(agentRequest(agent), taskId)));
 
         assertNull(originChannelOf(taskId),
                 "a bearer call that names no turn is not the operator; the task must fall to UNKNOWN");
@@ -480,7 +480,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         var agent = unboundAgent("trust-agent");
         var taskId = persistTask(agent, "trust-agent-task", null);
 
-        var response = asAgent(() -> POST(agentRequestFrom(WEB), "/api/tasks/" + taskId + "/trust",
+        var response = asAgent(() -> POST(agentRequestFrom(agent, WEB), "/api/tasks/" + taskId + "/trust",
                 "application/json", "{}"));
 
         assertStatus(403, response);
@@ -498,24 +498,28 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     }
 
     /** A request carrying the internal bearer token — indistinguishable from a jclaw_api call. */
-    private static Http.Request agentRequest() {
+    /** A bearer request stamped with the calling agent, as {@code JClawApiTool} sends it: a task route
+     *  reaches only the caller's own tasks (JF-284), and these tasks are {@code agent}'s. */
+    private static Http.Request agentRequest(Agent agent) {
         var request = newRequest();
         var token = AuthFixture.seedBearerToken();
         request.headers.put("authorization", new Http.Header("authorization", "Bearer " + token));
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agent.id)));
         return request;
     }
 
     /** A bearer request as {@code JClawApiTool} builds it on the owner's own Telegram DM turn. */
-    private static Http.Request agentRequestFromTheOwnersDm() {
-        var request = agentRequestFrom("telegram");
+    private static Http.Request agentRequestFromTheOwnersDm(Agent agent) {
+        var request = agentRequestFrom(agent, "telegram");
         request.headers.put(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER,
                 new Http.Header(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER, "true"));
         return request;
     }
 
     /** A bearer request stamped with the calling turn's {@code origin}, exactly as {@code JClawApiTool} builds it. */
-    private static Http.Request agentRequestFrom(String origin) {
-        var request = agentRequest();
+    private static Http.Request agentRequestFrom(Agent agent, String origin) {
+        var request = agentRequest(agent);
         request.headers.put(RequestPrincipal.CALLER_ORIGIN_HEADER,
                 new Http.Header(RequestPrincipal.CALLER_ORIGIN_HEADER, origin));
         return request;

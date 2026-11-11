@@ -408,9 +408,11 @@ class CapabilityRulesTest extends UnitTest {
      * The two ways an {@code OWN_ONLY} action can honour its level. A row route refuses one it
      * does not own; a list route has no row to refuse, so it pins the query to the caller
      * instead — a list that 403s on someone else's rows would have had to read them first.
+     * {@code scopedAgentId} is that pin, shared by every list route, and pins through
+     * {@code callingAgent}.
      */
     private static final Set<String> OWNERSHIP_CHECKS =
-            Set.of("mayReachAgentScopedRow", "callingAgent");
+            Set.of("mayReachAgentScopedRow", "callingAgent", "scopedAgentId");
 
     private static final Set<String> MUTATING_VERBS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String PRINCIPAL_CLASS = "controllers.RequestPrincipal";

@@ -243,7 +243,7 @@ public class ApiConversationsController extends Controller {
         // for the section above it, so no row can appear in both.
         var filter = new JpqlFilter()
                 .eq(CHANNEL_TYPE, channel)
-                .eq("agent.id", scopedAgentId(agentId))
+                .eq("agent.id", RequestPrincipal.scopedAgentId(agentId))
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null)
                 .eq(STARRED, starred)
@@ -980,7 +980,7 @@ public class ApiConversationsController extends Controller {
     @AgentAccess(value = OWN_ONLY,
             reason = "the distinct set is taken over the caller's own conversations (JCLAW-1270)")
     public static void listConversationChannels() {
-        var scoped = scopedAgentId(null);
+        var scoped = RequestPrincipal.scopedAgentId(null);
         var jpql = "SELECT DISTINCT c.channelType FROM Conversation c"
                 + (scoped == null ? "" : " WHERE c.agent.id = :agentId")
                 + " ORDER BY c.channelType";
@@ -1192,22 +1192,6 @@ public class ApiConversationsController extends Controller {
     }
 
     // --- Helpers ---
-
-    /**
-     * Pin a list query to the caller's own conversations rather than refusing one that names
-     * someone else: a list is not a row, so there is nothing to 403. The operator and {@code main}
-     * get {@code requested} unchanged.
-     */
-    private static @Nullable Long scopedAgentId(@Nullable Long requested) {
-        if (!RequestPrincipal.isAgentOriginated()) return requested;
-        var caller = RequestPrincipal.callingAgent();
-        if (caller == null) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "This request is agent-originated but names no agent, so it cannot be scoped.");
-            throw ApiResponses.unreachable();
-        }
-        return caller.isMain() ? requested : caller.id;
-    }
 
     /**
      * Load the addressed conversation or end the request — 404 when it does not exist, 403 when

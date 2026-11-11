@@ -25,7 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -104,12 +104,15 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
     @Operation(summary = "Paginated TaskRun history for one task (startedAt DESC), 404 if task missing")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "a task another agent owns is refused with agent_scope (JF-284)")
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = TaskService.findById(id);
         if (task == null) {
             notFound();
             throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(task.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Task " + id + " belongs to another agent.");
         }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
@@ -131,13 +134,9 @@ public class ApiTaskRunsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
     @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing; "
             + "where a GET /api/task-runs/search hit's full message text comes from")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "a run of another agent's task is refused with agent_scope (JF-284)")
     public static void runMessages(Long id) {
-        TaskRun run = TaskService.findRunById(id);
-        if (run == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        TaskRun run = requireRun(id);
 
         List<TaskRunMessage> rows = TaskRunQueryService.messagesForRun(run);
 
@@ -184,12 +183,29 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
     @Operation(summary = "Recent TaskRuns across all tasks for the calendar/timeline (range via from/to or rolling last hours)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "pinned to the caller's own tasks before the query runs (JF-284)")
     public static void recentRuns(Integer hours, Integer limit, String from, String to) {
         int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         var window = resolveRunWindow(hours, from, to);
-        List<TaskRun> rows = TaskRunQueryService.recentRuns(window.since(), window.until(), lim);
+        List<TaskRun> rows = TaskRunQueryService.recentRuns(window.since(), window.until(), lim,
+                RequestPrincipal.scopedAgentId(null));
         renderJSON(gson.toJson(rows.stream().map(RecentRunView::of).toList()));
+    }
+
+    /**
+     * The addressed run, or the request ends: 404 when it does not exist, 403 when its task belongs
+     * to another agent. {@code main} reaches every agent's runs; nothing reaches across (JF-284).
+     */
+    private static TaskRun requireRun(Long id) {
+        TaskRun run = TaskService.findRunById(id);
+        if (run == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(run.task != null ? run.task.agent : null)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Task run " + id + " belongs to another agent.");
+        }
+        return run;
     }
 
     /**
@@ -233,13 +249,9 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
     @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
-    @AgentAccess(value = OPEN, reason = "cooperative cancel of a run; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "cooperative cancel of a run of a task the caller owns (JF-284)")
     public static void cancelRun(Long runId) {
-        TaskRun run = TaskService.findRunById(runId);
-        if (run == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        TaskRun run = requireRun(runId);
         if (run.status != TaskRun.Status.RUNNING) {
             // Only an in-flight run can be canceled; a terminal run has nothing
             // to stop. (S2259: notFound() above halts on null, so run is non-null.)

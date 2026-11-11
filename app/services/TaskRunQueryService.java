@@ -57,15 +57,21 @@ public final class TaskRunQueryService {
      * Recent TaskRuns across all tasks for the calendar/timeline, most-recent
      * first (startedAt DESC), capped at {@code limit}. A non-null {@code until}
      * bounds the window ({@code since <= startedAt < until}); a null
-     * {@code until} is the rolling-window case (no upper bound).
+     * {@code until} is the rolling-window case (no upper bound). A non-null {@code agentId} keeps
+     * that agent's tasks' runs only.
      */
-    public static List<TaskRun> recentRuns(Instant since, @Nullable Instant until, int limit) {
-        var query = (until != null)
-                ? TaskRun.find("startedAt >= ?1 AND startedAt < ?2 ORDER BY startedAt DESC", since, until)
-                : TaskRun.find("startedAt >= ?1 ORDER BY startedAt DESC", since);
-        @SuppressWarnings("unchecked")
-        List<TaskRun> rows = (List<TaskRun>) (List<?>) query.fetch(limit);
-        return rows;
+    public static List<TaskRun> recentRuns(Instant since, @Nullable Instant until, int limit,
+                                           @Nullable Long agentId) {
+        var jpql = new StringBuilder("SELECT r FROM TaskRun r WHERE r.startedAt >= :since");
+        if (until != null) jpql.append(" AND r.startedAt < :until");
+        if (agentId != null) jpql.append(" AND r.task.agent.id = :agentId");
+        jpql.append(" ORDER BY r.startedAt DESC");
+        var query = JPA.em().createQuery(jpql.toString(), TaskRun.class)
+                .setParameter("since", since)
+                .setMaxResults(limit);
+        if (until != null) query.setParameter("until", until);
+        if (agentId != null) query.setParameter("agentId", agentId);
+        return query.getResultList();
     }
 
     /**

@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 
 import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -65,12 +66,15 @@ public class ApiSchedulingMetaController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "a task another agent owns is refused with agent_scope (JF-284)")
     public static void deliveryAdvisory(Long id) {
         Task task = TaskService.findById(id);
         if (task == null) {
             notFound();
             throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(task.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Task " + id + " belongs to another agent.");
         }
         var advisory = DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
         var payload = new LinkedHashMap<String, Object>();

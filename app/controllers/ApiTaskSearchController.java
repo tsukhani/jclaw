@@ -15,7 +15,7 @@ import services.search.MessageSearch;
 import services.search.SearchSnippet;
 import utils.ApiResponses;
 
-import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -72,7 +72,8 @@ public class ApiTaskSearchController extends Controller {
      * A hit holds every word of the query, each matched by its beginning
      * (a one-character word exactly). It is no QueryParser grammar: quotes and
      * {@code *} are dropped, AND/OR/NOT are words a hit must hold, and there is
-     * no phrase match.
+     * no phrase match. An agent searches its own tasks' runs only; the operator
+     * and {@code main} search every agent's (JF-284).
      *
      * <p>Empty {@code q} returns {@code []} — the search facade
      * intentionally non-exceptional on empty input so the UI can render
@@ -85,14 +86,17 @@ public class ApiTaskSearchController extends Controller {
     @Operation(summary = "Full-text search task-run transcripts (q, limit up to 50); each hit carries a snippet "
             + "around the match with task/run context, and the message's full text comes from "
             + "GET /api/task-runs/{id}/messages")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "hits are pinned to the caller's own task runs before the limit (JF-284)")
     public static void searchTranscripts(String q, Integer limit) {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, MAX_LIMIT) : MAX_LIMIT;
+        var scoped = RequestPrincipal.scopedAgentId(null);
         if (q == null || q.isBlank()) {
             renderJSON("[]");
         }
         try {
-            var hits = MessageSearch.search(q, effectiveLimit);
+            var hits = scoped == null
+                    ? MessageSearch.search(q, effectiveLimit)
+                    : MessageSearch.searchForAgent(q, scoped, effectiveLimit);
             renderJSON(gson.toJson(hits.stream().map(m -> TranscriptSearchHit.of(m, q)).toList()));
         } catch (Throwable e) {
             // Error subclasses escape a narrower catch as a generic Play 500 with no diagnostic; log the full stack.

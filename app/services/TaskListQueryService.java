@@ -39,7 +39,7 @@ public final class TaskListQueryService {
      */
     public record TaskListResult(List<Task> tasks, long total, boolean ftsEmpty) {}
 
-    public static TaskListResult query(String status, String type, Long agentId, String q,
+    public static TaskListResult query(String status, String type, @Nullable Long agentId, String q,
                                        String payloadType, String excludePayloadType,
                                        Integer limit, Integer offset) {
         // PAUSED is a display status, not a Task.Status: pause sets a flag and leaves

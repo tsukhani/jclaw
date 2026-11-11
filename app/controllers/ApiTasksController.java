@@ -40,8 +40,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -209,11 +209,11 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
     @Operation(summary = "List tasks filtered by status/type/agent/payloadType and full-text q, paginated with X-Total-Count; "
             + "an agent's rows carry a descriptionPreview in place of description, and the whole task comes from GET /api/tasks/{id}")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "the agent filter is pinned to the caller before the query runs (JF-284)")
     public static void list(String status, String type, Long agentId, String q,
                              String payloadType, String excludePayloadType,
                              Integer limit, Integer offset) {
-        var result = TaskListQueryService.query(status, type, agentId, q,
+        var result = TaskListQueryService.query(status, type, RequestPrincipal.scopedAgentId(agentId), q,
                 payloadType, excludePayloadType, limit, offset);
 
         // Empty-FTS short-circuit: a non-blank q that matched nothing renders
@@ -256,13 +256,9 @@ public class ApiTasksController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Get one task by id, its description whole")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "a task another agent owns is refused with agent_scope (JF-284)")
     public static void get(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         var ids = List.of(task.id);
         renderJSON(gson.toJson(TaskView.of(task,
                 TaskRunQueryService.lastFiredAtByTask(ids).get(task.id),
@@ -273,7 +269,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TaskRequest.class)))
     @Operation(summary = "Create a task from a JSON body (agentId, name, schedule + optional fields) and register it with the scheduler")
-    @AgentAccess(value = OPEN, reason = "task_manager is the scoped agent path for the same operation")
+    @AgentAccess(value = OWN_ONLY, reason = "a task for another agent is refused with agent_scope (JF-284)")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -283,6 +279,10 @@ public class ApiTasksController extends Controller {
         rejectUnbuiltFields(body);
 
         var agent = requireAgentFromBody(body);
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "agentId names another agent; an agent creates tasks for itself only.");
+        }
         var name = requireTaskName(body);
         var spec = requireScheduleSpec(body);
         rejectInvalidDelivery(body);
@@ -302,6 +302,22 @@ public class ApiTasksController extends Controller {
                         .formatted(saved.name, saved.id, saved.type));
 
         renderJSON(gson.toJson(TaskView.of(saved)));
+    }
+
+    /**
+     * The addressed task, or the request ends: 404 when it does not exist, 403 when another agent
+     * owns it. {@code main} reaches every agent's tasks; nothing reaches across (JF-284).
+     */
+    private static Task requireTask(Long id) {
+        Task task = TaskService.findById(id);
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(task.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Task " + id + " belongs to another agent.");
+        }
+        return task;
     }
 
     /**
@@ -437,13 +453,9 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TaskRequest.class)))
     @Operation(summary = "Patch a task by id from a JSON body of changed fields, re-registering the scheduler when the schedule changes")
-    @AgentAccess(value = OPEN, reason = "the task_manager tool is the scoped agent path to the same rows; DangerousActionGate bounds the mutating verb")
+    @AgentAccess(value = OWN_ONLY, reason = "a task another agent owns is refused with agent_scope (JF-284); DangerousActionGate bounds the mutating verb")
     public static void update(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -559,13 +571,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Cancel a PENDING or ACTIVE task by id (sets status CANCELLED and unschedules)")
-    @AgentAccess(value = OPEN, reason = "schedule control; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "schedule control on a task the caller owns (JF-284)")
     public static void cancel(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
@@ -597,13 +605,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Hard-delete a task by id along with its runs, messages, notifications, and scheduler row")
-    @AgentAccess(value = OPEN, reason = "removes a task the agent can equally create")
+    @AgentAccess(value = OWN_ONLY, reason = "removes a task the caller owns (JF-284)")
     public static void delete(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
 
         var agentName = task.agent != null ? task.agent.name : null;
         var taskName = task.name;
@@ -619,13 +623,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Pause a PENDING or ACTIVE task by id so it won't fire until resumed")
-    @AgentAccess(value = OPEN, reason = "schedule control; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "schedule control on a task the caller owns (JF-284)")
     public static void pause(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         // Pause only applies to live tasks (PENDING one-shot waiting / ACTIVE
         // recurring ongoing); pausing a terminal Task has no effect since the
         // scheduler row is already gone.
@@ -643,13 +643,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Resume a paused PENDING or ACTIVE task by id so it fires on schedule again")
-    @AgentAccess(value = OPEN, reason = "schedule control; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "schedule control on a task the caller owns (JF-284)")
     public static void resume(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
@@ -670,11 +666,7 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Record the operator origin on a task so its fires run dangerous tools at operator trust")
     @AgentAccess(value = OPERATOR_ONLY, reason = "raises a task's fire-time trust to the operator's")
     public static void trust(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         var previous = task.originChannel;
         task.originChannel = ChannelOriginTrust.WEB;
         task.save();
@@ -701,13 +693,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Re-arm a CANCELLED task's schedule at its next natural fire without firing immediately")
-    @AgentAccess(value = OPEN, reason = "schedule control; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "schedule control on a task the caller owns (JF-284)")
     public static void reenable(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         // Re-enable only applies to a CANCELLED task: reviving a live Task
         // would double-schedule, and reviving a COMPLETED/FAILED one would
         // resurrect a finished fire. Anything else is a client error.
@@ -738,13 +726,9 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped; "
             + "an agent calling from a chat is told there how the run ended")
-    @AgentAccess(value = OPEN, reason = "fires a task the agent can equally create")
+    @AgentAccess(value = OWN_ONLY, reason = "fires a task the caller owns (JF-284)")
     public static void run(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         // TaskExecutionHandler skips a paused task's fire: say so now rather than leave an agent waiting.
         if (task.paused) {
             response.setHeader(RequestPrincipal.AGENT_NOTE_HEADER, TaskRunReports.pausedNote(task.name));
@@ -780,13 +764,9 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Retry a FAILED or LOST task by id (reset retryCount/lastError and re-register to fire now)")
-    @AgentAccess(value = OPEN, reason = "schedule control; task_manager is the scoped agent path")
+    @AgentAccess(value = OWN_ONLY, reason = "schedule control on a task the caller owns (JF-284)")
     public static void retry(Long id) {
-        Task task = TaskService.findById(id);
-        if (task == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Task task = requireTask(id);
         // JCLAW-258 extends retry to accept LOST in addition to FAILED.
         // FAILED: no scheduled_tasks row (it was removed when the failure
         // terminated the previous fire) — register() inserts a fresh row.

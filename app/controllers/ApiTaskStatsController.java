@@ -18,8 +18,8 @@ import utils.AppClock;
 
 import java.time.LocalDate;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -53,8 +53,9 @@ public class ApiTaskStatsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
     @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/paused/active/failed counts, retention days)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "an agent's counts are pinned to its own tasks (JF-284)")
     public static void stats(String payloadType, String excludePayloadType) {
+        var scope = new TaskStatsService.Scope(payloadType, excludePayloadType, RequestPrincipal.scopedAgentId(null));
         var zone = TimezoneResolver.currentDefault();
         var since = LocalDate.ofInstant(AppClock.now(), zone).atStartOfDay(zone).toInstant();
 
@@ -63,11 +64,11 @@ public class ApiTaskStatsController extends Controller {
         // excludePayloadType=reminder so reminder tasks AND their runs never
         // inflate the automation KPIs, and /reminders passes payloadType=reminder
         // for the inverse. Both null/blank counts everything (headless callers).
-        long runsToday = TaskStatsService.countRunsSince(since, null, payloadType, excludePayloadType);
-        long completedToday = TaskStatsService.countRunsSince(since, TaskRun.Status.COMPLETED, payloadType, excludePayloadType);
-        long failedRunsToday = TaskStatsService.countRunsSince(since, TaskRun.Status.FAILED, payloadType, excludePayloadType);
+        long runsToday = TaskStatsService.countRunsSince(since, null, scope);
+        long completedToday = TaskStatsService.countRunsSince(since, TaskRun.Status.COMPLETED, scope);
+        long failedRunsToday = TaskStatsService.countRunsSince(since, TaskRun.Status.FAILED, scope);
 
-        Double avgDurationMs = TaskStatsService.avgCompletedDuration(since, payloadType, excludePayloadType);
+        Double avgDurationMs = TaskStatsService.avgCompletedDuration(since, scope);
 
         long terminalToday = completedToday + failedRunsToday;
         Double successRate = terminalToday > 0
@@ -76,16 +77,16 @@ public class ApiTaskStatsController extends Controller {
 
         var payload = new TaskStatsView(
                 runsToday, successRate, avgDurationMs,
-                TaskStatsService.countTasks(Task.Status.PENDING, false, payloadType, excludePayloadType),
+                TaskStatsService.countTasks(Task.Status.PENDING, false, scope),
                 // RUNNING is the only live-execution stat that lives on the
                 // TaskRun, not the Task: count RUNNING runs — the same signal
                 // the UI's runningRunId uses.
-                TaskStatsService.countRunningRuns(payloadType, excludePayloadType),
+                TaskStatsService.countRunningRuns(scope),
                 // Pending/Active pass paused=false so a suspended schedule is
                 // counted once, under Paused, instead of twice.
-                TaskStatsService.countPausedTasks(payloadType, excludePayloadType),
-                TaskStatsService.countTasks(Task.Status.ACTIVE, false, payloadType, excludePayloadType),
-                TaskStatsService.countTasks(Task.Status.FAILED, null, payloadType, excludePayloadType),
+                TaskStatsService.countPausedTasks(scope),
+                TaskStatsService.countTasks(Task.Status.ACTIVE, false, scope),
+                TaskStatsService.countTasks(Task.Status.FAILED, null, scope),
                 // JCLAW-259: carry the effective retention TTL so the page
                 // header renders it without a separate config fetch (which
                 // 404s when the key is unset). Resolved server-side so the
@@ -108,7 +109,7 @@ public class ApiTaskStatsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "deletes terminal task runs and their transcripts -- the operator's record of what ran")
     public static void resetStats(String payloadType, String excludePayloadType) {
-        int deleted = TaskStatsService.resetTerminalRuns(payloadType, excludePayloadType);
+        int deleted = TaskStatsService.resetTerminalRuns(TaskStatsService.Scope.ofPayload(payloadType, excludePayloadType));
 
         EventLogger.info("TASK_MGMT_RESET_STATS", null, null,
                 "Reset task stats: deleted %d terminal task run(s)".formatted(deleted));

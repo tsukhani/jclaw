@@ -3,10 +3,13 @@ package services.search;
 import models.TaskRunMessage;
 import org.jspecify.annotations.Nullable;
 import play.db.DB;
+import play.db.jpa.JPA;
 import services.EventLogger;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 
@@ -73,6 +76,35 @@ public final class MessageSearch {
         var current = repo;
         if (current == null) return List.of();
         return current.search(query, limit);
+    }
+
+    /**
+     * Candidates an agent's own transcript search filters, four times the conversation list's
+     * 500 (JCLAW-1064): the filter drops every other agent's hits, so a word common in their
+     * transcripts would otherwise leave this agent's page short.
+     */
+    static final int AGENT_SEARCH_CANDIDATES = 2_000;
+
+    /**
+     * {@link #search} narrowed to the task runs of {@code agentId}'s tasks (JF-284). The agent
+     * filter runs in SQL over the top {@link #AGENT_SEARCH_CANDIDATES} candidates and before
+     * {@code limit}, so another agent's hits never appear or take a place on the page; a query
+     * whose matches for this agent rank below that many of every agent's under-reports, as the
+     * conversation list's {@code q} filter does. Hits keep the search's order.
+     */
+    public static List<TaskRunMessage> searchForAgent(String query, long agentId, int limit) throws IOException {
+        var ids = searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, query, AGENT_SEARCH_CANDIDATES);
+        if (ids.isEmpty()) return List.of();
+        var rank = new HashMap<Long, Integer>();
+        for (int i = 0; i < ids.size(); i++) rank.putIfAbsent(ids.get(i), i);
+        return JPA.em().createQuery("SELECT m FROM TaskRunMessage m "
+                                + "WHERE m.id IN :ids AND m.taskRun.task.agent.id = :agentId", TaskRunMessage.class)
+                .setParameter("ids", ids)
+                .setParameter("agentId", agentId)
+                .getResultList().stream()
+                .sorted(Comparator.comparingInt(m -> rank.getOrDefault(m.id, Integer.MAX_VALUE)))
+                .limit(limit)
+                .toList();
     }
 
     /**

@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 import play.mvc.Scope;
 import services.InternalApiTokenService;
+import utils.ApiResponses;
 import utils.ChannelOriginTrust;
 
 /**
@@ -194,5 +195,27 @@ public final class RequestPrincipal {
      */
     public static boolean mayReachAgentScopedRow(@Nullable Agent owner) {
         return mayReachRow(isAgentOriginated(), callingAgent(), owner);
+    }
+
+    /**
+     * The agent a list query is pinned to: {@code requested} for the operator and {@code main}, and
+     * the caller's own id for every other agent, whatever it asked for. A list is not a row, so
+     * there is nothing to 403; an agent-originated request that names no agent is refused, since
+     * it cannot be scoped (JCLAW-1270, JF-284).
+     */
+    public static @Nullable Long scopedAgentId(@Nullable Long requested) {
+        if (!isAgentOriginated()) return requested;
+        var caller = callingAgent();
+        if (caller == null) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "This request is agent-originated but names no agent, so it cannot be scoped.");
+            throw ApiResponses.unreachable();
+        }
+        return scopedAgentId(caller, requested);
+    }
+
+    /** The policy half of {@link #scopedAgentId(Long)} for an identified agent, free of the request. */
+    public static @Nullable Long scopedAgentId(Agent caller, @Nullable Long requested) {
+        return caller.isMain() ? requested : caller.id;
     }
 }
