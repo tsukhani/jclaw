@@ -24,7 +24,8 @@ import java.util.concurrent.CompletableFuture;
  * <ol>
  *   <li>The requesting code calls {@link #request} with the chat to prompt,
  *       the bound user's Telegram id (for gating), and a human-readable
- *       prompt. The service renders approve/deny buttons via
+ *       prompt, in as many messages as it needs. The service sends them in
+ *       order, renders approve/deny buttons on the last via
  *       {@link TelegramChannel#sendMessageWithKeyboard} and registers a
  *       pending entry keyed by a fresh approval id.</li>
  *   <li>The user taps a button. {@link TelegramCallbackDispatcher} parses
@@ -53,30 +54,53 @@ public final class TelegramApprovalService {
     private static final ApprovalRegistry<TelegramApprovalCallback.Decision, Outcome> REGISTRY =
             new ApprovalRegistry<>(CHANNEL_NAME, TelegramApprovalService::toOutcome, o -> o == Outcome.DENIED);
 
+    /** Bot API sendMessage text: "1-4096 characters after entities parsing". From the docs, not measured by a send. */
+    public static final int MESSAGE_MAX_CHARS = 4096;
+
     /**
-     * Request an interactive approval. Renders approve/deny buttons in the
-     * given chat and returns a future that completes when the bound user
-     * taps a button (via {@link #resolve}) or {@link #expire} is called.
+     * Request an interactive approval. Sends {@code parts} to the given chat in order, with the approve/deny
+     * buttons on the last, and returns a future that completes when the bound user taps a button (via
+     * {@link #resolve}) or {@link #expire} is called. The buttons only ever follow the whole prompt (JF-294): when a
+     * part is over {@link #MESSAGE_MAX_CHARS} nothing is sent, and when a part fails to send the rest is not sent,
+     * so there is nothing to tap.
      *
      * @param botToken         bot to send through
      * @param chatId           chat to prompt (the bound user's private chat)
      * @param authorizedUserId Telegram user id allowed to resolve this
      *                         approval; a tap from any other user is rejected
-     * @param prompt           HTML-safe prompt text describing what is being
-     *                         approved (e.g. the tool name and arguments)
+     * @param parts            HTML-safe prompt text describing what is being approved (e.g. the tool name and
+     *                         arguments), one entry a message
      * @param allowScopes      when {@code true}, render session/always
      *                         buttons in addition to once; when {@code false}
      *                         render only a single Approve button
-     * @return a future for the {@link Outcome}; empty future-result only if
-     *         the prompt could not be sent (treated as {@link Outcome#EXPIRED})
+     * @return a future for the {@link Outcome}, already {@link Outcome#EXPIRED} when the prompt was not sent whole
      */
     public static CompletableFuture<Outcome> request(String botToken, String chatId,
-                                                     String authorizedUserId, String prompt,
+                                                     String authorizedUserId, List<String> parts,
                                                      boolean allowScopes) {
-        var approvalId = ApprovalRegistry.newId();
         var future = new CompletableFuture<Outcome>();
+        if (parts.isEmpty() || parts.stream().anyMatch(part -> part.length() > MESSAGE_MAX_CHARS)) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    ("Approval prompt for chat %s has no part, or a part over %d characters; nothing sent, "
+                            + "resolving as EXPIRED")
+                            .formatted(chatId, MESSAGE_MAX_CHARS));
+            future.complete(Outcome.EXPIRED);
+            return future;
+        }
+        var channel = TelegramChannel.forToken(botToken);
+        int last = parts.size() - 1;
+        for (int i = 0; i < last; i++) {
+            if (!channel.trySend(chatId, parts.get(i)).ok()) {
+                EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                        "Approval prompt part %d of %d failed to send to chat %s; no buttons shown, resolving as EXPIRED"
+                                .formatted(i + 1, parts.size(), chatId));
+                future.complete(Outcome.EXPIRED);
+                return future;
+            }
+        }
+        var approvalId = ApprovalRegistry.newId();
         var keyboard = keyboard(approvalId, allowScopes);
-        var messageId = TelegramChannel.forToken(botToken).sendMessageWithKeyboard(chatId, prompt, keyboard);
+        var messageId = channel.sendMessageWithKeyboard(chatId, parts.get(last), keyboard);
         if (messageId == null) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Approval prompt failed to send to chat %s; resolving as EXPIRED".formatted(chatId));

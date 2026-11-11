@@ -109,11 +109,12 @@ public final class ParallelToolExecutor {
             return unoffered;
         }
         // JCLAW-382: gate sensitive/irreversible actions through
-        // DangerousActionGate. No-op for non-dangerous tools — it returns
-        // PROCEED before any I/O. Uses the raw (wire-format) name so the
+        // DangerousActionGate. No-op for non-dangerous tools — it answers
+        // null before any I/O. Uses the raw (wire-format) name so the
         // gate's dangerous() lookup matches the registered tool.
-        if (DangerousActionGate.guard(agent, conversationId, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
-            return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
+        var refused = DangerousActionGate.refusal(agent, conversationId, rawName, rawArgs, displayName);
+        if (refused != null) {
+            return ToolRegistry.ToolResult.text(refused);
         }
         // JF-136: the model reads the whole conversation, so once outside text is in it, persona-file edits wait.
         // Only noted here: this may be a call's own thread, whose write would wait on the row the turn holds.
