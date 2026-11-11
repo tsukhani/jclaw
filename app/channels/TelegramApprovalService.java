@@ -62,7 +62,8 @@ public final class TelegramApprovalService {
      * buttons on the last, and returns a future that completes when the bound user taps a button (via
      * {@link #resolve}) or {@link #expire} is called. The buttons only ever follow the whole prompt (JF-294): when a
      * part is over {@link #MESSAGE_MAX_CHARS} nothing is sent, and when a part fails to send the rest is not sent,
-     * so there is nothing to tap.
+     * so there is nothing to tap. No other prompt's messages reach the chat between this prompt's first part and its
+     * buttons ({@link ApprovalRegistry#sending}), a one-message prompt's included.
      *
      * @param botToken         bot to send through
      * @param chatId           chat to prompt (the bound user's private chat)
@@ -78,6 +79,13 @@ public final class TelegramApprovalService {
     public static CompletableFuture<Outcome> request(String botToken, String chatId,
                                                      String authorizedUserId, List<String> parts,
                                                      boolean allowScopes) {
+        return REGISTRY.sending(botToken + "\n" + chatId,
+                () -> send(botToken, chatId, authorizedUserId, parts, allowScopes));
+    }
+
+    private static CompletableFuture<Outcome> send(String botToken, String chatId,
+                                                   String authorizedUserId, List<String> parts,
+                                                   boolean allowScopes) {
         var future = new CompletableFuture<Outcome>();
         if (parts.isEmpty() || parts.stream().anyMatch(part -> part.length() > MESSAGE_MAX_CHARS)) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,

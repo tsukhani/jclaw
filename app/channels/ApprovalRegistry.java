@@ -12,8 +12,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Generic approve/deny lifecycle shared by {@link TelegramApprovalService} and
@@ -78,7 +80,11 @@ final class ApprovalRegistry<D, O> {
      */
     record Resolution<T>(boolean resolved, Optional<T> outcome, String userMessage) {}
 
+    /** How many locks {@link #sending} spreads chats over. The array is fixed, so the chats it sees cannot grow it. */
+    private static final int SEND_STRIPES = 64;
+
     private final ConcurrentHashMap<String, Pending<O>> pending = new ConcurrentHashMap<>();
+    private final ReentrantLock[] sendLocks = new ReentrantLock[SEND_STRIPES];
     private final String channelName;
     private final Function<D, O> toOutcome;
     private final Predicate<O> isDenied;
@@ -92,6 +98,27 @@ final class ApprovalRegistry<D, O> {
         this.channelName = channelName;
         this.toOutcome = toOutcome;
         this.isDenied = isDenied;
+        for (int i = 0; i < SEND_STRIPES; i++) {
+            sendLocks[i] = new ReentrantLock();
+        }
+    }
+
+    /**
+     * Run {@code send}, which sends one prompt's messages from its first part to the one that carries the buttons,
+     * with no other prompt's messages going to {@code chatKey} meanwhile (JF-294). A prompt can be several messages
+     * with its buttons on the last, and two tool calls can prompt one chat at once: were their parts to mix, the
+     * operator could take one call's buttons for the other's arguments. Two chats on one stripe wait on each other
+     * and nothing worse. The caller returns before it waits for the tap: held across that wait, the lock would stop
+     * every later prompt to the chat.
+     */
+    <T> T sending(String chatKey, Supplier<T> send) {
+        var lock = sendLocks[Math.floorMod(chatKey.hashCode(), SEND_STRIPES)];
+        lock.lock();
+        try {
+            return send.get();
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**

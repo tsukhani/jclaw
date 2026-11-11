@@ -66,7 +66,8 @@ public final class SlackApprovalService {
      * with the approve/deny buttons on the last, and returns a future that completes when the authorized user taps
      * a button (via {@link #resolve}) or {@link #expire} runs. The buttons only ever follow the whole prompt
      * (JF-294): when a part is over {@link #SECTION_MAX_CHARS} nothing is posted, and when a part fails to post the
-     * rest is not posted, so there is nothing to tap.
+     * rest is not posted, so there is nothing to tap. No other prompt's messages reach the channel and thread between
+     * this prompt's first part and its buttons ({@link ApprovalRegistry#sending}), a one-message prompt's included.
      *
      * @param botToken         bot to post through
      * @param channelId        Slack channel to prompt in (the conversation's peer)
@@ -81,6 +82,13 @@ public final class SlackApprovalService {
     public static CompletableFuture<Outcome> request(String botToken, String channelId, @Nullable String threadTs,
                                                      String authorizedUserId, List<String> parts,
                                                      boolean allowScopes) {
+        return REGISTRY.sending(botToken + "\n" + channelId + "\n" + (threadTs == null ? "" : threadTs),
+                () -> send(botToken, channelId, threadTs, authorizedUserId, parts, allowScopes));
+    }
+
+    private static CompletableFuture<Outcome> send(String botToken, String channelId, @Nullable String threadTs,
+                                                   String authorizedUserId, List<String> parts,
+                                                   boolean allowScopes) {
         var future = new CompletableFuture<Outcome>();
         if (parts.isEmpty() || parts.stream().anyMatch(part -> part.length() > SECTION_MAX_CHARS)) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,

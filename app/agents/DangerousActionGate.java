@@ -16,8 +16,12 @@ import services.EventLogger;
 import services.Tx;
 import utils.ChannelOriginTrust;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -820,9 +824,9 @@ public final class DangerousActionGate {
 
     /**
      * An approval prompt as the messages it is sent in (JF-294): one when the arguments fit beside the prompt's own
-     * lines, else as many as show them whole, each naming its part, in order. The prompt's own lines stay outside
-     * the argument blocks, so arguments cannot imitate them. {@code unshown} is set, and {@code parts} empty, for a
-     * call that cannot be shown whole.
+     * lines, else as many as show them whole, each naming its part and its call, in order. The prompt's own lines
+     * stay outside the argument blocks, so arguments cannot imitate them. {@code unshown} is set, and {@code parts}
+     * empty, for a call that cannot be shown whole.
      */
     private record Prompt(List<String> parts, @Nullable Unshown unshown) {
 
@@ -844,20 +848,37 @@ public final class DangerousActionGate {
                 return new Prompt(List.of(whole), null);
             }
             var continued = dialect.banner.strip() + ", continued: the " + name + " action\n";
+            var tag = callTag(toolName, args);
             // Room is kept for the longest label a part could carry, so the count need not be known to cut.
-            int kept = dialect.bold(partLabel(999, 999)).length() + 1 + dialect.blockRoom;
+            int kept = dialect.bold(partLabel(999, 999, tag)).length() + 1 + dialect.blockRoom;
             var pieces = split(args, dialect, dialect.messageMax - head.length() - kept,
                     dialect.messageMax - continued.length() - kept);
             var parts = new ArrayList<String>(pieces.size());
             for (int i = 0; i < pieces.size(); i++) {
-                parts.add((i == 0 ? head : continued) + dialect.bold(partLabel(i + 1, pieces.size())) + "\n"
+                parts.add((i == 0 ? head : continued) + dialect.bold(partLabel(i + 1, pieces.size(), tag)) + "\n"
                         + dialect.block(dialect.escape(pieces.get(i))));
             }
             return new Prompt(List.copyOf(parts), null);
         }
 
-        private static String partLabel(int part, int of) {
-            return "Arguments, part " + part + " of " + of + ":";
+        private static String partLabel(int part, int of, String tag) {
+            return "Arguments, part " + part + " of " + of + ", call " + tag + ":";
+        }
+
+        /**
+         * The tag every part of one prompt carries, the part with the buttons included, so the operator can tell
+         * which call a part belongs to when two prompts reach one chat: the first six hex characters of SHA-256
+         * over the tool's name, a newline and the raw arguments.
+         */
+        private static String callTag(@Nullable String toolName, String args) {
+            try {
+                var call = (toolName == null ? "" : toolName) + "\n" + args;
+                var digest = MessageDigest.getInstance("SHA-256").digest(call.getBytes(StandardCharsets.UTF_8));
+                return HexFormat.of().formatHex(digest, 0, 3);
+            } catch (NoSuchAlgorithmException e) {
+                // SHA-256 is mandated by the JLS; unreachable on any conforming JVM.
+                throw new IllegalStateException("SHA-256 unavailable", e);
+            }
         }
 
         /**

@@ -32,7 +32,11 @@ import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,8 +52,8 @@ import java.util.regex.Pattern;
 
 /**
  * JF-294: an approval never covers arguments the operator was not shown. A prompt shows a call's arguments whole, in
- * several messages when one cannot hold them, with the approve and deny controls on the last; a call too long to show
- * is refused unasked; and a part that cannot be sent leaves the call unapproved.
+ * several messages when one cannot hold them, each naming its part and its call, with the approve and deny controls on
+ * the last; a call too long to show is refused unasked; and a part that cannot be sent leaves the call unapproved.
  *
  * <p>Every case reads the prompt as it was sent: Telegram's off the embedded {@link MockTelegramServer}, Slack's off
  * the wire {@link SlackApprovalService#installForTest} puts in Slack's place. The limits are written out here, not
@@ -84,15 +88,15 @@ class ApprovalPromptTest extends UnitTest {
             "🔐 *Approval required*\n\nThe agent wants to run the *danger_tool* action:\n";
     private static final String SLACK_CONTINUED = "🔐 *Approval required*, continued: the *danger_tool* action\n";
 
-    /** A Telegram message holds 4096 characters. {@code <pre></pre>} takes 11, and a part keeps 35 for its label line. */
+    /** A Telegram message holds 4096 characters. {@code <pre></pre>} takes 11, and a part keeps 48 for its label line. */
     private static final int TG_WHOLE = 4096 - TG_HEAD.length() - 11;
-    private static final int TG_FIRST = 4096 - TG_HEAD.length() - 35 - 11;
-    private static final int TG_LATER = 4096 - TG_CONTINUED.length() - 35 - 11;
-    /** A Slack section holds 3000. The fence takes 6; a part keeps 30 for its label line and 1 for a block that would
+    private static final int TG_FIRST = 4096 - TG_HEAD.length() - 48 - 11;
+    private static final int TG_LATER = 4096 - TG_CONTINUED.length() - 48 - 11;
+    /** A Slack section holds 3000. The fence takes 6; a part keeps 43 for its label line and 1 for a block that would
      *  open on a backtick. */
     private static final int SLACK_WHOLE = 3000 - SLACK_HEAD.length() - 6;
-    private static final int SLACK_FIRST = 3000 - SLACK_HEAD.length() - 30 - 7;
-    private static final int SLACK_LATER = 3000 - SLACK_CONTINUED.length() - 30 - 7;
+    private static final int SLACK_FIRST = 3000 - SLACK_HEAD.length() - 43 - 7;
+    private static final int SLACK_LATER = 3000 - SLACK_CONTINUED.length() - 43 - 7;
 
     /** One message of a prompt: its text, and whether the approve and deny controls came with it. */
     private record Sent(String text, boolean controls) {}
@@ -194,8 +198,8 @@ class ApprovalPromptTest extends UnitTest {
 
         assertEquals(List.of(new Sent(TG_HEAD + "<pre>" + atLimit + "</pre>", true)), one);
         assertEquals(4096, one.getFirst().text().length());
-        assertEquals(telegramParts(oneOver.substring(0, TG_FIRST), oneOver.substring(TG_FIRST)), two);
-        assertEquals(36, oneOver.length() - TG_FIRST, "the second part holds what the label line displaced, and the one more");
+        assertEquals(telegramParts(tag(oneOver), oneOver.substring(0, TG_FIRST), oneOver.substring(TG_FIRST)), two);
+        assertEquals(49, oneOver.length() - TG_FIRST, "the second part holds what the label line displaced, and the one more");
     }
 
     @Test
@@ -208,8 +212,8 @@ class ApprovalPromptTest extends UnitTest {
 
         assertEquals(List.of(new Sent(SLACK_HEAD + "```" + atLimit + "```", true)), one);
         assertEquals(3000, one.getFirst().text().length());
-        assertEquals(slackParts(oneOver.substring(0, SLACK_FIRST), oneOver.substring(SLACK_FIRST)), two);
-        assertEquals(32, oneOver.length() - SLACK_FIRST);
+        assertEquals(slackParts(tag(oneOver), oneOver.substring(0, SLACK_FIRST), oneOver.substring(SLACK_FIRST)), two);
+        assertEquals(45, oneOver.length() - SLACK_FIRST);
     }
 
     // ── Three parts ────────────────────────────────────────────────────
@@ -220,11 +224,11 @@ class ApprovalPromptTest extends UnitTest {
 
         var sent = telegramPrompt(guard(DANGEROUS_TOOL, args));
 
-        assertEquals(telegramParts(args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
+        assertEquals(telegramParts(tag(args), args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
                 args.substring(TG_FIRST + TG_LATER)), sent);
         assertEquals(args, telegramArguments(sent));
         assertEquals(List.of(false, false, true), sent.stream().map(Sent::controls).toList());
-        assertEquals(List.of(4092, 4092, 1111), sent.stream().map(s -> s.text().length()).toList());
+        assertEquals(List.of(4092, 4092, 1124), sent.stream().map(s -> s.text().length()).toList());
     }
 
     @Test
@@ -233,11 +237,34 @@ class ApprovalPromptTest extends UnitTest {
 
         var sent = slackPrompt(guard(DANGEROUS_TOOL, args));
 
-        assertEquals(slackParts(args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
+        assertEquals(slackParts(tag(args), args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
                 args.substring(SLACK_FIRST + SLACK_LATER)), sent);
         assertEquals(args, slackArguments(sent));
         assertEquals(List.of(false, false, true), sent.stream().map(Sent::controls).toList());
-        assertEquals(List.of(2995, 2995, 1092), sent.stream().map(s -> s.text().length()).toList());
+        assertEquals(List.of(2995, 2995, 1105), sent.stream().map(s -> s.text().length()).toList());
+    }
+
+    @Test
+    void everyPartOfAPromptNamesItsCallWithOneTagAndAnotherCallCarriesAnother() throws Exception {
+        var one = numbered(TG_FIRST + TG_LATER + 1000);
+        var another = command(TG_FIRST + TG_LATER + 1000);
+        var onSlack = numbered(SLACK_FIRST + SLACK_LATER + 1000);
+        assertEquals(List.of(8924, 6767), List.of(one.length(), onSlack.length()), "premise: the calls these tags were worked out for");
+
+        var first = telegramPrompt(guard(DANGEROUS_TOOL, one));
+        var second = telegramPrompt(guard(DANGEROUS_TOOL, another));
+        var slack = slackPrompt(guard(DANGEROUS_TOOL, onSlack));
+
+        // The first six hex characters of SHA-256 over "danger_tool", a newline and the arguments.
+        assertEquals(List.of("<b>Arguments, part 1 of 3, call 331b71:</b>", "<b>Arguments, part 2 of 3, call 331b71:</b>",
+                "<b>Arguments, part 3 of 3, call 331b71:</b>"), labels(first));
+        assertEquals(List.of("<b>Arguments, part 1 of 3, call da7d26:</b>", "<b>Arguments, part 2 of 3, call da7d26:</b>",
+                "<b>Arguments, part 3 of 3, call da7d26:</b>"), labels(second));
+        assertEquals(List.of("*Arguments, part 1 of 3, call 44197c:*", "*Arguments, part 2 of 3, call 44197c:*",
+                "*Arguments, part 3 of 3, call 44197c:*"), labels(slack));
+        assertEquals(List.of(true, true, true),
+                List.of(first.getLast().controls(), second.getLast().controls(), slack.getLast().controls()),
+                "the part with the buttons carries the tag");
     }
 
     // ── The 12,000-character limit ─────────────────────────────────────
@@ -249,10 +276,10 @@ class ApprovalPromptTest extends UnitTest {
         var telegram = telegramPrompt(guard(DANGEROUS_TOOL, args));
         var slack = slackPrompt(guard(DANGEROUS_TOOL, args));
 
-        assertEquals(telegramParts(args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
+        assertEquals(telegramParts(tag(args), args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
                 args.substring(TG_FIRST + TG_LATER, TG_FIRST + 2 * TG_LATER), args.substring(TG_FIRST + 2 * TG_LATER)),
                 telegram);
-        assertEquals(slackParts(args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
+        assertEquals(slackParts(tag(args), args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
                 args.substring(SLACK_FIRST + SLACK_LATER, SLACK_FIRST + 2 * SLACK_LATER),
                 args.substring(SLACK_FIRST + 2 * SLACK_LATER, SLACK_FIRST + 3 * SLACK_LATER),
                 args.substring(SLACK_FIRST + 3 * SLACK_LATER)), slack);
@@ -355,7 +382,7 @@ class ApprovalPromptTest extends UnitTest {
         var verdict = async(() -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, args));
 
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS));
-        assertEquals(telegramParts(args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
+        assertEquals(telegramParts(tag(args), args.substring(0, TG_FIRST), args.substring(TG_FIRST, TG_FIRST + TG_LATER),
                 args.substring(TG_FIRST + TG_LATER)).subList(0, 2), telegramSent(), "the third part was never tried");
     }
 
@@ -413,7 +440,7 @@ class ApprovalPromptTest extends UnitTest {
         var verdict = async(() -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, args));
 
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS));
-        assertEquals(slackParts(args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
+        assertEquals(slackParts(tag(args), args.substring(0, SLACK_FIRST), args.substring(SLACK_FIRST, SLACK_FIRST + SLACK_LATER),
                 args.substring(SLACK_FIRST + SLACK_LATER)).subList(0, 2),
                 posts.stream().map(ApprovalPromptTest::slackSent).toList(), "the third part was never tried");
     }
@@ -474,28 +501,28 @@ class ApprovalPromptTest extends UnitTest {
         // An & is five characters once escaped, so a part ends short of its room sooner than cut one.
         int first = (TG_FIRST - 12) / 5;
         int second = TG_LATER / 5;
-        assertEquals(List.of(2, 1), List.of((TG_FIRST - 12) % 5, TG_LATER % 5), "premise: neither room is a whole number of them");
+        assertEquals(List.of(4, 3), List.of((TG_FIRST - 12) % 5, TG_LATER % 5), "premise: neither room is a whole number of them");
         var args = "{\"command\":\"" + "&".repeat(first + second + 10) + "\"}";
 
         var sent = telegramPrompt(guard(DANGEROUS_TOOL, args));
 
-        assertEquals(telegramParts("{\"command\":\"" + "&amp;".repeat(first), "&amp;".repeat(second),
+        assertEquals(telegramParts(tag(args), "{\"command\":\"" + "&amp;".repeat(first), "&amp;".repeat(second),
                 "&amp;".repeat(10) + "\"}"), sent);
         assertEquals(args, telegramArguments(sent));
     }
 
     @Test
     void aSlackPartNeverEndsInsideAnEscapedCharacterAndABlockNeverOpensOnABacktick() throws Exception {
-        // A < is four characters once escaped and a backtick two. The second part ends short of its room at a backtick,
-        // so the third would open on one.
+        // A < is four characters once escaped and a backtick two. The first part ends short of its room, and the
+        // second ends on a backtick, so the third would open on one.
         int first = (SLACK_FIRST - 12) / 4;
         int second = (SLACK_LATER - 4) / 2;
-        assertEquals(List.of(2, 1), List.of((SLACK_FIRST - 12) % 4, (SLACK_LATER - 4) % 2), "premise: neither room is a whole number of them");
+        assertEquals(1, (SLACK_FIRST - 12) % 4, "premise: the first room is not a whole number of them");
         var args = "{\"command\":\"" + "<".repeat(first + 1) + "`".repeat(second + 10) + "\"}";
 
         var sent = slackPrompt(guard(DANGEROUS_TOOL, args));
 
-        assertEquals(slackParts("{\"command\":\"" + "&lt;".repeat(first), "&lt;" + ("`" + ZWSP).repeat(second),
+        assertEquals(slackParts(tag(args), "{\"command\":\"" + "&lt;".repeat(first), "&lt;" + ("`" + ZWSP).repeat(second),
                 ZWSP + ("`" + ZWSP).repeat(10) + "\"}"), sent);
         assertEquals(args, slackArguments(sent));
     }
@@ -509,9 +536,9 @@ class ApprovalPromptTest extends UnitTest {
         var telegram = telegramPrompt(guard(DANGEROUS_TOOL, telegramArgs));
         var slack = slackPrompt(guard(DANGEROUS_TOOL, slackArgs));
 
-        assertEquals(telegramParts("{\"command\":\"" + "a".repeat(TG_FIRST - 13), "😀" + "b".repeat(100) + "\"}"),
+        assertEquals(telegramParts(tag(telegramArgs), "{\"command\":\"" + "a".repeat(TG_FIRST - 13), "😀" + "b".repeat(100) + "\"}"),
                 telegram);
-        assertEquals(slackParts("{\"command\":\"" + "a".repeat(SLACK_FIRST - 13), "😀" + "b".repeat(100) + "\"}"), slack);
+        assertEquals(slackParts(tag(slackArgs), "{\"command\":\"" + "a".repeat(SLACK_FIRST - 13), "😀" + "b".repeat(100) + "\"}"), slack);
     }
 
     // ── The Why line ───────────────────────────────────────────────────
@@ -596,24 +623,42 @@ class ApprovalPromptTest extends UnitTest {
         return "{\"command\":\"" + body.substring(0, length - 14) + "\"}";
     }
 
-    /** The Telegram messages of a danger_tool prompt sent in parts, given each part's block as it is sent. */
-    private static List<Sent> telegramParts(String... blocks) {
+    /** The Telegram messages of a danger_tool prompt sent in parts, given its tag and each part's block as it is sent. */
+    private static List<Sent> telegramParts(String tag, String... blocks) {
         var parts = new ArrayList<Sent>();
         for (int i = 0; i < blocks.length; i++) {
             parts.add(new Sent((i == 0 ? TG_HEAD : TG_CONTINUED) + "<b>Arguments, part " + (i + 1) + " of " + blocks.length
-                    + ":</b>\n<pre>" + blocks[i] + "</pre>", i == blocks.length - 1));
+                    + ", call " + tag + ":</b>\n<pre>" + blocks[i] + "</pre>", i == blocks.length - 1));
         }
         return parts;
     }
 
     /** {@link #telegramParts} for Slack. */
-    private static List<Sent> slackParts(String... blocks) {
+    private static List<Sent> slackParts(String tag, String... blocks) {
         var parts = new ArrayList<Sent>();
         for (int i = 0; i < blocks.length; i++) {
             parts.add(new Sent((i == 0 ? SLACK_HEAD : SLACK_CONTINUED) + "*Arguments, part " + (i + 1) + " of "
-                    + blocks.length + ":*\n```" + blocks[i] + "```", i == blocks.length - 1));
+                    + blocks.length + ", call " + tag + ":*\n```" + blocks[i] + "```", i == blocks.length - 1));
         }
         return parts;
+    }
+
+    /** The tag a danger_tool call's parts carry: six hex characters of SHA-256 over the tool, a newline and the arguments. */
+    private static String tag(String args) {
+        try {
+            var digest = MessageDigest.getInstance("SHA-256")
+                    .digest((DANGEROUS_TOOL + "\n" + args).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 3);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Each message's label line, the one line of the prompt's own that names a part and its call. */
+    private static List<String> labels(List<Sent> sent) {
+        return sent.stream()
+                .map(s -> s.text().lines().filter(line -> line.contains("Arguments, part ")).findFirst().orElse(""))
+                .toList();
     }
 
     /** The arguments a Telegram prompt showed: each message's block, unescaped, joined in order. */
