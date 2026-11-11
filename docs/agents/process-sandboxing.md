@@ -90,10 +90,14 @@ the custom agent's alone: `main`'s `exec` and a coding harness keep their profil
   namespace the probe would pass and the run itself fail with bwrap's error, starting nothing (an
   inference, not measured). A JVM inside the sandbox can still be attached to from inside it
   (measured). Signals are not filtered: a SIGQUIT from the sandbox reaches a JVM outside and prints
-  a thread dump, but starts no listener (measured). A PID namespace would stop it, and is not used
-  because `--unshare-pid` makes bwrap mount a fresh `/proc`, which the container refuses: `Can't
-  mount proc on /newroot/proc`, measured under `seccomp-bwrap.json`, most likely because Docker
-  masks parts of `/proc`.
+  a thread dump, but starts no listener, and a `kill` from the sandbox stops a process outside
+  (both measured). A PID namespace would refuse both, and is not used for the reason the macOS
+  rule denies one signal only: a later run could then not stop what an earlier one left in the
+  background (measured: the earlier run's process keeps running and the later run finds no such
+  process). It is not `/proc` that rules it out: `--unshare-pid` beside the argv's `--proc /proc`
+  fails in the container with `Can't mount proc on /newroot/proc` under `seccomp-bwrap.json`, but
+  without `--proc`, keeping the `/proc` the root bind brings, bwrap starts and the signal is
+  refused (measured as root and as uid 1000).
 
 **Readiness is a launch, not a lookup.** `HarnessSandbox.availability()` is the one check behind
 `GET /api/sandbox`, every key-confined `wrap` and `wrapCustomAgentShell`. On Linux it runs
