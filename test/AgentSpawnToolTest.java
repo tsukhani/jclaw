@@ -388,10 +388,10 @@ class AgentSpawnToolTest extends UnitTest {
     void aSubagentIsNeverOfferedAgentSpawnAndItsDirectCallIsRefused() throws Exception {
         var main = createAgent("main");
         createAgent("researcher");
+        // createAgent grants agent_spawn, so this subagent holds a grant and must still never get the tool.
         var clone = createAgent("main-sub-1");
         clone.parentAgent = main;
         clone.save();
-        setTool(clone, "agent_spawn", true);
         var conv = ConversationService.create(clone, "web", "u-subagent");
         commitAndReopen();
         var cloneAgent = (Agent) Agent.findById(clone.id);
@@ -827,10 +827,12 @@ class AgentSpawnToolTest extends UnitTest {
         });
     }
 
+    /** An agent the operator has switched {@code agent_spawn} on for, as every case here hands work on (JF-288). */
     private Agent createAgent(String name) {
         var agent = AgentService.create(name, provider, MODEL);
         agent.enabled = true;
         agent.save();
+        if (!agent.isMain()) setTool(agent, "agent_spawn", true);
         return agent;
     }
 

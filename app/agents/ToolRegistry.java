@@ -787,8 +787,9 @@ public class ToolRegistry {
     public static Set<String> loadDisabledTools(@Nullable Agent agent) {
         if (agent == null) return Set.of();
         if (agent.id == null) {
-            // Unsaved agents have no configs, so nothing is disabled but what no grant can give.
-            return agent.isMain() ? Set.of() : Set.of(JCLAW_API_TOOL);
+            // Unsaved agents have no configs, so nothing is disabled but what no grant can give, and the hand-off
+            // and the shell an agent other than main must be granted.
+            return agent.isMain() ? Set.of() : Set.of(JCLAW_API_TOOL, AGENT_SPAWN_TOOL, EXEC_TOOL);
         }
         return DISABLED_TOOLS_CACHE.get(agent.id, _ -> computeDisabledTools(agent));
     }
@@ -891,14 +892,21 @@ public class ToolRegistry {
             GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL,
             CHROME_CONTROL_TOOL, CHROME_SCRIPT_TOOL, CHROME_UPLOAD_TOOL);
 
+    /** The shell. Off for every agent but main until the operator switches it on (JF-288). */
+    public static final String EXEC_TOOL = "exec";
+
     /**
      * Tools main holds by default and every other agent has to be granted. The split is
-     * trust, not cost: both reach beyond the turn they run in, into stored memory and past
-     * conversations, and main is the operator's own agent. {@code jclaw_api} is not on it:
-     * no grant gives it to another agent (JF-287).
+     * trust, not cost: each reaches beyond the turn it runs in, into stored memory, past
+     * conversations, another agent's work or the host's shell, and main is the operator's
+     * own agent. JF-288 added the last two: a restricted agent picked up {@code agent_spawn}
+     * the day it shipped, and a new agent started with {@code exec} beside its web-reading
+     * tools. A helper copy carries its parent's shell
+     * ({@code SubagentChildBootstrap.grantParentShell}). {@code jclaw_api} is not on the
+     * list: no grant gives it to another agent (JF-287).
      */
     private static final List<String> OPT_IN_FOR_NON_MAIN_AGENTS = List.of(
-            MEMORY_TOOL, CONVERSATION_SEARCH_TOOL);
+            MEMORY_TOOL, CONVERSATION_SEARCH_TOOL, AGENT_SPAWN_TOOL, EXEC_TOOL);
 
     /** Whether {@code toolName} is main's alone, so that no grant gives it to another agent (JF-287). */
     public static boolean isMainOnly(@Nullable String toolName) {

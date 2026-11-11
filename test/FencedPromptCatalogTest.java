@@ -49,8 +49,8 @@ import java.util.regex.Pattern;
  * subagent named, and tried, tools it could not call. Read off the request the model is sent.
  *
  * <p>JF-148: an operator-only tool is offered, and named in the catalog, only on a turn the owner started. The cases
- * follow {@code agent_spawn} (JF-164), which a top-level custom agent holds by default. {@code jclaw_api} is main's
- * alone (JF-287): the fixture's agent is granted it and must never be offered it.
+ * follow {@code agent_spawn} (JF-164), which the fixture's agent is granted, as a custom agent must be (JF-288).
+ * {@code jclaw_api} is main's alone (JF-287): the fixture's agent is granted it and must never be offered it.
  *
  * <p>Holds {@link ToolRegistrySync}: what is checked is what the native registry offers.
  */
@@ -105,6 +105,11 @@ class FencedPromptCatalogTest extends UnitTest {
         agent.enabled = true;
         agent.save();
         agentId = agent.id;
+        var handOff = new AgentToolConfig();
+        handOff.agent = agent;
+        handOff.toolName = OPERATOR_TOOL;
+        handOff.enabled = true;
+        handOff.save();
         // The catalog section is written only for an agent that has a skill to check against it.
         var skill = AgentService.workspacePath(agent.name).resolve("skills").resolve("notes");
         Files.createDirectories(skill);

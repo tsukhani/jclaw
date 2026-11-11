@@ -280,14 +280,56 @@ class ApiToolsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void mainKeepsJclawApiAndAnUnsavedOtherAgentDoesNotGetIt() {
+    void mainKeepsJclawApiAgentSpawnAndTheShellAndAnUnsavedOtherAgentGetsNone() {
         var main = new models.Agent();
         main.name = models.Agent.MAIN_AGENT_NAME;
         var other = new models.Agent();
         other.name = "tools-jclaw-api-unsaved";
 
         assertEquals(java.util.Set.of(), agents.ToolRegistry.loadDisabledTools(main));
-        assertEquals(java.util.Set.of("jclaw_api"), agents.ToolRegistry.loadDisabledTools(other));
+        assertEquals(java.util.Set.of("jclaw_api", "agent_spawn", "exec"), agents.ToolRegistry.loadDisabledTools(other));
+    }
+
+    @Test
+    void aCustomAgentGetsAgentSpawnAndTheShellOnlyWhenTheOperatorSwitchesThemOn() {
+        // JF-288: agent_spawn once joined every agent that had not switched it off, a restricted one
+        // included, and a new agent started with the shell beside its web-reading tools.
+        login();
+        var id = createAgent("tools-agent-spawn-optin");
+
+        for (var tool : List.of("agent_spawn", "exec")) {
+            assertEquals(false, enabledInList(id, tool), tool + " is off by default, and still listed so it can be switched on");
+
+            assertIsOk(PUT("/api/agents/" + id + "/tools/" + tool, "application/json", "{\"enabled\":true}"));
+            assertEquals(true, enabledInList(id, tool), "the operator's grant turns " + tool + " on");
+        }
+        assertEquals(true, enabledInList(id, "web_fetch"), "control: an ordinary tool is still on by default");
+    }
+
+    @Test
+    void aSubagentNeverGetsAgentSpawnEvenWithAGrant() {
+        var parentId = createAgent("tools-agent-spawn-parent");
+        var childId = fetchInFreshTx(() -> {
+            var child = AgentService.create("tools-agent-spawn-child", "openrouter", "gpt-4.1");
+            child.parentAgent = models.Agent.findById(parentId);
+            child.save();
+            var row = mcp.McpGrants.newRow(child, "agent_spawn");
+            row.enabled = true;
+            row.save();
+            return child.id;
+        });
+        agents.ToolRegistry.clearDisabledToolsCache();
+
+        assertTrue(fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(models.Agent.findById(childId))).contains("agent_spawn"));
+    }
+
+    /** Whether {@code tool} is listed as enabled in the agent's own tool list; null when it is not listed at all. */
+    private Boolean enabledInList(Long agentId, String tool) {
+        for (var row : JsonParser.parseString(getContent(GET("/api/agents/" + agentId + "/tools"))).getAsJsonArray()) {
+            var o = row.getAsJsonObject();
+            if (tool.equals(o.get("name").getAsString())) return o.get("enabled").getAsBoolean();
+        }
+        return null;
     }
 
     // --- PUT /api/agents/{id}/tools/{name} ---

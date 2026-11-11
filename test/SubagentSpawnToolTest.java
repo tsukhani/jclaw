@@ -907,20 +907,20 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();
 
-        // Non-main parent with the shell "exec" tool explicitly disabled. exec is
-        // enabled by default for non-main agents (only browser is
-        // seeded off), so a fresh clone would otherwise re-enable it.
+        // Non-main parent with web_fetch explicitly disabled. web_fetch is enabled by default for
+        // non-main agents, so a fresh clone would otherwise re-enable it. (exec was the example
+        // until JF-288 made it opt-in.)
         var parent = createAgent("p-restrict", "spawn-provider", "test-model");
         var deny = new AgentToolConfig();
         deny.agent = parent;
-        deny.toolName = "exec";
+        deny.toolName = "web_fetch";
         deny.enabled = false;
         deny.save();
         ConversationService.create(parent, "web", "u-restrict");
         commitAndReopen();
         ToolRegistry.invalidateDisabledToolsCache(parent);
-        assertTrue(ToolRegistry.loadDisabledTools(parent).contains("exec"),
-                "test premise: parent must have exec disabled");
+        assertTrue(ToolRegistry.loadDisabledTools(parent).contains("web_fetch"),
+                "test premise: parent must have web_fetch disabled");
 
         var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"do work\"}");
         var runId = Long.parseLong(JsonParser.parseString(reply).getAsJsonObject()
@@ -931,8 +931,43 @@ class SubagentSpawnToolTest extends UnitTest {
         assertNotNull(run.childAgent, "fresh spawn must create a child agent");
         Agent child = Agent.findById(run.childAgent.id);
         ToolRegistry.invalidateDisabledToolsCache(child);
-        assertTrue(ToolRegistry.loadDisabledTools(child).contains("exec"),
+        assertTrue(ToolRegistry.loadDisabledTools(child).contains("web_fetch"),
                 "a fresh subagent must inherit the parent's tool deny-rows (JCLAW-500)");
+    }
+
+    @Test
+    void aFreshCopyCarriesItsParentsShellAndOnlyWhenTheParentHasIt() throws Exception {
+        // JF-288: exec is opt-in for every agent but main, and a helper copy is not main.
+        startLlmServer(simpleResponse("Subagent reply: done."));
+        configureProvider();
+        var withShell = createAgent("p-shell", "spawn-provider", "test-model");
+        var grant = new AgentToolConfig();
+        grant.agent = withShell;
+        grant.toolName = "exec";
+        grant.enabled = true;
+        grant.save();
+        var without = createAgent("p-no-shell", "spawn-provider", "test-model");
+        ConversationService.create(withShell, "web", "u-shell");
+        ConversationService.create(without, "web", "u-no-shell");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(withShell);
+        ToolRegistry.invalidateDisabledToolsCache(without);
+        assertFalse(ToolRegistry.loadDisabledTools(withShell).contains("exec"), "premise: this parent was given the shell");
+        assertTrue(ToolRegistry.loadDisabledTools(without).contains("exec"), "premise: the shell is off by default");
+
+        assertFalse(disabledOnTheCopyOf(withShell).contains("exec"), "the copy works with its parent's shell");
+        assertTrue(disabledOnTheCopyOf(without).contains("exec"), "no parent shell, no copy shell");
+    }
+
+    /** The disabled tools of the fresh copy one {@code subagent_spawn} from {@code parent} creates. */
+    private java.util.Set<String> disabledOnTheCopyOf(Agent parent) throws Exception {
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"do work\"}");
+        var runId = Long.parseLong(JsonParser.parseString(reply).getAsJsonObject().get("run_id").getAsString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(runId);
+        Agent child = Agent.findById(run.childAgent.id);
+        ToolRegistry.invalidateDisabledToolsCache(child);
+        return ToolRegistry.loadDisabledTools(child);
     }
 
     @Test

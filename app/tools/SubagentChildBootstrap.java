@@ -109,6 +109,7 @@ final class SubagentChildBootstrap {
             // JCLAW-500: bound the fresh clone's tool surface above by the
             // parent's restrictions before any inherit-mode widening below.
             copyParentToolRestrictions(parentAgent, childAgent);
+            grantParentShell(parentAgent, childAgent);
             grantParentMcpGrants(parentAgent, childAgent);
         }
 
@@ -373,6 +374,21 @@ final class SubagentChildBootstrap {
             // flipped grants.
             ToolRegistry.invalidateDisabledToolsCache(childAgent);
         }
+    }
+
+    /**
+     * JF-288: {@code exec} is opt-in for every agent but main, and a helper copy is not main, so a fresh copy
+     * would lose the shell its parent works with. A copy carries its parent's shell: it is granted exactly when
+     * the parent has it, and it runs confined as the parent's root is ({@link ShellExecTool}).
+     */
+    private static void grantParentShell(Agent parentAgent, Agent childAgent) {
+        if (ToolRegistry.loadDisabledTools(parentAgent).contains(ToolRegistry.EXEC_TOOL)) return;
+        if (!ToolRegistry.loadDisabledTools(childAgent).contains(ToolRegistry.EXEC_TOOL)) return;
+        var row = McpGrants.find(childAgent, ToolRegistry.EXEC_TOOL);
+        if (row == null) row = McpGrants.newRow(childAgent, ToolRegistry.EXEC_TOOL);
+        row.enabled = true;
+        row.save();
+        ToolRegistry.invalidateDisabledToolsCache(childAgent);
     }
 
     /**

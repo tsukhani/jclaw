@@ -311,6 +311,12 @@ class AgentRunnerCompactionTest extends UnitTest {
         grant.toolName = "jclaw_api";
         grant.enabled = true;
         grant.save();
+        // agent_spawn is opt-in for a custom agent (JF-288); this one is granted it.
+        var handOff = new models.AgentToolConfig();
+        handOff.agent = agent;
+        handOff.toolName = "agent_spawn";
+        handOff.enabled = true;
+        handOff.save();
         // The Tool Catalog section is written only for an agent with a skill.
         var skill = services.AgentService.workspacePath(agent.name).resolve("skills").resolve("notes");
         java.nio.file.Files.createDirectories(skill);
