@@ -261,7 +261,7 @@ public final class McpServerService {
         for (var name : submitted.keySet()) {
             var element = submitted.get(name);
             var value = element.isJsonPrimitive() ? element.getAsString() : "";
-            if (!value.endsWith("****") || !(everyValueSecret || ConfigService.isSensitive(name))) continue;
+            if (!value.endsWith(ConfigService.SECRET_MASK) || !(everyValueSecret || ConfigService.isSensitive(name))) continue;
             var prior = stored.get(name);
             if (prior == null || !value.equals(everyValueSecret ? maskSecret(prior) : ConfigService.maskValue(name, prior))) {
                 return name + " holds a saved secret's mask rather than a value: enter the value again.";
@@ -572,13 +572,9 @@ public final class McpServerService {
                         (a, _) -> a, LinkedHashMap::new));
     }
 
-    /** Mask an all-secret value: first 4 chars + {@code "****"}, or {@code "****"}
-     *  when 4 chars or fewer, so an operator can still recognize which token is
-     *  set without the value leaking to an agent read. Mirrors the sensitive-case
-     *  shape of {@link ConfigService#maskValue}. */
+    /** Mask an all-secret value as {@link ConfigService#maskValue} masks a sensitive one: none of its characters. */
     private static String maskSecret(String value) {
-        if (value == null || value.isEmpty()) return value;
-        return value.length() > 4 ? value.substring(0, 4) + "****" : "****";
+        return value == null || value.isEmpty() ? value : ConfigService.SECRET_MASK;
     }
 
     // Suppressed in the body only: MustBeClosed does not treat a `yield` from a switch

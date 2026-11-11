@@ -382,7 +382,7 @@ class ControllerApiTest extends FunctionalTest {
         var getBody = getContent(getResp);
         assertTrue(getBody.contains("\"channelType\":\"telegram\""));
         assertFalse(getBody.contains("test-token-123"), "raw botToken must not leak: " + getBody);
-        assertTrue(getBody.contains("test****"), "botToken must be masked: " + getBody);
+        assertTrue(getBody.contains("\"botToken\":\"****\""), "botToken must be masked: " + getBody);
 
         // UPDATE (save again with different values)
         var updateBody = """
@@ -393,7 +393,7 @@ class ControllerApiTest extends FunctionalTest {
         var updateContent = getContent(updateResp);
         assertTrue(updateContent.contains("\"enabled\":false"));
         assertFalse(updateContent.contains("updated-token"), "raw botToken must not leak: " + updateContent);
-        assertTrue(updateContent.contains("upda****"), "botToken must be masked: " + updateContent);
+        assertTrue(updateContent.contains("\"botToken\":\"****\""), "botToken must be masked: " + updateContent);
 
         // LIST should now contain the channel
         var listResp = GET("/api/channels");

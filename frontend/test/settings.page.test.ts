@@ -55,7 +55,8 @@ function setupConfigApi() {
     entries: [
       { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1',
         updatedAt: '2026-04-22T10:00:00Z' },
-      { key: 'provider.ollama-cloud.apiKey', value: 'sk-test-****',
+      // A saved key reads back as the mask alone, as ConfigService.maskValue returns it.
+      { key: 'provider.ollama-cloud.apiKey', value: '****',
         updatedAt: '2026-04-22T10:00:00Z' },
       { key: 'provider.ollama-cloud.models', value:
         '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true}]',
@@ -204,9 +205,37 @@ describe('Settings page — provider section', () => {
     const component = await mountSettingsSection('providers')
 
     const html = component.html()
-    // A saved key renders as dots: neither the key nor the server's mask of it reaches the DOM.
+    // A saved key renders as dots: the server's mask of it never reaches the DOM.
     expect(html).toContain('••••••••')
-    expect(html).not.toContain('sk-test')
+    expect(html).not.toContain('****')
+  })
+
+  it('marks a provider configured when its key reads back as the mask, and not when it has no key', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.openrouter.baseUrl', value: 'https://openrouter.ai/api/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.openrouter.apiKey', value: '****', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.openai.baseUrl', value: 'https://api.openai.com/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.openai.apiKey', value: '', updatedAt: '2026-04-29T10:00:00Z' },
+      ],
+    }))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+
+    const component = await mountSettingsSection('providers')
+
+    const cards = component.findAll('div.bg-surface-elevated')
+      .filter(card => card.find('.text-fg-strong').exists())
+      .map(card => ({
+        name: card.find('.text-fg-strong').text(),
+        configured: card.findAll('span').some(span => span.text() === 'configured'),
+      }))
+      .filter(card => card.name === 'OpenRouter' || card.name === 'OpenAI')
+    expect(cards).toEqual([
+      { name: 'OpenRouter', configured: true },
+      { name: 'OpenAI', configured: false },
+    ])
   })
 })
 
@@ -715,9 +744,9 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/config', () => configPayload([
-      // Mask suffix mirrors ConfigService.maskValue's "first4chars + ****" shape;
-      // the gate treats any non-blank value as configured, including masked.
-      { key: 'provider.openrouter.apiKey', value: 'sk-o****' },
+      // The mask ConfigService.maskValue returns for a saved key; the gate treats any
+      // non-blank value as configured.
+      { key: 'provider.openrouter.apiKey', value: '****' },
     ]))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)

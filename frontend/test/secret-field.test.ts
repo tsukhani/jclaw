@@ -18,7 +18,7 @@ describe('SecretField', () => {
   })
 
   it('opens an empty editor even when the model still holds something, such as a mask', async () => {
-    const field = row({ saved: true, modelValue: 'sk-a****' })
+    const field = row({ saved: true, modelValue: '****' })
     await field.find('button[aria-label="Edit API key"]').trigger('click')
     expect(field.emitted('update:modelValue')?.at(-1)).toEqual([''])
     expect(field.emitted('edit')).toHaveLength(1)
@@ -67,11 +67,12 @@ describe('Settings — a saved key\'s editor never holds the key or its mask', (
 
   const ENTRIES = [
     { key: 'provider.openai.baseUrl', value: 'https://api.openai.com/v1' },
-    { key: 'provider.openai.apiKey', value: 'sk-a****' },
-    { key: 'provider.bfl.apiKey', value: 'bfl-****' },
+    // Each saved key as the API reads it back: the mask alone, none of the key's characters.
+    { key: 'provider.openai.apiKey', value: '****' },
+    { key: 'provider.bfl.apiKey', value: '****' },
     { key: 'imagegen.provider', value: 'bfl' },
-    { key: 'search.exa.apiKey', value: 'exa-****' },
-    { key: 'scanner.malwarebazaar.authKey', value: 'mb-a****' },
+    { key: 'search.exa.apiKey', value: '****' },
+    { key: 'scanner.malwarebazaar.authKey', value: '****' },
   ]
 
   beforeEach(() => {
@@ -100,13 +101,14 @@ describe('Settings — a saved key\'s editor never holds the key or its mask', (
   }
 
   it.each([
-    ['providers', 'provider.openai.apiKey', 'provider.openai.apiKey', 'sk-a'],
-    ['search', 'search.exa.apiKey', 'Exa API key', 'exa-'],
-    ['malware', 'scanner.malwarebazaar.authKey', 'MalwareBazaar (abuse.ch) authKey', 'mb-a'],
-    ['image-generation', 'provider.bfl.apiKey', 'Black Forest Labs API key', 'bfl-'],
-  ])('%s', async (sectionId, key, label, maskPrefix) => {
+    ['providers', 'provider.openai.apiKey', 'provider.openai.apiKey'],
+    ['search', 'search.exa.apiKey', 'Exa API key'],
+    ['malware', 'scanner.malwarebazaar.authKey', 'MalwareBazaar (abuse.ch) authKey'],
+    ['image-generation', 'provider.bfl.apiKey', 'Black Forest Labs API key'],
+  ])('%s', async (sectionId, key, label) => {
     const component = await mountSection(sectionId)
-    expect(component.html()).not.toContain(maskPrefix)
+    expect(component.html()).not.toContain('****')
+    expect(component.find(`button[aria-label="Edit ${label}"]`).attributes('title'), 'the key reads as saved').toBe('Change')
 
     await component.find(`button[aria-label="Edit ${label}"]`).trigger('click')
     const input = component.find(`input[aria-label="${label}"]`)

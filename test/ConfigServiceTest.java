@@ -61,13 +61,17 @@ class ConfigServiceTest extends UnitTest {
 
     @Test
     void aSecretsMaskReadBackIsRefusedInsteadOfSavedOverIt() {
-        // JCLAW-1330: saving what a read returned would replace the key with its first four characters.
+        // JCLAW-1330: saving what a read returned would replace the key with its mask.
         var key = "search.exa.apiKey";
         assertNull(ConfigService.setWithSideEffects(key, "sk-real-key-123"));
         var rejected = ConfigService.setWithSideEffects(key, ConfigService.maskValue(key, "sk-real-key-123"));
         assertNotNull(rejected, "the mask must be refused at the write");
         assertTrue(rejected.contains(key), rejected);
         assertEquals("sk-real-key-123", ConfigService.get(key), "the secret survives");
+        assertEquals("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
+                + "search.exa.apiKey unchanged.", ConfigService.setWithSideEffects(key, "sk-r****"),
+                "a mask read while it still carried four characters is refused as well");
+        assertEquals("sk-real-key-123", ConfigService.get(key));
         assertNull(ConfigService.setWithSideEffects("jclaw1330.note", "a****"), "only a secret's mask is refused");
     }
 
@@ -382,8 +386,12 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    void maskValueHidesSensitive() {
-        assertEquals("sk-t****", ConfigService.maskValue("apiKey", "sk-test-123"));
+    void aMaskedSecretShowsNoneOfItsCharacters() {
+        assertEquals("****", ConfigService.maskValue("apiKey", "sk-test-123"));
+        assertEquals("****", ConfigService.maskValue("apiKey", "abcd"), "a short secret is not shown whole");
+        assertEquals("****", ConfigService.maskValue("apiKey", "a"));
+        assertEquals("", ConfigService.maskValue("apiKey", ""), "an unset secret reads as unset");
+        assertNull(ConfigService.maskValue("apiKey", null));
         assertEquals("https://openrouter.ai/api/v1",
                 ConfigService.maskValue("baseUrl", "https://openrouter.ai/api/v1"));
     }

@@ -272,10 +272,10 @@ describe('useProviders', () => {
     expect(providers.value[0]!.models).toEqual([])
   })
 
-  it('detects masked API key (xxxx****) as configured', () => {
+  it('detects a masked API key (****) as configured', () => {
     const configData = makeConfigRef([
       { key: 'provider.ollama.baseUrl', value: 'http://localhost:11434' },
-      { key: 'provider.ollama.apiKey', value: 'xxxx****' },
+      { key: 'provider.ollama.apiKey', value: '****' },
       { key: 'provider.ollama.models', value: '[]' },
     ])
 

@@ -13,6 +13,7 @@ import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.DynamicUpdate;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
+import services.ConfigService;
 import utils.CredentialCipher;
 
 import java.time.Instant;
@@ -282,10 +283,8 @@ public class WhatsAppBinding extends AgentBoundBinding {
         return mask(verifyToken);
     }
 
-    /** Show only the first 4 characters of a secret, matching
-     *  {@code ConfigService.maskValue}'s house style; blank/null → null. */
+    /** None of the secret's characters, as {@code ConfigService.maskValue} reads one back; blank/null → null. */
     private static String mask(String secret) {
-        if (secret == null || secret.isBlank()) return null;
-        return secret.length() > 4 ? secret.substring(0, 4) + "****" : "****";
+        return secret == null || secret.isBlank() ? null : ConfigService.SECRET_MASK;
     }
 }

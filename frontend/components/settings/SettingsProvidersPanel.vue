@@ -758,7 +758,7 @@ const groupedProviders = computed(() => {
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium text-fg-strong">{{ providerLabel(name) }}</span>
             <span
-              v-if="entries.some((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
+              v-if="entries.some((e: any) => e.key.endsWith('.apiKey') && e.value)"
               class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
             >configured</span>
             <span

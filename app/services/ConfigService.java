@@ -362,8 +362,9 @@ public class ConfigService {
             return capped;
         }
         // JCLAW-1330: a secret reads back as its mask, so a client that saves what it read would
-        // replace the secret with its first four characters.
-        if (isSensitive(key) && value.endsWith(MASK_SUFFIX)) {
+        // replace the secret with the mask. endsWith, because a mask read before JF-294 has the
+        // secret's first four characters ahead of it.
+        if (isSensitive(key) && value.endsWith(SECRET_MASK)) {
             return "That is the saved value's mask, not a new value. Enter the whole new value, or leave "
                     + key + " unchanged.";
         }
@@ -862,7 +863,8 @@ public class ConfigService {
         cache.invalidateAll();
     }
 
-    private static final String MASK_SUFFIX = "****";
+    /** What a saved secret reads back as: none of its characters, whatever its length (JF-294). */
+    public static final String SECRET_MASK = "****";
 
     private static final Pattern WORD_BREAK = Pattern.compile("(?<=[a-z0-9])(?=[A-Z])|[^A-Za-z0-9]+");
 
@@ -882,12 +884,10 @@ public class ConfigService {
                 || words.stream().anyMatch(w -> w.contains("secret") || w.contains("password"));
     }
 
+    /** {@code value} as a read shows it: {@link #SECRET_MASK} for a secret that is set, and an unset one as empty. */
     public static @Nullable String maskValue(String key, String value) {
         if (value == null) return null;
-        if (isSensitive(key) && value.length() > 4) {
-            return value.substring(0, 4) + MASK_SUFFIX;
-        }
-        return value;
+        return isSensitive(key) && !value.isEmpty() ? SECRET_MASK : value;
     }
 
     private static final String AUTH_KEY_PREFIX = "auth.";

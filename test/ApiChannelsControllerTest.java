@@ -1,3 +1,5 @@
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -93,11 +95,54 @@ class ApiChannelsControllerTest extends FunctionalTest {
         login();
         PUT("/api/channels/slack", "application/json",
                 "{\"config\":{\"botToken\":\"supersecrettoken\",\"chatId\":\"12345\"},\"enabled\":false}");
-        var body = getContent(GET("/api/channels"));
-        assertTrue(body.contains("\"botToken\""), "key must survive: " + body);
-        assertFalse(body.contains("supersecrettoken"), "raw secret must not leak: " + body);
-        assertTrue(body.contains("supe****"), "botToken value must be masked: " + body);
-        assertTrue(body.contains("\"chatId\":\"12345\""), "non-secret field must round-trip: " + body);
+        assertEquals("{\"botToken\":\"****\",\"chatId\":\"12345\"}", listedConfig("slack").toString());
+    }
+
+    /** The {@code config} that {@code GET /api/channels} lists for one channel. */
+    private JsonObject listedConfig(String channelType) {
+        for (var row : JsonParser.parseString(getContent(GET("/api/channels"))).getAsJsonArray()) {
+            if (channelType.equals(row.getAsJsonObject().get("channelType").getAsString())) {
+                return row.getAsJsonObject().getAsJsonObject("config");
+            }
+        }
+        throw new AssertionError("no " + channelType + " row listed");
+    }
+
+    // --- JF-294: a masked secret shows none of its characters, at any depth of the config ---
+
+    @Test
+    void aShortSecretIsMaskedAndAnUnsetOneReadsAsUnset() {
+        login();
+        PUT("/api/channels/slack", "application/json",
+                "{\"config\":{\"botToken\":\"abc\",\"signingSecret\":\"\",\"chatId\":\"12345\"},\"enabled\":false}");
+
+        assertEquals("{\"botToken\":\"****\",\"signingSecret\":\"\",\"chatId\":\"12345\"}",
+                listedConfig("slack").toString());
+    }
+
+    @Test
+    void listMasksSecretValuesNestedInsideTheConfig() {
+        login();
+        PUT("/api/channels/slack", "application/json", """
+                {"config": {"chatId": "12345",
+                            "oauth": {"clientSecret": "nested-secret-1", "scopes": ["chat:write"],
+                                      "accounts": [{"name": "ops", "apiKey": "nested-secret-2"}]},
+                            "apiKeys": ["nested-secret-3", "nested-secret-4"],
+                            "secrets": {"signing": {"current": "nested-secret-5", "rotatedAt": 1700000000}},
+                            "limits": {"maxTokens": 4096, "hasToken": true, "pinToken": 493817, "resetToken": null}},
+                 "enabled": false}
+                """);
+
+        var expected = "{\"chatId\":\"12345\","
+                + "\"oauth\":{\"clientSecret\":\"****\",\"scopes\":[\"chat:write\"],"
+                + "\"accounts\":[{\"name\":\"ops\",\"apiKey\":\"****\"}]},"
+                + "\"apiKeys\":[\"****\",\"****\"],"
+                + "\"secrets\":{\"signing\":{\"current\":\"****\",\"rotatedAt\":\"****\"}},"
+                + "\"limits\":{\"maxTokens\":4096,\"hasToken\":true,\"pinToken\":\"****\",\"resetToken\":null}}";
+        assertEquals(expected, listedConfig("slack").toString());
+        // The single read and the save's own answer are the same view.
+        assertEquals(expected, JsonParser.parseString(getContent(GET("/api/channels/slack"))).getAsJsonObject()
+                .getAsJsonObject("config").toString());
     }
 
     @Test

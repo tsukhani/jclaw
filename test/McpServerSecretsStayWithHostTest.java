@@ -78,7 +78,7 @@ class McpServerSecretsStayWithHostTest extends FunctionalTest {
         var kept = PUT("/api/mcp-servers/" + id, "application/json", "{\"url\":\"http://127.0.0.1:1/v2/mcp\"}");
 
         assertIsOk(kept);
-        assertEquals("{\"Authorization\":\"Bear****\",\"X-Tier\":\"****\"}", json(kept).getAsJsonObject("headers").toString());
+        assertEquals("{\"Authorization\":\"****\",\"X-Tier\":\"****\"}", json(kept).getAsJsonObject("headers").toString());
         assertStored("""
                 {"url":"http://127.0.0.1:1/v2/mcp","headers":{"Authorization":"Bearer real-token","X-Tier":"gold"}}""", id);
     }
@@ -99,7 +99,7 @@ class McpServerSecretsStayWithHostTest extends FunctionalTest {
 
         // What the MCP Servers form sends when only the URL was edited: each untouched secret as its mask.
         var refused = PUT("/api/mcp-servers/" + id, "application/json", """
-                {"url":"http://127.0.0.2:1/mcp","headers":{"Authorization":"Bear****","X-Tier":"****"}}""");
+                {"url":"http://127.0.0.2:1/mcp","headers":{"Authorization":"****","X-Tier":"****"}}""");
 
         assertStatus(400, refused);
         assertEquals(List.of("invalid_request", MOVED_REFUSAL),
@@ -112,7 +112,7 @@ class McpServerSecretsStayWithHostTest extends FunctionalTest {
         var id = savedServer();
 
         assertIsOk(PUT("/api/mcp-servers/" + id, "application/json", """
-                {"url":"http://127.0.0.1:1/v2/mcp","headers":{"Authorization":"Bear****","X-Tier":"****"}}"""));
+                {"url":"http://127.0.0.1:1/v2/mcp","headers":{"Authorization":"****","X-Tier":"****"}}"""));
 
         assertStored("""
                 {"url":"http://127.0.0.1:1/v2/mcp","headers":{"Authorization":"Bearer real-token","X-Tier":"gold"}}""", id);
@@ -134,7 +134,7 @@ class McpServerSecretsStayWithHostTest extends FunctionalTest {
         var id = savedServer();
 
         var masked = PUT("/api/mcp-servers/" + id, "application/json", """
-                {"transport":"STDIO","command":"node","env":{"API_KEY":"Bear****"}}""");
+                {"transport":"STDIO","command":"node","env":{"API_KEY":"****"}}""");
         assertStatus(400, masked);
         assertEquals("API_KEY holds a saved secret's mask rather than a value: enter the value again.",
                 json(masked).get("message").getAsString());

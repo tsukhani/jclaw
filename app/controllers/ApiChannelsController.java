@@ -2,9 +2,11 @@ package controllers;
 
 import channels.TelegramPollingRunner;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -41,26 +43,35 @@ public class ApiChannelsController extends Controller {
     }
 
     /**
-     * JCLAW-780: parse the stored channel config and mask secret-bearing
-     * top-level fields (botToken, apiKey, signingSecret, …) before it reaches
-     * the {@link #list()} / {@link #get} responses. Sensitivity
-     * is key-driven via {@link ConfigService#maskValue}; non-string / nested
-     * values pass through unchanged (channel configs are flat string maps in
-     * practice).
+     * JCLAW-780: parse the stored channel config and mask its secrets before it reaches the {@link #list()} /
+     * {@link #get} responses. Sensitivity is key-driven via {@link ConfigService#isSensitive}, at any depth
+     * (JF-294): a string or a number under a sensitive key is masked, and so is every one inside an object or an
+     * array under it. A boolean stays, since {@code hasToken} names a flag and not a secret.
      */
     private static JsonElement maskConfig(String configJson) {
-        var parsed = JsonParser.parseString(configJson);
-        if (!parsed.isJsonObject()) return parsed;
-        var out = new JsonObject();
-        for (var entry : parsed.getAsJsonObject().entrySet()) {
-            var v = entry.getValue();
-            if (v.isJsonPrimitive() && v.getAsJsonPrimitive().isString()) {
-                out.addProperty(entry.getKey(), ConfigService.maskValue(entry.getKey(), v.getAsString()));
-            } else {
-                out.add(entry.getKey(), v);
+        return masked(JsonParser.parseString(configJson), false);
+    }
+
+    private static JsonElement masked(JsonElement element, boolean secret) {
+        if (element.isJsonObject()) {
+            var out = new JsonObject();
+            for (var entry : element.getAsJsonObject().entrySet()) {
+                out.add(entry.getKey(), masked(entry.getValue(), secret || ConfigService.isSensitive(entry.getKey())));
             }
+            return out;
         }
-        return out;
+        if (element.isJsonArray()) {
+            var out = new JsonArray();
+            for (var item : element.getAsJsonArray()) {
+                out.add(masked(item, secret));
+            }
+            return out;
+        }
+        if (!secret || !element.isJsonPrimitive() || element.getAsJsonPrimitive().isBoolean()
+                || element.getAsString().isEmpty()) {
+            return element;
+        }
+        return new JsonPrimitive(ConfigService.SECRET_MASK);
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))

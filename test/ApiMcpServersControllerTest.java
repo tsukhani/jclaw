@@ -279,7 +279,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                  "env":{"GITHUB_TOKEN":"ghp_real_secret","NODE_ENV":"production"}}
                 """);
         var env = view.getAsJsonObject("env");
-        assertEquals("ghp_****", env.get("GITHUB_TOKEN").getAsString(), view.toString());
+        assertEquals("****", env.get("GITHUB_TOKEN").getAsString(), view.toString());
 
         var body = new JsonObject();
         body.addProperty("name", "kept");
@@ -301,7 +301,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                  "headers":{"Authorization":"Bearer real-token","X-Tier":"gold"}}
                 """);
         var headers = view.getAsJsonObject("headers");
-        assertEquals("Bear****", headers.get("Authorization").getAsString(), view.toString());
+        assertEquals("{\"Authorization\":\"****\",\"X-Tier\":\"****\"}", headers.toString(), view.toString());
 
         var body = new JsonObject();
         body.addProperty("name", "remote-kept");
@@ -324,14 +324,14 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         var id = view.get("id").getAsLong();
 
         var renamed = PUT("/api/mcp-servers/" + id, "application/json",
-                "{\"command\":\"node\",\"env\":{\"GH_TOKEN\":\"ghp_****\"}}");
+                "{\"command\":\"node\",\"env\":{\"GH_TOKEN\":\"****\"}}");
         assertStatus(400, renamed);
         assertTrue(getContent(renamed).contains("GH_TOKEN"), getContent(renamed));
         assertTrue(storedConfig(id, "renamed").contains("ghp_real_secret"));
 
         var copied = POST("/api/mcp-servers", "application/json", """
                 {"name":"copy","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp",
-                 "headers":{"Authorization":"Bear****"}}
+                 "headers":{"Authorization":"****"}}
                 """);
         assertStatus(400, copied);
     }

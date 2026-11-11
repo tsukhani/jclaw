@@ -325,23 +325,23 @@ describe('MCP Servers page', () => {
   })
 
   it('shows a saved secret as dots and sends its mask back untouched, which keeps it (JCLAW-1331)', async () => {
-    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    setupApi([server({ env: { GITHUB_TOKEN: '****', NODE_ENV: 'production' } })])
     const c = await mountSuspended(McpServers)
     await flushPromises()
     await clickText(c, 'Edit')
 
-    expect(c.find('form').html()).not.toContain('ghp_')
+    expect(c.find('form').html()).not.toContain('****')
     const values = c.findAll('input[aria-label="Environment variable value"]')
     expect(values.map(v => (v.element as HTMLInputElement).value)).toEqual(['production'])
 
     await c.find('form').trigger('submit')
     await vi.waitFor(() => expect(putBody).toBeTruthy())
-    expect(putBody!.env).toEqual({ GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' })
+    expect(putBody!.env).toEqual({ GITHUB_TOKEN: '****', NODE_ENV: 'production' })
   })
 
   it('sends a changed secret as typed, and asks for a value once a saved one is renamed', async () => {
     setupApi([server({ transport: 'HTTP', command: null, args: [], env: {}, url: 'https://x.test/mcp',
-      headers: { 'Authorization': 'Bear****', 'X-Tier': 'gold****' } })])
+      headers: { 'Authorization': '****', 'X-Tier': '****' } })])
     const c = await mountSuspended(McpServers)
     await flushPromises()
     await clickText(c, 'Edit')
@@ -360,7 +360,7 @@ describe('MCP Servers page', () => {
   })
 
   it('sends a removed env variable as null and keeps the others as they were', async () => {
-    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    setupApi([server({ env: { GITHUB_TOKEN: '****', NODE_ENV: 'production' } })])
     const c = await mountSuspended(McpServers)
     await flushPromises()
     await clickText(c, 'Edit')
@@ -368,11 +368,11 @@ describe('MCP Servers page', () => {
     await c.findAll('button[aria-label="Remove env var"]')[1]!.trigger('click')
     await c.find('form').trigger('submit')
     await vi.waitFor(() => expect(putBody).toBeTruthy())
-    expect(putBody!.env).toEqual({ GITHUB_TOKEN: 'ghp_****', NODE_ENV: null })
+    expect(putBody!.env).toEqual({ GITHUB_TOKEN: '****', NODE_ENV: null })
   })
 
   it('sends every saved env variable as null once all of them are removed', async () => {
-    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    setupApi([server({ env: { GITHUB_TOKEN: '****', NODE_ENV: 'production' } })])
     const c = await mountSuspended(McpServers)
     await flushPromises()
     await clickText(c, 'Edit')

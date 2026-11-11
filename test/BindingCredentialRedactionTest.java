@@ -64,10 +64,8 @@ class BindingCredentialRedactionTest extends UnitTest {
         var b = new TelegramBinding();
         b.botToken = "123456:ABCDEFGHIJ";
         b.webhookSecret = "sekret-value-xyz";
-        assertEquals("1234****", b.maskedBotToken());
-        assertFalse(b.maskedWebhookSecret().contains("value-xyz"),
-                "masked webhook secret must not expose the tail");
-        assertTrue(b.maskedWebhookSecret().endsWith("****"));
+        assertEquals("****", b.maskedBotToken());
+        assertEquals("****", b.maskedWebhookSecret());
     }
 
     @Test
@@ -76,9 +74,9 @@ class BindingCredentialRedactionTest extends UnitTest {
         b.botToken = "xoxb-abcdefgh";
         b.signingSecret = "signing-abcdefgh";
         b.appToken = "xapp-abcdefgh";
-        assertFalse(b.maskedBotToken().contains("abcdefgh"));
-        assertFalse(b.maskedSigningSecret().contains("abcdefgh"));
-        assertFalse(b.maskedAppToken().contains("abcdefgh"));
+        assertEquals("****", b.maskedBotToken());
+        assertEquals("****", b.maskedSigningSecret());
+        assertEquals("****", b.maskedAppToken());
     }
 
     @Test
@@ -87,9 +85,9 @@ class BindingCredentialRedactionTest extends UnitTest {
         b.accessToken = "EAAtoken-abcdefgh";
         b.appSecret = "appsecret-abcdefgh";
         b.verifyToken = "verify-abcdefgh";
-        assertFalse(b.maskedAccessToken().contains("abcdefgh"));
-        assertFalse(b.maskedAppSecret().contains("abcdefgh"));
-        assertFalse(b.maskedVerifyToken().contains("abcdefgh"));
+        assertEquals("****", b.maskedAccessToken());
+        assertEquals("****", b.maskedAppSecret());
+        assertEquals("****", b.maskedVerifyToken());
     }
 
     @Test

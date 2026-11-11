@@ -365,9 +365,9 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     @Test
     void theLayaKeyIsMaskedAndItsMaskIsNeverSavedOverIt() {
         assertTrue(ConfigService.isSensitive(LayaDecision.API_KEY));
-        assertEquals("laya****", ConfigService.maskValue(LayaDecision.API_KEY, "laya-secret-0123"));
+        assertEquals("****", ConfigService.maskValue(LayaDecision.API_KEY, "laya-secret-0123"));
         assertRefused("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
-                + "decision.laya.apiKey unchanged.", LayaDecision.API_KEY, "laya****");
+                + "decision.laya.apiKey unchanged.", LayaDecision.API_KEY, "****");
     }
 
     @Test
@@ -380,9 +380,9 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     @Test
     void theBasetenKeyIsMaskedAndItsMaskIsNeverSavedOverIt() {
         assertTrue(ConfigService.isSensitive(BasetenDecision.API_KEY));
-        assertEquals("base****", ConfigService.maskValue(BasetenDecision.API_KEY, "baseten-secret-0123"));
+        assertEquals("****", ConfigService.maskValue(BasetenDecision.API_KEY, "baseten-secret-0123"));
         assertRefused("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
-                + "decision.baseten.apiKey unchanged.", BasetenDecision.API_KEY, "base****");
+                + "decision.baseten.apiKey unchanged.", BasetenDecision.API_KEY, "****");
     }
 
     @Test

@@ -135,7 +135,7 @@ class JsonCredentialTest extends UnitTest {
 
         // The form saves back what the read showed it, with only the URL changed.
         var body = JsonParser.parseString(GsonHolder.GSON.toJson(McpServerService.View.of(row))).getAsJsonObject();
-        assertEquals("enc:****", body.getAsJsonObject("headers").get("Authorization").getAsString());
+        assertEquals("****", body.getAsJsonObject("headers").get("Authorization").getAsString());
         body.addProperty("url", "http://127.0.0.1:2/mcp");
         assertNull(McpServerService.restoreMaskedSecrets(body,
                 McpServerService.explodeConfigJson(row.transport, row.configJson)));
