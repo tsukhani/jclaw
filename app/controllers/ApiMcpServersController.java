@@ -172,7 +172,8 @@ public class ApiMcpServersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Update an MCP server by id; omitted fields keep their values, env and headers change "
-            + "only the keys sent (a null value removes one), and it reconnects automatically")
+            + "only the keys sent (a null value removes one), a url on another scheme, host or port drops the "
+            + "saved headers unless they are sent again, and it reconnects automatically")
     @AgentAccess(value = OPEN,
             reason = "the operator and main only, as create (JF-285); offerViewToolsEverywhere is operator-only")
     public static void update(Long id) {

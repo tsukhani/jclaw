@@ -230,7 +230,7 @@ When you click **Add server**, you pick one:
 | **Endpoint URL** | Full URL to the server's MCP endpoint.                                          |
 | **Headers**    | Auth headers, etc. Common keys: `Authorization`, `X-Api-Key`.                     |
 
-Once saved, a header value and an environment variable whose name marks it as a secret (one ending in `KEY`, `KEYS` or `TOKEN`, or containing `SECRET` or `PASSWORD`, such as `GITHUB_TOKEN`) show as `••••••••` with a pencil, like every saved secret. Leaving one untouched keeps it when you save; the pencil takes a whole new value. Renaming a saved secret means entering its value again.
+Once saved, a header value and an environment variable whose name marks it as a secret (one ending in `KEY`, `KEYS` or `TOKEN`, or containing `SECRET` or `PASSWORD`, such as `GITHUB_TOKEN`) show as `••••••••` with a pencil, like every saved secret. Leaving one untouched keeps it when you save; the pencil takes a whole new value. Renaming a saved secret means entering its value again. So does changing the server's URL to another host, port or scheme (`http` or `https`): the save is refused and names the header until you enter each saved header again, so a saved secret is never sent to an address you did not enter it for.
 
 ### Testing a server
 

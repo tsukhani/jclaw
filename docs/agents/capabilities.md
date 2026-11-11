@@ -83,7 +83,10 @@ two were read inside one tool, so they hid a route without gating it and an agen
 internal bearer walked past both. **Do not add a guard to the body of an `OPERATOR_ONLY` action** —
 the interceptor has already refused, and a second check is the drift the collapse removed.
 
-The levels are not interchangeable. `OPEN` means any agent may call it, and on a mutating route
+The levels are not interchangeable. `OPEN` means the gate lets every agent's call through. A route
+that serves the instance and not one agent's rows stays `OPEN` and refuses every agent but `main`
+in its body, with `RequestPrincipal.requireOperatorOrMain`, and its `reason` says so (JF-292,
+[trust](trust.md)). On a mutating route
 its `reason` is mandatory and must name what bounds it instead (a scoped tool,
 `DangerousActionGate`, `SsrfGuard`, `LoadtestAuthCheck`) — an empty reason there is worse than no
 annotation, because it reads as adjudicated. `OWN_ONLY` means an agent reaches only rows its own

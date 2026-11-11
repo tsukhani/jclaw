@@ -1077,6 +1077,8 @@ On macOS a confined process runs under `sandbox-exec`: writes are denied outside
 
 On Linux a confined process runs under `bwrap`, which builds the visible filesystem from nothing: your home folder is empty, apart from the workspace when it lives there, and those secrets and JClaw's folders are absent rather than denied. This is the same for every agent.
 
+A custom agent's command also cannot attach to a Java program that runs outside the sandbox, JClaw included. On macOS it cannot attach to a Java program it starts itself either, so `jcmd`, `jstack` and a Java agent that attaches to its own program fail there.
+
 A confined `exec` keeps package caches in the agent's workspace, in its `.cache` folder: `UV_CACHE_DIR`, `npm_config_cache`, `PIP_CACHE_DIR` and `XDG_CACHE_HOME` point there, because `uv`, `npm` and `pip` cannot write their usual caches in your home folder.
 
 With `shell.sandbox.network` set to `deny`, a confined process also has no network. On macOS, `sandbox-exec` refuses every connection it tries to open. On Linux, `bwrap` gives it a network of its own with nothing else in it.

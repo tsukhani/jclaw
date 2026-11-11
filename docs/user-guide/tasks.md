@@ -99,7 +99,7 @@ Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks co
 | **Schedule**  | The schedule in plain words, such as "every 30 min" or "daily at 9 AM".                                 |
 | **Status**    | Color-coded; see *Status states* below.                                                                 |
 | **Agent**     | Which agent owns the task.                                                                              |
-| **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. |
+| **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. A task of an agent other than the Main Agent delivers to a web conversation only when that conversation is the agent's own or one that started a run of it. You can save another conversation here, but each run is then marked `NOT_DELIVERED` and nothing is written into it. |
 | **Next Run**  | When the task will fire next, formatted in the task's effective timezone (see *Timezones*).             |
 | **Retries**   | Current attempts / max attempts. Failed fires are retried up to this cap before marking `FAILED`; a recurring task gets a fresh budget for each occurrence. |
 | **Actions**   | Per-row controls (see *Per-row actions*).                                                               |
