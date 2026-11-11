@@ -7,11 +7,12 @@ import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, blockedReason, expired, transition, waitingOn as waitingFor, writeAtomically, type BoardBlocker, type Entry, type State, type Story } from "./board.ts";
 import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
+import { Brief, fileFindings, findingLocation, findingSummary, preExistingSection, type Finding, type FindingsTracker } from "./brief.ts";
 import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
 import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
-import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { REPO_ROOT } from "./paths.ts";
 import { TRUST_BOUNDARY, bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths } from "./plan.ts";
@@ -392,6 +393,66 @@ check("trust-boundary code needs a human, whatever the label says",
 check("a branch with both kinds is refused for the files that run on the Mac first",
   mergeVerdict(brief([true]), ["jclaw.sh"], ["install.sh"]),
   "it changes files that run on your Mac once merged, which a human must read first: jclaw.sh");
+
+// The brief's pre-existing defects: the schema accepts the older shape, each location is filed once, and the comment
+// section renders exactly.
+const markup = { code: (t: string) => `{{${t}}}`, heading: (t: string) => `h3. ${t}`, bullet: (t: string) => `* ${t}`, met: "(/)", unmet: "(x)" };
+const briefJson = { summary: "s", acceptanceCriteria: [{ criterion: "AC 1", met: true, evidence: "XTest.proves" }], decisions: [], risks: [], testsRun: [] };
+const oneOld = [{ location: "app/utils/X.java:12", defect: "the guard reads the raw path" }];
+check("a brief without preExisting still validates, as an empty list", Brief.safeParse(briefJson).data?.preExisting, []);
+check("a brief keeps the pre-existing defects it lists", Brief.safeParse({ ...briefJson, preExisting: oneOld }).data?.preExisting, oneOld);
+check("a pre-existing defect without its location does not validate", Brief.safeParse({ ...briefJson, preExisting: [{ defect: "d" }] }).success, false);
+const TRAILER = "The branch did not introduce these, so they do not block it. Each is filed as a story labelled {{factory-found}}, outside any sprint, so the factory builds none until you plan it into one.";
+check("no pre-existing defects add no section", preExistingSection([], markup), []);
+check("a filed and an already-filed defect render under their own heading, each with its location and key",
+  preExistingSection([{ ...oneOld[0], filed: "JF-9" }, { location: "app/Y.java:3", defect: "d", filed: "JF-4", already: true }], markup),
+  ["", "h3. Pre-existing, left unchanged", "* {{app/utils/X.java:12}}: the guard reads the raw path (filed as JF-9)",
+    "* {{app/Y.java:3}}: d (already filed as JF-4)", TRAILER]);
+check("an unfiled defect names why and asks for it by hand", preExistingSection([{ ...oneOld[0], error: "Jira POST: 503" }], markup),
+  ["", "h3. Pre-existing, left unchanged", "* {{app/utils/X.java:12}}: the guard reads the raw path (not filed: Jira POST: 503)", TRAILER,
+    "File the ones marked not filed by hand."]);
+
+check("a finding's summary gives back its location", findingLocation(findingSummary(oneOld[0])), "app/utils/X.java:12");
+check("a summary the factory did not write has no location", [findingLocation("Fix the login page: it 500s"), findingLocation("Pre-existing defect at nowhere")], [undefined, undefined]);
+const longSummary = findingSummary({ location: "app/Z.java:1", defect: "x".repeat(300) });
+check("a long defect is cut to Jira's 255-character summary and keeps its location", [longSummary.length, longSummary.endsWith("…"), findingLocation(longSummary)], [255, true, "app/Z.java:1"]);
+
+const source = { key: "JF-7", summary: "Do it", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "", comments: [] };
+const fakeTracker = (known: Record<string, string>, failOn?: string, listing?: Error) => {
+  const filedNow: string[] = [];
+  const t: FindingsTracker = {
+    filedFindings: async () => { if (listing) throw listing; return new Map(Object.entries(known)); },
+    fileFinding: async (_s, f: Finding) => { if (f.location === failOn) throw new Error("Jira POST /rest/api/2/issue: 400 bad\nmore"); filedNow.push(f.location); return `JF-${100 + filedNow.length}`; },
+  };
+  return { t, filedNow };
+};
+const findA = { location: "app/A.java:1", defect: "a" }, findB = { location: "app/B.java:2", defect: "b" };
+{
+  const { t, filedNow } = fakeTracker({});
+  check("nothing found files nothing and asks nothing", [await fileFindings(t, source, []), filedNow], [[], []]);
+}
+{
+  const { t, filedNow } = fakeTracker({ "app/A.java:1": "JF-50" });
+  check("a location filed before is not filed again; a new one is", [await fileFindings(t, source, [findA, findB]), filedNow],
+    [[{ ...findA, filed: "JF-50", already: true }, { ...findB, filed: "JF-101" }], ["app/B.java:2"]]);
+}
+{
+  const { t, filedNow } = fakeTracker({});
+  check("the same location twice in one brief is filed once", [await fileFindings(t, source, [findA, { ...findA, defect: "again" }]), filedNow],
+    [[{ ...findA, filed: "JF-101" }, { ...findA, defect: "again", filed: "JF-101", already: true }], ["app/A.java:1"]]);
+}
+{
+  const { t, filedNow } = fakeTracker({}, "app/A.java:1");
+  check("one filing that fails leaves the others filed, with the first line of its error", [await fileFindings(t, source, [findA, findB]), filedNow],
+    [[{ ...findA, error: "Jira POST /rest/api/2/issue: 400 bad" }, { ...findB, filed: "JF-101" }], ["app/B.java:2"]]);
+}
+{
+  const { t, filedNow } = fakeTracker({}, undefined, new Error("Jira GET /rest/api/2/search: 401"));
+  check("when the filed ones cannot be listed, nothing is filed, so nothing is filed twice", [await fileFindings(t, source, [findA]), filedNow],
+    [[{ ...findA, error: "Jira GET /rest/api/2/search: 401" }], []]);
+}
+const withOld: Report = { brief: { ...briefJson, preExisting: oneOld } as Report["brief"] };
+check("pre-existing defects do not refuse auto-merge", mergeVerdict(withOld, [], []), undefined);
 
 // The board: one transition per state, what moves `since`, retention at its boundary, and the document's shape.
 const T0 = new Date("2026-10-01T10:00:00.000Z"), T1 = new Date("2026-10-01T11:00:00.000Z"), T2 = new Date("2026-10-01T12:00:00.000Z");

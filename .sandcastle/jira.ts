@@ -3,6 +3,7 @@
 import * as fs from "node:fs";
 import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
+import { FOUND_LABEL, findingLocation, findingSummary, type Finding } from "./brief.ts";
 import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
 
 // Only from FACTORY_HOME/jira.env, never .env, which the gateway mounts: no container ever holds the Jira token.
@@ -108,6 +109,42 @@ export const addLabel = (key: string, label: string) =>
 
 export const removeLabel = (key: string, label: string) =>
   api(`/rest/api/2/issue/${key}`, { method: "PUT", body: { update: { labels: [{ remove: label }] } } });
+
+// Every story the factory filed for a pre-existing defect, by its location, Done ones included.
+export const filedFindings = async (): Promise<Map<string, string>> => {
+  const known = new Map<string, string>();
+  const jql = encodeURIComponent(`project = ${PROJECT} AND labels = ${FOUND_LABEL}`);
+  for (let startAt = 0; ; ) {
+    const page = await api(`/rest/api/2/search?jql=${jql}&fields=summary&maxResults=200&startAt=${startAt}`);
+    for (const issue of page.issues) {
+      const location = findingLocation(issue.fields.summary);
+      if (location && !known.has(location)) known.set(location, issue.key);
+    }
+    startAt += page.issues.length;
+    if (page.issues.length === 0 || startAt >= page.total) return known;
+  }
+};
+
+// Findings go to Jira whichever tracker the story came from: a GitHub issue on the public mirror would publish a defect,
+// security ones included, before anyone has read it.
+export const fileFinding = async (source: Snapshot, f: Finding): Promise<string> => {
+  const fromJira = ownsKey(source.key);
+  const description = [
+    f.defect,
+    "",
+    `Found at {{${f.location}}} by the AFK factory's review of ${source.key} (${source.summary}). That story did not change these lines, so the factory left them as they were and filed this instead.`,
+    "The finding is the review agent's and unverified: confirm it before building.",
+  ].join("\n");
+  const fields: Record<string, unknown> = {
+    project: { key: PROJECT }, issuetype: { name: "Story" }, summary: findingSummary(f), description, labels: [FOUND_LABEL],
+  };
+  if (fromJira && source.parent) fields[EPIC_LINK] = source.parent.key;
+  const created = await api("/rest/api/2/issue", { method: "POST", body: { fields } });
+  if (fromJira) {
+    await api("/rest/api/2/issueLink", { method: "POST", body: { type: { name: "Relates" }, inwardIssue: { key: created.key }, outwardIssue: { key: source.key } } });
+  }
+  return created.key;
+};
 
 // Stories this user's factory was working on when it stopped: it labels what it runs, so a story a human moved to
 // In Progress is never mistaken for one, and it assigns what it runs, so another developer's harness keeps its own.

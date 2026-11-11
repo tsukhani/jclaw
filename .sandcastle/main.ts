@@ -6,15 +6,15 @@ import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { format } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
-import { z } from "zod";
 import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
 import { githubTracker } from "./github.ts";
-import { jira } from "./jira.ts";
+import { fileFinding, filedFindings, jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, blockedReason, waitingOn, type About } from "./board.ts";
+import { Brief, fileFindings, preExistingSection, type Filed } from "./brief.ts";
 import { nextBlockers, outsideBlockers } from "./blockers.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
 import { checkFirst, checkGate } from "./check-gate.ts";
@@ -37,14 +37,6 @@ const gitIn = (repo: string, ...args: string[]) => execFileSync("/usr/bin/git", 
 const CHECKOUT = REPO_ROOT;
 const LESSONS = `${FACTORY_HOME}/lessons.md`;
 const GATE_DEADLINE_SECONDS = 1800;
-const Brief = z.object({
-  summary: z.string(),
-  acceptanceCriteria: z.array(z.object({ criterion: z.string(), met: z.boolean(), evidence: z.string() })),
-  decisions: z.array(z.string()),
-  risks: z.array(z.string()),
-  testsRun: z.array(z.string()),
-});
-type Brief = z.infer<typeof Brief>;
 
 // The agent authenticates through the gateway, which reads the credential from .env itself.
 const agent = sandcastle.claudeCode(MODEL);
@@ -299,7 +291,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   };
 
   // The comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
-  const reviewComment = (brief: Brief | undefined, sensitive: string[], trust: string[]) => {
+  const reviewComment = (brief: Brief | undefined, sensitive: string[], trust: string[], findings: Filed[]) => {
     const closes = tracker.mergeMessage(key);
     const merge = closes ? `git merge --no-ff -m "Merge branch '${branch}'" -m "${closes}" ${branch}` : `git merge --no-ff ${branch}`;
     const lines = [`${tracker.header}: ready for review`, `Local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: ${m.code(`git rebase --force-rebase --gpg-sign main ${branch}`)}, then ${m.code(merge)}; /deploy ships it. Or label it ${m.code("afk-merge")} and the factory merges it the same way. Model: ${MODEL}.`];
@@ -321,6 +313,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       lines.push(brief.summary, "", m.heading("Acceptance criteria"), ...brief.acceptanceCriteria.map((c) => m.bullet(`${c.met ? m.met : m.unmet} ${c.criterion}: ${c.evidence}`)));
       if (brief.decisions.length) lines.push("", m.heading("Decisions"), ...brief.decisions.map(m.bullet));
       if (brief.risks.length) lines.push("", m.heading("For the reviewer"), ...brief.risks.map(m.bullet));
+      lines.push(...preExistingSection(findings, m));
     } else {
       lines.push("The agent's brief did not validate; see the run log.");
     }
@@ -352,10 +345,12 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     const sensitive = sensitivePaths(changed), trust = trustBoundaryPaths(changed);
     if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
     if (trust.length > 0) console.log(`[${key}] changes trust-boundary code: ${trust.join(", ")}`);
+    const findings = brief ? await fileFindings({ filedFindings, fileFinding }, picked, brief.preExisting) : [];
+    for (const f of findings) console.log(`[${key}] pre-existing ${f.location}: ${f.error ? `not filed: ${f.error}` : `${f.already ? "already filed as" : "filed as"} ${f.filed}`}`);
     await tracker.reviewing(key);
-    await tracker.comment(key, reviewComment(brief, sensitive, trust));
+    await tracker.comment(key, reviewComment(brief, sensitive, trust, findings));
     const head = gitIn(REPO, "rev-parse", branch);
-    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, head, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
+    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, head, model: MODEL, buildMode: mode, timings, gates, brief, findings, environmentFailures: [...environmentFailures], flakes }, null, 2));
     board.set(key, { state: "review" });
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {

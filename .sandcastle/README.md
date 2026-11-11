@@ -70,7 +70,13 @@ lockfile changes. Every two minutes it:
      `./jclaw.sh test` runs before a push, which `play autotest` does not:
      `pnpm test`, `pnpm stylelint`, `pnpm lint` and `pnpm typecheck`. They are judged the same way: a failing test file
      is re-run alone, and a file or check that also fails on `main` is not counted.
-   - **Review** by a second agent, then a **brief**.
+   - **Review** by a second agent, then a **brief**. The reviewer fixes each defect the branch introduced at every
+     place the branch repeats it. One in lines the branch did not change stays as it is: the brief lists it under
+     "Pre-existing, left unchanged", and it does not block auto-merge. The harness files each as a JF story labelled
+     `factory-found`, under the story's epic and linked to it, once per location ever: a location already filed,
+     Done included, is not filed again. Findings from a GitHub issue are filed in Jira too, since an issue on the
+     public mirror would publish a defect nobody has read yet. A filed story is in no sprint, so the factory builds
+     it only once you plan it into one.
 4. Copies `agent/<KEY>` into your checkout, moves the ticket to Review and posts the brief.
 5. Merges a story in review that you labelled `afk-merge` (see [Auto-merge](#auto-merge)).
 

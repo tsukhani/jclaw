@@ -13,6 +13,11 @@ bundles, it has also run `pnpm test`,
 or one of those frontend checks is green is therefore met: cite the harness gate as its evidence, and do not mark it
 unmet or list it as a risk because you did not run it yourself.
 
+Each entry in `risks` names the `path:line` it concerns, or the command whose output shows it, so the reviewer can
+check it without searching. `preExisting` lists every defect your review found in lines the branch did not change and
+left alone, each with its `path:line`; it is empty when there were none, and it never holds a defect the branch
+introduced.
+
 Emit exactly one <brief> block as the last thing in your response, containing JSON of this shape:
 
 <brief>
@@ -20,7 +25,8 @@ Emit exactly one <brief> block as the last thing in your response, containing JS
   "summary": "two or three sentences: what changed and why",
   "acceptanceCriteria": [{ "criterion": "text", "met": true, "evidence": "the test that proves it (Class.method or spec file and name), or the file or commit where no test can" }],
   "decisions": ["each decision the ticket asked to be made or recorded, with its reason"],
-  "risks": ["anything the reviewer should check by hand"],
+  "risks": ["anything the reviewer should check by hand, with the path:line it concerns or the command that shows it"],
+  "preExisting": [{ "location": "path:line", "defect": "what is wrong there" }],
   "testsRun": ["test classes or commands run during implementation and review"]
 }
 </brief>
