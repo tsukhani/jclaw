@@ -1,6 +1,7 @@
 import agents.SkillLoader;
 import models.Agent;
 import models.AgentSkillConfig;
+import models.AgentToolConfig;
 import models.SkillRegistryTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -11,6 +12,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.NotificationBus;
 import services.SkillPromotionService;
+import services.Tx;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -116,29 +118,62 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         }
     }
 
-    // ==================== validateToolRequirements — declared-tools pass ====================
+    // ==================== validateToolRequirements — declared tools ====================
 
-    @Test
-    void validateToolRequirementsPassesWhenDeclaredToolsAllAvailable() throws Exception {
-        // The skill DECLARES a tool ('exec' — always registered) and the agent
-        // hasn't disabled it: the validation must reach the ToolCatalog check
-        // and come back ok, not just short-circuit on "no declaration".
-        var agent = createAgent("vtool-happy");
-        var dir = globalSkillsDir.resolve("needs-exec");
+    private void writeSkillDeclaringTool(String skill, String tool) throws Exception {
+        var dir = globalSkillsDir.resolve(skill);
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("SKILL.md"), """
                 ---
-                name: needs-exec
+                name: %s
                 description: declares a real tool
                 version: 1.0.0
-                tools: [exec]
+                tools: [%s]
                 ---
                 # body
-                """);
+                """.formatted(skill, tool));
         SkillLoader.clearCache();
+    }
+
+    @Test
+    void validateToolRequirementsPassesWhenDeclaredToolsAllAvailable() throws Exception {
+        // filesystem is on for a new agent, so the validation reaches the
+        // ToolCatalog check and passes there, not on "no declaration".
+        var agent = createAgent("vtool-happy");
+        writeSkillDeclaringTool("needs-files", "filesystem");
+
+        var result = SkillPromotionService.validateToolRequirements(agent, "needs-files");
+        assertTrue(result.ok(), "declared, registered, enabled tool must validate: " + result.message());
+        assertNull(result.message(), "success carries no message");
+    }
+
+    @Test
+    void aSkillThatNeedsTheShellIsRefusedForAnAgentWithoutIt() throws Exception {
+        // exec is opt-in for every agent but main (JF-288).
+        var agent = createAgent("vtool-no-shell");
+        writeSkillDeclaringTool("needs-exec", "exec");
 
         var result = SkillPromotionService.validateToolRequirements(agent, "needs-exec");
-        assertTrue(result.ok(), "declared, registered, enabled tool must validate: " + result.message());
+        assertFalse(result.ok(), "a custom agent has no shell until the operator switches it on");
+        assertEquals("Cannot add skill 'needs-exec' to agent 'vtool-no-shell': missing tools — disabled: [exec]."
+                + " Enable the required tools for this agent and try again.", result.message());
+    }
+
+    @Test
+    void aSkillThatNeedsTheShellValidatesOnceTheAgentIsGrantedIt() throws Exception {
+        var agent = createAgent("vtool-shell-granted");
+        writeSkillDeclaringTool("needs-exec", "exec");
+        Tx.run(() -> {
+            var grant = new AgentToolConfig();
+            grant.agent = agent;
+            grant.toolName = "exec";
+            grant.enabled = true;
+            grant.save();
+            return null;
+        });
+
+        var result = SkillPromotionService.validateToolRequirements(agent, "needs-exec");
+        assertTrue(result.ok(), "the operator's grant must let the skill validate: " + result.message());
         assertNull(result.message(), "success carries no message");
     }
 
