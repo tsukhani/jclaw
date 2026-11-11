@@ -5,6 +5,7 @@ import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -14,6 +15,7 @@ import okio.BufferedSource;
 import okio.Utf8;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import services.EventLogger;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.SsrfGuard;
@@ -23,6 +25,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -57,9 +60,13 @@ import java.util.function.Consumer;
  *
  * <p><b>Failures.</b> A non-2xx answer to a request fails that request alone through
  * {@code onRequestFailed} (JCLAW-1442): under 2026-07-28 a 400 or 404 carrying a JSON-RPC
- * error is an ordinary answer to one request. Two cases stay connection-level and go to
+ * error is an ordinary answer to one request. Three cases stay connection-level and go to
  * {@code onError}: a 400 or 404 on a POST that carried {@code Mcp-Session-Id}, either of which
- * can mean the session is gone, and a call that got no HTTP response.
+ * can mean the session is gone, a 401 or 403 from an address the saved headers were kept from,
+ * and a call that got no HTTP response.
+ *
+ * <p><b>Saved headers.</b> They go only to the endpoint's scheme, host and port, the address they
+ * were entered for (JF-291). A redirect to another address is followed without them (JF-304).
  *
  * <p><b>Out of scope.</b> The optional GET-SSE channel for receiving
  * server-initiated events between requests is not implemented; for the
@@ -77,6 +84,9 @@ public final class McpStreamableHttpTransport implements McpTransport {
     /** Room for a whole message on one {@code data: } line ended by {@code \r\n}. */
     private static final long SSE_LINE_MAX_BYTES = McpTransport.MAX_MESSAGE_BYTES + "data: \r".length();
     private static final String LISTEN = "subscriptions/listen";
+    private static final String HEADERS_STAY = "JClaw sends this server's saved headers only to the address they"
+            + " were entered for, so the redirect went without them. If the server has moved, change its URL to the"
+            + " new address and enter the headers again.";
 
     private final String name;
     private final URI endpoint;
@@ -98,6 +108,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
      *  the first response carries it; null forever if the server doesn't
      *  participate in session tracking (legacy non-streamable HTTP servers). */
     private final AtomicReference<String> sessionId = new AtomicReference<>();
+    /** One line a connection, however many of its requests the server redirects. */
+    private final AtomicBoolean redirectLogged = new AtomicBoolean();
 
     @MustBeClosed
     public McpStreamableHttpTransport(String name, URI endpoint, Map<String, String> headers) {
@@ -159,7 +171,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
         // A dropped or idle listen stream fails that subscription, never the connection.
         var isListen = msg instanceof JsonRpc.Request r && LISTEN.equals(r.method());
         var carriedSession = sid != null;
-        var call = (isListen ? listenClient() : HttpFactories.llmStreamingGuarded()).newCall(builder.build());
+        var client = isListen ? listenClient() : HttpFactories.llmStreamingGuarded();
+        var call = HttpFactories.keepingToOrigin(client, headers.keySet()).newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
         if (requestId != null) requestCalls.put(requestId, call);
@@ -182,6 +195,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onResponse(Call call, Response resp) {
                 try (resp) {
+                    checkRedirectedAnswer(call.request().url(), resp);
                     handleResponse(resp, requestId, isInitialize, carriedSession);
                 } catch (IOException e) {
                     if (!closed && !call.isCanceled()) ioFailure(e, requestId, isListen);
@@ -203,6 +217,30 @@ public final class McpStreamableHttpTransport implements McpTransport {
      */
     private static OkHttpClient listenClient() {
         return HttpFactories.llmStreamingGuarded().newBuilder().readTimeout(Duration.ZERO).build();
+    }
+
+    /**
+     * An answer from an address the saved headers were kept from. A 401 or 403 is that address asking for
+     * them, which no retry cures, so it fails the connection under a message that says so. Any other answer
+     * is handled as usual, and the redirect is logged once.
+     */
+    private void checkRedirectedAnswer(HttpUrl sentTo, Response resp) throws IOException {
+        var answered = resp.request().url();
+        if (headers.isEmpty() || HttpFactories.sameOrigin(answered, sentTo)) return;
+        if (resp.code() == 401 || resp.code() == 403) {
+            throw new IOException("MCP HTTP %d after a redirect to %s. %s"
+                    .formatted(resp.code(), origin(answered), HEADERS_STAY));
+        }
+        if (redirectLogged.compareAndSet(false, true)) {
+            EventLogger.warn("MCP_CONNECT", "MCP server '%s' redirected a request to %s. %s"
+                    .formatted(name, origin(answered), HEADERS_STAY));
+        }
+    }
+
+    /** Scheme, host and port alone: the rest of a {@code Location} is the redirecting server's text. */
+    private static String origin(HttpUrl url) {
+        var host = url.host().indexOf(':') >= 0 ? "[" + url.host() + "]" : url.host();
+        return url.scheme() + "://" + host + ":" + url.port();
     }
 
     private void ioFailure(IOException e, @Nullable Object requestId, boolean isListen) {

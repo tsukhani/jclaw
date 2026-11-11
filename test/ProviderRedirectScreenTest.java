@@ -75,21 +75,35 @@ class ProviderRedirectScreenTest extends UnitTest {
 
     @Test
     void theMcpListenClientRefusesARedirectToABlockedLiteral() throws Exception {
+        assertMcpRedirectRefused("subscriptions/listen", Map.of(), "failed: ");
+    }
+
+    /** A server with saved headers is sent through a client derived per request (JF-304), which keeps the screen. */
+    @Test
+    void anMcpServerWithSavedHeadersIsStillRefusedARedirectToABlockedLiteral() throws Exception {
+        assertMcpRedirectRefused("subscriptions/listen", Map.of("X-Api-Key", "saved-key"), "failed: ");
+        assertMcpRedirectRefused("tools/call", Map.of("X-Api-Key", "saved-key"), "broke: ");
+    }
+
+    /** A listen stream fails its subscription and any other request the connection, so {@code outcome} differs. */
+    private void assertMcpRedirectRefused(String method, Map<String, String> savedHeaders, String outcomePrefix)
+            throws Exception {
+        int sent = front.getRequestCount();
         front.enqueue(redirect(307, blockedHop()));
         behind.enqueue(new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
                 .body("{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}").build());
         try (var transport = new McpStreamableHttpTransport("redirect", URI.create(front.url("/mcp").toString()),
-                Map.of())) {
+                savedHeaders)) {
             var outcome = new CompletableFuture<String>();
             transport.start(m -> outcome.complete("answered: " + m),
                     (_, e) -> outcome.complete("failed: " + e.getMessage()),
                     e -> outcome.complete("broke: " + e));
-            transport.send(new JsonRpc.Request(7L, "subscriptions/listen", null));
+            transport.send(new JsonRpc.Request(7L, method, null));
 
             var result = outcome.get(10, TimeUnit.SECONDS);
-            assertEquals(1, front.getRequestCount(), result);
-            assertEquals(0, behind.getRequestCount(), "the listen POST reached the blocked hop: " + result);
-            assertTrue(result.startsWith("failed: ") && result.contains("SSRF guard"), result);
+            assertEquals(sent + 1, front.getRequestCount(), result);
+            assertEquals(0, behind.getRequestCount(), "the " + method + " POST reached the blocked hop: " + result);
+            assertTrue(result.startsWith(outcomePrefix) && result.contains("SSRF guard"), result);
         }
     }
 

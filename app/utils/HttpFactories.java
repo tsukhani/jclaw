@@ -5,12 +5,15 @@ import okhttp3.Connection;
 import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.EventListener;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.NonNull;
 import play.Logger;
 import services.ConfigService;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -333,5 +336,31 @@ public final class HttpFactories {
      */
     public static @NonNull OkHttpClient generalGuarded() {
         return TRANSPORT.orElse(GENERAL_GUARDED_CLIENT);
+    }
+
+    /**
+     * {@code client}, sending the headers in {@code names} only to the scheme, host and port a call is made to.
+     * Every tier follows redirects, and on a hop to another origin OkHttp removes {@code Authorization} and no
+     * other header, so a credential under any other name follows the redirect unless its caller asks for this
+     * (JF-304). A network interceptor, because only those see the request each hop sends.
+     *
+     * @return {@code client} itself when {@code names} is empty
+     */
+    public static @NonNull OkHttpClient keepingToOrigin(@NonNull OkHttpClient client,
+                                                        @NonNull Collection<String> names) {
+        var withheld = List.copyOf(names);
+        if (withheld.isEmpty()) return client;
+        return client.newBuilder().addNetworkInterceptor(chain -> {
+            var hop = chain.request();
+            if (sameOrigin(hop.url(), chain.call().request().url())) return chain.proceed(hop);
+            var bare = hop.newBuilder();
+            withheld.forEach(bare::removeHeader);
+            return chain.proceed(bare.build());
+        }).build();
+    }
+
+    /** Whether two URLs share a scheme, host and port: the address a saved credential was entered for. */
+    public static boolean sameOrigin(@NonNull HttpUrl a, @NonNull HttpUrl b) {
+        return a.scheme().equals(b.scheme()) && a.host().equals(b.host()) && a.port() == b.port();
     }
 }
