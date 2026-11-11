@@ -10,8 +10,8 @@ import type { Agent, Prompt, PromptCategory } from '~/types/api'
 
 const { data: promptsData, pending, refresh } = useLazyFetch<Prompt[]>('/api/prompts', { default: () => [] })
 const { data: categoriesData } = useLazyFetch<PromptCategory[]>('/api/prompts/categories', { default: () => [] })
-// The agents a new prompt's Owner field offers (JF-307). When the list cannot be read, the form
-// offers the operator alone and still saves.
+// The agents the form's Owner field offers (JF-307, JF-308). When the list cannot be read, the form
+// offers the operator, and on an edit the prompt's own owner, and still saves.
 const { data: agentsData } = useLazyFetch<Agent[]>('/api/agents', { default: () => [] })
 const prompts = computed(() => promptsData.value ?? [])
 const categories = computed(() => categoriesData.value ?? [])

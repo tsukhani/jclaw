@@ -31,11 +31,11 @@ import static utils.GsonHolder.GSON;
  * CRUD + import/export over the {@code prompt} table — the Prompts Library
  * (JCLAW-813).
  *
- * <p>A prompt has an owner ({@link Prompt#ownerAgent}), chosen once when it is created (JF-307): the
+ * <p>A prompt has an owner ({@link Prompt#ownerAgent}), chosen when it is created (JF-307): the
  * agent its creator names, else the creator. The operator and {@code main} may name any agent; any
- * other agent only itself. An agent other than {@code main} lists, reads, edits and deletes only
- * its own, and a prompt with no owner is the operator's, which only the operator and {@code main}
- * reach (JF-292).
+ * other agent only itself. Only the operator and {@code main} change it afterwards, on an update
+ * (JF-308). An agent other than {@code main} lists, reads, edits and deletes only its own, and a
+ * prompt with no owner is the operator's, which only the operator and {@code main} reach (JF-292).
  * Categories are a fixed taxonomy ({@link Prompt.Category}), so there is no
  * category CRUD — {@link #categories()} just exposes the closed list for the
  * frontend dropdown/filter; tags are the free-form axis and need no endpoint.
@@ -50,6 +50,11 @@ public class ApiPromptsController extends Controller {
     private static final String KEY_TAGS = "tags";
     private static final String KEY_CATEGORY = "category";
     private static final String KEY_OWNER_AGENT_ID = "ownerAgentId";
+
+    private static final String NEW_OWNER_REFUSED =
+            "An agent other than main owns every prompt it creates: leave ownerAgentId out, or send its own id.";
+    private static final String OWNER_CHANGE_REFUSED =
+            "An agent other than main cannot change a prompt's owner: leave ownerAgentId out, or send its own id.";
 
     /** Characters of {@code content} an agent's list row keeps; the whole prompt comes from {@link #get}. */
     public static final int CONTENT_PREVIEW_CHARS = 200;
@@ -103,7 +108,7 @@ public class ApiPromptsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PromptView.class))))
     @Operation(summary = "List saved prompts, newest-edited first, with an optional title filter (case-insensitive substring); "
             + "an agent's rows carry a contentPreview in place of content, and the whole prompt comes from GET /api/prompts/{id}. "
-            + "An agent other than main lists only the prompts it created")
+            + "An agent other than main lists only the prompts it owns")
     @AgentAccess(OWN_ONLY)
     public static void list(@Nullable String title) {
         // Null for the operator and main, who reach every prompt.
@@ -181,8 +186,11 @@ public class ApiPromptsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PromptView.class)))
-    @Operation(summary = "Update a prompt by id (partial: only supplied fields change; the owner never does)")
-    @AgentAccess(value = OWN_ONLY, reason = "one prompt the calling agent owns; main reaches every prompt (JF-292)")
+    @Operation(summary = "Update a prompt by id (partial: only supplied fields change). ownerAgentId changes the "
+            + "owner, for the operator and main only: an agent's id makes that agent the owner, null makes the "
+            + "prompt the operator's, and without it the owner is unchanged")
+    @AgentAccess(value = OWN_ONLY, reason = "one prompt the calling agent owns; main reaches every prompt (JF-292) "
+            + "and is the one agent that changes a prompt's owner (JF-308)")
     public static void update(Long id) {
         var row = requirePrompt(id);
         var body = JsonBodyReader.readJsonBody();
@@ -190,12 +198,15 @@ public class ApiPromptsController extends Controller {
             badRequest();
             throw ApiResponses.unreachable();
         }
+        // Ahead of every field write, so an owner that is refused leaves the whole prompt as it was.
+        var owner = body.has(KEY_OWNER_AGENT_ID) ? namedOwner(body, OWNER_CHANGE_REFUSED) : row.ownerAgent;
 
         if (present(body, KEY_TITLE)) row.title = JsonBodyReader.requiredOr400(body, KEY_TITLE);
         if (present(body, KEY_CONTENT)) row.content = JsonBodyReader.requiredOr400(body, KEY_CONTENT);
         if (present(body, KEY_CATEGORY)) row.category = requireCategory(body.get(KEY_CATEGORY).getAsString());
         // tags is nullable/clearable: an explicit "tags":"" or null blanks it.
         if (body.has(KEY_TAGS)) row.tags = JsonBodyReader.optString(body, KEY_TAGS, true);
+        row.ownerAgent = owner;
         row.save();
         renderJSON(gson.toJson(PromptView.of(row)));
     }
@@ -264,21 +275,28 @@ public class ApiPromptsController extends Controller {
 
     /**
      * The owner of a new prompt (JF-307): the agent {@code ownerAgentId} names, else the creator. The
-     * operator and {@code main} may name any agent, and get a 400 for an id that names none; any
-     * other agent may name only itself, and gets 403 {@code agent_scope} for anything else.
+     * operator and {@code main} may name any agent; any other agent may name only itself.
      */
     private static @Nullable Agent newPromptOwner(JsonObject body) {
         var creator = creatingAgent();
-        if (!present(body, KEY_OWNER_AGENT_ID)) return creator;
+        return present(body, KEY_OWNER_AGENT_ID) ? namedOwner(body, NEW_OWNER_REFUSED) : creator;
+    }
+
+    /**
+     * The owner {@code ownerAgentId} names in a body that carries it: that agent, or nobody, which is
+     * the operator, for a JSON null. The operator and {@code main} may name any owner, and get a 400
+     * for an id that names no agent or a value that is not a number. Any other agent may name only
+     * itself, and gets 403 {@code agent_scope} with {@code refusal} for anything else, a null included.
+     */
+    private static @Nullable Agent namedOwner(JsonObject body, String refusal) {
         var id = JsonArgs.optLong(body, KEY_OWNER_AGENT_ID);
         Agent named = id == null ? null : Agent.findById(id);
         // Ahead of the 400, so the answer to an agent other than main never says which ids exist.
         if (!RequestPrincipal.mayReachAgentScopedRow(named)) {
-            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
-                    "An agent other than main owns every prompt it creates: leave ownerAgentId out, or send its own id.");
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, refusal);
             throw ApiResponses.unreachable();
         }
-        if (named == null) {
+        if (named == null && !body.get(KEY_OWNER_AGENT_ID).isJsonNull()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, id == null
                     ? "ownerAgentId must be an agent's id, a number."
                     : "ownerAgentId " + id + " names no agent.");

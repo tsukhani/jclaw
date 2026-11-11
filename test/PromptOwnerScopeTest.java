@@ -20,8 +20,8 @@ import java.util.function.Supplier;
 
 /**
  * An agent other than {@code main} reaches only the prompts it owns (JF-292), driven end to end with
- * the bearer and agent header {@code jclaw_api} sends. Who owns a new prompt is
- * {@code PromptOwnerChoiceTest}'s (JF-307).
+ * the bearer and agent header {@code jclaw_api} sends. Who owns a new prompt (JF-307) and who changes
+ * a prompt's owner (JF-308) are {@code PromptOwnerChoiceTest}'s.
  *
  * <p>Each case pairs a refusal with a permission on the same route, since a broken header would 403
  * every caller. {@code main}'s half is in {@code RequestPrincipalPolicyTest}: the row check is
@@ -108,13 +108,17 @@ class PromptOwnerScopeTest extends FunctionalTest {
     void anUpdateCannotGiveAnAgentsPromptToAnotherAgent() {
         long id = createAs(own.agentId(), marker + " mine", "own content");
 
-        var moved = asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id, "application/json",
-                "{\"ownerAgentId\":" + alien.agentId() + ",\"ownerAgentName\":\"" + alien.name() + "\"}"));
-        assertStatus(200, moved);
-        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(moved)));
+        assertRefused("An agent other than main cannot change a prompt's owner: leave ownerAgentId out, or send its own id.",
+                asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id, "application/json",
+                        "{\"content\":\"given away\",\"ownerAgentId\":" + alien.agentId()
+                                + ",\"ownerAgentName\":\"" + alien.name() + "\"}")));
+        assertEquals(List.of(marker + " mine", "own content"), stored(id));
 
         assertRefused("Prompt " + id + " belongs to another agent.",
                 asAgent(() -> GET(agentRequest(alien.agentId()), "/api/prompts/" + id)));
+        var read = asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts/" + id));
+        assertStatus(200, read);
+        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(read)));
     }
 
     @Test

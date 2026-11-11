@@ -22,15 +22,17 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * A new prompt's creator picks its owner (JF-307), driven end to end: the operator by session, an
- * agent with the bearer and agent header {@code jclaw_api} sends.
+ * Who owns a prompt, driven end to end: the operator by session, an agent with the bearer and agent
+ * header {@code jclaw_api} sends. A new prompt's creator picks its owner (JF-307), and the operator
+ * changes it on an edit (JF-308).
  *
- * <p>{@code main}'s half is in {@code RequestPrincipalPolicyTest}. The check on a named owner is
- * {@code mayReachRow} with that agent, which answers {@code main} as it answers the operator: true
- * whoever it names ({@code mainReachesEveryAgentsRows}), and true for an id no agent has
- * ({@code anOwnerlessRowIsOperatorAndMainOnly}), so {@code main} gets the operator's 400 there and
- * never a custom agent's 403. {@code main} is provisioned at boot, where a sibling's
- * {@code Fixtures.deleteDatabase} can remove it mid-suite, so no test here drives it.
+ * <p>{@code main}'s half is in {@code RequestPrincipalPolicyTest}. The check on a named owner, on a
+ * create and on an edit alike, is {@code mayReachRow} with that agent, which answers {@code main} as
+ * it answers the operator: true whoever it names ({@code mainReachesEveryAgentsRows}), and true for
+ * an id no agent has and for a null ({@code anOwnerlessRowIsOperatorAndMainOnly}), so {@code main}
+ * gets the operator's 400 or the operator's change there and never a custom agent's 403.
+ * {@code main} is provisioned at boot, where a sibling's {@code Fixtures.deleteDatabase} can remove
+ * it mid-suite, so no test here drives it.
  */
 class PromptOwnerChoiceTest extends FunctionalTest {
 
@@ -38,6 +40,8 @@ class PromptOwnerChoiceTest extends FunctionalTest {
     private static final String INVALID_REQUEST = "invalid_request";
     private static final String OWN_PROMPTS_ONLY =
             "An agent other than main owns every prompt it creates: leave ownerAgentId out, or send its own id.";
+    private static final String OWNER_NOT_CHANGED =
+            "An agent other than main cannot change a prompt's owner: leave ownerAgentId out, or send its own id.";
     private static final String NOT_AN_ID = "ownerAgentId must be an agent's id, a number.";
     private static final String UNSCOPED = "This request is agent-originated but names no agent, so it cannot be scoped.";
     private static final long NO_SUCH_AGENT = 999_999_999L;
@@ -207,38 +211,248 @@ class PromptOwnerChoiceTest extends FunctionalTest {
         assertEquals(0L, written());
     }
 
-    // --- the owner is chosen once -------------------------------------------------------
+    // --- an edit changes the owner: the operator (JF-308) -------------------------------
 
     @Test
-    void anUpdateThatCarriesAnOwnerLeavesTheOwnerUnchanged() {
-        long given = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+    void theOperatorGivesItsPromptToAnAgentOnAnEdit() {
+        long id = createAsOperator(marker + " operator", "c", null);
+
+        var given = asOperator(() -> PUT("/api/prompts/" + id, "application/json",
+                "{\"content\":\"edited\",\"ownerAgentId\":" + own.agentId() + "}"));
+
+        assertStatus(200, given);
+        assertEquals(List.of("edited", String.valueOf(own.agentId()), own.name()),
+                List.of(json(given).get("content").getAsString(), owner(json(given)).get(0),
+                        owner(json(given)).get(1)));
+        assertEquals(Arrays.asList(marker + " operator", "edited", "CODING", null, own.agentId()), storedRow(id));
+    }
+
+    @Test
+    void theOperatorMovesAnAgentsPromptToAnotherAgent() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        var moved = asOperator(() -> PUT("/api/prompts/" + id, "application/json",
+                "{\"ownerAgentId\":" + alien.agentId() + "}"));
+
+        assertStatus(200, moved);
+        assertEquals(List.of(String.valueOf(alien.agentId()), alien.name()), owner(json(moved)));
+        assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, alien.agentId()), storedRow(id));
+    }
+
+    @Test
+    void aNullOwnerOnAnEditMakesThePromptTheOperators() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        var taken = asOperator(() -> PUT("/api/prompts/" + id, "application/json", "{\"ownerAgentId\":null}"));
+
+        assertStatus(200, taken);
+        assertEquals(Arrays.asList(null, null), owner(json(taken)));
+        assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, null), storedRow(id));
+    }
+
+    @Test
+    void anEditThatSendsNoOwnerLeavesTheOwnerUnchanged() {
+        long agents = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
         long operators = createAsOperator(marker + " operator", "c", null);
 
-        login();
-        var moved = PUT("/api/prompts/" + given, "application/json",
-                "{\"content\":\"edited\",\"ownerAgentId\":" + alien.agentId() + "}");
-        assertStatus(200, moved);
-        assertEquals(List.of("edited", String.valueOf(own.agentId()), own.name()),
-                List.of(json(moved).get("content").getAsString(), owner(json(moved)).get(0),
-                        owner(json(moved)).get(1)));
-        assertEquals(own.agentId(), storedOwner(given));
+        // An owner's name is not the field: only ownerAgentId is read.
+        var edited = asOperator(() -> PUT("/api/prompts/" + agents, "application/json",
+                "{\"content\":\"edited\",\"ownerAgentName\":\"" + alien.name() + "\"}"));
+        assertStatus(200, edited);
+        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(edited)));
+        assertEquals(Arrays.asList(marker + " for own", "edited", "CODING", null, own.agentId()), storedRow(agents));
 
-        var cleared = PUT("/api/prompts/" + given, "application/json", "{\"ownerAgentId\":null}");
-        assertStatus(200, cleared);
-        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(cleared)));
-        assertEquals(own.agentId(), storedOwner(given));
-
-        var claimed = PUT("/api/prompts/" + operators, "application/json",
-                "{\"ownerAgentId\":" + own.agentId() + "}");
-        assertStatus(200, claimed);
-        assertEquals(Arrays.asList(null, null), owner(json(claimed)));
-        assertNull(storedOwner(operators));
-
-        // An update reads no owner at all, so an id no agent has is no error there.
-        var unknown = PUT("/api/prompts/" + given, "application/json", "{\"ownerAgentId\":" + NO_SUCH_AGENT + "}");
-        assertStatus(200, unknown);
-        assertEquals(own.agentId(), storedOwner(given));
+        var editedOperators = asOperator(() -> PUT("/api/prompts/" + operators, "application/json",
+                "{\"content\":\"edited\"}"));
+        assertStatus(200, editedOperators);
+        assertEquals(Arrays.asList(null, null), owner(json(editedOperators)));
+        assertEquals(Arrays.asList(marker + " operator", "edited", "CODING", null, null), storedRow(operators));
     }
+
+    @Test
+    void anEditThatNamesTheCurrentOwnerLeavesTheOwnerUnchanged() {
+        long agents = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+        long operators = createAsOperator(marker + " operator", "c", null);
+
+        var same = asOperator(() -> PUT("/api/prompts/" + agents, "application/json",
+                "{\"ownerAgentId\":" + own.agentId() + "}"));
+        assertStatus(200, same);
+        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(same)));
+        assertEquals(own.agentId(), storedOwner(agents));
+
+        var stillOperators = asOperator(() -> PUT("/api/prompts/" + operators, "application/json",
+                "{\"ownerAgentId\":null}"));
+        assertStatus(200, stillOperators);
+        assertEquals(Arrays.asList(null, null), owner(json(stillOperators)));
+        assertNull(storedOwner(operators));
+    }
+
+    @Test
+    void theOperatorNamingAnIdNoAgentHasOnAnEditIsRefusedAndNothingIsApplied() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        var refused = asOperator(() -> PUT("/api/prompts/" + id, "application/json",
+                editNaming(String.valueOf(NO_SUCH_AGENT))));
+
+        assertStatus(400, refused);
+        assertEquals(List.of(INVALID_REQUEST, "ownerAgentId 999999999 names no agent."), codeAndMessage(refused));
+        assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, own.agentId()), storedRow(id));
+    }
+
+    @Test
+    void theOperatorNamingAnOwnerThatIsNotANumberOnAnEditIsRefusedAndNothingIsApplied() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        for (var notANumber : List.of("\"research-bot\"", "{}", "true")) {
+            var refused = asOperator(() -> PUT("/api/prompts/" + id, "application/json", editNaming(notANumber)));
+
+            assertStatus(400, refused);
+            assertEquals(List.of(INVALID_REQUEST, NOT_AN_ID), codeAndMessage(refused), notANumber);
+            assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, own.agentId()), storedRow(id),
+                    notANumber);
+        }
+    }
+
+    // --- an edit changes the owner: an agent other than main (JF-308) -------------------
+
+    @Test
+    void anAgentOtherThanMainCannotGiveItsPromptAwayAndNothingIsApplied() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        // Another agent, an id no agent has, a word, and null, which would hand it to the operator:
+        // one answer for all four, so the refusal never says which ids exist.
+        for (var named : List.of(String.valueOf(alien.agentId()), String.valueOf(NO_SUCH_AGENT), "\"research-bot\"",
+                "null")) {
+            assertRefused(OWNER_NOT_CHANGED, asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id,
+                    "application/json", editNaming(named))));
+            assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, own.agentId()), storedRow(id), named);
+        }
+
+        assertRefused("Prompt " + id + " belongs to another agent.",
+                asAgent(() -> GET(agentRequest(alien.agentId()), "/api/prompts/" + id)));
+    }
+
+    @Test
+    void anAgentOtherThanMainNamingItselfOnItsOwnPromptKeepsItAndTheRestOfTheEditApplies() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        var edited = asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id, "application/json",
+                editNaming(String.valueOf(own.agentId()))));
+
+        assertStatus(200, edited);
+        assertEquals(List.of(String.valueOf(own.agentId()), own.name()), owner(json(edited)));
+        assertEquals(Arrays.asList(marker + " retitled", "rewritten", "WRITING", "new", own.agentId()), storedRow(id));
+    }
+
+    @Test
+    void anAgentOtherThanMainCannotTakeAPrompt() {
+        long operators = createAsOperator(marker + " operator", "c", null);
+        long aliens = createAsOperator(marker + " for alien", "c", new JsonPrimitive(alien.agentId()));
+
+        assertRefused("Prompt " + operators + " is the operator's; an agent other than main reaches only its own prompts.",
+                asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + operators, "application/json",
+                        editNaming(String.valueOf(own.agentId())))));
+        assertRefused("Prompt " + aliens + " belongs to another agent.",
+                asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + aliens, "application/json",
+                        editNaming(String.valueOf(own.agentId())))));
+
+        assertEquals(Arrays.asList(marker + " operator", "c", "CODING", null, null), storedRow(operators));
+        assertEquals(Arrays.asList(marker + " for alien", "c", "CODING", null, alien.agentId()), storedRow(aliens));
+    }
+
+    @Test
+    void anUnstampedBearerNamingAnOwnerOnAnEditChangesNothing() {
+        long id = createAsOperator(marker + " for own", "c", new JsonPrimitive(own.agentId()));
+
+        assertRefused("Prompt " + id + " belongs to another agent.",
+                asAgent(() -> PUT(bareBearerRequest(), "/api/prompts/" + id, "application/json",
+                        editNaming(String.valueOf(alien.agentId())))));
+
+        assertEquals(Arrays.asList(marker + " for own", "c", "CODING", null, own.agentId()), storedRow(id));
+    }
+
+    // --- after a change (JF-308) --------------------------------------------------------
+
+    @Test
+    void afterAChangeTheNewOwnerListsReadsEditsAndDeletesThePrompt() {
+        long id = createAsOperator(marker + " operator", "operator wrote this", null);
+        assertStatus(200, asOperator(() -> PUT("/api/prompts/" + id, "application/json",
+                "{\"ownerAgentId\":" + own.agentId() + "}")));
+
+        var list = asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts"));
+        assertStatus(200, list);
+        assertEquals(List.of(id + ":" + marker + " operator"), idsAndTitles(list));
+
+        var read = asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts/" + id));
+        assertStatus(200, read);
+        assertEquals(List.of(marker + " operator", "operator wrote this", String.valueOf(own.agentId()), own.name()),
+                List.of(json(read).get("title").getAsString(), json(read).get("content").getAsString(),
+                        owner(json(read)).get(0), owner(json(read)).get(1)));
+
+        var edited = asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id, "application/json",
+                "{\"content\":\"edited by its new owner\"}"));
+        assertStatus(200, edited);
+        assertEquals(Arrays.asList(marker + " operator", "edited by its new owner", "CODING", null, own.agentId()),
+                storedRow(id));
+
+        var deleted = asAgent(() -> DELETE(agentRequest(own.agentId()), "/api/prompts/" + id));
+        assertStatus(200, deleted);
+        assertEquals("{\"status\":\"ok\",\"deleted\":true}", getContent(deleted));
+        assertNull(stored(id));
+    }
+
+    @Test
+    void afterAChangeTheAgentThatOwnedThePromptNoLongerReachesIt() {
+        long id = createAsOperator(marker + " moving", "c", new JsonPrimitive(own.agentId()));
+        assertStatus(200, asOperator(() -> PUT("/api/prompts/" + id, "application/json",
+                "{\"ownerAgentId\":" + alien.agentId() + "}")));
+        var refusal = "Prompt " + id + " belongs to another agent.";
+
+        var list = asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts"));
+        assertStatus(200, list);
+        assertEquals("[]", getContent(list));
+        assertRefused(refusal, asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts/" + id)));
+        assertRefused(refusal, asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id,
+                "application/json", "{\"content\":\"hijacked\"}")));
+        assertRefused(refusal, asAgent(() -> DELETE(agentRequest(own.agentId()), "/api/prompts/" + id)));
+        assertEquals(Arrays.asList(marker + " moving", "c", "CODING", null, alien.agentId()), storedRow(id));
+
+        // The same routes answer the new owner, so the refusals above are the scope and not a broken header.
+        var newOwnersList = asAgent(() -> GET(agentRequest(alien.agentId()), "/api/prompts"));
+        assertStatus(200, newOwnersList);
+        assertEquals(List.of(id + ":" + marker + " moving"), idsAndTitles(newOwnersList));
+        assertStatus(200, asAgent(() -> DELETE(agentRequest(alien.agentId()), "/api/prompts/" + id)));
+        assertNull(stored(id));
+    }
+
+    @Test
+    void afterAPromptGoesBackToTheOperatorTheAgentThatOwnedItNoLongerReachesIt() {
+        long id = createAsOperator(marker + " returning", "c", new JsonPrimitive(own.agentId()));
+        assertStatus(200, asOperator(() -> PUT("/api/prompts/" + id, "application/json", "{\"ownerAgentId\":null}")));
+        var refusal = "Prompt " + id + " is the operator's; an agent other than main reaches only its own prompts.";
+
+        var list = asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts"));
+        assertStatus(200, list);
+        assertEquals("[]", getContent(list));
+        assertRefused(refusal, asAgent(() -> GET(agentRequest(own.agentId()), "/api/prompts/" + id)));
+        assertRefused(refusal, asAgent(() -> PUT(agentRequest(own.agentId()), "/api/prompts/" + id,
+                "application/json", "{\"content\":\"hijacked\"}")));
+        assertRefused(refusal, asAgent(() -> DELETE(agentRequest(own.agentId()), "/api/prompts/" + id)));
+        assertEquals(Arrays.asList(marker + " returning", "c", "CODING", null, null), storedRow(id));
+
+        var operatorsList = asOperator(() -> GET("/api/prompts?title=" + marker));
+        assertStatus(200, operatorsList);
+        assertEquals(List.of(id + ":" + marker + " returning"), idsAndTitles(operatorsList));
+        var edited = asOperator(() -> PUT("/api/prompts/" + id, "application/json", "{\"content\":\"edited\"}"));
+        assertStatus(200, edited);
+        assertEquals(Arrays.asList("edited", null, null),
+                Arrays.asList(json(edited).get("content").getAsString(), owner(json(edited)).get(0),
+                        owner(json(edited)).get(1)));
+        assertStatus(200, asOperator(() -> DELETE("/api/prompts/" + id)));
+        assertNull(stored(id));
+    }
+
+    // --- an import ----------------------------------------------------------------------
 
     @Test
     void anImportedPromptThatNamesAnOwnerIsStillTheOperators() {
@@ -312,6 +526,22 @@ class PromptOwnerChoiceTest extends FunctionalTest {
         return body.toString();
     }
 
+    /** An edit that changes every field and names {@code ownerJson}, a JSON value, as the owner. */
+    private String editNaming(String ownerJson) {
+        return "{\"title\":\"%s retitled\",\"content\":\"rewritten\",\"category\":\"WRITING\",\"tags\":\"new\","
+                .formatted(marker) + "\"ownerAgentId\":" + ownerJson + "}";
+    }
+
+    /** One call in the operator's session, which ends with it, so a bearer call after it is the agent's. */
+    private Http.Response asOperator(Supplier<Http.Response> call) {
+        login();
+        try {
+            return call.get();
+        } finally {
+            clearCookies();
+        }
+    }
+
     private long createAsOperator(String title, String content, JsonElement owner) {
         login();
         try {
@@ -328,6 +558,15 @@ class PromptOwnerChoiceTest extends FunctionalTest {
         return commit(() -> {
             Prompt row = Prompt.findById(id);
             return row == null ? null : List.of(row.title, row.content);
+        });
+    }
+
+    /** The stored title, content, category, tags and owner's id, the last null for the operator's. */
+    private static List<Object> storedRow(long id) {
+        return commit(() -> {
+            Prompt row = Prompt.findById(id);
+            return Arrays.asList(row.title, row.content, row.category.name(), row.tags,
+                    row.ownerAgent == null ? null : row.ownerAgent.id);
         });
     }
 

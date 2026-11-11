@@ -253,9 +253,13 @@ describe('Prompts page — a failed import (JCLAW-1221)', () => {
   })
 })
 
-describe('Prompts page — the Owner field (JF-307)', () => {
+describe('Prompts page — the Owner field (JF-307, JF-308)', () => {
   const GENERATED = { title: 'Standup Notes', category: 'WRITING', content: 'Summarize the standup', tags: 'meetings' }
   const OPERATOR = 'You (the operator)'
+  const NEW_PROMPT_HINT
+    = 'An agent that owns a prompt can read, change and delete it. You can change the owner later, when you edit the prompt.'
+  const EDIT_HINT
+    = 'An agent that owns a prompt can read, change and delete it. To give this prompt to another owner, pick the owner and click Save.'
 
   let prompts: Prompt[] = []
   let posted: Record<string, unknown>[] = []
@@ -302,7 +306,17 @@ describe('Prompts page — the Owner field (JF-307)', () => {
         method: 'PUT',
         handler: async (event) => {
           const { readBody } = await import('h3')
-          put.push(await readBody(event) as Record<string, unknown>)
+          const body = await readBody(event) as Record<string, unknown>
+          put.push(body)
+          // As the server answers: a sent owner replaces the prompt's, null making it the
+          // operator's, and a body with no owner leaves the owner as it was.
+          prompts = prompts.map((p) => {
+            if (p.id !== id) return p
+            const edited = { ...p, title: String(body.title) }
+            if (!('ownerAgentId' in body)) return edited
+            const owner = AGENTS.find(a => a.id === body.ownerAgentId)
+            return { ...edited, ownerAgentId: owner?.id ?? null, ownerAgentName: owner?.name ?? null }
+          })
           return prompts.find(p => p.id === id)
         },
       })
@@ -373,8 +387,7 @@ describe('Prompts page — the Owner field (JF-307)', () => {
     expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
     expect(selectedOwner()).toBe(OPERATOR)
     expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim())
-      .toBe('An agent that owns a prompt can read, change and delete it. You cannot change the owner later.')
-    expect(control('prompt-form-owner-fixed')).toBeNull()
+      .toBe(NEW_PROMPT_HINT)
   })
 
   it('sends no owner when the owner is left at you, and the new card names no agent', async () => {
@@ -448,33 +461,155 @@ describe('Prompts page — the Owner field (JF-307)', () => {
     })
   })
 
-  it('shows the agent that owns a prompt being edited, with no way to change it, and saves without an owner', async () => {
-    await openEditForm(1)
+  // --- the edit form (JF-308) ---
 
-    const owner = control<HTMLInputElement>('prompt-form-owner-fixed')!
-    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
-    expect(owner.value).toBe('research-bot')
-    expect(owner.readOnly).toBe(true)
-    expect(control('prompt-form-owner')).toBeNull()
-    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim())
-      .toBe('The owner was chosen when this prompt was created. It cannot be changed.')
+  async function cancel() {
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => b.textContent?.trim() === 'Cancel')!.click()
+    await flushPromises()
+  }
 
-    await type('prompt-title', 'Code Review v2')
+  async function save() {
     control<HTMLButtonElement>('prompt-save')!.click()
     await vi.waitFor(() => expect(put).toHaveLength(1))
+  }
+
+  it('sets the owner of an agent\'s prompt being edited to that agent, in the list a new prompt offers', async () => {
+    await openEditForm(1)
+
+    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
+    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
+    expect(selectedOwner()).toBe('research-bot')
+    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim()).toBe(EDIT_HINT)
+  })
+
+  it('sets the owner of your own prompt being edited to you', async () => {
+    await openEditForm(2)
+
+    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
+    expect(selectedOwner()).toBe(OPERATOR)
+  })
+
+  it('sends no owner when an edit leaves the owner alone, and the card still names the agent', async () => {
+    await openEditForm(1)
+
+    await type('prompt-title', 'Code Review v2')
+    await save()
 
     expect(put[0]).toEqual({
       title: 'Code Review v2', content: 'Review this code', category: 'CODING', tags: 'review, quality',
     })
     expect(posted).toEqual([])
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-card-1"]').text()).toContain('Code Review v2'))
+    expect(page!.find('[data-testid="prompt-owner-1"]').text()).toBe('Agent: research-bot')
+    expect(control('prompt-title')).toBeNull()
   })
 
-  it('shows you as the owner of your own prompt being edited', async () => {
+  it('sends no owner when an edit leaves your own prompt with you', async () => {
     await openEditForm(2)
 
-    const owner = control<HTMLInputElement>('prompt-form-owner-fixed')!
-    expect(owner.value).toBe(OPERATOR)
-    expect(owner.readOnly).toBe(true)
-    expect(control('prompt-form-owner')).toBeNull()
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Blog Outline', content: 'Outline a blog post', category: 'WRITING', tags: 'writing',
+    })
+  })
+
+  it('sends the picked agent as ownerAgentId when an edit gives your prompt to an agent, and the card then names it', async () => {
+    await openEditForm(2)
+
+    await pickOwner('research-bot')
+    expect(selectedOwner()).toBe('research-bot')
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Blog Outline', content: 'Outline a blog post', category: 'WRITING', tags: 'writing',
+      ownerAgentId: 7,
+    })
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-2"]').exists()).toBe(true))
+    expect(page!.find('[data-testid="prompt-owner-2"]').text()).toBe('Agent: research-bot')
+  })
+
+  it('sends the picked agent as ownerAgentId when an edit moves an agent\'s prompt to another agent', async () => {
+    await openEditForm(1)
+
+    await pickOwner('main')
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+      ownerAgentId: 1,
+    })
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-1"]').text()).toBe('Agent: main'))
+  })
+
+  it('sends a null ownerAgentId when an edit gives an agent\'s prompt to you, and the card then names no agent', async () => {
+    await openEditForm(1)
+
+    await pickOwner(OPERATOR)
+    expect(selectedOwner()).toBe(OPERATOR)
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+      ownerAgentId: null,
+    })
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-1"]').exists()).toBe(false))
+  })
+
+  it('sends no owner when an edit picks another owner and then the current one again', async () => {
+    await openEditForm(1)
+
+    await pickOwner('main')
+    await pickOwner('research-bot')
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+    })
+  })
+
+  it('keeps an owner the agent list leaves out as the selected owner, and sends none when it is left alone', async () => {
+    prompts[0] = { ...prompts[0]!, ownerAgentId: 42, ownerAgentName: 'research-bot-helper' }
+    await openEditForm(1)
+
+    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot', 'research-bot-helper'])
+    expect(selectedOwner()).toBe('research-bot-helper')
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+    })
+  })
+
+  it('keeps the current owner selected when the agents cannot be listed, and can still give the prompt to you', async () => {
+    agentsDown = true
+    await openEditForm(1)
+
+    expect(ownerOptions()).toEqual([OPERATOR, 'research-bot'])
+    expect(selectedOwner()).toBe('research-bot')
+    await pickOwner(OPERATOR)
+    await save()
+
+    expect(put[0]).toEqual({
+      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+      ownerAgentId: null,
+    })
+  })
+
+  it('sets the owner to the prompt\'s current owner again each time the edit form opens', async () => {
+    await openEditForm(1)
+    await pickOwner('main')
+    await cancel()
+
+    await page!.find('[data-testid="prompt-edit-1"]').trigger('click')
+    await flushPromises()
+    expect(selectedOwner()).toBe('research-bot')
+    await cancel()
+
+    await page!.find('[data-testid="prompt-edit-2"]').trigger('click')
+    await flushPromises()
+    expect(selectedOwner()).toBe(OPERATOR)
+    expect(put).toEqual([])
   })
 })

@@ -14,7 +14,7 @@ Each prompt is a **title** plus the **prompt text** itself. It is filed under ex
 | **Prompt text** | The text loaded into the composer when you Run it. Required. |
 | **Category** | Exactly one, from a fixed set: **Coding, Writing, Analysis, Creative, Business, Custom**. This is the scannable, filterable axis. |
 | **Tags** | Optional, free-form, comma-separated. This is the unlimited cross-cutting axis: your own labels. |
-| **Owner** | You, or one of your agents. You pick it when you create the prompt, and it never changes after that. |
+| **Owner** | You, or one of your agents. You pick it when you create the prompt, and you can change it when you edit the prompt. |
 
 The two axes are deliberately different. **Categories** are a closed taxonomy (they are not editable), so grouping and filtering stay consistent. **Tags** are a folksonomy for whatever personal labels you want. That is why there is no "custom category" beyond the built-in **Custom** bucket: open-ended organization is what tags are for.
 
@@ -35,7 +35,7 @@ Click **New prompt**. Creation is a two-step flow:
 1. **Describe it**: type a one-line description of what you want the prompt to do, and hit **Generate**. An LLM drafts a title, category, prompt text, and tags from your description.
 2. **Review**: the generated fields pre-fill the form. Edit anything, pick the **Owner**, then click **Create**.
 
-The **Owner** field decides who the new prompt belongs to. It starts at **You (the operator)**, which makes the prompt yours. To give the prompt to an agent, pick that agent's name from the list. Under the field, the form says: *"An agent that owns a prompt can read, change and delete it. You cannot change the owner later."* To move a prompt to another owner, delete it and create it again.
+The **Owner** field decides who the new prompt belongs to. It starts at **You (the operator)**, which makes the prompt yours. To give the prompt to an agent, pick that agent's name from the list. Under the field, the form says: *"An agent that owns a prompt can read, change and delete it. You can change the owner later, when you edit the prompt."*
 
 For a new prompt, the form opens only after **Generate**. To add a prompt without it, write it in a JSON file and use **Import** (see below).
 
@@ -53,18 +53,31 @@ You can also reach the library from the chat composer with the `/prompt` slash c
 
 ## Editing and deleting
 
-The pencil on a card reopens the form, pre-filled. The form shows the **Owner**, but you cannot change it there: *"The owner was chosen when this prompt was created. It cannot be changed."* **Save** updates the prompt in place. Its *updated* time bumps, and the library re-sorts newest-edited first. The trash button deletes the prompt behind a confirmation. Deletion cannot be undone.
+The pencil on a card reopens the form, pre-filled. **Save** updates the prompt in place. Its *updated* time bumps, and the library re-sorts newest-edited first. The trash button deletes the prompt behind a confirmation. Deletion cannot be undone.
+
+### Changing the owner {#change-owner}
+
+In the edit form, the **Owner** field is the same list as in the new prompt form. It starts at the prompt's current owner. If that owner is an agent the list does not show, such as a subagent, the form adds it to the list. Under the field, the form says: *"An agent that owns a prompt can read, change and delete it. To give this prompt to another owner, pick the owner and click Save."*
+
+- To give the prompt to an agent, pick that agent's name.
+- To make the prompt yours, pick **You (the operator)**.
+- If you do not touch the field, **Save** leaves the owner as it is.
+
+After the change, the new owner can list, read, change and delete the prompt. The agent that owned it before cannot reach it any more, unless that agent is the Main Agent, which reaches every prompt.
+
+Only you and the Main Agent can change the owner of a prompt. Any other agent cannot give its prompt away, and cannot take a prompt of yours or of another agent.
 
 ## Prompts an agent owns {#agent-prompts}
 
-A prompt belongs to an agent in one of two ways:
+A prompt belongs to an agent in one of three ways:
 
-- You picked that agent as the **Owner** when you created the prompt.
+- You picked that agent as the **Owner**, when you created the prompt or when you edited it (see [Changing the owner](/guide#prompts-change-owner)).
 - An agent saved the prompt through JClaw's API. The Main Agent can name any agent as the owner of a prompt it saves, as you can. A prompt that any other agent saves is always its own.
+- The Main Agent changed the owner of a saved prompt to that agent through JClaw's API, as you can in the edit form.
 
 The card of such a prompt shows **Agent:** and the agent's name. You see every prompt on this page, whoever owns it, and you can run, edit or delete any of them. So can the Main Agent.
 
-Any other agent sees only the prompts it owns. It can list, read, change and delete those, whether it saved them itself or they were created for it. It cannot list, read, change or delete a prompt of yours or of another agent.
+Any other agent sees only the prompts it owns. It can list, read, change and delete those, whether it saved them itself, or they were created for it or given to it. It cannot list, read, change or delete a prompt of yours or of another agent.
 
 When you delete an agent, the prompts it owned stay in the library. They become yours, and the **Agent:** line goes away.
 

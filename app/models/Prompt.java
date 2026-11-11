@@ -87,9 +87,10 @@ public class Prompt extends TimestampedModel {
     public Category category;
 
     /**
-     * The agent this prompt belongs to, chosen once at creation (JF-307): the agent its creator
-     * named, else the agent that created it through the API. Null for the operator's: one made on
-     * the Prompts page with no agent picked, by an import or by the seed job. An agent other than
+     * The agent this prompt belongs to, chosen at creation (JF-307): the agent its creator named,
+     * else the agent that created it through the API. Null for the operator's: one made on the
+     * Prompts page with no agent picked, by an import or by the seed job. The operator and
+     * {@code main} change it on an edit, to an agent or back to null (JF-308). An agent other than
      * {@code main} reaches only its own (JF-292). Nullable, so rows that predate it are the
      * operator's with no migration, and SET NULL, so deleting an agent leaves its prompts with the
      * operator.
