@@ -17,13 +17,15 @@ export type Report = {
   head?: string;
 };
 
-// The checks that need no git: the factory's own report, and the files a human must read before they run on the Mac.
-export const mergeVerdict = (report: Report | undefined, sensitive: string[]): string | undefined => {
+// The checks that need no git: the factory's own report, the files a human must read before they run on the Mac, and
+// the trust-boundary files a human must review whatever the label says.
+export const mergeVerdict = (report: Report | undefined, sensitive: string[], trust: string[]): string | undefined => {
   if (!report) return "this harness has no report for it, so another developer's factory built it";
   if (!report.brief) return "the agent's brief did not validate, so its acceptance criteria are unconfirmed";
   const unmet = report.brief.acceptanceCriteria.filter((c) => !c.met);
   if (unmet.length > 0) return `acceptance criteria not met: ${unmet.map((c) => c.criterion).join("; ")}`;
   if (sensitive.length > 0) return `it changes files that run on your Mac once merged, which a human must read first: ${sensitive.join(", ")}`;
+  if (trust.length > 0) return `it changes trust-boundary code, which a human must review first: ${trust.join(", ")}`;
   return undefined;
 };
 

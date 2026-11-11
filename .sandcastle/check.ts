@@ -13,7 +13,8 @@ import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from ".
 import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
-import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { REPO_ROOT } from "./paths.ts";
+import { TRUST_BOUNDARY, bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Blocker, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
@@ -240,6 +241,23 @@ check("a check that fails on main too still runs the tests",
 check("sensitive paths are flagged, ordinary ones are not",
   sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md", "docs/agents/capabilities.md", ".codex/hooks.json", "bin/policy-guard.mjs", "bin/select-tests.test.mjs"]),
   [".githooks/pre-push", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", ".sandcastle/main.ts", "docs/agents/capabilities.md", ".codex/hooks.json", "bin/policy-guard.mjs"]);
+check("trust-boundary files and the ordinary files holding permission rules are flagged; other files, a guard's own test and its callers are not",
+  trustBoundaryPaths(["app/controllers/RequestPrincipal.java", "app/controllers/AgentAccessGate.java", "app/agents/DangerousActionGate.java",
+    "app/channels/SlackAccessPolicy.java", "app/channels/TelegramApprovalCallback.java", "app/channels/TelegramInboundTurn.java",
+    "app/controllers/WebhookWhatsAppController.java", "app/utils/CredentialCipher.java", "app/tools/HarnessSandbox.java",
+    "app/utils/SsrfGuard.java", "bin/sign-release.sh", "install.ps1", "test/JClawApiToolTest.java", "archunit_store/shell-process-spawners",
+    "app/utils/Filenames.java", "app/services/ConfigService.java", "test/SsrfGuardTest.java", "app/channels/TelegramInboundParser.java",
+    "app/controllers/ApiSkillsController.java", "archunit_store/wall-clock-interval-baselines", "docs/agents/trust.md",
+    "app/agents/ToolRegistry.java", "app/controllers/ApiAgentsController.java", "app/services/ConversationService.java"]),
+  ["app/controllers/RequestPrincipal.java", "app/controllers/AgentAccessGate.java", "app/agents/DangerousActionGate.java",
+    "app/channels/SlackAccessPolicy.java", "app/channels/TelegramApprovalCallback.java", "app/channels/TelegramInboundTurn.java",
+    "app/controllers/WebhookWhatsAppController.java", "app/utils/CredentialCipher.java", "app/tools/HarnessSandbox.java",
+    "app/utils/SsrfGuard.java", "bin/sign-release.sh", "install.ps1", "test/JClawApiToolTest.java", "archunit_store/shell-process-spawners",
+    "app/agents/ToolRegistry.java", "app/controllers/ApiAgentsController.java", "app/services/ConversationService.java"]);
+const tracked = execFileSync("/usr/bin/git", ["-C", REPO_ROOT, "ls-files"], { encoding: "utf8" }).split("\n");
+const matchingNothing = (patterns: RegExp[]) => patterns.filter((r) => !tracked.some((f) => r.test(f))).map(String);
+check("a pattern no tracked path matches is reported, so the check below can fail", matchingNothing([/^app\/NoSuchGuard\.java$/]), ["/^app\\/NoSuchGuard\\.java$/"]);
+check("every trust-boundary entry still matches a tracked path, so renaming a guarded class cannot drop it silently", matchingNothing(TRUST_BOUNDARY), []);
 
 const plan = parsePlan('{"A": {"files": ["./app/X.java", "test/XTest.java"], "bmad": true, "why": " open choice "}, "B": {"files": [], "bmad": false, "why": "precise"}}');
 check("a plan parses, with ./ stripped and the reason trimmed",
@@ -362,12 +380,18 @@ check("one closed without landing drops them and is not marked merged", settleLa
   { remove: ["afk-running", "afk-review"], add: [] });
 
 const brief = (met: boolean[]) => ({ brief: { acceptanceCriteria: met.map((m, i) => ({ criterion: `AC ${i + 1}`, met: m })) } });
-check("a clean report with ordinary files may merge", mergeVerdict(brief([true, true]), []), undefined);
-check("no report: another harness built it", mergeVerdict(undefined, []), "this harness has no report for it, so another developer's factory built it");
-check("an unvalidated brief is refused", mergeVerdict({}, []), "the agent's brief did not validate, so its acceptance criteria are unconfirmed");
-check("an unmet criterion is refused", mergeVerdict(brief([true, false]), []), "acceptance criteria not met: AC 2");
-check("files that run on the Mac need a human", mergeVerdict(brief([true]), [".githooks/pre-push"]),
+check("a clean report with ordinary files may merge", mergeVerdict(brief([true, true]), [], []), undefined);
+check("no report: another harness built it", mergeVerdict(undefined, [], []), "this harness has no report for it, so another developer's factory built it");
+check("an unvalidated brief is refused", mergeVerdict({}, [], []), "the agent's brief did not validate, so its acceptance criteria are unconfirmed");
+check("an unmet criterion is refused", mergeVerdict(brief([true, false]), [], []), "acceptance criteria not met: AC 2");
+check("files that run on the Mac need a human", mergeVerdict(brief([true]), [".githooks/pre-push"], []),
   "it changes files that run on your Mac once merged, which a human must read first: .githooks/pre-push");
+check("trust-boundary code needs a human, whatever the label says",
+  mergeVerdict(brief([true]), [], ["app/agents/DangerousActionGate.java", "app/utils/SsrfGuard.java"]),
+  "it changes trust-boundary code, which a human must review first: app/agents/DangerousActionGate.java, app/utils/SsrfGuard.java");
+check("a branch with both kinds is refused for the files that run on the Mac first",
+  mergeVerdict(brief([true]), ["jclaw.sh"], ["install.sh"]),
+  "it changes files that run on your Mac once merged, which a human must read first: jclaw.sh");
 
 // The board: one transition per state, what moves `since`, retention at its boundary, and the document's shape.
 const T0 = new Date("2026-10-01T10:00:00.000Z"), T1 = new Date("2026-10-01T11:00:00.000Z"), T2 = new Date("2026-10-01T12:00:00.000Z");

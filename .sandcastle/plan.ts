@@ -95,6 +95,32 @@ const SENSITIVE = [
 ];
 export const sensitivePaths = (files: string[]): string[] => files.filter((f) => SENSITIVE.some((r) => r.test(f)));
 
+// Files whose job is a trust decision, or that pin the allowlists freezing one: who may do what (docs/agents/trust.md),
+// secrets, the sandbox, outbound destinations, release signing. Not every caller of a guard, and not a guard's own
+// test: a change here needs a human whatever the story's label says. check.ts fails an entry no tracked path matches.
+export const TRUST_BOUNDARY = [
+  // Ordinary files that hold permission rules as data or inline checks (JF-284..288 changed them): ToolRegistry's
+  // per-agent tool switch-offs, the agent, tool, task and conversation routes' main-only writes. 6 of 77 factory
+  // stories from August to November touched one.
+  /^app\/agents\/(ToolRegistry|ParallelToolExecutor)\.java$/,
+  /^app\/controllers\/Api(Agents|Tools|Tasks|Conversations)Controller\.java$/,
+  /^app\/services\/(ConversationService|AgentService)\.java$/,
+  /^app\/controllers\/(AgentAccess|AgentAccessGate|RequestPrincipal|AuthCheck|LoadtestAuthCheck|ApiAuthController)\.java$/,
+  /^app\/tools\/JClawApiTool\.java$/,
+  /^app\/agents\/DangerousActionGate\.java$/, /^app\/models\/ToolApprovalGrant\.java$/,
+  /^app\/utils\/ChannelOriginTrust\.java$/, /^app\/services\/PersonaFileApprovals\.java$/,
+  /^app\/channels\/\w+(AccessPolicy|ApprovalCallback|ApprovalService)\.java$/, /^app\/channels\/ApprovalRegistry\.java$/,
+  /^app\/channels\/(SlackInbound|WhatsAppInbound|TelegramInboundTurn|TelegramReactionNotifier)\.java$/,
+  /^app\/controllers\/Webhook\w+Controller\.java$/,
+  /^app\/utils\/(CredentialCipher|SecretRedactor|PasswordHasher)\.java$/,
+  /^app\/tools\/HarnessSandbox\.java$/, /^app\/utils\/(SandboxHiddenRoots|SsrfGuard|ServedFiles)\.java$/,
+  /^app\/services\/ChromeBridgePolicy\.java$/, /^app\/services\/printing\/PrintTargetGuard\.java$/,
+  /^app\/utils\/ReleaseSignature\.java$/, /^bin\/sign-release\.sh$/, /^install\.(sh|ps1)$/,
+  /^test\/(CapabilityRulesTest|JClawApiToolTest|CredentialReadGateConformanceTest)\.java$/,
+  /^archunit_store\/(filesystem-tool-paths|shell-process-spawners)$/,
+];
+export const trustBoundaryPaths = (files: string[]): string[] => files.filter((f) => TRUST_BOUNDARY.some((r) => r.test(f)));
+
 // A running story holds its predicted files (undefined: unknown, so everything) until its build phase completes, and its
 // branch's real diff against main from then on, recomputed each round.
 export type RunningStory = { predicted: Set<string> | undefined; built: boolean };

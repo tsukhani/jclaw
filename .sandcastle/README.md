@@ -187,8 +187,11 @@ it. The label works before the story is built or after, and `no-afk-merge` exemp
   `main` only fast-forwards. If you have a local change on a file the merge touches, a merge or rebase in progress,
   or `main` moved meanwhile, the factory waits and tries again at the next poll.
 - **What it refuses:** a brief that did not validate or has an unmet criterion, a branch
-  that changed since it was offered, a conflict with `main`, a red re-gate, and any change to a file under
-  "(!) Runs on your Mac once merged", which a human must read. A refusal comments on the ticket, leaves the story in
+  that changed since it was offered, a conflict with `main`, a red re-gate, any change to a file under
+  "(!) Runs on your Mac once merged", which a human must read, and any change to a file under "(!) Trust boundary",
+  which a human must review: the code that decides who may do what or guards secrets, the sandbox, outbound
+  destinations or release signing, and the allowlists that pin it (`TRUST_BOUNDARY` in `plan.ts`). The label says
+  the operator trusts the story; what the change touches decides whether it lands unread. A refusal comments on the ticket, leaves the story in
   Review, and takes `afk-merge` off the story (or adds `no-afk-merge` when the label came from the epic), so nothing
   retries until you put it back.
 
@@ -273,6 +276,8 @@ blocks the story and says why: remove `afk` and add it again to approve the issu
 - **Merging runs its code.** Once you merge a branch, its code runs on your Mac through hooks, build scripts and the
   suite `/deploy` runs. The review comment lists every changed file of that kind under
   "(!) Runs on your Mac once merged", and you should read those line by line. Auto-merge never merges such a branch.
+- **A change can widen what an agent may do** without running anything on your Mac. The review comment lists every
+  changed trust-boundary file under "(!) Trust boundary", and auto-merge never merges such a branch either.
 - **A sandbox can move another story's `agent/` branch** in the clone, because commits need that ref directory
   writable. `main` stays out of reach, and a tampered branch shows up in its review.
 - **Sandboxes can reach each other** on the factory network. Cutting that would cut them off from the gateway too.
@@ -331,7 +336,8 @@ Jira user.
 - **Pause:** `docker stop jclaw-factory-gateway`. No new stories start, and stories already running fail. Resume with
   `docker start jclaw-factory-gateway`.
 - **Stop the harness:** `.sandcastle/install-agent.sh --remove`.
-- **Review:** merge `agent/<KEY>` into `main`. Read any file listed under "(!) Runs on your Mac once merged" line by line.
+- **Review:** merge `agent/<KEY>` into `main`. Read any file listed under "(!) Runs on your Mac once merged" line by line,
+  and review any listed under "(!) Trust boundary" against [trust](../docs/agents/trust.md).
   The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
   re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
   `git merge --no-ff agent/<KEY>`. Mark the story Done only once it is merged, because Done is what lets the stories it

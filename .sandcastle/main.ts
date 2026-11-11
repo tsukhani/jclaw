@@ -12,7 +12,7 @@ import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
-import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
+import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, blockedReason, waitingOn, type About } from "./board.ts";
 import { nextBlockers, outsideBlockers } from "./blockers.ts";
@@ -299,7 +299,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   };
 
   // The comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
-  const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
+  const reviewComment = (brief: Brief | undefined, sensitive: string[], trust: string[]) => {
     const closes = tracker.mergeMessage(key);
     const merge = closes ? `git merge --no-ff -m "Merge branch '${branch}'" -m "${closes}" ${branch}` : `git merge --no-ff ${branch}`;
     const lines = [`${tracker.header}: ready for review`, `Local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: ${m.code(`git rebase --force-rebase --gpg-sign main ${branch}`)}, then ${m.code(merge)}; /deploy ships it. Or label it ${m.code("afk-merge")} and the factory merges it the same way. Model: ${MODEL}.`];
@@ -311,6 +311,10 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     if (sensitive.length > 0) {
       lines.push("", m.heading("(!) Runs on your Mac once merged"), ...sensitive.map((f) => m.bullet(m.code(f))),
         "These files run during build, test, commit or push, or instruct later agents: read them line by line before merging.");
+    }
+    if (trust.length > 0) {
+      lines.push("", m.heading("(!) Trust boundary"), ...trust.map((f) => m.bullet(m.code(f))),
+        "These files decide who may do what, or guard secrets, the sandbox, outbound destinations or release signing: review them before merging. Auto-merge refuses this branch.");
     }
     lines.push("");
     if (brief) {
@@ -344,10 +348,12 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     const brief = await build();
     // A local branch in the operator's checkout, where merging it into main puts it in the next /deploy.
     gitIn(CHECKOUT, "fetch", "--quiet", REPO, `${branch}:${branch}`);
-    const sensitive = sensitivePaths(gitIn(REPO, "diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean));
+    const changed = gitIn(REPO, "diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean);
+    const sensitive = sensitivePaths(changed), trust = trustBoundaryPaths(changed);
     if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
+    if (trust.length > 0) console.log(`[${key}] changes trust-boundary code: ${trust.join(", ")}`);
     await tracker.reviewing(key);
-    await tracker.comment(key, reviewComment(brief, sensitive));
+    await tracker.comment(key, reviewComment(brief, sensitive, trust));
     const head = gitIn(REPO, "rev-parse", branch);
     fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, head, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
     board.set(key, { state: "review" });
@@ -524,7 +530,8 @@ const land = async (key: string): Promise<void> => {
     await tracker.comment(key, `${tracker.header}: merged\nMerged earlier as ${m.code(earlier.slice(0, 8))}, in your checkout and not pushed; the factory stopped before it could mark the story.`);
     return console.log(`[${key} merge] already merged as ${earlier.slice(0, 8)}; marked`);
   }
-  const verdict = mergeVerdict(report, sensitivePaths(changedOn(key)));
+  const changed = changedOn(key);
+  const verdict = mergeVerdict(report, sensitivePaths(changed), trustBoundaryPaths(changed));
   if (!report) return note(`merge ${key}`, `[${key} merge] skipped: ${verdict}`);
   // A story offered before the board existed is described once, from its ticket.
   if (!board.has(key)) board.set(key, { state: "review" }, about(await tracker.snapshotToState(key)));
