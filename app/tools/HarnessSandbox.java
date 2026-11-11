@@ -61,7 +61,8 @@ import java.util.Locale;
  *
  * <p>JF-165: an agent whose parent chain does not end at {@code main} runs {@code exec} through
  * {@link #wrapCustomAgentShell} whatever the key says, and on macOS its profile hides {@code $HOME}
- * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}.
+ * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}. That run
+ * also cannot attach to a JVM outside it: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}.
  */
 public final class HarnessSandbox {
 
@@ -105,6 +106,19 @@ public final class HarnessSandbox {
 
     private static final String BWRAP = "bwrap";
     private static final String SANDBOX_EXEC = "sandbox-exec";
+    private static final String UNSHARE_USER = "--unshare-user";
+
+    /**
+     * HotSpot's attach handshake, refused at both steps. SIGQUIT starts a JVM's attach listener, so it
+     * reaches only this sandbox's own processes; every other signal still reaches outside, which is how a
+     * later run stops what an earlier one left in the background. The listener's socket,
+     * {@code .java_pid<pid>} in the temp directory, takes no connection, and no rename, unlink or hard link
+     * that would give it a name the rule misses. The rule goes by name, not owner, so a JVM started inside
+     * the sandbox cannot be attached to either.
+     */
+    private static final String MAC_DENY_JVM_ATTACH =
+            "(deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))\n"
+                    + "(deny network-outbound file-write* file-link (regex #\"/\\.java_pid[^/]*$\"))\n";
 
     /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final List<String> DENY_READ_HOME = List.of(
@@ -122,7 +136,7 @@ public final class HarnessSandbox {
      * them could, with a full bounding set (a root JClaw outside Docker), unmount the tmpfs that hides $HOME
      * and the state folders.
      */
-    private static final List<String> ROOT_FLAGS = List.of("--unshare-user", "--cap-drop", "ALL");
+    private static final List<String> ROOT_FLAGS = List.of(UNSHARE_USER, "--cap-drop", "ALL");
 
     /**
      * {@link #BWRAP_PROBE} for a process running as root. Started as root, bwrap makes no user namespace of its
@@ -286,9 +300,8 @@ public final class HarnessSandbox {
     /**
      * Wrap a custom agent's {@code exec} run: confined whatever {@link #SHELL_SANDBOX_KEY} says, with
      * writes limited to {@code writeRoot} and the network cut under {@link #SHELL_NETWORK_KEY}{@code =deny}.
-     * On macOS the profile also hides {@code $HOME} except the write root and the {@code $HOME} directories
-     * on JClaw's own PATH ({@link #homeReadReopens}); on Linux it is {@link #linuxArgv}, which already
-     * hides {@code $HOME}.
+     * On macOS the profile is {@link #customAgentMacosProfile}; on Linux it is {@link #linuxArgv}, which
+     * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own}.
      *
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
@@ -300,9 +313,11 @@ public final class HarnessSandbox {
         if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
         var home = System.getProperty("user.home", "");
         var extraReads = extraHomeReads(home);
-        if (ready.mechanism().equals(BWRAP)) return linuxArgv(argv, writeRoot, extraReads, SHELL_SANDBOX_KEY);
+        if (ready.mechanism().equals(BWRAP)) {
+            return inOwnUserNamespace(linuxArgv(argv, writeRoot, extraReads, SHELL_SANDBOX_KEY));
+        }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
-        var profile = macosProfile(writeRoot, List.of(), home, SandboxHiddenRoots.current(),
+        var profile = customAgentMacosProfile(writeRoot, home, SandboxHiddenRoots.current(),
                 deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(SubprocessEnv.filteredHostEnv().get("PATH"), home, extraReads));
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
         out.addAll(argv);
@@ -574,6 +589,16 @@ public final class HarnessSandbox {
         return sb.toString();
     }
 
+    /**
+     * A custom agent's Seatbelt profile, public so a test can pin its text on any host: {@code $HOME} hidden
+     * except the write root and {@code homeReads} (the {@code $HOME} directories on JClaw's own PATH,
+     * {@link #homeReadReopens}), then the JVM attach handshake denied last, where no grant outranks it.
+     */
+    public static String customAgentMacosProfile(File writeRoot, String home, List<Path> hidden,
+                                                 boolean denyNetwork, List<String> homeReads) {
+        return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads) + MAC_DENY_JVM_ATTACH;
+    }
+
     private static void appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
         var homePath = SandboxHiddenRoots.lexical(home);
         if (homePath == null) throw new SandboxUnavailableException("sandbox: the home folder is not a valid path: " + home);
@@ -668,6 +693,19 @@ public final class HarnessSandbox {
         }
         out.addAll(reopened);
         out.addAll(argv);
+        return List.copyOf(out);
+    }
+
+    /**
+     * {@code bwrapArgv} asking for a user namespace of its own, once, whoever runs it. A setuid bwrap makes
+     * none unless asked, and without one the sandbox reaches {@code /proc/<pid>/cwd} and
+     * {@code /proc/<pid>/root} of the user's other processes: where a JVM looks for its attach trigger file
+     * and binds its attach socket, which the sandbox's read-only root and own {@code /tmp} otherwise hide.
+     */
+    public static List<String> inOwnUserNamespace(List<String> bwrapArgv) {
+        if (bwrapArgv.get(1).equals(UNSHARE_USER)) return bwrapArgv;
+        var out = new ArrayList<>(bwrapArgv);
+        out.add(1, UNSHARE_USER);
         return List.copyOf(out);
     }
 

@@ -156,7 +156,7 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.availability());
     }
 
-    /** On Linux a custom agent's run is linuxArgv under shell.sandbox's network rule, with the key itself unset. */
+    /** On Linux a custom agent's run is linuxArgv in its own user namespace, under shell.sandbox's network rule, with the key itself unset. */
     @Test
     void linuxCustomAgentWrapIsTheShellArgvUnderTheNetworkRule() {
         var a = HarnessSandbox.availability();
@@ -169,8 +169,10 @@ class HarnessSandboxTest extends UnitTest {
             for (var network : List.of("deny", "allow")) {
                 ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, network);
                 var wrapped = HarnessSandbox.wrapCustomAgentShell(argv, root);
-                assertEquals(HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY), wrapped,
+                assertEquals(HarnessSandbox.inOwnUserNamespace(
+                        HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), wrapped,
                         "network=" + network);
+                assertEquals("--unshare-user", wrapped.get(1), "network=" + network);
                 assertEquals(network.equals("deny"), wrapped.contains("--unshare-net"), "network=" + network);
             }
         } finally {
@@ -252,6 +254,52 @@ class HarnessSandboxTest extends UnitTest {
         var reopen = profile.indexOf("(allow file-read* file-write* (subpath \"/h/u/jc/data/run\"))\n");
         assertTrue(deny >= 0 && reopen > deny, profile);
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"/h/u/jc/data/allow\"))"), profile);
+    }
+
+    /**
+     * A custom agent's profile is the hidden-home profile plus two rules, last so that no grant outranks them:
+     * SIGQUIT only to its own sandbox, and a JVM's attach socket neither connected to nor renamed, removed or linked.
+     */
+    @Test
+    void macProfileForACustomAgentEndsWithTheJvmAttachDenies() {
+        var root = new File("/h/u/jc/workspace/a");
+        var hidden = List.of(Path.of("/h/u/jc/data"));
+        var homeReads = List.of("/h/u/.local/bin");
+        for (var denyNetwork : List.of(false, true)) {
+            assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, denyNetwork, homeReads) + """
+                    (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                    (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
+                    """, HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, denyNetwork, homeReads),
+                    "denyNetwork=" + denyNetwork);
+        }
+    }
+
+    /** Those two rules reach a custom agent's run alone: main's key-confined exec and a coding harness keep their profile. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macOnlyACustomAgentsRunCarriesTheJvmAttachDenies() {
+        ShellSandboxSync.acquire();
+        try {
+            // Set right before the wraps: another class's table wipe can clear a key.
+            ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+            ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
+            var mainProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), List.of(),
+                    HarnessSandbox.SHELL_SANDBOX_KEY, false).get(2);
+            var harnessProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), new ClaudeAdapter(), false).get(2);
+            var customProfile = HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile()).get(2);
+
+            for (var rule : List.of("(deny signal", ".java_pid")) {
+                assertFalse(mainProfile.contains(rule), mainProfile);
+                assertFalse(harnessProfile.contains(rule), harnessProfile);
+            }
+            assertTrue(customProfile.endsWith("""
+                    (deny file-read* (subpath "%s/.netrc"))
+                    (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                    (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
+                    """.formatted(System.getProperty("user.home"))), customProfile);
+        } finally {
+            ShellSandboxSync.release();
+        }
     }
 
     /** Only absolute entries strictly below home on a segment boundary are reopened, once each. */
@@ -448,6 +496,25 @@ class HarnessSandboxTest extends UnitTest {
                 "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE_AS_ROOT);
         assertEquals(List.of("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
                 "--tmpfs", "/tmp", "true"), HarnessSandbox.BWRAP_PROBE);
+    }
+
+    /**
+     * A custom agent's bwrap is asked for a user namespace even when not root, which a setuid bwrap would
+     * otherwise not make; a root argv already asks and is not asked twice. main's and a harness's argv are as before.
+     */
+    @Test
+    void linuxCustomAgentArgvAlwaysAsksForItsOwnUserNamespace() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
+        var notRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), true, false);
+        var asRoot = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/root", List.of(), true, true);
+
+        var expected = new ArrayList<>(notRoot);
+        expected.add(1, "--unshare-user");
+        assertEquals(expected, HarnessSandbox.inOwnUserNamespace(notRoot));
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-net", "--ro-bind", "/", "/"),
+                HarnessSandbox.inOwnUserNamespace(notRoot).subList(0, 6));
+        assertEquals(asRoot, HarnessSandbox.inOwnUserNamespace(asRoot));
+        assertFalse(notRoot.contains("--unshare-user"), notRoot.toString());
     }
 
     /** A write root above data/ (a coding run continuing in the checkout itself) is bound first, so data/'s tmpfs still covers it. */

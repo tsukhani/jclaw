@@ -48,7 +48,8 @@ parentless `main` is main-rooted and follows `shell.sandbox` byte for byte; any 
 chain the walk gives up on, runs through `HarnessSandbox.wrapCustomAgentShell` whatever the key
 says, writing only to `AgentService.workspacePath(agent.name)` (a copy writes its root's workspace),
 with the confined package caches. On Linux that is the same `linuxArgv`, which already hides
-`$HOME`. On macOS the profile also hides the home folder, in this order, last match winning:
+`$HOME`, with `--unshare-user` whoever runs it (below). On macOS the profile also hides the home
+folder, in this order, last match winning:
 today's lines through the write grants; `(deny file-read* (subpath "<home>"))`; the workspace
 reopened for reading; each PATH reopen; `(allow file-read-metadata (literal …))` for `<home>` and
 every directory between it and a reopen, so `getcwd` and `realpath` resolve (an inference about
@@ -59,6 +60,40 @@ JClaw's own `PATH` (`SubprocessEnv.filteredHostEnv()`), never from a `PATH` the 
 `exec`'s `env`: an entry qualifies when it is absolute and strictly below `<home>` on a segment
 boundary, plus its canonical path when that differs and is also below `<home>`.
 `HarnessSandboxTest.macProfileForACustomAgentHidesTheHomeFolder` pins the full text.
+
+**A custom agent's shell cannot attach to a JVM outside it (JF-290).** An attached client can load
+code into a JVM or dump its heap, and JClaw's own holds the internal bearer token. HotSpot's attach
+handshake has two steps: SIGQUIT makes the JVM look for a trigger file (`.attach_pid<pid>`, in its
+working directory or its temp directory) and start a listener, and the client then connects to the
+listener's socket, `.java_pid<pid>` in that temp directory. Both are refused, and both rules are
+the custom agent's alone: `main`'s `exec` and a coding harness keep their profiles
+(`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheJvmAttachDenies`).
+
+- **macOS** — `customAgentMacosProfile` ends the profile with two denies, last so that no grant
+  outranks them. `(deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))`:
+  SIGQUIT reaches only the run's own processes. Every other signal still reaches outside, because
+  `same-sandbox` is one `sandbox-exec` launch, and a later `exec` has to be able to stop what an
+  earlier one left in the background. `(deny network-outbound file-write* file-link (regex
+  #"/\.java_pid[^/]*$"))`: the socket takes no connection, and no rename, unlink or hard link that
+  would give it a name the rule misses (measured: a symlink, a case variant and a `/.vol` path all
+  resolve to the same name and are refused). The temp directory stays writable, as `TMPDIR` needs.
+  The rule goes by name, not owner, so a JVM started inside the sandbox cannot be attached to
+  either: `jcmd` against it gives up after its ten seconds (measured), and a Java agent that
+  attaches to its own JVM, instead of being passed with `-javaagent`, goes through the same socket.
+- **Linux** — no rule is needed for the files: HotSpot uses `/tmp` whatever `TMPDIR` says, the
+  sandbox has a `/tmp` of its own, and JClaw's working directory is under the read-only root. What
+  is left is `/proc/<pid>/cwd` and `/proc/<pid>/root`, which lead to both, and which the kernel
+  refuses across a user namespace. A bwrap that is not setuid always makes one; a setuid bwrap makes
+  none unless asked, so `inOwnUserNamespace` adds `--unshare-user` to a custom agent's argv when
+  `linuxArgv` has not (measured with a setuid bwrap: the flag is what makes the attempt fail). The
+  non-root readiness probe does not carry the flag, so on a setuid bwrap whose kernel makes no user
+  namespace the probe would pass and the run itself fail with bwrap's error, starting nothing (an
+  inference, not measured). A JVM inside the sandbox can still be attached to from inside it
+  (measured). Signals are not filtered: a SIGQUIT from the sandbox reaches a JVM outside and prints
+  a thread dump, but starts no listener (measured). A PID namespace would stop it, and is not used
+  because `--unshare-pid` makes bwrap mount a fresh `/proc`, which the container refuses: `Can't
+  mount proc on /newroot/proc`, measured under `seccomp-bwrap.json`, most likely because Docker
+  masks parts of `/proc`.
 
 **Readiness is a launch, not a lookup.** `HarnessSandbox.availability()` is the one check behind
 `GET /api/sandbox`, every key-confined `wrap` and `wrapCustomAgentShell`. On Linux it runs
@@ -119,3 +154,5 @@ resets it to `CustomAgentOverride.NONE`. The override is read only by
 `@EnabledOnOs(OS.MAC)`, or Linux with `assumeTrue(HarnessSandbox.availability().available())`, and
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.
+A test that needs a JVM to attach to starts a throwaway one and stops it (`SandboxJvmAttachTest`),
+never a JVM that is already running.
