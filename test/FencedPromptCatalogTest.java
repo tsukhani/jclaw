@@ -48,8 +48,9 @@ import java.util.regex.Pattern;
  * the same: the Tool Catalog section once listed the agent's whole set, so a fenced task or its
  * subagent named, and tried, tools it could not call. Read off the request the model is sent.
  *
- * <p>JF-148: {@code jclaw_api} is offered, and named in the catalog, only on a turn the owner started; so is
- * {@code agent_spawn} (JF-164).
+ * <p>JF-148: an operator-only tool is offered, and named in the catalog, only on a turn the owner started. The cases
+ * follow {@code agent_spawn} (JF-164), which a top-level custom agent holds by default. {@code jclaw_api} is main's
+ * alone (JF-287): the fixture's agent is granted it and must never be offered it.
  *
  * <p>Holds {@link ToolRegistrySync}: what is checked is what the native registry offers.
  */
@@ -61,9 +62,11 @@ class FencedPromptCatalogTest extends UnitTest {
     private static final Set<String> ALLOWED = Set.of("web_search", "datetime");
     private static final Pattern CATALOG_ROW = Pattern.compile("(?m)^\\| `([A-Za-z0-9_.-]+)` \\|");
     private static final String JCLAW_API = "jclaw_api";
-    /** The operator-only tools the fixture's agent holds; the Chrome tools are opt-in and it is granted none. */
-    private static final Set<String> OPERATOR_ONLY = Set.of(JCLAW_API, "agent_spawn");
+    private static final String OPERATOR_TOOL = "agent_spawn";
+    /** The operator-only tools the fixture's agent holds: the Chrome tools are opt-in and it is granted none. */
+    private static final Set<String> OPERATOR_ONLY = Set.of(OPERATOR_TOOL);
     private static final String JCLAW_API_SKILL = "jclaw-api";
+    private static final String OPERATOR_SKILL = "hand-off";
     private static final Pattern SKILL_NAME = Pattern.compile("<name>([^<]+)</name>");
 
     // Own provider name: breakers are keyed by provider in a process-global registry.
@@ -113,7 +116,20 @@ class FencedPromptCatalogTest extends UnitTest {
                 # Notes
                 Write the note down.
                 """);
-        // Declared as the shipped jclaw-api skill declares it: it needs nothing but the tool.
+        // Needs nothing but the operator-only tool, as the shipped jclaw-api skill needs nothing but jclaw_api.
+        var handOffSkill = AgentService.workspacePath(agent.name).resolve("skills").resolve(OPERATOR_SKILL);
+        Files.createDirectories(handOffSkill);
+        Files.writeString(handOffSkill.resolve("SKILL.md"), """
+                ---
+                name: hand-off
+                description: Hand work to another agent
+                metadata:
+                  jclaw-tools: agent_spawn
+                ---
+                # Hand-off
+                Call agent_spawn.
+                """);
+        // Declared as the shipped jclaw-api skill declares it, for an agent that must never be offered it.
         var apiSkill = AgentService.workspacePath(agent.name).resolve("skills").resolve(JCLAW_API_SKILL);
         Files.createDirectories(apiSkill);
         Files.writeString(apiSkill.resolve("SKILL.md"), """
@@ -176,10 +192,22 @@ class FencedPromptCatalogTest extends UnitTest {
                 "a fenced task's subagent runs in such a conversation, and its prompt must match its tools");
     }
 
-    // ── JF-148: jclaw_api is offered only where the owner reads the reply alone ──
+    // ── JF-148: an operator-only tool is offered only where the owner reads the reply alone ──
 
     @Test
-    void anOwnersTelegramTurnIsOfferedJclawApiAndToldAboutIt() throws Exception {
+    void aCustomAgentGrantedJclawApiIsNeverOfferedItOrItsSkill() throws Exception {
+        grantJclawApi();
+
+        for (var turn : List.of(syncTurn("web", null), streamedTurn("telegram", "4242", true))) {
+            assertFalse(turn.offered().contains(JCLAW_API), turn.offered().toString());
+            assertFalse(turn.catalog().contains(JCLAW_API), turn.catalog().toString());
+            assertFalse(turn.skills().contains(JCLAW_API_SKILL), turn.skills().toString());
+            assertTrue(turn.offered().contains(OPERATOR_TOOL), "control: the operator-only tool is there: " + turn.offered());
+        }
+    }
+
+    @Test
+    void anOwnersTelegramTurnIsOfferedTheOperatorOnlyToolAndToldAboutIt() throws Exception {
         grantJclawApi();
 
         var owners = new LinkedHashMap<String, Turn>();
@@ -187,9 +215,9 @@ class FencedPromptCatalogTest extends UnitTest {
         owners.put("the owner's Slack DM", streamedTurn("slack", "D456", true));
 
         owners.forEach((who, owner) -> {
-            assertTrue(owner.offered().contains(JCLAW_API), who + " keeps the tool: " + owner.offered());
-            assertTrue(owner.catalog().contains(JCLAW_API), who + ", and the prompt says so: " + owner.catalog());
-            assertTrue(owner.skills().contains(JCLAW_API_SKILL), who + ", and lists its skill: " + owner.skills());
+            assertTrue(owner.offered().contains(OPERATOR_TOOL), who + " keeps the tool: " + owner.offered());
+            assertTrue(owner.catalog().contains(OPERATOR_TOOL), who + ", and the prompt says so: " + owner.catalog());
+            assertTrue(owner.skills().contains(OPERATOR_SKILL), who + ", and lists its skill: " + owner.skills());
         });
     }
 
@@ -198,7 +226,7 @@ class FencedPromptCatalogTest extends UnitTest {
         grantJclawApi();
         var web = syncTurn("web", null);
         assertTrue(web.offered().containsAll(OPERATOR_ONLY), "control: the operator's own chat is offered them: " + web.offered());
-        assertTrue(web.skills().contains(JCLAW_API_SKILL), "control: and lists its skill: " + web.skills());
+        assertTrue(web.skills().contains(OPERATOR_SKILL), "control: and lists its skill: " + web.skills());
 
         var others = new LinkedHashMap<String, Turn>();
         others.put("a non-owner's Telegram DM", streamedTurn("telegram", "5151", false));
@@ -211,19 +239,19 @@ class FencedPromptCatalogTest extends UnitTest {
         others.put("a hosted app", syncTurn("app", "an-app"));
 
         var expected = new Turn(withoutOperatorOnly(web.offered()), withoutOperatorOnly(web.catalog()),
-                without(web.skills(), JCLAW_API_SKILL));
+                without(web.skills(), OPERATOR_SKILL));
         others.forEach((who, turn) -> assertEquals(expected, turn, who));
     }
 
     @Test
-    void aVoiceTurnKeepsJclawApi() throws Exception {
+    void aVoiceTurnKeepsTheOperatorOnlyTool() throws Exception {
         grantJclawApi();
 
         var voice = streamedTurn("voice", "admin", false);
 
-        assertTrue(voice.offered().contains(JCLAW_API), "voice needs the operator's session: " + voice.offered());
-        assertTrue(voice.catalog().contains(JCLAW_API), voice.catalog().toString());
-        assertTrue(voice.skills().contains(JCLAW_API_SKILL), voice.skills().toString());
+        assertTrue(voice.offered().contains(OPERATOR_TOOL), "voice needs the operator's session: " + voice.offered());
+        assertTrue(voice.catalog().contains(OPERATOR_TOOL), voice.catalog().toString());
+        assertTrue(voice.skills().contains(OPERATOR_SKILL), voice.skills().toString());
     }
 
     @Test
@@ -242,8 +270,8 @@ class FencedPromptCatalogTest extends UnitTest {
                 var reaction = lastTurn();
                 awaitUntil(() -> telegram.countRequests("sendMessage") == 1, "the reply went to the DM");
 
-                assertTrue(reaction.offered().contains(JCLAW_API), reaction.offered().toString());
-                assertTrue(reaction.catalog().contains(JCLAW_API), reaction.catalog().toString());
+                assertTrue(reaction.offered().contains(OPERATOR_TOOL), reaction.offered().toString());
+                assertTrue(reaction.catalog().contains(OPERATOR_TOOL), reaction.catalog().toString());
             } finally {
                 TelegramChannel.clearForTest(botToken);
             }
@@ -258,22 +286,22 @@ class FencedPromptCatalogTest extends UnitTest {
         var guestFire = fireTask(newTask("telegram"));
 
         assertTrue(operatorFire.offered().containsAll(OPERATOR_ONLY), operatorFire.offered().toString());
-        assertTrue(operatorFire.catalog().contains(JCLAW_API), operatorFire.catalog().toString());
+        assertTrue(operatorFire.catalog().contains(OPERATOR_TOOL), operatorFire.catalog().toString());
         assertEquals(new Turn(withoutOperatorOnly(operatorFire.offered()), withoutOperatorOnly(operatorFire.catalog()),
-                without(operatorFire.skills(), JCLAW_API_SKILL)), guestFire, "a task with nothing recorded but its origin");
+                without(operatorFire.skills(), OPERATOR_SKILL)), guestFire, "a task with nothing recorded but its origin");
     }
 
     @Test
-    void aTaskTheOwnerMadeInTheirDmKeepsJclawApiOnEveryFire() throws Exception {
+    void aTaskTheOwnerMadeInTheirDmKeepsTheOperatorOnlyToolOnEveryFire() throws Exception {
         grantJclawApi();
         var taskId = taskMadeOn("telegram", "4242", true, "jf148-owner-dm");
 
         var first = fireTask(taskId);
         var second = fireTask(taskId);
 
-        assertTrue(first.offered().contains(JCLAW_API), "first fire: " + first.offered());
-        assertTrue(second.offered().contains(JCLAW_API), "second fire: " + second.offered());
-        assertTrue(second.catalog().contains(JCLAW_API), second.catalog().toString());
+        assertTrue(first.offered().contains(OPERATOR_TOOL), "first fire: " + first.offered());
+        assertTrue(second.offered().contains(OPERATOR_TOOL), "second fire: " + second.offered());
+        assertTrue(second.catalog().contains(OPERATOR_TOOL), second.catalog().toString());
     }
 
     @Test
@@ -283,7 +311,7 @@ class FencedPromptCatalogTest extends UnitTest {
         assertTrue(control.offered().containsAll(OPERATOR_ONLY), "control: " + control.offered());
 
         var expected = new Turn(withoutOperatorOnly(control.offered()), withoutOperatorOnly(control.catalog()),
-                without(control.skills(), JCLAW_API_SKILL));
+                without(control.skills(), OPERATOR_SKILL));
         assertEquals(expected, fireTask(taskMadeOn("telegram", "-100200", true, "jf148-group")),
                 "made by the owner in a group");
         assertEquals(expected, fireTask(taskMadeOn("telegram", "5151", false, "jf148-guest")), "made by a guest");
@@ -295,8 +323,8 @@ class FencedPromptCatalogTest extends UnitTest {
 
         var drained = drainedTurn(true);
 
-        assertTrue(drained.offered().contains(JCLAW_API), drained.offered().toString());
-        assertTrue(drained.catalog().contains(JCLAW_API), drained.catalog().toString());
+        assertTrue(drained.offered().contains(OPERATOR_TOOL), drained.offered().toString());
+        assertTrue(drained.catalog().contains(OPERATOR_TOOL), drained.catalog().toString());
     }
 
     @Test
@@ -305,8 +333,8 @@ class FencedPromptCatalogTest extends UnitTest {
 
         var drained = drainedTurn(false);
 
-        assertFalse(drained.offered().contains(JCLAW_API), drained.offered().toString());
-        assertFalse(drained.catalog().contains(JCLAW_API), drained.catalog().toString());
+        assertFalse(drained.offered().contains(OPERATOR_TOOL), drained.offered().toString());
+        assertFalse(drained.catalog().contains(OPERATOR_TOOL), drained.catalog().toString());
     }
 
     /** What one turn put in front of the model: the request's tools, the prompt's Tool Catalog and its skills. */

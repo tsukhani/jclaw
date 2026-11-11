@@ -154,7 +154,9 @@ public class ApiToolsController extends Controller {
         // box for a tool the agent could not call (found during JCLAW-911 UAT). One source of
         // truth also covers tools added to the default-off list later.
         var disabled = ToolRegistry.loadDisabledTools(agent);
+        // A tool no grant can give this agent has no toggle to offer (JF-287).
         var result = catalog().stream()
+                .filter(t -> agent.isMain() || !ToolRegistry.isMainOnly(t.name()))
                 .map(t -> new AgentToolEntry(t.name(), t.group(), !disabled.contains(t.name()),
                         t.shortDescription()))
                 .toList();
@@ -196,6 +198,10 @@ public class ApiToolsController extends Controller {
         // level tool is the signature of an MCP per-action adapter. The
         // operator's per-server toggle goes through updateGroupForAgent;
         // direct per-action enable/disable is no longer a supported path.
+        if (enabled && !agent.isMain() && ToolRegistry.isMainOnly(name)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    name + " is the main agent's alone: no other agent can be given it.");
+        }
         var tool = ToolRegistry.lookupTool(name);
         if (tool != null && tool.group() != null && !tool.isServerLevel()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Per-action MCP tools are no longer toggleable individually. "

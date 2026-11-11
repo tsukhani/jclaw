@@ -785,9 +785,10 @@ public class ToolRegistry {
      * which writes an explicit AgentToolConfig row with {@code enabled=true}.
      */
     public static Set<String> loadDisabledTools(@Nullable Agent agent) {
-        if (agent == null || agent.id == null) {
-            // Unsaved agents have no configs; treat as "nothing disabled."
-            return Set.of();
+        if (agent == null) return Set.of();
+        if (agent.id == null) {
+            // Unsaved agents have no configs, so nothing is disabled but what no grant can give.
+            return agent.isMain() ? Set.of() : Set.of(JCLAW_API_TOOL);
         }
         return DISABLED_TOOLS_CACHE.get(agent.id, _ -> computeDisabledTools(agent));
     }
@@ -858,6 +859,8 @@ public class ToolRegistry {
         // JF-164: a subagent is a helper copy working for its parent, not a member of the hand-off graph, so no
         // grant gives it agent_spawn.
         if (agent.parentAgent != null) disabled.add(AGENT_SPAWN_TOOL);
+        // JF-287: jclaw_api is main's alone. Ahead of the eval branch, so not even an explicit grant opens it.
+        if (!agent.isMain()) disabled.add(JCLAW_API_TOOL);
         // JCLAW-883: the eval agent inverts the default — every tool is opt-in, not
         // just the costly ones below. An eval sweep runs unattended and its suites
         // deliberately provoke tool selection, so a tool nobody granted must not be
@@ -890,11 +893,17 @@ public class ToolRegistry {
 
     /**
      * Tools main holds by default and every other agent has to be granted. The split is
-     * trust, not cost: both reach beyond the turn they run in — one into JClaw's own admin
-     * API, one into stored memory — and main is the operator's own agent.
+     * trust, not cost: both reach beyond the turn they run in, into stored memory and past
+     * conversations, and main is the operator's own agent. {@code jclaw_api} is not on it:
+     * no grant gives it to another agent (JF-287).
      */
     private static final List<String> OPT_IN_FOR_NON_MAIN_AGENTS = List.of(
-            MEMORY_TOOL, JCLAW_API_TOOL, CONVERSATION_SEARCH_TOOL);
+            MEMORY_TOOL, CONVERSATION_SEARCH_TOOL);
+
+    /** Whether {@code toolName} is main's alone, so that no grant gives it to another agent (JF-287). */
+    public static boolean isMainOnly(@Nullable String toolName) {
+        return JCLAW_API_TOOL.equals(toolName);
+    }
 
     /** Disables each named tool that carries no explicit enable row — the opt-in default. */
     private static void disableUnlessGranted(Set<String> disabled,

@@ -242,41 +242,52 @@ class ApiToolsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void jclawApiIsOffForANonMainAgentWithNoConfigRowAtAll() {
-        // JCLAW-941: this used to be guaranteed by a disable row written at agent creation,
-        // which cannot cover an agent that already existed, one created outside
-        // AgentService.create, or a row later deleted — the live instance had two agents
-        // holding no row and therefore full admin-API access. Deleting every row for the
-        // agent reproduces exactly that state.
+    void aNonMainAgentsToolListLeavesOutJclawApiEvenWithNoConfigRow() {
+        // JCLAW-941 found agents holding no row, and so full admin-API access, when the default was a
+        // disable row written at creation. JF-287: the tool is main's alone, so it is not even listed.
         login();
         var id = createAgent("tools-jclaw-api-norow-agent");
         fetchInFreshTx(() -> models.AgentToolConfig.delete("agent.id = ?1", id));
         agents.ToolRegistry.clearDisabledToolsCache();
 
         var body = getContent(GET("/api/agents/" + id + "/tools"));
-        var idx = body.indexOf("\"name\":\"jclaw_api\"");
-        assertTrue(idx >= 0, "jclaw_api should still be listed: " + body);
-        var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
-        var enabledAt = entry.indexOf("\"enabled\":");
-        assertTrue(entry.startsWith("\"enabled\":false", enabledAt),
-                "a non-main agent with no config row must not get jclaw_api: " + entry);
+        assertFalse(body.contains("\"name\":\"jclaw_api\""), "jclaw_api must not be offered to a non-main agent: " + body);
+        assertTrue(body.contains("\"name\":\"filesystem\""), "the other tools are still listed: " + body);
+        assertTrue(fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(models.Agent.findById(id))).contains("jclaw_api"));
     }
 
     @Test
-    void anExplicitGrantStillEnablesJclawApiForANonMainAgent() {
-        // The default is opt-in, not a prohibition: granting it to a purpose-built agent
-        // stays one click, which is how this instance's cyber-concierge agent has it.
+    void noGrantGivesANonMainAgentJclawApi() {
         login();
         var id = createAgent("tools-jclaw-api-granted-agent");
 
-        assertIsOk(PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json",
-                "{\"enabled\":true}"));
+        var resp = PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json", "{\"enabled\":true}");
+        assertEquals(400, resp.status.intValue());
+        assertEquals("jclaw_api is the main agent's alone: no other agent can be given it.",
+                com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject().get("message").getAsString());
+        assertEquals(0L, (long) fetchInFreshTx(() -> models.AgentToolConfig.count(
+                "agent.id = ?1 AND toolName = ?2 AND enabled = true", id, "jclaw_api")));
 
-        var body = getContent(GET("/api/agents/" + id + "/tools"));
-        var idx = body.indexOf("\"name\":\"jclaw_api\"");
-        var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
-        assertTrue(entry.startsWith("\"enabled\":true", entry.indexOf("\"enabled\":")),
-                "an explicit grant must win over the default: " + entry);
+        // A grant row written behind the route, as an old JCLAW-941 grant was, opens nothing either.
+        fetchInFreshTx(() -> {
+            var row = mcp.McpGrants.newRow(models.Agent.findById(id), "jclaw_api");
+            row.enabled = true;
+            row.save();
+            return null;
+        });
+        agents.ToolRegistry.clearDisabledToolsCache();
+        assertTrue(fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(models.Agent.findById(id))).contains("jclaw_api"));
+    }
+
+    @Test
+    void mainKeepsJclawApiAndAnUnsavedOtherAgentDoesNotGetIt() {
+        var main = new models.Agent();
+        main.name = models.Agent.MAIN_AGENT_NAME;
+        var other = new models.Agent();
+        other.name = "tools-jclaw-api-unsaved";
+
+        assertEquals(java.util.Set.of(), agents.ToolRegistry.loadDisabledTools(main));
+        assertEquals(java.util.Set.of("jclaw_api"), agents.ToolRegistry.loadDisabledTools(other));
     }
 
     // --- PUT /api/agents/{id}/tools/{name} ---
@@ -675,7 +686,9 @@ class ApiToolsControllerTest extends FunctionalTest {
                     "sanity: the adapters' descriptions alone would not fit, so the check below measures the fold");
             for (var url : List.of("/api/tools", "/api/tools/meta", "/api/agents/" + id + "/tools")) {
                 var body = getContent(GET(url));
-                assertEquals(natives[0] + servers, JsonParser.parseString(body).getAsJsonArray().size(), url);
+                // A non-main agent's own list leaves out jclaw_api, which no grant can give it (JF-287).
+                var expectedRows = natives[0] + servers - (url.startsWith("/api/agents/") ? 1 : 0);
+                assertEquals(expectedRows, JsonParser.parseString(body).getAsJsonArray().size(), url);
                 assertTrue(body.length() < JClawApiTool.MAX_RESPONSE_CHARS,
                         url + " is " + body.length() + " characters");
             }

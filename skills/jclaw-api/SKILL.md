@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.8"
+  version: "1.1.9"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -11,7 +11,7 @@ metadata:
 
 # JClaw API
 
-Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, etc.
+Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, etc. Only the `main` agent has the `jclaw_api` tool.
 
 The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. An endpoint is callable only when its backend action is declared agent-reachable (`@AgentAccess` level `OPEN`, or `OWN_ONLY`, which reaches only your own agent's rows — `main` reaches every agent's); an undeclared action is operator-only. So a new endpoint appears in `discover` once the backend opens it, with no skill edit, and if `discover` does not list something, it is deliberately off-limits (see below). Access is decided by that backend declaration, never by this skill.
 
