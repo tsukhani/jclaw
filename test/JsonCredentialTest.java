@@ -133,16 +133,17 @@ class JsonCredentialTest extends UnitTest {
         row.transport = McpServer.Transport.HTTP;
         row.configJson = "{\"url\":\"http://127.0.0.1:1/mcp\",\"headers\":{\"Authorization\":\"" + lost + "\"}}";
 
-        // The form saves back what the read showed it, with only the URL changed.
+        // The form saves back what the read showed it, with only the URL's path changed: a saved header's mask is
+        // refused once the URL moves to another origin (JF-291).
         var body = JsonParser.parseString(GsonHolder.GSON.toJson(McpServerService.View.of(row))).getAsJsonObject();
         assertEquals("****", body.getAsJsonObject("headers").get("Authorization").getAsString());
-        body.addProperty("url", "http://127.0.0.1:2/mcp");
+        body.addProperty("url", "http://127.0.0.1:1/v2/mcp");
         assertNull(McpServerService.restoreMaskedSecrets(body,
                 McpServerService.explodeConfigJson(row.transport, row.configJson)));
         var saved = JsonCredential.MCP_SERVER.sealed(McpServerService.composeConfigJson(row.transport, body), CIPHER);
 
         assertEquals(lost, header(saved, "Authorization"));
-        assertEquals("http://127.0.0.1:2/mcp", JsonParser.parseString(saved).getAsJsonObject().get("url").getAsString());
+        assertEquals("http://127.0.0.1:1/v2/mcp", JsonParser.parseString(saved).getAsJsonObject().get("url").getAsString());
     }
 
     @Test
