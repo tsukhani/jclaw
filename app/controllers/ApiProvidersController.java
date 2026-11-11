@@ -298,7 +298,8 @@ public class ApiProvidersController extends Controller {
      * {@code supportsVision}, {@code supportsAudio}, {@code alwaysThinks}) plus the
      * four price fields mirror the Settings "add model" form exactly. Unset prices
      * are omitted from the saved JSON (matching the frontend), so they don't poison
-     * the cost-computation fallbacks. Rejects a duplicate id with 409.
+     * the cost-computation fallbacks. Rejects a duplicate id with 409, and a list the
+     * config write rules refuse with 400 and their reason.
      */
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelInfoRequest.class)))
@@ -333,7 +334,9 @@ public class ApiProvidersController extends Controller {
                 : deriveName(id);
 
         models.add(buildModelObject(body, id, displayName));
-        ConfigService.setWithSideEffects(key, gson.toJson(models));
+        var rejection = ConfigService.setWithSideEffects(key, gson.toJson(models));
+        // A 400, as PUT /api/router/models answers, so main tells a request to correct from a write it may not make.
+        if (rejection != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
 
         renderJSON(gson.toJson(new AddModelResponse(name, new ModelRef(id, displayName), models.size())));
     }

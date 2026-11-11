@@ -382,6 +382,28 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
+    void addModelReportsAWriteTheConfigRulesRefuseAndStoresNothing() {
+        // A base URL saved before the name was reserved: set() runs no write rule, as that row's own save did not.
+        var provider = services.decision.BasetenDecision.PROVIDER;
+        login();
+        ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:1/v1");
+        try {
+            var resp = POST("/api/providers/" + provider + "/models", "application/json", "{\"id\":\"jf294-model\"}");
+
+            var body = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+            assertEquals(java.util.List.of("400", "invalid_request",
+                            "The provider name 'baseten-decision' is reserved for the model router's Baseten classifier."),
+                    java.util.List.of(String.valueOf(resp.status), String.valueOf(body.get("code")).replace("\"", ""),
+                            String.valueOf(body.get("message")).replace("\"", "")));
+            assertNull(ConfigService.get("provider." + provider + ".models"));
+        } finally {
+            ConfigService.delete("provider." + provider + ".baseUrl");
+            ConfigService.delete("provider." + provider + ".models");
+            llm.ProviderRegistry.refresh();
+        }
+    }
+
+    @Test
     void addModelPersistsOptionalFieldsAndStripsUnsetPrices() {
         login();
         configureProvider();
