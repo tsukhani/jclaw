@@ -6,12 +6,16 @@
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import PromptCard from '~/components/prompts/PromptCard.vue'
 import PromptFormDialog from '~/components/prompts/PromptFormDialog.vue'
-import type { Prompt, PromptCategory } from '~/types/api'
+import type { Agent, Prompt, PromptCategory } from '~/types/api'
 
 const { data: promptsData, pending, refresh } = useLazyFetch<Prompt[]>('/api/prompts', { default: () => [] })
 const { data: categoriesData } = useLazyFetch<PromptCategory[]>('/api/prompts/categories', { default: () => [] })
+// The agents a new prompt's Owner field offers (JF-307). When the list cannot be read, the form
+// offers the operator alone and still saves.
+const { data: agentsData } = useLazyFetch<Agent[]>('/api/agents', { default: () => [] })
 const prompts = computed(() => promptsData.value ?? [])
 const categories = computed(() => categoriesData.value ?? [])
+const agents = computed(() => agentsData.value ?? [])
 
 // Client-side search + category filter over the (small, personal-scale) list.
 const search = ref('')
@@ -375,6 +379,7 @@ async function doImport(mode: 'merge' | 'replace') {
       v-model:open="dialogOpen"
       :editing="editing"
       :categories="categories"
+      :agents="agents"
       @saved="refresh"
     />
   </div>

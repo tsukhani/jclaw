@@ -2,11 +2,11 @@
 
 The **Prompts Library** is your personal collection of saved, reusable prompts: the paragraphs you keep re-typing into [Chat](/chat). Save one once, then use **Run** to load it into the composer whenever you need it. You can adjust it before you send. The [Prompts](/prompts) page is where you build, organize, search, and share that collection.
 
-Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. The library is yours: you can run any prompt in it with any agent. An agent can save prompts of its own too (see [Prompts an agent saved](/guide#prompts-agent-prompts)).
+Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. The library is yours: you can run any prompt in it with any agent. A prompt can also belong to one of your agents (see [Prompts an agent owns](/guide#prompts-agent-prompts)).
 
 ## What a prompt is
 
-Each prompt is a **title** plus the **prompt text** itself. It is filed under exactly one **category** and tagged with any number of free-form **tags**:
+Each prompt is a **title** plus the **prompt text** itself. It is filed under exactly one **category** and tagged with any number of free-form **tags**. It also has one **owner**:
 
 | Field | Meaning |
 | --- | --- |
@@ -14,6 +14,7 @@ Each prompt is a **title** plus the **prompt text** itself. It is filed under ex
 | **Prompt text** | The text loaded into the composer when you Run it. Required. |
 | **Category** | Exactly one, from a fixed set: **Coding, Writing, Analysis, Creative, Business, Custom**. This is the scannable, filterable axis. |
 | **Tags** | Optional, free-form, comma-separated. This is the unlimited cross-cutting axis: your own labels. |
+| **Owner** | You, or one of your agents. You pick it when you create the prompt, and it never changes after that. |
 
 The two axes are deliberately different. **Categories** are a closed taxonomy (they are not editable), so grouping and filtering stay consistent. **Tags** are a folksonomy for whatever personal labels you want. That is why there is no "custom category" beyond the built-in **Custom** bucket: open-ended organization is what tags are for.
 
@@ -24,7 +25,7 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view, the
 - **Category pills**: filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search**: the search box filters live across each prompt's **title, text, and tags**.
 - **Copy / Edit / Delete / Run**: the actions on every card. **Copy** puts the prompt text on your clipboard. The others are covered below.
-- **Agent: name**: a line on the card of a prompt that an agent saved. A prompt you made has no such line.
+- **Agent: name**: a line on the card of a prompt that an agent owns. A prompt of your own has no such line.
 - **Export · Import · New prompt**: the toolbar, left-aligned below the intro text.
 
 ## Creating a prompt
@@ -32,7 +33,9 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view, the
 Click **New prompt**. Creation is a two-step flow:
 
 1. **Describe it**: type a one-line description of what you want the prompt to do, and hit **Generate**. An LLM drafts a title, category, prompt text, and tags from your description.
-2. **Review**: the generated fields pre-fill the form. Edit anything, then **Save**.
+2. **Review**: the generated fields pre-fill the form. Edit anything, pick the **Owner**, then click **Create**.
+
+The **Owner** field decides who the new prompt belongs to. It starts at **You (the operator)**, which makes the prompt yours. To give the prompt to an agent, pick that agent's name from the list. Under the field, the form says: *"An agent that owns a prompt can read, change and delete it. You cannot change the owner later."* To move a prompt to another owner, delete it and create it again.
 
 For a new prompt, the form opens only after **Generate**. To add a prompt without it, write it in a JSON file and use **Import** (see below).
 
@@ -50,15 +53,20 @@ You can also reach the library from the chat composer with the `/prompt` slash c
 
 ## Editing and deleting
 
-The pencil on a card reopens the form, pre-filled. **Save** updates the prompt in place. Its *updated* time bumps, and the library re-sorts newest-edited first. The trash button deletes the prompt behind a confirmation. Deletion cannot be undone.
+The pencil on a card reopens the form, pre-filled. The form shows the **Owner**, but you cannot change it there: *"The owner was chosen when this prompt was created. It cannot be changed."* **Save** updates the prompt in place. Its *updated* time bumps, and the library re-sorts newest-edited first. The trash button deletes the prompt behind a confirmation. Deletion cannot be undone.
 
-## Prompts an agent saved {#agent-prompts}
+## Prompts an agent owns {#agent-prompts}
 
-An agent that calls JClaw's API can save a prompt. That prompt belongs to the agent, and its card shows **Agent:** and the agent's name. You see every prompt on this page, whoever saved it, and you can run, edit or delete any of them. So can the Main Agent.
+A prompt belongs to an agent in one of two ways:
 
-Any other agent sees only the prompts it saved itself. It cannot list, read, change or delete a prompt of yours or of another agent.
+- You picked that agent as the **Owner** when you created the prompt.
+- An agent saved the prompt through JClaw's API. The Main Agent can name any agent as the owner of a prompt it saves, as you can. A prompt that any other agent saves is always its own.
 
-When you delete an agent, the prompts it saved stay in the library. They become yours, and the **Agent:** line goes away.
+The card of such a prompt shows **Agent:** and the agent's name. You see every prompt on this page, whoever owns it, and you can run, edit or delete any of them. So can the Main Agent.
+
+Any other agent sees only the prompts it owns. It can list, read, change and delete those, whether it saved them itself or they were created for it. It cannot list, read, change or delete a prompt of yours or of another agent.
+
+When you delete an agent, the prompts it owned stay in the library. They become yours, and the **Agent:** line goes away.
 
 ## Import and export
 
@@ -69,10 +77,10 @@ Your whole library is portable as a single JSON document:
   - **Merge**: appends the imported prompts to your existing library.
   - **Replace all**: wipes the current library first, then imports.
 
-Import accepts either a full export document or a bare JSON array of prompts. So, a hand-authored list works too. An export holds every prompt, the ones your agents saved included, but not who saved each one. An imported prompt is always yours.
+Import accepts either a full export document or a bare JSON array of prompts. So, a hand-authored list works too. An export holds every prompt, the ones your agents own included, but not who owns each one. An imported prompt is always yours.
 
 :::gotcha Replace is destructive
-**Replace all** deletes every prompt in the library before importing, the ones your agents saved included. There is no undo. Use **Merge** unless you truly mean to start the library over from the imported file.
+**Replace all** deletes every prompt in the library before importing, the ones your agents own included. There is no undo. Use **Merge** unless you truly mean to start the library over from the imported file.
 :::
 
 ## Where to go next

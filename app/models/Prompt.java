@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * A saved, reusable prompt in the operator's Prompts Library (JCLAW-813).
  *
- * <p>The operator's library, plus the prompts each agent saved for itself
+ * <p>The operator's library, plus the prompts each agent owns
  * ({@link #ownerAgent}, JF-292). A prompt is one
  * title + free-form prompt text, filed under exactly one fixed {@link Category}
  * (the controlled, scannable axis) and tagged with an optional free-form,
@@ -87,10 +87,12 @@ public class Prompt extends TimestampedModel {
     public Category category;
 
     /**
-     * The agent that created this prompt through the API, or null for the operator's: one made on
-     * the Prompts page, by an import or by the seed job. An agent other than {@code main} reaches
-     * only its own (JF-292). Nullable, so rows that predate it are the operator's with no
-     * migration, and SET NULL, so deleting an agent leaves its prompts with the operator.
+     * The agent this prompt belongs to, chosen once at creation (JF-307): the agent its creator
+     * named, else the agent that created it through the API. Null for the operator's: one made on
+     * the Prompts page with no agent picked, by an import or by the seed job. An agent other than
+     * {@code main} reaches only its own (JF-292). Nullable, so rows that predate it are the
+     * operator's with no migration, and SET NULL, so deleting an agent leaves its prompts with the
+     * operator.
      */
     @ManyToOne
     @JoinColumn(name = "owner_agent_id")

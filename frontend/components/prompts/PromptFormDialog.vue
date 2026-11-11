@@ -4,15 +4,18 @@
 //    + Generate; the LLM-generated title/category/content/tags then pre-fill the
 //    same form (step 2) for the operator to tweak or save.
 //  - Edit: opens straight to the form, pre-filled from the existing prompt.
-// The form step is identical in both modes, so review-generated == edit.
+// The form step is identical in both modes but for the Owner field, which is picked once, on
+// create (JF-307): an edit shows the owner and sends none.
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog'
-import type { Prompt, PromptCategory } from '~/types/api'
+import type { Agent, Prompt, PromptCategory } from '~/types/api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
   editing: Prompt | null
   categories: PromptCategory[]
-}>()
+  /** The agents the Owner field offers beside the operator; with none, a new prompt is the operator's. */
+  agents?: Agent[]
+}>(), { agents: () => [] })
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
@@ -25,6 +28,9 @@ const title = ref('')
 const content = ref('')
 const category = ref('')
 const tags = ref('')
+// The agent a new prompt goes to; null leaves it the operator's own.
+const ownerAgentId = ref<number | null>(null)
+const OPERATOR_OWNER = 'You (the operator)'
 
 const { mutate, loading: saving, errorDetails: saveError } = useApiMutation()
 const { mutate: genMutate, loading: generating, errorDetails: generateError } = useApiMutation()
@@ -46,6 +52,7 @@ watch(() => props.open, (isOpen) => {
     content.value = ''
     category.value = props.categories[0]?.value ?? ''
     tags.value = ''
+    ownerAgentId.value = null
   }
 })
 
@@ -76,6 +83,7 @@ async function save() {
     content: content.value,
     category: category.value,
     tags: tags.value.trim(),
+    ...(!props.editing && ownerAgentId.value !== null ? { ownerAgentId: ownerAgentId.value } : {}),
   }
   const url = props.editing ? `/api/prompts/${props.editing.id}` : '/api/prompts'
   const method = props.editing ? 'PUT' : 'POST'
@@ -219,6 +227,51 @@ async function save() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
           >
         </label>
+        <div>
+          <label
+            for="pf-owner"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">Owner</span>
+            <input
+              v-if="editing"
+              id="pf-owner"
+              :value="editing.ownerAgentName ?? OPERATOR_OWNER"
+              type="text"
+              readonly
+              aria-describedby="pf-owner-hint"
+              data-testid="prompt-form-owner-fixed"
+              class="w-full px-2 py-1.5 text-sm bg-muted/30 border border-input text-fg-muted"
+            >
+            <select
+              v-else
+              id="pf-owner"
+              v-model="ownerAgentId"
+              aria-describedby="pf-owner-hint"
+              data-testid="prompt-form-owner"
+              class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            >
+              <option :value="null">
+                {{ OPERATOR_OWNER }}
+              </option>
+              <option
+                v-for="a in agents"
+                :key="a.id"
+                :value="a.id"
+              >
+                {{ a.name }}
+              </option>
+            </select>
+          </label>
+          <p
+            id="pf-owner-hint"
+            class="mt-1 text-xs text-fg-muted"
+          >
+            {{ editing
+              ? 'The owner was chosen when this prompt was created. It cannot be changed.'
+              : 'An agent that owns a prompt can read, change and delete it. You cannot change the owner later.' }}
+          </p>
+        </div>
         <!-- JCLAW-1137: retry only an edit. Editing is a PUT to a known id, so repeating it cannot
              duplicate anything. Creating is a POST, and if the first attempt succeeded but its
              response was lost, a retry makes a second prompt — so a failed create gets no button. -->

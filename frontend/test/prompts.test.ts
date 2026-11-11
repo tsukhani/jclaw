@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { useConfirm } from '~/composables/useConfirm'
 import Prompts from '~/pages/prompts.vue'
@@ -17,6 +17,12 @@ const CATEGORIES = [
   { value: 'CODING', label: 'Coding' },
   { value: 'WRITING', label: 'Writing' },
   { value: 'CUSTOM', label: 'Custom' },
+]
+
+// The rows of GET /api/agents the Owner field reads (JF-307).
+const AGENTS = [
+  { id: 1, name: 'main', isMain: true },
+  { id: 7, name: 'research-bot', isMain: false },
 ]
 
 function samplePrompts(): Prompt[] {
@@ -37,6 +43,7 @@ describe('Prompts Library page', () => {
     prompts = samplePrompts()
     registerEndpoint('/api/prompts', () => prompts)
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   afterEach(() => {
@@ -71,7 +78,7 @@ describe('Prompts Library page', () => {
     const owner = c.find('[data-testid="prompt-owner-1"]')
     expect(owner.exists()).toBe(true)
     expect(owner.text()).toBe('Agent: research-bot')
-    expect(owner.attributes('title')).toBe('Created by the agent research-bot')
+    expect(owner.attributes('title')).toBe('Owned by the agent research-bot')
     expect(c.find('[data-testid="prompt-owner-2"]').exists()).toBe(false)
   })
 
@@ -181,6 +188,7 @@ describe('Prompts page — a failed delete (JCLAW-1221)', () => {
     clearNuxtData()
     registerEndpoint('/api/prompts', () => samplePrompts())
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   afterEach(() => {
@@ -217,6 +225,7 @@ describe('Prompts page — a failed import (JCLAW-1221)', () => {
     clearNuxtData()
     registerEndpoint('/api/prompts', () => samplePrompts())
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   it('says why and keeps the mode picker so the import can be retried', async () => {
@@ -241,5 +250,231 @@ describe('Prompts page — a failed import (JCLAW-1221)', () => {
     finally {
       off()
     }
+  })
+})
+
+describe('Prompts page — the Owner field (JF-307)', () => {
+  const GENERATED = { title: 'Standup Notes', category: 'WRITING', content: 'Summarize the standup', tags: 'meetings' }
+  const OPERATOR = 'You (the operator)'
+
+  let prompts: Prompt[] = []
+  let posted: Record<string, unknown>[] = []
+  let put: Record<string, unknown>[] = []
+  let agentsDown = false
+  let page: VueWrapper | undefined
+
+  beforeEach(() => {
+    clearNuxtData()
+    prompts = [
+      { ...samplePrompts()[0]!, ownerAgentId: 7, ownerAgentName: 'research-bot' },
+      { ...samplePrompts()[1]!, ownerAgentId: null, ownerAgentName: null },
+    ]
+    posted = []
+    put = []
+    agentsDown = false
+    registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+    registerEndpoint('/api/agents', async (event) => {
+      if (!agentsDown) return AGENTS
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 502)
+      return '<html><body>Bad Gateway</body></html>'
+    })
+    registerEndpoint('/api/prompts/generate', { method: 'POST', handler: () => GENERATED })
+    registerEndpoint('/api/prompts', {
+      handler: async (event) => {
+        if (event.method !== 'POST') return prompts
+        const { readBody } = await import('h3')
+        const body = await readBody(event) as Record<string, unknown>
+        posted.push(body)
+        // As the server answers: the named agent owns the prompt, and no name leaves it the operator's.
+        const owner = AGENTS.find(a => a.id === body.ownerAgentId)
+        const saved: Prompt = {
+          id: 3, title: String(body.title), content: String(body.content), tags: String(body.tags),
+          category: 'WRITING', categoryLabel: 'Writing',
+          ownerAgentId: owner?.id ?? null, ownerAgentName: owner?.name ?? null, createdAt: null, updatedAt: null,
+        }
+        prompts = [...prompts, saved]
+        return saved
+      },
+    })
+    for (const id of [1, 2]) {
+      registerEndpoint(`/api/prompts/${id}`, {
+        method: 'PUT',
+        handler: async (event) => {
+          const { readBody } = await import('h3')
+          put.push(await readBody(event) as Record<string, unknown>)
+          return prompts.find(p => p.id === id)
+        },
+      })
+    }
+  })
+
+  afterEach(() => {
+    page?.unmount()
+    page = undefined
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+    document.body.style.pointerEvents = ''
+  })
+
+  /** A control of the prompt dialog, which is teleported to the body. */
+  function control<T extends HTMLElement>(testid: string): T | null {
+    return document.body.querySelector<T>(`[data-testid="${testid}"]`)
+  }
+
+  async function type(testid: string, value: string) {
+    const el = control<HTMLInputElement | HTMLTextAreaElement>(testid)!
+    el.value = value
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+  }
+
+  /** Picks an owner as a person does, by the option's text. */
+  async function pickOwner(text: string) {
+    const select = control<HTMLSelectElement>('prompt-form-owner')!
+    select.selectedIndex = Array.from(select.options).findIndex(o => o.textContent?.trim() === text)
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+  }
+
+  function ownerOptions(): (string | undefined)[] {
+    return Array.from(control<HTMLSelectElement>('prompt-form-owner')!.options).map(o => o.textContent?.trim())
+  }
+
+  function selectedOwner(): string | undefined {
+    return control<HTMLSelectElement>('prompt-form-owner')!.selectedOptions[0]?.textContent?.trim()
+  }
+
+  /** New prompt → describe → Generate, which is the only way to the form for a new prompt. */
+  async function openNewPromptForm() {
+    page = await mountSuspended(Prompts)
+    await flushPromises()
+    await page.find('[data-testid="new-prompt-button"]').trigger('click')
+    await flushPromises()
+    await describeAndGenerate()
+  }
+
+  async function describeAndGenerate() {
+    await type('prompt-description', 'notes for the daily standup')
+    control<HTMLButtonElement>('prompt-generate')!.click()
+    await vi.waitFor(() => expect(control('prompt-title')).toBeTruthy())
+  }
+
+  async function openEditForm(id: number) {
+    page = await mountSuspended(Prompts)
+    await flushPromises()
+    await page.find(`[data-testid="prompt-edit-${id}"]`).trigger('click')
+    await flushPromises()
+  }
+
+  it('offers you and each agent as the owner of a new prompt, with you selected at first', async () => {
+    await openNewPromptForm()
+
+    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
+    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
+    expect(selectedOwner()).toBe(OPERATOR)
+    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim())
+      .toBe('An agent that owns a prompt can read, change and delete it. You cannot change the owner later.')
+    expect(control('prompt-form-owner-fixed')).toBeNull()
+  })
+
+  it('sends no owner when the owner is left at you, and the new card names no agent', async () => {
+    await openNewPromptForm()
+
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+
+    expect(posted[0]).toEqual({
+      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
+    })
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-card-3"]').exists()).toBe(true))
+    expect(page!.find('[data-testid="prompt-owner-3"]').exists()).toBe(false)
+    expect(control('prompt-title')).toBeNull()
+  })
+
+  it('sends the picked agent as ownerAgentId, and the new card names that agent', async () => {
+    await openNewPromptForm()
+
+    await pickOwner('research-bot')
+    expect(selectedOwner()).toBe('research-bot')
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+
+    expect(posted[0]).toEqual({
+      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
+      ownerAgentId: 7,
+    })
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-3"]').exists()).toBe(true))
+    expect(page!.find('[data-testid="prompt-owner-3"]').text()).toBe('Agent: research-bot')
+  })
+
+  it('sends no owner when an agent was picked and then you again', async () => {
+    await openNewPromptForm()
+
+    await pickOwner('research-bot')
+    await pickOwner(OPERATOR)
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+
+    expect(posted[0]).toEqual({
+      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
+    })
+  })
+
+  it('starts the owner at you again each time the form opens', async () => {
+    await openNewPromptForm()
+    await pickOwner('research-bot')
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => b.textContent?.trim() === 'Cancel')!.click()
+    await flushPromises()
+
+    await page!.find('[data-testid="new-prompt-button"]').trigger('click')
+    await flushPromises()
+    await describeAndGenerate()
+
+    expect(selectedOwner()).toBe(OPERATOR)
+    expect(posted).toEqual([])
+  })
+
+  it('still offers you as the owner, and saves your prompt, when the agents cannot be listed', async () => {
+    agentsDown = true
+    await openNewPromptForm()
+
+    expect(ownerOptions()).toEqual([OPERATOR])
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+
+    expect(posted[0]).toEqual({
+      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
+    })
+  })
+
+  it('shows the agent that owns a prompt being edited, with no way to change it, and saves without an owner', async () => {
+    await openEditForm(1)
+
+    const owner = control<HTMLInputElement>('prompt-form-owner-fixed')!
+    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
+    expect(owner.value).toBe('research-bot')
+    expect(owner.readOnly).toBe(true)
+    expect(control('prompt-form-owner')).toBeNull()
+    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim())
+      .toBe('The owner was chosen when this prompt was created. It cannot be changed.')
+
+    await type('prompt-title', 'Code Review v2')
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(put).toHaveLength(1))
+
+    expect(put[0]).toEqual({
+      title: 'Code Review v2', content: 'Review this code', category: 'CODING', tags: 'review, quality',
+    })
+    expect(posted).toEqual([])
+  })
+
+  it('shows you as the owner of your own prompt being edited', async () => {
+    await openEditForm(2)
+
+    const owner = control<HTMLInputElement>('prompt-form-owner-fixed')!
+    expect(owner.value).toBe(OPERATOR)
+    expect(owner.readOnly).toBe(true)
+    expect(control('prompt-form-owner')).toBeNull()
   })
 })
