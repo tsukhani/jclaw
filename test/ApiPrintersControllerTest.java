@@ -1,7 +1,12 @@
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 
 /**
@@ -196,5 +201,39 @@ class ApiPrintersControllerTest extends FunctionalTest {
         var body = getContent(GET("/api/printers/options?host=192.0.2.10&port=631&protocol=IPP"));
         assertTrue(body.contains("\"fromPrinter\":false"), body);
         assertTrue(body.contains("\"options\":[]"), "inventing options would offer settings the device may reject: " + body);
+    }
+
+    // --- JF-294: the options route dials the address it is given ---
+
+    private static String optionsUrl(String host, int port) {
+        return "/api/printers/options?host=" + URLEncoder.encode(host, StandardCharsets.UTF_8) + "&port=" + port
+                + "&protocol=IPP";
+    }
+
+    /** The status with the error's code and message, or with the whole body when it is no error. */
+    private static String describe(play.mvc.Http.Response resp) {
+        var body = getContent(resp);
+        var json = JsonParser.parseString(body).getAsJsonObject();
+        return json.has("code")
+                ? resp.status + " " + json.get("code").getAsString() + " " + json.get("message").getAsString()
+                : resp.status + " " + body;
+    }
+
+    @Test
+    void jobOptionsRefuseAnAddressThatIsNeverAPrinter() {
+        login();
+        for (var host : List.of("169.254.169.254", "169.254.7.7", "fe80::1", "[fe80::1]", "224.0.0.251", "ff02::fb",
+                "0.0.0.0", "::", "169.254.169.254/x?", "user@169.254.169.254")) {
+            assertEquals("400 invalid_request '" + host + "' is a link-local, multicast or unspecified address, "
+                    + "which is never a printer.", describe(GET(optionsUrl(host, 631))), host);
+        }
+    }
+
+    @Test
+    void jobOptionsStillDialALoopbackAddress() {
+        // Port 1 refuses at once, so the route reached the dial and reports what an absent printer reports.
+        login();
+        assertEquals("200 {\"options\":[],\"protocols\":[\"IPP\",\"IPPS\",\"RAW\",\"LPD\"],\"mediaReady\":null,\"fromPrinter\":false}",
+                describe(GET(optionsUrl("127.0.0.1", 1))));
     }
 }

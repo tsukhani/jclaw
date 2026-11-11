@@ -84,4 +84,36 @@ class PrintTargetGuardTest extends UnitTest {
                         savedAt("169.254.169.254", 631),
                         List.of(printerAt("169.254.169.254", 631))));
     }
+
+    // The ranges every caller of the guard refuses, the printer options route included (JF-294).
+
+    @Test
+    void linkLocalMulticastAndTheUnspecifiedAddressAreNeverAPrinter() {
+        for (var host : List.of("169.254.169.254", "169.254.0.1", "fe80::1", "[fe80::1]", "224.0.0.251", "ff02::fb",
+                "0.0.0.0", "::")) {
+            assertTrue(PrintTargetGuard.isForbiddenDestination(host), host);
+        }
+    }
+
+    @Test
+    void loopbackTheLanAndANameThatDoesNotResolveAreNotForbidden() {
+        for (var host : List.of("127.0.0.1", "::1", "[::1]", "10.0.0.5", "192.168.1.20", "192.0.2.10",
+                "no-such-printer.invalid")) {
+            assertFalse(PrintTargetGuard.isForbiddenDestination(host), host);
+        }
+        assertFalse(PrintTargetGuard.isForbiddenDestination(null));
+        assertFalse(PrintTargetGuard.isForbiddenDestination("  "));
+    }
+
+    @Test
+    void aHostIsJudgedAsTheUrlAnIppJobIsSentToReadsIt() {
+        // ipp://<host>:631/ipp/print: each of these is no address as given, and names the metadata address to a URL parser.
+        for (var host : List.of("169.254.169.254/x?", "169.254.169.254#", "user@169.254.169.254",
+                "%31%36%39.254.169.254", "169.254.169.254:80")) {
+            assertTrue(PrintTargetGuard.isForbiddenDestination(host), host);
+        }
+        for (var host : List.of("127.0.0.1/x?", "user@192.168.1.20", "PRINTER.invalid")) {
+            assertFalse(PrintTargetGuard.isForbiddenDestination(host), host);
+        }
+    }
 }

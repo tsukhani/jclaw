@@ -1,5 +1,6 @@
 package services.printing;
 
+import okhttp3.HttpUrl;
 import org.jspecify.annotations.Nullable;
 import utils.SsrfGuard;
 
@@ -86,6 +87,10 @@ public final class PrintTargetGuard {
      * does not resolve is not refused: the address may only resolve on the network the
      * printer is on, and {@link Verdict#UNVETTED} already puts that in front of the
      * operator.
+     *
+     * <p>An IPP job goes to the host a URL parser reads out of {@code ipp://<host>:<port>/…},
+     * which is not the string given once that carries a path, a query, userinfo or a
+     * percent-escape ({@code 169.254.169.254/x?}), so that host is judged as well.
      */
     public static boolean isForbiddenDestination(@Nullable String host) {
         if (host == null || host.isBlank()) {
@@ -93,14 +98,22 @@ public final class PrintTargetGuard {
         }
         var bare = host.startsWith("[") && host.endsWith("]")
                 ? host.substring(1, host.length() - 1) : host;
+        if (resolvesIntoAForbiddenRange(bare)) {
+            return true;
+        }
+        var dialed = HttpUrl.parse("http://" + host + "/");
+        return dialed != null && !dialed.host().equalsIgnoreCase(bare) && resolvesIntoAForbiddenRange(dialed.host());
+    }
+
+    private static boolean resolvesIntoAForbiddenRange(String host) {
         try {
-            for (var addr : InetAddress.getAllByName(bare)) {
+            for (var addr : InetAddress.getAllByName(host)) {
                 if (SsrfGuard.isBlockedForProvider(addr)) {
                     return true;
                 }
             }
         } catch (UnknownHostException _) {
-            // Not a refusal — see the Javadoc.
+            // Not a refusal — see isForbiddenDestination.
         }
         return false;
     }

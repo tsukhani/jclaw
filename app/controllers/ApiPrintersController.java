@@ -13,6 +13,7 @@ import services.EventLogger;
 import services.printing.IppClient;
 import services.printing.JobAttributes;
 import services.printing.PrintProtocol;
+import services.printing.PrintTargetGuard;
 import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.ApiResponses;
@@ -177,15 +178,22 @@ public class ApiPrintersController extends Controller {
      *
      * <p>Without a reachable {@code host} the response carries no options and
      * {@code fromPrinter=false}, which the UI renders as "pick a printer first"
-     * rather than as an empty form.
+     * rather than as an empty form. A {@code host} in a range
+     * {@link PrintTargetGuard#isForbiddenDestination} never dials is a 400.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobOptionsResponse.class)))
-    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials whichever host the caller names")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): dials the host the caller names, which "
+            + "PrintTargetGuard screens")
     public static void options(String host, Integer port, String protocol) {
         RequestPrincipal.requireOperatorOrMain("read a printer's options");
         var protocols = List.of("IPP", "IPPS", "RAW", "LPD");
         if (host == null || host.isBlank()) {
             renderJSON(GSON.toJson(new JobOptionsResponse(List.of(), protocols, null, false)));
+        }
+        // The address is the caller's, so it meets the screen a print job's does, before anything dials (JF-294).
+        if (PrintTargetGuard.isForbiddenDestination(host)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'%s' is a link-local, multicast or unspecified address, which is never a printer.".formatted(host));
         }
 
         var printer = PrinterDiscovery.direct(host, port, PrintProtocol.parse(protocol));
