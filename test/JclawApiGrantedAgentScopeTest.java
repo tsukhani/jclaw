@@ -95,8 +95,9 @@ class JclawApiGrantedAgentScopeTest extends FunctionalTest {
     void aPromptTheGrantedAgentCreatesThroughTheToolNamesThatAgentAsItsOwner() {
         grantJclawApi(own.agentId());
 
+        // A new prompt names its owner (JF-307), and an agent other than main may name only itself.
         var created = call("{\"method\":\"POST\",\"path\":\"/api/prompts\",\"body\":{\"title\":\"jf293 " + own.name()
-                + "\",\"content\":\"Summarize the day.\",\"category\":\"CUSTOM\"}}");
+                + "\",\"content\":\"Summarize the day.\",\"category\":\"CUSTOM\",\"ownerAgentId\":" + own.agentId() + "}}");
 
         assertEquals("HTTP 200", firstLine(created));
         var prompt = JsonParser.parseString(body(created)).getAsJsonObject();
