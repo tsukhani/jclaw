@@ -15,6 +15,10 @@ import java.util.List;
  * {@code main} delivers into any. {@link DeliveryDispatcher} asks before it appends a message, and
  * {@code task_manager} and {@code POST}/{@code PATCH /api/tasks} before they save a task's
  * {@code web:<id>} delivery.
+ *
+ * <p>JF-305: the operator and {@code main} save any conversation as the target of any agent's task, and
+ * the task records that they did ({@link models.Task#deliverySetByOperator}), so its fire delivers there.
+ * A target the agent saved is the agent's send, at the save and at the fire.
  */
 public final class WebDeliveryScope {
 
@@ -44,6 +48,17 @@ public final class WebDeliveryScope {
     static @Nullable Conversation reachable(@Nullable Agent agent, long conversationId) {
         var conversation = (Conversation) Conversation.findById(conversationId);
         return conversation != null && agent != null && mayDeliverInto(agent, conversation) ? conversation : null;
+    }
+
+    /**
+     * {@link #reachable(Agent, long)} for the saved target of a task's fire (JF-305). A target the operator
+     * or {@code main} saved needs only to exist; one the task's agent saved, and a row from before the task
+     * recorded who saved it, is judged as the agent's.
+     *
+     * @param setByOperator {@link models.Task#deliverySetByOperator} of the task that fired
+     */
+    static @Nullable Conversation reachable(@Nullable Agent agent, long conversationId, boolean setByOperator) {
+        return setByOperator ? (Conversation) Conversation.findById(conversationId) : reachable(agent, conversationId);
     }
 
     private static boolean mayDeliverInto(Agent agent, Conversation target) {

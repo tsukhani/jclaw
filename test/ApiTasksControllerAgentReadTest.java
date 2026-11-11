@@ -30,7 +30,8 @@ class ApiTasksControllerAgentReadTest extends FunctionalTest {
     private static final Set<String> TASK_VIEW_KEYS = Set.of(
             "id", "name", "description", "type", "status", "cronExpression", "intervalSeconds", "scheduleDisplay",
             "retryCount", "maxRetries", "lastError", "nextRunAt", "lastFiredAt", "createdAt", "agentId", "agentName",
-            "paused", "delivery", "payloadType", "modelProvider", "modelId", "enabledToolNames", "workdir",
+            "paused", "delivery", "deliverySetByOperator", "payloadType", "modelProvider", "modelId",
+            "enabledToolNames", "workdir",
             "preCheck", "script", "noAgent", "autoDeleteOnComplete", "contextFromTaskIds", "repeatLimit",
             "timezone", "effectiveTimezone", "runningRunId", "originChannel", "failedOccurrences", "pauseReason");
 

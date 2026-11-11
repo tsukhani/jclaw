@@ -77,10 +77,14 @@ public final class TaskWriteService {
      *                      fails closed at fire time.
      * @param ownerReadsAlone whether the turn that asked is one where the owner reads the reply alone,
      *                      which keeps {@code jclaw_api} on every fire (JF-148)
+     * @param byOperatorOrMain whether the operator or {@code main} is asking, recorded with the delivery
+     *                      so a fire delivers the {@code web:<id>} they named (JF-305); the caller
+     *                      decides it for the reason it decides {@code originChannel}
      */
     public static Task persistNewTask(JsonObject body, Agent agent, String name,
                                       ScheduleShorthandParser.ScheduleSpec spec,
-                                      @Nullable String originChannel, boolean ownerReadsAlone) {
+                                      @Nullable String originChannel, boolean ownerReadsAlone,
+                                      boolean byOperatorOrMain) {
         var t = new Task();
         t.agent = agent;
         t.name = name;
@@ -101,7 +105,7 @@ public final class TaskWriteService {
         // until the column is dropped.
         t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
 
-        t.delivery = readOptionalString(body, KEY_DELIVERY);
+        t.setDelivery(readOptionalString(body, KEY_DELIVERY), byOperatorOrMain);
         t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);
         t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
         t.modelId = readOptionalString(body, KEY_MODEL_ID);
@@ -161,13 +165,16 @@ public final class TaskWriteService {
      * Pure mapping — the schedule and name updates (which throw Results on
      * invalid input) stay in the controller.
      *
+     * @param byOperatorOrMain whether the operator or {@code main} is asking. A {@code delivery} in the
+     *                         body is recorded as theirs or as the agent's (JF-305); a body without
+     *                         one leaves the saved delivery and who saved it alone.
      * @return true if any field was touched.
      */
-    public static boolean applyOptionalFieldUpdates(Task task, JsonObject body) {
+    public static boolean applyOptionalFieldUpdates(Task task, JsonObject body, boolean byOperatorOrMain) {
         // Split per-field-kind so each helper stays well under the cognitive-
         // complexity bar; the boolean OR reduction below preserves "any field
         // touched" semantics without short-circuiting.
-        boolean changed = applyOptionalStringFields(task, body);
+        boolean changed = applyOptionalStringFields(task, body, byOperatorOrMain);
         changed |= applyOptionalBooleanFields(task, body);
         return changed;
     }
@@ -177,14 +184,14 @@ public final class TaskWriteService {
      * also clears (readOptionalString collapses both to null). Description
      * uniquely coerces null → "" instead of leaving it null.
      */
-    private static boolean applyOptionalStringFields(Task task, JsonObject body) {
+    private static boolean applyOptionalStringFields(Task task, JsonObject body, boolean byOperatorOrMain) {
         boolean changed = false;
         if (body.has(KEY_DESCRIPTION)) {
             var v = readTextOrList(body, KEY_DESCRIPTION);
             task.description = v != null ? v : "";
             changed = true;
         }
-        if (body.has(KEY_DELIVERY))            { task.delivery          = readOptionalString(body, KEY_DELIVERY);            changed = true; }
+        if (body.has(KEY_DELIVERY))            { task.setDelivery(readOptionalString(body, KEY_DELIVERY), byOperatorOrMain);   changed = true; }
         if (body.has(KEY_PAYLOAD_TYPE))        { task.payloadType       = readOptionalString(body, KEY_PAYLOAD_TYPE);        changed = true; }
         if (body.has(KEY_MODEL_PROVIDER))      { task.modelProvider     = readOptionalString(body, KEY_MODEL_PROVIDER);      changed = true; }
         if (body.has(KEY_MODEL_ID))            { task.modelId           = readOptionalString(body, KEY_MODEL_ID);            changed = true; }

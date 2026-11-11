@@ -24,6 +24,10 @@ import java.util.function.Supplier;
  * conversation is one it may deliver into, and any for the operator (JF-289). The agent's requests carry
  * the bearer and agent header {@code jclaw_api} sends, as in {@code AgentTaskScopeTest}.
  *
+ * <p>The task records who saved the target, and shows it as {@code deliverySetByOperator} (JF-305): an
+ * agent's save of a delivery is the agent's, whoever saved the one before. What a fire then does with
+ * each is in {@code OperatorWebTargetFireTest}.
+ *
  * <p>{@code main}'s half is in {@code WebDeliveryScopeTest}, against a detached entity: its row is
  * provisioned by code and a test may not seed one.
  */
@@ -63,7 +67,7 @@ class WebDeliveryTaskApiTest extends FunctionalTest {
         var created = asAgent(() -> POST(agentRequest(own.agentId()), "/api/tasks", "application/json",
                 newTask(own.agentId(), name, "web:" + own.conversationId())));
         assertStatus(200, created);
-        assertEquals("web:" + own.conversationId(), deliveryIn(created));
+        assertEquals(new Saved("web:" + own.conversationId(), false), savedIn(created));
     }
 
     @Test
@@ -84,7 +88,7 @@ class WebDeliveryTaskApiTest extends FunctionalTest {
         var patched = asAgent(() -> patch(agentRequest(own.agentId()), path,
                 "{\"delivery\":\"web:%d\"}".formatted(own.otherConversationId())));
         assertStatus(200, patched);
-        assertEquals("web:" + own.otherConversationId(), deliveryIn(patched));
+        assertEquals(new Saved("web:" + own.otherConversationId(), false), savedIn(patched));
     }
 
     @Test
@@ -94,12 +98,58 @@ class WebDeliveryTaskApiTest extends FunctionalTest {
         var created = POST("/api/tasks", "application/json",
                 newTask(own.agentId(), "jf289-api-operator-" + suffix, "web:" + alien.conversationId()));
         assertStatus(200, created);
-        assertEquals("web:" + alien.conversationId(), deliveryIn(created));
+        assertEquals(new Saved("web:" + alien.conversationId(), true), savedIn(created));
 
         var patched = patch(operatorRequest(), "/api/tasks/" + own.taskId(),
                 "{\"delivery\":\"web:%d\"}".formatted(alien.conversationId()));
         assertStatus(200, patched);
-        assertEquals("web:" + alien.conversationId(), deliveryIn(patched));
+        assertEquals(new Saved("web:" + alien.conversationId(), true), savedIn(patched));
+    }
+
+    @Test
+    void anAgentKeepsTheOperatorsTargetOnlyWhileItLeavesTheDeliveryAlone() {
+        var path = "/api/tasks/" + own.taskId();
+        var wider = "web:" + alien.conversationId();
+        assertEquals(new Saved(wider, true), operatorSaves(path, wider));
+
+        var edited = asAgent(() -> patch(agentRequest(own.agentId()), path, "{\"description\":\"rewritten\"}"));
+        assertStatus(200, edited);
+        assertEquals(new Saved(wider, true), savedIn(edited));
+
+        // The operator's target sent back by the agent is the agent's save, and out of its reach.
+        refusal(alien.conversationId(), asAgent(() -> patch(agentRequest(own.agentId()), path,
+                "{\"description\":\"once more\",\"delivery\":\"%s\"}".formatted(wider))));
+        assertEquals(List.of(wider, true, "rewritten"), stored(own.taskId()));
+    }
+
+    @Test
+    void anAgentsChangeOfTheDeliveryMakesTheTargetTheAgents() {
+        var path = "/api/tasks/" + own.taskId();
+        var wider = "web:" + alien.conversationId();
+        var ownOther = "web:" + own.otherConversationId();
+        assertEquals(new Saved(wider, true), operatorSaves(path, wider));
+
+        var changed = asAgent(() -> patch(agentRequest(own.agentId()), path, "{\"delivery\":\"%s\"}".formatted(ownOther)));
+        assertStatus(200, changed);
+        assertEquals(new Saved(ownOther, false), savedIn(changed));
+
+        refusal(alien.conversationId(), asAgent(() -> patch(agentRequest(own.agentId()), path,
+                "{\"delivery\":\"%s\"}".formatted(wider))));
+        assertEquals(List.of(ownOther, false, "the prompt"), stored(own.taskId()));
+
+        assertEquals(new Saved(wider, true), operatorSaves(path, wider));
+    }
+
+    @Test
+    void anAgentThatClearsTheOperatorsTargetLeavesNoneBehind() {
+        var path = "/api/tasks/" + own.taskId();
+        assertEquals(new Saved("web:" + alien.conversationId(), true),
+                operatorSaves(path, "web:" + alien.conversationId()));
+
+        var cleared = asAgent(() -> patch(agentRequest(own.agentId()), path, "{\"delivery\":null}"));
+
+        assertStatus(200, cleared);
+        assertEquals(new Saved(null, false), savedIn(cleared));
     }
 
     // --- helpers -------------------------------------------------------------------------
@@ -113,8 +163,36 @@ class WebDeliveryTaskApiTest extends FunctionalTest {
         return getContent(response).replace(String.valueOf(conversationId), "<id>");
     }
 
-    private static String deliveryIn(Http.Response response) {
-        return JsonParser.parseString(getContent(response)).getAsJsonObject().get("delivery").getAsString();
+    /** A task's delivery and whether the operator or main saved it, as the API shows them. */
+    private record Saved(String delivery, boolean byOperatorOrMain) {}
+
+    private static Saved savedIn(Http.Response response) {
+        var body = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        var delivery = body.get("delivery");
+        assertNotNull(body.get("deliverySetByOperator"), "the task shows who saved its delivery");
+        return new Saved(delivery.isJsonNull() ? null : delivery.getAsString(),
+                body.get("deliverySetByOperator").getAsBoolean());
+    }
+
+    /** The operator signs in and saves {@code delivery} on the task at {@code path}; returns what the reply shows. */
+    private Saved operatorSaves(String path, String delivery) {
+        try {
+            assertIsOk(POST("/api/auth/login", "application/json", "{\"username\":\"admin\",\"password\":\"changeme\"}"));
+            var patched = patch(operatorRequest(), path, "{\"delivery\":\"%s\"}".formatted(delivery));
+            assertStatus(200, patched);
+            return savedIn(patched);
+        } finally {
+            clearCookies();
+        }
+    }
+
+    /** The task's delivery, who saved it and its description, as its agent reads them back. */
+    private List<Object> stored(Long taskId) {
+        var read = asAgent(() -> GET(agentRequest(own.agentId()), "/api/tasks/" + taskId));
+        assertStatus(200, read);
+        var saved = savedIn(read);
+        return List.of(saved.delivery(), saved.byOperatorOrMain(),
+                JsonParser.parseString(getContent(read)).getAsJsonObject().get("description").getAsString());
     }
 
     private static String newTask(Long agentId, String name, String delivery) {

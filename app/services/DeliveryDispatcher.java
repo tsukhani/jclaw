@@ -9,6 +9,7 @@ import models.Conversation;
 import models.DeliveredMessage;
 import models.MessageRole;
 import models.SlackBinding;
+import models.Task;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
 import org.jspecify.annotations.Nullable;
@@ -128,6 +129,12 @@ public final class DeliveryDispatcher {
      * @param text    UTF-8 message body. Channel-specific formatting limits apply.
      */
     public static DispatchResult dispatch(Agent agent, String channelType, @Nullable String target, String text) {
+        return dispatch(agent, channelType, target, text, false);
+    }
+
+    /** @param operatorSetTarget whether this is a task's fire whose target the operator or {@code main} saved (JF-305) */
+    private static DispatchResult dispatch(Agent agent, String channelType, @Nullable String target, String text,
+                                           boolean operatorSetTarget) {
         if (channelType == null || channelType.isBlank()) {
             return DispatchResult.unsupported("(null)");
         }
@@ -139,7 +146,7 @@ public final class DeliveryDispatcher {
             case TELEGRAM -> dispatchTelegram(agent, target, text);
             case SLACK -> dispatchSlack(agent, target, text);
             case WHATSAPP -> dispatchWhatsApp(agent, target, text);
-            case "web" -> dispatchWeb(agent, target, text);
+            case "web" -> dispatchWeb(agent, target, text, operatorSetTarget);
             default -> DispatchResult.unsupported(channelType);
         };
     }
@@ -149,8 +156,12 @@ public final class DeliveryDispatcher {
      *  {@code CHANNEL_UNSUPPORTED} when the spec doesn't contain a colon.
      *  Web specs may carry the target {@link Conversation} id (so a task
      *  fires-back to a specific chat, not just the agent's most-recent
-     *  conversation); see {@link #dispatchWeb(Agent, String, String)}. */
+     *  conversation); see {@link #dispatchWeb(Agent, String, String, boolean)}. */
     public static DispatchResult dispatchSpec(Agent agent, String deliverySpec, String text) {
+        return dispatchSpec(agent, deliverySpec, text, false);
+    }
+
+    private static DispatchResult dispatchSpec(Agent agent, String deliverySpec, String text, boolean operatorSetTarget) {
         if (deliverySpec == null || deliverySpec.isBlank()) {
             return DispatchResult.unsupported("(null)");
         }
@@ -170,7 +181,7 @@ public final class DeliveryDispatcher {
         return dispatch(agent,
                 deliverySpec.substring(0, idx),
                 deliverySpec.substring(idx + 1),
-                text);
+                text, operatorSetTarget);
     }
 
     /**
@@ -181,6 +192,16 @@ public final class DeliveryDispatcher {
      */
     public static DispatchResult dispatchSpec(Agent agent, String deliverySpec, String text, String source) {
         return recorded(dispatchSpec(agent, deliverySpec, text), text, source);
+    }
+
+    /**
+     * {@link #dispatchSpec(Agent, String, String, String)} for the output of a fire of {@code task}, sent to
+     * its {@link Task#delivery} as its agent. JF-305: a {@code web:<id>} target the operator or {@code main}
+     * saved ({@link Task#deliverySetByOperator}) is delivered to whatever that agent reaches, because their
+     * save may name any conversation; one the agent saved is judged as every send of the agent's is.
+     */
+    public static DispatchResult dispatchTaskDelivery(Task task, String text, String source) {
+        return recorded(dispatchSpec(task.agent, task.delivery, text, task.deliverySetByOperator), text, source);
     }
 
     /** {@link #dispatch(Agent, String, String, String)}, recorded as {@link #dispatchSpec(Agent, String, String, String)} is. */
@@ -349,9 +370,10 @@ public final class DeliveryDispatcher {
      * <p>JF-289: an explicit conversation id is honored only when {@link WebDeliveryScope} lets
      * {@code agent} deliver into it: its own conversation or one in its parent chain, and any
      * for {@code main}. The message would otherwise land, as user input, in a chat of the
-     * operator's with another agent.
+     * operator's with another agent. JF-305: the id a task's fire carries is honored for any
+     * conversation when the operator or {@code main} saved it ({@code operatorSetTarget}).
      */
-    private static DispatchResult dispatchWeb(Agent agent, String target, String text) {
+    private static DispatchResult dispatchWeb(Agent agent, String target, String text, boolean operatorSetTarget) {
         if (agent == null) {
             return DispatchResult.failedDelivery(
                     "Web dispatch requires an agent context to resolve the active conversation.");
@@ -367,7 +389,7 @@ public final class DeliveryDispatcher {
         Conversation conv = null;
         var convId = WebDeliveryScope.conversationId(target);
         if (convId != null) {
-            conv = WebDeliveryScope.reachable(agent, convId);
+            conv = WebDeliveryScope.reachable(agent, convId, operatorSetTarget);
             if (conv == null) {
                 return DispatchResult.failedDelivery(WebDeliveryScope.notFound(convId));
             }

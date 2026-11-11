@@ -485,7 +485,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // filled in rather than rejected at fire time with a "Delivery spec must be
         // channel:target" error the operator never sees. Headless API creation (no chat
         // context) leaves delivery null.
-        task.delivery = resolveDeliverySpec(optStr(args, KEY_DELIVERY), agent);
+        task.setDelivery(resolveDeliverySpec(optStr(args, KEY_DELIVERY), agent), agent.isMain());
         task.payloadType = optStr(args, KEY_PAYLOAD_TYPE);
         // Reminders default to auto-delete-after-fire; regular tasks keep their
         // audit history. An explicit arg overrides.
@@ -656,9 +656,11 @@ public class TaskTool implements ToolRegistry.Tool {
         // conversation. Inference runs ONLY for the bare-channel shape — an
         // explicit null-clear (optStr → null) or a "none"/full-spec value stays
         // verbatim, preserving updateTask's clear semantics.
+        // JF-305: this tool reaches only the caller's own tasks, so the saver is the task's agent, and a
+        // target the operator saved becomes the agent's again here.
         if (args.has(KEY_DELIVERY)) {
             var explicit = optStr(args, KEY_DELIVERY);
-            task.delivery = explicit == null ? null : resolveDeliverySpec(explicit, task.agent);
+            task.setDelivery(explicit == null ? null : resolveDeliverySpec(explicit, task.agent), task.agent.isMain());
             anyChange = true;
         }
         anyChange |= applyStringPatches(args, task);

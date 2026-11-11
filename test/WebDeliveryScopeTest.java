@@ -1,4 +1,6 @@
 import agents.ToolContext;
+import com.google.gson.JsonObject;
+import controllers.RequestPrincipal;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -9,25 +11,36 @@ import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
+import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.DeliveryDispatcher;
 import services.DeliveryDispatcher.DispatchResult;
 import services.ReminderDispatcher;
+import services.TaskWriteService;
 import services.Tx;
 import services.WebDeliveryScope;
 import tools.MessageTool;
 import tools.TaskTool;
 import utils.AppClock;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * An agent delivers on the web channel only into its own conversations and those above a run it is the
  * child of, and {@code main} into any (JF-289), through the dispatcher, the {@code message} tool and
  * {@code task_manager}. {@code POST}/{@code PATCH /api/tasks} is in {@code WebDeliveryTaskApiTest} and a
  * task's fire in {@code TaskExecutorTest}.
+ *
+ * <p>A task records who saved its target (JF-305): the operator's or {@code main}'s is delivered to at the
+ * fire whatever the task's agent reaches, and the agent's is judged as the agent's. The operator's save
+ * followed by a real fire is in {@code OperatorWebTargetFireTest}.
  *
  * <p>{@code main} is a detached entity, as in {@code RequestPrincipalPolicyTest}: its row is provisioned
  * by code and a test may not seed one, and the rule reads only its name.
@@ -257,6 +270,172 @@ class WebDeliveryScopeTest extends UnitTest {
         assertEquals(notFound(own.id), WebDeliveryScope.refusalFor(null, "web:" + own.id));
     }
 
+    // --- who saved a task's target (JF-305) ----------------------------------------------
+
+    @Test
+    void aFireDeliversATargetTheOperatorSavedForAnAgentsTaskIntoAnyConversation() {
+        var task = taskOf(owner, "web:" + own.id);
+        patchDelivery(task, "web:" + alienChat.id, true);
+
+        assertEquals(DispatchResult.delivered(), fire(task, "for the other agent's chat"));
+        assertEquals(List.of("for the other agent's chat"), delivered(alienChat));
+        assertEquals(List.of(), delivered(own));
+    }
+
+    @Test
+    void aFireJudgesATargetTheAgentSavedAsTheAgentsOwnSend() {
+        var task = taskOf(owner, "web:" + own.id);
+        patchDelivery(task, "web:" + own.id, false);
+        assertEquals(DispatchResult.delivered(), fire(task, "to my own chat"));
+        assertEquals(List.of("to my own chat"), delivered(own));
+
+        patchDelivery(task, "web:" + alienChat.id, false);
+        assertEquals(DispatchResult.failedDelivery(notFound(alienChat.id)), fire(task, "not mine"));
+        assertEquals(List.of(), delivered(alienChat));
+    }
+
+    @Test
+    void aTargetWrittenBeforeTheTaskRecordedWhoSavedItIsJudgedAsTheAgents() {
+        // The field alone, as a row from before the column holds it.
+        var task = taskOf(owner, "web:" + alienChat.id);
+
+        assertEquals(new Saved("web:" + alienChat.id, false), savedOn(task.name));
+        assertEquals(DispatchResult.failedDelivery(notFound(alienChat.id)), fire(task, "not mine"));
+        assertEquals(List.of(), delivered(alienChat));
+    }
+
+    @Test
+    void theColumnDefaultsToTheAgentSoARowFromBeforeItGainsNoReach() {
+        var column = Tx.run(() -> (Object[]) JPA.em().createNativeQuery(
+                "SELECT COLUMN_DEFAULT, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS "
+                        + "WHERE LOWER(TABLE_NAME) = 'task' AND LOWER(COLUMN_NAME) = 'delivery_set_by_operator'")
+                .getSingleResult());
+
+        assertEquals(List.of("FALSE", "NO"), List.of(String.valueOf(column[0]), String.valueOf(column[1])));
+        assertFalse(new Task().deliverySetByOperator);
+    }
+
+    @Test
+    void aTargetTheOperatorSavedThatNamesNoConversationIsNotFound() {
+        var missing = deletedConversationId();
+        var task = taskOf(owner, "web:" + own.id);
+        patchDelivery(task, "web:" + missing, true);
+
+        assertEquals(DispatchResult.failedDelivery(notFound(missing)), fire(task, "nobody's"));
+    }
+
+    @Test
+    void onlyTheOperatorsAndMainsSaveOfATargetReachesPastTheTasksAgent() {
+        // What PATCH /api/tasks/{id} asks of its caller: the operator's session, then three agent-originated requests.
+        record Caller(String who, boolean agentOriginated, Agent agent, boolean delivers) {}
+        var callers = List.of(
+                new Caller("the operator", false, null, true),
+                new Caller("main", true, main(), true),
+                new Caller("the task's own agent", true, owner, false),
+                new Caller("an agent nobody identified", true, null, false));
+        var task = taskOf(owner, "web:" + own.id);
+
+        for (var caller : callers) {
+            var byOperatorOrMain = RequestPrincipal.isOperatorOrMain(caller.agentOriginated(), caller.agent());
+            patchDelivery(task, "web:" + alienChat.id, byOperatorOrMain);
+            var output = "saved by " + caller.who();
+
+            assertEquals(new Saved("web:" + alienChat.id, caller.delivers()), savedOn(task.name), caller.who());
+            assertEquals(caller.delivers() ? DispatchResult.delivered()
+                    : DispatchResult.failedDelivery(notFound(alienChat.id)), fire(task, output), caller.who());
+        }
+        assertEquals(List.of("saved by the operator", "saved by main"), delivered(alienChat));
+    }
+
+    @Test
+    void taskManagerRecordsTheAgentAsTheOneWhoSavedTheTarget() {
+        var named = "jf305-named-" + suffix;
+        var inferred = "jf305-inferred-" + suffix;
+        taskManager(owner, create(named, "web:" + own.id));
+        ToolContext.withConversation(own.id, () -> new TaskTool().execute(
+                "{\"action\":\"createTask\",\"name\":\"%s\",\"schedule\":\"every 30m\"}".formatted(inferred), owner));
+
+        assertEquals(new Saved("web:" + own.id, false), savedOn(named));
+        assertEquals(new Saved("web:" + own.id, false), savedOn(inferred));
+    }
+
+    @Test
+    void anAgentKeepsTheOperatorsTargetOnlyWhileItLeavesTheDeliveryAlone() {
+        var name = "jf305-update-" + suffix;
+        var ownOther = conversation(owner, null);
+        taskManager(owner, create(name, "web:" + own.id));
+        patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
+
+        assertEquals("Task '" + name + "' updated.", taskManager(owner,
+                "{\"action\":\"updateTask\",\"name\":\"%s\",\"description\":\"rewritten\"}".formatted(name)));
+        assertEquals(new Saved("web:" + alienChat.id, true), savedOn(name));
+        assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "after the agent's edit"));
+        assertEquals(List.of("after the agent's edit"), delivered(alienChat));
+
+        // The operator's target sent back by the agent is the agent's save, and out of its reach.
+        assertEquals("Error: " + notFound(alienChat.id), taskManager(owner, update(name, "web:" + alienChat.id)));
+        assertEquals(new Saved("web:" + alienChat.id, true), savedOn(name));
+
+        assertEquals("Task '" + name + "' updated.", taskManager(owner, update(name, "web:" + ownOther.id)));
+        assertEquals(new Saved("web:" + ownOther.id, false), savedOn(name));
+        assertEquals("Error: " + notFound(alienChat.id), taskManager(owner, update(name, "web:" + alienChat.id)));
+        assertEquals(new Saved("web:" + ownOther.id, false), savedOn(name));
+    }
+
+    @Test
+    void aTargetAnAgentPutInPlaceOfTheOperatorsIsRefusedOnceItIsOutOfTheAgentsReach() {
+        var family = family();
+        var name = "jf305-sub-" + suffix;
+        taskManager(family.child(), create(name, "web:" + family.childChat().id));
+        patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
+        assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "the operator's target"));
+
+        assertEquals("Task '" + name + "' updated.",
+                taskManager(family.child(), update(name, "web:" + family.started().id)));
+        assertEquals(new Saved("web:" + family.started().id, false), savedOn(name));
+        assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "while the run is on record"));
+
+        // The run that put the chat in the child's reach is deleted, as retention or the operator deletes one.
+        Tx.run(() -> {
+            ((SubagentRun) SubagentRun.find("childAgent = ?1", family.child()).first()).delete();
+        });
+        assertEquals(DispatchResult.failedDelivery(notFound(family.started().id)),
+                fire(taskNamed(name), "after the run is gone"));
+        assertEquals(List.of("the operator's target"), delivered(alienChat));
+        assertEquals(List.of("while the run is on record"), delivered(family.started()));
+    }
+
+    @Test
+    void anAgentThatClearsTheOperatorsTargetLeavesNoneBehind() {
+        var name = "jf305-clear-" + suffix;
+        taskManager(owner, create(name, "web:" + own.id));
+        patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
+
+        assertEquals("Task '" + name + "' updated.", taskManager(owner,
+                "{\"action\":\"updateTask\",\"name\":\"%s\",\"delivery\":null}".formatted(name)));
+
+        assertEquals(new Saved("null", false), savedOn(name));
+    }
+
+    @Test
+    void noCodeSetsATasksDeliveryWithoutSayingWhoSavesIt() throws IOException {
+        var assignment = Pattern.compile("\\.delivery\\s*=(?!=)");
+        var offenders = new ArrayList<String>();
+        int writers = 0;
+        try (var files = Files.walk(Path.of(Play.applicationPath.getAbsolutePath()).resolve("app"))) {
+            for (var file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                var source = ResourceLeakGateConformanceTest.withoutComments(Files.readString(file));
+                if (assignment.matcher(source).find()) offenders.add(file.getFileName().toString());
+                for (int at = source.indexOf(".setDelivery("); at >= 0; at = source.indexOf(".setDelivery(", at + 1)) writers++;
+            }
+        }
+
+        assertEquals(List.of(), offenders, "these files assign Task.delivery directly, which leaves whoever saved "
+                + "the last target as the saver of the new one. Call Task.setDelivery(spec, byOperatorOrMain)");
+        assertEquals(4, writers, "the scan must still find the writers it guards: the tool's create and update, "
+                + "and the API's. Update the count when a writer is added or removed");
+    }
+
     // --- a reminder's fire ---------------------------------------------------------------
 
     @Test
@@ -395,6 +574,49 @@ class WebDeliveryScopeTest extends UnitTest {
 
     private static String deliveryOf(String taskName) {
         return Tx.run(() -> ((Task) Task.find("name = ?1", taskName).first()).delivery);
+    }
+
+    /** A task's delivery and whether the operator or main saved it. */
+    private record Saved(String delivery, boolean byOperatorOrMain) {}
+
+    private static Saved savedOn(String taskName) {
+        var task = taskNamed(taskName);
+        return new Saved(String.valueOf(task.delivery), task.deliverySetByOperator);
+    }
+
+    private static Task taskNamed(String taskName) {
+        return Tx.run(() -> (Task) Task.find("name = ?1", taskName).first());
+    }
+
+    /** A task of {@code agent} whose {@code delivery} field is written directly, as every row before JF-305 was. */
+    private Task taskOf(Agent agent, String delivery) {
+        return Tx.run(() -> {
+            var task = new Task();
+            task.agent = agent;
+            task.name = "jf305-task-" + UUID.randomUUID().toString().substring(0, 8) + "-" + suffix;
+            task.description = "Report.";
+            task.type = Task.Type.SCHEDULED;
+            task.status = Task.initialStatusFor(Task.Type.SCHEDULED);
+            task.delivery = delivery;
+            task.save();
+            return task;
+        });
+    }
+
+    /** What {@code PATCH /api/tasks/{id}} applies, once its checks pass, for a body that carries a delivery alone. */
+    private static void patchDelivery(Task task, String delivery, boolean byOperatorOrMain) {
+        Tx.run(() -> {
+            var body = new JsonObject();
+            body.addProperty("delivery", delivery);
+            TaskWriteService.applyOptionalFieldUpdates(task, body, byOperatorOrMain);
+            task.save();
+        });
+    }
+
+    /** What {@code TaskExecutor.dispatchDelivery} calls when a fire of {@code task} closes with {@code output}. */
+    private static DispatchResult fire(Task task, String output) {
+        return Tx.run(() -> DeliveryDispatcher.dispatchTaskDelivery((Task) Task.findById(task.id), output,
+                "the result of task '" + task.name + "'"));
     }
 
     /** What web delivery appended to {@code conversation}, oldest first. */

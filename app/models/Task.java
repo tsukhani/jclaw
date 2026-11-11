@@ -15,6 +15,7 @@ import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.query.NativeQuery;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 
@@ -226,10 +227,34 @@ public class Task extends TimestampedModel {
      * identifier route for the task's output, e.g. "telegram:12345" or
      * "slack:C0123". Stored verbatim; parsed by the
      * {@code DeliveryDispatcher} that JCLAW-295 wires in. Null = no
-     * delivery (operator reads the TaskRun row directly).
+     * delivery (operator reads the TaskRun row directly). Set through
+     * {@link #setDelivery}, which records {@link #deliverySetByOperator} with it.
      */
     @Column(name = "delivery")
     public String delivery;
+
+    /**
+     * JF-305: who saved {@link #delivery}. True when the operator or {@code main} did: they may name any
+     * conversation, so a fire delivers their {@code web:<id>} whatever the task's agent reaches. False when
+     * the agent did, and a fire judges the target as the agent's ({@code services.WebDeliveryScope}).
+     * The default is false, so a row from before the column gains no reach. Code in {@code app/} writes
+     * it only through {@link #setDelivery}.
+     */
+    // @ColumnDefault for the reason given on autoDeleteOnComplete.
+    @Column(name = "delivery_set_by_operator", nullable = false)
+    @ColumnDefault("false")
+    public boolean deliverySetByOperator = false;
+
+    /**
+     * Sets {@link #delivery} together with who is saving it. Every writer of the delivery calls this: one
+     * that assigned the field alone would leave an earlier saver's reach on the new target.
+     *
+     * @param byOperatorOrMain whether the operator or {@code main} is saving it; false for any other agent
+     */
+    public void setDelivery(@Nullable String spec, boolean byOperatorOrMain) {
+        delivery = spec;
+        deliverySetByOperator = byOperatorOrMain;
+    }
 
     /**
      * JCLAW-294 plumbing for JCLAW-295 (delivery layer). "reminder" routes

@@ -27,7 +27,7 @@ import java.util.Set;
  * Orchestrates one fire of a {@link Task}. Creates the {@link TaskRun},
  * wraps it in a {@link TaskRunSink}, drives the agent loop via
  * {@link AgentRunner#runForTask}, and on success routes the assistant's
- * final reply through {@link DeliveryDispatcher#dispatchSpec} when the
+ * final reply through {@link DeliveryDispatcher#dispatchTaskDelivery} when the
  * Task has a {@link Task#delivery} spec configured.
  *
  * <p>The TaskRun row is created in its own short transaction so
@@ -82,7 +82,7 @@ public final class TaskExecutor {
      * failure, and — on success when {@link Task#delivery} is set — a
      * populated {@code deliveryStatus} / {@code deliveryTarget} /
      * {@code deliveryError} reflecting the result of dispatching
-     * {@code outputSummary} through {@link DeliveryDispatcher#dispatchSpec}
+     * {@code outputSummary} through {@link DeliveryDispatcher#dispatchTaskDelivery}
      * (see {@link #dispatchDelivery}). Delivery failure does NOT fail
      * the TaskRun — the body succeeded; only the post-completion push
      * to the configured channel did not.
@@ -411,7 +411,7 @@ public final class TaskExecutor {
     /**
      * Re-read the closed TaskRun, mark one-shot Tasks COMPLETED on success,
      * emit the TASK_COMPLETED lifecycle event, and route the assistant's
-     * final reply through {@link DeliveryDispatcher#dispatchSpec} when
+     * final reply through {@link DeliveryDispatcher#dispatchTaskDelivery} when
      * {@link Task#delivery} is set.
      */
     private static @Nullable TaskRun finalizeRun(Task task, TaskRun run) {
@@ -474,7 +474,7 @@ public final class TaskExecutor {
 
     /**
      * Push the closed TaskRun's {@link TaskRun#outputSummary} through
-     * {@link DeliveryDispatcher#dispatchSpec} when {@link Task#delivery}
+     * {@link DeliveryDispatcher#dispatchTaskDelivery} when {@link Task#delivery}
      * is set, and stamp the result onto the TaskRun's delivery columns.
      *
      * <p>Skipped silently (with {@link TaskRun.DeliveryStatus#NOT_REQUESTED})
@@ -544,7 +544,7 @@ public final class TaskExecutor {
         // short Tx — the db-scheduler carrier thread has no inherited one.
         var result = isReminder(task)
                 ? Tx.run(() -> ReminderDispatcher.dispatch(task, closed, spec, content))
-                : Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content,
+                : Tx.run(() -> DeliveryDispatcher.dispatchTaskDelivery(task, content,
                         "the result of task '%s'".formatted(task.name)));
         if (result.ok()) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.DELIVERED, spec, null);

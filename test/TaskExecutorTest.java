@@ -398,7 +398,8 @@ class TaskExecutorTest extends UnitTest {
         othersChat.channelType = "web";
         othersChat.save();
 
-        // Written straight to the row, as a task saved before JF-289 checked the target would hold it.
+        // Written straight to the row, as a task saved before JF-289 checked the target would hold it, and
+        // before JF-305 recorded who saved it: the column's default is the agent.
         var task = persistTask(agent, "jf289-old-target", "Report.", Task.Type.SCHEDULED);
         task.delivery = "web:" + othersChat.id;
         task.save();
@@ -414,6 +415,44 @@ class TaskExecutorTest extends UnitTest {
         assertEquals(TaskRun.DeliveryStatus.NOT_DELIVERED, fresh.deliveryStatus);
         assertEquals("Web target conversation " + othersChat.id + " not found.", fresh.deliveryError);
         assertEquals(0L, (long) Tx.run(() -> models.Message.count("conversation.id = ?1", othersChat.id)));
+    }
+
+    @Test
+    void aFireDeliversIntoTheConversationTheOperatorSavedForAnotherAgentsTask() throws Exception {
+        startLlmServer(simpleResponse("Output the operator sent to another chat."));
+        configureProvider();
+
+        var agent = createAgent("jf305-fire-agent", "test-provider", "test-model");
+        var other = createAgent("jf305-fire-other", "test-provider", "test-model");
+        var othersChat = new models.Conversation();
+        othersChat.agent = other;
+        othersChat.channelType = "web";
+        othersChat.save();
+
+        var task = persistTask(agent, "jf305-operator-target", "Report.", Task.Type.SCHEDULED);
+        task.setDelivery("web:" + othersChat.id, true);
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var closed = fireOnVirtualThread(task);
+        JPA.em().clear();
+
+        var fresh = (TaskRun) TaskRun.findById(closed.id);
+        assertEquals(TaskRun.Status.COMPLETED, fresh.status);
+        assertEquals(TaskRun.DeliveryStatus.DELIVERED, fresh.deliveryStatus);
+        assertEquals("web:" + othersChat.id, fresh.deliveryTarget);
+        assertNull(fresh.deliveryError);
+        var delivered = Tx.run(() -> {
+            var contents = new java.util.ArrayList<String>();
+            for (var row : models.Message.find("conversation.id = ?1 ORDER BY id ASC", othersChat.id).fetch()) {
+                var message = (models.Message) row;
+                contents.add(message.messageKind + ": " + message.content);
+            }
+            return contents;
+        });
+        assertEquals(List.of("subagent_send: Output the operator sent to another chat."), delivered);
     }
 
     @Test

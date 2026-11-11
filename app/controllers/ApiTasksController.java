@@ -88,7 +88,11 @@ public class ApiTasksController extends Controller {
                             @Nullable String nextRunAt, @Nullable String lastFiredAt, String createdAt,
                             @Nullable Long agentId, @Nullable String agentName,
                             boolean paused,
-                            String delivery, String payloadType,
+                            String delivery,
+                            // JF-305: read-only, as originChannel is. True when the operator or main saved
+                            // `delivery`, whose web:<id> a fire then delivers whatever the agent reaches.
+                            boolean deliverySetByOperator,
+                            String payloadType,
                             String modelProvider, String modelId,
                             String enabledToolNames, String workdir,
                             String preCheck, String script, boolean noAgent,
@@ -129,7 +133,7 @@ public class ApiTasksController extends Controller {
                     t.agent != null ? t.agent.id : null,
                     t.agent != null ? t.agent.name : null,
                     t.paused,
-                    t.delivery, t.payloadType,
+                    t.delivery, t.deliverySetByOperator, t.payloadType,
                     t.modelProvider, t.modelId,
                     t.enabledToolNames, t.workdir,
                     t.preCheck, t.script, t.noAgent,
@@ -297,7 +301,9 @@ public class ApiTasksController extends Controller {
 
         var origin = RequestPrincipal.callerOrigin();
         var ownerReadsAlone = RequestPrincipal.callerOwnerReadsAlone();
-        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin, ownerReadsAlone));
+        var byOperatorOrMain = RequestPrincipal.isOperatorOrMainAgent();
+        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin, ownerReadsAlone,
+                byOperatorOrMain));
 
         TaskSchedulingService.register(saved);
 
@@ -390,7 +396,8 @@ public class ApiTasksController extends Controller {
      * when {@code delivery} is absent or explicit-null (the latter clears it).
      *
      * <p>JF-289: an agent other than {@code main} saves a {@code web:<id>} delivery only for a
-     * conversation it may deliver into ({@link WebDeliveryScope}); the operator and {@code main} save any.
+     * conversation it may deliver into ({@link WebDeliveryScope}); the operator and {@code main} save any,
+     * and the task records that they did, so its fire delivers there (JF-305).
      */
     private static void rejectInvalidDelivery(JsonObject body) {
         var delivery = TaskWriteService.readOptionalString(body, KEY_DELIVERY);
@@ -503,7 +510,8 @@ public class ApiTasksController extends Controller {
         boolean scheduleChanged = schedule != null;
         if (schedule != null) applySchedule(task, schedule);
         if (name != null) task.name = name;
-        boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body);
+        boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body,
+                RequestPrincipal.isOperatorOrMainAgent());
 
         // True only when nothing above wrote to `task`.
         if (!scheduleChanged && name == null && !fieldsChanged) {
