@@ -7,8 +7,9 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.BindingService;
+import utils.ApiResponses;
 
-import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -36,10 +37,14 @@ public class WhatsAppQrController extends Controller {
      * a {@code paired:false, qr:null} response for a Cloud-API binding (which never
      * pairs via QR) so the UI can distinguish "wrong transport" cheaply.
      */
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "a binding of another agent is refused with agent_scope (JF-285)")
     public static void status(Long id) {
         WhatsAppBinding binding = BindingService.findWhatsAppBindingById(id);
         notFoundIfNull(binding);
+        // A pairing QR links whoever scans it to the binding's WhatsApp account (JF-285).
+        if (!RequestPrincipal.mayReachAgentScopedRow(binding.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "WhatsApp binding " + id + " belongs to another agent.");
+        }
 
         boolean isWeb = binding.transport == WhatsAppTransport.WHATSAPP_WEB;
         boolean paired = isWeb && WhatsAppCobaltRunner.isPaired(id);

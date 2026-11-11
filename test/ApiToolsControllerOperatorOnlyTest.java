@@ -403,8 +403,9 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools/meta")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools/filesystem")));
-        assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/tools")));
-        assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/skills")));
+        // JF-285: an agent reads its own config only, so the request carries the agent, as jclaw_api's does.
+        assertIsOk(asAgent(() -> GET(agentRequestAs(id), "/api/agents/" + id + "/tools")));
+        assertIsOk(asAgent(() -> GET(agentRequestAs(id), "/api/agents/" + id + "/skills")));
     }
 
     // --- JCLAW-1058: workspace files are standing instructions, not data ---
@@ -583,9 +584,10 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
      *  only the writes moved. */
     @Test
     void agentPrincipalCanStillListWhatsAppBindings() {
-        var token = AuthFixture.seedBearerToken();
+        // JF-285: the list is pinned to the calling agent, so the request carries one, as jclaw_api's does.
+        var id = createAgent("operator-only-whatsapp-list");
 
-        assertIsOk(asAgent(() -> GET(requestWithToken(token), WHATSAPP_BINDINGS)));
+        assertIsOk(asAgent(() -> GET(agentRequestAs(id), WHATSAPP_BINDINGS)));
     }
 
     // --- ACP harness commands: what a runtime=acp spawn executes ---

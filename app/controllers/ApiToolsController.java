@@ -25,6 +25,7 @@ import java.util.List;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -134,12 +135,16 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     @Operation(summary = "List an agent's tools (name, group, enabled for this agent, one-line summary); "
             + "a tool's description and actions come from GET /api/tools/{name}")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
             notFound();
             throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Agent " + id + " is not the calling agent; only main reaches another agent's settings.");
         }
 
         // Ask the agent loop what it will actually do rather than re-deriving the policy here:

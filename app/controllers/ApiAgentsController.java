@@ -48,6 +48,7 @@ import java.util.regex.Pattern;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -139,6 +140,11 @@ public class ApiAgentsController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
+        // JF-285: a custom agent reaches only its own row; main and the operator reach every agent's.
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Agent " + id + " is not the calling agent; only main reaches another agent's settings.");
+        }
         return agent;
     }
 
@@ -212,10 +218,12 @@ public class ApiAgentsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
     @Operation(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "pinned to the caller's own row before the list is built; main lists every agent (JF-285)")
     public static void list() {
         var configuredKeys = AgentService.configuredModelKeys();
+        var scoped = RequestPrincipal.scopedAgentId(null);
         var result = listedAgents().stream()
+                .filter(a -> scoped == null || scoped.equals(a.id))
                 .map(a -> AgentView.of(a, configuredKeys))
                 .toList();
         renderJSON(gson.toJson(result));
@@ -239,7 +247,7 @@ public class ApiAgentsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @Operation(summary = "Get one agent's full details by id")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -253,7 +261,7 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
     @Operation(summary = "Per-section breakdown of the system prompt this agent would receive next turn")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
         var breakdown = SystemPromptAssembler.breakdown(agent, null, requireBreakdownChannel());
@@ -272,7 +280,7 @@ public class ApiAgentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void promptText(Long id) {
         var agent = requireAgent(id);
         var assembled = SystemPromptAssembler.assemble(agent, null, null, requireBreakdownChannel());
@@ -312,7 +320,7 @@ public class ApiAgentsController extends Controller {
      * disabling or removing the skill.
      */
     @Operation(summary = "Effective shell allowlist for an agent: global config unioned with enabled-skill commands")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void effectiveShellAllowlist(Long id) {
         var agent = requireAgent(id);
 
@@ -511,10 +519,12 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Update an agent by id")
-    @AgentAccess(value = OPEN, reason = "the operator and main only (RequestPrincipal.isOperatorOrMainAgent); "
+    @AgentAccess(value = OPEN, reason = "the operator and main only (RequestPrincipal.isOperatorOrMainAgent), a custom "
+            + "agent's own row included (JF-285); "
             + "acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for main too, a model it picks "
             + "must be registered, and tool grants live on operator-only routes")
     public static void update(Long id) {
+        // JF-285: an agent never reconfigures itself, its own row included; main changes any agent's.
         if (!RequestPrincipal.isOperatorOrMainAgent()) {
             ApiResponses.error(403, ApiResponses.AGENT_SCOPE, "Only the operator or the main agent may change an agent's "
                     + "settings.");

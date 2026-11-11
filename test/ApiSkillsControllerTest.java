@@ -1480,10 +1480,19 @@ class ApiSkillsControllerTest extends FunctionalTest {
     private static final String MASKED_JSON = "{\n  \"token\": \"[CREDENTIAL]\"\n}";
 
     private play.mvc.Http.Response asAgentGet(String url) {
+        return asAgentGet(url, null);
+    }
+
+    /** A bearer GET stamped as {@code agentId}, as jclaw_api sends it; null sends no agent. */
+    private play.mvc.Http.Response asAgentGet(String url, Long agentId) {
         clearCookies();
         var request = newRequest();
         request.headers.put("authorization",
                 new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        if (agentId != null) {
+            request.headers.put(controllers.RequestPrincipal.AGENT_ID_HEADER,
+                    new play.mvc.Http.Header(controllers.RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        }
         try {
             return GET(request, url);
         } finally {
@@ -1518,17 +1527,24 @@ class ApiSkillsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void anAgentReadsAnotherAgentsWorkspaceCredentialFileMasked() throws Exception {
+    void anAgentReadsItsOwnWorkspaceCredentialFileMaskedAndNotAnotherAgents() throws Exception {
         login();
         var ownerId = createAgent("cred-owner");
+        var otherId = createAgent("cred-other");
         var dir = seedAgentWorkspaceSkill("cred-owner", "wa", "wa");
         Files.createDirectories(dir.resolve("credentials"));
         Files.writeString(dir.resolve("credentials/api.json"), API_JSON);
+        var url = "/api/agents/" + ownerId + "/skills/wa/files/credentials/api.json";
 
-        var response = asAgentGet("/api/agents/" + ownerId + "/skills/wa/files/credentials/api.json");
+        var own = asAgentGet(url, Long.valueOf(ownerId));
+        assertIsOk(own);
+        assertEquals(MASKED_JSON, fileContent(own));
 
-        assertIsOk(response);
-        assertEquals(MASKED_JSON, fileContent(response));
+        // JF-285: another agent's skill files are its settings, not this agent's.
+        var other = asAgentGet(url, Long.valueOf(otherId));
+        assertStatus(403, other);
+        assertEquals("agent_scope",
+                com.google.gson.JsonParser.parseString(getContent(other)).getAsJsonObject().get("code").getAsString());
     }
 
     @Test

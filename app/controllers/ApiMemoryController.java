@@ -50,8 +50,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -616,7 +616,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "One agent's core-memory usage against the cap")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void coreMigrationStatus(Long agentId) {
         requireAgentById(agentId);
         renderJSON(gson.toJson(CoreMemoryCapMigration.status(String.valueOf(agentId))));
@@ -649,8 +649,14 @@ public class ApiMemoryController extends Controller {
 
     /** 404s unless {@code agentId} names an existing agent. */
     private static void requireAgentById(Long agentId) {
-        if (agentId == null || Agent.<Agent>findById(agentId) == null) {
+        var agent = agentId == null ? null : Agent.<Agent>findById(agentId);
+        if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
+            throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Agent " + agentId + " is not the calling agent; only main reaches another agent's settings.");
         }
     }
 

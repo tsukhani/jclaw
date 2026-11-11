@@ -487,15 +487,16 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             request.headers.put("authorization", new Http.Header("authorization", "Bearer " + bearer));
             return request;
         };
-        var refused = "offerViewToolsEverywhere is operator-only. A server's view tools are already offered in the operator's "
-                + "web chat; this setting only extends them to other channels, tasks and subagents.";
+        // JF-285: an agent that is not main is refused every MCP write at the door, before this field's own
+        // operator-only check, which only main can reach and a per-test main cannot be seeded to drive.
+        var refused = "Only the operator or the main agent may add, change or remove an MCP server.";
         var update = PUT(agent.get(), "/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":true}");
         assertEquals(403, update.status.intValue());
         assertEquals(refused, JsonParser.parseString(getContent(update)).getAsJsonObject().get("message").getAsString());
         var create = POST(agent.get(), "/api/mcp-servers", "application/json", "{\"name\":\"agentmade\",\"enabled\":false,"
                 + "\"offerViewToolsEverywhere\":true,\"transport\":\"HTTP\",\"url\":\"http://127.0.0.1:1/mcp\"}");
         assertEquals(403, create.status.intValue());
-        assertIsOk(PUT(agent.get(), "/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":false}"));
+        assertEquals(refused, JsonParser.parseString(getContent(create)).getAsJsonObject().get("message").getAsString());
         clearCookies();
         assertFalse(commitInFreshTx(() -> McpServer.<McpServer>findById(Long.valueOf(id)).offerViewToolsEverywhere));
         assertNull(commitInFreshTx(() -> McpServer.findByName("agentmade")));

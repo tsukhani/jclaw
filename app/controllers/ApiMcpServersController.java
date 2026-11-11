@@ -116,9 +116,10 @@ public class ApiMcpServersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Add an MCP server (STDIO or HTTP)")
     @AgentAccess(value = OPEN,
-            reason = "HTTP transports are agent-reachable and DangerousActionGate bounds the verb; "
-                    + "a STDIO command is main-only (JCLAW-1270); offerViewToolsEverywhere is operator-only")
+            reason = "the operator and main only (JF-285): a custom agent never adds a server to itself; "
+                    + "DangerousActionGate bounds the verb; offerViewToolsEverywhere is operator-only")
     public static void create() {
+        requireOperatorOrMain();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -167,8 +168,9 @@ public class ApiMcpServersController extends Controller {
     @Operation(summary = "Update an MCP server by id; omitted fields keep their values, env and headers change "
             + "only the keys sent (a null value removes one), and it reconnects automatically")
     @AgentAccess(value = OPEN,
-            reason = "same seam as create; a STDIO command is main-only (JCLAW-1270); offerViewToolsEverywhere is operator-only")
+            reason = "the operator and main only, as create (JF-285); offerViewToolsEverywhere is operator-only")
     public static void update(Long id) {
+        requireOperatorOrMain();
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -243,8 +245,9 @@ public class ApiMcpServersController extends Controller {
 
     @Operation(summary = "Disconnect and delete an MCP server by id")
     @AgentAccess(value = OPEN,
-            reason = "removes a server an agent can equally add; DangerousActionGate bounds it")
+            reason = "the operator and main only, as create (JF-285); DangerousActionGate bounds it")
     public static void delete(Long id) {
+        requireOperatorOrMain();
         var row = requireServer(id);
         // stop() handles every teardown concern: closes the McpClient,
         // unpublishes the tools from ToolRegistry, deletes allowlist rows,
@@ -261,6 +264,14 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
+    /** MCP servers are the instance's configuration: a custom agent never adds, changes or removes one (JF-285). */
+    private static void requireOperatorOrMain() {
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may add, change or remove an MCP server.");
+        }
+    }
+
     @AgentAccess(value = OPEN, reason = "probes an already-configured server and adds no reach")
     public static void test(Long id) {
         var row = requireServer(id);

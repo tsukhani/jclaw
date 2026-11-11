@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.7"
+  version: "1.1.8"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -30,9 +30,9 @@ The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response ca
 
 These staples don't need a discover round-trip first; run `action="discover"` for anything else.
 
-- **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create: `main` only); `PUT /api/agents/{id}` (update, any agent's: `main` only; any other agent, even for its own row, gets 403 `agent_scope` and asks the user to make the change). A `modelProvider`/`modelId` you change must be a model the provider registers, or the update is refused: add it to the provider first.
+- **Agents** — `GET /api/agents` lists your own agent, and `main` lists every agent; `POST /api/agents` body `name`, `modelProvider`, `modelId` (create: `main` only); `PUT /api/agents/{id}` (update, any agent's: `main` only; any other agent, even for its own row, gets 403 `agent_scope` and asks the user to make the change). An agent other than `main` reads only its own settings; another agent's get 403 `agent_scope`. A `modelProvider`/`modelId` you change must be a model the provider registers, or the update is refused: add it to the provider first.
 - **Provider models** — `GET /api/providers/{name}/models` lists what a provider registers; `POST /api/providers/{name}/models` body `id` (and optionally `name`) adds one. Only `main` may add a model; any other agent asks the user, or `main`, to add it first.
-- **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`. `PUT /api/mcp-servers/{id}` changes only what it carries: send just the fields to change, and in `env`/`headers` just the keys to change, with `null` to remove one.
+- **MCP servers** (add, change or remove: `main` only; any other agent gets 403 `agent_scope` and asks the user) — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`. `PUT /api/mcp-servers/{id}` changes only what it carries: send just the fields to change, and in `env`/`headers` just the keys to change, with `null` to remove one.
 - **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
 - **Model router lists** — read a class's list with `GET /api/config/router.<class>.models`; replace it with `PUT /api/router/models/{class}` body `models` (`[{"provider": "…", "model": "…"}]`, tried in that order; `[]` clears it, and the class then uses the chat list). The classes are `chat`, `summarize`, `agentic`, `reasoning` and `coding`. To add, remove or reorder one model, read the list, change it, and send the whole list back. Only the `main` agent may write it (any other agent gets 403 `agent_scope`), and only a model registered under a configured provider is accepted (`GET /api/providers/{name}/models`). Every other router setting is operator-only.
 

@@ -4,6 +4,7 @@ import controllers.RequestPrincipal;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
+import models.McpServer;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -125,14 +126,23 @@ class AgentScopedAccessTest extends FunctionalTest {
     }
 
     @Test
-    void aCustomAgentMayStillConfigureAnHttpMcpServer() {
-        // The permission half: the route stays agent-reachable, only the transport is bounded.
-        // A non-403 is the assertion — the row may still be refused on validation grounds.
-        var resp = asAgent(() -> POST(agentRequest(callerAgentId), "/api/mcp-servers",
+    void aCustomAgentCannotAddChangeOrRemoveAnHttpMcpServerEither() {
+        // JF-285: a custom agent never reconfigures itself, and a server is how it would add tools.
+        // The operator's half is ApiMcpServersControllerTest's; main's is the isOperatorOrMain matrix.
+        var refused = "Only the operator or the main agent may add, change or remove an MCP server.";
+        var create = asAgent(() -> POST(agentRequest(callerAgentId), "/api/mcp-servers",
                 "application/json",
                 "{\"name\":\"scope-test-http\",\"transport\":\"HTTP\",\"url\":\"https://example.invalid/mcp\"}"));
-        assertFalse(getContent(resp).contains(AGENT_SCOPE),
-                "an HTTP transport must not hit the STDIO guard; got: " + getContent(resp));
+        assertStatus(403, create);
+        assertEquals(List.of(AGENT_SCOPE, refused), List.of(field(create, "code"), field(create, "message")));
+        assertNull(commit(() -> McpServer.find("name = ?1", "scope-test-http").first()));
+
+        for (var response : List.of(
+                asAgent(() -> PUT(agentRequest(callerAgentId), "/api/mcp-servers/999999999", "application/json", "{}")),
+                asAgent(() -> DELETE(agentRequest(callerAgentId), "/api/mcp-servers/999999999")))) {
+            assertStatus(403, response);
+            assertEquals(refused, field(response, "message"));
+        }
     }
 
     // --- agents: only the operator and main change an agent's settings ---------------------

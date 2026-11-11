@@ -20,8 +20,8 @@ import utils.ApiResponses;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
 import static controllers.BindingKeys.KEY_AGENT_ID;
 import static controllers.BindingKeys.KEY_ENABLED;
@@ -102,9 +102,11 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "pinned to the caller's own bindings; main lists every agent's (JF-285)")
     public static void list() {
+        var scoped = RequestPrincipal.scopedAgentId(null);
         var items = WhatsAppBinding.<WhatsAppBinding>findAll().stream()
+                .filter(b -> scoped == null || (b.agent != null && scoped.equals(b.agent.id)))
                 .map(BindingView::of)
                 .toList();
         renderJSON(gson.toJson(items));

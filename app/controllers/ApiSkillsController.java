@@ -44,6 +44,7 @@ import java.util.Set;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -448,13 +449,9 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     @Operation(summary = "List an agent's installed skills and their enabled state")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void listForAgent(Long id) {
-        Agent agent = AgentService.findById(id);
-        if (agent == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Agent agent = requireReachableAgent(id);
         renderJSON(gson.toJson(installedSkillsOf(agent)));
     }
 
@@ -468,10 +465,12 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(type = "object"),
             additionalPropertiesArraySchema = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     @Operation(summary = "List every agent's installed skills and enabled state, keyed by agent id")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "pinned to the caller's own skills; main lists every agent's (JF-285)")
     public static void listByAgent() {
         var byAgent = new LinkedHashMap<String, Object>();
+        var scoped = RequestPrincipal.scopedAgentId(null);
         for (var agent : ApiAgentsController.listedAgents()) {
+            if (scoped != null && !scoped.equals(agent.id)) continue;
             byAgent.put(String.valueOf(agent.id), installedSkillsOf(agent));
         }
         renderJSON(gson.toJson(byAgent));
@@ -632,29 +631,35 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     @Operation(summary = "List files in an agent workspace skill folder with metadata and detected tool dependencies")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void listAgentSkillFiles(Long id, String name) {
+        Agent agent = requireReachableAgent(id);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
+        if (!Files.isDirectory(dir)) notFound();
+        listSkillFilesFrom(dir);
+    }
+
+    /** The addressed agent, or the request ends: 404 when it does not exist, 403 when it is another agent (JF-285). */
+    private static Agent requireReachableAgent(Long id) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
             notFound();
             throw ApiResponses.unreachable();
         }
-        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
-        if (!Files.isDirectory(dir)) notFound();
-        listSkillFilesFrom(dir);
+        if (!RequestPrincipal.mayReachAgentScopedRow(agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Agent " + id + " is not the calling agent; only main reaches another agent's settings.");
+        }
+        return agent;
     }
 
     /** GET /api/agents/{id}/skills/{name}/files/{filePath} — Read a text file from an agent skill. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     @Operation(summary = "Read a text file from an agent workspace skill")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY, reason = "another agent's settings are refused with agent_scope; main reaches every agent's (JF-285)")
     public static void readAgentSkillFile(Long id, String name, String filePath) {
-        Agent agent = AgentService.findById(id);
-        if (agent == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Agent agent = requireReachableAgent(id);
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
     }
