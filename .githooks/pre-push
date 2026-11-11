@@ -162,7 +162,11 @@ frontend_label=run
 echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label. Jenkins runs everything."
 
 echo "[jclaw pre-push] Testing $current_sha before push..."
-if (cd "$repo_root" && JCLAW_TEST_BACKEND="$backend_scope" JCLAW_TEST_FRONTEND="$run_frontend" ./jclaw.sh test); then
+# Git exports GIT_DIR to a hook run in a worktree, and a test that runs git in a scratch directory inherits it:
+# RestartProgressScriptTest's git add then lands in this repository's index while the test still passes (JF-299).
+# The list is the one git's own scripts clear before they work in another repository.
+if (cd "$repo_root" && unset $(git rev-parse --local-env-vars) \
+        && JCLAW_TEST_BACKEND="$backend_scope" JCLAW_TEST_FRONTEND="$run_frontend" ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"
     echo "[jclaw pre-push] Tests passed — proceeding with push."
     exit 0
