@@ -275,6 +275,20 @@ class JClawApiToolTest extends UnitTest {
                 () -> asOwner("{\"method\":\"GET\",\"path\":\"/api/agents\"}", null));
     }
 
+    /** A GET of a {@code body} with {@code charOffset} set to {@code offset}, a JSON value. */
+    private static String readFrom(String body, String offset) {
+        return HttpFactories.callWith(replying(new AtomicReference<>(), 200, body),
+                () -> asOwner("{\"method\":\"GET\",\"path\":\"/api/agents\",\"charOffset\":" + offset + "}", null));
+    }
+
+    private static String readOn(int from, int to, int length, int next) {
+        return "\n\n[Truncated: characters %d to %d of %d shown. ccr_retrieve cannot return the rest; read on with "
+                .formatted(from, to, length)
+                + "charOffset=%d. For a list, narrow the request first: pass a limit or a filter, or read one item "
+                .formatted(next)
+                + "through its own route.]";
+    }
+
     @Test
     void aResponseAtTheCapIsShownWhole() {
         var body = "a".repeat(50_000);
@@ -283,21 +297,111 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    void aResponseOneCharacterOverTheCapIsCutAndSaysWhatWasDroppedAndHowToReadIt() {
+    void aGetOneCharacterOverTheCapIsCutAndNamesTheOffsetThatReadsOn() {
         var kept = "a".repeat(50_000);
 
-        assertEquals("HTTP 200\n" + kept + "\n\n[Truncated: 50000 of 50001 characters shown, 1 dropped. The dropped part "
-                + "was not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through its "
-                + "own route, or pass a limit or a filter.]", readReturning(kept + "b"));
+        assertEquals("HTTP 200\n" + kept + readOn(0, 49_999, 50_001, 50_000), readReturning(kept + "b"));
     }
 
     @Test
-    void theMarkerCountsWhatAFarLongerResponseDropped() {
+    void aMiddlePartShowsItsRangeAndTheOffsetOfTheNext() {
+        var body = "a".repeat(50_000) + "b".repeat(50_000) + "c".repeat(20_000);
+
+        assertEquals("HTTP 200\n" + "b".repeat(50_000) + readOn(50_000, 99_999, 120_000, 100_000),
+                readFrom(body, "50000"));
+    }
+
+    @Test
+    void theLastPartSaysItReachesTheEnd() {
+        var body = "a".repeat(100_000) + "c".repeat(20_000);
+
+        assertEquals("HTTP 200\n" + "c".repeat(20_000)
+                + "\n\n[Characters 100000 to 119999 of 120000 shown: the end of the response.]", readFrom(body, "100000"));
+    }
+
+    @Test
+    void anOffsetAtTheLastCharacterReadsItAndOnePastTheEndIsRefused() {
+        var body = "a".repeat(50_000) + "b";
+
+        assertEquals("HTTP 200\nb\n\n[Characters 50000 to 50000 of 50001 shown: the end of the response.]",
+                readFrom(body, "50000"));
+        assertEquals("Error: charOffset 50001 is at or past the end of the response, which is 50001 characters long.",
+                readFrom(body, "50001"));
+    }
+
+    @Test
+    void noOffsetOrAZeroOffsetShowsTheResponseAsBefore() {
+        assertEquals("HTTP 200\n{\"id\":5}", readReturning("{\"id\":5}"));
+        assertEquals("HTTP 200\n{\"id\":5}", readFrom("{\"id\":5}", "0"));
+        assertEquals("HTTP 200\n{\"id\":5}", readFrom("{\"id\":5}", "null"));
+    }
+
+    @Test
+    void aWholeNumberSentAsTextOrWithAZeroFractionIsTheSameOffset() {
+        var body = "a".repeat(50_000) + "b";
+        var expected = "HTTP 200\nb\n\n[Characters 50000 to 50000 of 50001 shown: the end of the response.]";
+
+        assertEquals(expected, readFrom(body, "\"50000\""));
+        assertEquals(expected, readFrom(body, "50000.0"));
+    }
+
+    @Test
+    void anOffsetThatIsNoWholeNumberOfZeroOrMoreIsRefusedBeforeAnyRequest() {
+        for (var offset : List.of("-1", "1.5", "\"ten\"", "true", "[1]", "3000000000")) {
+            var sent = new AtomicReference<Request>();
+            var result = HttpFactories.callWith(replying(sent, 200, "{}"), () -> asOwner(
+                    "{\"method\":\"GET\",\"path\":\"/api/agents\",\"charOffset\":" + offset + "}", null));
+
+            assertEquals("Error: charOffset must be a whole number of characters, 0 or more -- got: " + offset, result);
+            assertNull(sent.get(), offset);
+        }
+    }
+
+    @Test
+    void anOffsetOnAWriteIsRefusedBeforeAnyRequestButAZeroOneIsNot() {
+        for (var method : List.of("POST", "PUT", "PATCH", "DELETE")) {
+            var sent = new AtomicReference<Request>();
+            var result = HttpFactories.callWith(replying(sent, 200, "{}"), () -> asOwner(
+                    "{\"method\":\"" + method + "\",\"path\":\"/api/tasks/5/run\",\"charOffset\":50000}", null));
+
+            assertEquals("Error: charOffset reads on through a GET response only -- sending a " + method
+                    + " again could act twice.", result);
+            assertNull(sent.get(), method);
+        }
+        var sent = new AtomicReference<Request>();
+        var zero = HttpFactories.callWith(replying(sent, 200, "{\"id\":5}"), () -> asOwner(
+                "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\",\"charOffset\":0}", null));
+
+        assertEquals("HTTP 200\n{\"id\":5}", zero);
+        assertEquals("POST", sent.get().method());
+    }
+
+    @Test
+    void aWriteOverTheCapIsCutAndSaysToNarrowSinceItCannotBeSentAgain() {
         var kept = "a".repeat(50_000);
+        var result = HttpFactories.callWith(replying(new AtomicReference<>(), 200, kept + "b".repeat(70_000)),
+                () -> asOwner("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null));
 
         assertEquals("HTTP 200\n" + kept + "\n\n[Truncated: 50000 of 120000 characters shown, 70000 dropped. The dropped "
                 + "part was not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through "
-                + "its own route, or pass a limit or a filter.]", readReturning(kept + "b".repeat(70_000)));
+                + "its own route, or pass a limit or a filter.]", result);
+    }
+
+    @Test
+    void anErrorIsShownFromItsStartWhateverTheOffset() {
+        var result = HttpFactories.callWith(replying(new AtomicReference<>(), 404, "{\"code\":\"not_found\"}"),
+                () -> asOwner("{\"method\":\"GET\",\"path\":\"/api/agents\",\"charOffset\":50000}", null));
+
+        assertEquals("HTTP 404\n{\"code\":\"not_found\"}", result);
+    }
+
+    @Test
+    void aReadOnIsLoggedWithTheCharacterItStartsFrom() {
+        var body = "a".repeat(50_000) + "b";
+
+        assertEquals(List.of("INFO GET /api/agents from character 50000: HTTP 200"), loggedCalls(
+                replying(new AtomicReference<>(), 200, body),
+                "{\"method\":\"GET\",\"path\":\"/api/agents\",\"charOffset\":50000}"));
     }
 
     /** A task run of a task recorded with {@code origin} and {@code ownerReadsAlone}, in the ambient transaction. */

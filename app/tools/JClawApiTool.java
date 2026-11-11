@@ -30,6 +30,7 @@ import utils.JsonArgs;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -92,6 +93,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
     private static final String KEY_PATH = "path";
     private static final String KEY_BODY = "body";
     private static final String KEY_QUERY = "query";
+    private static final String KEY_CHAR_OFFSET = "charOffset";
 
     /** Every callable path must start with this prefix (the three gate checks share it). */
     private static final String API_PREFIX = "/api/";
@@ -101,12 +103,22 @@ public class JClawApiTool implements ToolRegistry.Tool {
     public static final int MAX_RESPONSE_CHARS = 50_000;
 
     /**
-     * Appended to a response cut at {@link #MAX_RESPONSE_CHARS}: shown, full length, dropped. The stored tool message is
-     * the cut copy, so {@code ccr_retrieve} has nothing more to return, which a model expected it to (JF-145).
+     * Appended to a write's response cut at {@link #MAX_RESPONSE_CHARS}: shown, full length, dropped. The stored tool
+     * message is the cut copy, so {@code ccr_retrieve} has nothing more to return, which a model expected it to (JF-145).
      */
     private static final String TRUNCATED = "\n\n[Truncated: %d of %d characters shown, %d dropped. The dropped part was "
             + "not kept, so ccr_retrieve cannot return it. Narrow the request instead: read one item through its own "
             + "route, or pass a limit or a filter.]";
+    /**
+     * Appended to a GET cut at {@link #MAX_RESPONSE_CHARS}: the range shown, the full length and the
+     * {@code charOffset} that reads on. One item can be longer than the cap, and its own read is then the
+     * narrowest request there is (JF-282).
+     */
+    private static final String READ_ON = "\n\n[Truncated: characters %d to %d of %d shown. ccr_retrieve cannot return "
+            + "the rest; read on with charOffset=%d. For a list, narrow the request first: pass a limit or a filter, "
+            + "or read one item through its own route.]";
+    /** Appended to the part a {@code charOffset} read that reaches the end of the response. */
+    private static final String LAST_PART = "\n\n[Characters %d to %d of %d shown: the end of the response.]";
     private static final List<String> ALLOWED_METHODS =
             List.of("GET", "POST", "PUT", "PATCH", "DELETE");
 
@@ -142,6 +154,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                 pass an optional `filter` substring to narrow the list. \
                 To invoke one, omit action (or action="call") and pass `method` and `path` like "/api/agents" -- never a full URL; \
                 for mutating verbs (POST/PUT/PATCH/DELETE), pass `body` as a JSON object. \
+                A GET response over 50,000 characters is cut, and its marker names the `charOffset` that reads the next part. \
                 Prefer discover over guessing paths; never call an endpoint that discover does not list.""";
     }
 
@@ -171,7 +184,12 @@ public class JClawApiTool implements ToolRegistry.Tool {
                         KEY_QUERY, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "Query parameters as key->string-value pairs",
-                                SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
+                                SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING)),
+                        KEY_CHAR_OFFSET, Map.of(
+                                SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "GET only: the character to read the response from, as a cut "
+                                        + "response's marker names. Each part fetches the route again. Not a list's row "
+                                        + "offset, which goes in query.")
                 )
         );
     }
@@ -254,9 +272,17 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (!ALLOWED_METHODS.contains(method)) {
             return "Error: method must be one of " + ALLOWED_METHODS + " -- got: " + methodRaw;
         }
+        var offset = charOffset(args);
+        if (offset == null) {
+            return "Error: charOffset must be a whole number of characters, 0 or more -- got: " + args.get(KEY_CHAR_OFFSET);
+        }
+        if (offset > 0 && !"GET".equals(method)) {
+            return "Error: charOffset reads on through a GET response only -- sending a " + method
+                    + " again could act twice.";
+        }
         var origin = DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
         var plan = plan(method, path, args);
-        var call = plan.label() + bodyFields(method, args);
+        var call = plan.label() + bodyFields(method, args) + (offset > 0 ? " from character " + offset : "");
         HttpUrl url;
         switch (plan) {
             case Refuse refused -> {
@@ -298,10 +324,13 @@ public class JClawApiTool implements ToolRegistry.Tool {
             var status = response.code();
             var text = response.body().string();
             logCall(agent, origin, call + ": HTTP " + status + (status >= 400 ? errorCode(text) : ""), status < 400);
-            if (text.length() > MAX_RESPONSE_CHARS) {
-                text = text.substring(0, MAX_RESPONSE_CHARS) + TRUNCATED.formatted(MAX_RESPONSE_CHARS, text.length(),
-                        text.length() - MAX_RESPONSE_CHARS);
+            // An error is read from its start: it is short, and it is what the model has to act on.
+            var from = status >= 400 ? 0 : offset;
+            if (from > 0 && from >= text.length()) {
+                return "Error: charOffset %d is at or past the end of the response, which is %d characters long."
+                        .formatted(from, text.length());
             }
+            text = part(method, text, from);
             var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
             return note == null || note.isBlank()
                     ? "HTTP %d\n%s".formatted(status, text)
@@ -310,6 +339,36 @@ public class JClawApiTool implements ToolRegistry.Tool {
             logCall(agent, origin, call + ": failed, " + e.getMessage(), false);
             return "Error: HTTP request failed: " + e.getMessage();
         }
+    }
+
+    /** The {@code charOffset} argument: 0 when absent, null when it is not a whole number of 0 or more. */
+    private static @Nullable Integer charOffset(JsonObject args) {
+        var raw = args.get(KEY_CHAR_OFFSET);
+        if (raw == null || raw.isJsonNull()) return 0;
+        if (!raw.isJsonPrimitive() || raw.getAsJsonPrimitive().isBoolean()) return null;
+        try {
+            var n = new BigDecimal(raw.getAsString().strip());
+            return n.signum() < 0 ? null : n.intValueExact();
+        } catch (NumberFormatException | ArithmeticException _) {
+            return null;
+        }
+    }
+
+    /**
+     * What a call shows of {@code text} from character {@code from}: at most {@link #MAX_RESPONSE_CHARS}, with a
+     * marker when more follows or when a read-on reaches the end. Only a GET reads on, since a repeated write could
+     * act twice, so a cut write keeps JF-145's marker. {@code from} is below the length whenever it is above 0.
+     */
+    private static String part(String method, String text, int from) {
+        var length = text.length();
+        var end = from + Math.min(MAX_RESPONSE_CHARS, length - from);
+        var shown = text.substring(from, end);
+        if (end < length) {
+            return shown + ("GET".equals(method)
+                    ? READ_ON.formatted(from, end - 1, length, end)
+                    : TRUNCATED.formatted(MAX_RESPONSE_CHARS, length, length - MAX_RESPONSE_CHARS));
+        }
+        return from == 0 ? shown : shown + LAST_PART.formatted(from, end - 1, length);
     }
 
     /** The endpoint the request reaches, or the one asked for and why it is refused, as {@link #plan} decides. */

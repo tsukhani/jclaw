@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.6"
+  version: "1.1.7"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -35,6 +35,18 @@ These staples don't need a discover round-trip first; run `action="discover"` fo
 - **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`. `PUT /api/mcp-servers/{id}` changes only what it carries: send just the fields to change, and in `env`/`headers` just the keys to change, with `null` to remove one.
 - **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
 - **Model router lists** — read a class's list with `GET /api/config/router.<class>.models`; replace it with `PUT /api/router/models/{class}` body `models` (`[{"provider": "…", "model": "…"}]`, tried in that order; `[]` clears it, and the class then uses the chat list). The classes are `chat`, `summarize`, `agentic`, `reasoning` and `coding`. To add, remove or reorder one model, read the list, change it, and send the whole list back. Only the `main` agent may write it (any other agent gets 403 `agent_scope`), and only a model registered under a configured provider is accepted (`GET /api/providers/{name}/models`). Every other router setting is operator-only.
+
+## Lists, single reads and long responses
+
+`jclaw_api` cuts any response at 50,000 characters, so the lists that hold long text return a short form of each row, and one item comes whole from its own read:
+
+- **Messages** — `GET /api/conversations/{id}/messages` cuts a long field and names it in the row's `cut`; `GET /api/conversations/{id}/messages/{messageId}` returns that message whole.
+- **Subagent runs** — the list's `outcome` is an excerpt that `outcomeTruncated` marks; `GET /api/subagent-runs/{id}` returns the whole outcome.
+- **Prompts and tasks** — your list rows carry `contentPreview` or `descriptionPreview` (with `contentTruncated` or `descriptionTruncated`); `GET /api/prompts/{id}` or `GET /api/tasks/{id}` returns the whole text. Edit a prompt or task from its own read, never from a preview.
+- **Transcript search** — `GET /api/task-runs/search` returns a `snippet` around the match; `GET /api/task-runs/{id}/messages` returns the run's messages.
+- **Tools** — the catalogs list each tool's name, group and summary; `GET /api/tools/{name}` returns its description and actions.
+
+When a response is still cut, its marker says how many characters it holds. For a list, narrow the request first: a smaller `limit`, a filter, or the one item's own read. When one item is itself longer than the cap, call the same GET again with the `charOffset` the marker names, and repeat until a part says it reaches the end. `charOffset` counts characters and works on a GET only; a list's row `offset` goes in `query`. `ccr_retrieve` cannot return a cut part.
 
 ## Off-limits
 
