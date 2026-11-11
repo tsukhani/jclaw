@@ -23,9 +23,11 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -58,7 +60,7 @@ class SandboxLocalServiceTest extends UnitTest {
         cleanupTestAgent();
         tool = new ShellExecTool();
         agent = AgentService.create(AGENT, "openrouter", "gpt-4.1");
-        ConfigService.set("shell.allowlist", "curl,echo,cat,open,dscacheutil,mktemp");
+        ConfigService.set("shell.allowlist", "curl,echo,cat,open,dscacheutil,mktemp,mv,ln,rmdir,mkdir");
     }
 
     @AfterEach
@@ -157,6 +159,11 @@ class SandboxLocalServiceTest extends UnitTest {
 
     private static String connectTo(Path socket) {
         return "%s -s --max-time 5 --unix-socket '%s' http://probe/; echo \"exit=$?\"".formatted(CURL, socket);
+    }
+
+    /** An attempt to give a socket a path the run may connect to, its exit status, then the connection at that path. */
+    private static String attemptThenConnect(String attempt, Path at) {
+        return "%s 2>/dev/null; echo \"attempt=$?\"; %s".formatted(attempt, connectTo(at));
     }
 
     private static List<String> answeredBy(Path socket) {
@@ -295,6 +302,120 @@ class SandboxLocalServiceTest extends UnitTest {
                 "outside the sandbox this host's own name does not resolve either: " + control);
 
         assertEquals(control, new TreeSet<>(lines(run(agent, lookup))));
+    }
+
+    /**
+     * The rule goes by a socket's path, and the shared temp folders are writable to the run: moved under the
+     * workspace or the run's own temp folder, a socket there, or the folder that holds it, would take the
+     * connection at its new path. No spelling of the move gets it there. Moved by main's unconfined exec it
+     * answers at the new path, the run included, which is what the refusals keep from happening.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacACustomAgentCannotMoveOrLinkASocketOutOfTheSharedTempFolder() throws Exception {
+        assumeWorkingSandbox();
+        var workspace = AgentService.workspacePath(AGENT).toAbsolutePath();
+        var ownTemp = HarnessSandbox.customAgentTempDir(workspace.toFile());
+        assumeTrue(workspace.resolve("m/podman.sock").toString().length() <= LONGEST_SOCKET_PATH,
+                "this checkout's workspace path is too long for a socket: " + workspace);
+        var folder = Files.createDirectory(scratchDir(Path.of(System.getProperty("java.io.tmpdir")), "jf302-").resolve("podman"));
+        var socket = folder.resolve("podman.sock");
+        try (var server = Server.atSocket(socket)) {
+            var moves = new LinkedHashMap<String, Path>();
+            moves.put("mv '%s' '%s'".formatted(socket, ownTemp.resolve("m.sock")), ownTemp.resolve("m.sock"));
+            moves.put("mv '%s' '%s'".formatted(folder, ownTemp.resolve("m")), ownTemp.resolve("m/podman.sock"));
+            moves.put("mv '%s' '%s'".formatted(folder, workspace.resolve("m")), workspace.resolve("m/podman.sock"));
+            moves.put("ln '%s' '%s'".formatted(socket, workspace.resolve("l.sock")), workspace.resolve("l.sock"));
+            for (var move : moves.entrySet()) {
+                var confined = run(agent, attemptThenConnect(move.getKey(), move.getValue()));
+                assertEquals(List.of("attempt=1", "exit=7"), lines(confined), move.getKey() + ": " + confined);
+            }
+            var linked = run(agent, attemptThenConnect("ln -s '%s' s.sock".formatted(socket), workspace.resolve("s.sock")));
+            assertEquals(List.of("attempt=0", "exit=7"), lines(linked), linked.toString());
+            assertEquals(0, server.accepted(), "no connection may reach the server");
+            assertTrue(Files.exists(socket), "the socket stays where its program put it");
+
+            var moved = ownTemp.resolve("m");
+            scratch.add(moved);
+            var control = run(main(), attemptThenConnect("mv '%s' '%s'".formatted(folder, moved), moved.resolve("podman.sock")));
+            assertEquals(List.of("attempt=0", "answered podman.sock", "exit=0"), lines(control),
+                    "unconfined, the folder must move and its socket answer or the test proves nothing: " + control);
+            var confined = run(agent, connectTo(moved.resolve("podman.sock")));
+            assertEquals(answeredBy(socket), lines(confined), confined.toString());
+            assertEquals(2, server.accepted());
+        }
+    }
+
+    /** The profile names the run's temp folder, so the run may not take it away and leave something else at its name. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacACustomAgentCannotRemoveOrRenameItsOwnTempFolder() throws Exception {
+        assumeWorkingSandbox();
+        var workspace = AgentService.workspacePath(AGENT);
+        var temp = HarnessSandbox.customAgentTempDir(workspace.toFile());
+
+        var result = run(agent, "rmdir \"$TMPDIR\" 2>/dev/null; echo \"rmdir=$?\"; mv \"$TMPDIR\" gone 2>/dev/null; echo \"mv=$?\"");
+
+        assertEquals(List.of("rmdir=1", "mv=1"), lines(result), result.toString());
+        assertTrue(Files.isDirectory(temp, LinkOption.NOFOLLOW_LINKS), result.toString());
+        assertFalse(Files.exists(workspace.resolve("gone")), result.toString());
+    }
+
+    /**
+     * The folder every run can write to holds the run's temp folder, so a link can stand at its name before the
+     * folder is first made. The run then gets a plain folder in the link's place, and the folder the link pointed
+     * at keeps its sockets shut: here one in the home folder, where Docker Desktop and Colima keep theirs.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacALinkAtTheRunsTempFolderNameOpensNoSocketBehindIt() throws Exception {
+        assumeWorkingSandbox();
+        assumeCurlInsideTheSandbox();
+        var temp = HarnessSandbox.customAgentTempDir(AgentService.workspacePath(AGENT).toFile());
+        var outside = scratchDir(Path.of(System.getProperty("user.home")), "jclaw-jf302-");
+        var socket = outside.resolve("docker.sock");
+        try (var server = Server.atSocket(socket)) {
+            deleteDir(temp);
+            Files.createSymbolicLink(temp, outside);
+
+            var confined = run(agent, connectTo(socket));
+
+            assertEquals(REFUSED, lines(confined), confined.toString());
+            assertEquals(0, server.accepted(), "no connection may reach the server");
+            assertTrue(Files.isDirectory(temp, LinkOption.NOFOLLOW_LINKS), "the run's temp folder is a plain folder again");
+            assertTrue(Files.exists(socket), "what the link pointed at is left alone");
+
+            var control = run(main(), connectTo(socket));
+            assertEquals(answeredBy(socket), lines(control),
+                    "unconfined, the same connection must be answered or the test proves nothing: " + control);
+        } finally {
+            // deleteDir follows a link, so one this test left dangling would outlive the class.
+            if (Files.isSymbolicLink(temp)) Files.delete(temp);
+        }
+    }
+
+    /**
+     * What those rules leave alone: a file in a shared temp folder still comes and goes, a folder is still made
+     * there, and folders of the run's own are made, renamed and removed. Seatbelt has one operation for rename
+     * and removal, so a folder the run made in a shared temp folder stays until something outside removes it.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void onMacFilesInASharedTempFolderAndFoldersOfTheRunsOwnStillComeAndGo() throws Exception {
+        assumeWorkingSandbox();
+        var name = "jf302-" + UUID.randomUUID().toString().substring(0, 8);
+        for (var shared : List.of(Path.of("/private/tmp", name), Path.of(System.getProperty("java.io.tmpdir"), name))) {
+            scratch.add(shared);
+            var result = run(agent, String.join("\n",
+                    "echo a > '%1$s.txt' && mv '%1$s.txt' '%1$s.2' && rm '%1$s.2'; echo \"file=$?\"",
+                    "mkdir \"$TMPDIR/d\" && mv \"$TMPDIR/d\" \"$TMPDIR/d2\" && rmdir \"$TMPDIR/d2\"; echo \"own=$?\"",
+                    "mkdir d && mv d d2 && rmdir d2; echo \"workspace=$?\"",
+                    "mkdir '%1$s'; echo \"made=$?\"",
+                    "rmdir '%1$s' 2>/dev/null; echo \"removed=$?\"").formatted(shared));
+
+            assertEquals(List.of("file=0", "own=0", "workspace=0", "made=0", "removed=1"), lines(result), shared + ": " + result);
+            assertTrue(Files.isDirectory(shared), shared.toString());
+        }
     }
 
     /** An outbound connection still opens, here to a loopback server, and on Linux the resolver's file is still read. */

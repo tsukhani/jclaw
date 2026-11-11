@@ -14,6 +14,7 @@ import utils.SubprocessEnv;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -64,8 +65,8 @@ import java.util.Map;
  * {@link #wrapCustomAgentShell} whatever the key says, and on macOS its profile hides {@code $HOME}
  * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}. That run
  * also cannot attach to a JVM outside it, and with the network allowed it still reaches no local service
- * through a socket file outside its workspace and its own temp and runtime folders:
- * {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}.
+ * through a socket file outside its workspace and its own temp and runtime folders, nor moves one into
+ * them: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}.
  */
 public final class HarnessSandbox {
 
@@ -125,6 +126,12 @@ public final class HarnessSandbox {
 
     /** The one socket outside a run's own folders that its commands need: macOS resolves names through it. */
     private static final String MAC_MDNS_SOCKET = "/private/var/run/mDNSResponder";
+
+    /**
+     * The temp folders a confined run may write to besides its write root. macOS shares them between every
+     * program the user runs, their control sockets included.
+     */
+    private static final List<String> MAC_SHARED_TEMP = List.of("/private/tmp", "/private/var/folders");
 
     /**
      * LaunchServices starts an app outside the sandbox for whoever asks ({@code open}), which would run a
@@ -345,7 +352,7 @@ public final class HarnessSandbox {
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
         var temp = customAgentTempDir(writeRoot);
         var profile = customAgentMacosProfile(writeRoot, home, SandboxHiddenRoots.current(),
-                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(pathEnv, home, extraReads), createdRealPath(temp));
+                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(pathEnv, home, extraReads), plainFolderRealPath(temp));
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
         out.addAll(argv);
         return new ConfinedShell(List.copyOf(out), Map.of("TMPDIR", temp.toString()));
@@ -371,10 +378,22 @@ public final class HarnessSandbox {
         return temp.resolve("jclaw-%08x".formatted(writeRoot.getAbsolutePath().hashCode()));
     }
 
-    /** {@code temp}, made, with its symlinks resolved: Seatbelt matches {@code /private/var}, never {@code /var}. */
-    private static String createdRealPath(Path temp) {
+    /**
+     * {@code temp} as a plain folder, at its path with the symlinks above it resolved: Seatbelt matches
+     * {@code /private/var}, never {@code /var}. Its own name is never resolved. The folder that holds it is
+     * writable to every run, so a link can stand at that name, and the profile would open the sockets of
+     * whatever folder a followed link led to. Anything there that is not a folder is replaced by one.
+     */
+    private static String plainFolderRealPath(Path temp) {
+        var shared = temp.getParent();
+        var name = temp.getFileName();
         try {
-            return Files.createDirectories(temp).toRealPath().toString();
+            if (shared == null || name == null) throw new IOException("it has no folder above it");
+            if (!Files.isDirectory(temp, LinkOption.NOFOLLOW_LINKS)) {
+                Files.deleteIfExists(temp);
+                Files.createDirectory(temp);
+            }
+            return shared.toRealPath().resolve(name).toString();
         } catch (IOException e) {
             throw new SandboxUnavailableException("the run's temp folder %s could not be made: %s".formatted(temp, e));
         }
@@ -631,8 +650,9 @@ public final class HarnessSandbox {
         if (denyNetwork) sb.append("(deny network*)\n");
         sb.append("(deny file-write* (subpath \"/\"))\n");
         sb.append(writeAllow(writeRoot.getAbsolutePath()));
-        sb.append(writeAllow("/private/tmp"));
-        sb.append(writeAllow("/private/var/folders"));
+        for (var temp : MAC_SHARED_TEMP) {
+            sb.append(writeAllow(temp));
+        }
         sb.append(writeAllow("/dev"));
         var grants = new ArrayList<String>();
         grants.add(writeRoot.getAbsolutePath());
@@ -665,8 +685,11 @@ public final class HarnessSandbox {
      * container runtime mounts any host folder. So with the network, a Unix socket takes the run's connection
      * only under the write root, under {@code ownTemp} and at mDNSResponder's path. Under {@code denyNetwork}
      * the one network rule already refuses every socket, and an allow after it would reopen one.
+     * {@link #sharedTempStaysInPlace} keeps the sockets of the shared temp folders out of those two folders
+     * under either setting, so none is waiting there when the network is allowed again.
      *
-     * @param ownTemp {@link #customAgentTempDir} with its symlinks resolved, which is how Seatbelt matches it
+     * @param ownTemp {@link #customAgentTempDir} with the symlinks above it resolved, which is how Seatbelt
+     *                matches it
      */
     public static String customAgentMacosProfile(File writeRoot, String home, List<Path> hidden,
                                                  boolean denyNetwork, List<String> homeReads, String ownTemp) {
@@ -675,11 +698,31 @@ public final class HarnessSandbox {
                 + socketAllow("subpath", ownTemp)
                 + socketAllow("path-literal", MAC_MDNS_SOCKET);
         return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads)
-                + sockets + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_JVM_ATTACH;
+                + sockets + sharedTempStaysInPlace(writeRoot.getAbsolutePath(), ownTemp)
+                + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_JVM_ATTACH;
     }
 
     private static String socketAllow(String filter, String path) {
         return "(allow network-outbound (remote unix-socket (" + filter + " \"" + escapeSeatbelt(path) + "\")))\n";
+    }
+
+    /**
+     * The socket rules go by path, and the run may write to the shared temp folders: a socket there, or a
+     * folder holding one, renamed under the write root or {@code ownTemp} would take the run's connection at
+     * its new path. So the run renames no socket and no folder in them. Seatbelt has one operation for rename
+     * and removal, so it removes none there either; a file it still renames and removes, and whatever is
+     * inside the write root and {@code ownTemp} is its own. {@code ownTemp} itself stays, so the run puts
+     * nothing else at the name its next profile opens. A hard link needs no rule: under this profile Seatbelt
+     * already refuses one from a shared temp folder into either of the two (measured).
+     */
+    private static String sharedTempStaysInPlace(String writeRoot, String ownTemp) {
+        var sb = new StringBuilder("(deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any");
+        for (var temp : MAC_SHARED_TEMP) {
+            sb.append(' ').append(subpath(temp));
+        }
+        return sb.append(") (require-not ").append(subpath(writeRoot)).append(") (require-not ").append(subpath(ownTemp))
+                .append(")))\n(deny file-write-unlink (literal \"").append(escapeSeatbelt(ownTemp)).append("\"))\n")
+                .toString();
     }
 
     private static void appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
@@ -859,7 +902,11 @@ public final class HarnessSandbox {
     }
 
     private static String rule(String action, String operations, String path) {
-        return "(" + action + " " + operations + " (subpath \"" + escapeSeatbelt(path) + "\"))\n";
+        return "(" + action + " " + operations + " " + subpath(path) + ")\n";
+    }
+
+    private static String subpath(String path) {
+        return "(subpath \"" + escapeSeatbelt(path) + "\")";
     }
 
     /**

@@ -103,7 +103,8 @@ the custom agent's alone: `main`'s `exec` and a coding harness keep their profil
 sandbox bounds files, and a service that runs unconfined as the operator acts outside it for whoever
 connects: a container runtime starts a container with any host folder mounted, which undoes the file
 confinement. So while `shell.sandbox.network` is `allow`, a socket file takes a custom agent's connection
-only in its workspace and in its own temp folder. The rule refuses every socket but a few instead of
+only in its workspace and in its own temp folder on macOS, and on Linux the folders where services keep
+their sockets are empty for it. The macOS rule refuses every socket but a few instead of
 naming the known ones: on the Mac it was measured on, the shared temp folder alone held the control
 sockets of several other programs, none of them a container runtime, which no list would have named.
 Like the JVM attach rules it is the custom agent's alone: `main`'s `exec` and a coding harness keep their
@@ -118,7 +119,8 @@ profiles (`SandboxLocalServiceTest.mainConfinedUnderTheKeyStillConnectsToASocket
   Podman machine's is under `$HOME` or, in newer versions, in the temp folder, which macOS shares between
   every program the user runs (their documentation's paths: neither is installed here). So the run gets a
   temp folder of its own, `HarnessSandbox.customAgentTempDir`: `jclaw-<hash of the write root>` in `java.io.tmpdir`,
-  made by the wrap, named in the profile by its real path and in the run's environment by `TMPDIR`
+  made by the wrap, named in the profile by its path with the folders above it resolved and in the run's
+  environment by `TMPDIR`
   (`ConfinedShell.env`, put after the model's `env`, so a `TMPDIR` the model passes changes nothing). The
   name is short because a socket path holds 103 bytes. A tool that keeps a socket beside its temp files
   still reaches it (measured with Python's `multiprocessing.Manager`: it works under that `TMPDIR` and
@@ -128,6 +130,31 @@ profiles (`SandboxLocalServiceTest.mainConfinedUnderTheKeyStillConnectsToASocket
   `network=deny` the socket rules are left out: `(deny network*)` already refuses every socket, and an
   allow after it would reopen the workspace's
   (`HarnessSandboxTest.macProfileForACustomAgentUnderNetworkDenyReopensNoSocket`).
+
+  The socket rules go by path, and the run writes to the shared temp folders (`/private/tmp` and
+  `/private/var/folders`), so two more rules hold them up. A socket in a shared temp folder, or the folder
+  that holds it, renamed under the workspace or the run's temp folder takes the connection at its new path
+  (measured without the rule: `mv` of the socket, `mv` of its folder, and `renameatx_np` with `RENAME_SWAP`,
+  each answered). `sharedTempStaysInPlace` adds
+  `(deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) …))` for the two shared folders,
+  leaving out what is inside the workspace and the run's temp folder. Seatbelt has one operation for
+  rename and removal, so the run cannot remove or rename a folder it made in a shared temp folder either:
+  `rm -rf "$(mktemp -d)"` empties the folder, leaves it and exits 1, because macOS `mktemp` uses the shared
+  folder unless its template names `$TMPDIR`. Files there, and everything under `TMPDIR` and the workspace,
+  still come and go (`SandboxLocalServiceTest.onMacFilesInASharedTempFolderAndFoldersOfTheRunsOwnStillComeAndGo`).
+  The workspace is left out by the path JClaw spells it with, so one reached through a link inside a shared
+  temp folder (`/tmp/…`) is not. A hard link from a shared folder into the workspace or the run's temp
+  folder needs no rule: Seatbelt refuses it under this profile (measured). The rule is there under
+  `network=deny` too, so a socket moved then is not waiting when the network is allowed again
+  (`onMacACustomAgentCannotMoveOrLinkASocketOutOfTheSharedTempFolder`). The second: the run's temp folder
+  sits in a folder every run writes to, so a link can stand at its name, and a profile built from the
+  resolved path would open the sockets of whatever folder the link leads to (measured with such a profile:
+  the run removed its temp folder, left a link to a folder under `$HOME`, and its next connection to a
+  socket there was answered).
+  So the profile names the folder by its parent's real path plus its own name, never resolving the name;
+  the wrap replaces whatever is there that is not a folder; and `(deny file-write-unlink (literal …))`
+  keeps the run from removing or renaming the folder itself
+  (`onMacALinkAtTheRunsTempFolderNameOpensNoSocketBehindIt`, `onMacACustomAgentCannotRemoveOrRenameItsOwnTempFolder`).
 - **Linux** — a socket is a file, and the `$HOME` and `/tmp` tmpfs already hid Docker Desktop's, Colima's
   and everything in `/tmp`. The root bind left `/run` visible (and `/var/run` where that is a directory
   of its own): Docker's and Podman's sockets, the rootless ones under `/run/user/<uid>`, the session and
@@ -139,7 +166,8 @@ profiles (`SandboxLocalServiceTest.mainConfinedUnderTheKeyStillConnectsToASocket
   linked one, not on NixOS). The file is bound, never its folder, so a socket beside it stays out. A run
   that outlives a change of DNS servers keeps reading the file it started with, and a host that looks up
   names or accounts through a daemon socket under `/run` (nscd, nslcd) loses that lookup inside the
-  sandbox (both inferences, not measured). The Linux run tests skip where bwrap cannot start, the build
+  sandbox (both inferences, not measured). A socket file anywhere else on the root stays reachable, under
+  `network=deny` as well: see the table. The Linux run tests skip where bwrap cannot start, the build
   host included, so `HarnessSandboxTest` pins the argv on every host and the argv itself was run in
   throwaway containers.
 
@@ -151,6 +179,8 @@ root and as uid 1000, with throwaway servers in place of every real service.
 | --- | --- | --- |
 | A container runtime's control socket (macOS, Linux) | answered | Refused by the rules above: `SandboxLocalServiceTest.aCustomAgentCannotConnectToASocketWhereAContainerRuntimeKeepsIts`. |
 | The operator's ssh-agent (macOS) | answered `ssh-add -l` | Refused by the socket rule (`Error connecting to agent: Operation not permitted`). It signs with the operator's keys for any caller, and `~/.ssh` was already denied. |
+| A socket in a shared temp folder, moved under the workspace or the run's temp folder (macOS) | answered at its new path, for a throwaway server in `/private/tmp` and one in the user's temp folder | Refused: the socket and its folder stay where they are, at the cost described above. A Podman machine's API socket is in the user's temp folder (its documentation's path). The ssh-agent's is under `/var/run` here, where the run writes nothing; earlier macOS versions kept it in a folder under `/private/tmp` (an inference, not seen here). |
+| A socket file elsewhere on the root (Linux) | answered | Kept: bwrap decides what is mounted, not what is connected to, and hiding more of the root one folder at a time would be a list of known services. A throwaway server under `/var/lib`, `/srv` and `/opt` answered, with `--unshare-net` too, while the one at `/run/docker.sock` did not (measured in one container image, as root). LXD and Incus keep their control sockets under `/var/lib` or `/var/snap` (their documentation's paths, not installed here), and only a member of their group may connect. |
 | LaunchServices, `open` (macOS) | started a throwaway app outside the sandbox, which wrote where the sandbox cannot | Closed with `(deny lsopen)`: `open` fails with error -54 and starts nothing (`onMacACustomAgentCannotHaveLaunchServicesStartAnApp`). |
 | launchd job submission, `launchctl submit`, `bootstrap`, `load` (macOS) | refused | Kept as it is, no rule: launchd refuses a sandboxed caller, under `(allow default)` alone too. Outside, all three ran a throwaway job; inside, none did (`Bootstrap failed: 5: Input/output error`), and `launchctl setenv` is `Not privileged`. |
 | Apple Events, `osascript` (macOS) | refused | Kept as it is, no rule: a `quit` sent to a throwaway applet outside came back `-10004` and the applet kept running, under `(allow default)` alone too; outside the sandbox it quit. Only that event was measured: another may ask the operator for consent on screen. |

@@ -273,7 +273,8 @@ class HarnessSandboxTest extends UnitTest {
      * A custom agent's profile is the hidden-home profile, then the local services outside it refused, then two
      * rules last so that no grant outranks them: SIGQUIT only to its own sandbox, and a JVM's attach socket
      * neither connected to nor renamed, removed or linked. With the network it connects to no Unix socket but
-     * those in its workspace and its own temp folder, and mDNSResponder's, which resolves names.
+     * those in its workspace and its own temp folder, and mDNSResponder's, which resolves names. No socket and
+     * no folder of the shared temp folders is renamed into those two, and its own temp folder stays at its name.
      */
     @Test
     void macProfileForACustomAgentRefusesLocalServicesAndEndsWithTheJvmAttachDenies() {
@@ -286,6 +287,8 @@ class HarnessSandboxTest extends UnitTest {
                 (allow network-outbound (remote unix-socket (subpath "/h/u/jc/workspace/a")))
                 (allow network-outbound (remote unix-socket (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d")))
                 (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+                (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
+                (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
                 (deny lsopen)
                 (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
@@ -294,7 +297,9 @@ class HarnessSandboxTest extends UnitTest {
 
     /**
      * Under network=deny the one network rule refuses every socket, a Unix one included. The socket rules are
-     * left out, since an allow after that deny would reopen the workspace's sockets and mDNSResponder's.
+     * left out, since an allow after that deny would reopen the workspace's sockets and mDNSResponder's. The
+     * rule that keeps sockets and folders in the shared temp folders stays: one moved now would be waiting in
+     * the run's own folders when the network is allowed again.
      */
     @Test
     void macProfileForACustomAgentUnderNetworkDenyReopensNoSocket() {
@@ -303,6 +308,8 @@ class HarnessSandboxTest extends UnitTest {
         var homeReads = List.of("/h/u/.local/bin");
         var denied = HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, true, homeReads, "/private/var/folders/x/T/jclaw-0a1b2c3d");
         assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, true, homeReads) + """
+                (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
+                (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
                 (deny lsopen)
                 (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
@@ -317,6 +324,8 @@ class HarnessSandboxTest extends UnitTest {
                 "/private/t\"mp");
         assertTrue(profile.contains("(allow network-outbound (remote unix-socket (subpath \"/h/u/w\\\"s\")))\n"), profile);
         assertTrue(profile.contains("(allow network-outbound (remote unix-socket (subpath \"/private/t\\\"mp\")))\n"), profile);
+        assertTrue(profile.contains("(require-not (subpath \"/h/u/w\\\"s\")) (require-not (subpath \"/private/t\\\"mp\"))))\n"
+                + "(deny file-write-unlink (literal \"/private/t\\\"mp\"))\n"), profile);
     }
 
     /** One temp folder per write root, in this user's temp folder, under a name short enough to leave a socket path room. */
@@ -349,7 +358,7 @@ class HarnessSandboxTest extends UnitTest {
             var custom = HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile());
             var customProfile = custom.argv().get(2);
 
-            for (var rule : List.of("(deny signal", ".java_pid", "unix-socket", "lsopen")) {
+            for (var rule : List.of("(deny signal", ".java_pid", "unix-socket", "lsopen", "file-write-unlink")) {
                 assertFalse(mainProfile.contains(rule), mainProfile);
                 assertFalse(harnessProfile.contains(rule), harnessProfile);
             }
@@ -361,6 +370,8 @@ class HarnessSandboxTest extends UnitTest {
                     (allow network-outbound (remote unix-socket (subpath "%s")))
                     (allow network-outbound (remote unix-socket (subpath "%s")))
                     (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+                    (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "%2$s")) (require-not (subpath "%3$s"))))
+                    (deny file-write-unlink (literal "%3$s"))
                     (deny lsopen)
                     (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
                     (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
