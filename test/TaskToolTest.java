@@ -138,6 +138,52 @@ class TaskToolTest extends UnitTest {
                 "error must list every valid action, not only the near miss; got: " + result);
     }
 
+    // === JF-286: only main chooses the model a task runs on ===
+
+    private static final String MODEL_IS_MAINS = "Error: only the main agent chooses the model a task runs on. Leave "
+            + "modelProvider and modelId out, and the task runs on your own model.";
+
+    @Test
+    void aCustomAgentCannotCreateATaskOnAModelItChose() {
+        var result = execute("""
+                {"action":"createTask","name":"jf286-model","schedule":"30m","modelId":"other-model"}""");
+        commitAndReopen();
+
+        assertEquals(MODEL_IS_MAINS, result);
+        assertEquals(0L, countTasksWithName("jf286-model"));
+        assertEquals(0, stub.schedules.size());
+    }
+
+    @Test
+    void aCustomAgentCannotChangeItsTasksModelButAnUnchangedEchoIsNoChange() {
+        execute("""
+                {"action":"createTask","name":"jf286-update","description":"before","schedule":"30m"}""");
+        commitAndReopen();
+
+        assertEquals(MODEL_IS_MAINS, execute("""
+                {"action":"updateTask","name":"jf286-update","modelProvider":"other-provider","description":"after"}"""));
+        commitAndReopen();
+        var refused = findTaskByName("jf286-update");
+        assertEquals(java.util.Arrays.asList(null, "before"), java.util.Arrays.asList(refused.modelProvider, refused.description));
+
+        assertEquals("Task 'jf286-update' updated.", execute("""
+                {"action":"updateTask","name":"jf286-update","modelProvider":null,"description":"after"}"""));
+        commitAndReopen();
+        assertEquals("after", findTaskByName("jf286-update").description);
+    }
+
+    @Test
+    void mainPassesTheModelCheckAndMeetsTheNextOne() {
+        // A detached main: isMain() is a name comparison, and the call stops at the missing name before any row.
+        var main = new Agent();
+        main.name = Agent.MAIN_AGENT_NAME;
+
+        assertEquals("Error: 'name' is required", tool.execute("""
+                {"action":"createTask","schedule":"30m","modelId":"other-model"}""", main));
+        assertEquals(MODEL_IS_MAINS, tool.execute("""
+                {"action":"createTask","schedule":"30m","modelId":"other-model"}""", agent));
+    }
+
     // === createTask: all four schedule shorthands ===
 
     @Test

@@ -1008,8 +1008,9 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
     @AgentAccess(value = OWN_ONLY,
-            reason = "conversation-scoped model choice, validated against the provider registry")
+            reason = "the operator and main only: a custom agent never changes the model or thinking level it runs on (JF-286)")
     public static void setModelOverride(Long id) {
+        requireOperatorOrMainForModelChoice();
         Conversation conversation = requireConversation(id);
 
         var body = JsonBodyReader.readJsonBody();
@@ -1049,8 +1050,9 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
     @AgentAccess(value = OWN_ONLY,
-            reason = "reverts one conversation to the agent default")
+            reason = "the operator and main only: a custom agent never changes the model or thinking level it runs on (JF-286)")
     public static void clearModelOverride(Long id) {
+        requireOperatorOrMainForModelChoice();
         Conversation conversation = requireConversation(id);
         ConversationService.clearModelOverride(conversation);
         renderJSON(gson.toJson(new StatusResponse("cleared")));
@@ -1066,8 +1068,9 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @AgentAccess(value = OWN_ONLY,
-            reason = "conversation-scoped thinking level, validated against the effective model")
+            reason = "the operator and main only: a custom agent never changes the model or thinking level it runs on (JF-286)")
     public static void setThinkingOverride(Long id) {
+        requireOperatorOrMainForModelChoice();
         Conversation conversation = requireConversation(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(THINKING_MODE) || body.get(THINKING_MODE).isJsonNull()) {
@@ -1093,8 +1096,9 @@ public class ApiConversationsController extends Controller {
 
     /** DELETE /api/conversations/{id}/thinking-override — back to the agent's default. */
     @AgentAccess(value = OWN_ONLY,
-            reason = "reverts one conversation to the agent default")
+            reason = "the operator and main only: a custom agent never changes the model or thinking level it runs on (JF-286)")
     public static void clearThinkingOverride(Long id) {
+        requireOperatorOrMainForModelChoice();
         Conversation conversation = requireConversation(id);
         ConversationService.setThinkingOverride(conversation, null);
         renderJSON(gson.toJson(new StatusResponse("cleared")));
@@ -1192,6 +1196,14 @@ public class ApiConversationsController extends Controller {
     }
 
     // --- Helpers ---
+
+    /** JF-286: the model and thinking level an agent runs on are main's and the operator's to choose. */
+    private static void requireOperatorOrMainForModelChoice() {
+        if (!RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may change a conversation's model or thinking level.");
+        }
+    }
 
     /**
      * Load the addressed conversation or end the request — 404 when it does not exist, 403 when

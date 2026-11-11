@@ -78,6 +78,8 @@ By default, the child runs on the same model as the parent. In a [task fire](/gu
 
 **Use when:** the child's task is better served by a different model than the parent's. Examples: a large-context model for research, a code-tuned model for refactoring, a cheap model for bulk classification. The override lives only on the child's conversation. The parent's model stays the same.
 
+Only the **main** agent can name a model for a spawn. Any other agent cannot change the model it runs on, so its subagents always run on its own model. A spawn of theirs that names one is refused. To give one of your agents a different model, ask the Main Agent, or change it on its [Agents](/agents) page.
+
 The parent's behavior settings (system prompt, granted tools when `context=inherit`) still apply. Only the model identity changes.
 
 ## Async plus yield (the two-stage pattern) {#async-yield}
@@ -168,7 +170,7 @@ By default, a child runs on JClaw's own native agent loop. You can instead deleg
 
    **Permission flags.** In `json` and `rpc` modes, JClaw appends the adapter's default permission flags to the command. Only Claude Code has defaults: `--allowedTools Read,Edit,Write,Glob,Grep`. These keep file editing and search but leave out the shell. `subagent.acp.permissionArgs` replaces the defaults with its own flags, split on whitespace. The value `none` sends no flags at all. `subagent.acp.permissionArgs` has no Settings field; set it with `POST /api/config`. `batch` mode and harnesses driven over native ACP get no permission flags.
 
-   **Optionally, pick the model the harness runs with.** By default, the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead. A per-spawn `modelProvider` / `modelId` on `subagent_spawn` ("run this through Codex on `ollama` with `qwen3-coder`") overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API; Ollama and OpenRouter do). **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint. **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them. **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's log records the override as a **Step** line near the top. When you named a folder, the folder line comes first.
+   **Optionally, pick the model the harness runs with.** By default, the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead. A per-spawn `modelProvider` / `modelId` on `subagent_spawn` ("run this through Codex on `ollama` with `qwen3-coder`") overrides that for one run. Only the Main Agent can name one. Another agent's coding runs use the `acp.model` setting, or the harness's own model when that is not set. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API; Ollama and OpenRouter do). **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint. **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them. **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's log records the override as a **Step** line near the top. When you named a folder, the folder line comes first.
 
 2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement. For that reason it is a privileged capability. The **main agent** may always request it. A **custom agent** must have its **ACP External Harness** switch turned on, on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent cannot break out by delegating to `acp`.
 
@@ -312,8 +314,8 @@ subagent_spawn
   context           string   "fresh" (default) | "inherit"
   runtime           string   "native" (default) | "acp"
   folder            string   acp only: the folder the harness works in; an existing name continues there, a new name creates it
-  modelProvider     string   override child's provider (acp: points the harness at that endpoint — claude/codex only)
-  modelId           string   override child's model (acp: replaces the harness's own default model)
+  modelProvider     string   main only: override child's provider (acp: points the harness at that endpoint — claude/codex only)
+  modelId           string   main only: override child's model (acp: replaces the harness's own default model)
   async             bool     return run id immediately (session mode only)
   runTimeoutSeconds int      idle budget (seconds of inactivity), default subagent.defaultRunTimeoutSeconds (300)
 

@@ -641,6 +641,7 @@ class CapabilityRulesTest extends UnitTest {
             "utils.HttpFactories", Set.of("runWith", "callWith"),
             "utils.AppClock", Set.of("runWith", "callWith"),
             "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"),
+            "tools.SubagentSpawnTool", Set.of("callWithModelChoiceForTest"),
             "services.EventLogger", Set.of("captureForTest", "captureMatchingForTest"),
             "services.OperatorAlerts",
             Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest"));

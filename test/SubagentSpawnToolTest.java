@@ -453,6 +453,43 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(NOTHING_TO_COLLECT, yieldInConversation(parent.id, conv.id, "{\"all\":true}"));
     }
 
+    private static final String MODEL_REFUSED = "Error: only the main agent picks a subagent's model. Leave modelProvider "
+            + "and modelId out, and the helper runs on your own model.";
+
+    @Test
+    void aCustomAgentCannotPickItsHelpersModelSingleOrBatch() throws Exception {
+        // JF-286: a custom agent never changes the model it runs on, and a helper is a copy of it.
+        var parent = createAgent("p-model-refused", "spawn-provider", "test-model");
+        commitAndReopen();
+
+        for (var args : java.util.List.of(
+                "{\"task\":\"t\",\"modelId\":\"test-model-alt\"}",
+                "{\"task\":\"t\",\"modelProvider\":\"spawn-provider\"}",
+                "{\"tasks\":[\"a\"],\"modelId\":\"test-model-alt\"}",
+                "{\"tasks\":[{\"task\":\"a\",\"modelId\":\"test-model-alt\"}]}",
+                "{\"task\":\"t\",\"runtime\":\"acp\",\"modelId\":\"test-model-alt\"}")) {
+            assertEquals(MODEL_REFUSED, invokeOnVirtualThread(parent.id, args), args);
+        }
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count("parentAgent.id = ?1", parent.id), "no run row");
+    }
+
+    @Test
+    void aNullModelNamesNoneAndMainPassesTheModelCheck() {
+        var custom = new Agent();
+        custom.name = "p-model-null";
+        var main = new Agent();
+        main.name = Agent.MAIN_AGENT_NAME;
+
+        // Both stop at the missing task, after the model check and before any row.
+        assertEquals("Error: 'task' is required.",
+                new SubagentSpawnTool().execute("{\"modelProvider\":null,\"modelId\":null}", custom));
+        assertEquals("Error: 'task' is required.",
+                new SubagentSpawnTool().execute("{\"modelId\":\"test-model-alt\"}", main));
+        assertEquals(MODEL_REFUSED, new SubagentSpawnTool().execute("{\"modelId\":\"test-model-alt\"}", custom));
+    }
+
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {
             "{\"task\":\"go\"}",
@@ -540,9 +577,10 @@ class SubagentSpawnToolTest extends UnitTest {
                 var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
                 var spawnTool = new SubagentSpawnTool();
                 var yieldTool = new tools.SubagentYieldTool();
+                // A model override is main's to pick (JF-286); the custom parent stands in for main here.
                 resultRef.set(agents.ToolContext.withScope(null, 8890L, () -> {
-                    spawnTool.execute("{\"tasks\":[\"do A\"],\"mode\":\"session\","
-                            + "\"modelProvider\":\"spawn-provider\",\"modelId\":\"override-model\"}", p);
+                    SubagentSpawnTool.callWithModelChoiceForTest(() -> spawnTool.execute("{\"tasks\":[\"do A\"],"
+                            + "\"mode\":\"session\",\"modelProvider\":\"spawn-provider\",\"modelId\":\"override-model\"}", p));
                     return yieldTool.execute("{\"all\":true}", p);
                 }));
             } catch (Exception e) {
@@ -1651,8 +1689,9 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
+        // A model override is main's to pick (JF-286); the custom parent stands in for main here.
         var reply = invokeOnVirtualThread(parent.id,
-                "{\"task\":\"with override\",\"modelProvider\":\"spawn-provider\",\"modelId\":\"test-model-alt\"}");
+                "{\"task\":\"with override\",\"modelProvider\":\"spawn-provider\",\"modelId\":\"test-model-alt\"}", true);
         EventLogger.flush();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
@@ -3071,13 +3110,20 @@ class SubagentSpawnToolTest extends UnitTest {
      *  own for the child; that's fine — the outer VT exists only to give the
      *  whole tool body a fresh persistence context). */
     private String invokeOnVirtualThread(Long parentAgentId, String argsJson) throws Exception {
+        return invokeOnVirtualThread(parentAgentId, argsJson, false);
+    }
+
+    /** {@code modelChoice} lets the custom parent name a model, as only main may (JF-286). */
+    private String invokeOnVirtualThread(Long parentAgentId, String argsJson, boolean modelChoice) throws Exception {
         var resultRef = new AtomicReference<String>();
         var errorRef = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
                 var tool = new SubagentSpawnTool();
-                resultRef.set(tool.execute(argsJson, parent));
+                resultRef.set(modelChoice
+                        ? SubagentSpawnTool.callWithModelChoiceForTest(() -> tool.execute(argsJson, parent))
+                        : tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);
             }

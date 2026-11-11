@@ -286,7 +286,9 @@ class AcpHarnessConfigValidationTest extends UnitTest {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
                 var tool = new SubagentSpawnTool();
-                resultRef.set(tool.execute(argsJson, parent));
+                // A harness's model and endpoint overrides are main's to pick (JF-286); these cases test the
+                // harness's own validation of one, with a custom parent standing in for main.
+                resultRef.set(SubagentSpawnTool.callWithModelChoiceForTest(() -> tool.execute(argsJson, parent)));
             } catch (Exception e) {
                 errorRef.set(e);
             }

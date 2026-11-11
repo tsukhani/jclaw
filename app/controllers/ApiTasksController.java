@@ -64,6 +64,8 @@ public class ApiTasksController extends Controller {
     // (The mapping keys travel with the field mapping in TaskWriteService.)
     private static final String KEY_NAME = "name";
     private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_MODEL_PROVIDER_FIELD = "modelProvider";
+    private static final String KEY_MODEL_ID_FIELD = "modelId";
     private static final String KEY_SCHEDULE = "schedule";
     private static final String KEY_DELIVERY = "delivery";
     private static final String KEY_TIMEZONE = "timezone";
@@ -283,6 +285,7 @@ public class ApiTasksController extends Controller {
             ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
                     "agentId names another agent; an agent creates tasks for itself only.");
         }
+        rejectModelChoiceByACustomAgent(body, null, null);
         var name = requireTaskName(body);
         var spec = requireScheduleSpec(body);
         rejectInvalidDelivery(body);
@@ -302,6 +305,23 @@ public class ApiTasksController extends Controller {
                         .formatted(saved.name, saved.id, saved.type));
 
         renderJSON(gson.toJson(TaskView.of(saved)));
+    }
+
+    /**
+     * JF-286: only main and the operator choose the model a task runs on, so a custom agent's task runs on
+     * its own. A field the body leaves out, or echoes unchanged, is no choice.
+     */
+    private static void rejectModelChoiceByACustomAgent(JsonObject body, @Nullable String provider,
+                                                        @Nullable String modelId) {
+        if (RequestPrincipal.isOperatorOrMainAgent()) return;
+        var changes = (body.has(KEY_MODEL_PROVIDER_FIELD)
+                        && !Objects.equals(TaskWriteService.readOptionalString(body, KEY_MODEL_PROVIDER_FIELD), provider))
+                || (body.has(KEY_MODEL_ID_FIELD)
+                        && !Objects.equals(TaskWriteService.readOptionalString(body, KEY_MODEL_ID_FIELD), modelId));
+        if (changes) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Only the operator or the main agent may choose the model a task runs on.");
+        }
     }
 
     /**
@@ -466,6 +486,8 @@ public class ApiTasksController extends Controller {
         rejectUnbuiltFields(body);
         rejectInvalidDelivery(body);
         rejectInvalidTimezone(body);
+        // Before any field is applied: `task` is managed, so a 403 after a partial apply would still flush it.
+        rejectModelChoiceByACustomAgent(body, task.modelProvider, task.modelId);
 
         var timezoneBefore = task.timezone;
         boolean scheduleChanged = applyScheduleUpdate(task, body);

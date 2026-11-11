@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * JCLAW-294: agent-facing task management tool. One {@code task_manager}
@@ -211,9 +212,10 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "notification toast / Telegram chat with a 🔔 prefix). Leave null "
                                 + "for ordinary agent-driven tasks.")),
                 Map.entry(KEY_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Override the agent's LLM provider for this task")),
+                        SchemaKeys.DESCRIPTION, "Main agent only: override the agent's LLM provider for this task. "
+                                + "Any other agent leaves it out, and its tasks run on its own model.")),
                 Map.entry(KEY_MODEL_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Override the agent's model id for this task")),
+                        SchemaKeys.DESCRIPTION, "Main agent only: override the agent's model id for this task.")),
                 Map.entry(KEY_ENABLED_TOOL_NAMES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of tool names this task may use. Null = full toolset.")),
                 Map.entry(KEY_AUTO_DELETE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
@@ -254,6 +256,17 @@ public class TaskTool implements ToolRegistry.Tool {
     // --- Helpers ---
 
     /** True iff {@code args} has {@code key} and its value is not JSON null. */
+    static final String ERR_MODEL_IS_MAINS = "Error: only the main agent chooses the model a task runs on. Leave "
+            + "modelProvider and modelId out, and the task runs on your own model.";
+
+    /** JF-286: whether a custom agent's args set or change a task's model; leaving it out, or an unchanged echo, is not. */
+    private static boolean choosesAModel(JsonObject args, Agent agent, @Nullable String provider,
+                                         @Nullable String modelId) {
+        if (agent.isMain()) return false;
+        return (args.has(KEY_MODEL_PROVIDER) && !Objects.equals(optStr(args, KEY_MODEL_PROVIDER), provider))
+                || (args.has(KEY_MODEL_ID) && !Objects.equals(optStr(args, KEY_MODEL_ID), modelId));
+    }
+
     private static boolean hasValue(JsonObject args, String key) {
         return args.has(key) && !args.get(key).isJsonNull();
     }
@@ -320,6 +333,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private String createTask(JsonObject args, Agent agent) {
         var unbuilt = TaskWriteService.unbuiltFieldError(args);
         if (unbuilt != null) return ERR_PREFIX + unbuilt;
+        if (choosesAModel(args, agent, null, null)) return ERR_MODEL_IS_MAINS;
         if (!hasValue(args, KEY_NAME)) {
             return ERR_NAME_REQUIRED;
         }
@@ -547,6 +561,11 @@ public class TaskTool implements ToolRegistry.Tool {
                     + "with the specific Task id.").formatted(ids.size(), name);
         }
         var taskId = ids.getFirst();
+        var current = Tx.run(() -> {
+            var task = (Task) Task.findById(taskId);
+            return task == null ? new String[2] : new String[]{task.modelProvider, task.modelId};
+        });
+        if (choosesAModel(args, agent, current[0], current[1])) return ERR_MODEL_IS_MAINS;
 
         // JCLAW-418: validate an explicit delivery patch before persisting.
         if (args.has(KEY_DELIVERY)) {

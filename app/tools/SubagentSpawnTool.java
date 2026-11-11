@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * JCLAW-265: synchronous spawn of a child agent as a subagent.
@@ -140,6 +141,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String ARG_AGENT_ID = "agentId";
     static final String AGENT_ID_REFUSED = "Error: subagent_spawn no longer takes agentId: it spawns only helper "
             + "copies of the calling agent. To hand a task to another agent, call agent_spawn with that agent's name.";
+    static final String MODEL_REFUSED = "Error: only the main agent picks a subagent's model. Leave modelProvider and "
+            + "modelId out, and the helper runs on your own model.";
     static final String SPAWN_REFUSED = "Subagent spawn refused: ";
     static final String ARG_CONTEXT = "context";
     static final String ARG_RUN_TIMEOUT_SECONDS = "runTimeoutSeconds";
@@ -353,12 +356,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "so there \"inline\" runs as \"session\"."));
         props.put(ARG_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Optional provider override for the child (a configured JClaw provider name). With "
+                "Main agent only: optional provider override for the child (a configured JClaw provider name). With "
                         + "runtime=\"acp\" the coding harness is pointed at that provider's endpoint — "
                         + "claude and codex accept this; pi and gemini take modelId only."));
         props.put(ARG_MODEL_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Optional model id override for the child. With runtime=\"acp\" it replaces the "
+                "Main agent only: optional model id override for the child. With runtime=\"acp\" it replaces the "
                         + "harness's own default model (alone, the harness keeps its own endpoint and "
                         + "login); it also overrides the operator's Settings default for the harness."));
         props.put(ARG_CONTEXT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -422,6 +425,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public String execute(String argsJson, Agent parentAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         if (namesAgentId(args)) return AGENT_ID_REFUSED;
+        if (!parentAgent.isMain() && !MODEL_CHOICE_FOR_TEST.isBound() && namesAModel(args)) return MODEL_REFUSED;
         // JCLAW-498: batch fan-out — a tasks[] array spawns N async children in
         // parallel; the single-child flow below handles a scalar task.
         if (args.has(ARG_TASKS) && !args.get(ARG_TASKS).isJsonNull()) {
@@ -430,6 +434,35 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var requested = SubagentSpawnArgs.parse(args);
         if (requested.error() != null) return requested.error();
         return spawnOne(args, parentAgent, requested, SPAWN_REFUSED, Map.of(), null);
+    }
+
+    private static final ScopedValue<Boolean> MODEL_CHOICE_FOR_TEST = ScopedValue.newInstance();
+
+    /**
+     * Test seam (JF-286): a parent other than {@code main} may name a model while {@code body} runs on this thread, so
+     * the tests of how an override reaches a child can drive it without seeding {@code main}. {@code CapabilityRulesTest}
+     * fails the build if anything in {@code app/} calls it.
+     */
+    public static <T> T callWithModelChoiceForTest(Supplier<T> body) {
+        return ScopedValue.where(MODEL_CHOICE_FOR_TEST, Boolean.TRUE).call(body::get);
+    }
+
+    /** JF-286: whether the call picks a model, at the top level or in a {@code tasks[]} object; a null names none. */
+    private static boolean namesAModel(JsonObject args) {
+        if (namesValue(args, ARG_MODEL_PROVIDER) || namesValue(args, ARG_MODEL_ID)) return true;
+        var tasks = args.get(ARG_TASKS);
+        if (tasks == null || !tasks.isJsonArray()) return false;
+        for (var el : tasks.getAsJsonArray()) {
+            if (el.isJsonObject() && (namesValue(el.getAsJsonObject(), ARG_MODEL_PROVIDER)
+                    || namesValue(el.getAsJsonObject(), ARG_MODEL_ID))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean namesValue(JsonObject obj, String key) {
+        return obj.has(key) && !obj.get(key).isJsonNull();
     }
 
     /** Whether the call names {@code agentId} at the top level or in a {@code tasks[]} object, whatever its value. */
