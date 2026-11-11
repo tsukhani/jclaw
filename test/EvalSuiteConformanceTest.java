@@ -88,7 +88,7 @@ class EvalSuiteConformanceTest extends UnitTest {
     void aTurnThatDidNothingFailsEveryShippedCase() {
         // tools_called_within, max_llm_calls and not_contains_any each pass an empty turn, so a case
         // built only from them grades every agent up.
-        var emptyTurn = new EvalScorer.Response("", List.of(), 1);
+        var emptyTurn = new EvalScorer.Response("", List.of(), 1).withTurn(TURN_START, ZONE);
         var passing = shippedSuites().stream()
                 .flatMap(s -> s.cases().stream()
                         .filter(c -> EvalScorer.failures(c, emptyTurn).isEmpty())
@@ -99,21 +99,31 @@ class EvalSuiteConformanceTest extends UnitTest {
                 + "what the answer must say (contains_all, matches, json_schema) or on a tool that must run");
     }
 
+    /** 09:53:20Z is 17:53 in Asia/Singapore, which keeps UTC+8 all year. */
+    private static final String TURN_START = "2026-11-11T09:53:20Z";
+    private static final String ZONE = "Asia/Singapore";
+
     @Test
-    void theWallClockCasePassesAReplyThatTellsTheTimeAndFailsOneThatDoesNot() {
+    void theWallClockCasePassesTheTurnsTimeAndFailsAWrongOrMissingOne() {
         var wallClock = shippedCase("tool-selection", "wall-clock-datetime-optional");
-        var timeRegex = wallClock.checks().stream()
-                .filter(c -> c.kind() == EvalCheck.Kind.MATCHES).findFirst().orElseThrow().arg();
-        var noTime = List.of("matches: response does not match /" + timeRegex + "/");
+        var noTime = List.of("states_turn_time: response states no time of day");
 
         assertEquals(List.of(), EvalScorer.failures(wallClock,
-                new EvalScorer.Response("It's 17:53 in Singapore.", List.of(), 1)));
+                new EvalScorer.Response("It's 17:53 in Singapore.", List.of(), 1).withTurn(TURN_START, ZONE)));
         assertEquals(List.of(), EvalScorer.failures(wallClock,
-                new EvalScorer.Response("It's 5:53 PM.", List.of("datetime"), 2)));
+                new EvalScorer.Response("It's 5:53 PM.", List.of("datetime"), 2).withTurn(TURN_START, ZONE)));
+        assertEquals(List.of("states_turn_time: response states [16:53], more than 2 minutes from the turn's start "
+                        + "at 17:53 Asia/Singapore"),
+                EvalScorer.failures(wallClock,
+                        new EvalScorer.Response("It's 16:53.", List.of(), 1).withTurn(TURN_START, ZONE)));
         assertEquals(noTime, EvalScorer.failures(wallClock,
-                new EvalScorer.Response("I can't check the time from here.", List.of(), 1)));
+                new EvalScorer.Response("I can't check the time from here.", List.of(), 1).withTurn(TURN_START, ZONE)));
         assertEquals(noTime, EvalScorer.failures(wallClock,
-                new EvalScorer.Response("Today is Wednesday, 11 November 2026.", List.of(), 1)));
+                new EvalScorer.Response("Today is Wednesday, 11 November 2026.", List.of(), 1)
+                        .withTurn(TURN_START, ZONE)));
+        assertEquals(List.of("states_turn_time: the recording carries no turn time, so the time the reply states "
+                        + "cannot be checked"),
+                EvalScorer.failures(wallClock, new EvalScorer.Response("It's 17:53.", List.of(), 1)));
     }
 
     private static EvalCase shippedCase(String suiteId, String caseId) {

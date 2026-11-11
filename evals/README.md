@@ -51,7 +51,7 @@ nothing else; the loader refuses a file whose body id disagrees with its name.
       "input": "What time is it?",
       "rubric": "The harness already injects the current time, so the clock tool is allowed but not required.",
       "checks": [
-        { "kind": "matches", "args": ["(?i)\\b\\d{1,2}(:\\d{2}|\\s?[ap]\\.?m\\b)"] },
+        { "kind": "states_turn_time", "limit": 2 },
         { "kind": "tools_called_within", "args": ["datetime"] },
         { "kind": "max_llm_calls", "limit": 2 }
       ]
@@ -66,7 +66,7 @@ does not belong in the suite.
 A case must also fail a turn that did nothing. `tools_called_within`,
 `max_llm_calls` and `not_contains_any` each pass an empty reply with no tool
 call, so a case built only from them reports a pass for any agent; this example
-passed one until it gained its `matches` check. `EvalSuiteConformanceTest`
+passed one until it gained a check on the time it states. `EvalSuiteConformanceTest`
 scores that empty turn against every shipped case and fails the build on a case
 that passes it: add a check on what the answer must say, or on a tool that must
 run.
@@ -86,6 +86,12 @@ Every kind is decidable from the response alone — no judge model.
 | `tool_args_include` | `args`: one tool name, `schema`: expected arguments | a dispatched call to that tool carried every key in `schema` with an equal value |
 | `tool_result_includes` | `args`: a tool name, then substrings | a dispatched call to that tool returned all of them (case-insensitive) |
 | `max_llm_calls` | `limit` | the turn spent at most `limit` model calls |
+| `states_turn_time` | `limit`: minutes | the reply states a time of day within `limit` minutes of the recorded `turnStartedAt`, read in the recorded `timezone`. 24-hour and 12-hour forms count, with or without am or pm; a UTC offset is not read as a time, and a recording without a turn time fails |
+
+`states_turn_time` exists because a pattern on the reply's shape cannot tell
+the right time from a wrong one: "It is 3:15" matched whatever the time was.
+The scorer reads no clock, so it checks the reply against the time capture
+recorded when the turn started.
 
 `json_schema` implements a subset: `type`, `properties`, `required`, `items`,
 `enum`, `additionalProperties`, `description`. JClaw carries no JSON Schema
@@ -233,7 +239,9 @@ The runner scores whatever produced the responses; the file is the contract.
       "toolsCalled": ["web_fetch"],
       "toolsAttempted": ["web_fetch", "httpFetch"],
       "toolResults": { "web_fetch": ["The transfer lasted 209 days."] },
-      "llmCalls": 2
+      "llmCalls": 2,
+      "turnStartedAt": "2026-11-11T09:53:20Z",
+      "timezone": "Asia/Singapore"
     },
     "cites-the-chunk-it-used": {
       "error": "provider unreachable"
@@ -244,6 +252,11 @@ The runner scores whatever produced the responses; the file is the contract.
 
 `error` marks a case the agent never answered. It is optional, and older
 recordings without it read as answered.
+
+`turnStartedAt` (an ISO-8601 instant) and `timezone` (an IANA id) are when the
+turn started and the zone its clock block used, which `states_turn_time` checks
+the reply against. Capture writes both; older recordings have neither, still
+load, and fail `states_turn_time` naming the missing time.
 
 ### `toolsCalled` vs `toolsAttempted`
 

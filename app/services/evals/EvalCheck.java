@@ -104,7 +104,15 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
          */
         TOOL_RESULT_INCLUDES,
         /** The turn used at most {@link #limit()} model calls (JCLAW-833's NFR). */
-        MAX_LLM_CALLS;
+        MAX_LLM_CALLS,
+        /**
+         * The reply states a time of day within {@link #limit()} minutes of the recorded turn start,
+         * read in the recorded timezone (JF-298). A pattern on the reply's shape passed "It is 3:15"
+         * whatever the time was, and the scorer reads no clock, so the reply is checked against the
+         * time capture wrote down. 24-hour and 12-hour forms count, with or without am or pm, and a
+         * recording without a turn time fails rather than passing unchecked.
+         */
+        STATES_TURN_TIME;
 
         public String wire() {
             return name().toLowerCase(Locale.ROOT);
@@ -135,6 +143,11 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
     /** A {@link Kind#MAX_LLM_CALLS} budget check. */
     public static EvalCheck maxLlmCalls(int limit) {
         return new EvalCheck(Kind.MAX_LLM_CALLS, List.of(), null, limit);
+    }
+
+    /** A {@link Kind#STATES_TURN_TIME} check: the stated time may be {@code toleranceMinutes} from the turn's start. */
+    public static EvalCheck statesTurnTime(int toleranceMinutes) {
+        return new EvalCheck(Kind.STATES_TURN_TIME, List.of(), null, toleranceMinutes);
     }
 
     /** The first argument: the regex, or the tool a tool kind names. */

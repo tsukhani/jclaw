@@ -2,13 +2,18 @@ import agents.ToolRegistry;
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.TimezoneResolver;
 import services.evals.EvalCapture;
 import services.evals.EvalCase;
 import services.evals.EvalCheck;
 import services.evals.EvalRunner;
 import services.evals.EvalSuite;
+import utils.AppClock;
 import utils.LatencyTrace;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -56,6 +61,20 @@ class EvalCaptureTest extends UnitTest {
         assertEquals(suite.fingerprint(), capture.fingerprint(), "the recording names which suite content produced it");
         assertEquals("It is 11:04.", capture.responses().get("clock").output());
         assertNull(capture.responses().get("clock").error());
+    }
+
+    @Test
+    void capturedRecordCarriesWhenTheTurnStartedAndTheZoneItsClockUsed() {
+        // The case runs on a thread capture forks, which a ScopedValue clock binding does not
+        // reach on its own: this pins that the caller's clock is the one the record reads.
+        var clock = Clock.fixed(Instant.parse("2026-11-11T09:53:20Z"), ZoneOffset.UTC);
+
+        var capture = AppClock.callWith(clock, () -> EvalCapture.run(suiteAsking("clock"), evalAgent(), 1,
+                (agent, prompt, sink) -> "It's 17:53."));
+
+        var recorded = capture.responses().get("clock");
+        assertEquals("2026-11-11T09:53:20Z", recorded.turnStartedAt());
+        assertEquals(TimezoneResolver.appZone().getId(), recorded.timezone());
     }
 
     @Test

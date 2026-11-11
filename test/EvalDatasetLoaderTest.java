@@ -150,6 +150,29 @@ class EvalDatasetLoaderTest extends UnitTest {
         assertTrue(msg.contains("non-empty object"), msg);
     }
 
+    private static final String WITHIN_CHECK = "{\"kind\": \"tools_called_within\", \"args\": [\"web_search\"]}";
+
+    @Test
+    void loadsStatesTurnTimeWithItsToleranceInMinutes() throws Exception {
+        var suite = EvalDatasetLoader.loadSuite(write("sample.json",
+                VALID.replace(WITHIN_CHECK, "{\"kind\": \"states_turn_time\", \"limit\": 1}")));
+
+        var check = suite.cases().getFirst().checks().get(1);
+        assertEquals(EvalCheck.Kind.STATES_TURN_TIME, check.kind());
+        assertEquals(1, check.limit());
+    }
+
+    @Test
+    void rejectsStatesTurnTimeWithoutAToleranceOfAtLeastOneMinute() throws Exception {
+        var zero = refusal("sample.json", VALID.replace(WITHIN_CHECK, "{\"kind\": \"states_turn_time\", \"limit\": 0}"));
+        assertNotNull(zero);
+        assertTrue(zero.endsWith("[greets-back]: states_turn_time: 'limit' must be >= 1"), zero);
+
+        var absent = refusal("sample.json", VALID.replace(WITHIN_CHECK, "{\"kind\": \"states_turn_time\"}"));
+        assertNotNull(absent);
+        assertTrue(absent.endsWith("[greets-back]: 'limit' must be a number"), absent);
+    }
+
     // ==================== Fingerprint (JCLAW-883) ====================
 
     @Test

@@ -12,9 +12,12 @@ import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.TaskWriteService;
+import services.TimezoneResolver;
 import services.Tx;
+import utils.AppClock;
 import utils.LatencyTrace;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -264,8 +267,11 @@ public final class EvalCapture {
      * is simply the one that supplies the real agent run.
      */
     public static Capture run(EvalSuite suite, Agent agent, int maxConcurrency, TurnRunner turns) {
+        // Read here because the cases run on TaskScope's executor, which a ScopedValue clock
+        // binding does not cross; each case still reads its own start from this clock.
+        var clock = AppClock.clock();
         var captured = EvalFanOut.mapCasesBounded(suite.cases(), maxConcurrency,
-                testCase -> Map.entry(testCase.id(), captureOne(testCase, agent, turns)));
+                testCase -> Map.entry(testCase.id(), captureOne(testCase, agent, turns, clock)));
 
         // LinkedHashMap so the recorded file keeps suite order and two captures of
         // the same suite diff line by line, matching how the report already behaves.
@@ -314,7 +320,7 @@ public final class EvalCapture {
         }
     }
 
-    private static EvalScorer.Response captureOne(EvalCase testCase, Agent agent, TurnRunner turns) {
+    private static EvalScorer.Response captureOne(EvalCase testCase, Agent agent, TurnRunner turns, Clock clock) {
         // Counts this turn's model calls (JCLAW-882) without ever being ended — see
         // the class comment on why an eval turn must not reach LatencyStats. The
         // binding must be open BEFORE the turn starts: LlmProvider counts at its
@@ -323,9 +329,13 @@ public final class EvalCapture {
         var trace = LatencyTrace.forTurn("eval", null);
         var sink = new CaptureSink();
         try (var _ = LatencyTrace.bind(trace)) {
+            // The instant and zone the turn's clock block is built from (CurrentTimeInjector),
+            // so states_turn_time can check the time the reply states.
+            var startedAt = clock.instant().toString();
+            var zone = TimezoneResolver.appZone().getId();
             var content = turns.run(agent, testCase.input(), sink);
             return new EvalScorer.Response(content, sink.toolsCalled(), sink.toolsAttempted(),
-                    sink.toolArgs(), sink.toolResults(), trace.llmCallCount(), null);
+                    sink.toolArgs(), sink.toolResults(), trace.llmCallCount(), null, startedAt, zone);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Eval case '%s' errored: %s".formatted(testCase.id(), e));

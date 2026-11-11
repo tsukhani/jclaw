@@ -89,7 +89,8 @@
             "tools_called_within",
             "tool_args_include",
             "tool_result_includes",
-            "max_llm_calls"
+            "max_llm_calls",
+            "states_turn_time"
           ],
           "description": "Every kind is decidable without a model call. Model-judged checks land with the critic (JCLAW-836)."
         },
@@ -108,7 +109,7 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "description": "max_llm_calls only: the call budget for the case (JCLAW-833's efficiency NFR, measured via llm_call_count from JCLAW-882)."
+          "description": "max_llm_calls: the call budget for the case (JCLAW-833's efficiency NFR, measured via llm_call_count from JCLAW-882). states_turn_time: how many minutes the time the reply states may be from the recorded turn start, read in the recorded timezone (JF-298)."
         }
       }
     }

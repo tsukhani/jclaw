@@ -8,11 +8,17 @@ import org.jspecify.annotations.Nullable;
 import tools.SchemaKeys;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -46,10 +52,16 @@ public final class EvalScorer {
      * entirely, would reach the scorer as an indistinguishable "no response
      * recorded" and throw away the one detail someone debugging the sweep needs.
      * Older recordings have no {@code error} field and deserialize to null.
+     *
+     * <p>{@code turnStartedAt} (an ISO-8601 instant) and {@code timezone} (an IANA id)
+     * record when the turn started and the zone its clock block used (JF-298), which
+     * {@link EvalCheck.Kind#STATES_TURN_TIME} checks the reply against. A recording made
+     * before them has neither, and both deserialize to null.
      */
     public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
                            Map<String, List<String>> toolArgs, Map<String, List<String>> toolResults,
-                           int llmCalls, @Nullable String error) {
+                           int llmCalls, @Nullable String error,
+                           @Nullable String turnStartedAt, @Nullable String timezone) {
 
         public Response {
             output = output == null ? "" : output;
@@ -66,12 +78,18 @@ public final class EvalScorer {
 
         /** A turn that produced an answer, where every attempted call also ran. */
         public Response(String output, List<String> toolsCalled, int llmCalls) {
-            this(output, toolsCalled, toolsCalled, Map.of(), Map.of(), llmCalls, null);
+            this(output, toolsCalled, toolsCalled, Map.of(), Map.of(), llmCalls, null, null, null);
         }
 
         /** A turn where some attempts were refused: {@code toolsCalled} is the dispatched subset. */
         public Response(String output, List<String> toolsCalled, List<String> toolsAttempted, int llmCalls) {
-            this(output, toolsCalled, toolsAttempted, Map.of(), Map.of(), llmCalls, null);
+            this(output, toolsCalled, toolsAttempted, Map.of(), Map.of(), llmCalls, null, null, null);
+        }
+
+        /** This response, recorded for a turn that started at {@code startedAt} (an ISO-8601 instant) in {@code zone}. */
+        public Response withTurn(String startedAt, String zone) {
+            return new Response(output, toolsCalled, toolsAttempted, toolArgs, toolResults, llmCalls, error,
+                    startedAt, zone);
         }
 
         /** Argument JSONs of the dispatched calls to {@code tool}, in call order. */
@@ -86,7 +104,7 @@ public final class EvalScorer {
 
         /** A turn that never produced an answer, and why. */
         public static Response failed(String reason) {
-            return new Response("", List.of(), List.of(), Map.of(), Map.of(), 0, reason);
+            return new Response("", List.of(), List.of(), Map.of(), Map.of(), 0, reason, null, null);
         }
 
         /** Names the model emitted that never reached a tool — invented, or not granted. */
@@ -145,7 +163,77 @@ public final class EvalScorer {
                     failures.add("max_llm_calls: used " + response.llmCalls() + " calls, budget " + check.limit());
                 }
             }
+            case STATES_TURN_TIME -> scoreStatesTurnTime(check, response, failures);
         }
+    }
+
+    /**
+     * A time of day as a reply writes it: 24-hour, or 12-hour with am or pm (an hour alone needs one).
+     * A number straight after a sign, a colon or a digit is skipped, so a UTC offset such as +08:00 is
+     * never read as the time.
+     */
+    private static final Pattern TIME_OF_DAY = Pattern.compile(
+            "(?i)(?<![\\d:+\\-])(\\d{1,2})(?::([0-5]\\d))?(?::[0-5]\\d)?(?:\\s?([ap])\\.?\\s?m\\b)?");
+    private static final int MINUTES_PER_DAY = 24 * 60;
+    private static final DateTimeFormatter HOURS_MINUTES = DateTimeFormatter.ofPattern("HH:mm");
+
+    private static void scoreStatesTurnTime(EvalCheck check, Response response, List<String> failures) {
+        var startedAt = response.turnStartedAt();
+        var zone = response.timezone();
+        if (startedAt == null || zone == null) {
+            failures.add("states_turn_time: the recording carries no turn time, so the time the reply states "
+                    + "cannot be checked");
+            return;
+        }
+        LocalTime turn;
+        try {
+            turn = Instant.parse(startedAt).atZone(ZoneId.of(zone)).toLocalTime();
+        } catch (DateTimeException _) {
+            failures.add("states_turn_time: the recorded turn time " + startedAt + " in " + zone + " does not parse");
+            return;
+        }
+        int turnMinute = turn.getHour() * 60 + turn.getMinute();
+        var stated = new ArrayList<String>();
+        var match = TIME_OF_DAY.matcher(response.output());
+        while (match.find()) {
+            var readings = minutesOfDay(match);
+            if (readings.isEmpty()) continue;
+            stated.add(match.group().strip());
+            for (int minute : readings) {
+                if (minutesApart(minute, turnMinute) <= check.limit()) return;
+            }
+        }
+        if (stated.isEmpty()) {
+            failures.add("states_turn_time: response states no time of day");
+            return;
+        }
+        failures.add("states_turn_time: response states " + stated + ", more than " + check.limit()
+                + " minutes from the turn's start at " + turn.format(HOURS_MINUTES) + " " + zone);
+    }
+
+    /**
+     * The minutes of the day one match can mean, or none when it is not a time. A bare 1:00 to 12:59
+     * is read both ways, as a 12-hour clock written without am or pm.
+     */
+    private static List<Integer> minutesOfDay(Matcher match) {
+        int hour = Integer.parseInt(match.group(1));
+        var minutes = match.group(2);
+        var meridiem = match.group(3);
+        int minute = minutes == null ? 0 : Integer.parseInt(minutes);
+        if (meridiem != null) {
+            if (hour < 1 || hour > 12) return List.of();
+            int offset = "p".equalsIgnoreCase(meridiem) ? 12 : 0;
+            return List.of((hour % 12 + offset) * 60 + minute);
+        }
+        if (minutes == null || hour > 23) return List.of();
+        if (hour >= 1 && hour <= 12) return List.of((hour % 12) * 60 + minute, (hour % 12 + 12) * 60 + minute);
+        return List.of(hour * 60 + minute);
+    }
+
+    /** Minutes between two times of day, the short way round midnight. */
+    private static int minutesApart(int a, int b) {
+        int apart = Math.abs(a - b) % MINUTES_PER_DAY;
+        return Math.min(apart, MINUTES_PER_DAY - apart);
     }
 
     /**

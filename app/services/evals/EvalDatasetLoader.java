@@ -218,6 +218,11 @@ public final class EvalDatasetLoader {
                 if (limit < 1) throw new IllegalArgumentException(ctx + ": max_llm_calls: 'limit' must be >= 1");
                 yield EvalCheck.maxLlmCalls(limit);
             }
+            case STATES_TURN_TIME -> {
+                var limit = requireInt(ctx, obj, "limit");
+                if (limit < 1) throw new IllegalArgumentException(ctx + ": states_turn_time: 'limit' must be >= 1");
+                yield EvalCheck.statesTurnTime(limit);
+            }
         };
     }
 

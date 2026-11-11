@@ -1,3 +1,4 @@
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
@@ -176,7 +177,7 @@ class EvalScorerTest extends UnitTest {
 
     private static EvalScorer.Response callingWithArgs(String tool, String... argJsons) {
         return new EvalScorer.Response("answer", List.of(tool), List.of(tool),
-                java.util.Map.of(tool, List.of(argJsons)), java.util.Map.of(), 1, null);
+                java.util.Map.of(tool, List.of(argJsons)), java.util.Map.of(), 1, null, null, null);
     }
 
     private static EvalCheck argsInclude(String tool, String expectedJson) {
@@ -226,7 +227,8 @@ class EvalScorerTest extends UnitTest {
         // the other an argument failure, and they send the reader to different fixes.
         var failures = EvalScorer.failures(
                 caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")),
-                new EvalScorer.Response("answer", List.of(), List.of(), java.util.Map.of(), java.util.Map.of(), 1, null));
+                new EvalScorer.Response("answer", List.of(), List.of(), java.util.Map.of(), java.util.Map.of(), 1, null,
+                        null, null));
 
         assertEquals(1, failures.size(), failures::toString);
         assertTrue(failures.getFirst().contains("recorded no dispatched call"), failures.getFirst());
@@ -236,7 +238,7 @@ class EvalScorerTest extends UnitTest {
 
     private static EvalScorer.Response returning(String tool, String... results) {
         return new EvalScorer.Response("answer", List.of(tool), List.of(tool),
-                java.util.Map.of(), java.util.Map.of(tool, List.of(results)), 1, null);
+                java.util.Map.of(), java.util.Map.of(tool, List.of(results)), 1, null, null, null);
     }
 
     private static EvalCheck resultIncludes(String tool, String... needles) {
@@ -398,5 +400,91 @@ class EvalScorerTest extends UnitTest {
                 new EvalScorer.Response("fifty-one", List.of("exec"), 2));
 
         assertEquals(3, failures.size(), () -> "one line per failed check: " + failures);
+    }
+
+    // ==================== states_turn_time (JF-298) ====================
+
+    /** 09:53:20Z is 17:53 in Asia/Singapore, which keeps UTC+8 all year. */
+    private static final String TURN_START = "2026-11-11T09:53:20Z";
+    private static final String ZONE = "Asia/Singapore";
+    private static final EvalCase TELLS_THE_TIME = caseWith(EvalCheck.statesTurnTime(2));
+    private static final String NO_TURN_TIME =
+            "states_turn_time: the recording carries no turn time, so the time the reply states cannot be checked";
+
+    private static List<String> turnTimeFailures(String turnStart, String output) {
+        return EvalScorer.failures(TELLS_THE_TIME, text(output).withTurn(turnStart, ZONE));
+    }
+
+    private static String offBy(String stated, String turnTime) {
+        return "states_turn_time: response states " + stated + ", more than 2 minutes from the turn's start at "
+                + turnTime + " " + ZONE;
+    }
+
+    @Test
+    void aReplyStatingTheTurnsTimeInTheAgentsZonePasses() {
+        assertEquals(List.of(), turnTimeFailures(TURN_START, "It's 17:53 in Singapore."));
+    }
+
+    @Test
+    void twelveHourFormsPass() {
+        for (var reply : List.of("It's 5:53 PM.", "It's 5:53pm.", "It's 5:53 p.m.", "It's 5:53 now.")) {
+            assertEquals(List.of(), turnTimeFailures(TURN_START, reply), reply);
+        }
+        assertEquals(List.of(), turnTimeFailures("2026-11-11T10:01:00Z", "It's just after 6 pm."));
+    }
+
+    @Test
+    void aTimeAtTheToleranceSidePassesAndOneMinutePastItFails() {
+        assertEquals(List.of(), turnTimeFailures(TURN_START, "It's 17:55."));
+        assertEquals(List.of(), turnTimeFailures(TURN_START, "It's 17:51."));
+        assertEquals(List.of(offBy("[17:56]", "17:53")), turnTimeFailures(TURN_START, "It's 17:56."));
+    }
+
+    @Test
+    void aReplyAnHourOffFails() {
+        assertEquals(List.of(offBy("[16:53]", "17:53")), turnTimeFailures(TURN_START, "It's 16:53."));
+        assertEquals(List.of(offBy("[4:53 PM]", "17:53")), turnTimeFailures(TURN_START, "It's 4:53 PM."));
+    }
+
+    @Test
+    void theToleranceWrapsAroundMidnight() {
+        assertEquals(List.of(), turnTimeFailures("2026-11-11T15:59:30Z", "It's 00:01."));
+    }
+
+    @Test
+    void aUtcOffsetIsNotReadAsTheTime() {
+        assertEquals(List.of(offBy("[16:53]", "17:53")), turnTimeFailures(TURN_START, "It's 16:53 (UTC+08:00)."));
+    }
+
+    @Test
+    void aReplyThatStatesNoTimeOfDayFails() {
+        assertEquals(List.of("states_turn_time: response states no time of day"),
+                turnTimeFailures(TURN_START, "Today is Wednesday, 11 November 2026."));
+    }
+
+    @Test
+    void aRecordingWithoutATurnTimeFailsNamingIt() {
+        assertEquals(List.of(NO_TURN_TIME), EvalScorer.failures(TELLS_THE_TIME, text("It's 17:53.")));
+    }
+
+    @Test
+    void aTurnTimeThatDoesNotParseFailsNamingIt() {
+        assertEquals(List.of("states_turn_time: the recorded turn time yesterday in Asia/Singapore does not parse"),
+                turnTimeFailures("yesterday", "It's 17:53."));
+        assertEquals(List.of("states_turn_time: the recorded turn time " + TURN_START + " in Mars/Olympus does not parse"),
+                EvalScorer.failures(TELLS_THE_TIME, text("It's 17:53.").withTurn(TURN_START, "Mars/Olympus")));
+    }
+
+    @Test
+    void aRecordingMadeBeforeTurnTimesStillLoadsAndCannotPass() {
+        var recorded = new Gson().fromJson(
+                "{\"output\":\"It's 17:53.\",\"toolsCalled\":[\"datetime\"],\"llmCalls\":2}", EvalScorer.Response.class);
+
+        assertEquals("It's 17:53.", recorded.output());
+        assertEquals(List.of("datetime"), recorded.toolsCalled());
+        assertEquals(2, recorded.llmCalls());
+        assertNull(recorded.turnStartedAt());
+        assertNull(recorded.timezone());
+        assertEquals(List.of(NO_TURN_TIME), EvalScorer.failures(TELLS_THE_TIME, recorded));
     }
 }
