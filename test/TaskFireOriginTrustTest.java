@@ -497,9 +497,9 @@ class TaskFireOriginTrustTest extends FunctionalTest {
                 "{\"username\": \"admin\", \"password\": \"changeme\"}"));
     }
 
-    /** A request carrying the internal bearer token — indistinguishable from a jclaw_api call. */
-    /** A bearer request stamped with the calling agent, as {@code JClawApiTool} sends it: a task route
-     *  reaches only the caller's own tasks (JF-284), and these tasks are {@code agent}'s. */
+    /** A request carrying the internal bearer token and stamped with the calling agent, so it is
+     *  indistinguishable from a jclaw_api call: a task route reaches only the caller's own tasks (JF-284),
+     *  and these tasks are {@code agent}'s. */
     private static Http.Request agentRequest(Agent agent) {
         var request = newRequest();
         var token = AuthFixture.seedBearerToken();

@@ -42,7 +42,7 @@ public final class SearchSnippet {
         var match = firstMatch(flat, query);
         int matchStart = match != null ? match.start() : 0;
         int matchLength = match != null ? match.end() - match.start() : 0;
-        int start = Math.clamp(matchStart - Math.max(0, WINDOW_CHARS - matchLength) / 2,
+        int start = Math.clamp((long) matchStart - Math.max(0, WINDOW_CHARS - matchLength) / 2,
                 0, flat.length() - WINDOW_CHARS);
         int end = start + WINDOW_CHARS;
         // A lone surrogate at a cut end would reach the wire as an unpaired code unit.

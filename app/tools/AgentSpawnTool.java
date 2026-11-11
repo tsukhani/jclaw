@@ -181,9 +181,10 @@ public class AgentSpawnTool implements ToolRegistry.Tool {
         var calleeName = target.name();
 
         var handOffs = handOffCounter();
-        var budget = SubagentLimits.readPositiveIntConfig(MAX_HAND_OFFS_KEY, DEFAULT_MAX_HAND_OFFS);
-        if (handOffs.get() >= budget) {
-            var reason = "hand-off limit %d reached (hand-offs so far: %d).".formatted(budget, handOffs.get());
+        int budget = SubagentLimits.readPositiveIntConfig(MAX_HAND_OFFS_KEY, DEFAULT_MAX_HAND_OFFS);
+        int soFar = handOffs.get();
+        if (soFar >= budget) {
+            var reason = "hand-off limit %d reached (hand-offs so far: %d).".formatted(budget, soFar);
             EventLogger.recordSubagentLimitExceeded(caller.name, reason);
             return HAND_OFF_REFUSED + reason + " Reply with what you have.";
         }
