@@ -211,6 +211,58 @@ class AgentOwnRowsScopeTest extends FunctionalTest {
     }
 
     @Test
+    void anAgentsRecentVideoJobsHoldAJobOfItsConversationThatNamesNoAgentAndNoOwnerlessJob() {
+        var provider = "jf292-recent-" + UUID.randomUUID().toString().substring(0, 8);
+        var byConversation = commit(() -> {
+            var job = new VideoGenerationJob();
+            job.conversation = Conversation.findById(own.conversationId());
+            job.provider = provider;
+            job.prompt = "by conversation";
+            job.save();
+            var ownerless = new VideoGenerationJob();
+            ownerless.provider = provider;
+            ownerless.prompt = "ownerless";
+            ownerless.save();
+            return job.id;
+        });
+        try {
+            var mine = asAgent(() -> GET(agentRequest(own.agentId()), "/api/videogen/jobs/recent"));
+            assertStatus(200, mine);
+            // Newest first: the job seeded here, then the one the agent was seeded with.
+            assertEquals(List.of(byConversation, own.jobId()), ids(rows(mine)));
+
+            var theirs = asAgent(() -> GET(agentRequest(alien.agentId()), "/api/videogen/jobs/recent"));
+            assertStatus(200, theirs);
+            assertEquals(List.of(alien.jobId()), ids(rows(theirs)));
+        } finally {
+            commit(() -> VideoGenerationJob.delete("provider = ?1", provider));
+        }
+    }
+
+    @Test
+    void asManyNewerJobsOfAnotherAgentAsTheRecentCapLeaveAnAgentsOwnJobInItsList() {
+        var provider = "jf292-cap-" + UUID.randomUUID().toString().substring(0, 8);
+        commit(() -> {
+            Agent other = Agent.findById(alien.agentId());
+            for (int i = 0; i < 20; i++) {
+                var job = new VideoGenerationJob();
+                job.agent = other;
+                job.provider = provider;
+                job.prompt = "newer " + i;
+                job.save();
+            }
+            return null;
+        });
+        try {
+            var mine = asAgent(() -> GET(agentRequest(own.agentId()), "/api/videogen/jobs/recent"));
+            assertStatus(200, mine);
+            assertEquals(List.of(own.jobId()), ids(rows(mine)));
+        } finally {
+            commit(() -> VideoGenerationJob.delete("provider = ?1", provider));
+        }
+    }
+
+    @Test
     void anUnstampedBearerSeesNoVideoJob() {
         for (var path : List.of("/api/videogen/jobs?ids=" + own.jobId(), "/api/videogen/jobs/recent")) {
             var resp = asAgent(() -> GET(bareBearerRequest(), path));

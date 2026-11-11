@@ -100,7 +100,8 @@ class AuthCheckSessionGuardTest extends FunctionalTest {
         var request = with("origin", "null");
         request.headers.put("sec-fetch-site", new Http.Header("sec-fetch-site", "cross-site"));
         request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
-        assertIsOk(GET(request, "/api/config"));
+        // A route any agent may call: /api/config refuses a bearer that names no agent (JF-292).
+        assertIsOk(GET(request, "/api/timezones"));
     }
 
     @Test
