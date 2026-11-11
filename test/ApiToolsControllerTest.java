@@ -16,6 +16,10 @@ import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.AgentService;
 import services.ConfigService;
+import services.evals.EvalCapture;
+import services.evals.EvalCase;
+import services.evals.EvalCheck;
+import services.evals.EvalSuite;
 import tools.JClawApiTool;
 
 import java.util.ArrayList;
@@ -289,23 +293,52 @@ class ApiToolsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theEvalAgentGetsJclawApiOnlyWithAGrantOfItsOwn() {
-        // Every tool is opt-in for the eval agent (JCLAW-883), so calibration grants exactly what a suite names.
-        var id = createAgent(Agent.EVALTEST_AGENT_NAME);
+    void theEvalAgentNeverGetsJclawApiWhateverGrantRowOrSuiteNamesIt() {
+        login();
+        // Provisioned as a first capture provisions it: no test stores or deletes a fixed-name agent.
+        var id = fetchInFreshTx(() -> EvalCapture.provision("openrouter", "gpt-4.1").id);
         try {
             agents.ToolRegistry.clearDisabledToolsCache();
-            assertTrue(disabledFor(id).contains("jclaw_api"), "off without a grant");
+            assertEquals(java.util.Set.of(), offeredTo(id), "premise: every tool is opt-in for the eval agent (JCLAW-883)");
 
             fetchInFreshTx(() -> grant(Agent.findById(id), "jclaw_api"));
+            fetchInFreshTx(() -> grant(Agent.findById(id), "datetime"));
             agents.ToolRegistry.clearDisabledToolsCache();
-            assertFalse(disabledFor(id).contains("jclaw_api"), "on with its own grant");
-        } finally {
+            assertEquals(java.util.Set.of("datetime"), offeredTo(id), "a grant row of its own gives it datetime and not jclaw_api");
+            assertEquals(true, disabledFor(id).contains("jclaw_api"));
+            assertEquals(false, enabledInList(id, "jclaw_api"));
+
+            // Calibration grants what a suite names, and reads back the same.
+            var suite = new EvalSuite("eval-jclaw-api-fixture", "fixture", List.of("jclaw_api", "datetime"),
+                    List.of(new EvalCase("a-case", "hello", "a case",
+                            List.of(EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of("hi"))))));
             fetchInFreshTx(() -> {
-                Agent agent = Agent.findById(id);
-                AgentToolConfig.delete("agent = ?1", agent);
-                return agent.delete();
+                EvalCapture.calibrate(suite, Agent.findById(id));
+                return null;
             });
+            assertEquals(List.of("datetime=true", "jclaw_api=true"), toolRows(id), "premise: calibration stored both grants");
+            assertEquals(java.util.Set.of("datetime"), offeredTo(id));
+            assertEquals(false, enabledInList(id, "jclaw_api"));
+        } finally {
+            // The rows are this test's; the agent stays as the code provisioned it.
+            fetchInFreshTx(() -> AgentToolConfig.delete("agent.id = ?1", id));
+            agents.ToolRegistry.clearDisabledToolsCache();
         }
+    }
+
+    /** The tools a turn of the agent may be offered. */
+    private static java.util.Set<String> offeredTo(Long agentId) {
+        return fetchInFreshTx(() -> {
+            var names = new java.util.TreeSet<String>();
+            for (var def : ToolRegistry.getToolDefsForAgent(Agent.findById(agentId))) names.add(def.function().name());
+            return names;
+        });
+    }
+
+    /** The agent's stored tool rows as {@code tool=enabled}, sorted. */
+    private static List<String> toolRows(Long agentId) {
+        return fetchInFreshTx(() -> AgentToolConfig.findByAgent(Agent.findById(agentId)).stream()
+                .map(r -> r.handle() + "=" + r.enabled).sorted().toList());
     }
 
     private static AgentToolConfig grant(Agent agent, String tool) {

@@ -821,9 +821,10 @@ public class ToolRegistry {
      *  agent creation (JCLAW-282): a seeded row cannot cover an agent that already existed,
      *  an agent created outside AgentService.create, or a row later deleted — this instance
      *  had two agents holding no row and therefore full access. Same reasoning JCLAW-883
-     *  recorded for the eval agent. An explicit enable row still wins, so granting it to a
-     *  purpose-built agent stays a single click. The grant rests on every agent-callable route
-     *  holding an agent other than main to its own rows (JF-293, docs/agents/trust.md). */
+     *  recorded for the eval agent. An explicit enable row still wins for any agent but a
+     *  subagent or the eval agent, so granting it to a purpose-built agent stays a single click.
+     *  The grant rests on every agent-callable route holding an agent other than main to its
+     *  own rows (JF-293, docs/agents/trust.md). */
     private static final String JCLAW_API_TOOL = "jclaw_api";
 
     /** Drives the operator's own signed-in Chrome, so no agent has it until the operator grants it, and
@@ -865,6 +866,8 @@ public class ToolRegistry {
             // JF-293: nor jclaw_api. The operator grants it to one agent, and a copy is made by that agent's spawn.
             disabled.add(JCLAW_API_TOOL);
         }
+        // JF-293: nor the eval agent, whatever row or suite names it: a sweep runs unattended and its calls are real.
+        if (agent.isEvalTest()) disabled.add(JCLAW_API_TOOL);
         // JCLAW-883: the eval agent inverts the default — every tool is opt-in, not
         // just the costly ones below. An eval sweep runs unattended and its suites
         // deliberately provoke tool selection, so a tool nobody granted must not be
