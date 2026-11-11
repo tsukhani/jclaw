@@ -20,6 +20,7 @@ import services.TaskRunReports;
 import services.TaskSchedulingService;
 import services.TaskWriteService;
 import services.Tx;
+import services.WebDeliveryScope;
 import services.search.LuceneIndexer;
 import utils.AppClock;
 import utils.ChannelOriginTrust;
@@ -356,7 +357,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // grammar before persisting. null/omitted is fine (it gets inferred);
         // a malformed value (e.g. email:, which is not a channel) is rejected
         // with a hint toward tool:send_gmail_message.
-        var deliveryErr = DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+        var deliveryErr = deliveryError(optStr(args, KEY_DELIVERY), agent);
         if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
 
         var conflict = checkRecurringDuplicate(name, agent, spec);
@@ -386,6 +387,15 @@ public class TaskTool implements ToolRegistry.Tool {
         // JCLAW-455: warn in chat if the declared Slack delivery target isn't reachable
         // (private/uninvited channel). Non-blocking — the task is still created.
         return withDeliveryAdvisory(base, agent, saved.delivery);
+    }
+
+    /**
+     * Why {@code delivery} is not saved, or null when it is: malformed (JCLAW-418), or a web conversation
+     * {@code agent} may not deliver into (JF-289). An inferred target needs no check: it is the agent's own.
+     */
+    private static @Nullable String deliveryError(@Nullable String delivery, Agent agent) {
+        var malformed = DeliverySpec.validate(delivery);
+        return malformed != null ? malformed : WebDeliveryScope.refusalFor(agent, delivery);
     }
 
     /** JCLAW-455: append a non-blocking delivery-reachability advisory to a tool result,
@@ -569,7 +579,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
         // JCLAW-418: validate an explicit delivery patch before persisting.
         if (args.has(KEY_DELIVERY)) {
-            var deliveryErr = DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+            var deliveryErr = deliveryError(optStr(args, KEY_DELIVERY), agent);
             if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
         }
 

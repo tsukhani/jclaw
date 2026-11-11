@@ -78,6 +78,8 @@ public final class ReminderDispatcher {
         };
     }
 
+    // The spec's target is not read: a web reminder is a Notification for the task's own agent, never a
+    // message in a conversation, so WebDeliveryScope (JF-289) has nothing to check here.
     private static DeliveryDispatcher.DispatchResult dispatchWeb(Task task, TaskRun run, String content) {
         if (task.agent == null) {
             return DeliveryDispatcher.DispatchResult.failedDelivery(

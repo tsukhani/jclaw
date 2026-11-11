@@ -29,6 +29,7 @@ import services.TaskService;
 import services.TaskWriteService;
 import services.TimezoneResolver;
 import services.Tx;
+import services.WebDeliveryScope;
 import utils.ApiResponses;
 import utils.AppClock;
 import utils.ChannelOriginTrust;
@@ -387,11 +388,17 @@ public class ApiTasksController extends Controller {
      * {@link services.DeliverySpec#validate}. Structural only — tool
      * resolution and channel configuration are caller/runtime concerns. No-op
      * when {@code delivery} is absent or explicit-null (the latter clears it).
+     *
+     * <p>JF-289: an agent other than {@code main} saves a {@code web:<id>} delivery only for a
+     * conversation it may deliver into ({@link WebDeliveryScope}); the operator and {@code main} save any.
      */
     private static void rejectInvalidDelivery(JsonObject body) {
         var delivery = TaskWriteService.readOptionalString(body, KEY_DELIVERY);
         if (delivery == null) return;
         var err = DeliverySpec.validate(delivery);
+        if (err == null && !RequestPrincipal.isOperatorOrMainAgent()) {
+            err = WebDeliveryScope.refusalFor(RequestPrincipal.callingAgent(), delivery);
+        }
         if (err != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, err);
     }
 

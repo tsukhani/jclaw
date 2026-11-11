@@ -345,6 +345,11 @@ public final class DeliveryDispatcher {
      * on a virtual-thread carrier with no Conversation context still
      * lands in the right chat — the agent's "most-recent conversation"
      * heuristic isn't reliable when the agent has parallel chats open.
+     *
+     * <p>JF-289: an explicit conversation id is honored only when {@link WebDeliveryScope} lets
+     * {@code agent} deliver into it: its own conversation or one in its parent chain, and any
+     * for {@code main}. The message would otherwise land, as user input, in a chat of the
+     * operator's with another agent.
      */
     private static DispatchResult dispatchWeb(Agent agent, String target, String text) {
         if (agent == null) {
@@ -360,16 +365,11 @@ public final class DeliveryDispatcher {
         // the walk-up — that path predates this overload and the existing
         // callers depend on it.
         Conversation conv = null;
-        if (target != null && !target.isBlank()) {
-            try {
-                var convId = Long.parseLong(target.trim());
-                conv = (Conversation) Conversation.findById(convId);
-                if (conv == null) {
-                    return DispatchResult.failedDelivery(
-                            "Web target conversation " + convId + " not found.");
-                }
-            } catch (NumberFormatException _) {
-                // Non-numeric → not an explicit routing signal; fall through.
+        var convId = WebDeliveryScope.conversationId(target);
+        if (convId != null) {
+            conv = WebDeliveryScope.reachable(agent, convId);
+            if (conv == null) {
+                return DispatchResult.failedDelivery(WebDeliveryScope.notFound(convId));
             }
         }
         if (conv == null) {
