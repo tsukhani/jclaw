@@ -97,9 +97,10 @@ import java.util.stream.Collectors;
  * <p>{@link #confinement} decides each run from the root of the agent's parent chain. Every agent
  * except {@code main} and its copies always runs through {@link HarnessSandbox#wrapCustomAgentShell}:
  * writes are limited to its resolved workspace and, on macOS, the home folder is unreadable except that
- * workspace and the home directories on JClaw's own PATH (on Linux bwrap already hides it). Where no
- * sandbox can start, its command is refused with {@link ToolErrorTemplates#shellSandboxUnavailable} and
- * nothing runs.
+ * workspace and the home directories on JClaw's own PATH (on Linux bwrap already hides it). With the network
+ * allowed it still reaches no local service through a socket file outside its workspace and its own temp
+ * folder, such as a container runtime's control socket. Where no sandbox can start, its command is refused
+ * with {@link ToolErrorTemplates#shellSandboxUnavailable} and nothing runs.
  *
  * <p>{@code main} follows JCLAW-1153's tri-state {@code shell.sandbox} — {@code false} (shipped
  * default) | {@code true} (confine every run) | {@code untrusted} (confine only runs whose origin channel
@@ -701,8 +702,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var script = "exec 3>&1 " + BackgroundProcesses.HELD_FD + "<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV
                 + "\" 2>&1\n" + command;
         var shell = List.of("/bin/sh", "-c", script);
-        var argv = confinement == Confinement.CUSTOM_AGENT
-                ? HarnessSandbox.wrapCustomAgentShell(shell, workspace.toFile())
+        var custom = confinement == Confinement.CUSTOM_AGENT
+                ? HarnessSandbox.wrapCustomAgentShell(shell, workspace.toFile()) : null;
+        var argv = custom != null ? custom.argv()
                 : HarnessSandbox.wrap(shell, workspace.toFile(), List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
         var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
@@ -712,8 +714,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
         if (confinement != Confinement.NONE) {
             pb.environment().putAll(confinedCaches(workspace));
         }
-        if (confinement == Confinement.CUSTOM_AGENT) {
+        if (custom != null) {
             pb.environment().putAll(customAgentConfig(workspace));
+            // Last, so a TMPDIR the model passes cannot point the run's tools back at the shared temp folder.
+            pb.environment().putAll(custom.env());
         }
         pb.environment().put(OUTPUT_ENV, output.toString());
         return pb.start();

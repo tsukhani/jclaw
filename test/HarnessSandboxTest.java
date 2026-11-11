@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 
 /**
@@ -156,7 +157,11 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.availability());
     }
 
-    /** On Linux a custom agent's run is linuxArgv in its own user namespace, under shell.sandbox's network rule, with the key itself unset. */
+    /**
+     * On Linux a custom agent's run is linuxArgv in its own user namespace, under shell.sandbox's network rule,
+     * with the key itself unset, plus runtime folders of its own between /proc and the $HOME tmpfs. It has a
+     * /tmp of its own already, so its TMPDIR is left alone.
+     */
     @Test
     void linuxCustomAgentWrapIsTheShellArgvUnderTheNetworkRule() {
         var a = HarnessSandbox.availability();
@@ -168,12 +173,20 @@ class HarnessSandboxTest extends UnitTest {
             var root = session.toFile();
             for (var network : List.of("deny", "allow")) {
                 ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, network);
-                var wrapped = HarnessSandbox.wrapCustomAgentShell(argv, root);
-                assertEquals(HarnessSandbox.inOwnUserNamespace(
-                        HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), wrapped,
-                        "network=" + network);
+                var confined = HarnessSandbox.wrapCustomAgentShell(argv, root);
+                var wrapped = confined.argv();
+                assertEquals(Map.of(), confined.env(), "network=" + network);
                 assertEquals("--unshare-user", wrapped.get(1), "network=" + network);
                 assertEquals(network.equals("deny"), wrapped.contains("--unshare-net"), "network=" + network);
+
+                int afterProc = indexOfPair(wrapped, "--proc", "/proc") + 2;
+                int homeTmpfs = indexOfPair(wrapped, "--tmpfs", System.getProperty("user.home"));
+                assertEquals(List.of("--tmpfs", "/run"), wrapped.subList(afterProc, afterProc + 2), "argv=" + wrapped);
+                var withoutOwnRuntime = new ArrayList<>(wrapped);
+                withoutOwnRuntime.subList(afterProc, homeTmpfs).clear();
+                assertEquals(HarnessSandbox.inOwnUserNamespace(
+                        HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), withoutOwnRuntime,
+                        "network=" + network);
             }
         } finally {
             ShellSandboxSync.release();
@@ -257,27 +270,74 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * A custom agent's profile is the hidden-home profile plus two rules, last so that no grant outranks them:
-     * SIGQUIT only to its own sandbox, and a JVM's attach socket neither connected to nor renamed, removed or linked.
+     * A custom agent's profile is the hidden-home profile, then the local services outside it refused, then two
+     * rules last so that no grant outranks them: SIGQUIT only to its own sandbox, and a JVM's attach socket
+     * neither connected to nor renamed, removed or linked. With the network it connects to no Unix socket but
+     * those in its workspace and its own temp folder, and mDNSResponder's, which resolves names.
      */
     @Test
-    void macProfileForACustomAgentEndsWithTheJvmAttachDenies() {
+    void macProfileForACustomAgentRefusesLocalServicesAndEndsWithTheJvmAttachDenies() {
         var root = new File("/h/u/jc/workspace/a");
         var hidden = List.of(Path.of("/h/u/jc/data"));
         var homeReads = List.of("/h/u/.local/bin");
-        for (var denyNetwork : List.of(false, true)) {
-            assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, denyNetwork, homeReads) + """
-                    (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
-                    (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
-                    """, HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, denyNetwork, homeReads),
-                    "denyNetwork=" + denyNetwork);
-        }
+        var ownTemp = "/private/var/folders/x/T/jclaw-0a1b2c3d";
+        assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, false, homeReads) + """
+                (deny network-outbound (remote unix-socket))
+                (allow network-outbound (remote unix-socket (subpath "/h/u/jc/workspace/a")))
+                (allow network-outbound (remote unix-socket (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d")))
+                (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+                (deny lsopen)
+                (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
+                """, HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, false, homeReads, ownTemp));
     }
 
-    /** Those two rules reach a custom agent's run alone: main's key-confined exec and a coding harness keep their profile. */
+    /**
+     * Under network=deny the one network rule refuses every socket, a Unix one included. The socket rules are
+     * left out, since an allow after that deny would reopen the workspace's sockets and mDNSResponder's.
+     */
+    @Test
+    void macProfileForACustomAgentUnderNetworkDenyReopensNoSocket() {
+        var root = new File("/h/u/jc/workspace/a");
+        var hidden = List.of(Path.of("/h/u/jc/data"));
+        var homeReads = List.of("/h/u/.local/bin");
+        var denied = HarnessSandbox.customAgentMacosProfile(root, "/h/u", hidden, true, homeReads, "/private/var/folders/x/T/jclaw-0a1b2c3d");
+        assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, true, homeReads) + """
+                (deny lsopen)
+                (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
+                (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
+                """, denied);
+        assertTrue(denied.startsWith("(version 1)\n(allow default)\n(deny network*)\n"), denied);
+    }
+
+    /** A path with a quote in it stays inside its string in a socket rule, as it does in a file rule. */
+    @Test
+    void macSocketRulesEscapeTheirPaths() {
+        var profile = HarnessSandbox.customAgentMacosProfile(new File("/h/u/w\"s"), "/h/u", List.of(), false, List.of(),
+                "/private/t\"mp");
+        assertTrue(profile.contains("(allow network-outbound (remote unix-socket (subpath \"/h/u/w\\\"s\")))\n"), profile);
+        assertTrue(profile.contains("(allow network-outbound (remote unix-socket (subpath \"/private/t\\\"mp\")))\n"), profile);
+    }
+
+    /** One temp folder per write root, in this user's temp folder, under a name short enough to leave a socket path room. */
+    @Test
+    void aCustomAgentsTempFolderIsNamedAfterItsWriteRoot() {
+        var temp = Path.of(System.getProperty("java.io.tmpdir"));
+        var a = new File("/h/u/jc/workspace/a");
+        assertEquals(temp.resolve("jclaw-%08x".formatted("/h/u/jc/workspace/a".hashCode())), HarnessSandbox.customAgentTempDir(a));
+        assertEquals(HarnessSandbox.customAgentTempDir(a), HarnessSandbox.customAgentTempDir(new File("/h/u/jc/workspace/a")));
+        assertNotEquals(HarnessSandbox.customAgentTempDir(a), HarnessSandbox.customAgentTempDir(new File("/h/u/jc/workspace/b")));
+        assertEquals(14, HarnessSandbox.customAgentTempDir(a).getFileName().toString().length());
+    }
+
+    /**
+     * The local-service and JVM-attach rules reach a custom agent's run alone: main's key-confined exec and a
+     * coding harness keep their profile. The custom run's TMPDIR is the folder its profile names, made by the wrap.
+     */
     @Test
     @EnabledOnOs(OS.MAC)
-    void macOnlyACustomAgentsRunCarriesTheJvmAttachDenies() {
+    void macOnlyACustomAgentsRunCarriesTheLocalServiceAndJvmAttachDenies() throws Exception {
+        var temp = HarnessSandbox.customAgentTempDir(session.toFile());
         ShellSandboxSync.acquire();
         try {
             // Set right before the wraps: another class's table wipe can clear a key.
@@ -286,17 +346,39 @@ class HarnessSandboxTest extends UnitTest {
             var mainProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), List.of(),
                     HarnessSandbox.SHELL_SANDBOX_KEY, false).get(2);
             var harnessProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), new ClaudeAdapter(), false).get(2);
-            var customProfile = HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile()).get(2);
+            var custom = HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile());
+            var customProfile = custom.argv().get(2);
 
-            for (var rule : List.of("(deny signal", ".java_pid")) {
+            for (var rule : List.of("(deny signal", ".java_pid", "unix-socket", "lsopen")) {
                 assertFalse(mainProfile.contains(rule), mainProfile);
                 assertFalse(harnessProfile.contains(rule), harnessProfile);
             }
+            assertEquals(Map.of("TMPDIR", temp.toString()), custom.env());
+            assertTrue(Files.isDirectory(temp), "the wrap makes the folder: " + temp);
             assertTrue(customProfile.endsWith("""
                     (deny file-read* (subpath "%s/.netrc"))
+                    (deny network-outbound (remote unix-socket))
+                    (allow network-outbound (remote unix-socket (subpath "%s")))
+                    (allow network-outbound (remote unix-socket (subpath "%s")))
+                    (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+                    (deny lsopen)
                     (deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))
                     (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
-                    """.formatted(System.getProperty("user.home"))), customProfile);
+                    """.formatted(System.getProperty("user.home"), session.toFile().getAbsolutePath(), temp.toRealPath())),
+                    customProfile);
+        } finally {
+            Files.deleteIfExists(temp);
+            ShellSandboxSync.release();
+        }
+    }
+
+    /** With the override in place of the sandbox, the argv comes back unwrapped and no variable is set. */
+    @Test
+    void theCustomAgentPassthroughOverrideSetsNoVariable() {
+        ShellSandboxSync.acquireUnconfined();
+        try {
+            assertEquals(new HarnessSandbox.ConfinedShell(List.of("true"), Map.of()),
+                    HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile()));
         } finally {
             ShellSandboxSync.release();
         }
@@ -515,6 +597,53 @@ class HarnessSandboxTest extends UnitTest {
                 HarnessSandbox.inOwnUserNamespace(notRoot).subList(0, 6));
         assertEquals(asRoot, HarnessSandbox.inOwnUserNamespace(asRoot));
         assertFalse(notRoot.contains("--unshare-user"), notRoot.toString());
+    }
+
+    /**
+     * A custom agent's Linux run gets empty runtime folders of its own, where the services outside it keep their
+     * control sockets. The mounts sit between /proc and the $HOME tmpfs, and main's and a harness's argv have none.
+     */
+    @Test
+    void linuxCustomAgentArgvHidesTheRuntimeFoldersBeforeTheHomeTmpfs() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw").toFile();
+        var plain = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), false, false);
+        var ownRuntime = List.of("--tmpfs", "/run", "--ro-bind-try", "/run/systemd/resolve/stub-resolv.conf",
+                "/run/systemd/resolve/stub-resolv.conf");
+        var custom = HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), false, false,
+                ownRuntime);
+
+        assertEquals(List.of("bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--proc", "/proc",
+                "--tmpfs", "/run", "--ro-bind-try", "/run/systemd/resolve/stub-resolv.conf",
+                "/run/systemd/resolve/stub-resolv.conf", "--tmpfs", "/home/operator"), custom.subList(0, 17));
+        var without = new ArrayList<>(custom);
+        without.subList(10, 15).clear();
+        assertEquals(plain, without);
+        assertEquals(plain, HarnessSandbox.linuxArgv(List.of("true"), root, List.of(), "/home/operator", List.of(), false,
+                false, List.of()));
+        assertEquals(-1, indexOfPair(plain, "--tmpfs", "/run"), "main's and a harness's argv keep /run, argv=" + plain);
+    }
+
+    /**
+     * Each runtime folder gets a tmpfs, and only what a command needs from under one comes back, read-only:
+     * the file /etc/resolv.conf points at and the PATH folders, once each. A path that merely starts with the
+     * same letters, the folder itself, a relative entry and anything outside are left alone.
+     */
+    @Test
+    void linuxOwnRuntimeBringsBackOnlyTheResolverFileAndPathFoldersUnderARuntimeFolder() {
+        assertEquals(List.of("--tmpfs", "/run"), HarnessSandbox.linuxOwnRuntime(List.of("/run"), null, null));
+        assertEquals(List.of(), HarnessSandbox.linuxOwnRuntime(List.of(), "/run/systemd/resolve/stub-resolv.conf", "/run/bin"));
+        assertEquals(List.of("--tmpfs", "/run"),
+                HarnessSandbox.linuxOwnRuntime(List.of("/run"), "/etc/resolv.conf", "/usr/bin:/bin"),
+                "a resolver file and a PATH outside /run need nothing brought back");
+        assertEquals(List.of("--tmpfs", "/run",
+                        "--ro-bind-try", "/run/systemd/resolve/stub-resolv.conf", "/run/systemd/resolve/stub-resolv.conf",
+                        "--ro-bind-try", "/run/current-system/sw/bin", "/run/current-system/sw/bin",
+                        "--ro-bind-try", "/run/wrappers/bin", "/run/wrappers/bin"),
+                HarnessSandbox.linuxOwnRuntime(List.of("/run"), "/run/systemd/resolve/stub-resolv.conf",
+                        "/run/current-system/sw/bin:/usr/bin::/run/wrappers/bin/:/run/current-system/sw/bin:/run:/runner/bin:run/bin:/run/../opt/bin"));
+        assertEquals(List.of("--tmpfs", "/run", "--tmpfs", "/var/run",
+                        "--ro-bind-try", "/var/run/NetworkManager/resolv.conf", "/var/run/NetworkManager/resolv.conf"),
+                HarnessSandbox.linuxOwnRuntime(List.of("/run", "/var/run"), "/var/run/NetworkManager/resolv.conf", null));
     }
 
     /** A write root above data/ (a coding run continuing in the checkout itself) is bound first, so data/'s tmpfs still covers it. */

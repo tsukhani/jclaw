@@ -48,8 +48,8 @@ parentless `main` is main-rooted and follows `shell.sandbox` byte for byte; any 
 chain the walk gives up on, runs through `HarnessSandbox.wrapCustomAgentShell` whatever the key
 says, writing only to `AgentService.workspacePath(agent.name)` (a copy writes its root's workspace),
 with the confined package caches. On Linux that is the same `linuxArgv`, which already hides
-`$HOME`, with `--unshare-user` whoever runs it (below). On macOS the profile also hides the home
-folder, in this order, last match winning:
+`$HOME`, with `--unshare-user` whoever runs it and runtime folders of its own (both below). On macOS
+the profile also hides the home folder, in this order, last match winning:
 today's lines through the write grants; `(deny file-read* (subpath "<home>"))`; the workspace
 reopened for reading; each PATH reopen; `(allow file-read-metadata (literal …))` for `<home>` and
 every directory between it and a reopen, so `getcwd` and `realpath` resolve (an inference about
@@ -98,6 +98,66 @@ the custom agent's alone: `main`'s `exec` and a coding harness keep their profil
   fails in the container with `Can't mount proc on /newroot/proc` under `seccomp-bwrap.json`, but
   without `--proc`, keeping the `/proc` the root bind brings, bwrap starts and the signal is
   refused (measured as root and as uid 1000).
+
+**A custom agent's shell reaches no local service outside it through a socket file (JF-302).** The
+sandbox bounds files, and a service that runs unconfined as the operator acts outside it for whoever
+connects: a container runtime starts a container with any host folder mounted, which undoes the file
+confinement. So while `shell.sandbox.network` is `allow`, a socket file takes a custom agent's connection
+only in its workspace and in its own temp folder. The rule refuses every socket but a few instead of
+naming the known ones: on the Mac it was measured on, the shared temp folder alone held the control
+sockets of several other programs, none of them a container runtime, which no list would have named.
+Like the JVM attach rules it is the custom agent's alone: `main`'s `exec` and a coding harness keep their
+profiles (`SandboxLocalServiceTest.mainConfinedUnderTheKeyStillConnectsToASocketOutsideItsWorkspace`,
+`HarnessSandboxTest.macOnlyACustomAgentsRunCarriesTheLocalServiceAndJvmAttachDenies`).
+
+- **macOS** — `customAgentMacosProfile` adds `(deny network-outbound (remote unix-socket))`, then an
+  allow for the workspace, for the run's own temp folder and for `/private/var/run/mDNSResponder`, which
+  name resolution goes through (measured: without that allow `curl` resolves no host;
+  `SandboxLocalServiceTest.onMacANameStillResolvesInsideTheSandbox`). Docker Desktop's socket is under
+  `$HOME`, with `/var/run/docker.sock` a link to it (seen here). Colima's is under `$HOME` too, and a
+  Podman machine's is under `$HOME` or, in newer versions, in the temp folder, which macOS shares between
+  every program the user runs (their documentation's paths: neither is installed here). So the run gets a
+  temp folder of its own, `HarnessSandbox.customAgentTempDir`: `jclaw-<hash of the write root>` in `java.io.tmpdir`,
+  made by the wrap, named in the profile by its real path and in the run's environment by `TMPDIR`
+  (`ConfinedShell.env`, put after the model's `env`, so a `TMPDIR` the model passes changes nothing). The
+  name is short because a socket path holds 103 bytes. A tool that keeps a socket beside its temp files
+  still reaches it (measured with Python's `multiprocessing.Manager`: it works under that `TMPDIR` and
+  fails with `Operation not permitted` in the shared folder). A tool that puts its socket in `/tmp` by a
+  fixed name does not, and needs a path in the workspace or a TCP port. Files in the shared temp folders
+  stay writable, and JClaw never empties the run's folder. Under
+  `network=deny` the socket rules are left out: `(deny network*)` already refuses every socket, and an
+  allow after it would reopen the workspace's
+  (`HarnessSandboxTest.macProfileForACustomAgentUnderNetworkDenyReopensNoSocket`).
+- **Linux** — a socket is a file, and the `$HOME` and `/tmp` tmpfs already hid Docker Desktop's, Colima's
+  and everything in `/tmp`. The root bind left `/run` visible (and `/var/run` where that is a directory
+  of its own): Docker's and Podman's sockets, the rootless ones under `/run/user/<uid>`, the session and
+  system D-Bus, the systemd user instance. `HarnessSandbox.linuxOwnRuntime` puts a tmpfs over each,
+  between `--proc /proc` and the `$HOME` tmpfs, and binds back read-only what a command needs from under
+  it: the file `/etc/resolv.conf` points at, which systemd-resolved and NetworkManager keep there
+  (measured: with `/run` hidden and that file not bound back, no name resolves), and the folders of
+  JClaw's own `PATH` under `/run`, where NixOS keeps its programs (measured with a stand-in folder and a
+  linked one, not on NixOS). The file is bound, never its folder, so a socket beside it stays out. A run
+  that outlives a change of DNS servers keeps reading the file it started with, and a host that looks up
+  names or accounts through a daemon socket under `/run` (nscd, nslcd) loses that lookup inside the
+  sandbox (both inferences, not measured). The Linux run tests skip where bwrap cannot start, the build
+  host included, so `HarnessSandboxTest` pins the argv on every host and the argv itself was run in
+  throwaway containers.
+
+The other local-service channels, each measured from inside a custom agent's sandbox with the same
+attempt outside it as the control. macOS is 27.0.1; Linux is the two container images, bwrap 0.11.1, as
+root and as uid 1000, with throwaway servers in place of every real service.
+
+| Channel | Before | Now, and why |
+| --- | --- | --- |
+| A container runtime's control socket (macOS, Linux) | answered | Refused by the rules above: `SandboxLocalServiceTest.aCustomAgentCannotConnectToASocketWhereAContainerRuntimeKeepsIts`. |
+| The operator's ssh-agent (macOS) | answered `ssh-add -l` | Refused by the socket rule (`Error connecting to agent: Operation not permitted`). It signs with the operator's keys for any caller, and `~/.ssh` was already denied. |
+| LaunchServices, `open` (macOS) | started a throwaway app outside the sandbox, which wrote where the sandbox cannot | Closed with `(deny lsopen)`: `open` fails with error -54 and starts nothing (`onMacACustomAgentCannotHaveLaunchServicesStartAnApp`). |
+| launchd job submission, `launchctl submit`, `bootstrap`, `load` (macOS) | refused | Kept as it is, no rule: launchd refuses a sandboxed caller, under `(allow default)` alone too. Outside, all three ran a throwaway job; inside, none did (`Bootstrap failed: 5: Input/output error`), and `launchctl setenv` is `Not privileged`. |
+| Apple Events, `osascript` (macOS) | refused | Kept as it is, no rule: a `quit` sent to a throwaway applet outside came back `-10004` and the applet kept running, under `(allow default)` alone too; outside the sandbox it quit. Only that event was measured: another may ask the operator for consent on screen. |
+| The session D-Bus at `/run/user/<uid>/bus` (Linux) | a throwaway server at that path answered, and saw the operator's uid as its peer | Absent, with the rest of `/run`: the system bus and the systemd user instance go the same way. Measured with a stand-in, because neither image has a D-Bus daemon; that a real bus admits a peer by that uid is an inference. |
+| An abstract socket (Linux) | answered | Kept: it belongs to the network namespace, which the run shares for its outbound connections, so only `shell.sandbox.network=deny` cuts it. An X server listens on one, and so does a session bus started by `dbus-launch` (an inference, not measured with either). |
+| A service on a loopback TCP port (macOS, Linux) | answered | Kept: the network is allowed, and a local port is part of it. `shell.sandbox.network=deny` closes it. |
+| The preferences daemon, `defaults` (macOS) | a write to a throwaway domain inside was read back outside | Kept, and not closed here: it is a Mach service, not a socket, and denying one takes its own measurement of which tools stop working. The keychain service is the same case: it answered a lookup for an item that does not exist, and reading a real item was not measured. The clipboard was empty, so it was not measured. |
 
 **Readiness is a launch, not a lookup.** `HarnessSandbox.availability()` is the one check behind
 `GET /api/sandbox`, every key-confined `wrap` and `wrapCustomAgentShell`. On Linux it runs
@@ -159,7 +219,9 @@ resets it to `CustomAgentOverride.NONE`. The override is read only by
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.
 A test that needs a JVM to attach to starts a throwaway one and stops it (`SandboxJvmAttachTest`),
-never a JVM that is already running. A test that sends SIGQUIT inside a run aims it at the run's
+never a JVM that is already running. A test that needs a local service starts its own Unix socket server at
+the path in question (`SandboxLocalServiceTest`): it never connects to a real runtime's socket and never
+starts a container. A test that sends SIGQUIT inside a run aims it at the run's
 shell from a subshell, `(kill -QUIT $$)`: `sh` starts a background job with SIGQUIT ignored, so
 `cmd & kill -QUIT $!` ends the job only when the signal arrives before the job has set that up
 (measured under CPU load: 13 of 300 runs ignored it).

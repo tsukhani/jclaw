@@ -1079,6 +1079,32 @@ On Linux a confined process runs under `bwrap`, which builds the visible filesys
 
 A custom agent's command also cannot attach to a Java program that runs outside the sandbox, JClaw included. On macOS it cannot attach to a Java program it starts itself either, so `jcmd`, `jstack` and a Java agent that attaches to its own program fail there.
 
+A custom agent's command also cannot reach a program that runs outside the sandbox through a socket file. Such a program does what it is asked with your rights: Docker Desktop, Colima and Podman can start a container that sees any folder on your machine. So the command connects to a socket file only in its own workspace and in its own temp folder. On macOS, JClaw makes that temp folder for the agent and points `TMPDIR` to it, because the usual temp folder is shared with every program you run. One socket outside those folders stays open on macOS: the one the system uses to look up network names. On Linux the command gets empty `/tmp`, `/run` and `/var/run` folders of its own, so the Docker and Podman sockets and your session's D-Bus are not there. On macOS the command also cannot have the system open an app or a file, so `open` fails.
+
+:::gotcha
+A program that an agent starts with its socket at a fixed path in `/tmp` cannot be reached there on macOS. Give it a socket path in the workspace, or a port on `127.0.0.1`.
+:::
+
+### What the sandbox stops and what it does not
+
+For a custom agent's commands, the sandbox stops these:
+
+- Writing a file outside the workspace and the temp folders.
+- Reading your home folder outside the workspace, and reading or writing JClaw's own folders.
+- Connecting to a socket file outside the workspace and the command's own temp folder. That covers the control sockets of Docker Desktop, Colima and Podman and your SSH agent, and on Linux the D-Bus of your session and of the system.
+- Opening an app or a file with `open` on macOS.
+- Attaching to a Java program outside the sandbox.
+
+It does not stop these:
+
+- **The network**, while `shell.sandbox.network` is *Allow*. The command can connect to any address. That includes a program on this machine that listens on a network port, such as a database, or Docker when you have turned on its TCP port. *Deny* stops all of it.
+- **Reading files outside your home folder** that your account can read.
+- **Signals.** The command can stop another program of yours with `kill`.
+- **On Linux, a socket that has no file.** Some desktop programs listen on such an "abstract" socket, for example the X11 display, and on some systems your session's D-Bus. *Deny* stops these too, because they belong to the network.
+- **On macOS, system services that are not socket files.** A command can still read and change app preferences with `defaults`, and the keychain still answers its requests. Whether the keychain gives out a saved item without asking you was not tested.
+
+If one of these matters for an agent, do not give that agent the shell, or run JClaw in a container.
+
 A confined `exec` keeps package caches in the agent's workspace, in its `.cache` folder: `UV_CACHE_DIR`, `npm_config_cache`, `PIP_CACHE_DIR` and `XDG_CACHE_HOME` point there, because `uv`, `npm` and `pip` cannot write their usual caches in your home folder.
 
 With `shell.sandbox.network` set to `deny`, a confined process also has no network. On macOS, `sandbox-exec` refuses every connection it tries to open. On Linux, `bwrap` gives it a network of its own with nothing else in it.

@@ -93,6 +93,7 @@ class SandboxJvmAttachTest extends UnitTest {
     @AfterAll
     static void cleanupTestAgent() {
         deleteDir(AgentService.workspacePath(AGENT));
+        deleteDir(HarnessSandbox.customAgentTempDir(AgentService.workspacePath(AGENT).toFile()));
     }
 
     /** {@code main}, unsaved: {@code Fixtures.deleteDatabase} removed its row, and it runs {@code exec} unconfined. */

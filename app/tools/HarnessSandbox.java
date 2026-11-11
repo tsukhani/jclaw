@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * JCLAW-672: opt-in OS sandbox around a coding-harness process. When enabled
@@ -62,7 +63,9 @@ import java.util.Locale;
  * <p>JF-165: an agent whose parent chain does not end at {@code main} runs {@code exec} through
  * {@link #wrapCustomAgentShell} whatever the key says, and on macOS its profile hides {@code $HOME}
  * as well; {@link #SHELL_SANDBOX_KEY} governs only {@code main}'s and its copies' {@code exec}. That run
- * also cannot attach to a JVM outside it: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}.
+ * also cannot attach to a JVM outside it, and with the network allowed it still reaches no local service
+ * through a socket file outside its workspace and its own temp and runtime folders:
+ * {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}.
  */
 public final class HarnessSandbox {
 
@@ -119,6 +122,23 @@ public final class HarnessSandbox {
     private static final String MAC_DENY_JVM_ATTACH =
             "(deny signal (require-all (signal-number 3) (require-not (target same-sandbox))))\n"
                     + "(deny network-outbound file-write* file-link (regex #\"/\\.java_pid[^/]*$\"))\n";
+
+    /** The one socket outside a run's own folders that its commands need: macOS resolves names through it. */
+    private static final String MAC_MDNS_SOCKET = "/private/var/run/mDNSResponder";
+
+    /**
+     * LaunchServices starts an app outside the sandbox for whoever asks ({@code open}), which would run a
+     * program the run wrote with none of this profile's rules.
+     */
+    private static final String MAC_DENY_LAUNCH_SERVICES = "(deny lsopen)\n";
+
+    /**
+     * Where Linux services keep their control sockets: a container runtime's, the session and system D-Bus,
+     * the systemd user instance. A custom agent's run gets empty ones of its own.
+     */
+    private static final List<String> LINUX_RUNTIME_DIRS = List.of("/run", "/var/run");
+
+    private static final String RESOLV_CONF = "/etc/resolv.conf";
 
     /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final List<String> DENY_READ_HOME = List.of(
@@ -301,27 +321,73 @@ public final class HarnessSandbox {
      * Wrap a custom agent's {@code exec} run: confined whatever {@link #SHELL_SANDBOX_KEY} says, with
      * writes limited to {@code writeRoot} and the network cut under {@link #SHELL_NETWORK_KEY}{@code =deny}.
      * On macOS the profile is {@link #customAgentMacosProfile}; on Linux it is {@link #linuxArgv}, which
-     * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own}.
+     * already hides {@code $HOME}, {@link #inOwnUserNamespace in a user namespace of its own} and with
+     * {@link #linuxOwnRuntime runtime folders of its own}.
      *
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
-    public static List<String> wrapCustomAgentShell(List<String> argv, File writeRoot) {
+    public static ConfinedShell wrapCustomAgentShell(List<String> argv, File writeRoot) {
         var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
-        if (override == CustomAgentOverride.PASSTHROUGH) return argv;
+        if (override == CustomAgentOverride.PASSTHROUGH) return new ConfinedShell(argv, Map.of());
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
         if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
         var home = System.getProperty("user.home", "");
         var extraReads = extraHomeReads(home);
+        var pathEnv = SubprocessEnv.filteredHostEnv().get("PATH");
         if (ready.mechanism().equals(BWRAP)) {
-            return inOwnUserNamespace(linuxArgv(argv, writeRoot, extraReads, SHELL_SANDBOX_KEY));
+            var resolvConf = realPath(RESOLV_CONF);
+            var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
+            return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, extraReads, home,
+                    linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()),
+                    deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime)), Map.of());
         }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
+        var temp = customAgentTempDir(writeRoot);
         var profile = customAgentMacosProfile(writeRoot, home, SandboxHiddenRoots.current(),
-                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(SubprocessEnv.filteredHostEnv().get("PATH"), home, extraReads));
+                deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(pathEnv, home, extraReads), createdRealPath(temp));
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
         out.addAll(argv);
-        return List.copyOf(out);
+        return new ConfinedShell(List.copyOf(out), Map.of("TMPDIR", temp.toString()));
+    }
+
+    /**
+     * A custom agent's run as {@link #wrapCustomAgentShell} confines it: the argv to start, and the variables
+     * its rules count on, which go into the environment after the caller's own.
+     */
+    public record ConfinedShell(List<String> argv, Map<String, String> env) {}
+
+    /**
+     * The temp folder of a custom agent's run on macOS, one per write root, inside this user's temp folder.
+     * macOS shares that folder between every program the user runs, their control sockets included, so the
+     * run's {@code TMPDIR} is this one and a socket in it is the only one in a temp folder the run reaches.
+     * The name is short because a socket's path holds 103 bytes.
+     */
+    public static Path customAgentTempDir(File writeRoot) {
+        var temp = SandboxHiddenRoots.lexical(System.getProperty("java.io.tmpdir", ""));
+        if (temp == null || !temp.isAbsolute()) {
+            throw new SandboxUnavailableException("the temp folder (java.io.tmpdir) is not an absolute path");
+        }
+        return temp.resolve("jclaw-%08x".formatted(writeRoot.getAbsolutePath().hashCode()));
+    }
+
+    /** {@code temp}, made, with its symlinks resolved: Seatbelt matches {@code /private/var}, never {@code /var}. */
+    private static String createdRealPath(Path temp) {
+        try {
+            return Files.createDirectories(temp).toRealPath().toString();
+        } catch (IOException e) {
+            throw new SandboxUnavailableException("the run's temp folder %s could not be made: %s".formatted(temp, e));
+        }
+    }
+
+    /** {@code path} with its symlinks resolved, or null when nothing is there. */
+    private static @Nullable Path realPath(String path) {
+        var lexical = SandboxHiddenRoots.lexical(path);
+        try {
+            return lexical == null ? null : lexical.toRealPath();
+        } catch (IOException _) {
+            return null;
+        }
     }
 
     /**
@@ -592,11 +658,28 @@ public final class HarnessSandbox {
     /**
      * A custom agent's Seatbelt profile, public so a test can pin its text on any host: {@code $HOME} hidden
      * except the write root and {@code homeReads} (the {@code $HOME} directories on JClaw's own PATH,
-     * {@link #homeReadReopens}), then the JVM attach handshake denied last, where no grant outranks it.
+     * {@link #homeReadReopens}), then the local services outside the sandbox refused, and the JVM attach
+     * handshake denied last, where no grant outranks it.
+     *
+     * <p>A service that runs unconfined as the operator acts outside the sandbox for whoever connects: a
+     * container runtime mounts any host folder. So with the network, a Unix socket takes the run's connection
+     * only under the write root, under {@code ownTemp} and at mDNSResponder's path. Under {@code denyNetwork}
+     * the one network rule already refuses every socket, and an allow after it would reopen one.
+     *
+     * @param ownTemp {@link #customAgentTempDir} with its symlinks resolved, which is how Seatbelt matches it
      */
     public static String customAgentMacosProfile(File writeRoot, String home, List<Path> hidden,
-                                                 boolean denyNetwork, List<String> homeReads) {
-        return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads) + MAC_DENY_JVM_ATTACH;
+                                                 boolean denyNetwork, List<String> homeReads, String ownTemp) {
+        var sockets = denyNetwork ? "" : "(deny network-outbound (remote unix-socket))\n"
+                + socketAllow("subpath", writeRoot.getAbsolutePath())
+                + socketAllow("subpath", ownTemp)
+                + socketAllow("path-literal", MAC_MDNS_SOCKET);
+        return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads)
+                + sockets + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_JVM_ATTACH;
+    }
+
+    private static String socketAllow(String filter, String path) {
+        return "(allow network-outbound (remote unix-socket (" + filter + " \"" + escapeSeatbelt(path) + "\")))\n";
     }
 
     private static void appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
@@ -670,6 +753,17 @@ public final class HarnessSandbox {
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
                                          String home, List<Path> hidden, boolean denyNetwork, boolean asRoot) {
+        return linuxArgv(argv, writeRoot, allowances, home, hidden, denyNetwork, asRoot, List.of());
+    }
+
+    /**
+     * {@link #linuxArgv(List, File, List, String, List, boolean, boolean)} with {@code ownRuntime}, the
+     * {@link #linuxOwnRuntime} mounts of a custom agent's run. They go before the {@code $HOME} tmpfs, so
+     * every grant still lands on top of them.
+     */
+    @SuppressWarnings("java:S107") // one sandbox's whole shape, each part resolved by the caller
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String home,
+                                         List<Path> hidden, boolean denyNetwork, boolean asRoot, List<String> ownRuntime) {
         var out = new ArrayList<String>(List.of(BWRAP));
         if (asRoot) out.addAll(ROOT_FLAGS);
         if (denyNetwork) out.add("--unshare-net");
@@ -677,10 +771,11 @@ public final class HarnessSandbox {
                 "--ro-bind", "/", "/",
                 "--dev", "/dev",
                 "--tmpfs", "/tmp",
-                "--proc", "/proc",
-                // an empty HOME by default; the write root and the harness's own state
-                // paths are bound back below (secrets not listed stay absent).
-                "--tmpfs", home));
+                "--proc", "/proc"));
+        out.addAll(ownRuntime);
+        // an empty HOME by default; the write root and the harness's own state
+        // paths are bound back below (secrets not listed stay absent).
+        out.addAll(List.of("--tmpfs", home));
         var reopened = new ArrayList<String>();
         // rebind the write root read-write over the read-only root
         addBind(out, reopened, "--bind", writeRoot.getAbsolutePath(), hidden);
@@ -693,6 +788,49 @@ public final class HarnessSandbox {
         }
         out.addAll(reopened);
         out.addAll(argv);
+        return List.copyOf(out);
+    }
+
+    /**
+     * The mounts that give a custom agent's run runtime folders of its own, public so a test can pin them on
+     * any host: an empty tmpfs over each of {@code runtimeDirs}, where the services outside the sandbox keep
+     * their control sockets, then read-only what its commands still need from under them. That is the file
+     * {@code /etc/resolv.conf} points at ({@code resolvConf}: systemd-resolved and NetworkManager keep it
+     * there, and without it no name resolves) and each {@code pathEnv} folder (NixOS keeps its programs
+     * there). A file is bound, never its folder, so no socket beside it comes back.
+     */
+    public static List<String> linuxOwnRuntime(List<String> runtimeDirs, @Nullable String resolvConf,
+                                               @Nullable String pathEnv) {
+        var out = new ArrayList<String>();
+        var dirs = new ArrayList<Path>();
+        for (var dir : runtimeDirs) {
+            var path = SandboxHiddenRoots.lexical(dir);
+            if (path == null) continue;
+            out.addAll(List.of("--tmpfs", dir));
+            dirs.add(path);
+        }
+        var needed = new ArrayList<String>();
+        if (resolvConf != null) needed.add(resolvConf);
+        if (pathEnv != null) needed.addAll(List.of(pathEnv.split(File.pathSeparator)));
+        var kept = new LinkedHashSet<String>();
+        for (var entry : needed) {
+            var p = SandboxHiddenRoots.lexical(entry);
+            if (entry.isEmpty() || p == null || !p.isAbsolute()) continue;
+            if (dirs.stream().anyMatch(dir -> strictlyBelow(p, dir))) kept.add(p.toString());
+        }
+        for (var path : kept) {
+            out.addAll(List.of("--ro-bind-try", path, path));
+        }
+        return List.copyOf(out);
+    }
+
+    /** {@link #LINUX_RUNTIME_DIRS} as this host has them: each real directory once, {@code /var/run} being {@code /run} on most. */
+    private static List<String> linuxRuntimeDirs() {
+        var out = new LinkedHashSet<String>();
+        for (var dir : LINUX_RUNTIME_DIRS) {
+            var real = realPath(dir);
+            if (real != null && Files.isDirectory(real)) out.add(real.toString());
+        }
         return List.copyOf(out);
     }
 
