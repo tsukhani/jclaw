@@ -1014,6 +1014,8 @@ What a dangerous action does when it cannot reach you for approval. It covers ev
 | `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` (see below). |
 | `telegram.approval.timeout-seconds` | 300 | How long an approval prompt in Telegram or Slack waits for your answer before it expires unanswered. Minimum 1. |
 
+An approval prompt shows the action's arguments in full. When they are too long for one message, JClaw sends them in several messages. Each one is marked like **Arguments, part 2 of 3, call 3fa9c1:**, and the approve and deny buttons come with the last one. Every part of one prompt has the same short code after **call**, and JClaw finishes sending one prompt before it starts the next in the same chat, so the buttons always belong to the parts just above them. An action with more than 12,000 characters of arguments is not sent to you: JClaw refuses it and tells the agent to make it shorter or split it. If any part cannot be sent, the action is not approved.
+
 One tool is stricter than this setting. A click by the `chrome_control` tool on anything except a plain link is refused under `allow`, because the page it clicks is your own signed-in browser; `ask` and `deny` behave as the table says. The main agent can be exempted in [Settings → Chrome](#settings-chrome).
 
 This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted (the channel already established that the sender was you), so this policy is what decides them:

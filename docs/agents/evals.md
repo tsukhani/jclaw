@@ -32,7 +32,8 @@ task. Run sweeps against `__evaltest__` — the eval sibling of `__loadtest__`,
 auto-provisioned on first capture, for which **every tool is opt-in**. Each suite
 declares its own `requiredTools` and capture grants exactly those before the
 sweep, revoking the rest, so a run is reproducible from the repo rather than from
-whatever was last clicked in the agent editor. Only `__evaltest__` is calibrated
+whatever was last clicked in the agent editor. `jclaw_api` is the exception:
+`__evaltest__` never gets it, even when a suite names it. Only `__evaltest__` is calibrated
 this way — an agent you configured yourself is never rewritten. Deleting the eval
 agent cleans up everything a sweep created.
 

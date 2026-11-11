@@ -481,7 +481,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // Plumbing fields (consumed by JCLAW-295/297).
         // Delivery inference (resolveDeliverySpec) exists so a task created from a chat
         // auto-delivers back to it on completion (TaskExecutor.dispatchDelivery →
-        // DeliveryDispatcher.dispatchSpec), and so a bare channel name from the LLM is
+        // DeliveryDispatcher.dispatchTaskDelivery), and so a bare channel name from the LLM is
         // filled in rather than rejected at fire time with a "Delivery spec must be
         // channel:target" error the operator never sees. Headless API creation (no chat
         // context) leaves delivery null.

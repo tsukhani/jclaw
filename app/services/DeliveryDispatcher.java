@@ -361,7 +361,7 @@ public final class DeliveryDispatcher {
      * treatment is the same.
      *
      * <p>Task auto-delivery (the
-     * {@link services.TaskExecutor} → {@link #dispatchSpec} wire) stamps
+     * {@link services.TaskExecutor} → {@link #dispatchTaskDelivery} wire) stamps
      * the calling conversation id as the target so a fire that completes
      * on a virtual-thread carrier with no Conversation context still
      * lands in the right chat — the agent's "most-recent conversation"

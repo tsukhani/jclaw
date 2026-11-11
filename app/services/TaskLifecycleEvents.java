@@ -35,7 +35,7 @@ import java.util.Map;
  *       under the {@code task} category instead.</li>
  *   <li>{@link #DELIVERED} — emitted by
  *       {@link TaskExecutor#dispatchDelivery} after a successful
- *       post-completion push through {@link DeliveryDispatcher#dispatchSpec}.
+ *       post-completion push through {@link DeliveryDispatcher#dispatchTaskDelivery}.
  *       Independent of {@link #COMPLETED} — a fire can complete
  *       without delivery (no {@link models.Task#delivery} configured),
  *       in which case the TaskRun's {@code deliveryStatus} is
@@ -85,7 +85,7 @@ public final class TaskLifecycleEvents {
      */
     public static final String LOST = "TASK_LOST";
     /** Emitted after a successful TaskRun completion whose {@link Task#delivery}
-     *  spec was honored by {@link DeliveryDispatcher#dispatchSpec}. */
+     *  spec was honored by {@link DeliveryDispatcher#dispatchTaskDelivery}. */
     public static final String DELIVERED = "TASK_DELIVERED";
     /** Emitted when post-completion delivery dispatch returned a non-OK
      *  {@link DeliveryDispatcher.DispatchResult}. The TaskRun itself is still
@@ -188,7 +188,7 @@ public final class TaskLifecycleEvents {
         NotificationBus.publishAfterCommit(BUS_RUN_CANCELLED, Map.of("taskId", taskId, "runId", runId));
     }
 
-    /** Mark a successful post-completion delivery via {@link DeliveryDispatcher#dispatchSpec}. */
+    /** Mark a successful post-completion delivery via {@link DeliveryDispatcher#dispatchTaskDelivery}. */
     public static void recordDelivered(Task task, TaskRun run, String deliverySpec) {
         var agentName = task.agent != null ? task.agent.name : null;
         var message = "Task '%s' delivered via '%s' (run=%d)".formatted(
