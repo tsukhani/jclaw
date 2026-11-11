@@ -15,6 +15,8 @@ import play.test.Fixtures;
 import play.test.FunctionalTest;
 import tools.JClawApiTool;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -169,6 +171,38 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
                 "completely unrelated content about cats");
 
         assertEquals(List.of("the quick brown fox jumps over the lazy dog"), snippets("fox"));
+    }
+
+    @Test
+    void aWordMatchesTheBeginningOfALongerOneAndAStarAddsNothing() {
+        var taskId = seedTask(seedAgent(), "prefix-task");
+        seedTranscript(taskId, "the quarterly invoice went out", "a reminder about lunch");
+
+        assertEquals(List.of("the quarterly invoice went out"), snippets("invoi"));
+        assertEquals(List.of("the quarterly invoice went out"), snippets(encoded("invoi*")));
+        assertEquals(List.of(), snippets("nvoice"));
+    }
+
+    @Test
+    void aHitHoldsEveryWordInAnyOrderAndQuotesMakeNoPhrase() {
+        var taskId = seedTask(seedAgent(), "every-word-task");
+        seedTranscript(taskId, "invoice drafted for review", "the client got it: send the invoice");
+
+        assertEquals(List.of("the client got it: send the invoice"), snippets(encoded("invoice client")));
+        assertEquals(List.of("the client got it: send the invoice"), snippets(encoded("\"invoice send client\"")));
+    }
+
+    @Test
+    void orAndNotAreWordsAHitMustHoldNotOperators() {
+        var taskId = seedTask(seedAgent(), "operator-task");
+        seedTranscript(taskId, "pay the invoice", "pay the bill", "invoice or bill, whichever is due");
+
+        assertEquals(List.of("invoice or bill, whichever is due"), snippets(encoded("invoice OR bill")));
+        assertEquals(List.of(), snippets(encoded("invoice NOT bill")));
+    }
+
+    private static String encoded(String query) {
+        return URLEncoder.encode(query, StandardCharsets.UTF_8);
     }
 
     @Test

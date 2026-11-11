@@ -43,8 +43,8 @@ function onFiltersChanged(filters: Filter[]) {
   // Lucene scope: task_run_message bodies, not the task name/description that
   // `q:` searches). A non-empty token runs the search and shows the hit panel;
   // removing the chip clears it. Multi-word queries are quoted in the bar
-  // (transcript:"send the invoice") and reach the backend FTS verbatim, so
-  // AND/OR/NOT and prefix* all work.
+  // (transcript:"send the invoice") only to keep the value whole: the backend
+  // requires every word, each by its beginning, and has no operators or phrases.
   const tq = filters.find(f => f.key === 'transcript')?.value ?? ''
   transcriptQuery.value = tq
   if (tq) void searchTranscripts()
@@ -649,8 +649,8 @@ watch(peekRunIsRunning, (running, wasRunning) => {
 // ── JCLAW-22 (slice T): transcript search ──
 // Distinct from the FilterBar's q (task name/description, JCLAW-304): this
 // searches task_run_message bodies via the shipped /api/task-runs/search
-// (Lucene QueryParser — phrase, AND/OR/NOT, prefix*). Each hit opens the
-// run's trace in the same PeekPanel.
+// (every word, each matched by its beginning). Each hit opens the run's trace
+// in the same PeekPanel.
 const transcriptQuery = ref('')
 const transcriptHits = ref<TranscriptSearchHit[]>([])
 const transcriptSearching = ref(false)
@@ -1097,7 +1097,7 @@ function zoneForTaskRender(task: Task): string | undefined {
          scope (task_run_message bodies) — see onFiltersChanged; its results
          render in the hit panel below, not the table. Multi-word transcript
          queries are quoted so they survive tokenization: transcript:"send the
-         invoice" (also supports AND/OR/NOT and prefix*). -->
+         invoice" (every word required, each by its beginning). -->
     <div class="mb-4">
       <FilterBar
         storage-key="tasks"

@@ -333,7 +333,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * <p>Tokens shorter than {@link #MIN_PREFIX_LEN} match exactly. {@code requireAll} ANDs
      * the tokens (admin filter — all must appear), else ORs them (agent recall — any token,
      * then relevance-ranked + floored). Returns {@code null} when the query yields no
-     * usable tokens (e.g. all stopwords).
+     * usable tokens (only punctuation, say: the analyzer drops no words).
      */
     private static @Nullable Query buildContentQuery(String query, boolean requireAll) throws IOException {
         var terms = distinctCapped(analyzeToTerms(query));
@@ -368,7 +368,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     }
 
     /** Run {@link #CONTENT_ANALYZER} over {@code text} and collect the emitted
-     *  tokens (lowercased, stopwords dropped). */
+     *  tokens (lowercased and stemmed; no stopword is dropped). */
     static List<String> analyzeToTerms(String text) throws IOException {
         var terms = new ArrayList<String>();
         try (var ts = CONTENT_ANALYZER.tokenStream(LuceneIndexer.CONTENT_FIELD, text)) {
@@ -395,7 +395,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // and stray Lucene operator characters can't ParseException the query out from
         // under the UI. Possessives and plurals are the analyzer's job since JCLAW-1052.
         Query content = buildContentQuery(query, requireAll);
-        if (content == null) return List.of(); // no usable tokens (e.g. all stopwords)
+        if (content == null) return List.of(); // no usable tokens, e.g. only punctuation
         Query q = content;
         if (agentKey != null) {
             q = new BooleanQuery.Builder()

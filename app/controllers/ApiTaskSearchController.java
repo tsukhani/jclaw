@@ -69,8 +69,10 @@ public class ApiTaskSearchController extends Controller {
      * {@link services.search.MessageSearch} facade, which dispatches
      * to either the direct Lucene 10 backend (default) or Postgres
      * tsvector (operator opt-in via {@code -Djclaw.search.postgres-native=true}).
-     * Query syntax accepts Lucene's standard QueryParser grammar:
-     * phrase quoting, AND/OR/NOT, and prefix wildcards.
+     * A hit holds every word of the query, each matched by its beginning
+     * (a one-character word exactly). It is no QueryParser grammar: quotes and
+     * {@code *} are dropped, AND/OR/NOT are words a hit must hold, and there is
+     * no phrase match.
      *
      * <p>Empty {@code q} returns {@code []} — the search facade
      * intentionally non-exceptional on empty input so the UI can render
