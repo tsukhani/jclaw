@@ -528,7 +528,10 @@ public class ApiSkillsController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
-        var agentSkillDir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
+        // The name's spelling only, not resolveSkillName: SkillLoader follows a skill folder that is a link out
+        // of the skills folder, so the agent runs that skill and this switch is what turns it off.
+        if (!WorkspacePathGuard.isOneSegment(name)) throw notASkillName(name);
+        var agentSkillDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR).resolve(name);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_ENABLED)) {
@@ -934,12 +937,15 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     private static Path resolveSkillName(Path root, String name) {
         var resolved = WorkspacePathGuard.resolveChild(root, name);
-        if (resolved == null) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "'%s' is not a skill name: pass the skill's folder name, not a path.".formatted(name));
-            throw ApiResponses.unreachable();
-        }
+        if (resolved == null) throw notASkillName(name);
         return resolved;
+    }
+
+    /** Ends the request with the 400 a skills route gives a name that is not one folder of its skills folder. */
+    private static AssertionError notASkillName(String name) {
+        ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                "'%s' is not a skill name: pass the skill's folder name, not a path.".formatted(name));
+        return ApiResponses.unreachable();
     }
 
     private static HashMap<String, Object> skillToMap(SkillLoader.SkillInfo s, boolean isGlobal) {

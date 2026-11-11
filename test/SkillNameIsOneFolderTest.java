@@ -253,6 +253,30 @@ class SkillNameIsOneFolderTest extends FunctionalTest {
     }
 
     @Test
+    void aSkillWhoseFolderIsALinkOutOfTheSkillsFolderIsStillSwitchedOffAndOn() throws IOException {
+        signIn();
+        var outside = Files.createTempDirectory("jf291-linked-");
+        try {
+            Files.writeString(outside.resolve("SKILL.md"), SKILL_MD.formatted("linked", "linked"));
+            Files.createSymbolicLink(agentSkills.resolve("linked"), outside);
+            var base = "/api/agents/" + agentId + "/skills";
+            assertTrue(listedSkill(base, "linked").get("enabled").getAsBoolean(), "the agent loads the linked skill");
+
+            for (var enabled : List.of(false, true)) {
+                var response = PUT(base + "/linked", "application/json", "{\"enabled\":" + enabled + "}");
+                assertStatus(200, response);
+                assertEquals("{\"name\":\"linked\",\"enabled\":" + enabled + ",\"status\":\"ok\"}", getContent(response));
+                assertEquals(enabled, listedSkill(base, "linked").get("enabled").getAsBoolean());
+            }
+            // The limit: the switch takes the folder's name, and its files stay refused.
+            assertNotASkillName(new Name("linked", "linked"), GET(base + "/linked/files"));
+            assertNotASkillName(new Name("linked", "linked"), agentGet(base + "/linked/files/SKILL.md"));
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+        }
+    }
+
+    @Test
     void aSkillIsRenamedOnlyToOneFolderName() throws IOException {
         signIn();
         seedSkill(globalSkills, "other");
@@ -330,6 +354,16 @@ class SkillNameIsOneFolderTest extends FunctionalTest {
         try (var entries = Files.list(root)) {
             return entries.filter(Files::isDirectory).map(p -> p.getFileName().toString()).sorted().toList();
         }
+    }
+
+    /** The row for {@code skillName} in an agent's installed-skills list. */
+    private static JsonObject listedSkill(String agentSkillsUrl, String skillName) {
+        var listed = GET(agentSkillsUrl);
+        assertStatus(200, listed);
+        for (var row : JsonParser.parseString(getContent(listed)).getAsJsonArray()) {
+            if (skillName.equals(row.getAsJsonObject().get("name").getAsString())) return row.getAsJsonObject();
+        }
+        throw new AssertionError(skillName + " is not in " + getContent(listed));
     }
 
     private void signIn() {

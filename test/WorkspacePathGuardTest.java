@@ -93,6 +93,28 @@ class WorkspacePathGuardTest extends UnitTest {
     }
 
     @Test
+    void isOneSegmentJudgesTheSpellingAlone() throws Exception {
+        for (var name : List.of("alpha", "al.pha v2", ".hidden", "...", "a..b", "alpha, beta")) {
+            assertTrue(WorkspacePathGuard.isOneSegment(name), "'" + name + "' is one segment");
+        }
+        for (var name : List.of("", ".", "..", "alpha/inner", "alpha/", "/alpha", "./alpha", "x/..", "alpha\\inner",
+                "\\", "\0", "alpha\0")) {
+            assertFalse(WorkspacePathGuard.isOneSegment(name), "'" + name + "' is not one segment");
+        }
+
+        var root = Files.createTempDirectory("wpg-segment");
+        var outside = Files.createTempDirectory("wpg-segment-outside");
+        try {
+            Files.createSymbolicLink(root.resolve("to-outside"), outside);
+            assertTrue(WorkspacePathGuard.isOneSegment("to-outside"), "where the entry leads is resolveChild's to judge");
+            assertNull(WorkspacePathGuard.resolveChild(root, "to-outside"));
+        } finally {
+            deleteRecursive(root);
+            deleteRecursive(outside);
+        }
+    }
+
+    @Test
     void resolveChildFollowsALinkOnlyToAnotherEntryOfTheRoot() throws Exception {
         var root = Files.createTempDirectory("wpg-child-links");
         var outside = Files.createTempDirectory("wpg-child-outside");

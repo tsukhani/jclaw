@@ -94,10 +94,7 @@ public final class WorkspacePathGuard {
      *         another entry of {@code root}, or cannot be resolved
      */
     public static @Nullable Path resolveChild(@NonNull Path root, @NonNull String name) {
-        if (name.isEmpty() || name.equals(".") || name.equals("..")
-                || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 || name.indexOf('\0') >= 0) {
-            return null;
-        }
+        if (!isOneSegment(name)) return null;
         try {
             var resolved = resolveContained(root, name);
             var rootReal = canonicalize(root.toAbsolutePath().normalize());
@@ -105,6 +102,19 @@ public final class WorkspacePathGuard {
         } catch (IOException | InvalidPathException _) {
             return null;
         }
+    }
+
+    /**
+     * Whether {@code name} is one path segment: not empty, {@code .} or {@code ..}, with no separator and no NUL.
+     * The spelling alone, for a caller that needs the name and not where its entry leads; {@link #resolveChild}
+     * adds that.
+     *
+     * @param name the name, as the caller received it
+     * @return true when {@code name} can only name an entry of the folder it is resolved in
+     */
+    public static boolean isOneSegment(@NonNull String name) {
+        return !name.isEmpty() && !name.equals(".") && !name.equals("..")
+                && name.indexOf('/') < 0 && name.indexOf('\\') < 0 && name.indexOf('\0') < 0;
     }
 
     /**
