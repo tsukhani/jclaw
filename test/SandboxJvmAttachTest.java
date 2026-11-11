@@ -234,7 +234,7 @@ class SandboxJvmAttachTest extends UnitTest {
 
     /**
      * Only SIGQUIT is held inside the sandbox on macOS. A process outside refuses it and still takes SIGTERM,
-     * which is how a later run stops what an earlier one left in the background; the run's own child takes it.
+     * which is how a later run stops what an earlier one left in the background; inside the run it is delivered.
      */
     @Test
     @EnabledOnOs(OS.MAC)
@@ -251,8 +251,11 @@ class SandboxJvmAttachTest extends UnitTest {
         assertTrue(outside.waitFor(10, TimeUnit.SECONDS), "SIGTERM must still reach a process outside the sandbox");
         assertEquals(143, outside.exitValue());
 
-        var own = run(agent, "sleep 30 & kill -QUIT $!; wait $!; echo own=$?");
-        assertTrue(lines(own).contains("own=131"), "the run's own child must still take SIGQUIT: " + own);
+        // Sent to the run's shell from a subshell: sh starts a background job with SIGQUIT ignored, so one
+        // takes the signal only when it arrives before the job has set that up.
+        var own = run(agent, "echo before; (kill -QUIT $$); echo after=$?");
+        assertEquals(131, exit(own), "inside the sandbox SIGQUIT must still be delivered: " + own);
+        assertEquals("before", own.get("output").getAsString(), own.toString());
 
         var control = startSleep();
         var unconfined = run(main(), "kill -QUIT %d; echo quit=$?".formatted(control.pid()));

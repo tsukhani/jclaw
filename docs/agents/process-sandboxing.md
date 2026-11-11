@@ -155,4 +155,7 @@ resets it to `CustomAgentOverride.NONE`. The override is read only by
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.
 A test that needs a JVM to attach to starts a throwaway one and stops it (`SandboxJvmAttachTest`),
-never a JVM that is already running.
+never a JVM that is already running. A test that sends SIGQUIT inside a run aims it at the run's
+shell from a subshell, `(kill -QUIT $$)`: `sh` starts a background job with SIGQUIT ignored, so
+`cmd & kill -QUIT $!` ends the job only when the signal arrives before the job has set that up
+(measured under CPU load: 13 of 300 runs ignored it).
