@@ -1,10 +1,18 @@
+import com.google.gson.JsonParser;
 import controllers.ApiOnboardingController;
+import controllers.RequestPrincipal;
+import models.Agent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.ConfigService;
 import services.Tx;
+
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 class ApiOnboardingControllerTest extends FunctionalTest {
 
@@ -131,6 +139,67 @@ class ApiOnboardingControllerTest extends FunctionalTest {
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":2}");
         assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void anAgentOtherThanMainCannotMoveTheTourCounter() {
+        // JF-293: the counter decides whether the operator's dashboard opens the tour, so it is not an agent's to write.
+        seedTourMaxStep(2);
+        var agentId = seedCustomAgent();
+        clearCookies();
+        try {
+            for (var request : List.of(agentRequest(agentId), bearerRequest())) {
+                var response = POST(request, "/api/onboarding/tour-progress", "application/json", "{\"step\":5}");
+                clearCookies();
+
+                assertEquals(403, response.status.intValue());
+                var error = JsonParser.parseString(getContent(response)).getAsJsonObject();
+                assertEquals(List.of("agent_scope", "Only the operator or the main agent may record the guided tour's progress."),
+                        List.of(error.get("code").getAsString(), error.get("message").getAsString()));
+            }
+            assertEquals(2, readTourMaxStep(), "the counter is where the operator left it");
+
+            var status = GET(agentRequest(agentId), "/api/onboarding/tour-status");
+            assertEquals(200, status.status.intValue());
+            assertEquals("{\"maxStepReached\":2,\"totalSteps\":6,\"shouldAutoShow\":false}", getContent(status));
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static Long seedCustomAgent() {
+        var id = new AtomicReference<Long>();
+        runInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "jf293-tour-" + UUID.randomUUID().toString().substring(0, 8);
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            id.set(agent.id);
+        });
+        return id.get();
+    }
+
+    private static int readTourMaxStep() {
+        var step = new AtomicReference<Integer>();
+        runInFreshTx(() -> step.set(ConfigService.getInt(ApiOnboardingController.CONFIG_KEY, 0)));
+        return step.get();
+    }
+
+    /** The bearer as {@code jclaw_api} sends it for {@code agentId}. */
+    private static Http.Request agentRequest(Long agentId) {
+        var request = bearerRequest();
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        return request;
+    }
+
+    /** A bearer with no agent stamp, a token used outside the tool. */
+    private static Http.Request bearerRequest() {
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        return request;
     }
 
     @Test

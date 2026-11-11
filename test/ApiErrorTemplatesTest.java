@@ -4,6 +4,8 @@ import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.ErrorTemplates;
 
+import java.util.List;
+
 /**
  * Wording defects the JCLAW-60 rubric scoring found in the API templates: a remedy that promised
  * UI behaviour nothing implements, and limits the operator had to go and look up.
@@ -16,6 +18,20 @@ class ApiErrorTemplatesTest extends UnitTest {
 
         assertFalse(template.howToRetry().contains("highlighted"), template.howToRetry());
         assertTrue(template.whatToCheck().contains("message above"), template.whatToCheck());
+    }
+
+    @Test
+    void anAgentScopeRefusalCoversAnotherAgentsRowAndARouteThatIsTheOperatorsAndMains() {
+        // The code answers both since JF-292, and a custom agent holding jclaw_api reads it for both (JF-293).
+        var template = ErrorTemplates.forCode(ApiResponses.AGENT_SCOPE);
+
+        assertEquals(List.of(
+                "An agent tried to reach another agent's row, or a route that answers only the operator and main.",
+                "An agent other than main reaches only its own rows, such as its conversations, tasks and settings. "
+                        + "Every other agent's rows, and the instance's setup, status and the calls that spend, are "
+                        + "the operator's and main's.",
+                "Do it yourself in the admin UI, or ask main."),
+                List.of(template.whatBroke(), template.whatToCheck(), String.valueOf(template.howToRetry())));
     }
 
     @Test

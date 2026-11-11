@@ -587,7 +587,7 @@ class AgentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void aCalleeIsOfferedAgentSpawnOnlyWhenTheOwnerReadsTheHandingTurnAloneAndNeverJclawApi() throws Exception {
+    void aCalleeIsOfferedJclawApiAndAgentSpawnOnlyWhenTheOwnerReadsTheHandingTurnAlone() throws Exception {
         var main = createAgent("main");
         var callee = createAgent("researcher");
         setTool(callee, "jclaw_api", true);
@@ -607,11 +607,11 @@ class AgentSpawnToolTest extends UnitTest {
 
         assertEquals(4, requests.size(), "one model call per hand-off: " + requests);
         var fromWeb = requests.get(0).tools();
-        assertTrue(fromWeb.contains("agent_spawn"), "from web chat: " + fromWeb);
-        // The callee holds a grant row, and still gets no jclaw_api: it is main's alone (JF-287).
-        assertFalse(fromWeb.contains("jclaw_api"), "from web chat: " + fromWeb);
+        // The callee is one of the operator's own agents, so it works with the jclaw_api it was granted (JF-293).
+        assertTrue(fromWeb.contains("jclaw_api") && fromWeb.contains("agent_spawn"), "from web chat: " + fromWeb);
         assertEquals(fromWeb, requests.get(1).tools(), "from the owner's own Telegram DM");
         var expected = new TreeSet<>(fromWeb);
+        expected.remove("jclaw_api");
         expected.remove("agent_spawn");
         assertEquals(expected, requests.get(2).tools(), "from the owner's message in a Telegram group");
         assertEquals(expected, requests.get(3).tools(), "from a guest's Telegram turn");

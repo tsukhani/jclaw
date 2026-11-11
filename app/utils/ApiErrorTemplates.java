@@ -184,9 +184,11 @@ public final class ApiErrorTemplates {
             e(ApiResponses.APP_SCOPE, "A hosted app tried to reach outside its own agent.",
                     "An app may only invoke the agent it was installed for.",
                     "If the app genuinely needs this, it needs installing against that agent."),
-            e(ApiResponses.AGENT_SCOPE, "An agent tried to reach another agent's row.",
-                    "An agent reaches its own conversations and subagent runs; only main reaches "
-                            + "every agent's.",
+            e(ApiResponses.AGENT_SCOPE,
+                    "An agent tried to reach another agent's row, or a route that answers only the operator and main.",
+                    "An agent other than main reaches only its own rows, such as its conversations, tasks and "
+                            + "settings. Every other agent's rows, and the instance's setup, status and the calls "
+                            + "that spend, are the operator's and main's.",
                     "Do it yourself in the admin UI, or ask main."),
 
             // --- agents and apps ---

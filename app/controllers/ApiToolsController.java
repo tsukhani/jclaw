@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.McpServerCatalog;
 import agents.SkillLoader;
 import agents.ToolAction;
 import agents.ToolRegistry;
@@ -22,6 +23,7 @@ import services.Tx;
 import utils.ApiResponses;
 
 import java.util.List;
+import java.util.Set;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
@@ -74,7 +76,8 @@ public class ApiToolsController extends Controller {
      * GET /api/tools/meta — the catalog with what a collapsed {@code /tools} card shows.
      *
      * <p>The backend is the single source of truth for category, icon and short description
-     * (JCLAW-72 migrated these off a hardcoded frontend dictionary). No per-agent filtering.
+     * (JCLAW-72 migrated these off a hardcoded frontend dictionary). No agent's grants filter the rows, except
+     * that an agent other than main is shown only the MCP servers it may call ({@link #mcpServersShownTo}).
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolMetaEntry.class))))
     @Operation(summary = "List tool metadata (category, icon, action count) for the admin UI; "
@@ -103,7 +106,8 @@ public class ApiToolsController extends Controller {
     @AgentAccess(OPEN)
     public static void get(String name) {
         var t = ToolRegistry.lookupTool(name);
-        if (t == null) {
+        // A server the caller is not shown answers as a name nobody registered, so the answer does not confirm it.
+        if (t == null || !shown(t, callerMcpServers())) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No tool named '" + name + "' is registered.");
             throw ApiResponses.unreachable();
         }
@@ -112,14 +116,38 @@ public class ApiToolsController extends Controller {
     }
 
     /**
-     * The tools a catalog lists. An MCP server's per-action adapters fold into its server-level
+     * The tools a catalog lists for the caller. An MCP server's per-action adapters fold into its server-level
      * handle, whose action count and detail stand for them, as they do in the model's own tool list:
      * the 600-odd adapters alone would put a catalog over jclaw_api's cap.
      */
     private static List<ToolRegistry.Tool> catalog() {
+        var servers = callerMcpServers();
         return ToolRegistry.listTools().stream()
                 .filter(t -> t.group() == null || t.isServerLevel())
+                .filter(t -> shown(t, servers))
                 .toList();
+    }
+
+    /** Whether a caller shown {@code servers} is shown {@code t}: a built-in tool always, an MCP tool only on one of them. */
+    private static boolean shown(ToolRegistry.Tool t, @Nullable Set<String> servers) {
+        var group = t.group();
+        return group == null || servers == null || servers.contains(group);
+    }
+
+    private static @Nullable Set<String> callerMcpServers() {
+        return mcpServersShownTo(RequestPrincipal.isAgentOriginated(), RequestPrincipal.callingAgent());
+    }
+
+    /**
+     * The MCP servers whose handles and actions a caller is shown, or null for every one (JF-293). The operator
+     * and main are shown every server. Any other agent is shown the ones it may call: a handle names a service
+     * the operator connected, and its actions say what that service does. An agent-originated request that names
+     * no agent is shown none.
+     */
+    // Public and free of the request, as RequestPrincipal.isOperatorOrMain is: a test must not seed main.
+    public static @Nullable Set<String> mcpServersShownTo(boolean agentOriginated, @Nullable Agent caller) {
+        if (RequestPrincipal.isOperatorOrMain(agentOriginated, caller)) return null;
+        return caller == null ? Set.of() : Set.copyOf(McpServerCatalog.serversForAgent(caller));
     }
 
     /** Whether the tool can run on this instance at all: its {@code requiresConfig} key, when it names one, is true. */
@@ -154,9 +182,7 @@ public class ApiToolsController extends Controller {
         // box for a tool the agent could not call (found during JCLAW-911 UAT). One source of
         // truth also covers tools added to the default-off list later.
         var disabled = ToolRegistry.loadDisabledTools(agent);
-        // A tool no grant can give this agent has no toggle to offer (JF-287).
         var result = catalog().stream()
-                .filter(t -> agent.isMain() || !ToolRegistry.isMainOnly(t.name()))
                 .map(t -> new AgentToolEntry(t.name(), t.group(), !disabled.contains(t.name()),
                         t.shortDescription()))
                 .toList();
@@ -198,10 +224,6 @@ public class ApiToolsController extends Controller {
         // level tool is the signature of an MCP per-action adapter. The
         // operator's per-server toggle goes through updateGroupForAgent;
         // direct per-action enable/disable is no longer a supported path.
-        if (enabled && !agent.isMain() && ToolRegistry.isMainOnly(name)) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    name + " is the main agent's alone: no other agent can be given it.");
-        }
         var tool = ToolRegistry.lookupTool(name);
         if (tool != null && tool.group() != null && !tool.isServerLevel()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Per-action MCP tools are no longer toggleable individually. "

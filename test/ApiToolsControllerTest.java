@@ -242,41 +242,80 @@ class ApiToolsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aNonMainAgentsToolListLeavesOutJclawApiEvenWithNoConfigRow() {
+    void aNonMainAgentsToolListShowsJclawApiSwitchedOffEvenWithNoConfigRow() {
         // JCLAW-941 found agents holding no row, and so full admin-API access, when the default was a
-        // disable row written at creation. JF-287: the tool is main's alone, so it is not even listed.
+        // disable row written at creation. The tool is listed, so the operator has a switch for it (JF-293).
         login();
         var id = createAgent("tools-jclaw-api-norow-agent");
         fetchInFreshTx(() -> models.AgentToolConfig.delete("agent.id = ?1", id));
         agents.ToolRegistry.clearDisabledToolsCache();
 
-        var body = getContent(GET("/api/agents/" + id + "/tools"));
-        assertFalse(body.contains("\"name\":\"jclaw_api\""), "jclaw_api must not be offered to a non-main agent: " + body);
-        assertTrue(body.contains("\"name\":\"filesystem\""), "the other tools are still listed: " + body);
-        assertTrue(fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(models.Agent.findById(id))).contains("jclaw_api"));
+        assertEquals(false, enabledInList(id, "jclaw_api"), "listed, and off until the operator switches it on");
+        assertTrue(disabledFor(id).contains("jclaw_api"));
     }
 
     @Test
-    void noGrantGivesANonMainAgentJclawApi() {
+    void theOperatorsGrantGivesACustomAgentJclawApiAndSwitchingItOffTakesItBack() {
         login();
         var id = createAgent("tools-jclaw-api-granted-agent");
+        assertTrue(disabledFor(id).contains("jclaw_api"), "off without a grant");
 
-        var resp = PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json", "{\"enabled\":true}");
-        assertEquals(400, resp.status.intValue());
-        assertEquals("jclaw_api is the main agent's alone: no other agent can be given it.",
-                com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject().get("message").getAsString());
-        assertEquals(0L, (long) fetchInFreshTx(() -> models.AgentToolConfig.count(
-                "agent.id = ?1 AND toolName = ?2 AND enabled = true", id, "jclaw_api")));
+        var granted = PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json", "{\"enabled\":true}");
+        assertEquals(200, granted.status.intValue());
+        assertEquals(json("{\"name\":\"jclaw_api\",\"enabled\":true,\"status\":\"ok\"}"), json(getContent(granted)));
+        assertEquals(true, enabledInList(id, "jclaw_api"));
+        assertFalse(disabledFor(id).contains("jclaw_api"), "on with the grant");
 
-        // A grant row written behind the route, as an old JCLAW-941 grant was, opens nothing either.
-        fetchInFreshTx(() -> {
-            var row = mcp.McpGrants.newRow(models.Agent.findById(id), "jclaw_api");
-            row.enabled = true;
-            row.save();
-            return null;
+        var revoked = PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json", "{\"enabled\":false}");
+        assertEquals(200, revoked.status.intValue());
+        assertEquals(false, enabledInList(id, "jclaw_api"));
+        assertTrue(disabledFor(id).contains("jclaw_api"), "off again once the operator switches it off");
+    }
+
+    @Test
+    void aSubagentNeverGetsJclawApiWhateverItOrItsParentWasGranted() {
+        var parentId = createAgent("tools-jclaw-api-parent");
+        var childId = fetchInFreshTx(() -> {
+            Agent parent = Agent.findById(parentId);
+            grant(parent, "jclaw_api");
+            var child = AgentService.create("tools-jclaw-api-child", "openrouter", "gpt-4.1", null, null, false, parent);
+            grant(child, "jclaw_api");
+            return child.id;
         });
         agents.ToolRegistry.clearDisabledToolsCache();
-        assertTrue(fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(models.Agent.findById(id))).contains("jclaw_api"));
+
+        assertFalse(disabledFor(parentId).contains("jclaw_api"), "premise: the parent holds the operator's grant");
+        assertTrue(disabledFor(childId).contains("jclaw_api"));
+    }
+
+    @Test
+    void theEvalAgentGetsJclawApiOnlyWithAGrantOfItsOwn() {
+        // Every tool is opt-in for the eval agent (JCLAW-883), so calibration grants exactly what a suite names.
+        var id = createAgent(Agent.EVALTEST_AGENT_NAME);
+        try {
+            agents.ToolRegistry.clearDisabledToolsCache();
+            assertTrue(disabledFor(id).contains("jclaw_api"), "off without a grant");
+
+            fetchInFreshTx(() -> grant(Agent.findById(id), "jclaw_api"));
+            agents.ToolRegistry.clearDisabledToolsCache();
+            assertFalse(disabledFor(id).contains("jclaw_api"), "on with its own grant");
+        } finally {
+            fetchInFreshTx(() -> {
+                Agent agent = Agent.findById(id);
+                AgentToolConfig.delete("agent = ?1", agent);
+                return agent.delete();
+            });
+        }
+    }
+
+    private static AgentToolConfig grant(Agent agent, String tool) {
+        var row = mcp.McpGrants.newRow(agent, tool);
+        row.enabled = true;
+        return row.save();
+    }
+
+    private static java.util.Set<String> disabledFor(Long agentId) {
+        return fetchInFreshTx(() -> agents.ToolRegistry.loadDisabledTools(Agent.findById(agentId)));
     }
 
     @Test
@@ -728,9 +767,7 @@ class ApiToolsControllerTest extends FunctionalTest {
                     "sanity: the adapters' descriptions alone would not fit, so the check below measures the fold");
             for (var url : List.of("/api/tools", "/api/tools/meta", "/api/agents/" + id + "/tools")) {
                 var body = getContent(GET(url));
-                // A non-main agent's own list leaves out jclaw_api, which no grant can give it (JF-287).
-                var expectedRows = natives[0] + servers - (url.startsWith("/api/agents/") ? 1 : 0);
-                assertEquals(expectedRows, JsonParser.parseString(body).getAsJsonArray().size(), url);
+                assertEquals(natives[0] + servers, JsonParser.parseString(body).getAsJsonArray().size(), url);
                 assertTrue(body.length() < JClawApiTool.MAX_RESPONSE_CHARS,
                         url + " is " + body.length() + " characters");
             }

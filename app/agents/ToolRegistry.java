@@ -787,8 +787,8 @@ public class ToolRegistry {
     public static Set<String> loadDisabledTools(@Nullable Agent agent) {
         if (agent == null) return Set.of();
         if (agent.id == null) {
-            // Unsaved agents have no configs, so nothing is disabled but what no grant can give, and the hand-off
-            // and the shell an agent other than main must be granted.
+            // Unsaved agents have no configs, so nothing is disabled but jclaw_api, the hand-off and the shell,
+            // which an agent other than main must be granted.
             return agent.isMain() ? Set.of() : Set.of(JCLAW_API_TOOL, AGENT_SPAWN_TOOL, EXEC_TOOL);
         }
         return DISABLED_TOOLS_CACHE.get(agent.id, _ -> computeDisabledTools(agent));
@@ -822,7 +822,8 @@ public class ToolRegistry {
      *  an agent created outside AgentService.create, or a row later deleted — this instance
      *  had two agents holding no row and therefore full access. Same reasoning JCLAW-883
      *  recorded for the eval agent. An explicit enable row still wins, so granting it to a
-     *  purpose-built agent stays a single click. */
+     *  purpose-built agent stays a single click. The grant rests on every agent-callable route
+     *  holding an agent other than main to its own rows (JF-293, docs/agents/trust.md). */
     private static final String JCLAW_API_TOOL = "jclaw_api";
 
     /** Drives the operator's own signed-in Chrome, so no agent has it until the operator grants it, and
@@ -857,11 +858,13 @@ public class ToolRegistry {
         for (var entry : explicitState.entrySet()) {
             if (Boolean.FALSE.equals(entry.getValue())) disabled.add(entry.getKey());
         }
-        // JF-164: a subagent is a helper copy working for its parent, not a member of the hand-off graph, so no
-        // grant gives it agent_spawn.
-        if (agent.parentAgent != null) disabled.add(AGENT_SPAWN_TOOL);
-        // JF-287: jclaw_api is main's alone. Ahead of the eval branch, so not even an explicit grant opens it.
-        if (!agent.isMain()) disabled.add(JCLAW_API_TOOL);
+        if (agent.parentAgent != null) {
+            // JF-164: a subagent is a helper copy working for its parent, not a member of the hand-off graph, so
+            // no grant gives it agent_spawn.
+            disabled.add(AGENT_SPAWN_TOOL);
+            // JF-293: nor jclaw_api. The operator grants it to one agent, and a copy is made by that agent's spawn.
+            disabled.add(JCLAW_API_TOOL);
+        }
         // JCLAW-883: the eval agent inverts the default — every tool is opt-in, not
         // just the costly ones below. An eval sweep runs unattended and its suites
         // deliberately provoke tool selection, so a tool nobody granted must not be
@@ -898,20 +901,16 @@ public class ToolRegistry {
     /**
      * Tools main holds by default and every other agent has to be granted. The split is
      * trust, not cost: each reaches beyond the turn it runs in, into stored memory, past
-     * conversations, another agent's work or the host's shell, and main is the operator's
-     * own agent. JF-288 added the last two: a restricted agent picked up {@code agent_spawn}
-     * the day it shipped, and a new agent started with {@code exec} beside its web-reading
-     * tools. A helper copy carries its parent's shell
-     * ({@code SubagentChildBootstrap.grantParentShell}). {@code jclaw_api} is not on the
-     * list: no grant gives it to another agent (JF-287).
+     * conversations, another agent's work, the host's shell or JClaw's own API, and main is
+     * the operator's own agent. JF-288 added {@code agent_spawn} and {@code exec}: a
+     * restricted agent picked up {@code agent_spawn} the day it shipped, and a new agent
+     * started with {@code exec} beside its web-reading tools. A helper copy carries its
+     * parent's shell ({@code SubagentChildBootstrap.grantParentShell}) and nothing else on
+     * this list: {@code computeDisabledTools} keeps {@code agent_spawn} and
+     * {@code jclaw_api} from every subagent.
      */
     private static final List<String> OPT_IN_FOR_NON_MAIN_AGENTS = List.of(
-            MEMORY_TOOL, CONVERSATION_SEARCH_TOOL, AGENT_SPAWN_TOOL, EXEC_TOOL);
-
-    /** Whether {@code toolName} is main's alone, so that no grant gives it to another agent (JF-287). */
-    public static boolean isMainOnly(@Nullable String toolName) {
-        return JCLAW_API_TOOL.equals(toolName);
-    }
+            MEMORY_TOOL, JCLAW_API_TOOL, CONVERSATION_SEARCH_TOOL, AGENT_SPAWN_TOOL, EXEC_TOOL);
 
     /** Disables each named tool that carries no explicit enable row — the opt-in default. */
     private static void disableUnlessGranted(Set<String> disabled,

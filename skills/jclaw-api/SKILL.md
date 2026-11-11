@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.11"
+  version: "1.1.12"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -11,7 +11,7 @@ metadata:
 
 # JClaw API
 
-Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, etc. Only the `main` agent has the `jclaw_api` tool.
+Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, etc. The `main` agent has the `jclaw_api` tool. Any other agent has it only once the user has switched it on for that agent, and no agent can switch it on, for itself or for another. If you are not `main`, the tool reaches your own rows and the shared catalogs, and every call marked `main` only below is refused to you with 403 `agent_scope`: tell the user what you were asked to change, and let them make it or ask `main`.
 
 The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. An endpoint is callable only when its backend action is declared agent-reachable (`@AgentAccess` level `OPEN`, or `OWN_ONLY`, which reaches only your own agent's rows — `main` reaches every agent's); an undeclared action is operator-only. So a new endpoint appears in `discover` once the backend opens it, with no skill edit, and if `discover` does not list something, it is deliberately off-limits (see below). Access is decided by that backend declaration, never by this skill.
 
@@ -36,7 +36,7 @@ These staples don't need a discover round-trip first; run `action="discover"` fo
 - **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
 - **Prompts** — a prompt you create is yours, and every row names its owner in `ownerAgentId` and `ownerAgentName` (both `null` on the operator's own). `main` lists, reads, edits and deletes every prompt; any other agent only the ones it created, and gets 403 `agent_scope` for the operator's or another agent's.
 - **Your own rows** — an agent other than `main` lists and acknowledges only its own notifications, and reads only its own video jobs and its own cost, latency and compression rows, whichever `agentId` it asks for. `main` reads every agent's.
-- **The instance** — its setup (config, logging levels, providers and their models, MCP servers, channel configurations, the model router's status, the coding-harness commands), its host and lifecycle status (metrics, circuit breakers, restart, upgrade and Java-runtime status), and the calls that dial out or spend (prompt generation and export, a provider probe or model discovery, the price refresh, the MCP server test, a printer's options) answer `main` only; any other agent gets 403 `agent_scope`.
+- **The instance** — its setup (config, logging levels, providers and their models, MCP servers, channel configurations, the model router's status, the coding-harness commands, the guided tour's progress), its host and lifecycle status (metrics, circuit breakers, restart, upgrade and Java-runtime status), and the calls that dial out or spend (prompt generation and export, a provider probe or model discovery, the price refresh, the MCP server test, a printer's options) answer `main` only; any other agent gets 403 `agent_scope`.
 - **Model router lists** — read a class's list with `GET /api/config/router.<class>.models`; replace it with `PUT /api/router/models/{class}` body `models` (`[{"provider": "…", "model": "…"}]`, tried in that order; `[]` clears it, and the class then uses the chat list). The classes are `chat`, `summarize`, `agentic`, `reasoning` and `coding`. To add, remove or reorder one model, read the list, change it, and send the whole list back. Only the `main` agent may write it (any other agent gets 403 `agent_scope`), and only a model registered under a configured provider is accepted (`GET /api/providers/{name}/models`). Every other router setting is operator-only.
 
 ## Lists, single reads and long responses
@@ -47,7 +47,7 @@ These staples don't need a discover round-trip first; run `action="discover"` fo
 - **Subagent runs** — the list's `outcome` is an excerpt that `outcomeTruncated` marks; `GET /api/subagent-runs/{id}` returns the whole outcome.
 - **Prompts and tasks** — your list rows carry `contentPreview` or `descriptionPreview` (with `contentTruncated` or `descriptionTruncated`); `GET /api/prompts/{id}` or `GET /api/tasks/{id}` returns the whole text. Edit a prompt or task from its own read, never from a preview.
 - **Transcript search** — `GET /api/task-runs/search` returns a `snippet` around the match; `GET /api/task-runs/{id}/messages` returns the run's messages.
-- **Tools** — the catalogs list each tool's name, group and summary; `GET /api/tools/{name}` returns its description and actions.
+- **Tools** — the catalogs list each tool's name, group and summary; `GET /api/tools/{name}` returns its description and actions. An agent other than `main` is shown only the MCP servers switched on for it, and any other server's name is a 404.
 
 When a response is still cut, its marker says how many characters it holds. For a list, narrow the request first: a smaller `limit`, a filter, or the one item's own read. When one item is itself longer than the cap, call the same GET again with the `charOffset` the marker names, and repeat until a part says it reaches the end. `charOffset` counts characters and works on a GET only; a list's row `offset` goes in `query`. `ccr_retrieve` cannot return a cut part.
 

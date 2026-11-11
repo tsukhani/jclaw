@@ -84,7 +84,7 @@ Tools listed here are *available*. To make a tool *active* for a specific agent:
 
 A few tools require extra setup (an API key, a workspace path, a shell allowlist entry); that config lives under the matching [Settings](/guide#settings) section.
 
-Two `System` tools hand work on. `subagent_spawn` runs a helper copy of the calling agent. `agent_spawn` hands a task to another of your agents by name and returns its reply; it is on for every agent and is offered only on a turn you read alone. See [Handing work to another agent](/guide#subagents-agent-spawn).
+Two `System` tools hand work on. `subagent_spawn` runs a helper copy of the calling agent. `agent_spawn` hands a task to another of your agents by name and returns its reply; it is off for every agent but the Main Agent until you switch it on, and is offered only on a turn you read alone. See [Handing work to another agent](/guide#subagents-agent-spawn).
 
 When `exec`, `filesystem`, `web_fetch` or `web_scrape` fails, the agent gets the error in three parts (what broke, what to check, and how to retry), so it can correct the call rather than repeat it.
 

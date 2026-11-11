@@ -63,8 +63,10 @@ public class ApiOnboardingController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TourProgressRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourProgressResponse.class)))
     @Operation(summary = "Record guided-tour progress, upserting the max step reached (400 outside [1, totalSteps])")
-    @AgentAccess(value = OPEN, reason = "guided-tour step counter -- operator UI state with no reach")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-293): the step counter decides whether the "
+            + "operator's dashboard opens the guided tour")
     public static void recordProgress() {
+        RequestPrincipal.requireOperatorOrMain("record the guided tour's progress");
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("step")) {
             badRequest();

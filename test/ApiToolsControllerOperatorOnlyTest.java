@@ -200,6 +200,26 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
                 "a cross-agent grant must be refused too");
     }
 
+    @Test
+    void noAgentSwitchesJclawApiOnForItselfOrForAnotherAgent() {
+        // JF-293: jclaw_api is the operator's to switch on. An agent that could write the grant would hold it at will.
+        var self = createAgent("operator-only-jclaw-api-self");
+        var other = createAgent("operator-only-jclaw-api-other");
+
+        for (var target : List.of(self, other)) {
+            for (var request : List.of(agentRequestAs(self), agentRequest())) {
+                var resp = asAgent(() -> PUT(request, "/api/agents/" + target + "/tools/jclaw_api",
+                        "application/json", GRANT_BODY));
+
+                assertStatus(403, resp);
+                var error = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+                assertEquals(List.of("operator_only", "This endpoint is operator-only; an agent principal cannot call it."),
+                        List.of(error.get("code").getAsString(), error.get("message").getAsString()));
+            }
+            assertFalse(grantExistsFor(target, "jclaw_api"), "the refused PUT wrote no grant row");
+        }
+    }
+
     /** CONTROL — passes with the guard reverted; pins that the operator path still writes. */
     @Test
     void operatorSessionCanStillGrantATool() {

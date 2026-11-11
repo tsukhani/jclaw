@@ -51,6 +51,8 @@ class MainOnlyRoutesTest extends FunctionalTest {
             new Route("GET", "/api/router/usage/ollama-cloud?range=1y", "read the model router's status and usage", 400),
             new Route("GET", "/api/subagents/acp-harnesses", "read the coding harness commands", 200),
             new Route("GET", "/api/subagents/acp-command", "read the coding harness commands", 200),
+            // The operator's own UI state (JF-293); the operator's empty body is refused for its missing step.
+            new Route("POST", "/api/onboarding/tour-progress", "record the guided tour's progress", 400),
             // Routes that spend on, or dial, an outside service.
             new Route("POST", "/api/mcp-servers/999999999/test", "test an MCP server", 404),
             new Route("POST", "/api/prompts/generate", "generate a prompt", 400),
@@ -144,7 +146,8 @@ class MainOnlyRoutesTest extends FunctionalTest {
 
     @Test
     void aCustomAgentStillReadsTheCatalogsEveryAgentShares() {
-        for (var path : List.of("/api/timezones", "/api/prompts/categories", "/api/slash-commands", "/api/status")) {
+        for (var path : List.of("/api/timezones", "/api/prompts/categories", "/api/slash-commands", "/api/status",
+                "/api/onboarding/tour-status")) {
             assertStatus(200, asAgent(() -> GET(agentRequest(customAgentId), path)));
         }
     }
