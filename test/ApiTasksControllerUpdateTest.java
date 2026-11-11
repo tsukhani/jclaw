@@ -435,4 +435,100 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         assertIsOk(resp);
         assertContentMatch("\"name\":\"samename\"", resp);
     }
+
+    // --- JF-294: a refused patch saves none of its fields ---
+
+    /** The status with the error's code and message. */
+    private static String refusal(Response resp) {
+        var json = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        return resp.status + " " + json.get("code").getAsString() + " " + json.get("message").getAsString();
+    }
+
+    /** Every column a patch can write, as committed. */
+    private static String storedRow(Long taskId) {
+        return commitInFreshTx(() -> {
+            Task t = Task.findById(taskId);
+            return String.join(" | ", t.name, t.description, String.valueOf(t.type), t.scheduleDisplay,
+                    String.valueOf(t.cronExpression), String.valueOf(t.intervalSeconds), String.valueOf(t.scheduledAt),
+                    String.valueOf(t.nextRunAt), String.valueOf(t.paused), String.valueOf(t.autoDeleteOnComplete),
+                    String.valueOf(t.delivery), String.valueOf(t.payloadType), String.valueOf(t.modelProvider),
+                    String.valueOf(t.modelId), String.valueOf(t.enabledToolNames), String.valueOf(t.timezone),
+                    String.valueOf(t.originChannel), String.valueOf(t.updatedAt));
+        });
+    }
+
+    @Test
+    void aPatchRefusedOnABlankNameSavesNoneOfItsOtherFields() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "keep", "every 1h");
+        var before = storedRow(taskId);
+
+        var refused = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"schedule": "every 2h", "description": "changed", "paused": true, "name": "  "}
+                """);
+
+        assertEquals("400 invalid_request name must be non-blank", refusal(refused));
+        assertEquals(before, storedRow(taskId));
+    }
+
+    @Test
+    void aPatchRefusedAsADuplicateNameSavesNoneOfItsOtherFields() {
+        var agent = seedAgent();
+        var alpha = seedTask(agent, "alpha", "every 1h");
+        var beta = seedTask(agent, "beta", "every 1h");
+        var before = storedRow(beta);
+
+        var refused = PATCH("/api/tasks/" + beta, "application/json", """
+                {"schedule": "every 2h", "description": "changed", "name": "alpha"}
+                """);
+
+        assertEquals("409 conflict A recurring task named 'alpha' already exists for this agent (id=" + alpha + ")",
+                refusal(refused));
+        assertEquals(before, storedRow(beta));
+    }
+
+    @Test
+    void aRenameIsJudgedAgainstTheScheduleTheSamePatchSets() {
+        var agent = seedAgent();
+        var alpha = seedTask(agent, "alpha", "every 1h");
+
+        // A one-shot task the patch makes recurring takes a recurring task's name: refused, and still one-shot.
+        var oneShot = seedTask(agent, "beta", "now");
+        var before = storedRow(oneShot);
+        var refused = PATCH("/api/tasks/" + oneShot, "application/json", """
+                {"schedule": "every 1h", "name": "alpha"}
+                """);
+        assertEquals("409 conflict A recurring task named 'alpha' already exists for this agent (id=" + alpha + ")",
+                refusal(refused));
+        assertEquals(before, storedRow(oneShot));
+
+        // A recurring task the patch makes one-shot may take it: a one-shot name collides with nothing.
+        var recurring = seedTask(agent, "gamma", "every 1h");
+        var renamed = PATCH("/api/tasks/" + recurring, "application/json", """
+                {"schedule": "now", "name": "alpha"}
+                """);
+        assertIsOk(renamed);
+        var view = JsonParser.parseString(getContent(renamed)).getAsJsonObject();
+        assertEquals(List.of("alpha", "IMMEDIATE"),
+                List.of(view.get("name").getAsString(), view.get("type").getAsString()));
+    }
+
+    @Test
+    void aPatchThatPassesEveryCheckAppliesEveryField() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "all-fields", "every 1h");
+
+        var saved = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"schedule": "every 2h", "name": "renamed", "description": "changed", "paused": true,
+                 "payloadType": "markdown", "timezone": "Asia/Tokyo"}
+                """);
+
+        assertIsOk(saved);
+        var view = JsonParser.parseString(getContent(saved)).getAsJsonObject();
+        assertEquals(List.of("renamed", "changed", "INTERVAL", "7200", "true", "markdown", "Asia/Tokyo"),
+                List.of(view.get("name").getAsString(), view.get("description").getAsString(),
+                        view.get("type").getAsString(), view.get("intervalSeconds").getAsString(),
+                        view.get("paused").getAsString(), view.get("payloadType").getAsString(),
+                        view.get("timezone").getAsString()));
+    }
 }

@@ -456,16 +456,16 @@ public class ApiTasksController extends Controller {
 
     /**
      * Rename variant of {@link #rejectDuplicateRecurringTask}: re-checks the
-     * duplicate-name rule against the task's current agent + type, excluding the
-     * task itself (filtered out by id in the controller) so renaming to its own
-     * name is a no-op.
+     * duplicate-name rule against the task's current agent and the type the patch
+     * leaves it with, excluding the task itself (filtered out by id in the
+     * controller) so renaming to its own name is a no-op.
      * Only CRON / INTERVAL are checked — one-shot names are inert (parity with
      * create). 409 with the conflicting Task id. Relies on {@code update}'s
      * ambient action transaction (no {@code Tx.run} wrap — it runs alongside the
      * raw {@code findById}/{@code save} that {@code update} already performs).
      */
-    private static void rejectDuplicateRecurringRename(String name, Task task) {
-        if (task.type != Task.Type.CRON && task.type != Task.Type.INTERVAL) return;
+    private static void rejectDuplicateRecurringRename(String name, Task task, Task.Type type) {
+        if (type != Task.Type.CRON && type != Task.Type.INTERVAL) return;
         List<Task> conflicts = TaskService.findRecurringConflicts(name, task.agent)
                 .stream().filter(t -> !t.id.equals(task.id)).toList();
         if (!conflicts.isEmpty()) {
@@ -493,16 +493,20 @@ public class ApiTasksController extends Controller {
         rejectUnbuiltFields(body);
         rejectInvalidDelivery(body);
         rejectInvalidTimezone(body);
-        // Before any field is applied: `task` is managed, so a 403 after a partial apply would still flush it.
         rejectModelChoiceByACustomAgent(body, task.modelProvider, task.modelId);
+        // No field of `task` is set until every check has passed (JF-294): a refusal that came after a
+        // save would leave the fields set before it stored.
+        var schedule = scheduleUpdate(task, body);
+        var name = nameUpdate(task, body, schedule != null ? schedule.type() : task.type);
 
         var timezoneBefore = task.timezone;
-        boolean scheduleChanged = applyScheduleUpdate(task, body);
-        boolean nameChanged = applyNameUpdate(task, body);
+        boolean scheduleChanged = schedule != null;
+        if (schedule != null) applySchedule(task, schedule);
+        if (name != null) task.name = name;
         boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body);
-        boolean anyChange = scheduleChanged || nameChanged || fieldsChanged;
 
-        if (!anyChange) {
+        // True only when nothing above wrote to `task`.
+        if (!scheduleChanged && name == null && !fieldsChanged) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No patchable fields in body");
         }
 
@@ -539,29 +543,28 @@ public class ApiTasksController extends Controller {
     }
 
     /**
-     * Schedule re-parse: when present, drives type + scheduledAt +
-     * cronExpression + intervalSeconds + scheduleDisplay together.
-     * Passing through ScheduleShorthandParser revalidates cron
-     * expressions (with the prepend-0 hint for Unix 5-field) per AC.
-     *
-     * @return true if the schedule field was applied.
+     * The schedule {@code body} carries, parsed and not yet applied, or null when it carries
+     * none. Passing through ScheduleShorthandParser revalidates cron expressions (with the
+     * prepend-0 hint for Unix 5-field) per AC; one that does not parse is a 400.
      */
     @SuppressWarnings("java:S2259")
-    private static boolean applyScheduleUpdate(Task task, JsonObject body) {
-        if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return false;
-        final ScheduleShorthandParser.ScheduleSpec spec;
+    private static ScheduleShorthandParser.@Nullable ScheduleSpec scheduleUpdate(Task task, JsonObject body) {
+        if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return null;
         try {
             // JCLAW-818: resolve a bare local date-time in the task's zone, not
             // the server default. Prefer a timezone supplied in the same PATCH
-            // body (applyOptionalFieldUpdates hasn't run yet, so task.timezone
-            // still holds the stored value) over the task's stored zone.
+            // body over the task's stored zone.
             var tzRaw = TaskWriteService.readOptionalString(body, KEY_TIMEZONE);
             var zone = TimezoneResolver.resolve(tzRaw != null ? tzRaw : task.timezone);
-            spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
+            return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid schedule: " + e.getMessage());
-            return false; // unreachable — error() throws
+            throw ApiResponses.unreachable();
         }
+    }
+
+    /** A parsed schedule drives type + scheduledAt + cronExpression + intervalSeconds + scheduleDisplay together. */
+    private static void applySchedule(Task task, ScheduleShorthandParser.ScheduleSpec spec) {
         task.type = spec.type();
         task.scheduledAt = spec.scheduledAt();
         task.cronExpression = spec.cronExpression();
@@ -571,30 +574,27 @@ public class ApiTasksController extends Controller {
         // stays in sync — the scheduled_tasks row is the source of
         // truth at fire time but operators read nextRunAt from the UI.
         task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
-        return true;
     }
 
     /**
-     * Name update: present-and-non-blank renames the task. Unlike description,
-     * name cannot be cleared — present-and-null or present-and-blank is a 400
-     * (mirrors create's {@link #requireTaskName}). A rename of a recurring task
-     * re-checks the duplicate-name rule via {@link #rejectDuplicateRecurringRename}.
-     * Must run AFTER {@link #applyScheduleUpdate} so that check sees the task's
-     * effective type when the same PATCH also changes the schedule.
+     * The name {@code body} renames the task to, checked and not yet applied, or null when it
+     * carries none. Unlike description, name cannot be cleared — present-and-null or
+     * present-and-blank is a 400 (mirrors create's {@link #requireTaskName}). A rename of a
+     * recurring task re-checks the duplicate-name rule via {@link #rejectDuplicateRecurringRename}.
      *
-     * @return true if the name field was present (and applied).
+     * @param type the type the patch leaves the task with, so a rename sent with a schedule
+     *             is judged as the task it becomes
      */
-    private static boolean applyNameUpdate(Task task, JsonObject body) {
-        if (!body.has(KEY_NAME)) return false;
+    private static @Nullable String nameUpdate(Task task, JsonObject body, Task.Type type) {
+        if (!body.has(KEY_NAME)) return null;
         var el = body.get(KEY_NAME);
         var name = el.isJsonNull() ? null : el.getAsString();
         if (name == null || name.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name must be non-blank");
-            return false; // unreachable — error() throws
+            throw ApiResponses.unreachable();
         }
-        rejectDuplicateRecurringRename(name, task);
-        task.name = name;
-        return true;
+        rejectDuplicateRecurringRename(name, task, type);
+        return name;
     }
 
     @SuppressWarnings("java:S2259")

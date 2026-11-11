@@ -432,15 +432,18 @@ public class ApiAgentsController extends Controller {
         }
     }
 
+    /** A provider and one of its models, or neither. */
+    private record ModelPair(@Nullable String provider, @Nullable String modelId) {}
+
     /**
-     * JCLAW-1190: apply the fallback pair present in {@code body} under the partial-PUT
-     * convention. Clearing either half clears both; a body that names neither still has the
-     * stored pair re-checked against the (possibly new) primary.
+     * JCLAW-1190: the fallback pair {@code body} leaves the agent with, under the partial-PUT convention, checked and
+     * not yet applied. Clearing either half clears both; a body that names neither still has the stored pair
+     * re-checked against the (possibly new) primary.
      */
-    private static void applyFallbackSettings(Agent agent, JsonObject body, String modelProvider) {
+    private static ModelPair fallbackAfter(Agent agent, JsonObject body, String modelProvider) {
         if (!body.has(KEY_FALLBACK_PROVIDER) && !body.has(KEY_FALLBACK_MODEL_ID)) {
             validateFallback(modelProvider, agent.fallbackProvider, agent.fallbackModelId);
-            return;
+            return new ModelPair(agent.fallbackProvider, agent.fallbackModelId);
         }
         var provider = body.has(KEY_FALLBACK_PROVIDER)
                 ? readOptionalString(body, KEY_FALLBACK_PROVIDER) : agent.fallbackProvider;
@@ -451,26 +454,24 @@ public class ApiAgentsController extends Controller {
             modelId = null;
         }
         validateFallback(modelProvider, provider, modelId);
-        agent.fallbackProvider = provider;
-        agent.fallbackModelId = modelId;
+        return new ModelPair(provider, modelId);
     }
 
     /**
-     * JF-239: apply the compaction-model pair present in {@code body} under the partial-PUT convention. Both null or
-     * blank resets the agent to writing its summaries as before; one without the other is a 400, and a concrete pair
-     * must be a model registered on that provider. Checked before anything is applied so a 400 never leaves a
-     * half-written agent behind.
+     * JF-239: the compaction-model pair {@code body} leaves the agent with, under the partial-PUT convention, checked
+     * and not yet applied. Both null or blank resets the agent to writing its summaries as before; one without the
+     * other is a 400, and a concrete pair must be a model registered on that provider.
      */
-    private static void applyCompactionModel(Agent agent, JsonObject body) {
-        if (!body.has(KEY_COMPACTION_PROVIDER) && !body.has(KEY_COMPACTION_MODEL)) return;
+    private static ModelPair compactionModelAfter(Agent agent, JsonObject body) {
+        if (!body.has(KEY_COMPACTION_PROVIDER) && !body.has(KEY_COMPACTION_MODEL)) {
+            return new ModelPair(agent.compactionProvider, agent.compactionModel);
+        }
         var provider = body.has(KEY_COMPACTION_PROVIDER)
                 ? readOptionalString(body, KEY_COMPACTION_PROVIDER) : agent.compactionProvider;
         var modelId = body.has(KEY_COMPACTION_MODEL)
                 ? readOptionalString(body, KEY_COMPACTION_MODEL) : agent.compactionModel;
         if (provider == null && modelId == null) {
-            agent.compactionProvider = null;
-            agent.compactionModel = null;
-            return;
+            return new ModelPair(null, null);
         }
         if (provider == null || modelId == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
@@ -482,8 +483,7 @@ public class ApiAgentsController extends Controller {
                     "Model '%s' is not registered on provider '%s'".formatted(modelId, provider));
             throw ApiResponses.unreachable();
         }
-        agent.compactionProvider = provider;
-        agent.compactionModel = modelId;
+        return new ModelPair(provider, modelId);
     }
 
     /**
@@ -537,8 +537,8 @@ public class ApiAgentsController extends Controller {
             throw ApiResponses.unreachable();
         }
 
-        // Checked before any field is applied: `agent` is managed, so a 403 thrown after a
-        // partial apply would still flush the earlier fields on the request's commit.
+        // No field of `agent` is set until every check has passed (JF-294): a refusal that came after a
+        // save would leave the fields set before it stored.
         requireOperatorForAcpChange(agent, body);
         requireOperatorForTypeChange(agent, body);
 
@@ -569,6 +569,9 @@ public class ApiAgentsController extends Controller {
                 ? readOptionalString(body, KEY_DESCRIPTION)
                 : agent.description;
 
+        var compaction = compactionModelAfter(agent, body);
+        var fallback = fallbackAfter(agent, body, modelProvider);
+
         applyCompressionSettings(agent, body);
 
         // JCLAW-500: per-agent acp-runtime grant. Absent/null key leaves it
@@ -578,8 +581,10 @@ public class ApiAgentsController extends Controller {
         }
 
         applyMemorySettings(agent, body);
-        applyCompactionModel(agent, body);
-        applyFallbackSettings(agent, body, modelProvider);
+        agent.compactionProvider = compaction.provider();
+        agent.compactionModel = compaction.modelId();
+        agent.fallbackProvider = fallback.provider();
+        agent.fallbackModelId = fallback.modelId();
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);

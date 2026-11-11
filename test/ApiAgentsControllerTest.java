@@ -508,6 +508,111 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
+    // JF-294: a refused update saves none of its fields
+    // =====================
+
+    /** The status with the error's code and message. */
+    private static String refusal(play.mvc.Http.Response resp) {
+        var json = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        return resp.status + " " + json.get("code").getAsString() + " " + json.get("message").getAsString();
+    }
+
+    @Test
+    void aPutRefusedOnItsCompactionModelSavesNoneOfItsOtherFields() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("jf294-compaction");
+        var before = getContent(GET("/api/agents/" + id));
+
+        var refused = PUT("/api/agents/" + id, "application/json", """
+                {"acpAllowed": true, "compressionEnabled": true, "memoryAutocaptureEnabled": false,
+                 "memoryAutocaptureProvider": "together", "memoryAutocaptureModel": "fb-model",
+                 "description": "changed", "compactionProvider": "together"}
+                """);
+
+        assertEquals("400 invalid_request 'compactionProvider' and 'compactionModel' go together: set both or neither",
+                refusal(refused));
+        assertEquals(before, getContent(GET("/api/agents/" + id)));
+    }
+
+    @Test
+    void aPutRefusedOnItsFallbackSavesNoneOfItsOtherFields() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("jf294-fallback");
+        var before = getContent(GET("/api/agents/" + id));
+
+        var refused = PUT("/api/agents/" + id, "application/json", """
+                {"acpAllowed": true, "compressionEnabled": true, "memoryAutocaptureEnabled": false,
+                 "compactionProvider": "together", "compactionModel": "fb-model",
+                 "fallbackProvider": "openrouter", "fallbackModelId": "gpt-4.1"}
+                """);
+
+        assertEquals("400 invalid_request The fallback provider must differ from the agent's provider 'openrouter'",
+                refusal(refused));
+        assertEquals(before, getContent(GET("/api/agents/" + id)));
+    }
+
+    @Test
+    void aPutRefusedBecauseItsNewModelIsTheStoredFallbackSavesNoneOfItsOtherFields() {
+        login();
+        seedFallbackProvider();
+        var id = JsonParser.parseString(getContent(POST("/api/agents", "application/json", """
+                {"name": "jf294-stored-fallback", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model"}
+                """))).getAsJsonObject().get("id").getAsLong();
+        var before = getContent(GET("/api/agents/" + id));
+
+        var refused = PUT("/api/agents/" + id, "application/json", """
+                {"compressionEnabled": true, "memoryAutocaptureEnabled": false,
+                 "modelProvider": "together", "modelId": "fb-model"}
+                """);
+
+        assertEquals("400 invalid_request The fallback provider must differ from the agent's provider 'together'",
+                refusal(refused));
+        assertEquals(before, getContent(GET("/api/agents/" + id)));
+    }
+
+    @Test
+    void aPutRefusedWithAConflictSavesNoneOfItsOtherFields() {
+        login();
+        createAgent("jf294-taken");
+        var id = createAgent("jf294-renamer");
+        var before = getContent(GET("/api/agents/" + id));
+
+        var refused = PUT("/api/agents/" + id, "application/json", """
+                {"acpAllowed": true, "compressionEnabled": true, "memoryAutocaptureEnabled": false,
+                 "name": "jf294-taken"}
+                """);
+
+        assertEquals("409 conflict An agent named 'jf294-taken' already exists", refusal(refused));
+        assertEquals(before, getContent(GET("/api/agents/" + id)));
+    }
+
+    @Test
+    void aPutThatPassesEveryCheckAppliesEveryField() {
+        login();
+        seedFallbackProvider();
+        var id = createAgent("jf294-all-fields");
+
+        var saved = PUT("/api/agents/" + id, "application/json", """
+                {"acpAllowed": true, "compressionEnabled": true, "memoryAutocaptureEnabled": false,
+                 "memoryAutocaptureProvider": "together", "memoryAutocaptureModel": "fb-model",
+                 "compactionProvider": "together", "compactionModel": "fb-model",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model", "description": "all at once"}
+                """);
+
+        assertIsOk(saved);
+        var view = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertEquals(java.util.List.of("true", "true", "false", "\"together\"", "\"fb-model\"", "\"together\"",
+                        "\"fb-model\"", "\"together\"", "\"fb-model\"", "\"all at once\""),
+                java.util.stream.Stream.of("acpAllowed", "compressionEnabled", "memoryAutocaptureEnabled",
+                                "memoryAutocaptureProvider", "memoryAutocaptureModel", "compactionProvider",
+                                "compactionModel", "fallbackProvider", "fallbackModelId", "description")
+                        .map(field -> view.get(field).toString()).toList());
+    }
+
+    // =====================
     // Service agents
     // =====================
 
