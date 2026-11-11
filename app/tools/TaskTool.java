@@ -663,8 +663,14 @@ public class TaskTool implements ToolRegistry.Tool {
             task.setDelivery(explicit == null ? null : resolveDeliverySpec(explicit, task.agent), task.agent.isMain());
             anyChange = true;
         }
-        anyChange |= applyStringPatches(args, task);
+        boolean stringsChanged = applyStringPatches(args, task);
+        anyChange |= stringsChanged;
         anyChange |= applyFlagPatches(args, task);
+        // JF-305: paused and autoDeleteOnComplete, the fields left out here, change neither what a fire
+        // produces nor when it fires.
+        boolean fireChanged = scheduleChanged || stringsChanged
+                || args.has(SchemaKeys.DESCRIPTION) || args.has(KEY_TIMEZONE);
+        if (fireChanged && !task.agent.isMain()) task.agentChangedTheFire();
 
         if (anyChange) {
             downgradeOrigin(task);

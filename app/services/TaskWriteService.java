@@ -166,8 +166,9 @@ public final class TaskWriteService {
      * invalid input) stay in the controller.
      *
      * @param byOperatorOrMain whether the operator or {@code main} is asking. A {@code delivery} in the
-     *                         body is recorded as theirs or as the agent's (JF-305); a body without
-     *                         one leaves the saved delivery and who saved it alone.
+     *                         body is recorded as theirs or as the agent's (JF-305), and any other string
+     *                         field an agent changes makes the saved target the agent's
+     *                         ({@link Task#agentChangedTheFire}); the two flags leave it alone.
      * @return true if any field was touched.
      */
     public static boolean applyOptionalFieldUpdates(Task task, JsonObject body, boolean byOperatorOrMain) {
@@ -175,6 +176,8 @@ public final class TaskWriteService {
         // complexity bar; the boolean OR reduction below preserves "any field
         // touched" semantics without short-circuiting.
         boolean changed = applyOptionalStringFields(task, body, byOperatorOrMain);
+        // Every string field is part of what a fire produces or when it fires; the flags below are not.
+        if (changed && !byOperatorOrMain) task.agentChangedTheFire();
         changed |= applyOptionalBooleanFields(task, body);
         return changed;
     }

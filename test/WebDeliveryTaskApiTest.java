@@ -25,8 +25,9 @@ import java.util.function.Supplier;
  * the bearer and agent header {@code jclaw_api} sends, as in {@code AgentTaskScopeTest}.
  *
  * <p>The task records who saved the target, and shows it as {@code deliverySetByOperator} (JF-305): an
- * agent's save of a delivery is the agent's, whoever saved the one before. What a fire then does with
- * each is in {@code OperatorWebTargetFireTest}.
+ * agent's save of a delivery is the agent's, whoever saved the one before, and so is the target of a task
+ * whose agent changed what a fire produces or when it fires. What a fire then does with each is in
+ * {@code OperatorWebTargetFireTest}.
  *
  * <p>{@code main}'s half is in {@code WebDeliveryScopeTest}, against a detached entity: its row is
  * provisioned by code and a test may not seed one.
@@ -107,19 +108,65 @@ class WebDeliveryTaskApiTest extends FunctionalTest {
     }
 
     @Test
-    void anAgentKeepsTheOperatorsTargetOnlyWhileItLeavesTheDeliveryAlone() {
+    void anAgentsEditOfWhatAFireProducesOrWhenItFiresMakesTheOperatorsTargetTheAgents() {
+        var path = "/api/tasks/" + own.taskId();
+        var wider = "web:" + alien.conversationId();
+        var edits = List.of(
+                "{\"description\":\"rewritten\"}",
+                "{\"schedule\":\"2d\"}",
+                "{\"name\":\"renamed-" + suffix + "\"}",
+                "{\"payloadType\":\"reminder\"}",
+                "{\"enabledToolNames\":[\"web_search\"]}",
+                "{\"timezone\":\"Asia/Tokyo\"}");
+
+        for (var edit : edits) {
+            assertEquals(new Saved(wider, true), operatorSaves(path, wider), edit);
+
+            var edited = asAgent(() -> patch(agentRequest(own.agentId()), path, edit));
+
+            assertStatus(200, edited);
+            assertEquals(new Saved(wider, false), savedIn(edited), edit);
+        }
+    }
+
+    @Test
+    void anAgentThatSwitchesItsTaskOffAndOnKeepsTheOperatorsTarget() {
         var path = "/api/tasks/" + own.taskId();
         var wider = "web:" + alien.conversationId();
         assertEquals(new Saved(wider, true), operatorSaves(path, wider));
 
-        var edited = asAgent(() -> patch(agentRequest(own.agentId()), path, "{\"description\":\"rewritten\"}"));
+        for (var edit : List.of("{\"paused\":true}", "{\"paused\":false}", "{\"autoDeleteOnComplete\":true}")) {
+            var edited = asAgent(() -> patch(agentRequest(own.agentId()), path, edit));
+
+            assertStatus(200, edited);
+            assertEquals(new Saved(wider, true), savedIn(edited), edit);
+        }
+    }
+
+    @Test
+    void theOperatorsOwnEditOfTheTaskKeepsTheTargetTheirs() {
+        var path = "/api/tasks/" + own.taskId();
+        var wider = "web:" + alien.conversationId();
+        assertEquals(new Saved(wider, true), operatorSaves(path, wider));
+
+        assertIsOk(POST("/api/auth/login", "application/json", "{\"username\":\"admin\",\"password\":\"changeme\"}"));
+        var edited = patch(operatorRequest(), path, "{\"description\":\"rewritten\",\"schedule\":\"2d\"}");
+
         assertStatus(200, edited);
         assertEquals(new Saved(wider, true), savedIn(edited));
+    }
 
-        // The operator's target sent back by the agent is the agent's save, and out of its reach.
+    @Test
+    void theOperatorsTargetSentBackByTheAgentIsRefusedAndNothingInThePatchIsSaved() {
+        var path = "/api/tasks/" + own.taskId();
+        var wider = "web:" + alien.conversationId();
+        assertEquals(new Saved(wider, true), operatorSaves(path, wider));
+
+        // Sent back unchanged it is still the agent's save, and out of the agent's reach.
         refusal(alien.conversationId(), asAgent(() -> patch(agentRequest(own.agentId()), path,
                 "{\"description\":\"once more\",\"delivery\":\"%s\"}".formatted(wider))));
-        assertEquals(List.of(wider, true, "rewritten"), stored(own.taskId()));
+
+        assertEquals(List.of(wider, true, "the prompt"), stored(own.taskId()));
     }
 
     @Test

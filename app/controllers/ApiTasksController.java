@@ -508,10 +508,12 @@ public class ApiTasksController extends Controller {
 
         var timezoneBefore = task.timezone;
         boolean scheduleChanged = schedule != null;
+        boolean byOperatorOrMain = RequestPrincipal.isOperatorOrMainAgent();
         if (schedule != null) applySchedule(task, schedule);
         if (name != null) task.name = name;
-        boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body,
-                RequestPrincipal.isOperatorOrMainAgent());
+        // The name is the fire's prompt when the description is blank (TaskExecutor).
+        if ((scheduleChanged || name != null) && !byOperatorOrMain) task.agentChangedTheFire();
+        boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body, byOperatorOrMain);
 
         // True only when nothing above wrote to `task`.
         if (!scheduleChanged && name == null && !fieldsChanged) {

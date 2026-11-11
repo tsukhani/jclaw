@@ -238,7 +238,7 @@ public class Task extends TimestampedModel {
      * conversation, so a fire delivers their {@code web:<id>} whatever the task's agent reaches. False when
      * the agent did, and a fire judges the target as the agent's ({@code services.WebDeliveryScope}).
      * The default is false, so a row from before the column gains no reach. Code in {@code app/} writes
-     * it only through {@link #setDelivery}.
+     * it only through {@link #setDelivery} and {@link #agentChangedTheFire}.
      */
     // @ColumnDefault for the reason given on autoDeleteOnComplete.
     @Column(name = "delivery_set_by_operator", nullable = false)
@@ -254,6 +254,18 @@ public class Task extends TimestampedModel {
     public void setDelivery(@Nullable String spec, boolean byOperatorOrMain) {
         delivery = spec;
         deliverySetByOperator = byOperatorOrMain;
+    }
+
+    /**
+     * An agent other than {@code main} changed what a fire produces or when it fires. The operator and
+     * {@code main} lend their reach to the task as it stood when they saved its target, so from here the
+     * target is judged as the agent's until one of them saves it again. Kept otherwise, an agent could
+     * rewrite a task pointed at another agent's conversation and have its own text delivered there.
+     * Pausing, resuming and {@code autoDeleteOnComplete} switch the task on or off as it stands, and
+     * do not call this.
+     */
+    public void agentChangedTheFire() {
+        deliverySetByOperator = false;
     }
 
     /**

@@ -37,9 +37,9 @@ import java.util.function.Supplier;
 
 /**
  * A {@code web:<id>} target the operator saves for a task of another agent is delivered to when the task
- * fires, a target the agent saved is judged as the agent's, and an agent's change of the target makes it
- * the agent's again (JF-305). Each test saves through {@code POST} or {@code PATCH /api/tasks} and then
- * runs the production fire body against a stub provider.
+ * fires, a target the agent saved is judged as the agent's, and an agent's change of the target, or of
+ * what a fire produces or when it fires, makes it the agent's again (JF-305). Each test saves through
+ * {@code POST} or {@code PATCH /api/tasks} and then runs the production fire body against a stub provider.
  *
  * <p>{@code main}'s save is in {@code WebDeliveryScopeTest}: its row is provisioned by code and a test may
  * not seed one.
@@ -154,16 +154,40 @@ class OperatorWebTargetFireTest extends FunctionalTest {
     }
 
     @Test
-    void anAgentsEditThatLeavesTheTargetAloneKeepsTheOperatorsTarget() throws Exception {
+    void anAgentsRewriteOfTheTaskStopsTheOperatorsTargetUntilTheOperatorSavesItAgain() throws Exception {
+        var path = "/api/tasks/" + worker.taskId();
+        for (var edit : List.of("{\"description\":\"rewritten\"}", "{\"schedule\":\"2d\"}")) {
+            login();
+            assertStatus(200, patch(operatorRequest(), path, delivery(other.conversationId())));
+            clearCookies();
+            var edited = asAgent(() -> patch(agentRequest(worker.agentId()), path, edit));
+            assertStatus(200, edited);
+            assertEquals("web:" + other.conversationId(), body(edited).get("delivery").getAsString(), edit);
+
+            fire(worker.taskId());
+
+            assertEquals(notDeliveredTo(other.conversationId()), lastRun(worker.taskId()), edit);
+        }
+        assertEquals(List.of(), deliveredInto(other.conversationId()));
+
+        login();
+        assertStatus(200, patch(operatorRequest(), path, delivery(other.conversationId())));
+        clearCookies();
+        fire(worker.taskId());
+
+        assertEquals(deliveredTo(other.conversationId()), lastRun(worker.taskId()));
+        assertEquals(List.of(OUTPUT), deliveredInto(other.conversationId()));
+    }
+
+    @Test
+    void anAgentThatSwitchesItsTaskOffAndOnKeepsTheOperatorsTargetAtTheFire() throws Exception {
         var path = "/api/tasks/" + worker.taskId();
         login();
         assertStatus(200, patch(operatorRequest(), path, delivery(other.conversationId())));
         clearCookies();
-
-        var edited = asAgent(() -> patch(agentRequest(worker.agentId()), path, "{\"description\":\"rewritten\"}"));
-        assertStatus(200, edited);
-        assertEquals(List.of("rewritten", "web:" + other.conversationId()),
-                List.of(body(edited).get("description").getAsString(), body(edited).get("delivery").getAsString()));
+        for (var edit : List.of("{\"paused\":true}", "{\"paused\":false}")) {
+            assertStatus(200, asAgent(() -> patch(agentRequest(worker.agentId()), path, edit)));
+        }
 
         fire(worker.taskId());
 

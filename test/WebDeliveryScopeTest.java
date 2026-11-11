@@ -360,19 +360,52 @@ class WebDeliveryScopeTest extends UnitTest {
     }
 
     @Test
-    void anAgentKeepsTheOperatorsTargetOnlyWhileItLeavesTheDeliveryAlone() {
+    void anAgentsEditOfWhatAFireProducesOrWhenItFiresMakesTheOperatorsTargetTheAgents() {
         var name = "jf305-update-" + suffix;
+        taskManager(owner, create(name, "web:" + own.id));
+        var edits = List.of(
+                "\"description\":\"rewritten\"",
+                "\"schedule\":\"every 45m\"",
+                "\"payloadType\":\"reminder\"",
+                "\"enabledToolNames\":\"[\\\"web_search\\\"]\"",
+                "\"timezone\":\"Asia/Tokyo\"");
+
+        for (var edit : edits) {
+            patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
+            assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "before " + edit), edit);
+
+            assertEquals("Task '" + name + "' updated.", taskManager(owner,
+                    "{\"action\":\"updateTask\",\"name\":\"%s\",%s}".formatted(name, edit)), edit);
+
+            assertEquals(new Saved("web:" + alienChat.id, false), savedOn(name), edit);
+            assertEquals(DispatchResult.failedDelivery(notFound(alienChat.id)), fire(taskNamed(name), "after " + edit), edit);
+        }
+        assertEquals(edits.stream().map(edit -> "before " + edit).toList(), delivered(alienChat));
+    }
+
+    @Test
+    void anAgentThatSwitchesItsTaskOffAndOnKeepsTheOperatorsTarget() {
+        var name = "jf305-switch-" + suffix;
+        taskManager(owner, create(name, "web:" + own.id));
+        patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
+
+        for (var edit : List.of("\"paused\":true", "\"paused\":false", "\"autoDeleteOnComplete\":true")) {
+            assertEquals("Task '" + name + "' updated.", taskManager(owner,
+                    "{\"action\":\"updateTask\",\"name\":\"%s\",%s}".formatted(name, edit)), edit);
+            assertEquals(new Saved("web:" + alienChat.id, true), savedOn(name), edit);
+        }
+        assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "after the switches"));
+        assertEquals(List.of("after the switches"), delivered(alienChat));
+    }
+
+    @Test
+    void theOperatorsTargetSentBackByTheAgentIsRefusedAndStaysTheOperators() {
+        var name = "jf305-echo-" + suffix;
         var ownOther = conversation(owner, null);
         taskManager(owner, create(name, "web:" + own.id));
         patchDelivery(taskNamed(name), "web:" + alienChat.id, true);
 
-        assertEquals("Task '" + name + "' updated.", taskManager(owner,
-                "{\"action\":\"updateTask\",\"name\":\"%s\",\"description\":\"rewritten\"}".formatted(name)));
-        assertEquals(new Saved("web:" + alienChat.id, true), savedOn(name));
-        assertEquals(DispatchResult.delivered(), fire(taskNamed(name), "after the agent's edit"));
-        assertEquals(List.of("after the agent's edit"), delivered(alienChat));
-
-        // The operator's target sent back by the agent is the agent's save, and out of its reach.
+        // Sent back unchanged it is still the agent's save, and out of the agent's reach.
         assertEquals("Error: " + notFound(alienChat.id), taskManager(owner, update(name, "web:" + alienChat.id)));
         assertEquals(new Saved("web:" + alienChat.id, true), savedOn(name));
 
