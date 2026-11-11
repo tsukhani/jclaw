@@ -295,6 +295,25 @@ class RestartProgressScriptTest extends UnitTest {
         assertEquals(List.of(), calls().stream().filter(c -> c.startsWith("npx ") || c.startsWith("pnpm ")).toList());
     }
 
+    @Test
+    void aLockfileNewerThanThePrecompiledClassesPrecompilesAgain() throws Exception {
+        builtSourceCheckout();
+        assertTrue(start().out().lines().toList().contains("==> Skipping precompile (precompiled/ is up to date)"));
+        var compiled = Files.getLastModifiedTime(home.resolve("precompiled/java")).toMillis();
+        var lock = Files.writeString(home.resolve("gradle.lockfile"), "x:y:1=runtimeClasspath\n");
+        Files.setLastModifiedTime(lock, FileTime.fromMillis(compiled - 2_000));
+
+        var older = start();
+        assertTrue(older.out().lines().toList().contains("==> Skipping precompile (precompiled/ is up to date)"), older.out());
+        assertEquals(List.of(), calls().stream().filter(c -> c.equals("play precompile")).toList());
+
+        Files.setLastModifiedTime(lock, FileTime.fromMillis(compiled + 2_000));
+        var newer = start();
+        assertTrue(newer.out().lines().toList().contains(
+                "==> Precompiling backend (gradle.lockfile is newer than precompiled/)..."), newer.out());
+        assertEquals(List.of("play precompile"), calls().stream().filter(c -> c.equals("play precompile")).toList());
+    }
+
     private void assertTheWebAppIsRebuiltBecause(String reason) throws Exception {
         var run = start();
         assertTrue(run.out().lines().toList().contains("==> Generating static SPA (" + reason + ")..."), run.out());

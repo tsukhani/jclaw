@@ -3191,7 +3191,7 @@ aot_fingerprint() {
         find "$SCRIPT_DIR/lib" "$SCRIPT_DIR/framework" -name '*.jar' -exec ls -ln {} + 2>/dev/null \
             | awk '{ print $5, $NF }' | sed "s|$SCRIPT_DIR/||" | sort || true
     else
-        (cd "$SCRIPT_DIR" && cksum build.gradle.kts settings.gradle.kts .play-version 2>/dev/null) || true
+        (cd "$SCRIPT_DIR" && cksum build.gradle.kts settings.gradle.kts gradle.lockfile .play-version 2>/dev/null) || true
     fi
 }
 
@@ -3792,8 +3792,10 @@ do_start_prod() {
         # file registers through its parent's mtime), conf/routes (Play
         # renders it from precompiled/templates/conf/routes, not the
         # source), .play-version (the fork's enhancers and framework
-        # templates) and build.gradle.kts (what the classes compiled
-        # against). The threshold is precompiled/java's mtime —
+        # templates), and build.gradle.kts and gradle.lockfile (what the
+        # classes compiled against: a lock rewrite for one transitive
+        # changes the jars and leaves build.gradle.kts alone). The
+        # threshold is precompiled/java's mtime —
         # playPrecompile deletes precompiled/ before writing it — and
         # -print -quit stops at the first match so a clean tree costs
         # milliseconds.
@@ -3801,7 +3803,7 @@ do_start_prod() {
         if [[ ! -d precompiled/java ]]; then
             precompile_trigger="precompiled/ is missing"
         else
-            precompile_trigger=$(find app conf/routes .play-version build.gradle.kts \
+            precompile_trigger=$(find app conf/routes .play-version build.gradle.kts gradle.lockfile \
                 -newer precompiled/java -print -quit 2>/dev/null || true)
             if [[ -n "$precompile_trigger" ]]; then
                 precompile_trigger="$precompile_trigger is newer than precompiled/"

@@ -124,6 +124,22 @@ class AotCacheScriptTest extends UnitTest {
     }
 
     @Test
+    void aLockfileChangeAloneRetrainsAndAnUnchangedOneKeepsTheCache() throws Exception {
+        var home = gradleHome();
+        prepare(home, Map.of(), "--http.port=9000 -Xmx2g");
+        Files.writeString(home.resolve("gradle.lockfile"), "x:y:1=runtimeClasspath\n");
+        var added = prepare(home, Map.of(), "--http.port=9000 -Xmx2g");
+        assertTrue(added.contains("Training the AOT cache (the JDK, the JVM options or the libraries changed)"), added);
+        Files.writeString(home.resolve("gradle.lockfile"), "x:y:1=runtimeClasspath\nx:z:3=runtimeClasspath\n");
+        var transitive = prepare(home, Map.of(), "--http.port=9000 -Xmx2g");
+        assertTrue(transitive.contains("Training the AOT cache (the JDK, the JVM options or the libraries changed)"),
+                transitive);
+        var unchanged = prepare(home, Map.of(), "--http.port=9000 -Xmx2g");
+        assertTrue(unchanged.contains("AOT cache: up to date"), unchanged);
+        assertEquals(3, calls().size());
+    }
+
+    @Test
     void aFailedTrainingRunNeverStopsTheStart() throws Exception {
         var home = gradleHome();
         var out = prepare(home, Map.of("STUB_PLAY_FAIL", "1"), "--http.port=9000");
