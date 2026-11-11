@@ -77,6 +77,7 @@ public class ApiSkillsController extends Controller {
     private static final String KEY_SKILL_NAME = "skillName";
     private static final String KEY_CATALOG = "catalog";
     private static final String CREDENTIALS_DIR = "credentials";
+    private static final String BUILT_IN_SKILL = "skill-creator";
     /** The validator's problems on a 422 from {@code export}. */
     private static final String KEY_PROBLEMS = "problems";
     private static final String KEY_PROVIDER = "provider";
@@ -436,11 +437,11 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
     @AgentAccess(value = OPERATOR_ONLY, reason = "removes a registry skill every agent installs from")
     public static void delete(String name) {
-
-        if ("skill-creator".equals(name)) {
+        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
+        // The folder the name resolves to, not the name: a link to it or a case variant (macOS) is the same skill.
+        if (BUILT_IN_SKILL.equals(dir.getFileName().toString())) {
             ApiResponses.error(403, ApiResponses.FORBIDDEN, "The skill-creator skill is a built-in skill and cannot be deleted.");
         }
-        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
         deleteSkillDir(dir);
     }
@@ -527,6 +528,7 @@ public class ApiSkillsController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
+        var agentSkillDir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_ENABLED)) {
@@ -545,8 +547,6 @@ public class ApiSkillsController extends Controller {
         // Only enforce on enable: turning a missing skill off is a no-op
         // we shouldn't reject (lets callers clean up stale configs).
         if (enabled) {
-            var agentSkillDir = AgentService.workspacePath(agent.name)
-                    .resolve(SKILLS_DIR).resolve(name);
             if (!Files.exists(agentSkillDir.resolve(SKILL_MD))) {
                 ApiResponses.errorWithTemplate(400, ApiResponses.INVALID_REQUEST,
                         ("Skill '%s' is not installed on agent '%s'. "
@@ -716,15 +716,16 @@ public class ApiSkillsController extends Controller {
         }
 
         var agentName = agent.name;
-        // Route the body-supplied skillName through the same containment guard
-        // every sibling op uses: a ../ or absolute name is rejected (notFound)
+        // Route the body-supplied skillName through the same guard every
+        // sibling op uses: a path, ../ or absolute name finds no skill (404)
         // here, before any read or the background write. Both the read dir and
         // the global write target below derive from the guard-validated folder
         // name — never the raw body string, which the background job would
         // otherwise resolve against globalSkillsPath() and escape on write.
-        var skillDir = resolveSkillName(AgentService.workspacePath(agentName).resolve(SKILLS_DIR), skillName);
-        if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve(SKILL_MD))) {
+        var skillDir = WorkspacePathGuard.resolveChild(AgentService.workspacePath(agentName).resolve(SKILLS_DIR), skillName);
+        if (skillDir == null || !Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve(SKILL_MD))) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Skill '%s' not found in agent workspace".formatted(skillName));
+            throw ApiResponses.unreachable();
         }
         var folderName = skillDir.getFileName().toString();
 
@@ -926,15 +927,16 @@ public class ApiSkillsController extends Controller {
     // --- Helpers ---
 
     /**
-     * Resolve a skill name to a contained path inside the given root, rejecting
-     * any name that escapes (e.g. "../../../etc"). Calls {@code notFound()} on
-     * escape so callers never see a null return.
+     * The folder {@code name} names directly inside {@code root}; any other name ends the request with a 400.
+     * {@code .} or a path such as {@code skill/credentials} would address the skills folder itself or the inside
+     * of a skill, where {@link #isCredentialFile} and the routes that list, move and delete judge the wrong folder.
      */
     @SuppressWarnings("java:S2259")
     private static Path resolveSkillName(Path root, String name) {
-        var resolved = WorkspacePathGuard.resolveContained(root, name);
+        var resolved = WorkspacePathGuard.resolveChild(root, name);
         if (resolved == null) {
-            notFound();
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'%s' is not a skill name: pass the skill's folder name, not a path.".formatted(name));
             throw ApiResponses.unreachable();
         }
         return resolved;

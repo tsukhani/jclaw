@@ -287,9 +287,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     void getGlobalSkillRejectsTraversalName() {
         login();
         var resp = GET("/api/skills/..%2F..%2Fetc");
-        var status = resp.status.intValue();
-        assertTrue(status == 404 || status == 403,
-                "traversal must be blocked, got " + status);
+        assertEquals(400, resp.status.intValue());
     }
 
     // ==================== GET /api/skills/{name}/files ====================

@@ -13,6 +13,7 @@ import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.JsonCredential;
 import models.McpServer;
+import okhttp3.HttpUrl;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.AppClock;
@@ -240,16 +241,20 @@ public final class McpServerService {
     /**
      * Puts a stored secret back wherever {@code body} carries its mask (JCLAW-1331): the read masks env values
      * with sensitive names and every header value, so a form or an agent that saves what it read sends masks.
+     * A header's mask is not swapped when {@code body} moves the server to another origin: see {@link #sameOrigin}.
      *
-     * @return why the body cannot be saved, a mask that matches nothing stored under its name, or null
+     * @return why the body cannot be saved (a mask that matches nothing stored under its name, or a header's
+     *         mask sent with a URL on another origin), or null
      */
     public static @Nullable String restoreMaskedSecrets(JsonObject body, TransportConfig stored) {
-        var env = restoreMasked(body, "env", stored.env(), false);
-        return env != null ? env : restoreMasked(body, "headers", stored.headers(), true);
+        var env = restoreMasked(body, "env", stored.env(), false, false);
+        if (env != null) return env;
+        boolean moved = body.has("url") && !sameOrigin(stored.url(), optionalString(body, "url"));
+        return restoreMasked(body, "headers", stored.headers(), true, moved);
     }
 
     private static @Nullable String restoreMasked(JsonObject body, String field, Map<String, String> stored,
-                                                  boolean everyValueSecret) {
+                                                  boolean everyValueSecret, boolean moved) {
         if (!body.has(field) || !body.get(field).isJsonObject()) return null;
         var submitted = body.getAsJsonObject(field);
         var restored = new LinkedHashMap<String, String>();
@@ -260,6 +265,10 @@ public final class McpServerService {
             var prior = stored.get(name);
             if (prior == null || !value.equals(everyValueSecret ? maskSecret(prior) : ConfigService.maskValue(name, prior))) {
                 return name + " holds a saved secret's mask rather than a value: enter the value again.";
+            }
+            if (moved) {
+                return name + " was saved for the server's previous address and is not sent to a new one: "
+                        + "enter the value again.";
             }
             restored.put(name, prior);
         }
@@ -284,13 +293,18 @@ public final class McpServerService {
     /**
      * The {@code configJson} after an update, applied as a JSON Merge Patch (RFC 7386) over the stored one: a field
      * the body omits keeps its value and a null clears it, and env and headers change only the keys the body names,
-     * a null value removing that key. A secret the caller never sends is therefore never lost.
+     * a null value removing that key. A secret the caller never sends is therefore never lost, with one exception:
+     * the saved headers do not follow the server to another origin (see {@link #sameOrigin}), which gets only the
+     * headers the body itself carries. A transport switch keeps nothing either way, since {@link #composeConfigJson}
+     * discards the other transport's fields.
      */
     public static String mergeConfigJson(McpServer.Transport transport, String storedConfigJson, JsonObject body) {
         var merged = Objects.requireNonNullElseGet(parseConfig(storedConfigJson), JsonObject::new);
+        var storedUrl = optionalString(merged, "url");
         for (var field : List.of("command", "args", "url")) {
             if (body.has(field)) merged.add(field, body.get(field));
         }
+        if (!sameOrigin(storedUrl, optionalString(merged, "url"))) merged.remove("headers");
         for (var field : List.of("env", "headers")) {
             if (!body.has(field)) continue;
             if (!(body.get(field) instanceof JsonObject patch)) {
@@ -305,6 +319,20 @@ public final class McpServerService {
             merged.add(field, values);
         }
         return composeConfigJson(transport, merged);
+    }
+
+    /**
+     * Whether two server URLs reach one origin: the same scheme, host and port, parsed as the HTTP transport's
+     * client parses them, so the host compared is the host the headers would be sent to. Saved headers stay with
+     * their origin because a change of URL is approved without them in view, and another port of the same host
+     * can be another process. An unchanged URL is its own origin; any other URL the client cannot parse is on none.
+     */
+    private static boolean sameOrigin(@Nullable String url, @Nullable String other) {
+        if (url == null || other == null) return false;
+        if (url.equals(other)) return true;
+        var a = HttpUrl.parse(url);
+        var b = HttpUrl.parse(other);
+        return a != null && b != null && a.scheme().equals(b.scheme()) && a.host().equals(b.host()) && a.port() == b.port();
     }
 
     private static void composeStdioConfig(JsonObject body, JsonObject cfg) {

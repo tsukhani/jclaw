@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 
@@ -77,6 +78,31 @@ public final class WorkspacePathGuard {
             if (rootReal == null || canonical == null) return null;
             return canonical.startsWith(rootReal) ? canonical : null;
         } catch (IOException _) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolve {@code name} as one entry directly inside {@code root}: a single path segment, not {@code .} or
+     * {@code ..}, whose canonical path is a child of the canonical root. {@link #resolveContained} also accepts
+     * the root itself and any depth below it, which a caller that judges a file by its place under the entry
+     * (a skill's {@code credentials/}) cannot take. A read-only probe, as {@link #resolveContained} is.
+     *
+     * @param root the folder the entry must sit directly in
+     * @param name the entry's name, as the caller received it
+     * @return the canonical absolute path, or {@code null} when {@code name} is a path, a link to anything but
+     *         another entry of {@code root}, or cannot be resolved
+     */
+    public static @Nullable Path resolveChild(@NonNull Path root, @NonNull String name) {
+        if (name.isEmpty() || name.equals(".") || name.equals("..")
+                || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 || name.indexOf('\0') >= 0) {
+            return null;
+        }
+        try {
+            var resolved = resolveContained(root, name);
+            var rootReal = canonicalize(root.toAbsolutePath().normalize());
+            return resolved != null && rootReal != null && rootReal.equals(resolved.getParent()) ? resolved : null;
+        } catch (IOException | InvalidPathException _) {
             return null;
         }
     }
