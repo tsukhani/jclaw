@@ -28,8 +28,14 @@
     {
       "id": "wall-clock-datetime-optional",
       "input": "What time is it?",
-      "rubric": "CurrentTimeInjector stamps the current time onto the last user message, so answering with no tool is correct and one datetime call is also correct. A web search or a second clock call is not.",
+      "rubric": "CurrentTimeInjector stamps the current time onto the last user message, so answering with no tool is correct and one datetime call is also correct. A web search or a second clock call is not. The reply must state a clock time; a recording carries no turn time, so the check is on its shape, not its value.",
       "checks": [
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)\\b\\d{1,2}(:\\d{2}|\\s?[ap]\\.?m\\b)"
+          ]
+        },
         {
           "kind": "tools_called_within",
           "args": [

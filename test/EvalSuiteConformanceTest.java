@@ -3,8 +3,10 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
+import services.evals.EvalCase;
 import services.evals.EvalCheck;
 import services.evals.EvalDatasetLoader;
+import services.evals.EvalScorer;
 import services.evals.EvalSuite;
 
 import java.nio.file.Files;
@@ -80,5 +82,46 @@ class EvalSuiteConformanceTest extends UnitTest {
 
         assertTrue(unused.isEmpty(), "check kinds no shipped suite uses: " + unused
                 + ". Add a case checking each to a suite under evals/suites");
+    }
+
+    @Test
+    void aTurnThatDidNothingFailsEveryShippedCase() {
+        // tools_called_within, max_llm_calls and not_contains_any each pass an empty turn, so a case
+        // built only from them grades every agent up.
+        var emptyTurn = new EvalScorer.Response("", List.of(), 1);
+        var passing = shippedSuites().stream()
+                .flatMap(s -> s.cases().stream()
+                        .filter(c -> EvalScorer.failures(c, emptyTurn).isEmpty())
+                        .map(c -> s.id() + "/" + c.id()))
+                .toList();
+
+        assertEquals(List.of(), passing, "these cases pass a turn with no reply and no tool call: add a check on "
+                + "what the answer must say (contains_all, matches, json_schema) or on a tool that must run");
+    }
+
+    @Test
+    void theWallClockCasePassesAReplyThatTellsTheTimeAndFailsOneThatDoesNot() {
+        var wallClock = shippedCase("tool-selection", "wall-clock-datetime-optional");
+        var timeRegex = wallClock.checks().stream()
+                .filter(c -> c.kind() == EvalCheck.Kind.MATCHES).findFirst().orElseThrow().arg();
+        var noTime = List.of("matches: response does not match /" + timeRegex + "/");
+
+        assertEquals(List.of(), EvalScorer.failures(wallClock,
+                new EvalScorer.Response("It's 17:53 in Singapore.", List.of(), 1)));
+        assertEquals(List.of(), EvalScorer.failures(wallClock,
+                new EvalScorer.Response("It's 5:53 PM.", List.of("datetime"), 2)));
+        assertEquals(noTime, EvalScorer.failures(wallClock,
+                new EvalScorer.Response("I can't check the time from here.", List.of(), 1)));
+        assertEquals(noTime, EvalScorer.failures(wallClock,
+                new EvalScorer.Response("Today is Wednesday, 11 November 2026.", List.of(), 1)));
+    }
+
+    private static EvalCase shippedCase(String suiteId, String caseId) {
+        return shippedSuites().stream()
+                .filter(s -> s.id().equals(suiteId))
+                .flatMap(s -> s.cases().stream())
+                .filter(c -> c.id().equals(caseId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(suiteId + "/" + caseId + " is not a shipped case"));
     }
 }

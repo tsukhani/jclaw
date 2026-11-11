@@ -51,6 +51,7 @@ nothing else; the loader refuses a file whose body id disagrees with its name.
       "input": "What time is it?",
       "rubric": "The harness already injects the current time, so the clock tool is allowed but not required.",
       "checks": [
+        { "kind": "matches", "args": ["(?i)\\b\\d{1,2}(:\\d{2}|\\s?[ap]\\.?m\\b)"] },
         { "kind": "tools_called_within", "args": ["datetime"] },
         { "kind": "max_llm_calls", "limit": 2 }
       ]
@@ -61,6 +62,14 @@ nothing else; the loader refuses a file whose body id disagrees with its name.
 
 `rubric` is required: a case that cannot say in one line what it is testing
 does not belong in the suite.
+
+A case must also fail a turn that did nothing. `tools_called_within`,
+`max_llm_calls` and `not_contains_any` each pass an empty reply with no tool
+call, so a case built only from them reports a pass for any agent; this example
+passed one until it gained its `matches` check. `EvalSuiteConformanceTest`
+scores that empty turn against every shipped case and fails the build on a case
+that passes it: add a check on what the answer must say, or on a tool that must
+run.
 
 ### Check kinds
 
