@@ -292,6 +292,34 @@ public class JClawApiTool implements ToolRegistry.Tool {
             case Send send -> url = send.url();
         }
 
+        var requestBuilder = stampedRequest(url, agent, origin, ownerReadsAlone);
+        RequestBody body = requestBodyFor(method, args);
+        requestBuilder.method(method, body);
+
+        try (var response = HttpFactories.general().newCall(requestBuilder.build()).execute()) {
+            var status = response.code();
+            var text = response.body().string();
+            logCall(agent, origin, call + ": HTTP " + status + (status >= 400 ? errorCode(text) : ""), status < 400);
+            // An error is read from its start: it is short, and it is what the model has to act on.
+            var from = status >= 400 ? 0 : offset;
+            if (from > 0 && from >= text.length()) {
+                return "Error: charOffset %d is at or past the end of the response, which is %d characters long."
+                        .formatted(from, text.length());
+            }
+            text = part(method, text, from);
+            var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
+            return note == null || note.isBlank()
+                    ? "HTTP %d\n%s".formatted(status, text)
+                    : "HTTP %d\nNote: %s\n%s".formatted(status, note.strip(), text);
+        } catch (IOException e) {
+            logCall(agent, origin, call + ": failed, " + e.getMessage(), false);
+            return "Error: HTTP request failed: " + e.getMessage();
+        }
+    }
+
+    /** A request to {@code url} that carries who is calling: the agent, and the turn it is calling from. */
+    private static Request.Builder stampedRequest(HttpUrl url, @Nullable Agent agent, @Nullable String origin,
+            boolean ownerReadsAlone) {
         var requestBuilder = new Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer " + InternalApiTokenService.token())
@@ -316,29 +344,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (ownerReadsAlone) {
             requestBuilder.header(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER, "true");
         }
-
-        RequestBody body = requestBodyFor(method, args);
-        requestBuilder.method(method, body);
-
-        try (var response = HttpFactories.general().newCall(requestBuilder.build()).execute()) {
-            var status = response.code();
-            var text = response.body().string();
-            logCall(agent, origin, call + ": HTTP " + status + (status >= 400 ? errorCode(text) : ""), status < 400);
-            // An error is read from its start: it is short, and it is what the model has to act on.
-            var from = status >= 400 ? 0 : offset;
-            if (from > 0 && from >= text.length()) {
-                return "Error: charOffset %d is at or past the end of the response, which is %d characters long."
-                        .formatted(from, text.length());
-            }
-            text = part(method, text, from);
-            var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
-            return note == null || note.isBlank()
-                    ? "HTTP %d\n%s".formatted(status, text)
-                    : "HTTP %d\nNote: %s\n%s".formatted(status, note.strip(), text);
-        } catch (IOException e) {
-            logCall(agent, origin, call + ": failed, " + e.getMessage(), false);
-            return "Error: HTTP request failed: " + e.getMessage();
-        }
+        return requestBuilder;
     }
 
     /** The {@code charOffset} argument: 0 when absent, null when it is not a whole number of 0 or more. */

@@ -503,7 +503,7 @@ class AgentSpawnToolTest extends UnitTest {
     // ── the description lists who may be reached ──
 
     @Test
-    void theDescriptionListsEveryAgentTheCallerMayReachAndNoOther() throws Exception {
+    void theDescriptionListsEveryAgentTheCallerMayReachAndNoOther() {
         var main = createAgent("main");
         var a = createAgent("A");
         a.description = "Makes videos";
@@ -529,7 +529,7 @@ class AgentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void theDescriptionSaysNoneWhenNoAgentCanBeReached() throws Exception {
+    void theDescriptionSaysNoneWhenNoAgentCanBeReached() {
         var main = createAgent("main");
 
         assertEquals(STATIC_DESCRIPTION + "none", agentSpawnDescription(main));
