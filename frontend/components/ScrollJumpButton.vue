@@ -12,17 +12,21 @@ export const SCROLL_JUMP_CLEARANCE = 'scroll-pb-12'
 // Attributes and listeners land on the button, not the row: a caller's @click and data-testid address the control.
 defineOptions({ inheritAttrs: false })
 
-defineProps<{
+withDefaults(defineProps<{
   direction: 'up' | 'down'
-}>()
+  align?: 'center' | 'end'
+}>(), { align: 'center' })
 </script>
 
 <template>
   <!--
   A zero-height sticky row holds the pill at its scroller's visible bottom without adding scroll height, so the caller
-  renders it last in the scrolled content and centres it on that content's column.
+  renders it last in the scrolled content, which the row spans: centred on it, or at its right edge.
 -->
-  <div class="sticky bottom-2 h-0 flex items-start justify-center pointer-events-none">
+  <div
+    class="sticky bottom-2 h-0 flex items-start pointer-events-none"
+    :class="align === 'end' ? 'justify-end' : 'justify-center'"
+  >
     <!-- Cancelling the press keeps the button from taking focus, so a reader typing or reading keeps theirs. -->
     <button
       v-bind="$attrs"

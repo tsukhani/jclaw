@@ -193,11 +193,13 @@ const tocItems = computed(() => sections.map(s => ({
 </script>
 
 <template>
-  <div class="max-w-5xl">
+  <div class="@container">
+    <!-- The root is full width, unlike the header row and the body, so Back to top can sit at <main>'s right edge,
+         clear of the reading column; as the @container it labels the button only where that edge leaves it room. -->
     <!-- max-w-5xl (64rem) is the TOC rail, its gap and the reading column (w-56 + gap-8 + max-w-3xl): the header row
          ends where the column does, so Clawdia stands over the first card's right corner at every width. Her negative
          bottom margin cancels the row's, so she stands on that card's top edge: keep the two pairs equal. -->
-    <div class="flex items-end justify-between gap-4 mb-4 md:mb-3">
+    <div class="max-w-5xl flex items-end justify-between gap-4 mb-4 md:mb-3">
       <div>
         <h1
           ref="pageTitle"
@@ -234,7 +236,7 @@ const tocItems = computed(() => sections.map(s => ({
       >
     </div>
 
-    <div class="flex flex-col md:flex-row gap-8">
+    <div class="max-w-5xl flex flex-col md:flex-row gap-8">
       <!-- TOC rail. Sticky on desktop; an overlay panel on mobile that
            closes on link click via jumpTo above. -->
       <aside
@@ -278,47 +280,49 @@ const tocItems = computed(() => sections.map(s => ({
         </nav>
       </aside>
 
-      <div class="flex-1 min-w-0 max-w-3xl">
-        <!-- space-y-8 spaces the sections only: on the column it would add margin to the Back to top row too. -->
-        <div class="space-y-8">
-          <section
-            v-for="s in sections"
-            :id="s.id"
-            :key="s.id"
-            :data-section-id="s.id"
-            class="border border-border rounded-xl bg-surface-elevated p-6"
-          >
-            <!-- Section header: icon + title. Mirrors the icon shown in the
-                 TOC so operators can scan the page and see the same visual
-                 anchor that brought them here. The markdown's leading h1 is
-                 suppressed (suppressFirstH1) so the title isn't duplicated. -->
-            <header class="flex items-center gap-3 mb-6">
-              <component
-                :is="s.icon"
-                class="w-7 h-7 shrink-0 text-fg-strong"
-                aria-hidden="true"
-              />
-              <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
-                {{ s.title }}
-              </h1>
-            </header>
-            <GuideRenderer
-              :section-id="s.id"
-              :content="s.content"
-              suppress-first-h1
-            />
-          </section>
-        </div>
-
-        <ScrollJumpButton
-          v-if="scrolledDown"
-          direction="up"
-          data-testid="guide-back-to-top"
-          @click="scrollToTop"
+      <div class="flex-1 min-w-0 max-w-3xl space-y-8">
+        <section
+          v-for="s in sections"
+          :id="s.id"
+          :key="s.id"
+          :data-section-id="s.id"
+          class="border border-border rounded-xl bg-surface-elevated p-6"
         >
-          Back to top
-        </ScrollJumpButton>
+          <!-- Section header: icon + title. Mirrors the icon shown in the
+               TOC so operators can scan the page and see the same visual
+               anchor that brought them here. The markdown's leading h1 is
+               suppressed (suppressFirstH1) so the title isn't duplicated. -->
+          <header class="flex items-center gap-3 mb-6">
+            <component
+              :is="s.icon"
+              class="w-7 h-7 shrink-0 text-fg-strong"
+              aria-hidden="true"
+            />
+            <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
+              {{ s.title }}
+            </h1>
+          </header>
+          <GuideRenderer
+            :section-id="s.id"
+            :content="s.content"
+            suppress-first-h1
+          />
+        </section>
       </div>
     </div>
+
+    <!-- 72rem leaves the labelled pill a gutter beside the 64rem column. Narrower, where the card reaches the edge, the
+         arrow alone shows, round and inside the card's padding, with the label kept as its accessible name. -->
+    <ScrollJumpButton
+      v-if="scrolledDown"
+      direction="up"
+      align="end"
+      data-testid="guide-back-to-top"
+      title="Back to top"
+      class="@max-6xl:px-1.5"
+      @click="scrollToTop"
+    >
+      <span class="sr-only @6xl:not-sr-only">Back to top</span>
+    </ScrollJumpButton>
   </div>
 </template>

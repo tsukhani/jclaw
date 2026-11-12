@@ -276,6 +276,22 @@ describe('User Guide page', () => {
     expect(apiCalls).toEqual([])
   })
 
+  it('puts Back to top at the right edge of <main>, outside the reading column, named "Back to top" at every width', async () => {
+    const { scrollMain, backToTop } = await mountInMain()
+    await scrollMain(500)
+
+    const button = backToTop()
+    const row = button.element.parentElement as HTMLElement
+    // jsdom lays nothing out, so pin what places it: a row spanning the page root, packed to its right edge.
+    expect(row.closest('.max-w-3xl')).toBeNull()
+    expect(row.parentElement?.classList.contains('@container')).toBe(true)
+    expect(row.classList.contains('justify-end')).toBe(true)
+    // Below 72rem only the arrow shows; the label stays the button's name and its tooltip.
+    expect(button.text()).toBe('Back to top')
+    expect(button.find('span').classes()).toEqual(['sr-only', '@6xl:not-sr-only'])
+    expect(button.attributes('title')).toBe('Back to top')
+  })
+
   it('shows Back to top only once the reader is more than 8px from the top', async () => {
     const { scrollMain, backToTop } = await mountInMain()
     expect(backToTop().exists()).toBe(false)
