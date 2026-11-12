@@ -1093,7 +1093,7 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     const { list } = await openStreamingTurnAtBottom()
 
     // jsdom lays nothing out, so pin the scroll padding a browser honours when Tab scrolls a link into view.
-    expect(list.classList.contains('scroll-pb-12')).toBe(true)
+    expect(list.classList.contains('scroll-pb-16')).toBe(true)
   })
 
   it('drops a Queued row the queue no longer lists once the stream gives up, when no init will come', async () => {

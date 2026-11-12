@@ -2,10 +2,12 @@
 import { ArrowDownIcon, ArrowUpIcon } from '@heroicons/vue/24/outline'
 
 /**
- * Scroll padding for a scroller that shows this pill, covering bottom-2 plus the pill's height: a link that Tab scrolls
- * up from below stops above the pill rather than behind it (WCAG 2.4.11, technique C43). Resize it with the pill.
+ * Scroll padding for a scroller that shows this pill. Chrome counts bottom-2 from inside the scroller's own bottom
+ * padding (24px in both callers), so the 30px pill spans 32-62px above the edge; Tab scrolls a link it reaches inside
+ * this padding up into view, so 4rem keeps a focused link out from behind the pill (WCAG 2.4.11, technique C43).
+ * Resize it with the pill or that padding.
  */
-export const SCROLL_JUMP_CLEARANCE = 'scroll-pb-12'
+export const SCROLL_JUMP_CLEARANCE = 'scroll-pb-16'
 </script>
 
 <script setup lang="ts">

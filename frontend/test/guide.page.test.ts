@@ -59,7 +59,7 @@ describe('User Guide page', () => {
     const { main, component } = await mountInMain()
 
     // jsdom lays nothing out, so pin the scroll padding a browser honours when Tab scrolls a link up from below.
-    expect([...main.classList]).toEqual(['scroll-pb-12'])
+    expect([...main.classList]).toEqual(['scroll-pb-16'])
 
     // <main> is the layout's: every other page keeps its own scrolling.
     component.unmount()

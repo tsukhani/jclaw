@@ -312,14 +312,15 @@ const tocItems = computed(() => sections.map(s => ({
     </div>
 
     <!-- 72rem leaves the labelled pill a gutter beside the 64rem column. Narrower, where the card reaches the edge, the
-         arrow alone shows, round and inside the card's padding, with the label kept as its accessible name. -->
+         arrow alone shows, a 28px circle nudged 4px right so it stays within the card's 25px of border and padding,
+         with the label kept as its accessible name. -->
     <ScrollJumpButton
       v-if="scrolledDown"
       direction="up"
       align="end"
       data-testid="guide-back-to-top"
       title="Back to top"
-      class="@max-6xl:px-1.5"
+      class="@max-6xl:px-1.5 @max-6xl:translate-x-1"
       @click="scrollToTop"
     >
       <span class="sr-only @6xl:not-sr-only">Back to top</span>
