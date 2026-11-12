@@ -281,4 +281,37 @@ class SandboxJvmAttachTest extends UnitTest {
             });
         } catch (IOException _) {}
     }
+
+    /**
+     * JF-325: the Main Agent's fenced shell attaches to any JVM but JClaw's own, whose memory holds what the fence
+     * hides on disk. Refused before the listener is up and after; another JVM still answers.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void theMainAgentsFencedShellCannotAttachToJclawsOwnJvm() throws Exception {
+        assumeWorkingSandbox();
+        assumeTrue(Files.isExecutable(JCMD) && JCMD.toString().indexOf(' ') < 0, "this JDK has no usable jcmd: " + JCMD);
+        var own = "%s %d VM.version".formatted(JCMD, ProcessHandle.current().pid());
+
+        var fenced = run(main(), own);
+        assertEquals(1, exit(fenced), fenced.toString());
+        assertFalse(lines(fenced).contains(VM_VERSION_LINE), "JClaw's own JVM must not have answered: " + fenced);
+
+        HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
+        try {
+            var control = run(main(), own);
+            assertEquals(0, exit(control), "unfenced, the same attempt must attach or the refusal proves nothing: " + control);
+            assertTrue(lines(control).contains(VM_VERSION_LINE), control.toString());
+        } finally {
+            HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.NONE);
+        }
+
+        var listening = run(main(), own);
+        assertEquals(1, exit(listening), "with the listener now up: " + listening);
+        assertFalse(lines(listening).contains(VM_VERSION_LINE), listening.toString());
+
+        var other = run(main(), attachTo(startJvm()));
+        assertEquals(0, exit(other), "any other JVM still answers the fenced shell: " + other);
+        assertTrue(lines(other).contains(VM_VERSION_LINE), other.toString());
+    }
 }

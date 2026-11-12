@@ -151,6 +151,8 @@ public final class HarnessSandbox {
      * program the run wrote with none of this profile's rules.
      */
     private static final String MAC_DENY_LAUNCH_SERVICES = "(deny lsopen)\n";
+    /** The setuid process viewers the Main Agent's fence runs outside the sandbox, where alone macOS starts them. */
+    private static final List<String> MAC_SETUID_VIEWERS = List.of("/bin/ps", "/usr/bin/top");
 
     /**
      * Where Linux services keep their control sockets: a container runtime's, the session and system D-Bus,
@@ -418,8 +420,10 @@ public final class HarnessSandbox {
      *                 but {@code conf/}, which holds no secret
      * @param readable folders inside a hidden one that stay readable, never writable: the backup folder, which the
      *                 operator's backup task uploads (JF-325)
+     * @param jvmPid   JClaw's own process, whose memory holds what {@code hidden} keeps off disk: the fenced shell
+     *                 attaches to any JVM but this one
      */
-    public record MainFence(List<Path> readOnly, Path writable, List<Path> hidden, List<Path> readable) {
+    public record MainFence(List<Path> readOnly, Path writable, List<Path> hidden, List<Path> readable, long jvmPid) {
 
         /** The fence for this install, around the workspaces under {@code workspaceRoot}. */
         public static MainFence current(File workspaceRoot) {
@@ -435,7 +439,7 @@ public final class HarnessSandbox {
                     .filter(p -> !p.equals(backups) && (p.getFileName() == null
                             || !p.getFileName().toString().equals("conf"))).toList();
             return new MainFence(List.copyOf(readOnly), SandboxHiddenRoots.canonical(workspaceRoot.toPath()), hidden,
-                    List.of(backups));
+                    List.of(backups), ProcessHandle.current().pid());
         }
     }
 
@@ -457,7 +461,7 @@ public final class HarnessSandbox {
         if (ready.mechanism().equals(BWRAP)) {
             // A tmpfs needs its mount point, so only the secret folders that exist are hidden.
             var present = new MainFence(fence.readOnly(), fence.writable(),
-                    linuxHiddenRoots(DatabaseService.backupsDir(), fence.hidden()), fence.readable());
+                    linuxHiddenRoots(DatabaseService.backupsDir(), fence.hidden()), fence.readable(), fence.jvmPid());
             return mainFenceLinuxArgv(argv, present, RUNS_AS_ROOT);
         }
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", mainFenceMacosProfile(fence)));
@@ -468,7 +472,13 @@ public final class HarnessSandbox {
     /**
      * The Main Agent's Seatbelt profile, public so a test can pin its text. The last matching rule wins: the program
      * files lose their writes, the workspaces get them back, the secret folders lose everything after that, and a
-     * readable folder inside one gets its reads back last.
+     * readable folder inside one gets its reads back.
+     *
+     * <p>macOS runs no setuid program inside a sandbox (measured: {@code ps}, {@code top}, {@code sudo},
+     * {@code crontab}, {@code su} and {@code traceroute} all fail with EPERM under a bare {@code (allow default)}), so
+     * the two read-only process viewers run outside it. The last rule refuses JClaw's own attach socket, by its pid,
+     * for connecting, renaming and linking, as {@link #MAC_DENY_JVM_ATTACH} does for every JVM in a custom agent's
+     * run: {@code jcmd} against JClaw would otherwise read from memory what the fence hides on disk.
      */
     public static String mainFenceMacosProfile(MainFence fence) {
         var sb = new StringBuilder("(version 1)\n(allow default)\n");
@@ -479,6 +489,11 @@ public final class HarnessSandbox {
             var reopened = SandboxHiddenRoots.beneath(p.toString(), fence.hidden());
             if (reopened != null) sb.append(rule("allow", "file-read*", reopened.toString()));
         }
+        for (var viewer : MAC_SETUID_VIEWERS) {
+            sb.append("(allow process-exec (literal \"").append(viewer).append("\") (with no-sandbox))\n");
+        }
+        sb.append("(deny network-outbound file-write* file-link (regex #\"/\\.java_pid").append(fence.jvmPid())
+                .append("$\"))\n");
         return sb.toString();
     }
 

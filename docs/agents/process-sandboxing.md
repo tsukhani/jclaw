@@ -69,6 +69,14 @@ readable because the operator's backup task uploads it. The program files (`Play
 `Play.frameworkPath` and `~/.gradle`, which a restart loads its jars from) are read-only, with the workspace root
 writable again inside them. It fails closed like a custom agent's run, and honours `setCustomAgentOverrideForTest`
 the same way. A command that names a skill secret still reaches JClaw's loopback secrets proxy (JF-324).
+On macOS the profile ends with two more things. macOS starts no setuid program inside a sandbox (measured on
+27.0.1 under a bare `(allow default)`: `ps`, `top`, `sudo`, `crontab`, `su` and `traceroute` fail with EPERM), so
+`/bin/ps` and `/usr/bin/top` run outside it (`with no-sandbox`); the others stay unavailable to the fenced shell.
+And JClaw's own attach socket, `.java_pid<JClaw's pid>`, takes no connection, rename or link, so `jcmd` cannot read
+from JClaw's memory what the fence hides on disk; any other JVM still attaches
+(`SandboxJvmAttachTest.theMainAgentsFencedShellCannotAttachToJclawsOwnJvm`). The Linux fence has no such rule yet:
+it shares `/tmp` and the PID namespace with the host. Another process's environment is not a route on macOS 27:
+`ps -E` prints none for a same-user process (measured).
 `ShellExecSandboxTest` pins both platform forms and probes the real one on the host.
 
 **A custom agent's shell cannot attach to a JVM outside it (JF-290).** An attached client can load

@@ -694,7 +694,7 @@ class ShellExecSandboxTest extends UnitTest {
                 List.of(Path.of("/srv/jclaw"), Path.of("/opt/play1"), Path.of("/home/op/.gradle")),
                 Path.of("/srv/jclaw/workspace"),
                 List.of(Path.of("/srv/jclaw/data"), Path.of("/srv/jclaw/certs"), Path.of("/srv/jclaw/logs")),
-                List.of(Path.of("/srv/jclaw/data/backups")));
+                List.of(Path.of("/srv/jclaw/data/backups")), 4242L);
     }
 
     @Test
@@ -710,6 +710,9 @@ class ShellExecSandboxTest extends UnitTest {
                 (deny file-read* file-write* (subpath "/srv/jclaw/certs"))
                 (deny file-read* file-write* (subpath "/srv/jclaw/logs"))
                 (allow file-read* (subpath "/srv/jclaw/data/backups"))
+                (allow process-exec (literal "/bin/ps") (with no-sandbox))
+                (allow process-exec (literal "/usr/bin/top") (with no-sandbox))
+                (deny network-outbound file-write* file-link (regex #"/\\.java_pid4242$"))
                 """, HarnessSandbox.mainFenceMacosProfile(sampleFence()));
     }
 
@@ -777,5 +780,18 @@ class ShellExecSandboxTest extends UnitTest {
             Files.deleteIfExists(workspaceRoot.resolve("fence-" + tag + ".txt"));
             Files.deleteIfExists(outside);
         }
+    }
+
+    /** macOS runs no setuid program inside a sandbox, so the fence lets these two read-only viewers run outside it. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void theMainAgentsFencedShellStillRunsPsAndTop() {
+        assumeTrue(HarnessSandbox.availability().available(), "no sandbox on this host");
+        ConfigService.set("shell.allowlist", "ps,top");
+        var ps = run(main(), "ps -p 1 -o pid=");
+        assertEquals(0, ps.get("exitCode").getAsInt(), ps.toString());
+        assertEquals("1", ps.get("output").getAsString().strip());
+        var top = run(main(), "top -l 1 -n 0");
+        assertEquals(0, top.get("exitCode").getAsInt(), top.toString());
     }
 }
