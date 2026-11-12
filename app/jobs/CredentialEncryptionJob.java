@@ -2,6 +2,7 @@ package jobs;
 
 import models.BindingCredential;
 import models.JsonCredential;
+import models.SkillSecret;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.DB;
@@ -88,6 +89,11 @@ public class CredentialEncryptionJob extends Job<Void> {
         }
         for (var json : JsonCredential.values()) {
             resealColumn(conn, json.table, JsonCredential.COLUMN, stored -> json.reseal(stored, pass));
+        }
+        // JF-323: a database from before the store has no table until Hibernate's update adds it at the next start.
+        if (columnExists(conn, SkillSecret.TABLE, SkillSecret.VALUE_COLUMN)) {
+            resealColumn(conn, SkillSecret.TABLE, SkillSecret.VALUE_COLUMN,
+                    stored -> pass.reseal(SkillSecret.VALUE_FIELD, stored));
         }
         return pass;
     }

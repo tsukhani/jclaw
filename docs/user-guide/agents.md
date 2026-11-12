@@ -30,7 +30,7 @@ The table covers `jclaw_api` only. An agent also works through its other tools. 
 | Notifications, video jobs, and cost and latency figures | All | Every agent's | Its own |
 | Read an agent's settings, tools and skills | All | Every agent's | Its own |
 | Create an agent, or change an agent's model, prompt or other settings | Yes | Yes | No, not even its own |
-| Delete an agent, switch its tools or skills on or off, give it `jclaw_api`, or manage its workspace files and approvals | Yes | No | No |
+| Delete an agent, switch its tools or skills on or off, give it `jclaw_api`, or manage its workspace files, skill secrets and approvals | Yes | No | No |
 | List and read saved prompts | Yes | Yes | Yes |
 | Create, change, delete, generate or export prompts | Yes | Yes | No |
 | Import prompts | Yes | No | No |

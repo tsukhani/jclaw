@@ -183,7 +183,7 @@ Everything a repair creates stays in `data/` (the damaged file, its trace, the r
 
 ### Encrypted credentials
 
-JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, and the secret values of each MCP server. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.
+JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, the secret values of each MCP server, and the secrets you store for an agent's skills. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.
 
 This has four consequences:
 

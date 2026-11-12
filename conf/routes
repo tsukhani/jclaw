@@ -234,6 +234,10 @@ GET     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.
 GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSkillFiles
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
+# JF-323: a skill's secrets on an agent. Values go in and never come back out.
+GET     /api/agents/{id}/skills/{name}/secrets          ApiSkillSecretsController.list
+PUT     /api/agents/{id}/skills/{name}/secrets/{secret} ApiSkillSecretsController.put
+DELETE  /api/agents/{id}/skills/{name}/secrets/{secret} ApiSkillSecretsController.delete
 
 # Events API (SSE notification bus)
 GET     /api/events                             ApiEventsController.stream

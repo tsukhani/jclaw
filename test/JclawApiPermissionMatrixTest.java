@@ -69,7 +69,7 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
         pin("Create an agent, or change an agent's model, prompt or other settings", "Yes", "Yes",
                 "No, not even its own", "PUT", "/api/agents/" + NO_SUCH_ID, "{}");
         pin("Delete an agent, switch its tools or skills on or off, give it `jclaw_api`, or manage its workspace "
-                + "files and approvals", "Yes", "No", "No",
+                + "files, skill secrets and approvals", "Yes", "No", "No",
                 "PUT", "/api/agents/" + NO_SUCH_ID + "/tools/jclaw_api", "{\"enabled\":true}");
         pin("List and read saved prompts", "Yes", "Yes", "Yes", "GET", "/api/prompts", null);
         pin("Create, change, delete, generate or export prompts", "Yes", "Yes", "No",

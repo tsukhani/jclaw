@@ -1624,6 +1624,11 @@ function totalSkillCount(agentId: number) {
         </div>
       </div>
 
+      <SkillSecretsPanel
+        v-if="editingAgentId != null"
+        :agent-id="editingAgentId"
+        :skill-name="editing.folderName || editing.name"
+      />
       <!-- What SKILL.md and its references cost an agent's conversation once read. -->
       <div
         v-if="contextFiles.length"

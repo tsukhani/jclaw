@@ -50,6 +50,16 @@ Agents cannot open those files either. The file and documents tools refuse any f
 
 After an import the page warns you about two things. If no malware scanner is set up, the skill's binary files were not scanned, and the warning names them. If a zip holds a file outside `credentials/` that looks like it holds a key, the warning names that file too: every agent can read it, so move the key into `credentials/`.
 
+### Secrets
+
+When you open a skill from an agent's column, the **Secrets** panel lists the keys and passwords stored for that skill on that agent. Each secret has a name, a value and the hosts it may be sent to.
+
+- **Add secret** asks for all three. The name uses capital letters, digits and underscores, such as `NAS_PASSWORD`. Each host is a name alone, such as `api.example.com` or `nas.example.com:5001`, with no `https://` or path. Separate hosts with commas or spaces.
+- **Replace** sets a new value or new hosts. Leave **Value** empty to keep the stored value and change only the hosts.
+- **Delete** removes the secret after you confirm.
+
+JClaw stores each value encrypted. No page, agent or API call returns a value, you included, so the panel shows only each secret's name, hosts and when it was set. Only you can add, replace or delete a secret: agents cannot, the Main Agent included. Removing the skill from the agent, or deleting the agent, deletes its secrets. A global skill has no secrets, and neither does a copy of a skill on another agent.
+
 ### Exporting to Claude
 
 JClaw skills use the same format as Claude's skills. **Export for Claude** (the download icon on a Global Skills row) saves the skill as a zip. Unzip it into `~/.claude/skills/` for Claude Code, or upload the zip as a skill in the Claude app.

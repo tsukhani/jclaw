@@ -22,7 +22,9 @@ import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
 import services.SkillExporter;
 import services.SkillPromotionService;
+import services.SkillSecrets;
 import services.Tx;
+import services.WorkspaceFiles;
 import services.catalog.CatalogPage;
 import services.catalog.CatalogQuery;
 import services.catalog.CatalogRegistry;
@@ -687,6 +689,7 @@ public class ApiSkillsController extends Controller {
         // have a stale directory without grants than the inverse. The revoke is
         // idempotent, so a retry after a transient failure is safe.
         SkillPromotionService.revokeAgentAllowlist(agent, name);
+        SkillSecrets.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
         deleteSkillDir(dir);
     }
 
