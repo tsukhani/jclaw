@@ -92,20 +92,29 @@ class JclawApiGrantedAgentScopeTest extends FunctionalTest {
     }
 
     @Test
-    void aPromptTheGrantedAgentCreatesThroughTheToolNamesThatAgentAsItsOwner() {
+    void aGrantedAgentReadsThePromptLibraryAndCannotChangeItThroughTheTool() {
         grantJclawApi(own.agentId());
-
-        // A new prompt names its owner (JF-307), and an agent other than main may name only itself.
-        var created = call("{\"method\":\"POST\",\"path\":\"/api/prompts\",\"body\":{\"title\":\"jf293 " + own.name()
-                + "\",\"content\":\"Summarize the day.\",\"category\":\"CUSTOM\",\"ownerAgentId\":" + own.agentId() + "}}");
-
-        assertEquals("HTTP 200", firstLine(created));
-        var prompt = JsonParser.parseString(body(created)).getAsJsonObject();
-        var promptId = prompt.get("id").getAsLong();
+        var title = "jf314 " + own.name();
+        long promptId = commit(() -> {
+            var p = new Prompt();
+            p.title = title;
+            p.content = "Summarize the day.";
+            p.category = Prompt.Category.CUSTOM;
+            p.save();
+            return p.id;
+        });
         try {
-            assertEquals(List.of(String.valueOf(own.agentId()), own.name()),
-                    List.of(prompt.get("ownerAgentId").getAsString(), prompt.get("ownerAgentName").getAsString()));
-            assertEquals(own.agentId(), commit(() -> Prompt.<Prompt>findById(promptId).ownerAgent.id), "the stored row");
+            // The library is shared (JF-314): any agent with the tool reads it; only the operator and main change it.
+            var read = call("{\"method\":\"GET\",\"path\":\"/api/prompts/" + promptId + "\"}");
+            assertEquals("HTTP 200", firstLine(read));
+            var prompt = JsonParser.parseString(body(read)).getAsJsonObject();
+            assertEquals(List.of(title, "Summarize the day."),
+                    List.of(prompt.get("title").getAsString(), prompt.get("content").getAsString()));
+
+            assertRefused("Only the operator or the main agent may change a prompt.",
+                    call("{\"method\":\"PUT\",\"path\":\"/api/prompts/" + promptId
+                            + "\",\"body\":{\"content\":\"rewritten through jclaw_api\"}}"));
+            assertEquals("Summarize the day.", commit(() -> Prompt.<Prompt>findById(promptId).content));
         } finally {
             commit(() -> Prompt.delete("id = ?1", promptId));
         }

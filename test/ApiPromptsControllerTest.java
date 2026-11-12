@@ -11,7 +11,6 @@ import play.test.FunctionalTest;
 import services.Tx;
 import tools.JClawApiTool;
 
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -225,22 +224,20 @@ class ApiPromptsControllerTest extends FunctionalTest {
     }
 
     // ==================== an agent's list and single read (JF-144) ====================
-    // The agent is a custom one, and the prompts are the ones it created: it reaches no other (JF-292).
+    // The agent is a custom one, and it reaches every prompt, which only the operator saves here (JF-314).
 
     private static final String AT_BOUND = "0123456789".repeat(ApiPromptsController.CONTENT_PREVIEW_CHARS / 10);
     private static final String LONG_CONTENT = AT_BOUND.repeat(25);
 
     @Test
     void anAgentsListRowKeepsContentAtTheBoundWholeAndUnmarked() {
-        var id = createPromptAsAgent("Review", AT_BOUND, "CODING", "a, b");
+        var id = seedPrompt("Review", AT_BOUND, "CODING", "a, b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts")));
 
         assertEquals(Set.of("id", "title", "tags", "category", "categoryLabel",
-                "contentPreview", "contentTruncated", "ownerAgentId", "ownerAgentName", "createdAt", "updatedAt"),
+                "contentPreview", "contentTruncated", "createdAt", "updatedAt"),
                 row.keySet());
-        assertEquals(List.of(String.valueOf(agentId()), AGENT_NAME),
-                List.of(row.get("ownerAgentId").getAsString(), row.get("ownerAgentName").getAsString()));
         assertEquals(id, row.get("id").getAsLong());
         assertEquals("Review", row.get("title").getAsString());
         assertEquals("a, b", row.get("tags").getAsString());
@@ -252,7 +249,7 @@ class ApiPromptsControllerTest extends FunctionalTest {
 
     @Test
     void anAgentsListRowCutsContentOneCharacterOverTheBoundAndMarksTheCut() {
-        createPromptAsAgent("Review", AT_BOUND + "X", "CODING", "a, b");
+        seedPrompt("Review", AT_BOUND + "X", "CODING", "a, b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts")));
 
@@ -262,8 +259,8 @@ class ApiPromptsControllerTest extends FunctionalTest {
 
     @Test
     void anAgentsTitleFilterStillApplies() {
-        createPromptAsAgent("Article Creator", LONG_CONTENT, "WRITING", "a");
-        createPromptAsAgent("Code Review Checklist", LONG_CONTENT, "CODING", "b");
+        seedPrompt("Article Creator", LONG_CONTENT, "WRITING", "a");
+        seedPrompt("Code Review Checklist", LONG_CONTENT, "CODING", "b");
 
         var row = onlyRow(asAgent(() -> GET(agentRequest(), "/api/prompts?title=article")));
 
@@ -279,15 +276,14 @@ class ApiPromptsControllerTest extends FunctionalTest {
         var row = onlyRow(GET("/api/prompts"));
 
         assertEquals(Set.of("id", "title", "content", "tags", "category", "categoryLabel",
-                "ownerAgentId", "ownerAgentName", "createdAt", "updatedAt"), row.keySet());
+                "createdAt", "updatedAt"), row.keySet());
         assertEquals(id, row.get("id").getAsLong());
         assertEquals(LONG_CONTENT, row.get("content").getAsString());
-        assertTrue(row.get("ownerAgentId").isJsonNull() && row.get("ownerAgentName").isJsonNull(), row.toString());
     }
 
     @Test
     void anAgentReadsOnePromptWhole() {
-        var id = createPromptAsAgent("Review", LONG_CONTENT, "CODING", "a, b");
+        var id = seedPrompt("Review", LONG_CONTENT, "CODING", "a, b");
         login();
         var operatorRow = onlyRow(GET("/api/prompts"));
 
@@ -327,8 +323,8 @@ class ApiPromptsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theExportCarriesAnAgentsPromptWholeAndIsRefusedToACustomAgent() {
-        createPromptAsAgent("Review", LONG_CONTENT, "CODING", "a, b");
+    void theExportCarriesAPromptWholeAndIsRefusedToACustomAgent() {
+        seedPrompt("Review", LONG_CONTENT, "CODING", "a, b");
 
         var refused = asAgent(() -> GET(agentRequest(), "/api/prompts/export"));
         assertEquals(403, refused.status.intValue());
@@ -346,7 +342,7 @@ class ApiPromptsControllerTest extends FunctionalTest {
     void todaysPromptCountFitsUnderTheJClawApiCapForAnAgent() {
         // 21 prompts on the live instance on 2026-11-11, here at the title and tags column maxima.
         for (int i = 0; i < 21; i++) {
-            createPromptAsAgent(("Prompt " + i + " ").repeat(40).substring(0, 200), LONG_CONTENT, "CODING",
+            seedPrompt(("Prompt " + i + " ").repeat(40).substring(0, 200), LONG_CONTENT, "CODING",
                     "t".repeat(500));
         }
 
@@ -380,15 +376,14 @@ class ApiPromptsControllerTest extends FunctionalTest {
         return JsonParser.parseString(getContent(resp)).getAsJsonObject().get("id").getAsLong();
     }
 
-    private long createPromptAsAgent(String title, String content, String category, String tags) {
-        var body = new JsonObject();
-        body.addProperty("title", title);
-        body.addProperty("content", content);
-        body.addProperty("category", category);
-        body.addProperty("tags", tags);
-        var resp = asAgent(() -> POST(agentRequest(), "/api/prompts", "application/json", body.toString()));
-        assertIsOk(resp);
-        return JsonParser.parseString(getContent(resp)).getAsJsonObject().get("id").getAsLong();
+    /** A prompt the operator saves, signed out again after, so the request that follows is the agent's own. */
+    private long seedPrompt(String title, String content, String category, String tags) {
+        login();
+        try {
+            return createPrompt(title, content, category, tags);
+        } finally {
+            clearCookies();
+        }
     }
 
     private JsonObject onlyRow(Http.Response resp) {

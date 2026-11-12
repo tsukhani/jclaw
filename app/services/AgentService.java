@@ -364,9 +364,6 @@ public class AgentService {
      * owns the cross-subsystem teardown (memory, string-keyed config, Lucene
      * docs, workspace dirs) plus the single cascading DB delete.
      *
-     * <p>The prompts the agent saved are kept: {@code Prompt.ownerAgent} is SET NULL, not CASCADE,
-     * so they become the operator's (JF-292).
-     *
      * @param agent the agent to delete (must have a persisted id)
      */
     public static void delete(Agent agent) {

@@ -8,7 +8,7 @@ import type { Prompt } from '~/types/api'
 
 /**
  * Prompts Library page (JCLAW-813): rendering, client-side search + category
- * filter, the Run → chat-composer hand-off (?compose=), and delete-behind-confirm.
+ * filter, the Run → chat-composer hand-off (?compose=), delete-behind-confirm, and what a save sends.
  */
 const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn().mockResolvedValue(undefined) }))
 mockNuxtImport('navigateTo', () => navigateToMock)
@@ -19,13 +19,7 @@ const CATEGORIES = [
   { value: 'CUSTOM', label: 'Custom' },
 ]
 
-// The rows of GET /api/agents the Owner field reads (JF-307).
-const AGENTS = [
-  { id: 1, name: 'main', isMain: true },
-  { id: 7, name: 'research-bot', isMain: false },
-]
-
-function samplePrompts(): Prompt[] {
+function samplePrompts() {
   return [
     { id: 1, title: 'Code Review', content: 'Review this code', tags: 'review, quality',
       category: 'CODING', categoryLabel: 'Coding', createdAt: null, updatedAt: null },
@@ -43,7 +37,6 @@ describe('Prompts Library page', () => {
     prompts = samplePrompts()
     registerEndpoint('/api/prompts', () => prompts)
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
-    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   afterEach(() => {
@@ -65,29 +58,6 @@ describe('Prompts Library page', () => {
     expect(text).toContain('Code Review')
     expect(text).toContain('Coding')
     expect(text).toContain('#review')
-  })
-
-  it('names the agent that owns an agent\'s prompt and marks none on the operator\'s', async () => {
-    prompts = [
-      { ...samplePrompts()[0]!, ownerAgentId: 7, ownerAgentName: 'research-bot' },
-      { ...samplePrompts()[1]!, ownerAgentId: null, ownerAgentName: null },
-    ]
-    const c = await mountSuspended(Prompts)
-    await flushPromises()
-
-    const owner = c.find('[data-testid="prompt-owner-1"]')
-    expect(owner.exists()).toBe(true)
-    expect(owner.text()).toBe('Agent: research-bot')
-    expect(owner.attributes('title')).toBe('Owned by the agent research-bot')
-    expect(c.find('[data-testid="prompt-owner-2"]').exists()).toBe(false)
-  })
-
-  it('marks no owner on a prompt whose row carries no owner fields', async () => {
-    const c = await mountSuspended(Prompts)
-    await flushPromises()
-
-    expect(c.find('[data-testid="prompt-card-1"]').exists()).toBe(true)
-    expect(c.find('[data-testid^="prompt-owner-"]').exists()).toBe(false)
   })
 
   it('shows the empty state when the library is empty', async () => {
@@ -188,7 +158,6 @@ describe('Prompts page — a failed delete (JCLAW-1221)', () => {
     clearNuxtData()
     registerEndpoint('/api/prompts', () => samplePrompts())
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
-    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   afterEach(() => {
@@ -225,7 +194,6 @@ describe('Prompts page — a failed import (JCLAW-1221)', () => {
     clearNuxtData()
     registerEndpoint('/api/prompts', () => samplePrompts())
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
-    registerEndpoint('/api/agents', () => AGENTS)
   })
 
   it('says why and keeps the mode picker so the import can be retried', async () => {
@@ -253,36 +221,20 @@ describe('Prompts page — a failed import (JCLAW-1221)', () => {
   })
 })
 
-describe('Prompts page — the Owner field (JF-307, JF-308)', () => {
+describe('Prompts page — what a save sends (JF-314)', () => {
   const GENERATED = { title: 'Standup Notes', category: 'WRITING', content: 'Summarize the standup', tags: 'meetings' }
-  const OPERATOR = 'You (the operator)'
-  const NEW_PROMPT_HINT
-    = 'An agent that owns a prompt can read, change and delete it. You can change the owner later, when you edit the prompt.'
-  const EDIT_HINT
-    = 'An agent that owns a prompt can read, change and delete it. To give this prompt to another owner, pick the owner and click Save.'
 
   let prompts: Prompt[] = []
   let posted: Record<string, unknown>[] = []
   let put: Record<string, unknown>[] = []
-  let agentsDown = false
   let page: VueWrapper | undefined
 
   beforeEach(() => {
     clearNuxtData()
-    prompts = [
-      { ...samplePrompts()[0]!, ownerAgentId: 7, ownerAgentName: 'research-bot' },
-      { ...samplePrompts()[1]!, ownerAgentId: null, ownerAgentName: null },
-    ]
+    prompts = samplePrompts()
     posted = []
     put = []
-    agentsDown = false
     registerEndpoint('/api/prompts/categories', () => CATEGORIES)
-    registerEndpoint('/api/agents', async (event) => {
-      if (!agentsDown) return AGENTS
-      const { setResponseStatus } = await import('h3')
-      setResponseStatus(event, 502)
-      return '<html><body>Bad Gateway</body></html>'
-    })
     registerEndpoint('/api/prompts/generate', { method: 'POST', handler: () => GENERATED })
     registerEndpoint('/api/prompts', {
       handler: async (event) => {
@@ -290,37 +242,24 @@ describe('Prompts page — the Owner field (JF-307, JF-308)', () => {
         const { readBody } = await import('h3')
         const body = await readBody(event) as Record<string, unknown>
         posted.push(body)
-        // As the server answers: the named agent owns the prompt, and no name leaves it the operator's.
-        const owner = AGENTS.find(a => a.id === body.ownerAgentId)
         const saved: Prompt = {
           id: 3, title: String(body.title), content: String(body.content), tags: String(body.tags),
-          category: 'WRITING', categoryLabel: 'Writing',
-          ownerAgentId: owner?.id ?? null, ownerAgentName: owner?.name ?? null, createdAt: null, updatedAt: null,
+          category: 'WRITING', categoryLabel: 'Writing', createdAt: null, updatedAt: null,
         }
         prompts = [...prompts, saved]
         return saved
       },
     })
-    for (const id of [1, 2]) {
-      registerEndpoint(`/api/prompts/${id}`, {
-        method: 'PUT',
-        handler: async (event) => {
-          const { readBody } = await import('h3')
-          const body = await readBody(event) as Record<string, unknown>
-          put.push(body)
-          // As the server answers: a sent owner replaces the prompt's, null making it the
-          // operator's, and a body with no owner leaves the owner as it was.
-          prompts = prompts.map((p) => {
-            if (p.id !== id) return p
-            const edited = { ...p, title: String(body.title) }
-            if (!('ownerAgentId' in body)) return edited
-            const owner = AGENTS.find(a => a.id === body.ownerAgentId)
-            return { ...edited, ownerAgentId: owner?.id ?? null, ownerAgentName: owner?.name ?? null }
-          })
-          return prompts.find(p => p.id === id)
-        },
-      })
-    }
+    registerEndpoint('/api/prompts/1', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        const body = await readBody(event) as Record<string, unknown>
+        put.push(body)
+        prompts = prompts.map(p => (p.id === 1 ? { ...p, title: String(body.title) } : p))
+        return prompts.find(p => p.id === 1)
+      },
+    })
   })
 
   afterEach(() => {
@@ -342,274 +281,38 @@ describe('Prompts page — the Owner field (JF-307, JF-308)', () => {
     await flushPromises()
   }
 
-  /** Picks an owner as a person does, by the option's text. */
-  async function pickOwner(text: string) {
-    const select = control<HTMLSelectElement>('prompt-form-owner')!
-    select.selectedIndex = Array.from(select.options).findIndex(o => o.textContent?.trim() === text)
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    await flushPromises()
-  }
-
-  function ownerOptions(): (string | undefined)[] {
-    return Array.from(control<HTMLSelectElement>('prompt-form-owner')!.options).map(o => o.textContent?.trim())
-  }
-
-  function selectedOwner(): string | undefined {
-    return control<HTMLSelectElement>('prompt-form-owner')!.selectedOptions[0]?.textContent?.trim()
-  }
-
-  /** New prompt → describe → Generate, which is the only way to the form for a new prompt. */
-  async function openNewPromptForm() {
+  it('creates a prompt with its title, text, category and tags only, from a form with no Owner field', async () => {
     page = await mountSuspended(Prompts)
     await flushPromises()
     await page.find('[data-testid="new-prompt-button"]').trigger('click')
     await flushPromises()
-    await describeAndGenerate()
-  }
-
-  async function describeAndGenerate() {
     await type('prompt-description', 'notes for the daily standup')
     control<HTMLButtonElement>('prompt-generate')!.click()
     await vi.waitFor(() => expect(control('prompt-title')).toBeTruthy())
-  }
 
-  async function openEditForm(id: number) {
+    expect(control('prompt-form-owner')).toBeNull()
+    control<HTMLButtonElement>('prompt-save')!.click()
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+
+    expect(posted[0]).toEqual(GENERATED)
+    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-card-3"]').exists()).toBe(true))
+  })
+
+  it('saves an edit with the fields of the prompt only', async () => {
     page = await mountSuspended(Prompts)
     await flushPromises()
-    await page.find(`[data-testid="prompt-edit-${id}"]`).trigger('click')
-    await flushPromises()
-  }
-
-  it('offers you and each agent as the owner of a new prompt, with you selected at first', async () => {
-    await openNewPromptForm()
-
-    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
-    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
-    expect(selectedOwner()).toBe(OPERATOR)
-    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim())
-      .toBe(NEW_PROMPT_HINT)
-  })
-
-  it('sends no owner when the owner is left at you, and the new card names no agent', async () => {
-    await openNewPromptForm()
-
-    control<HTMLButtonElement>('prompt-save')!.click()
-    await vi.waitFor(() => expect(posted).toHaveLength(1))
-
-    expect(posted[0]).toEqual({
-      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
-    })
-    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-card-3"]').exists()).toBe(true))
-    expect(page!.find('[data-testid="prompt-owner-3"]').exists()).toBe(false)
-    expect(control('prompt-title')).toBeNull()
-  })
-
-  it('sends the picked agent as ownerAgentId, and the new card names that agent', async () => {
-    await openNewPromptForm()
-
-    await pickOwner('research-bot')
-    expect(selectedOwner()).toBe('research-bot')
-    control<HTMLButtonElement>('prompt-save')!.click()
-    await vi.waitFor(() => expect(posted).toHaveLength(1))
-
-    expect(posted[0]).toEqual({
-      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
-      ownerAgentId: 7,
-    })
-    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-3"]').exists()).toBe(true))
-    expect(page!.find('[data-testid="prompt-owner-3"]').text()).toBe('Agent: research-bot')
-  })
-
-  it('sends no owner when an agent was picked and then you again', async () => {
-    await openNewPromptForm()
-
-    await pickOwner('research-bot')
-    await pickOwner(OPERATOR)
-    control<HTMLButtonElement>('prompt-save')!.click()
-    await vi.waitFor(() => expect(posted).toHaveLength(1))
-
-    expect(posted[0]).toEqual({
-      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
-    })
-  })
-
-  it('starts the owner at you again each time the form opens', async () => {
-    await openNewPromptForm()
-    await pickOwner('research-bot')
-    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
-      .find(b => b.textContent?.trim() === 'Cancel')!.click()
+    await page.find('[data-testid="prompt-edit-1"]').trigger('click')
     await flushPromises()
 
-    await page!.find('[data-testid="new-prompt-button"]').trigger('click')
-    await flushPromises()
-    await describeAndGenerate()
-
-    expect(selectedOwner()).toBe(OPERATOR)
-    expect(posted).toEqual([])
-  })
-
-  it('still offers you as the owner, and saves your prompt, when the agents cannot be listed', async () => {
-    agentsDown = true
-    await openNewPromptForm()
-
-    expect(ownerOptions()).toEqual([OPERATOR])
-    control<HTMLButtonElement>('prompt-save')!.click()
-    await vi.waitFor(() => expect(posted).toHaveLength(1))
-
-    expect(posted[0]).toEqual({
-      title: 'Standup Notes', content: 'Summarize the standup', category: 'WRITING', tags: 'meetings',
-    })
-  })
-
-  // --- the edit form (JF-308) ---
-
-  async function cancel() {
-    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
-      .find(b => b.textContent?.trim() === 'Cancel')!.click()
-    await flushPromises()
-  }
-
-  async function save() {
+    expect(control('prompt-form-owner')).toBeNull()
+    await type('prompt-title', 'Code Review v2')
     control<HTMLButtonElement>('prompt-save')!.click()
     await vi.waitFor(() => expect(put).toHaveLength(1))
-  }
-
-  it('sets the owner of an agent\'s prompt being edited to that agent, in the list a new prompt offers', async () => {
-    await openEditForm(1)
-
-    expect(document.body.querySelector('label[for="pf-owner"] span')?.textContent?.trim()).toBe('Owner')
-    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
-    expect(selectedOwner()).toBe('research-bot')
-    expect(document.body.querySelector('#pf-owner-hint')?.textContent?.trim()).toBe(EDIT_HINT)
-  })
-
-  it('sets the owner of your own prompt being edited to you', async () => {
-    await openEditForm(2)
-
-    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot'])
-    expect(selectedOwner()).toBe(OPERATOR)
-  })
-
-  it('sends no owner when an edit leaves the owner alone, and the card still names the agent', async () => {
-    await openEditForm(1)
-
-    await type('prompt-title', 'Code Review v2')
-    await save()
 
     expect(put[0]).toEqual({
       title: 'Code Review v2', content: 'Review this code', category: 'CODING', tags: 'review, quality',
     })
     expect(posted).toEqual([])
     await vi.waitFor(() => expect(page!.find('[data-testid="prompt-card-1"]').text()).toContain('Code Review v2'))
-    expect(page!.find('[data-testid="prompt-owner-1"]').text()).toBe('Agent: research-bot')
-    expect(control('prompt-title')).toBeNull()
-  })
-
-  it('sends no owner when an edit leaves your own prompt with you', async () => {
-    await openEditForm(2)
-
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Blog Outline', content: 'Outline a blog post', category: 'WRITING', tags: 'writing',
-    })
-  })
-
-  it('sends the picked agent as ownerAgentId when an edit gives your prompt to an agent, and the card then names it', async () => {
-    await openEditForm(2)
-
-    await pickOwner('research-bot')
-    expect(selectedOwner()).toBe('research-bot')
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Blog Outline', content: 'Outline a blog post', category: 'WRITING', tags: 'writing',
-      ownerAgentId: 7,
-    })
-    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-2"]').exists()).toBe(true))
-    expect(page!.find('[data-testid="prompt-owner-2"]').text()).toBe('Agent: research-bot')
-  })
-
-  it('sends the picked agent as ownerAgentId when an edit moves an agent\'s prompt to another agent', async () => {
-    await openEditForm(1)
-
-    await pickOwner('main')
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
-      ownerAgentId: 1,
-    })
-    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-1"]').text()).toBe('Agent: main'))
-  })
-
-  it('sends a null ownerAgentId when an edit gives an agent\'s prompt to you, and the card then names no agent', async () => {
-    await openEditForm(1)
-
-    await pickOwner(OPERATOR)
-    expect(selectedOwner()).toBe(OPERATOR)
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
-      ownerAgentId: null,
-    })
-    await vi.waitFor(() => expect(page!.find('[data-testid="prompt-owner-1"]').exists()).toBe(false))
-  })
-
-  it('sends no owner when an edit picks another owner and then the current one again', async () => {
-    await openEditForm(1)
-
-    await pickOwner('main')
-    await pickOwner('research-bot')
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
-    })
-  })
-
-  it('keeps an owner the agent list leaves out as the selected owner, and sends none when it is left alone', async () => {
-    prompts[0] = { ...prompts[0]!, ownerAgentId: 42, ownerAgentName: 'research-bot-helper' }
-    await openEditForm(1)
-
-    expect(ownerOptions()).toEqual([OPERATOR, 'main', 'research-bot', 'research-bot-helper'])
-    expect(selectedOwner()).toBe('research-bot-helper')
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
-    })
-  })
-
-  it('keeps the current owner selected when the agents cannot be listed, and can still give the prompt to you', async () => {
-    agentsDown = true
-    await openEditForm(1)
-
-    expect(ownerOptions()).toEqual([OPERATOR, 'research-bot'])
-    expect(selectedOwner()).toBe('research-bot')
-    await pickOwner(OPERATOR)
-    await save()
-
-    expect(put[0]).toEqual({
-      title: 'Code Review', content: 'Review this code', category: 'CODING', tags: 'review, quality',
-      ownerAgentId: null,
-    })
-  })
-
-  it('sets the owner to the prompt\'s current owner again each time the edit form opens', async () => {
-    await openEditForm(1)
-    await pickOwner('main')
-    await cancel()
-
-    await page!.find('[data-testid="prompt-edit-1"]').trigger('click')
-    await flushPromises()
-    expect(selectedOwner()).toBe('research-bot')
-    await cancel()
-
-    await page!.find('[data-testid="prompt-edit-2"]').trigger('click')
-    await flushPromises()
-    expect(selectedOwner()).toBe(OPERATOR)
-    expect(put).toEqual([])
   })
 })

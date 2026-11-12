@@ -57,6 +57,10 @@ class MainOnlyRoutesTest extends FunctionalTest {
             new Route("POST", "/api/mcp-servers/999999999/test", "test an MCP server", 404),
             new Route("POST", "/api/prompts/generate", "generate a prompt", 400),
             new Route("GET", "/api/prompts/export", "export the prompt library", 200),
+            // The shared prompt library: every agent reads it, the operator and main change it (JF-314).
+            new Route("POST", "/api/prompts", "create a prompt", 400),
+            new Route("PUT", "/api/prompts/999999999", "change a prompt", 404),
+            new Route("DELETE", "/api/prompts/999999999", "delete a prompt", 404),
             new Route("POST", "/api/providers/" + NO_PROVIDER + "/discover-models",
                     "probe a provider or discover its models", 400),
             new Route("GET", "/api/providers/" + NO_PROVIDER + "/video-models",
@@ -135,8 +139,12 @@ class MainOnlyRoutesTest extends FunctionalTest {
         var wrong = new ArrayList<String>();
         for (var route : MAIN_ONLY) {
             if (route.operatorStatus() == null) continue;
-            var resp = "POST".equals(route.method())
-                    ? POST(route.path(), "application/json", "{}") : GET(route.path());
+            var resp = switch (route.method()) {
+                case "POST" -> POST(route.path(), "application/json", "{}");
+                case "PUT" -> PUT(route.path(), "application/json", "{}");
+                case "DELETE" -> DELETE(route.path());
+                default -> GET(route.path());
+            };
             if (!route.operatorStatus().equals(resp.status)) {
                 wrong.add(route.method() + " " + route.path() + " -> " + describe(resp));
             }
@@ -146,8 +154,8 @@ class MainOnlyRoutesTest extends FunctionalTest {
 
     @Test
     void aCustomAgentStillReadsTheCatalogsEveryAgentShares() {
-        for (var path : List.of("/api/timezones", "/api/prompts/categories", "/api/slash-commands", "/api/status",
-                "/api/onboarding/tour-status")) {
+        for (var path : List.of("/api/timezones", "/api/prompts/categories", "/api/prompts", "/api/slash-commands",
+                "/api/status", "/api/onboarding/tour-status")) {
             assertStatus(200, asAgent(() -> GET(agentRequest(customAgentId), path)));
         }
     }
@@ -170,9 +178,12 @@ class MainOnlyRoutesTest extends FunctionalTest {
     }
 
     private static Http.Response send(Http.Request request, Route route) {
-        return "POST".equals(route.method())
-                ? POST(request, route.path(), "application/json", "{}")
-                : GET(request, route.path());
+        return switch (route.method()) {
+            case "POST" -> POST(request, route.path(), "application/json", "{}");
+            case "PUT" -> PUT(request, route.path(), "application/json", "{}");
+            case "DELETE" -> DELETE(request, route.path());
+            default -> GET(request, route.path());
+        };
     }
 
     private static <T> T commit(Supplier<T> block) {

@@ -4,18 +4,15 @@
 //    + Generate; the LLM-generated title/category/content/tags then pre-fill the
 //    same form (step 2) for the operator to tweak or save.
 //  - Edit: opens straight to the form, pre-filled from the existing prompt.
-// The form step is identical in both modes. Its Owner field starts at the operator on a new prompt
-// (JF-307) and at the prompt's owner on an edit (JF-308).
+// The form step is identical in both modes, so review-generated == edit.
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog'
-import type { Agent, Prompt, PromptCategory } from '~/types/api'
+import type { Prompt, PromptCategory } from '~/types/api'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   open: boolean
   editing: Prompt | null
   categories: PromptCategory[]
-  /** The agents the Owner field offers beside the operator and the owner of the prompt being edited. */
-  agents?: Agent[]
-}>(), { agents: () => [] })
+}>()
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
@@ -28,20 +25,6 @@ const title = ref('')
 const content = ref('')
 const category = ref('')
 const tags = ref('')
-// The picked owner: an agent's id, or null for the operator.
-const ownerAgentId = ref<number | null>(null)
-const OPERATOR_OWNER = 'You (the operator)'
-// The owner the form opens with: the prompt's on an edit, the operator on a new prompt.
-const openingOwnerId = computed(() => props.editing?.ownerAgentId ?? null)
-
-// GET /api/agents leaves out subagents and the fixed test agents, and can fail. The owner of the
-// prompt being edited is offered all the same: with no option for it the field would show no owner.
-const ownerOptions = computed(() => {
-  const listed = props.agents.map(a => ({ id: a.id, name: a.name }))
-  const current = openingOwnerId.value
-  if (current === null || listed.some(a => a.id === current)) return listed
-  return [...listed, { id: current, name: props.editing?.ownerAgentName ?? String(current) }]
-})
 
 const { mutate, loading: saving, errorDetails: saveError } = useApiMutation()
 const { mutate: genMutate, loading: generating, errorDetails: generateError } = useApiMutation()
@@ -55,7 +38,6 @@ watch(() => props.open, (isOpen) => {
     content.value = props.editing.content
     category.value = props.editing.category
     tags.value = props.editing.tags ?? ''
-    ownerAgentId.value = openingOwnerId.value
   }
   else {
     step.value = 'describe'
@@ -64,7 +46,6 @@ watch(() => props.open, (isOpen) => {
     content.value = ''
     category.value = props.categories[0]?.value ?? ''
     tags.value = ''
-    ownerAgentId.value = null
   }
 })
 
@@ -95,9 +76,6 @@ async function save() {
     content: content.value,
     category: category.value,
     tags: tags.value.trim(),
-    // Only a picked change travels, so saving an untouched form never moves a prompt. On an edit
-    // null is a change too: it gives an agent's prompt to the operator.
-    ...(ownerAgentId.value !== openingOwnerId.value ? { ownerAgentId: ownerAgentId.value } : {}),
   }
   const url = props.editing ? `/api/prompts/${props.editing.id}` : '/api/prompts'
   const method = props.editing ? 'PUT' : 'POST'
@@ -241,40 +219,6 @@ async function save() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
           >
         </label>
-        <div>
-          <label
-            for="pf-owner"
-            class="block"
-          >
-            <span class="block text-xs text-fg-muted mb-1">Owner</span>
-            <select
-              id="pf-owner"
-              v-model="ownerAgentId"
-              aria-describedby="pf-owner-hint"
-              data-testid="prompt-form-owner"
-              class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            >
-              <option :value="null">
-                {{ OPERATOR_OWNER }}
-              </option>
-              <option
-                v-for="a in ownerOptions"
-                :key="a.id"
-                :value="a.id"
-              >
-                {{ a.name }}
-              </option>
-            </select>
-          </label>
-          <p
-            id="pf-owner-hint"
-            class="mt-1 text-xs text-fg-muted"
-          >
-            {{ editing
-              ? 'An agent that owns a prompt can read, change and delete it. To give this prompt to another owner, pick the owner and click Save.'
-              : 'An agent that owns a prompt can read, change and delete it. You can change the owner later, when you edit the prompt.' }}
-          </p>
-        </div>
         <!-- JCLAW-1137: retry only an edit. Editing is a PUT to a known id, so repeating it cannot
              duplicate anything. Creating is a POST, and if the first attempt succeeded but its
              response was lost, a retry makes a second prompt — so a failed create gets no button. -->
