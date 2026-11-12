@@ -2265,13 +2265,11 @@ describe('Settings page — Unmanaged config warning banner', () => {
     expect(component.text()).not.toContain('unmanaged config')
   })
 
-  // None is seeded: a panel's key exists once an operator has used the panel, and the grant-reset
-  // marker on every install from its first start with JclawApiGrantResetJob.
+  // Neither key is seeded, so only an install that has used the panel holds the row.
   it.each([
-    ['otel.enabled', 'its own Settings panel', 'false'],
-    ['tool.approval.offChannelPolicy', 'its own Settings panel', 'deny'],
-    ['tool.jclawApi.grantResetApplied', 'the jclaw_api grant reset at start', 'true'],
-  ])('treats %s, written by %s, as managed', async (key, _writer, value) => {
+    ['otel.enabled', 'false'],
+    ['tool.approval.offChannelPolicy', 'deny'],
+  ])('treats %s, written by its own Settings panel, as managed', async (key, value) => {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
