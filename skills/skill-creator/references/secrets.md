@@ -1,6 +1,6 @@
 # Secrets in a skill
 
-A skill never holds an API key, token or password. JClaw keeps each one in a secret store that only the operator fills, in the skill's Secrets panel on the Skills page. This file says how a skill declares its secrets and uses them.
+A skill's folder holds only SKILL.md, references/ and tools/: never an API key, token or password, and never a settings file. The operator fills in each value the skill needs, in the skill's Secrets panel on the Skills page. This file says how a skill declares those values and uses them.
 
 ## How a secret reaches a command
 
@@ -8,7 +8,7 @@ A skill never holds an API key, token or password. JClaw keeps each one in a sec
 - The variable holds a stand-in that starts with `jclaw-secret-`, never the value. JClaw puts the real value where the stand-in stands, only in HTTPS requests to that secret's hosts: in the address, a header, a sign-in or the body. A request that carries it anywhere else is refused.
 - So use `$NAME` only in a request to its own service. Do not print it, compare it, or save it: it is not the real value.
 - Only HTTPS requests carry a secret. A command that connects by SSH or to a database cannot use one.
-- A session id or key that a sign-in returns is ordinary text, not a stand-in: never print or store it.
+- A session id or key that a sign-in returns is ordinary text, not a stand-in: never print it. To reuse it on the next run, save it only in the skill's state folder (section 4).
 - A name is used once on an agent. When another skill of the same agent already holds the secret, declare the same name: both skills' commands can use it.
 
 ## 1. Add a `## Secrets` section to the skill's SKILL.md
@@ -47,16 +47,41 @@ curl -s -H "X-API-Key: $WEATHER_API_KEY" "https://api.example-weather.com/v1/tod
 
 A skill that uses a secret runs its commands with the `exec` tool, so its `jclaw-tools` lists `exec`.
 
-## 3. Settings are not secrets
+## 3. Settings: values that are not secret
 
-An address, a user name or a path is a setting. Keep it in a file under `credentials/`, such as `credentials/config.json` holding `{"baseUrl": "", "user": ""}`, and let the user fill it in. The skill's commands read it through `exec`, for example `"$(jq -r .baseUrl skills/{skill-name}/credentials/config.json)"`. The filesystem tool writes files in `credentials/` and does not read them. Never put a secret there.
+An address, a user name or a path that differs from one install to the next is a setting. Declare it in the same block, on a line that starts with `setting`, with an example value:
 
-## 4. Tell the user
+```secrets
+WEATHER_API_KEY=api.example-weather.com                       # The API key
+setting WEATHER_BASE_URL=https://api.example-weather.com/v1   # The service's address, with https://
+setting WEATHER_USER=admin                                    # Optional. The account's user name
+```
 
-When you confirm the skill, name each secret and say where it goes: "Open the skill from this agent's column on the Skills page and add each secret in its Secrets panel, with the host of your service." Never ask for a value, and never offer to add one yourself.
+The operator fills it in in the same panel, where its value is shown in clear. A command that names `$WEATHER_BASE_URL`, or runs in the skill's folder, gets the value itself, in the background too:
 
-## Refactoring a skill that keeps a secret in a file
+```bash
+curl -s -H "X-API-Key: $WEATHER_API_KEY" "$WEATHER_BASE_URL/today?city=Paris"
+```
 
-1. Add the `## Secrets` section with its `secrets` block.
-2. Replace each command that reads the file, such as `$(cat skills/x/credentials/api-key.txt)` or `$(jq -r .apiKey ...)`, with `$NAME`.
-3. Do not read the value and do not copy it anywhere. Tell the user to add it in the Secrets panel, and to remove it from the old file once the skill works.
+A value that is the same everywhere, or a default such as a city or a unit, is no setting: write it in SKILL.md. Never create a settings file such as `credentials/config.json`.
+
+## 4. What a skill saves between runs
+
+A skill that keeps something for its next run, such as a session key it renewed or a cookie jar, writes it under `skill-state/{skill-name}/` in the agent's workspace, never in its own folder, with its commands through `exec`:
+
+```bash
+mkdir -p skill-state/{skill-name} && printf '%s' "$SESSION_KEY" > skill-state/{skill-name}/session-key
+```
+
+The filesystem and documents tools refuse that folder, as it can hold a live credential: only the skill's commands read and write it. Removing the skill from the agent removes it.
+
+## 5. Tell the user
+
+When you confirm the skill, name each secret and setting and say where it goes: "Open the skill from this agent's column on the Skills page and fill in each one in its Secrets panel; give each secret the host of your service." Never ask for a value, and never offer to add one yourself.
+
+## Refactoring a skill that keeps values in a file
+
+1. Add the `## Secrets` section with its `secrets` block: a line for each key, token or password, and a `setting` line for each address, user name or path.
+2. Replace each command that reads the file, such as `$(cat skills/x/credentials/api-key.txt)` or `$(jq -r .baseUrl ...)`, with `$NAME`.
+3. Move anything the skill writes between runs to `skill-state/{skill-name}/` (section 4).
+4. Do not read the values and do not copy them anywhere: the filesystem tool cannot open a credentials folder anyway. Tell the user to fill each one in in the Secrets panel, and to delete the old file once the skill works.

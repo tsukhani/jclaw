@@ -404,13 +404,13 @@ public class SkillPromotionService {
      * the sanitizer may rewrite a declaration's line and its description with it. A block that holds anything but
      * declarations gets no such help: what the sanitizer returns for it stands.
      */
-    private static @Nullable List<SkillSecrets.Declared> declarationsToRestore(LinkedHashMap<String, String> textFiles) {
+    private static SkillSecrets.@Nullable Declarations declarationsToRestore(LinkedHashMap<String, String> textFiles) {
         var body = textFiles.get(SKILL_FILE_NAME);
         if (body == null) return null;
         var block = SkillSecrets.splitDeclaration(body).block();
         if (block == null || SkillSecrets.holdsMoreThanDeclarations(block)) return null;
-        var declared = SkillSecrets.declaredIn(body);
-        return declared.isEmpty() ? null : declared;
+        var declared = new SkillSecrets.Declarations(SkillSecrets.declaredIn(body), SkillSecrets.settingsIn(body));
+        return declared.secrets().isEmpty() && declared.settings().isEmpty() ? null : declared;
     }
 
     /**
@@ -419,20 +419,30 @@ public class SkillPromotionService {
      * masked comes back, name or host; only whether the original marked a secret optional does. A declaration whose
      * name the sanitizer changed is gone, and a block it dropped stays dropped.
      */
-    private static void restoreDeclaration(@Nullable List<SkillSecrets.Declared> declared,
+    private static void restoreDeclaration(SkillSecrets.@Nullable Declarations declared,
                                            LinkedHashMap<String, String> sanitized) {
         var body = declared == null ? null : sanitized.get(SKILL_FILE_NAME);
         if (declared == null || body == null) return;
         var reviewed = new HashMap<String, SkillSecrets.Declared>();
         for (var d : SkillSecrets.declaredIn(body)) reviewed.put(d.name(), d);
         var rebuilt = new ArrayList<SkillSecrets.Declared>();
-        for (var d : declared) {
+        for (var d : declared.secrets()) {
             var kept = reviewed.get(d.name());
             if (kept == null) continue;
             rebuilt.add(new SkillSecrets.Declared(kept.name(), SkillSecrets.keepOptional(kept.description(), d.optional()),
                     kept.exampleHosts(), d.optional()));
         }
-        var lifted = rebuilt.isEmpty() ? null : SkillSecrets.liftDeclaration(body, SkillSecrets.declarationBlock(rebuilt));
+        var reviewedSettings = new HashMap<String, SkillSecrets.DeclaredSetting>();
+        for (var d : SkillSecrets.settingsIn(body)) reviewedSettings.put(d.name(), d);
+        var rebuiltSettings = new ArrayList<SkillSecrets.DeclaredSetting>();
+        for (var d : declared.settings()) {
+            var kept = reviewedSettings.get(d.name());
+            if (kept == null) continue;
+            rebuiltSettings.add(new SkillSecrets.DeclaredSetting(kept.name(),
+                    SkillSecrets.keepOptional(kept.description(), d.optional()), kept.example(), d.optional()));
+        }
+        if (rebuilt.isEmpty() && rebuiltSettings.isEmpty()) return;
+        var lifted = SkillSecrets.liftDeclaration(body, SkillSecrets.declarationBlock(rebuilt, rebuiltSettings));
         if (lifted != null) sanitized.put(SKILL_FILE_NAME, lifted.text());
     }
 

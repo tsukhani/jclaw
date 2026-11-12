@@ -412,7 +412,7 @@ public final class TelegramOutboundPlanner {
             var path = AgentService.acquireWorkspacePath(agentName, relativePath);
             if (WorkspacePathGuard.isInSkillCredentials(AgentService.workspacePath(agentName), path)) {
                 EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
-                        "File delivery refused: %s is in a skill's credentials folder".formatted(relativePath));
+                        "File delivery refused: %s holds a skill's credentials or saved state".formatted(relativePath));
                 return null;
             }
             var file = path.toFile();

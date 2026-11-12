@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
 import services.SkillSecrets;
+import services.SkillSettings;
 import services.Tx;
 import services.WorkspaceFiles;
 
@@ -15,8 +16,10 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -88,6 +91,34 @@ public final class SecretGrants {
             }
         }
         return chosen.isEmpty() ? null : new Found(found.ownerName(), chosen);
+    }
+
+    /**
+     * The settings {@code command} is given (JF-357), as environment variables: plain values, under the rule that
+     * gives a secret. A background command gets them too, since no grant has to outlive it.
+     */
+    public static Map<String, String> settingsFor(Agent agent, String command, Path workdir) {
+        if (agent.id == null) return Map.of();
+        record Owned(String ownerName, List<SkillSettings.Usable> settings) {}
+        @Nullable Owned found = Tx.run(() -> {
+            Agent current = Agent.findById(agent.id);
+            if (current == null) return null;
+            var owner = WorkspaceFiles.workspaceOwner(current);
+            return new Owned(owner.name, SkillSettings.usable(owner));
+        });
+        if (found == null || found.settings().isEmpty()) return Map.of();
+        var enabled = SkillLoader.enabledSkillFolders(found.ownerName());
+        var skillsRoot = AgentService.workspacePath(found.ownerName()).resolve("skills").toAbsolutePath().normalize();
+        var where = workdir.toAbsolutePath().normalize();
+        var out = new LinkedHashMap<String, String>();
+        for (var setting : found.settings()) {
+            if (!enabled.contains(setting.skill())) continue;
+            if (names(command, setting.name()) || namesFolder(command, setting.skill())
+                    || where.startsWith(skillsRoot.resolve(setting.skill()))) {
+                out.put(setting.name(), setting.value());
+            }
+        }
+        return out;
     }
 
     /** A grant for {@code secrets} with no agent behind it, for the proxy's own tests. */

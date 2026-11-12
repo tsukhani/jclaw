@@ -23,6 +23,7 @@ import services.SkillBinaryScanner;
 import services.SkillExporter;
 import services.SkillPromotionService;
 import services.SkillSecrets;
+import services.SkillSettings;
 import services.Tx;
 import services.WorkspaceFiles;
 import services.catalog.CatalogPage;
@@ -695,6 +696,17 @@ public class ApiSkillsController extends Controller {
         // idempotent, so a retry after a transient failure is safe.
         SkillPromotionService.revokeAgentAllowlist(agent, name);
         SkillSecrets.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
+        SkillSettings.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
+        // What the skill saved for its next run goes with it (JF-357); a skill name is one folder, never a path.
+        var state = WorkspacePathGuard.resolveChild(
+                AgentService.workspacePath(agent.name).resolve(WorkspacePathGuard.SKILL_STATE_DIR), name);
+        if (state != null && Files.isDirectory(state)) {
+            try {
+                SkillPromotionService.deleteRecursive(state);
+            } catch (IOException e) {
+                ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to delete the skill's saved state: " + e.getMessage());
+            }
+        }
         deleteSkillDir(dir);
     }
 

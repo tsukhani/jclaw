@@ -8,6 +8,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.SkillSecrets;
+import services.SkillSettings;
 import services.Tx;
 import services.secrets.SecretGrant;
 import services.secrets.SecretGrants;
@@ -16,6 +17,7 @@ import tools.ShellExecTool;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -193,6 +195,42 @@ class SkillSecretGrantsTest extends UnitTest {
             if (previous == null) ConfigService.delete("shell.allowlist");
             else ConfigService.set("shell.allowlist", previous);
         }
+    }
+
+    /** JF-357: a setting is the plain value, given under the rule that gives a secret, in the background too. */
+    @Test
+    void aCommandGetsTheSettingsItNamesAsPlainValues() {
+        Tx.run(() -> {
+            SkillSettings.put(agent, "demo", "SITE_URL", "https://site.example.org/app");
+            SkillSettings.put(agent, "demo-two", "TWO_URL", "https://two.example.org");
+        });
+        assertEquals(Map.of("SITE_URL", "https://site.example.org/app"), SecretGrants.settingsFor(agent, "echo $SITE_URL", workspace));
+        assertEquals(Map.of("SITE_URL", "https://site.example.org/app"),
+                SecretGrants.settingsFor(agent, "bash skills/demo/run.sh", workspace));
+        assertEquals(Map.of(), SecretGrants.settingsFor(agent, "echo $SITE_URLS hello", workspace));
+
+        var previous = ConfigService.get("shell.allowlist", null);
+        ConfigService.set("shell.allowlist", "echo");
+        try {
+            assertEquals("[https://site.example.org/app]", run(new ShellExecTool(), "echo \"[$SITE_URL]\"").strip());
+            var background = JsonParser.parseString(SecretGrants.callWithUpstreamForTest(stub.upstream(), () -> new ShellExecTool()
+                    .execute("{\"command\":\"echo \\\"[$SITE_URL]\\\"\",\"background\":true}", agent))).getAsJsonObject();
+            assertTrue(background.get("output").getAsString().contains("[https://site.example.org/app]"),
+                    background.get("output").getAsString());
+        } finally {
+            if (previous == null) ConfigService.delete("shell.allowlist");
+            else ConfigService.set("shell.allowlist", previous);
+        }
+
+        Tx.run(() -> {
+            var config = new AgentSkillConfig();
+            config.agent = Agent.findById(agent.id);
+            config.skillName = "demo";
+            config.enabled = false;
+            config.save();
+        });
+        agents.SkillLoader.clearCache();
+        assertEquals(Map.of(), SecretGrants.settingsFor(agent, "echo $SITE_URL", workspace), "a switched-off skill gives none");
     }
 
     @Test

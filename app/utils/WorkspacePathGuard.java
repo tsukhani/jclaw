@@ -135,27 +135,38 @@ public final class WorkspacePathGuard {
     private static final String SKILL_CREDENTIALS_DIR = "credentials";
 
     /**
-     * Whether {@code canonicalTarget} is a skill's credentials folder, or anything inside it, in the workspace at
-     * {@code workspaceRoot} (JF-322). The Skills page masks those files, and no agent tool opens, lists, sends or
-     * packages them: a skill's own scripts read its secrets. Fails closed when the root cannot be resolved.
+     * The workspace folder where a skill keeps what it saves for its next run, such as a session key or a cookie jar
+     * (JF-357): {@code skill-state/<name>/}, outside {@code skills/}, so a skill's own folder holds only SKILL.md,
+     * tools/ and references/. What it holds is a live credential, so it is fenced like a credentials folder.
+     */
+    public static final String SKILL_STATE_DIR = "skill-state";
+
+    /**
+     * Whether {@code canonicalTarget} is a skill's credentials folder (JF-322) or the skill-state folder (JF-357), or
+     * anything inside either, in the workspace at {@code workspaceRoot}. The Skills page masks those files, and no
+     * agent tool opens, lists, sends or packages them: a skill's own scripts read them. Fails closed when the root
+     * cannot be resolved.
      *
      * @param workspaceRoot   the agent's workspace root, resolved here
      * @param canonicalTarget a path already resolved by {@link #acquireContained} or {@link #resolveContained}
      */
     public static boolean isInSkillCredentials(Path workspaceRoot, Path canonicalTarget) {
         var segments = skillSegments(workspaceRoot, canonicalTarget);
-        return segments == null || segments.length >= 3 && segments[0].equalsIgnoreCase("skills")
+        return segments == null || segments.length >= 1 && segments[0].equalsIgnoreCase(SKILL_STATE_DIR)
+                || segments.length >= 3 && segments[0].equalsIgnoreCase("skills")
                 && segments[2].equalsIgnoreCase(SKILL_CREDENTIALS_DIR);
     }
 
     /**
      * Whether a folder holds a skill's credentials folder or sits inside one: the workspace root, {@code skills/},
-     * a skill's folder, or anything in its credentials folder (JF-322), for a caller that copies a whole folder.
+     * a skill's folder, anything in its credentials folder (JF-322), or anything in the skill-state folder (JF-357),
+     * for a caller that copies a whole folder.
      */
     public static boolean reachesSkillCredentials(Path workspaceRoot, Path canonicalDir) {
         var segments = skillSegments(workspaceRoot, canonicalDir);
         if (segments == null) return true;
         if (segments.length == 0) return true;
+        if (segments[0].equalsIgnoreCase(SKILL_STATE_DIR)) return true;
         if (!segments[0].equalsIgnoreCase("skills")) return false;
         return segments.length <= 2 || segments[2].equalsIgnoreCase(SKILL_CREDENTIALS_DIR);
     }

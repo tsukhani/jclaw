@@ -267,7 +267,9 @@ public final class RegistrySkillImporter {
         var split = SkillSecrets.splitDeclaration(text);
         var block = split.block();
         if (block == null) return !SecretRedactor.redact(text).equals(text);
-        var names = SkillSecrets.declaredIn(text).stream().map(SkillSecrets.Declared::name).toList();
+        var names = new ArrayList<String>();
+        for (var d : SkillSecrets.declaredIn(text)) names.add(d.name());
+        for (var d : SkillSecrets.settingsIn(text)) names.add(d.name());
         return SkillSecrets.holdsMoreThanDeclarations(block) || masksSomething(split.rest(), names);
     }
 

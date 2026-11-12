@@ -212,7 +212,7 @@ describe('SkillSecretsPanel', () => {
     await settle()
 
     expect(wrapper.find('[data-testid="secrets-not-runnable"]').text().replace(/\s+/g, ' '))
-      .toBe('Not runnable: this secret needs a value before the agent can use this skill: API_KEY')
+      .toBe('Not runnable: this needs a value before the agent can use this skill: API_KEY')
     expect(wrapper.find('[data-testid="declared-API_KEY"]').text()).toContain('Needs a value')
     expect(wrapper.find('[data-testid="declared-API_KEY"]').text()).toContain('The service\'s API key')
     expect(wrapper.find('[data-testid="declared-PROXY_PASS"]').text()).toContain('Optional, not set')
@@ -285,5 +285,58 @@ describe('SkillSecretsPanel', () => {
     await wrapper.find('[data-testid="secret-form"]').trigger('submit')
     await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
     expect(sent).toEqual({ value: 'fake-typed-value', hosts: ['api.internal.example'] })
+  })
+
+  // ===== JF-357: settings, values that are not secret =====
+
+  const withSettings = {
+    secrets: [],
+    expected: [],
+    settings: [{ name: 'SITE_URL', value: 'https://site.example.org/app', setAt: '2026-11-13T00:00:00Z' }],
+    expectedSettings: [
+      { name: 'SITE_URL', description: 'The site\'s address', example: 'https://example.com', optional: false, set: true, setIn: 'demo' },
+      { name: 'SITE_USER', description: 'The sign-in user', example: 'admin', optional: false, set: false, setIn: null },
+      { name: 'SITE_REGION', description: 'Optional. The region', example: 'eu', optional: true, set: false, setIn: null },
+    ],
+    missing: ['SITE_USER'],
+  }
+
+  it('lists each setting with its value, or what it still needs', async () => {
+    registerEndpoint('/api/agents/51/skills/demo/secrets', () => withSettings)
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 51, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.find('[data-testid="setting-SITE_URL"]').text()).toContain('https://site.example.org/app')
+    expect(wrapper.find('[data-testid="setting-SITE_USER"]').text()).toContain('Needs a value')
+    expect(wrapper.find('[data-testid="setting-SITE_REGION"]').text()).toContain('Optional, not set')
+    expect(wrapper.find('[data-testid="secrets-not-runnable"]').text().replace(/\s+/g, ' '))
+      .toBe('Not runnable: this needs a value before the agent can use this skill: SITE_USER')
+  })
+
+  it('editing a setting sends its value and tells the page', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/52/skills/demo/secrets', () => withSettings)
+    registerEndpoint('/api/agents/52/skills/demo/settings/SITE_USER', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'SITE_USER', value: 'operator', setAt: '2026-11-13T01:00:00Z' }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 52, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SITE_USER"]').trigger('click')
+    const name = wrapper.find('input[name="setting-name"]')
+    expect((name.element as HTMLInputElement).value).toBe('SITE_USER')
+    expect(name.attributes('readonly')).toBeDefined()
+    expect(wrapper.find('input[name="setting-value"]').attributes('placeholder')).toBe('for example admin')
+    expect(wrapper.find('input[name="setting-value"]').attributes('type')).toBe('text')
+
+    await wrapper.find('input[name="setting-value"]').setValue('operator')
+    await wrapper.find('[data-testid="setting-form"]').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ value: 'operator' })
   })
 })

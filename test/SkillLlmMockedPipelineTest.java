@@ -572,6 +572,34 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         assertEquals(List.of(new SkillSecrets.Declared("PROXY_PASS", "Optional", List.of(), true)), promotedDeclarations());
     }
 
+    @Test
+    void aSettingTheReviewerKeptSurvivesTheRebuild() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                ```secrets
+                WEATHER_API_KEY=api.example-weather.com   # The API key
+                setting WEATHER_URL=https://api.example-weather.com/v2   # Optional. Another address
+                ```
+                """, """
+                ```secrets
+                WEATHER_API_KEY=[API_KEY]   # The API key
+                setting WEATHER_URL=[URL]
+                junk the reviewer left
+                ```
+                """);
+
+        assertEquals("""
+                ```secrets
+                WEATHER_API_KEY=   # The API key
+                setting WEATHER_URL=[URL]   # Optional
+                ```""", body);
+        assertEquals(List.of(new SkillSecrets.DeclaredSetting("WEATHER_URL", "Optional", "[URL]", true)),
+                SkillSecrets.declaredSettings(promotedGlobal.resolve("weather")));
+    }
+
     /** A block that holds a pasted key is not restored: the reviewer masks it like any other. */
     @Test
     void aSecretsBlockHoldingAKeyIsLeftToTheReviewer() throws Exception {

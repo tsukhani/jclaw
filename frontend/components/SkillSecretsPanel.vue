@@ -6,8 +6,11 @@
  *
  * JF-348: the skill's SKILL.md declares what it needs, in its secrets block. Each declared secret is listed with its state, and
  * while a required one has no value the skill is not runnable, which the panel says at its top.
+ *
+ * JF-357: the same block declares settings, values that are not secret; they are listed and edited below the secrets.
  */
 import type { ApiErrorDetails } from '~/types/api'
+import type { ExpectedSetting, Setting } from '~/components/SkillSettingsSection.vue'
 
 const props = defineProps<{ agentId: number, skillName: string }>()
 /** After a secret is added, replaced or deleted, so the page can redraw the skill's not-runnable flag. */
@@ -25,6 +28,8 @@ interface Expected {
 
 const secrets = ref<Secret[]>([])
 const expected = ref<Expected[]>([])
+const settings = ref<Setting[]>([])
+const expectedSettings = ref<ExpectedSetting[]>([])
 const missing = ref<string[]>([])
 const loading = ref(false)
 const loadError = ref<ApiErrorDetails | null>(null)
@@ -44,14 +49,29 @@ const hostsId = useId()
 
 const base = computed(() =>
   `/api/agents/${props.agentId}/skills/${encodeURIComponent(props.skillName)}/secrets`)
+const settingsBase = computed(() =>
+  `/api/agents/${props.agentId}/skills/${encodeURIComponent(props.skillName)}/settings`)
+
+async function settingsChanged() {
+  await load()
+  emit('changed')
+}
 
 async function load() {
   loading.value = true
   loadError.value = null
   try {
-    const res = await $fetch<{ secrets: Secret[], expected?: Expected[], missing?: string[] }>(base.value)
+    const res = await $fetch<{
+      secrets: Secret[]
+      expected?: Expected[]
+      settings?: Setting[]
+      expectedSettings?: ExpectedSetting[]
+      missing?: string[]
+    }>(base.value)
     secrets.value = res.secrets
     expected.value = res.expected ?? []
+    settings.value = res.settings ?? []
+    expectedSettings.value = res.expectedSettings ?? []
     missing.value = res.missing ?? []
   }
   catch (e) {
@@ -171,7 +191,7 @@ watch(() => [props.agentId, props.skillName], () => {
       class="mx-4 mb-2 px-3 py-2 text-xs border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300"
       data-testid="secrets-not-runnable"
     >
-      Not runnable: {{ missing.length === 1 ? 'this secret needs' : 'these secrets need' }} a value before the agent can use this skill:
+      Not runnable: {{ missing.length === 1 ? 'this needs' : 'these need' }} a value before the agent can use this skill:
       <span class="font-mono">{{ missing.join(', ') }}</span>
     </p>
 
@@ -378,5 +398,13 @@ watch(() => [props.agentId, props.skillName], () => {
         </button>
       </div>
     </form>
+
+    <SkillSettingsSection
+      v-if="!loadError"
+      :base="settingsBase"
+      :settings="settings"
+      :expected="expectedSettings"
+      @changed="settingsChanged"
+    />
   </div>
 </template>

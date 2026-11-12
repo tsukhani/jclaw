@@ -185,8 +185,8 @@ class ChromeUploadToolTest extends UnitTest {
         ChromeBridgeSync.with(fake, () -> {
             for (var path : List.of("skills/demo/credentials/key.txt", "SKILLS/demo/Credentials/key.txt",
                     "skills/demo/../demo/credentials/key.txt", "key-link.txt")) {
-                assertEquals("Error: '" + path + "' is in a skill's credentials folder, which no agent tool opens.",
-                        run(path));
+                assertEquals("Error: '" + path + "' holds a skill's credentials or what a skill saved for its next run,"
+                        + " which no agent tool opens.", run(path));
                 assertTrue(fake.sent.isEmpty(), path);
             }
         });

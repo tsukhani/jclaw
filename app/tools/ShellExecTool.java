@@ -381,6 +381,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 command.length() > 200 ? command.substring(0, 200) + "…" : command,
                 why.isEmpty() ? "" : " — why: " + why));
 
+        var settings = SecretGrants.settingsFor(agent, command, workdir);
+        if (!settings.isEmpty()) {
+            var withSettings = new LinkedHashMap<String, String>(env);
+            withSettings.putAll(settings);
+            env = withSettings;
+        }
         try (var grant = SecretGrants.forCommand(agent, command, workdir, background)) {
             return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent, background,
                     grant);

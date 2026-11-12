@@ -221,9 +221,10 @@ public final class ToolErrorTemplates {
 
     public static ErrorTemplate fsCredentials(String path) {
         return new ErrorTemplate(FS_CREDENTIALS,
-                "'%s' is in a skill's credentials folder, which no agent tool opens.".formatted(path),
-                "A skill's own scripts read its secrets: run the skill's script instead of reading or sending the "
-                        + "file. The operator manages these files on the Skills page.",
+                "'%s' holds a skill's credentials or what a skill saved for its next run, which no agent tool opens."
+                        .formatted(path),
+                "A skill's own scripts read these files: run the skill's script instead of reading or sending the "
+                        + "file. The operator manages a skill's secrets and settings on the Skills page.",
                 null);
     }
 

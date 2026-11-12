@@ -3,6 +3,7 @@ package services;
 import agents.SkillLoader;
 import models.Agent;
 import models.SkillSecret;
+import models.SkillSetting;
 import org.jspecify.annotations.Nullable;
 import utils.SecretRedactor;
 
@@ -55,6 +56,15 @@ public final class SkillSecrets {
     public record Declared(String name, String description, List<String> exampleHosts, boolean optional) {}
 
     /**
+     * A setting a skill says it needs (JF-357), from a {@code setting NAME=example   # what it is} line of the same
+     * block: a value that is not secret, which the operator fills in on the panel. {@code example} is a hint only.
+     */
+    public record DeclaredSetting(String name, String description, String example, boolean optional) {}
+
+    /** What a block declares: its secrets and its settings, each in the block's order. */
+    public record Declarations(List<Declared> secrets, List<DeclaredSetting> settings) {}
+
+    /**
      * The language of the fenced block in a skill's SKILL.md that declares its secrets (JF-353), one
      * {@code NAME=example-host   # what it is} per line and never a value. It sits in the file the agent already
      * reads, so the declaration and the instructions cannot drift apart, and no extra file needs a place in a skill.
@@ -65,8 +75,9 @@ public final class SkillSecrets {
     private static final Pattern OPTIONAL = Pattern.compile("(?i)optional\\b.*", Pattern.DOTALL);
     private static final int MAX_SKILL_BYTES = 262_144;
     private static final int MAX_DECLARED = 32;
+    /** {@code [setting] [export] NAME=example   # description}: groups 1 the keyword, 2 the name, 3 the example, 4 the description. */
     private static final Pattern DECLARATION = Pattern.compile(
-            "\\s*(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
+            "\\s*(?:(setting)\\s+)?(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
 
     /** A secret with its value, for the proxy's grants alone: no route or tool ever returns one (JF-324). */
     public record Usable(String skill, String name, String value, List<String> hosts) {}
@@ -106,6 +117,11 @@ public final class SkillSecrets {
             throw new Refused("The value is longer than %d characters.".formatted(MAX_VALUE_CHARS));
         }
         var normalized = normalizeHosts(hosts);
+        SkillSetting setting = SkillSetting.find("agent = ?1 AND name = ?2", owner, name).first();
+        if (setting != null) {
+            throw new Refused(("Skill '%s' on this agent has a setting named %s. A command finds a value by its name, so"
+                    + " each name is used once on an agent.").formatted(setting.skillName, name));
+        }
         SkillSecret elsewhere = SkillSecret.find("agent = ?1 AND name = ?2 AND skillName <> ?3", owner, name, skill).first();
         if (elsewhere != null) {
             throw new Refused(("Skill '%s' on this agent already has a secret named %s. A command finds a secret by its"
@@ -146,15 +162,18 @@ public final class SkillSecrets {
      * breaks the panel. Empty when the skill ships no file.
      */
     public static List<Declared> declared(Path skillDir) {
+        var skillMd = readSkillMd(skillDir);
+        return skillMd == null ? List.of() : declaredIn(skillMd);
+    }
+
+    private static @Nullable String readSkillMd(Path skillDir) {
         var file = skillDir.resolve(SKILL_FILE);
-        String skillMd;
         try {
-            if (!Files.isRegularFile(file) || Files.size(file) > MAX_SKILL_BYTES) return List.of();
-            skillMd = Files.readString(file);
+            if (!Files.isRegularFile(file) || Files.size(file) > MAX_SKILL_BYTES) return null;
+            return Files.readString(file);
         } catch (IOException | UncheckedIOException _) {
-            return List.of();
+            return null;
         }
-        return declaredIn(skillMd);
     }
 
     /** The secrets {@code skillMd}'s declaration block declares; empty when it has none. */
@@ -165,12 +184,18 @@ public final class SkillSecrets {
 
     /**
      * A declaration block, fences included, written from parsed declarations alone: no comment line, no text that
-     * did not parse, nothing after the fence. What it holds is only what {@link #declaredIn} would read back.
+     * did not parse, nothing after the fence. What it holds is only what {@link #declaredIn} and {@link #settingsIn}
+     * would read back.
      */
-    public static String declarationBlock(List<Declared> declared) {
+    public static String declarationBlock(List<Declared> declared, List<DeclaredSetting> settings) {
         var out = new StringBuilder("```").append(DECLARATION_BLOCK).append('\n');
         for (var d : declared) {
             out.append(d.name()).append('=').append(String.join(", ", d.exampleHosts()));
+            if (!d.description().isEmpty()) out.append("   # ").append(d.description());
+            out.append('\n');
+        }
+        for (var d : settings) {
+            out.append("setting ").append(d.name()).append('=').append(d.example());
             if (!d.description().isEmpty()) out.append("   # ").append(d.description());
             out.append('\n');
         }
@@ -250,28 +275,50 @@ public final class SkillSecrets {
     }
 
     private static List<Declared> declarationsIn(String block) {
-        var out = new ArrayList<Declared>();
+        return parse(block).secrets();
+    }
+
+    /** The settings {@code skillMd}'s declaration block declares; empty when it has none. */
+    public static List<DeclaredSetting> settingsIn(String skillMd) {
+        var block = splitDeclaration(skillMd).block();
+        return block == null ? List.of() : parse(block).settings();
+    }
+
+    /** The settings the skill in {@code skillDir} declares in its SKILL.md. */
+    public static List<DeclaredSetting> declaredSettings(Path skillDir) {
+        var skillMd = readSkillMd(skillDir);
+        return skillMd == null ? List.of() : settingsIn(skillMd);
+    }
+
+    private static Declarations parse(String block) {
+        var secrets = new ArrayList<Declared>();
+        var settings = new ArrayList<DeclaredSetting>();
         var seen = new LinkedHashSet<String>();
         for (var line : block.split("\\R")) {
             if (line.isBlank() || line.stripLeading().startsWith("#")) continue;
             var m = DECLARATION.matcher(line);
             if (!m.matches()) continue;
-            var name = m.group(1);
+            var name = m.group(2);
             if (nameRejection(name) != null || !seen.add(name)) continue;
-            var examples = new ArrayList<String>();
-            for (var example : m.group(2).split("[,\\s]+")) {
-                if (example.isBlank()) continue;
-                try {
-                    examples.addAll(normalizeHosts(List.of(example)));
-                } catch (Refused _) {
-                    // An example that is no host is left out; the secret is still declared.
+            var description = m.group(4) == null ? "" : m.group(4).strip();
+            boolean optional = OPTIONAL.matcher(description).matches();
+            if (m.group(1) != null) {
+                settings.add(new DeclaredSetting(name, description, m.group(3).strip(), optional));
+            } else {
+                var examples = new ArrayList<String>();
+                for (var example : m.group(3).split("[,\\s]+")) {
+                    if (example.isBlank()) continue;
+                    try {
+                        examples.addAll(normalizeHosts(List.of(example)));
+                    } catch (Refused _) {
+                        // An example that is no host is left out; the secret is still declared.
+                    }
                 }
+                secrets.add(new Declared(name, description, List.copyOf(examples), optional));
             }
-            var description = m.group(3) == null ? "" : m.group(3).strip();
-            out.add(new Declared(name, description, List.copyOf(examples), OPTIONAL.matcher(description).matches()));
-            if (out.size() == MAX_DECLARED) break;
+            if (secrets.size() + settings.size() == MAX_DECLARED) break;
         }
-        return List.copyOf(out);
+        return new Declarations(List.copyOf(secrets), List.copyOf(settings));
     }
 
     /**
@@ -295,6 +342,8 @@ public final class SkillSecrets {
             if (known == null) {
                 known = new LinkedHashMap<>();
                 for (var secret : usable(owner)) known.put(secret.name(), secret.skill());
+                // A name is used once on an agent, so a setting never shares one with a secret (JF-357).
+                for (var setting : SkillSettings.usable(owner)) known.put(setting.name(), setting.skill());
                 holders = known;
             }
             return known;
@@ -321,15 +370,20 @@ public final class SkillSecrets {
         }
 
         /**
-         * The required secrets the skill in {@code skillDir} declares and cannot be given: while any is listed, the
-         * skill is not runnable.
+         * The required secrets and settings the skill in {@code skillDir} declares and cannot be given: while any is
+         * listed, the skill is not runnable.
          */
         public List<String> missing(Path skillDir) {
-            var declared = declared(skillDir);
+            var skillMd = readSkillMd(skillDir);
             var folder = skillDir.getFileName();
-            if (declared.isEmpty() || folder == null) return List.of();
+            var block = skillMd == null ? null : splitDeclaration(skillMd).block();
+            if (block == null || folder == null) return List.of();
+            var declarations = parse(block);
             var out = new ArrayList<String>();
-            for (var d : declared) {
+            for (var d : declarations.secrets()) {
+                if (!d.optional() && !to(folder.toString(), d.name())) out.add(d.name());
+            }
+            for (var d : declarations.settings()) {
                 if (!d.optional() && !to(folder.toString(), d.name())) out.add(d.name());
             }
             return List.copyOf(out);
@@ -361,12 +415,17 @@ public final class SkillSecrets {
                 if (masked(line.strip().replaceFirst("^#+", ""))) return true;
                 continue;
             }
-            if (masked(m.group(1)) || looksRandom(m.group(1).split("_"))) return true;
-            for (var example : m.group(2).split("[,\\s]+")) {
-                if (example.isBlank()) continue;
-                if (!isPlausibleExampleHost(example) || masked(example)) return true;
+            if (masked(m.group(2)) || looksRandom(m.group(2).split("_"))) return true;
+            if (m.group(1) != null) {
+                // A setting's example is free text, such as an address with a path; it may hold no key.
+                if (masked(m.group(3)) || looksRandom(m.group(3).split("[^A-Za-z0-9]+"))) return true;
+            } else {
+                for (var example : m.group(3).split("[,\\s]+")) {
+                    if (example.isBlank()) continue;
+                    if (!isPlausibleExampleHost(example) || masked(example)) return true;
+                }
             }
-            if (m.group(3) != null && masked(m.group(3))) return true;
+            if (m.group(4) != null && masked(m.group(4))) return true;
         }
         return false;
     }
@@ -401,7 +460,7 @@ public final class SkillSecrets {
 
 
     /** Why {@code name} cannot name a secret, or null when it can. */
-    private static @Nullable String nameRejection(String name) {
+    static @Nullable String nameRejection(String name) {
         if (!NAME.matcher(name).matches()) {
             return "'%s' is not a secret name: use capital letters, digits and underscores, starting with a"
                     .formatted(name) + " letter, at most 64 characters, as in NAS_PASSWORD.";

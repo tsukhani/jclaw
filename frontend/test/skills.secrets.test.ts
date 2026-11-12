@@ -47,7 +47,7 @@ describe('Skills page: skills that need secrets', () => {
     await flushPromises()
 
     const flag = page.find('[data-testid="needs-secrets-4-nas"]')
-    expect(flag.text()).toBe('Needs secrets')
+    expect(flag.text()).toBe('Needs values')
     expect(flag.attributes('title')).toBe('Not runnable: needs NAS_PASS, PROXY_PASS')
     expect(page.find('[data-testid="needs-secrets-4-plain"]').exists()).toBe(false)
 

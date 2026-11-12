@@ -1701,6 +1701,23 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals("[\"SKILL.md\"]", body.get("flaggedFiles").toString());
     }
 
+    /** JF-357: a sign-in made of a declared setting and a declared secret is two references, not a value. */
+    @Test
+    void anUploadIsNotFlaggedForSigningInWithADeclaredSettingAndSecret() throws Exception {
+        login();
+        var skillMd = "---\nname: nas\ndescription: Lists the NAS.\nmetadata:\n  jclaw-tools: \"\"\n---\n# NAS\n\n"
+                + "```secrets\nNAS_PASS=nas.example.com:5001   # The password\nsetting NAS_USER=admin   # The user\n```\n\n"
+                + "```bash\ncurl -s -u \"$NAS_USER:$NAS_PASS\" \"https://nas.example.com:5001/webapi/entry.cgi\"\n```\n";
+        var upload = zipFile("nas/SKILL.md", skillMd);
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[]", body.get("flaggedFiles").toString());
+    }
+
     /** Only a declared secret's reference is not a value: an undeclared variable after a key header is judged as usual. */
     @Test
     void anUploadIsFlaggedForAKeyHeaderThatNamesNoDeclaredSecret() throws Exception {

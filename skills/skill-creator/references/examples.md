@@ -3,8 +3,6 @@
 ```
 whatsapp-notifier/
 ├── SKILL.md
-├── credentials/
-│   └── api-config.json       # The API's address and the sender's number: settings, no secret
 └── tools/
     ├── wacli                  # WhatsApp CLI binary
     └── README.md              # Usage docs for the binary
@@ -35,12 +33,14 @@ metadata:
 The operator adds this in the skill's Secrets panel on the Skills page. An agent cannot.
 
 ```secrets
-WHATSAPP_API_TOKEN=api.example-whatsapp.com   # The API token, from the provider's dashboard
+WHATSAPP_API_TOKEN=api.example-whatsapp.com             # The API token, from the provider's dashboard
+setting WHATSAPP_API_URL=https://api.example-whatsapp.com/v1   # The API's address
+setting WHATSAPP_SENDER=+15550100                        # The sending number
 ```
 
 When asked to send a WhatsApp message:
 
-1. Use the `exec` tool to run `tools/wacli` to send the message. It reads its settings from `credentials/api-config.json` and takes the token as `$WHATSAPP_API_TOKEN`
+1. Use the `exec` tool to run `tools/wacli` to send the message. It takes the address and number as `$WHATSAPP_API_URL` and `$WHATSAPP_SENDER`, and the token as `$WHATSAPP_API_TOKEN`
 2. Confirm delivery status to the user
 ````
 

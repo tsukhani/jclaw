@@ -222,7 +222,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
         Path dest = resolveWorkspaceDir(args, PARAM_DEST, slug, agent);
         if (dest == null) return err("dest escapes your workspace.");
         if (WorkspacePathGuard.reachesSkillCredentials(WorkspaceFiles.workspacePath(agent.name), dest)) {
-            return err("dest '" + shown(agent, dest) + "' would replace a skill's credentials folder;"
+            return err("dest '" + shown(agent, dest) + "' would replace a skill's credentials or saved state;"
                     + " stage into a folder of its own.");
         }
         boolean overwrite = JsonArgs.optBool(args, PARAM_OVERWRITE);
@@ -374,7 +374,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
      */
     private static @Nullable String sourceRefusal(Agent agent, Path src) {
         if (WorkspacePathGuard.reachesSkillCredentials(WorkspaceFiles.workspacePath(agent.name), src)) {
-            return "'" + shown(agent, src) + "' holds a skill's credentials folder, which is never published.";
+            return "'" + shown(agent, src) + "' holds a skill's credentials or saved state, which is never published.";
         }
         String link;
         try {

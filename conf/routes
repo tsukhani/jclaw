@@ -238,6 +238,8 @@ POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
 GET     /api/agents/{id}/skills/{name}/secrets          ApiSkillSecretsController.list
 PUT     /api/agents/{id}/skills/{name}/secrets/{secret} ApiSkillSecretsController.put
 DELETE  /api/agents/{id}/skills/{name}/secrets/{secret} ApiSkillSecretsController.delete
+PUT     /api/agents/{id}/skills/{name}/settings/{setting} ApiSkillSecretsController.putSetting
+DELETE  /api/agents/{id}/skills/{name}/settings/{setting} ApiSkillSecretsController.deleteSetting
 
 # Events API (SSE notification bus)
 GET     /api/events                             ApiEventsController.stream

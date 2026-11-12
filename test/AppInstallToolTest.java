@@ -224,13 +224,13 @@ class AppInstallToolTest extends UnitTest {
         var slug = slug();
         seedSkillCredentials();
         buildInWorkspace("skills/demo", manifest("Demo", "1.0.0"));
-        assertEquals("Error: 'skills/demo' holds a skill's credentials folder, which is never published.",
+        assertEquals("Error: 'skills/demo' holds a skill's credentials or saved state, which is never published.",
                 run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"skills/demo\"}"));
-        assertEquals("Error: 'skills' holds a skill's credentials folder, which is never published.",
+        assertEquals("Error: 'skills' holds a skill's credentials or saved state, which is never published.",
                 run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"skills\"}"));
-        assertEquals("Error: '.' holds a skill's credentials folder, which is never published.",
+        assertEquals("Error: '.' holds a skill's credentials or saved state, which is never published.",
                 run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\".\"}"));
-        assertEquals("{\"valid\":false,\"issues\":[\"'skills/demo' holds a skill's credentials folder, which is never"
+        assertEquals("{\"valid\":false,\"issues\":[\"'skills/demo' holds a skill's credentials or saved state, which is never"
                         + " published.\"]}",
                 run("{\"action\":\"validate\",\"slug\":\"" + slug + "\",\"source\":\"skills/demo\"}"));
         assertFalse(Files.exists(Play.getFile("public/apps/" + slug).toPath()));
@@ -276,7 +276,7 @@ class AppInstallToolTest extends UnitTest {
         assertTrue(installed.get("installed").getAsBoolean(), installed.toString());
         var key = seedSkillCredentials();
         for (var dest : List.of("skills/demo", "skills", "skills/demo/credentials")) {
-            assertEquals("Error: dest '" + dest + "' would replace a skill's credentials folder; stage into a folder of"
+            assertEquals("Error: dest '" + dest + "' would replace a skill's credentials or saved state; stage into a folder of"
                             + " its own.",
                     run("{\"action\":\"stage\",\"slug\":\"" + slug + "\",\"dest\":\"" + dest
                             + "\",\"overwrite\":true}"));

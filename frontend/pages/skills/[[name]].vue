@@ -1448,7 +1448,7 @@ function totalSkillCount(agentId: number) {
                         :data-testid="`needs-secrets-${agent.id}-${skill.name}`"
                         @click.stop="editAgentSkill(agent.id, skill)"
                       >
-                        Needs secrets
+                        Needs values
                       </button>
                       <button
                         v-if="updateAvailable(skill)"

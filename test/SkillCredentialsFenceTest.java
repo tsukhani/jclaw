@@ -62,11 +62,26 @@ class SkillCredentialsFenceTest extends UnitTest {
 
     @Test
     void readingACredentialsFileIsRefusedInPlainWords() {
-        assertEquals("Error: 'skills/demo/credentials/key.json' is in a skill's credentials folder, which no agent"
-                        + " tool opens.\n\nWhat to check: A skill's own scripts read its secrets: run the skill's"
-                        + " script instead of reading or sending the file. The operator manages these files on the"
-                        + " Skills page.",
+        assertEquals("Error: 'skills/demo/credentials/key.json' holds a skill's credentials or what a skill saved for"
+                        + " its next run, which no agent tool opens.\n\nWhat to check: A skill's own scripts read these"
+                        + " files: run the skill's script instead of reading or sending the file. The operator manages a"
+                        + " skill's secrets and settings on the Skills page.",
                 file("{\"action\":\"readFile\",\"path\":\"" + KEY + "\"}"));
+    }
+
+    /** JF-357: what a skill saves for its next run sits outside its folder, fenced the same way. */
+    @Test
+    void theSkillStateFolderIsFencedLikeACredentialsFolder() throws Exception {
+        Files.createDirectories(workspace.resolve("skill-state/demo"));
+        Files.writeString(workspace.resolve("skill-state/demo/session.txt"), SECRET + "\n");
+        assertEquals(refusal("skill-state/demo/session.txt"),
+                file("{\"action\":\"readFile\",\"path\":\"skill-state/demo/session.txt\"}"));
+        assertEquals(refusal("skill-state"), file("{\"action\":\"listFiles\",\"path\":\"skill-state\"}"));
+        assertEquals(refusal("Skill-State/demo/session.txt"),
+                file("{\"action\":\"readFile\",\"path\":\"Skill-State/demo/session.txt\"}"));
+        assertEquals(refusal("skill-state/demo/session.txt"),
+                documents.execute("{\"action\":\"read\",\"path\":\"skill-state/demo/session.txt\"}", agent));
+        assertEquals(SECRET + "\n", Files.readString(workspace.resolve("skill-state/demo/session.txt")));
     }
 
     @Test

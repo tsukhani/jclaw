@@ -14,6 +14,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.SkillSecrets;
+import services.SkillSettings;
 import services.WorkspaceFiles;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
@@ -27,8 +28,9 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
- * The Secrets panel of an agent's skill (JF-323): list, create or replace, and delete. A value goes in and never comes
- * back out, to the operator included; every route is the operator's alone.
+ * The Secrets panel of an agent's skill (JF-323): list, create or replace, and delete. A secret's value goes in and
+ * never comes back out, to the operator included. A setting (JF-357) is not secret, so its value is listed. Every
+ * route is the operator's alone.
  */
 @With(AuthCheck.class)
 public class ApiSkillSecretsController extends Controller {
@@ -43,8 +45,20 @@ public class ApiSkillSecretsController extends Controller {
     public record ExpectedView(String name, String description, List<String> exampleHosts, boolean optional,
                                boolean set, @Nullable String setIn) {}
 
-    /** {@code missing} names the required declared secrets not yet provided; the skill runs only when it is empty. */
-    public record SecretsResponse(List<SecretView> secrets, List<ExpectedView> expected, List<String> missing) {}
+    public record SettingView(String name, String value, String setAt) {}
+
+    /** A setting the skill's block declares (JF-357), with the same {@code set} and {@code setIn} as a secret. */
+    public record ExpectedSettingView(String name, String description, String example, boolean optional, boolean set,
+                                      @Nullable String setIn) {}
+
+    /**
+     * {@code missing} names the required declared secrets and settings not yet provided; the skill runs only when it
+     * is empty.
+     */
+    public record SecretsResponse(List<SecretView> secrets, List<ExpectedView> expected, List<SettingView> settings,
+                                  List<ExpectedSettingView> expectedSettings, List<String> missing) {}
+
+    public record SettingWriteRequest(String value) {}
 
     /** {@code value} may be left out to keep the stored one and change only {@code hosts}. */
     public record SecretWriteRequest(@Nullable String value, List<String> hosts) {}
@@ -52,7 +66,7 @@ public class ApiSkillSecretsController extends Controller {
     public record SecretDeletedResponse(boolean deleted) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SecretsResponse.class)))
-    @Operation(summary = "List a skill's secrets on an agent, and the ones its SKILL.md declares: names, hosts and when each was set, never a value")
+    @Operation(summary = "List a skill's secrets and settings on an agent, and the ones its SKILL.md declares: a secret's name, hosts and when it was set, never its value; a setting's value")
     @AgentAccess(value = OPERATOR_ONLY, reason = "names the secrets a skill holds and the hosts they reach")
     public static void list(Long id, String name) {
         var owner = requireOwner(id);
@@ -65,7 +79,16 @@ public class ApiSkillSecretsController extends Controller {
             expected.add(new ExpectedView(d.name(), d.description(), d.exampleHosts(), d.optional(),
                     provided.to(name, d.name()), provided.holder(d.name())));
         }
-        renderJSON(GSON.toJson(new SecretsResponse(views, expected, provided.missing(dir))));
+        var settings = new ArrayList<SettingView>();
+        for (var listing : SkillSettings.list(owner, name)) {
+            settings.add(new SettingView(listing.name(), listing.value(), listing.setAt().toString()));
+        }
+        var expectedSettings = new ArrayList<ExpectedSettingView>();
+        for (var d : SkillSecrets.declaredSettings(dir)) {
+            expectedSettings.add(new ExpectedSettingView(d.name(), d.description(), d.example(), d.optional(),
+                    provided.to(name, d.name()), provided.holder(d.name())));
+        }
+        renderJSON(GSON.toJson(new SecretsResponse(views, expected, settings, expectedSettings, provided.missing(dir))));
     }
 
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SecretWriteRequest.class)))
@@ -101,6 +124,42 @@ public class ApiSkillSecretsController extends Controller {
         requireSkill(owner, name);
         if (!SkillSecrets.delete(owner, name, secret)) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No secret '%s' on skill '%s'.".formatted(secret, name));
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(GSON.toJson(new SecretDeletedResponse(true)));
+    }
+
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SettingWriteRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SettingView.class)))
+    @Operation(summary = "Create or replace a skill's setting on an agent: a value that is not secret, such as an address")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "sets where a skill's commands connect and as whom")
+    public static void putSetting(Long id, String name, String setting) {
+        var owner = requireOwner(id);
+        requireSkill(owner, name);
+        var body = JsonBodyReader.readJsonBody();
+        var value = body == null ? null : stringOrNull(body, "value");
+        if (value == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "The body must be a JSON object with 'value'.");
+            throw ApiResponses.unreachable();
+        }
+        SkillSettings.Listing saved;
+        try {
+            saved = SkillSettings.put(owner, name, setting, value);
+        } catch (SkillSecrets.Refused e) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.reason());
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(GSON.toJson(new SettingView(saved.name(), saved.value(), saved.setAt().toString())));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SecretDeletedResponse.class)))
+    @Operation(summary = "Delete a skill's setting on an agent")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "deletes a value a skill relies on")
+    public static void deleteSetting(Long id, String name, String setting) {
+        var owner = requireOwner(id);
+        requireSkill(owner, name);
+        if (!SkillSettings.delete(owner, name, setting)) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No setting '%s' on skill '%s'.".formatted(setting, name));
             throw ApiResponses.unreachable();
         }
         renderJSON(GSON.toJson(new SecretDeletedResponse(true)));

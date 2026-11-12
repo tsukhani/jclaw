@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.1"
+  version: "1.3.2"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -19,8 +19,6 @@ Every skill MUST follow this layout:
 ```
 {skill-name}/                  # kebab-case name (required)
 ├── SKILL.md                   # Skill definition with YAML frontmatter (required)
-├── credentials/               # Settings files only (optional)
-│   └── *.json, *.txt, *.env   # Addresses, user names, paths — TEXT FILES ONLY
 ├── references/                # Detailed material SKILL.md points to (optional)
 │   └── *.md                   # Catalogs, templates, examples — TEXT FILES ONLY
 └── tools/                     # Binary tools and their docs (optional)
@@ -30,10 +28,10 @@ Every skill MUST follow this layout:
 
 ### Rules
 
-- **Binaries are ONLY allowed in the `tools/` folder.** No binaries in the root folder or `credentials/` folder.
-- The `credentials/` folder may ONLY contain text files (json, txt, env, yaml, properties) that hold settings. A key, token or password NEVER goes in any file.
+- **Binaries are ONLY allowed in the `tools/` folder.** No binaries in the root folder.
+- A skill folder holds no settings or credentials file. Everything a skill needs to reach a service is declared in its `## Secrets` section (see Secrets); a key, token or password NEVER goes in any file.
 - The `references/` folder may ONLY contain text files, one level deep: a reference file never points to another reference file.
-- The skill root folder may ONLY contain `SKILL.md` and the three subfolders.
+- The skill root folder may ONLY contain `SKILL.md` and the two subfolders.
 - Skill names must be kebab-case (e.g., `web-scraper`, `slack-notifier`), at most 64 characters, and the same as the folder name.
 
 ## SKILL.md size limit
@@ -48,12 +46,12 @@ A SKILL.md MUST stay under 20,000 characters (about 5,000 tokens, or 500 lines).
 
 ## Secrets
 
-Only the operator can give a skill an API key, token or password, in JClaw's secret store. A command that names `$NAME` gets a stand-in; JClaw puts the real value in only on requests to that secret's hosts. A skill that needs a secret MUST have a `## Secrets` section in its SKILL.md that:
+Only the operator gives a skill what it needs to reach a service, in the skill's Secrets panel. A skill that needs an API key, token or password, or a per-install value such as an address, a user name or a path, MUST have a `## Secrets` section in its SKILL.md that:
 
-1. Declares each secret in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is`. JClaw reads that block to fill the skill's Secrets panel; no agent is offered the skill until every required secret has a value.
-2. Tells the agent to use `$NAME` in its commands.
+1. Declares each one in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is` for a secret, `setting NAME=example-value   # what it is` for a value that is not secret. No agent is offered the skill until every required one has a value.
+2. Tells the agent to use `$NAME` in its commands. A secret arrives as a stand-in JClaw swaps for the value on requests to its hosts; a setting, as its value.
 
-Never write a value into a file or ask for one in chat. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
+Never write a value into a file or ask for one in chat. Write defaults (a city, a unit) in SKILL.md. What the skill saves between runs (a session key, a cookie jar) goes in `skill-state/{skill-name}/` in the workspace, never in the skill's folder. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
 
 ## Frontmatter layout
 
@@ -122,10 +120,9 @@ Every skill MUST include a `jclaw-icon` entry under `metadata` — a single emoj
 5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
    - Write `skills/{skill-name}/SKILL.md` with `writeFile` (brand-new files use `writeFile`; existing files should use `editFile` — see the Refactoring section).
-   - If it needs settings (an address, a user name), create `credentials/` with placeholder files
    - If binary tools are needed, create `tools/` with documentation. Every binary dropped here MUST also appear in `jclaw-commands`, and every name in `jclaw-commands` MUST correspond to a file in `tools/`.
-   - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/credentials/config.json` / ... / `*** End Patch`.
-6. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist. If it declares secrets, name each one and tell the user to add it in the skill's Secrets panel on the Skills page.
+   - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/references/notes.md` / ... / `*** End Patch`.
+6. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist. If it declares secrets or settings, name each one and tell the user to fill it in in the skill's Secrets panel on the Skills page.
 
 ### Rules for the `jclaw-tools` entry
 
@@ -148,8 +145,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
 1. **Audit** the existing skill directory by listing all files and subfolders.
 2. **Identify violations and changes needed:**
    - Any binary files in the root folder or `credentials/` → must move to `tools/`
-   - Any settings files in the root folder → must move to `credentials/`
-   - A key, token or password in a file, or read from one → move it to the secret store (see Secrets)
+   - A settings or credentials file, in the root folder or `credentials/` → declare each value it holds in the `## Secrets` section and use `$NAME` instead (see Secrets); the user deletes the file
    - Any files other than SKILL.md in the root folder → categorize and move to the correct subfolder
    - Missing YAML frontmatter in SKILL.md → add it
    - JClaw entries at the top level of the frontmatter (`version`, `author`, `icon`, `tools`, `commands`) → move them under `metadata` as `version`, `author`, `jclaw-icon`, `jclaw-tools` and `jclaw-commands`, lists written as space-separated strings. The filesystem tool also does this when it saves the file.
@@ -177,4 +173,3 @@ Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store ou
 
 - Skills should be focused on one task — create multiple skills for complex workflows
 - Skills you create go into your workspace and are available only to you
-- An admin can promote a skill to global by copying it to the shared skills directory

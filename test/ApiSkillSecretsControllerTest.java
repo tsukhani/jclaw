@@ -338,6 +338,118 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals(List.of(), offeredSkills(), "it is still switched off");
     }
 
+    // ==================== settings (JF-357) ====================
+
+    private Http.Response putSetting(String setting, String json) {
+        return PUT("/api/agents/" + agentId + "/skills/demo/settings/" + setting, "application/json", json);
+    }
+
+    /** A setting is not secret: the panel lists its value, and the operator can change or delete it. */
+    @Test
+    void aSettingIsListedWithItsValueAndCanBeChangedAndDeleted() throws Exception {
+        declare("demo", "setting SITE_URL=https://example.com   # The site's address\n");
+        var saved = putSetting("SITE_URL", "{\"value\":\"https://site.example.org/app\"}");
+        assertIsOk(saved);
+        assertEquals(List.of("name", "setAt", "value"), json(saved).keySet().stream().sorted().toList());
+
+        var body = json(GET(base()));
+        var listed = body.getAsJsonArray("settings").get(0).getAsJsonObject();
+        assertEquals("SITE_URL", listed.get("name").getAsString());
+        assertEquals("https://site.example.org/app", listed.get("value").getAsString());
+        assertEquals(JsonParser.parseString("""
+                [{"name":"SITE_URL","description":"The site's address","example":"https://example.com","optional":false,
+                  "set":true,"setIn":"demo"}]"""), body.get("expectedSettings"));
+        assertEquals("[]", body.get("missing").toString());
+
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://other.example.org\"}"));
+        assertEquals("https://other.example.org",
+                json(GET(base())).getAsJsonArray("settings").get(0).getAsJsonObject().get("value").getAsString());
+
+        assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/settings/SITE_URL"));
+        assertEquals("[]", json(GET(base())).get("settings").toString());
+        assertEquals(404, DELETE("/api/agents/" + agentId + "/skills/demo/settings/SITE_URL").status);
+    }
+
+    @Test
+    void aSkillIsNotRunnableUntilEachRequiredSettingHasAValue() throws Exception {
+        declare("demo", """
+                API_KEY=api.example.com          # The key
+                setting SITE_URL=https://example.com   # The site's address
+                setting SITE_USER=admin          # Optional. The sign-in user
+                """);
+        assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("[\"SITE_URL\"]", missingOf("demo"));
+        assertEquals(List.of(), offeredSkills());
+
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://site.example.org\"}"));
+        assertEquals("[]", missingOf("demo"));
+        assertEquals(List.of("demo"), offeredSkills());
+    }
+
+    @Test
+    void aNameIsUsedOnceAcrossSecretsAndSettings() throws Exception {
+        assertIsOk(put("SITE_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("400 invalid_request Skill 'demo' on this agent has a secret named SITE_KEY. A command finds a value"
+                + " by its name, so each name is used once on an agent.", errorOf(putSetting("SITE_KEY", "{\"value\":\"x\"}")));
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://site.example.org\"}"));
+        assertEquals("400 invalid_request Skill 'demo' on this agent has a setting named SITE_URL. A command finds a value"
+                + " by its name, so each name is used once on an agent.",
+                errorOf(put("SITE_URL", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}")));
+    }
+
+    @Test
+    void aSettingTheStoreCannotTakeIsRefusedAndStoresNothing() {
+        assertEquals("400 invalid_request A setting is one line: remove the line breaks.",
+                errorOf(putSetting("SITE_URL", "{\"value\":\"https://a.example.org\\nexport X=1\"}")));
+        assertEquals("400 invalid_request The value is empty.", errorOf(putSetting("SITE_URL", "{\"value\":\"\"}")));
+        assertEquals("400 invalid_request The body must be a JSON object with 'value'.", errorOf(putSetting("SITE_URL", "{}")));
+        assertEquals("400 invalid_request 'site_url' is not a secret name: use capital letters, digits and underscores,"
+                + " starting with a letter, at most 64 characters, as in NAS_PASSWORD.",
+                errorOf(putSetting("site_url", "{\"value\":\"x\"}")));
+        assertEquals(400, putSetting("PATH", "{\"value\":\"/tmp\"}").status);
+        assertEquals("[]", json(GET(base())).get("settings").toString());
+    }
+
+    @Test
+    void anAgentCannotReadOrWriteASetting() throws Exception {
+        for (var action : List.of("putSetting", "deleteSetting")) {
+            var method = java.util.Arrays.stream(ApiSkillSecretsController.class.getMethods())
+                    .filter(m -> m.getName().equals(action)).findFirst().orElseThrow();
+            assertEquals(AgentAccess.Level.OPERATOR_ONLY, method.getAnnotation(AgentAccess.class).value(), action);
+        }
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://site.example.org\"}"));
+        clearCookies();
+        var codes = new ArrayList<String>();
+        try {
+            codes.add(json(PUT(agentRequest(), "/api/agents/" + agentId + "/skills/demo/settings/SITE_URL", "application/json",
+                    "{\"value\":\"https://evil.example.com\"}")).get("code").getAsString());
+            codes.add(json(DELETE(agentRequest(), "/api/agents/" + agentId + "/skills/demo/settings/SITE_URL"))
+                    .get("code").getAsString());
+        } finally {
+            clearCookies();
+        }
+        assertEquals(List.of("operator_only", "operator_only"), codes);
+        login();
+        assertEquals("https://site.example.org",
+                json(GET(base())).getAsJsonArray("settings").get(0).getAsJsonObject().get("value").getAsString());
+    }
+
+    @Test
+    void removingTheSkillFromTheAgentDeletesItsSettingsAndWhatItSaved() throws Exception {
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://site.example.org\"}"));
+        var state = AgentService.workspacePath(agentName).resolve("skill-state/demo");
+        Files.createDirectories(state);
+        Files.writeString(state.resolve("session.txt"), "x\n");
+        Files.createDirectories(AgentService.workspacePath(agentName).resolve("skill-state/other"));
+
+        assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+
+        assertEquals(0L, (long) commitInFreshTx(() -> models.SkillSetting.count("agent.id = ?1", agentId)));
+        assertEquals(false, Files.exists(state));
+        assertEquals(true, Files.isDirectory(AgentService.workspacePath(agentName).resolve("skill-state/other")),
+                "another skill's saved state stays");
+    }
+
     @Test
     void deletingASecretRemovesItAndOnlyIt() {
         assertIsOk(put("ONE", "{\"value\":\"v1\",\"hosts\":[\"a.example.com\"]}"));
