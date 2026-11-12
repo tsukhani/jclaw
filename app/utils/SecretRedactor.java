@@ -2,9 +2,11 @@ package utils;
 
 import org.jspecify.annotations.Nullable;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -116,6 +118,102 @@ public final class SecretRedactor {
     /** One pass over every format: where two overlap the leftmost takes the whole run, which separate passes would split. */
     private static final Pattern TOKEN_SHAPE = Pattern.compile("(?<!\\w)(?:" + OPENAI_KEY + "|" + GITHUB_KEY + "|" + SLACK_KEY
             + "|" + AWS_KEY_ID + "|" + JWT + "|" + TELEGRAM_BOT_KEY + ")|" + PEM_PRIVATE_KEY);
+
+    /**
+     * {@code text} with only the credentials recognizable by their shape masked: a key format such as {@code sk-} or
+     * {@code ghp_}, a JWT, a private key, and a password in a URL (JF-361). Unlike {@link #redact}, no value is masked
+     * for the name beside it, so prose such as "the password: is set below" in a tool's output stays as it is.
+     */
+    public static String redactShapes(String text) {
+        var userinfo = new Starts();
+        var shapes = new Starts();
+        shapeStarts(text, userinfo, shapes);
+        var out = replaceAt(USERINFO, text, userinfo, m -> m.group("keep") + MASK);
+        if (out != text) {
+            shapes = new Starts();
+            shapeStarts(out, new Starts(), shapes);
+        }
+        return replaceAt(TOKEN_SHAPE, out, shapes, _ -> MASK);
+    }
+
+    /** A growing list of positions, ascending as a pass adds them. */
+    private static final class Starts {
+        private int[] at = new int[8];
+        private int count;
+
+        void add(int position) {
+            if (count == at.length) at = Arrays.copyOf(at, count * 2);
+            at[count++] = position;
+        }
+    }
+
+    /**
+     * Every position where {@link #USERINFO} or {@link #TOKEN_SHAPE} can begin a match, in one pass: each format
+     * starts with a fixed prefix, or for a Telegram key with 8 to 10 digits before a colon. The regexes then run only
+     * there, since a scan that tries the whole alternation at every position costs 20 ms a megabyte (JF-361).
+     */
+    private static void shapeStarts(String text, Starts userinfo, Starts shapes) {
+        for (int i = 0, n = text.length(); i < n; i++) {
+            switch (text.charAt(i)) {
+                case ':' -> {
+                    if (text.startsWith("//", i + 1)) userinfo.add(i);
+                    int digits = 0;
+                    while (digits <= 10 && i - digits > 0 && isDigit(text.charAt(i - digits - 1))) digits++;
+                    // A longer run cannot match: its start would follow a digit, which the lookbehind refuses.
+                    if (digits >= 8 && digits <= 10) shapes.add(i - digits);
+                }
+                case 's' -> addAtBoundary(text, i, "sk-", shapes);
+                case 'g' -> addAtBoundary(text, i, "gh", shapes);
+                case 'x' -> addAtBoundary(text, i, "xox", shapes);
+                case 'A' -> addAtBoundary(text, i, "AKIA", shapes);
+                case 'e' -> addAtBoundary(text, i, "eyJ", shapes);
+                case '-' -> {
+                    if (text.startsWith("-----BEGIN ", i)) shapes.add(i);
+                }
+                default -> {
+                    // no format starts here
+                }
+            }
+        }
+        // A Telegram start lies before the colon that found it, so it can arrive after a later start.
+        Arrays.sort(shapes.at, 0, shapes.count);
+    }
+
+    private static void addAtBoundary(String text, int i, String prefix, Starts shapes) {
+        if (text.startsWith(prefix, i) && (i == 0 || !isWordChar(text.charAt(i - 1)))) shapes.add(i);
+    }
+
+    private static boolean isDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    /** {@code \w} as {@link Pattern} reads it without {@code UNICODE_CHARACTER_CLASS}. */
+    private static boolean isWordChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || isDigit(c) || c == '_';
+    }
+
+    /**
+     * {@code text} with each match of {@code pattern} that begins at one of {@code starts} replaced, as
+     * {@link Matcher#replaceAll} would replace it when no match can begin elsewhere: leftmost first, and a start
+     * inside a replaced run skipped. Transparent bounds let a lookbehind see the text before a start.
+     */
+    private static String replaceAt(Pattern pattern, String text, Starts starts,
+                                    Function<MatchResult, String> replacement) {
+        if (starts.count == 0) return text;
+        var m = pattern.matcher(text).useTransparentBounds(true).useAnchoringBounds(false);
+        StringBuilder out = null;
+        int at = 0;
+        for (int k = 0; k < starts.count; k++) {
+            int start = starts.at[k];
+            if (start < at) continue;
+            m.region(start, text.length());
+            if (!m.lookingAt()) continue;
+            if (out == null) out = new StringBuilder(text.length());
+            out.append(text, at, start).append(replacement.apply(m));
+            at = m.end();
+        }
+        return out == null ? text : out.append(text, at, text.length()).toString();
+    }
 
     /** {@code text} with every recognized credential's value replaced by {@link #MASK}; unchanged when it holds none. */
     public static String redact(String text) {

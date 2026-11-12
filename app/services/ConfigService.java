@@ -222,6 +222,7 @@ public class ConfigService {
 
     public static void set(String key, String value) {
         Tx.run(() -> Config.upsert(key, storedForm(key, value)));
+        if (encryptsAtRest(key)) Tx.afterCommit(CredentialMask::invalidate);
         // Read-your-writes: seed the cache immediately so a later reader on a
         // different connection sees the value before the surrounding transaction
         // commits — the FunctionalTest suite and real request flows depend on this.
@@ -711,6 +712,7 @@ public class ConfigService {
                 config.delete();
             }
         });
+        if (encryptsAtRest(key)) Tx.afterCommit(CredentialMask::invalidate);
         // JCLAW-1042 (VULN-100): an invalidate here runs before the commit whenever Tx.run
         // joined an ambient transaction, and a racing login then missed the cache, read the
         // not-yet-deleted row and re-cached the password hash for the full 60s TTL — so the

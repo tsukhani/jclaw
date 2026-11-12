@@ -8,11 +8,15 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
+import services.CredentialMask;
 import services.PersonaFileApprovals;
 import services.WorkspaceFiles;
 import tools.FsSupport.FsOutcome;
 import utils.ToolErrorTemplates;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -180,6 +184,9 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // applyPatch encodes its paths inside the patch body, so it does not take a top-level `path` field.
         if (ACTION_APPLY_PATCH.equals(action)) {
             var patch = args.has(ARG_PATCH) ? args.get(ARG_PATCH).getAsString() : "";
+            if (CredentialMask.mayHoldMask(patch) && patchAddsMasks(patch)) {
+                return FsOutcome.fail(ToolErrorTemplates.fsMaskInWrite("the patched files"));
+            }
             return FsPatchApplier.applyPatch(agent, patch);
         }
 
@@ -195,6 +202,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
         }
 
         var target = resolved.resolvedTarget();
+        // JF-361: only a write whose arguments carry a mask reads the file it would replace.
+        if (FsPaths.isMutatingAction(action) && CredentialMask.mayHoldMask(argsJson)
+                && addsMasks(action, args, target)) {
+            return FsOutcome.fail(ToolErrorTemplates.fsMaskInWrite("'" + args.get("path").getAsString() + "'"));
+        }
         var persona = FsPaths.isMutatingAction(action)
                 ? PersonaFileEdits.personaFile(resolved.resolvedWorkspace(), target) : null;
         if (persona == null) return dispatchAction(action, args, agent, target);
@@ -208,6 +220,33 @@ public class FileSystemTools implements ToolRegistry.Tool {
                     expectedText(action, args, before));
             return FsOutcome.ok(outcome.text() + "\n\n" + note);
         });
+    }
+
+    /**
+     * Whether the write leaves the file more masks than it holds: a masked read written back whole would save the mask
+     * over the real value, while a page that already holds a mask can be rewritten as it is.
+     */
+    private static boolean addsMasks(String action, JsonObject args, Path target) {
+        String before;
+        try {
+            before = Files.isRegularFile(target) ? Files.readString(target) : "";
+        } catch (IOException | UncheckedIOException _) {
+            return false;
+        }
+        var after = expectedText(action, args, before);
+        return after != null && CredentialMask.masksIn(after) > CredentialMask.masksIn(before);
+    }
+
+    /** Whether a unified diff's added lines carry more masks than its removed ones. */
+    private static boolean patchAddsMasks(String patch) {
+        int added = 0;
+        int removed = 0;
+        for (var line : patch.split("\n", -1)) {
+            if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
+            if (line.startsWith("+")) added += CredentialMask.masksIn(line);
+            else if (line.startsWith("-")) removed += CredentialMask.masksIn(line);
+        }
+        return added > removed;
     }
 
     /** The text a write action makes of a file holding {@code before}, or null when it cannot be told. */

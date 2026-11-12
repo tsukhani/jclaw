@@ -87,6 +87,8 @@ mkdir -p skill-state/{skill-name} && printf '%s' "$SESSION_KEY" > skill-state/{s
 
 The filesystem and documents tools refuse that folder, as it can hold a live credential: only the skill's commands read and write it. Removing the skill from the agent removes it.
 
+Keep only secrets there. JClaw masks what it finds in that folder wherever a tool's result shows it: a file of one word whole, and any long string of letters and digits in other files. So anything else the skill keeps between runs, such as a last-seen id, a cache or a folder path, goes in `skill-data/{skill-name}/`, where the agent can read it and nothing masks it.
+
 ## 5. Tell the user
 
 When you confirm the skill, name each secret and setting and say where it goes: "Open the skill from this agent's column on the Skills page and fill in each one in its Secrets panel; give each secret the host of your service." Never ask for a value, and never offer to add one yourself.

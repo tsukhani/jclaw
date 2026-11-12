@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 public final class SecretGrants {
 
     /** Every placeholder starts so, then 32 base-32 letters: 160 random bits, never derived from a value. */
-    static final String PLACEHOLDER_PREFIX = "jclaw-secret-";
+    public static final String PLACEHOLDER_PREFIX = "jclaw-secret-";
     static final int PLACEHOLDER_LENGTH = PLACEHOLDER_PREFIX.length() + 32;
     static final Pattern PLACEHOLDER = Pattern.compile(Pattern.quote(PLACEHOLDER_PREFIX) + "[a-z2-7]{32}");
 

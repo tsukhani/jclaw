@@ -49,6 +49,7 @@ public final class ToolErrorTemplates {
     public static final String FS_EDIT_REJECTED = "fs_edit_rejected";
     public static final String FS_LINE_OP_REJECTED = "fs_line_op_rejected";
     public static final String FS_PATCH_REJECTED = "fs_patch_rejected";
+    public static final String FS_MASK_IN_WRITE = "fs_mask_in_write";
 
     public static final String WEB_HOST_UNRESOLVED = "web_host_unresolved";
     public static final String WEB_HOST_UNREACHABLE = "web_host_unreachable";
@@ -217,6 +218,19 @@ public final class ToolErrorTemplates {
                         + "other skills, but not alter it. To get an updated skill-creator, ask the user "
                         + "to drag it from the global skills registry onto this agent's card.",
                 null);
+    }
+
+    /**
+     * JF-361: a tool result shows a credential as {@code [masked: NAME]} or {@code [redacted]}, so a file read and
+     * written back would save that text over the real value.
+     */
+    public static ErrorTemplate fsMaskInWrite(String what) {
+        return new ErrorTemplate(FS_MASK_IN_WRITE,
+                "This write would put '[masked: …]' or '[redacted]' into %s more times than it holds now.".formatted(what),
+                "JClaw shows a credential as that text in what tools return, so writing it would replace the real value."
+                        + " Nothing was written.",
+                "Change only the lines you need with editFile, leaving the masked lines out of oldText and newText."
+                        + " If the file needs a new credential, ask the operator to put it there.");
     }
 
     public static ErrorTemplate fsCredentials(String path) {

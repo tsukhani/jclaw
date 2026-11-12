@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.3"
+  version: "1.3.4"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -51,7 +51,7 @@ Only the operator gives a skill what it needs to reach a service, in the skill's
 1. Declares each one in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is` for a secret, `setting NAME=example-value   # what it is` for a value that is not secret. When in doubt, it is a secret. No agent is offered the skill until every required one has a value.
 2. Tells the agent to use `$NAME` in its commands. A secret arrives as a stand-in JClaw swaps for the value on requests to its hosts; a setting, as its value.
 
-Never write a value into a file or ask for one in chat. Write defaults (a city, a unit) in SKILL.md. What the skill saves between runs (a session key, a cookie jar) goes in `skill-state/{skill-name}/` in the workspace, never in the skill's folder. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
+Never write a value into a file or ask for one in chat. Write defaults (a city, a unit) in SKILL.md. A secret the skill saves between runs (a session key, a cookie jar) goes in `skill-state/{skill-name}/` in the workspace, never in the skill's folder; anything else it keeps goes in `skill-data/{skill-name}/`. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
 
 ## Frontmatter layout
 

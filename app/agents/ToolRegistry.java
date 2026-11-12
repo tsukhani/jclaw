@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import services.CredentialMask;
 import services.EventLogger;
 import services.LoadTestRunner;
 import services.Tx;
@@ -606,17 +607,27 @@ public class ToolRegistry {
                             .formatted(toolName, e.getMessage()),
                     ToolResult.Outcome.INVALID_ARGS);
         }
+        // JF-361: every result passes the credential mask on its way to the model, the conversation and the logs.
         try {
-            return tool.executeRich(argsJson, agent);
+            return masked(tool.executeRich(argsJson, agent));
         } catch (Exception e) {
-            return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage()));
+            return masked(ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage())));
         } catch (@SuppressWarnings("java:S1181") Throwable t) {
             // An Error fails the call like an exception: no handler above catches one, so it left the call without a
             // result or the turn without an end (JF-189). jclaw.sh and the image run the JVM with
             // -XX:+ExitOnOutOfMemoryError, so an OutOfMemoryError never gets this far.
             EventLogger.error("tool", agent.name, null, "Tool '%s' threw %s".formatted(toolName, t), t);
-            return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, t));
+            return masked(ToolResult.text("Error executing tool '%s': %s".formatted(toolName, t)));
         }
+    }
+
+    private static ToolResult masked(ToolResult result) {
+        var text = CredentialMask.mask(result.text());
+        var json = CredentialMask.mask(result.structuredJson());
+        if (java.util.Objects.equals(text, result.text()) && java.util.Objects.equals(json, result.structuredJson())) {
+            return result;
+        }
+        return new ToolResult(text == null ? "" : text, json, result.attachments(), result.videoJob(), result.outcome());
     }
 
     /**

@@ -415,4 +415,32 @@ class SecretRedactorTest extends UnitTest {
         }
         return s;
     }
+
+    /** JF-361: each key format is masked by its shape alone, with no name beside it. */
+    @Test
+    void redactShapesMasksEachKeyFormatByItsShape() {
+        assertEquals("a [redacted] b", SecretRedactor.redactShapes("a sk-abcdefghijklmnopqrstuvwx b"));
+        assertEquals("a [redacted] b", SecretRedactor.redactShapes("a ghp_ABCDEFGHIJKLMNOPQRST1234 b"));
+        assertEquals("a [redacted] b", SecretRedactor.redactShapes("a xoxb-1234-5678-abcdef b"));
+        assertEquals("a [redacted] b", SecretRedactor.redactShapes("a AKIAABCDEFGHIJKLMNOP b"));
+        assertEquals("a [redacted] b",
+                SecretRedactor.redactShapes("a eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.abcdefgh12345678 b"));
+        assertEquals("a [redacted] b", SecretRedactor.redactShapes("a 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz b"));
+        assertEquals("key: [redacted] end", SecretRedactor.redactShapes(
+                "key: -----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY----- end"));
+        assertEquals("https://user:[redacted]@host/x", SecretRedactor.redactShapes("https://user:hunter2pass@host/x"));
+        assertEquals("[redacted] and [redacted]",
+                SecretRedactor.redactShapes("sk-abcdefghijklmnopqrstuvwx and ghp_ABCDEFGHIJKLMNOPQRST1234"));
+    }
+
+    /** A format's prefix inside a word, or a run of digits the wrong length, is no key. */
+    @Test
+    void redactShapesLeavesAPrefixInsideAWordAndTheWrongDigitRunAlone() {
+        for (var text : List.of("task-abcdefghijklmnopqrstuvwx", "xghp_ABCDEFGHIJKLMNOPQRST1234", "ZAKIAABCDEFGHIJKLMNOP",
+                "1234567:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz", "12345678901:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz", "a12345678:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz", "https://host/path:8080@x", "plain text, no keys")) {
+            assertEquals(text, SecretRedactor.redactShapes(text));
+        }
+        assertEquals("[redacted] ", SecretRedactor.redactShapes("12345678:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz "), "8 digits is the shortest bot id");
+        assertEquals("[redacted] ", SecretRedactor.redactShapes("1234567890:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawz "), "10 the longest");
+    }
 }

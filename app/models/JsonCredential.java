@@ -7,7 +7,9 @@ import services.ConfigService;
 import utils.CredentialCipher;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 
 /**
@@ -59,6 +61,17 @@ public enum JsonCredential {
     }
 
     abstract void collect(JsonObject json, List<Slot> out);
+
+    /** Each secret value in {@code json}, an entity's decrypted attribute, by its path (JF-361). */
+    public Map<String, String> secretValues(@Nullable String json) {
+        var parsed = parse(json);
+        var out = new LinkedHashMap<String, String>();
+        if (parsed == null) return out;
+        var slots = new ArrayList<Slot>();
+        collect(parsed, slots);
+        for (var slot : slots) out.put(slot.path(), slot.value());
+        return out;
+    }
 
     /** The cipher's additional authenticated data for the value at {@code path}. */
     public String field(String path) {

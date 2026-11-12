@@ -149,6 +149,7 @@ public final class SkillSecrets {
         row.hosts = String.join("\n", normalized);
         row.save();
         if (created) SkillLoader.clearCache();
+        Tx.afterCommit(CredentialMask::invalidate);
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s %s for skill %s, sent only to %s".formatted(
                 name, created ? "added" : value != null ? "replaced" : "kept, hosts changed", skill,
                 String.join(", ", normalized)));
@@ -160,6 +161,7 @@ public final class SkillSecrets {
         if (row == null) return false;
         row.delete();
         SkillLoader.clearCache();
+        Tx.afterCommit(CredentialMask::invalidate);
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s deleted from skill %s".formatted(name, skill));
         return true;
     }
@@ -500,7 +502,10 @@ public final class SkillSecrets {
     /** Delete every secret of a skill the operator removes from the agent, as its credentials folder goes with it. */
     public static int deleteForSkill(Agent owner, String skill) {
         int deleted = SkillSecret.delete("agent = ?1 AND skillName = ?2", owner, skill);
-        if (deleted > 0) SkillLoader.clearCache();
+        if (deleted > 0) {
+            SkillLoader.clearCache();
+            Tx.afterCommit(CredentialMask::invalidate);
+        }
         return deleted;
     }
 
