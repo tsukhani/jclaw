@@ -224,6 +224,13 @@ function setAt(iso: string) {
           class="mt-1 w-full font-mono text-xs bg-surface border border-border px-2 py-1 text-fg-strong"
         >
       </label>
+      <p
+        class="text-xs text-amber-800 dark:text-amber-300"
+        data-testid="setting-form-caution"
+      >
+        Shown in clear and given to the skill's commands as it is. Never type a password, key or token here: add it
+        under Secrets.
+      </p>
       <ApiErrorAlert :error="writeError" />
       <div class="flex items-center gap-2">
         <button

@@ -333,6 +333,8 @@ describe('SkillSecretsPanel', () => {
     expect(name.attributes('readonly')).toBeDefined()
     expect(wrapper.find('input[name="setting-value"]').attributes('placeholder')).toBe('for example admin')
     expect(wrapper.find('input[name="setting-value"]').attributes('type')).toBe('text')
+    expect(wrapper.find('[data-testid="setting-form-caution"]').text().replace(/\s+/g, ' '))
+      .toBe('Shown in clear and given to the skill\'s commands as it is. Never type a password, key or token here: add it under Secrets.')
 
     await wrapper.find('input[name="setting-value"]').setValue('operator')
     await wrapper.find('[data-testid="setting-form"]').trigger('submit')

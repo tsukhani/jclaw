@@ -408,6 +408,24 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals(1, json(GET(base())).getAsJsonArray("settings").size());
     }
 
+    /** A name can be chosen to look innocent: a setting may not copy a stored secret or hold a key-shaped value. */
+    @Test
+    void aSettingCannotCopyAStoredSecretOrHoldAKeyShapedValue() {
+        assertIsOk(put("NAS_PASS", "{\"value\":\"hunter2-correct-horse\",\"hosts\":[\"nas.example.com\"]}"));
+        assertEquals("400 invalid_request This value is already stored as the secret NAS_PASS. A setting would show it in"
+                + " clear and give it to commands as it is.",
+                errorOf(putSetting("NAS_LOGIN", "{\"value\":\"hunter2-correct-horse\"}")));
+        for (var value : List.of("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "https://admin:hunter2@nas.example.com",
+                "ghp_abcdefghijklmnopqrstuvwxyz0123456789")) {
+            assertEquals("400 invalid_request This value looks like a key, token or password, so it can only be a secret:"
+                    + " add it under Secrets, with the hosts it may be sent to.",
+                    errorOf(putSetting("SITE_URL", "{\"value\":\"" + value + "\"}")), value);
+        }
+        assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://nas.example.com:5001/webapi\"}"));
+        assertIsOk(putSetting("NAS_LOGIN", "{\"value\":\"admin\"}"));
+        assertEquals(2, json(GET(base())).getAsJsonArray("settings").size());
+    }
+
     @Test
     void aSettingTheStoreCannotTakeIsRefusedAndStoresNothing() {
         assertEquals("400 invalid_request A setting is one line: remove the line breaks.",

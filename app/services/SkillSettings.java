@@ -4,6 +4,7 @@ import agents.SkillLoader;
 import models.Agent;
 import models.SkillSecret;
 import models.SkillSetting;
+import utils.SecretRedactor;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -48,6 +49,18 @@ public final class SkillSettings {
         // A command receives it as one environment variable: a line break or a NUL would end or split it.
         if (value.chars().anyMatch(c -> c == '\n' || c == '\r' || c == 0)) {
             throw new SkillSecrets.Refused("A setting is one line: remove the line breaks.");
+        }
+        // The setting keyword and the name are written by whoever writes SKILL.md, the agent included, so the value
+        // is checked too: a setting reaches any command in clear, with no host limit.
+        if (!SecretRedactor.redact(value).equals(value)) {
+            throw new SkillSecrets.Refused("This value looks like a key, token or password, so it can only be a secret:"
+                    + " add it under Secrets, with the hosts it may be sent to.");
+        }
+        for (var secret : SkillSecrets.usable(owner)) {
+            if (secret.value().equals(value)) {
+                throw new SkillSecrets.Refused(("This value is already stored as the secret %s. A setting would show it in"
+                        + " clear and give it to commands as it is.").formatted(secret.name()));
+            }
         }
         SkillSecret secret = SkillSecret.find("agent = ?1 AND name = ?2", owner, name).first();
         if (secret != null) {
