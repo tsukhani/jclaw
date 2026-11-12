@@ -3,6 +3,7 @@ package tools;
 import agents.DangerousActionGate;
 import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
+import play.Play;
 import services.ConfigService;
 import services.EventLogger;
 import services.ExecutableProbeSupport;
@@ -406,6 +407,101 @@ public final class HarnessSandbox {
      * its rules count on, which go into the environment after the caller's own.
      */
     public record ConfinedShell(List<String> argv, Map<String, String> env) {}
+
+    /**
+     * What the Main Agent's fence protects (JF-325), as canonical paths, the form Seatbelt and bwrap match.
+     *
+     * @param readOnly JClaw's program files: the checkout, the Play framework and the Gradle cache a restart loads
+     *                 its jars from, readable and never writable
+     * @param writable the agents' workspaces, writable inside the read-only checkout
+     * @param hidden   JClaw's secret folders, neither readable nor writable: {@link SandboxHiddenRoots#current()}
+     *                 but {@code conf/}, which holds no secret
+     * @param readable folders inside a hidden one that stay readable, never writable: the backup folder, which the
+     *                 operator's backup task uploads (JF-325)
+     */
+    public record MainFence(List<Path> readOnly, Path writable, List<Path> hidden, List<Path> readable) {
+
+        /** The fence for this install, around the workspaces under {@code workspaceRoot}. */
+        public static MainFence current(File workspaceRoot) {
+            var home = System.getProperty("user.home", "");
+            var readOnly = new ArrayList<Path>();
+            readOnly.add(SandboxHiddenRoots.canonical(Play.applicationPath.toPath()));
+            if (Play.frameworkPath != null) readOnly.add(SandboxHiddenRoots.canonical(Play.frameworkPath.toPath()));
+            if (!home.isBlank()) readOnly.add(SandboxHiddenRoots.canonical(Path.of(home, ".gradle")));
+            var backups = SandboxHiddenRoots.canonical(DatabaseService.backupsDir());
+            // The backup folder leaves the list so it can be reopened for reading; inside data/ it is still hidden
+            // first. conf/ leaves it too: it holds no secret, and the checkout's read-only rule covers it.
+            var hidden = SandboxHiddenRoots.current().stream()
+                    .filter(p -> !p.equals(backups) && (p.getFileName() == null
+                            || !p.getFileName().toString().equals("conf"))).toList();
+            return new MainFence(List.copyOf(readOnly), SandboxHiddenRoots.canonical(workspaceRoot.toPath()), hidden,
+                    List.of(backups));
+        }
+    }
+
+    /**
+     * Wrap the Main Agent's {@code exec} when {@link #SHELL_SANDBOX_KEY} does not confine it (JF-325). The command
+     * keeps everything it had, network, home folder and paths outside the workspace included, except JClaw's own
+     * files: {@link MainFence}. It fails closed: where no sandbox starts the run is refused, never launched unfenced.
+     * The {@link #setCustomAgentOverrideForTest} override applies here as it does to a custom agent's run.
+     *
+     * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
+     */
+    public static List<String> wrapMainFence(List<String> argv, File workspaceRoot) {
+        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
+        if (override == CustomAgentOverride.PASSTHROUGH) return argv;
+        if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
+        var ready = availability();
+        if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
+        var fence = MainFence.current(workspaceRoot);
+        if (ready.mechanism().equals(BWRAP)) {
+            // A tmpfs needs its mount point, so only the secret folders that exist are hidden.
+            var present = new MainFence(fence.readOnly(), fence.writable(),
+                    linuxHiddenRoots(DatabaseService.backupsDir(), fence.hidden()), fence.readable());
+            return mainFenceLinuxArgv(argv, present, RUNS_AS_ROOT);
+        }
+        var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", mainFenceMacosProfile(fence)));
+        out.addAll(argv);
+        return List.copyOf(out);
+    }
+
+    /**
+     * The Main Agent's Seatbelt profile, public so a test can pin its text. The last matching rule wins: the program
+     * files lose their writes, the workspaces get them back, the secret folders lose everything after that, and a
+     * readable folder inside one gets its reads back last.
+     */
+    public static String mainFenceMacosProfile(MainFence fence) {
+        var sb = new StringBuilder("(version 1)\n(allow default)\n");
+        for (var p : fence.readOnly()) sb.append(rule("deny", "file-write*", p.toString()));
+        sb.append(writeAllow(fence.writable().toString()));
+        for (var p : fence.hidden()) sb.append(rule("deny", "file-read* file-write*", p.toString()));
+        for (var p : fence.readable()) {
+            var reopened = SandboxHiddenRoots.beneath(p.toString(), fence.hidden());
+            if (reopened != null) sb.append(rule("allow", "file-read*", reopened.toString()));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The Main Agent's bwrap argv, public so a test can pin its order. bwrap applies mounts in argument order: the
+     * whole filesystem as it is, the program files read-only over it, the workspaces writable inside them, a tmpfs
+     * over each secret folder, and a readable folder bound back read-only over its tmpfs. A root bwrap runs in a user
+     * namespace of its own, so its commands have no real root.
+     */
+    public static List<String> mainFenceLinuxArgv(List<String> argv, MainFence fence, boolean asRoot) {
+        var out = new ArrayList<String>(List.of(BWRAP));
+        if (asRoot) out.addAll(ROOT_FLAGS);
+        out.addAll(List.of("--dev-bind", "/", "/"));
+        for (var p : fence.readOnly()) out.addAll(List.of("--ro-bind-try", p.toString(), p.toString()));
+        out.addAll(List.of("--bind", fence.writable().toString(), fence.writable().toString()));
+        for (var p : fence.hidden()) out.addAll(List.of("--tmpfs", p.toString()));
+        for (var p : fence.readable()) {
+            var reopened = SandboxHiddenRoots.beneath(p.toString(), fence.hidden());
+            if (reopened != null) out.addAll(List.of("--ro-bind", reopened.toString(), reopened.toString()));
+        }
+        out.addAll(argv);
+        return List.copyOf(out);
+    }
 
     /**
      * The temp folder of a custom agent's run on macOS, one per write root, inside this user's temp folder.

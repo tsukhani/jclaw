@@ -1071,7 +1071,11 @@ A program that closes the files it was given when it started does not appear in 
 The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can run only the commands their enabled skills allow.
 :::
 
-Every agent except the Main Agent runs its shell commands in the sandbox, always. A subagent copy follows the agent it was copied from. `shell.sandbox` covers the Main Agent's `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model.
+Every agent runs its shell commands in the sandbox, always. A custom agent's commands are confined as described below. A subagent copy follows the agent it was copied from.
+
+While `shell.sandbox` is off, the Main Agent's commands keep everything they had except JClaw's own files. They cannot read or change JClaw's `data`, `certs` and `logs` folders, except that they can read the backup folder. They can read JClaw's program files but not change them: the JClaw folder apart from the agents' workspaces, the Play framework JClaw runs on, and the Gradle cache in `~/.gradle`. Where JClaw cannot start a sandbox, the Main Agent's commands are refused too. To change JClaw's code, use a coding run.
+
+`shell.sandbox` confines the Main Agent's `exec` further, as described below. It also covers `diarize_audio`'s ffmpeg extraction and the ffmpeg transcode of an audio attachment on its way to a model.
 
 On macOS a confined process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. JClaw's own `data`, `certs`, `conf` and `logs` folders and its backup folder can be neither read nor written. A custom agent's command also cannot read your home folder. It can read only its own workspace there, the folders in your home folder that are on JClaw's `PATH` (such as `~/.local/bin`), and the folders you list in `shell.sandbox.homeReads`, so the tools it runs still start. A `PATH` the agent sets for its own command does not open anything. The Main Agent's confined commands can still read your home folder.
 

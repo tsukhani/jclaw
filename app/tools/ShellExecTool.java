@@ -697,7 +697,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return ToolErrorTemplates.render(
                     ToolErrorTemplates.shellSpawnFailed(command, String.valueOf(e.getMessage())));
         } catch (HarnessSandbox.SandboxUnavailableException e) {
-            return customAgentRefusal(command, confinement, e);
+            return sandboxRefusal(command, confinement, e);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
@@ -708,18 +708,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
     }
 
-    /** A custom agent's run that cannot be confined is refused; {@code main}'s keeps today's abort. */
-    private static String customAgentRefusal(String command, Confinement confinement,
+    /** A fenced or custom agent's run that cannot be confined is refused; one under {@code shell.sandbox} keeps its abort. */
+    private static String sandboxRefusal(String command, Confinement confinement,
                                              HarnessSandbox.SandboxUnavailableException e) {
-        if (confinement != Confinement.CUSTOM_AGENT) throw e;
+        if (confinement == Confinement.KEY) throw e;
         return ToolErrorTemplates.render(
                 ToolErrorTemplates.shellSandboxUnavailable(command, String.valueOf(e.getMessage())));
     }
 
     /** How {@code exec} confines a run. */
     public enum Confinement {
-        /** Unconfined: a main-rooted agent while {@code shell.sandbox} does not apply. */
-        NONE,
+        /**
+         * A main-rooted agent while {@code shell.sandbox} does not apply: everything as before except JClaw's own
+         * files, {@link HarnessSandbox.MainFence} (JF-325).
+         */
+        FENCE,
         /** A main-rooted agent under {@code shell.sandbox}. */
         KEY,
         /** Any other agent, whatever {@code shell.sandbox} says. */
@@ -733,7 +736,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     public static Confinement confinement(Agent agent, boolean trustedOrigin) {
         if (!mainRooted(agent)) return Confinement.CUSTOM_AGENT;
         return HarnessSandbox.confines(HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin)
-                ? Confinement.KEY : Confinement.NONE;
+                ? Confinement.KEY : Confinement.FENCE;
     }
 
     private static boolean mainRooted(Agent agent) {
@@ -801,14 +804,17 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var shell = List.of("/bin/sh", "-c", script);
         var custom = confinement == Confinement.CUSTOM_AGENT
                 ? HarnessSandbox.wrapCustomAgentShell(shell, workspace.toFile()) : null;
-        var argv = custom != null ? custom.argv()
-                : HarnessSandbox.wrap(shell, workspace.toFile(), List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
+        List<String> argv;
+        if (custom != null) argv = custom.argv();
+        else if (confinement == Confinement.FENCE) argv = HarnessSandbox.wrapMainFence(shell, WorkspaceFiles.workspaceRoot().toFile());
+        else argv = HarnessSandbox.wrap(shell, workspace.toFile(), List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, trustedOrigin);
         var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();
         pb.environment().putAll(env);
-        if (confinement != Confinement.NONE) {
+        // The fence leaves the home folder writable, so a fenced command keeps its own caches.
+        if (confinement != Confinement.FENCE) {
             pb.environment().putAll(confinedCaches(workspace));
         }
         if (custom != null) {

@@ -61,6 +61,16 @@ JClaw's own `PATH` (`SubprocessEnv.filteredHostEnv()`), never from a `PATH` the 
 boundary, plus its canonical path when that differs and is also below `<home>`.
 `HarnessSandboxTest.macProfileForACustomAgentHidesTheHomeFolder` pins the full text.
 
+**The Main Agent's shell is fenced from JClaw's own files (JF-325).** While `shell.sandbox` does not
+confine it, `main`'s `exec` and its copies run through `HarnessSandbox.wrapMainFence` (`Confinement.FENCE`):
+everything stays as it was except `HarnessSandbox.MainFence`. The secret folders (`SandboxHiddenRoots.current()`
+minus `conf/`, which holds no secret) can be neither read nor written, except the backup folder, which stays
+readable because the operator's backup task uploads it. The program files (`Play.applicationPath`,
+`Play.frameworkPath` and `~/.gradle`, which a restart loads its jars from) are read-only, with the workspace root
+writable again inside them. It fails closed like a custom agent's run, and honours `setCustomAgentOverrideForTest`
+the same way. A command that names a skill secret still reaches JClaw's loopback secrets proxy (JF-324).
+`ShellExecSandboxTest` pins both platform forms and probes the real one on the host.
+
 **A custom agent's shell cannot attach to a JVM outside it (JF-290).** An attached client can load
 code into a JVM or dump its heap, and JClaw's own holds the internal bearer token. HotSpot's attach
 handshake has two steps: SIGQUIT makes the JVM look for a trigger file (`.attach_pid<pid>`, in its

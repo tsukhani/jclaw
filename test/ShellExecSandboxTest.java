@@ -296,7 +296,14 @@ class ShellExecSandboxTest extends UnitTest {
             args.addProperty("command", probe.toString());
             var command = args.toString();
 
-            var control = tool.execute(command, main());
+            // The Main Agent's own runs are fenced (JF-325); the override gives the one unconfined control run.
+            String control;
+            HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
+            try {
+                control = tool.execute(command, main());
+            } finally {
+                HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.NONE);
+            }
             assertTrue(control.contains(secret), "unconfined, exec must reach the sentinels or the test proves nothing; got: " + control);
             for (int i = 0; i < real.size(); i++) {
                 assertTrue(control.contains("READABLE_" + i), "unconfined, exec must read " + real.get(i) + "; got: " + control);
@@ -344,8 +351,8 @@ class ShellExecSandboxTest extends UnitTest {
                     ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, value);
                     var expected = switch (value) {
                         case "true" -> Confinement.KEY;
-                        case "untrusted" -> trusted ? Confinement.NONE : Confinement.KEY;
-                        default -> Confinement.NONE;
+                        case "untrusted" -> trusted ? Confinement.FENCE : Confinement.KEY;
+                        default -> Confinement.FENCE;
                     };
                     assertEquals(expected, ShellExecTool.confinement(who, trusted),
                             who.name + " under shell.sandbox='" + value + "', trusted=" + trusted);
@@ -359,7 +366,7 @@ class ShellExecSandboxTest extends UnitTest {
     void aParentChainLongerThanTheWalkIsConfined() {
         var reachesMain = main();
         for (int i = 0; i < 32; i++) reachesMain = unsaved("main-sub-" + i, reachesMain);
-        assertEquals(Confinement.NONE, ShellExecTool.confinement(reachesMain, true), "32 hops reach main");
+        assertEquals(Confinement.FENCE, ShellExecTool.confinement(reachesMain, true), "32 hops reach main");
 
         var tooLong = unsaved("main-sub-extra", reachesMain);
         assertEquals(Confinement.CUSTOM_AGENT, ShellExecTool.confinement(tooLong, true),
@@ -368,7 +375,7 @@ class ShellExecSandboxTest extends UnitTest {
 
     /** No sandbox here: a custom agent's command is refused and nothing runs or stays behind; main runs. */
     @Test
-    void withNoSandboxACustomAgentIsRefusedAndMainStillRuns() throws IOException {
+    void withNoSandboxEveryAgentsCommandIsRefused() throws IOException {
         HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.unavailable("test: no sandbox"));
         var workspace = AgentService.workspacePath(AGENT);
         var args = new JsonObject();
@@ -376,8 +383,8 @@ class ShellExecSandboxTest extends UnitTest {
 
         var result = tool.execute(args.toString(), agent);
 
-        assertEquals("Error: `echo x > marker` did not run: every agent except main runs shell commands inside the "
-                        + "OS sandbox, and this host cannot start one (test: no sandbox).\n\n"
+        assertEquals("Error: `echo x > marker` did not run: every agent runs shell commands inside the OS sandbox, the"
+                        + " Main Agent's fenced from JClaw's own files, and this host cannot start one (test: no sandbox).\n\n"
                         + "What to check: JClaw refuses the command rather than run it unconfined.\n\n"
                         + "How to retry: Do not retry. Tell the operator that this host's sandbox is not working.",
                 result);
@@ -388,9 +395,11 @@ class ShellExecSandboxTest extends UnitTest {
             assertEquals(List.of(), left.toList(), "no output file may stay behind");
         }
 
-        var mainRun = run(main(), "echo hi");
-        assertEquals("hi", mainRun.get("output").getAsString(), mainRun.toString());
-        assertEquals(0, mainRun.get("exitCode").getAsInt(), mainRun.toString());
+        // JF-325: the Main Agent's shell is fenced from JClaw's own files, and where no sandbox starts it fails closed too.
+        var args2 = new JsonObject();
+        args2.addProperty("command", "echo hi");
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.shellSandboxUnavailable("echo hi", "test: no sandbox")),
+                tool.execute(args2.toString(), main()));
     }
 
     /** The background form is refused the same way, naming the command the model sent. */
@@ -497,10 +506,19 @@ class ShellExecSandboxTest extends UnitTest {
             }
             var command = "ls '%s' '%s' 2>&1; true".formatted(appRoot.resolve("data"), appRoot.resolve("certs"));
 
-            var control = run(main(), command).get("output").getAsString();
+            String control;
+            HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.PASSTHROUGH);
+            try {
+                control = run(main(), command).get("output").getAsString();
+            } finally {
+                HarnessSandbox.setCustomAgentOverrideForTest(HarnessSandbox.CustomAgentOverride.NONE);
+            }
             for (var s : sentinels) {
                 assertTrue(control.contains(s.getFileName().toString()), "unconfined, ls must list " + s + ": " + control);
             }
+            // JF-325: the Main Agent's own run is fenced from both folders.
+            var fenced = run(main(), command).get("output").getAsString();
+            for (var s : sentinels) assertFalse(fenced.contains(s.getFileName().toString()), "fenced, main listed " + s);
             var confined = run(agent, command).get("output").getAsString();
             for (var s : sentinels) {
                 assertFalse(confined.contains(s.getFileName().toString()), s + " must be hidden: " + confined);
@@ -667,5 +685,97 @@ class ShellExecSandboxTest extends UnitTest {
                 try { Files.delete(p); } catch (IOException _) { /* best-effort */ }
             });
         } catch (IOException _) { /* best-effort */ }
+    }
+
+    // ===== JF-325: the Main Agent's fence =====
+
+    private static HarnessSandbox.MainFence sampleFence() {
+        return new HarnessSandbox.MainFence(
+                List.of(Path.of("/srv/jclaw"), Path.of("/opt/play1"), Path.of("/home/op/.gradle")),
+                Path.of("/srv/jclaw/workspace"),
+                List.of(Path.of("/srv/jclaw/data"), Path.of("/srv/jclaw/certs"), Path.of("/srv/jclaw/logs")),
+                List.of(Path.of("/srv/jclaw/data/backups")));
+    }
+
+    @Test
+    void theMainAgentsMacProfileKeepsEverythingButJclawsOwnFiles() {
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/srv/jclaw"))
+                (deny file-write* (subpath "/opt/play1"))
+                (deny file-write* (subpath "/home/op/.gradle"))
+                (allow file-write* (subpath "/srv/jclaw/workspace"))
+                (deny file-read* file-write* (subpath "/srv/jclaw/data"))
+                (deny file-read* file-write* (subpath "/srv/jclaw/certs"))
+                (deny file-read* file-write* (subpath "/srv/jclaw/logs"))
+                (allow file-read* (subpath "/srv/jclaw/data/backups"))
+                """, HarnessSandbox.mainFenceMacosProfile(sampleFence()));
+    }
+
+    @Test
+    void theMainAgentsLinuxArgvMountsInTheOrderTheFenceNeeds() {
+        var argv = HarnessSandbox.mainFenceLinuxArgv(List.of("/bin/sh", "-c", "true"), sampleFence(), false);
+        assertEquals(List.of("bwrap", "--dev-bind", "/", "/",
+                "--ro-bind-try", "/srv/jclaw", "/srv/jclaw",
+                "--ro-bind-try", "/opt/play1", "/opt/play1",
+                "--ro-bind-try", "/home/op/.gradle", "/home/op/.gradle",
+                "--bind", "/srv/jclaw/workspace", "/srv/jclaw/workspace"),
+                argv.subList(0, 16), "the whole tree first, the program files read-only, the workspaces writable");
+        var rest = argv.subList(16, argv.size());
+        var tmpfs = rest.indexOf("--ro-bind");
+        assertTrue(tmpfs > 0, "a readable folder is bound back after the tmpfs over its parent: " + rest);
+        assertEquals(List.of("--ro-bind", "/srv/jclaw/data/backups", "/srv/jclaw/data/backups", "/bin/sh", "-c", "true"),
+                rest.subList(tmpfs, rest.size()));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--dev-bind"),
+                HarnessSandbox.mainFenceLinuxArgv(List.of("true"), sampleFence(), true).subList(0, 5),
+                "as root, in a user namespace of its own");
+    }
+
+    /**
+     * On this host, a real fenced run of the Main Agent's: JClaw's secret folders unreadable, its program files and
+     * the Gradle cache read-only, the workspaces and everything outside JClaw writable, the backup folder readable.
+     */
+    @Test
+    void theMainAgentsShellCannotReadJclawsSecretsOrChangeItsProgramFiles() throws IOException {
+        assumeTrue(HarnessSandbox.availability().available(), "no sandbox on this host");
+        ConfigService.set("shell.allowlist", "echo,head,touch,ls,cat,rm");
+        var app = Play.applicationPath.toPath().toRealPath();
+        var data = app.resolve("data");
+        var backups = services.database.DatabaseService.backupsDir().toAbsolutePath();
+        Files.createDirectories(backups);
+        var tag = UUID.randomUUID().toString().substring(0, 8);
+        var secretProbe = data.resolve("fence-" + tag + ".txt");
+        var backupProbe = backups.resolve("fence-" + tag + ".zip");
+        var workspaceRoot = services.WorkspaceFiles.workspaceRoot().toAbsolutePath();
+        Files.createDirectories(workspaceRoot);
+        var outside = Path.of(System.getProperty("java.io.tmpdir")).toRealPath().resolve("fence-" + tag + ".txt");
+        Files.writeString(secretProbe, "secret");
+        Files.writeString(backupProbe, "backup");
+        try {
+            var refused = new ArrayList<String>();
+            var allowed = new ArrayList<String>();
+            for (var command : List.of("head -c 0 " + app.resolve("certs/.env"), "head -c 0 " + secretProbe,
+                    "touch " + backups.resolve("new-" + tag + ".zip"), "touch " + app.resolve("fence-" + tag + ".txt"),
+                    "touch " + Path.of(System.getProperty("user.home"), ".gradle", "fence-" + tag),
+                    "touch " + Play.frameworkPath.toPath().resolve("fence-" + tag))) {
+                if (run(main(), command).get("exitCode").getAsInt() == 0) refused.add(command);
+            }
+            for (var command : List.of("cat " + backupProbe, "head -c 1 " + app.resolve("conf/application.conf"),
+                    "touch " + workspaceRoot.resolve("fence-" + tag + ".txt"), "touch " + outside)) {
+                var result = run(main(), command);
+                if (result.get("exitCode").getAsInt() != 0) allowed.add(command + " -> " + result.get("output"));
+            }
+            assertEquals(List.of(), refused, "these ran, and the fence should have stopped them");
+            assertEquals(List.of(), allowed, "these were stopped, and the fence should have let them run");
+            assertEquals("backup", run(main(), "cat " + backupProbe).get("output").getAsString().strip());
+            assertFalse(Files.exists(app.resolve("fence-" + tag + ".txt")));
+            assertFalse(Files.exists(backups.resolve("new-" + tag + ".zip")));
+        } finally {
+            Files.deleteIfExists(secretProbe);
+            Files.deleteIfExists(backupProbe);
+            Files.deleteIfExists(workspaceRoot.resolve("fence-" + tag + ".txt"));
+            Files.deleteIfExists(outside);
+        }
     }
 }

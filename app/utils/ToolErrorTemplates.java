@@ -140,8 +140,8 @@ public final class ToolErrorTemplates {
 
     public static ErrorTemplate shellSandboxUnavailable(String command, String reason) {
         return new ErrorTemplate(SHELL_SANDBOX_UNAVAILABLE,
-                ("`%s` did not run: every agent except main runs shell commands inside the OS sandbox, "
-                        + "and this host cannot start one (%s).").formatted(command, reason),
+                ("`%s` did not run: every agent runs shell commands inside the OS sandbox, the Main Agent's "
+                        + "fenced from JClaw's own files, and this host cannot start one (%s).").formatted(command, reason),
                 "JClaw refuses the command rather than run it unconfined.",
                 "Do not retry. Tell the operator that this host's sandbox is not working.");
     }
