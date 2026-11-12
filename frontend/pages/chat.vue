@@ -57,7 +57,7 @@ import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
 import ChatChecklist from '~/components/chat/ChatChecklist.vue'
 import McpElicitationForm from '~/components/chat/McpElicitationForm.vue'
-import ScrollJumpButton from '~/components/ScrollJumpButton.vue'
+import ScrollJumpButton, { SCROLL_JUMP_CLEARANCE } from '~/components/ScrollJumpButton.vue'
 import { useMcpElicitations } from '~/composables/useMcpElicitations'
 import { hasOpenItem } from '~/utils/checklist'
 import { syncVisualEnabled } from '~/utils/visual/spec'
@@ -1027,6 +1027,7 @@ function exportConversation() {
           tabindex="-1"
           :aria-busy="loadingOlder"
           class="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
+          :class="SCROLL_JUMP_CLEARANCE"
         >
           <!--
           Unsloth-style centered content column: the scroll container

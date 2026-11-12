@@ -1089,6 +1089,13 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(jumpButton().exists()).toBe(false)
   })
 
+  it('pads the bottom of the message list, so a link Tab scrolls up from below stops above Jump to latest', async () => {
+    const { list } = await openStreamingTurnAtBottom()
+
+    // jsdom lays nothing out, so pin the scroll padding a browser honours when Tab scrolls a link into view.
+    expect(list.classList.contains('scroll-pb-12')).toBe(true)
+  })
+
   it('drops a Queued row the queue no longer lists once the stream gives up, when no init will come', async () => {
     serveConversation(5, [row(1, 'user', 'long job')])
     serveQueue(5, { busy: true, stoppable: true, queueSize: 1,

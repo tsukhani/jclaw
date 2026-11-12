@@ -23,7 +23,7 @@ import { useRoute, useRouter } from '#imports'
 import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { sections } from '~/components/guide/sections'
 import GuideRenderer from '~/components/guide/GuideRenderer.vue'
-import ScrollJumpButton from '~/components/ScrollJumpButton.vue'
+import ScrollJumpButton, { SCROLL_JUMP_CLEARANCE } from '~/components/ScrollJumpButton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,11 +39,6 @@ const mobileNavOpen = ref(false)
 const scroller = ref<HTMLElement | null>(null)
 const scrolledDown = ref(false)
 const pageTitle = ref<HTMLElement | null>(null)
-
-// Back to top floats over the bottom of <main>, where Tab scrolls a link that enters from below: this padding stops
-// that link above the button instead of behind it (WCAG 2.4.11, technique C43). <main> is the layout's, shared with
-// every page, so the guide adds it on mount and takes it off on unmount.
-const BACK_TO_TOP_CLEARANCE = 'scroll-pb-12'
 
 function updateScrolled() {
   const el = scroller.value
@@ -166,7 +161,8 @@ onMounted(async () => {
   jumpToHash(route.hash)
   scroller.value = document.querySelector('main')
   scroller.value?.addEventListener('scroll', updateScrolled, { passive: true })
-  scroller.value?.classList.add(BACK_TO_TOP_CLEARANCE)
+  // <main> is the layout's, shared with every page, so the clearance comes off again on unmount.
+  scroller.value?.classList.add(SCROLL_JUMP_CLEARANCE)
   updateScrolled()
 })
 
@@ -186,7 +182,7 @@ onUnmounted(() => {
   observer?.disconnect()
   observer = null
   scroller.value?.removeEventListener('scroll', updateScrolled)
-  scroller.value?.classList.remove(BACK_TO_TOP_CLEARANCE)
+  scroller.value?.classList.remove(SCROLL_JUMP_CLEARANCE)
 })
 
 const tocItems = computed(() => sections.map(s => ({

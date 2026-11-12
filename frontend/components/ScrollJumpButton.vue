@@ -1,6 +1,14 @@
-<script setup lang="ts">
+<script lang="ts">
 import { ArrowDownIcon, ArrowUpIcon } from '@heroicons/vue/24/outline'
 
+/**
+ * Scroll padding for a scroller that shows this pill, covering bottom-2 plus the pill's height: a link that Tab scrolls
+ * up from below stops above the pill rather than behind it (WCAG 2.4.11, technique C43). Resize it with the pill.
+ */
+export const SCROLL_JUMP_CLEARANCE = 'scroll-pb-12'
+</script>
+
+<script setup lang="ts">
 // Attributes and listeners land on the button, not the row: a caller's @click and data-testid address the control.
 defineOptions({ inheritAttrs: false })
 
