@@ -1,11 +1,14 @@
 package services.evals;
 
+import org.jspecify.annotations.Nullable;
 import utils.TaskScope;
 
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -34,18 +37,33 @@ public final class EvalFanOut {
      * An unbounded sweep would hammer a provider into rate-limiting, and the
      * resulting retries and timeouts would score as agent failures.
      *
-     * <p>A case whose {@code fn} throws cancels the cases still in flight: the sweep is
-     * already lost at that point, and the survivors would only spend model calls on a
-     * report nobody receives.
+     * <p>A case whose {@code fn} throws loses the sweep, so the cases still waiting for a
+     * slot never start: they would only spend model calls on a report nobody receives.
+     * The cases already running finish, because stopping one by interrupt can kill the H2
+     * database its agent turn is writing. Under {@link EvalCapture} each is an
+     * {@code AgentRunner.runForTask} turn, bounded by the round cap {@code chat.maxToolRounds}
+     * and each model stream's {@code llm.breaker.first-chunk-seconds} and
+     * {@code llm.breaker.stall-abort-seconds} budgets. The exception thrown carries the first
+     * case failure as its cause.
      */
     public static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
         var permits = new Semaphore(Math.max(1, maxConcurrency));
+        var firstFailure = new AtomicReference<@Nullable Throwable>();
         try (var scope = new TaskScope<T>()) {
             var futures = cases.stream()
                     .map(testCase -> scope.fork(() -> {
                         permits.acquire();
                         try {
-                            return fn.apply(testCase);
+                            if (firstFailure.get() != null || scope.isCancelled()) {
+                                throw new CancellationException("Skipped: another eval case already failed");
+                            }
+                            try {
+                                return fn.apply(testCase);
+                            } catch (Throwable e) {
+                                // Recorded before the finally frees the slot, so the case that takes it is skipped.
+                                firstFailure.compareAndSet(null, e);
+                                throw e;
+                            }
                         } finally {
                             permits.release();
                         }
@@ -57,7 +75,10 @@ public final class EvalFanOut {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Eval run interrupted", e);
         } catch (ExecutionException e) {
-            throw new IllegalStateException("Eval case failed outside scoring", e.getCause());
+            // A skipped case can complete before the failure that skipped it; close() has
+            // waited for every case by now, so the record is final.
+            var failure = firstFailure.get();
+            throw new IllegalStateException("Eval case failed outside scoring", failure != null ? failure : e.getCause());
         }
     }
 }

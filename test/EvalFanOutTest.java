@@ -11,11 +11,12 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 /**
  * The bounded fan-out capture puts a model behind (JCLAW-883): its ceiling, its
- * overlap, suite order, and cancelling the survivors when one case fails.
+ * overlap, suite order, and what one failing case does to the others (JF-332).
  */
 class EvalFanOutTest extends UnitTest {
 
@@ -93,35 +94,82 @@ class EvalFanOutTest extends UnitTest {
     }
 
     @Test
-    void aCaseFailingOutsideScoringCancelsTheCasesStillInFlight() {
-        var blocked = new CountDownLatch(1);
+    void aCaseWaitingForASlotWhenAnotherFailsNeverStarts() {
+        // Preemptive: a fan-out that never frees its slot would park forever rather than
+        // fail, and a hung test tells nobody anything.
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            // The freed slot races the failure's record, so one pass proves little.
+            for (int run = 0; run < 100; run++) {
+                var calls = new AtomicInteger();
+                var boom = new IllegalStateException("boom");
+                var thrown = assertThrows(IllegalStateException.class, () ->
+                        EvalFanOut.mapCasesBounded(cases(3), 1, testCase -> {
+                            // Whichever case the scheduler lets into the one slot first throws.
+                            if (calls.incrementAndGet() == 1) throw boom;
+                            return testCase.id();
+                        }));
+
+                assertSame(boom, thrown.getCause(), "run " + run + ": the cause must be the case that failed");
+                assertEquals(1, calls.get(), "run " + run + ": the cases queued behind the failure must never start");
+            }
+        });
+    }
+
+    @Test
+    void aCaseAlreadyRunningWhenAnotherFailsFinishesUninterrupted() {
+        var running = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var bombThread = new AtomicReference<Thread>();
+        var bombing = new CountDownLatch(1);
         var interrupted = new AtomicBoolean();
+        var finished = new AtomicBoolean();
         var cases = List.of(cases(1).getFirst(), new EvalCase("bomb", "say ok", "boom",
                 List.of(EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of("ok")))));
+        // The bomb's thread ends only once its failure has reached the scope, so joining it
+        // releases the running case strictly after the bomb has thrown.
+        var releaser = Thread.ofPlatform().daemon().start(() -> {
+            await(bombing);
+            try {
+                bombThread.get().join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                release.countDown();
+            }
+        });
 
-        // Preemptive: a fan-out that failed to cancel would park forever rather than
-        // fail, and a hung test in a 7-minute suite tells nobody anything.
-        var thrown = assertTimeoutPreemptively(Duration.ofSeconds(15), () ->
-                assertThrows(IllegalStateException.class, () ->
+        var thrown = assertTimeoutPreemptively(Duration.ofSeconds(15), () -> {
+            try {
+                return assertThrows(IllegalStateException.class, () ->
                     EvalFanOut.mapCasesBounded(cases, 2, testCase -> {
                         if ("bomb".equals(testCase.id())) {
-                            // Let the blocker reach its park first, so there is something
-                            // running for the failure to cancel.
-                            await(blocked);
+                            await(running);
+                            bombThread.set(Thread.currentThread());
+                            bombing.countDown();
                             throw new IllegalStateException("boom");
                         }
-                        blocked.countDown();
+                        running.countDown();
                         try {
-                            new CountDownLatch(1).await();
+                            release.await();
+                            // A release that wins the race returns with the interrupt still pending.
+                            interrupted.set(Thread.currentThread().isInterrupted());
                         } catch (InterruptedException _) {
                             interrupted.set(true);
                             Thread.currentThread().interrupt();
                         }
-                        return "unreachable";
-                    })));
+                        finished.set(true);
+                        return testCase.id();
+                    }));
+            } finally {
+                // A red run must not leave the running case parked, nor wait on a stuck releaser.
+                release.countDown();
+                releaser.join(Duration.ofSeconds(5));
+            }
+        });
 
         assertEquals("boom", thrown.getCause().getMessage());
-        assertTrue(interrupted.get(), "the blocked case must be cancelled, not left running");
+        assertFalse(interrupted.get(), "a case already running must not be interrupted when another fails");
+        assertTrue(finished.get(), "the fan-out must not return before the running case ends");
     }
 
     private static void await(CountDownLatch latch) {
