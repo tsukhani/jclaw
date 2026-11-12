@@ -3,10 +3,10 @@ name: claude-designer
 description: >-
   Produce thoughtful, well-crafted design artifacts (slide decks, interactive prototypes, hi-fi mockups, animated videos, landing pages, dashboards, marketing one-pagers) using HTML/CSS/JS/SVG as the medium. Use this skill whenever the user asks to "design", "mock up", "prototype", "make a deck", "make slides", "make a landing page", "create a dashboard", "visualize X", "build a UI", "build an interactive demo", or any request whose deliverable is a visual artifact rather than production code. Also trigger for requests like "recreate this UI", "explore options for X", "give me variations of Y", or when the user attaches screenshots/Figma/PRDs and wants a visual response. HTML is the tool; the medium varies — embody the right expert (slide designer, UX designer, animator, prototyper) for the task.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   author: clawhub.ai/cced3000/claude-designer
   jclaw-icon: "🎨"
-  jclaw-tools: filesystem documents browser checklist
+  jclaw-tools: filesystem documents exec checklist
   jclaw-commands: ""
 ---
 # Claude Designer
@@ -182,6 +182,12 @@ After building, open the HTML file in a browser (or the dev tool's preview) and 
 5. If it's a deck, all slides render; if it's a prototype, the main flow works end-to-end
 
 If you're in a tool with a preview pane (Claude Code, Cursor, an IDE with Live Server), use it. If you're in a pure terminal, at minimum open the file in a browser and check the console.
+
+In JClaw the `browser` tool cannot open a local file, so render the page with `exec` instead and look at the image:
+
+```bash
+npx -y playwright@1.63.0 screenshot --full-page "file://<absolute path>.html" "<absolute path>.png"
+```
 
 **Then summarize briefly.** Caveats and next steps only — the artifact speaks for itself. Don't walk the user through what you built unless they ask.
 
