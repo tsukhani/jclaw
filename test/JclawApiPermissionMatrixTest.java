@@ -9,6 +9,7 @@ import play.Play;
 import play.mvc.Http;
 import play.mvc.Router;
 import play.test.FunctionalTest;
+import services.RestartService;
 import services.Tx;
 
 import java.io.IOException;
@@ -35,7 +36,9 @@ import java.util.function.Supplier;
  * route's {@link AgentAccess} level, since {@code main} is provisioned at boot and a sibling's
  * {@code Fixtures.deleteDatabase} can remove it mid-suite: a cell of {@code No} is exactly an
  * {@code OPERATOR_ONLY} route. Every example route is one the operator can call with no effect, a
- * read or an id that names nothing, because the operator's half really runs.
+ * read or an id that names nothing, because the operator's half really runs. The restart is the one
+ * action among them, so its helper is stubbed: a guard that regressed would otherwise hand
+ * {@code jclaw.sh restart} the checkout running the suite.
  */
 class JclawApiPermissionMatrixTest extends FunctionalTest {
 
@@ -91,7 +94,9 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
                 "DELETE", "/api/channels/telegram/bindings/" + NO_SUCH_ID, null);
         pin("Read metrics, circuit breakers, and the restart, upgrade and Java status", "Yes", "Yes", "No",
                 "GET", "/api/breakers", null);
-        pin("Restart, upgrade, back up, restore, repair or compact", "Yes", "No", "No",
+        pin("Restart JClaw, from a conversation (never from a scheduled task)", "Yes", "Yes", "No",
+                "POST", "/api/system/restart", "{}");
+        pin("Upgrade, back up, restore, repair or compact", "Yes", "No", "No",
                 "DELETE", "/api/system/database/backups/jf315-no-such-backup", null);
         pin("Memory, logs, sign-in and password, Tailscale, Chrome, telemetry and the software factory",
                 "Yes", "No", "No", "GET", "/api/logs", null);
@@ -103,11 +108,13 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
     }
 
     private Long customAgentId;
+    private final List<RestartService.Plan> spawned = new ArrayList<>();
 
     // No Fixtures.deleteDatabase(): test classes run concurrently, and the one row here is this
     // class's by its unique name.
     @BeforeEach
     void seed() {
+        RestartService.spawnerForTest = spawned::add;
         AuthFixture.seedAdminPassword("changeme");
         var name = "jf315-custom-" + UUID.randomUUID().toString().substring(0, 8);
         customAgentId = commit(() -> {
@@ -122,8 +129,10 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
     }
 
     @AfterEach
-    void dropCookieJar() {
+    void cleanUp() {
         clearCookies();
+        RestartService.spawnerForTest = null;
+        RestartService.resetHandOffForTest();
     }
 
     @Test
@@ -159,6 +168,7 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
             }
         });
         assertEquals(List.of(), wrong);
+        assertEquals(List.of(), spawned, "a refused restart hands nothing off");
     }
 
     @Test
