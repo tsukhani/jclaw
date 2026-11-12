@@ -49,6 +49,18 @@ A skill that uses a secret runs its commands with the `exec` tool, so its `jclaw
 
 ## 3. Settings: values that are not secret
 
+**Secret or setting?** Ask what someone could do with the value if they saw it. If they could sign in, call the service, or act as the operator, it is a secret; otherwise it is a setting. When in doubt, declare a secret: a secret can hold any value, while a setting is shown to anyone who opens the panel and reaches every command as it is.
+
+| Secret | Setting |
+| --- | --- |
+| API key, access token, personal access token | Service address, host or port |
+| Password, passphrase, PIN | User name, account or tenant id |
+| Client secret, signing secret, private key | OAuth client id, app id |
+| Session id or cookie the operator copies in | Region, folder id, library path |
+| The token part of a URL, such as a webhook's | A URL with no token in it |
+
+A secret never holds a whole URL: the command needs the real host to connect to, and the stand-in is swapped only inside the request (its path, headers or body). For a webhook, the secret is the token part, its example host is the webhook's host, and the command writes the rest: `curl -s -X POST "https://hooks.slack.com/services/$SLACK_WEBHOOK_TOKEN" -d ...`.
+
 An address, a user name or a path that differs from one install to the next is a setting. Declare it in the same block, on a line that starts with `setting`, with an example value:
 
 ```secrets
