@@ -31,7 +31,7 @@ Read `docs/README.md` first. Its tables list every kind of documentation with wh
 - **fix + gate** — documentation in source and config files (Javadoc, code comments, docstrings, script, config and build comments): edit, then run that file type's gate from `docs/README.md` § Gates.
 - **facts only** — the architecture snapshot, `docs/architecture/*.md`: a snapshot nothing regenerates (`/bmad-document-project`, which produced it, is deprecated), so a wrong fact is corrected in place. A wrong fact is one the code now contradicts: a version, a renamed or removed class, path, command or endpoint, a wrong default or count. Omissions are not drift: the snapshot predates later features, so never add coverage, sections or explanation. Skip plan documents (e.g. `jclaw-agentic-refactor.md`): their proposals are history, not a description of the code.
 - **report** — text that ships as behaviour (UI copy, CLI help, tool descriptions, API summaries, prompt text, local skills, factory prompts, eval prose, test-enforced rationale) and policy statements: list with evidence; edit only the items the user approves one by one in Phase 3.
-- **skip** — never touch: the seven upstream skills, `workspace/`, `.claude/commands/` and `.claude/workflows/`, planning and history, legal text, data files, and directives in comment syntax.
+- **skip** — never touch: `workspace/`, `.claude/commands/` and `.claude/workflows/`, planning and history, legal text, data files, and directives in comment syntax.
 
 The catalog itself can drift. A tracked doc file that matches no row (`git ls-files '*.md' '*.txt'` against the rows' paths) is a finding: report it and propose its row, and leave it unswept until the row exists.
 
@@ -148,7 +148,7 @@ Present a table (file · drift item · `current → correct` · handling · FIX/
 - **Never rewrite a doc or comment to match code that looks wrong** — report it.
 - **In `docs/architecture/*.md`, correct wrong facts only** — never expand, restructure or add coverage, and never edit a plan document.
 - **Shipped text is behaviour**: edit UI copy, CLI help, tool descriptions, API summaries, prompts and local skills only with the user's per-item approval, and run the tests that pin them.
-- **Never touch** what `docs/README.md` marks **skip**: the seven upstream skills, `workspace/`, `.claude/commands/` and `.claude/workflows/`, directives in comment syntax.
+- **Never touch** what `docs/README.md` marks **skip**: `workspace/`, `.claude/commands/` and `.claude/workflows/`, directives in comment syntax.
 - **Never redirect a compile task's output** to run a check: Gradle deletes that task's previous outputs, and for `compileJava` that empties `build/classes/java/main`, which `ArchitectureTest` reads. Run javac directly into a scratch directory instead.
 - **Verify before asserting**: confirm a command, script, endpoint, or path exists in the code before writing it into a doc. Never copy a claim from one doc into another without checking the codebase — and treat CLAUDE.md as fallible, not gospel.
 - Don't auto-author entire new pages for coverage gaps without confirming scope first.

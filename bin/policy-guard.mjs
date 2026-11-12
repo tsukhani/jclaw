@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const USAGE = `Usage: node bin/policy-guard.mjs hook        (a PreToolUse event on stdin; prints a deny decision or nothing)
@@ -16,15 +16,12 @@ const RELEASE = /^Release v\d+\.\d+\.\d+$/;
 const VERSION_TAG = /^refs\/tags\/v\d+\.\d+\.\d+$/;
 const NAMED_COMMIT = /^([0-9a-f]{40}):refs\/heads\/main$/;
 const STOPS = new Set(["restart", "stop", "restore", "repair", "compact", "reset", "upgrade", "uninstall"]);
-const UPSTREAM_SKILLS = new Set(["claude-designer", "powerpoint-pptx", "humanizer", "youtube-transcript", "git",
-  "frontend-design", "ffmpeg-video-processing"]);
 const APPROVAL = "JCLAW_OPERATOR_APPROVED";
-const EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
 const RESERVED = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac",
   "function", "select", "{", "}", "!", "time", "coproc"]);
 // What a crash still refuses: a parser bug must not open the push path, nor block every other command.
-const TRIGGER = /push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|kill|skills\//i;
+const TRIGGER = /push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|kill/i;
 
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
@@ -37,8 +34,6 @@ export const REASONS = {
     + "in a detached worktree holding HEAD plus your diff instead.",
   stop: "This stops the JClaw instance, which may be serving live work (AGENTS.md Policy): ask the operator in chat, and "
     + `once they approve, rerun the same command prefixed with ${APPROVAL}=1.`,
-  skills: (name) => `skills/${name} is imported from upstream, and a re-import overwrites hand edits (AGENTS.md Policy): `
-    + "change it upstream, or ask the operator.",
 };
 
 const deny = (rule, reason = REASONS[rule]) => ({ rule, reason });
@@ -398,16 +393,6 @@ export function commandVerdict(line, ctx) {
   return null;
 }
 
-/** The refusal for an edit of `file`, or null. `ctx`: {cwd, checkoutOf(absolutePath) → jclaw checkout root or null}. */
-export function pathVerdict(file, ctx) {
-  if (!file) return null;
-  const abs = resolve(ctx.cwd, file);
-  const root = ctx.checkoutOf(abs);
-  if (!root) return null;
-  const m = relative(root, abs).split(sep).join("/").match(/^skills\/([^/]+)\//);
-  return m && UPSTREAM_SKILLS.has(m[1]) ? deny("skills", REASONS.skills(m[1])) : null;
-}
-
 /** The refusal for git's pre-push ref lines, or null. `state(sha, remoteSha)` → {branch, subject, mainCheckout, onMain, fastForward}. */
 export function refsVerdict(text, remote, state) {
   for (const line of text.split("\n")) {
@@ -467,25 +452,13 @@ function liveContext(cwd) {
       const file = common && join(dirname(common), "server.pid");
       return file && existsSync(file) ? readFileSync(file, "utf8").trim() : "";
     },
-    checkoutOf: (abs) => {
-      let dir = dirname(abs);
-      while (!existsSync(dir) && dir !== dirname(dir)) dir = dirname(dir);
-      try {
-        const top = git(dir, "rev-parse", "--show-toplevel");
-        return existsSync(join(top, "jclaw.sh")) ? top : null;
-      } catch {
-        return null;
-      }
-    },
   };
 }
 
 /** The refusal for a PreToolUse event, or null. */
 export function hookVerdict(event, ctx = liveContext(event.cwd ?? process.cwd())) {
   const input = event.tool_input ?? {};
-  if (event.tool_name === "Bash") return commandVerdict(input.command ?? "", ctx);
-  if (EDITS.has(event.tool_name)) return pathVerdict(input.file_path ?? input.notebook_path, ctx);
-  return null;
+  return event.tool_name === "Bash" ? commandVerdict(input.command ?? "", ctx) : null;
 }
 
 function main(argv) {

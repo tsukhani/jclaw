@@ -207,8 +207,7 @@ The command layer refuses:
 - **`git stash` with untracked files**;
 - **stopping the instance**: the `jclaw.sh` subcommands the Policy block names, and `kill` aimed at the pid in
   `server.pid` or at ports 9000 or 9443, unless the command carries `JCLAW_OPERATOR_APPROVED=1`. The agent asks in chat
-  and adds the prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting;
-- **an edit under the seven upstream-imported skills**, through Claude Code's edit tools.
+  and adds the prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting.
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
 `main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, and the deletion of `renovate/*`

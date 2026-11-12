@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { REASONS, commandVerdict, hookVerdict, pathVerdict, refsVerdict } from "./policy-guard.mjs";
+import { REASONS, commandVerdict, hookVerdict, refsVerdict } from "./policy-guard.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GUARD = join(ROOT, "bin", "policy-guard.mjs");
@@ -21,7 +21,6 @@ const ctx = (state = RELEASE, pid = "4242") => ({
   cwd: "/repo",
   state: () => state,
   serverPid: () => pid,
-  checkoutOf: (abs) => (abs.startsWith("/repo/") ? "/repo" : null),
 });
 const refused = (rule) => ({ rule, reason: REASONS[rule] });
 
@@ -169,22 +168,12 @@ test("with no server.pid, only the pid file or the port names the server", () =>
   deepStrictEqual(commandVerdict("kill $(lsof -ti :9443)", ctx(RELEASE, "")), refused("stop"));
 });
 
-test("editing an upstream-imported skill is refused, a local skill is not", () => {
-  deepStrictEqual(pathVerdict("/repo/skills/humanizer/SKILL.md", ctx()),
-    { rule: "skills", reason: REASONS.skills("humanizer") });
-  deepStrictEqual(pathVerdict("skills/git/references/x.md", ctx()), { rule: "skills", reason: REASONS.skills("git") });
-  deepStrictEqual(pathVerdict("/repo/skills/web-research/SKILL.md", ctx()), null);
-  deepStrictEqual(pathVerdict("/repo/skillsx/git/SKILL.md", ctx()), null);
-  deepStrictEqual(pathVerdict("/elsewhere/skills/humanizer/SKILL.md", ctx()), null);
-});
-
-test("hookVerdict reads Bash commands and the edit tools' paths, and nothing else", () => {
+test("hookVerdict reads Bash commands only, and lets every edit through, an imported skill's included", () => {
   const c = ctx();
   deepStrictEqual(hookVerdict({ tool_name: "Bash", tool_input: { command: "git push" } }, c), refused("push"));
-  deepStrictEqual(hookVerdict({ tool_name: "Write", tool_input: { file_path: "/repo/skills/git/a.md" } }, c),
-    { rule: "skills", reason: REASONS.skills("git") });
-  deepStrictEqual(hookVerdict({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/skills/git/n.ipynb" } }, c),
-    { rule: "skills", reason: REASONS.skills("git") });
+  deepStrictEqual(hookVerdict({ tool_name: "Write", tool_input: { file_path: "/repo/skills/git/a.md" } }, c), null);
+  deepStrictEqual(hookVerdict({ tool_name: "Edit", tool_input: { file_path: "/repo/skills/humanizer/SKILL.md" } }, c), null);
+  deepStrictEqual(hookVerdict({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/skills/git/n.ipynb" } }, c), null);
   deepStrictEqual(hookVerdict({ tool_name: "Read", tool_input: { file_path: "/repo/skills/git/a.md" } }, c), null);
 });
 

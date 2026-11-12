@@ -44,7 +44,7 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | Tool descriptions | `description()` and parameter schema text in `app/tools` | models | what the tool does | report |
 | API summaries | `@Operation` and `@RequestBody` text in `app/controllers` | models through `jclaw_api` discover, the OpenAPI spec | the route | report |
 | Prompt text | prompt builders such as `SystemPromptAssembler`, slash-command help in `app/slash` | models, chat users | runtime behaviour | report |
-| Local skills | `skills/*/SKILL.md` and their references, except the seven upstream imports | models | the tools and paths a skill names | report |
+| Local skills | `skills/*/SKILL.md` and their references, imported skills included | models | the tools and paths a skill names | report |
 | Factory prompts | `.sandcastle/prompts/*.md`, `.sandcastle/bmad/bmad-build-auto.toml` | factory agents | the factory's phases | report |
 | Eval prose | `description` and `rubric` in `evals/suites/*.json` | people scoring a run | the cases; both are outside the suite fingerprint | report |
 | Test-enforced rationale | `@AgentAccess(reason = …)`, ArchUnit `because(…)` | maintainers | what bounds the route; the rule | report; never edit a `because(…)`, which keys the frozen store |
@@ -53,7 +53,6 @@ Everything that explains the code is documentation: the Markdown, the comments a
 
 | Kind | Where | Why a sweep skips it |
 |---|---|---|
-| Upstream skills | `skills/{claude-designer,powerpoint-pptx,humanizer,youtube-transcript,git,frontend-design,ffmpeg-video-processing}` | a re-import overwrites them |
 | Agent workspaces | `workspace/` (gitignored) | runtime data the agents own, such as `SOUL.md` and `AGENT.md` |
 | Tooling | `.claude/commands/*.md`, `.claude/workflows/*.js` | changed on purpose, never by a sweep |
 | Planning and history | `_bmad-output/`, `docs/spikes/`, `docs/analysis/` (all gitignored), plan documents, commit messages, tags, release notes | records of decisions; published history does not change |
