@@ -18,6 +18,8 @@ import services.SubagentRegistry;
 import services.TaskRunRegistry;
 import services.Tx;
 import services.WorkspaceFiles;
+import services.secrets.SecretGrant;
+import services.secrets.SecretGrants;
 import utils.ErrorTemplate;
 import utils.SubprocessEnv;
 import utils.ToolErrorTemplates;
@@ -37,6 +39,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -378,7 +381,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 command.length() > 200 ? command.substring(0, 200) + "…" : command,
                 why.isEmpty() ? "" : " — why: " + why));
 
-        return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent, background);
+        try (var grant = SecretGrants.forCommand(agent, command, workdir, background)) {
+            return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent, background,
+                    grant);
+        }
     }
 
     /**
@@ -591,7 +597,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     @SuppressWarnings("java:S107") // one call's whole environment, resolved by execute
     private String executeCommand(String command, Path workdir, Path workspace, int timeoutSec,
                                   int maxOutputBytes, Map<String, String> env, long startTime,
-                                  Agent agent, boolean background) {
+                                  Agent agent, boolean background, @Nullable SecretGrant grant) {
         Path output = null;
         FileChannel outputChannel = null;
         boolean keepOutput = false;
@@ -605,9 +611,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
                     StandardOpenOption.READ, StandardOpenOption.WRITE);
             // By inode, before any command runs: a file anyone later moves or links into the folder is never recorded.
             BackgroundProcesses.recordOutputFile(output);
+            var runEnv = env;
+            if (grant != null) {
+                runEnv = new LinkedHashMap<>(env);
+                runEnv.putAll(grant.environment());
+            }
             // A background command runs as a subshell the shell does not wait for, so the call returns at once.
-            var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output,
-                    confinement, trustedOrigin);
+            var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, runEnv,
+                    output, confinement, trustedOrigin);
             var sentinel = new Sentinel(process);
 
             // isAlive() is false after the read either way, so this flag is what tells a watchdog
@@ -633,8 +644,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             if (tail.imageSeen()) {
                 keepOutput = true;
                 var seen = tail.result();
-                return buildTerminalImageEarlyReturn(seen.output().toString(), agent, timeoutSec,
-                        startTime, seen.truncated());
+                var seenOutput = grant == null ? seen.output().toString() : grant.mask(seen.output().toString());
+                return buildTerminalImageEarlyReturn(seenOutput, agent, timeoutSec, startTime, seen.truncated());
             }
 
             // Ensure process is fully dead before collecting exit code.
@@ -660,6 +671,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
+            if (grant != null) processedOutput = grant.mask(processedOutput);
+            if (background && SecretGrants.namesSecrets(agent, command, workdir)) {
+                processedOutput += "\n[A background command is given no skill secrets: run it in the foreground to use them.]";
+            }
 
             boolean wasStopped = stopped.get() && !timedOut.get();
             int exitCode = timedOut.get() || wasStopped ? -1 : process.exitValue();

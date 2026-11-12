@@ -37,6 +37,9 @@ public final class SkillSecrets {
     /** One secret as the panel shows it: never its value. */
     public record Listing(String name, List<String> hosts, Instant setAt) {}
 
+    /** A secret with its value, for the proxy's grants alone: no route or tool ever returns one (JF-324). */
+    public record Usable(String skill, String name, String value, List<String> hosts) {}
+
     /** A write the store refuses, with the message the operator reads. */
     public static final class Refused extends RuntimeException {
         private final String reason;
@@ -77,6 +80,12 @@ public final class SkillSecrets {
             throw new Refused("The value is longer than %d characters.".formatted(MAX_VALUE_CHARS));
         }
         var normalized = normalizeHosts(hosts);
+        SkillSecret elsewhere = SkillSecret.find("agent = ?1 AND name = ?2 AND skillName <> ?3", owner, name, skill).first();
+        if (elsewhere != null) {
+            throw new Refused(("Skill '%s' on this agent already has a secret named %s. A command finds a secret by its"
+                    + " name, so each name is used once on an agent; that skill's commands can use it too.")
+                    .formatted(elsewhere.skillName, name));
+        }
         SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, name).first();
         boolean created = row == null;
         if (row == null) {
@@ -101,6 +110,16 @@ public final class SkillSecrets {
         row.delete();
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s deleted from skill %s".formatted(name, skill));
         return true;
+    }
+
+    /** The agent's secrets whose values open, for a command's grant (JF-324). One that will not open is left out. */
+    public static List<Usable> usable(Agent owner) {
+        List<SkillSecret> rows = SkillSecret.find("agent = ?1 ORDER BY skillName, name", owner).fetch();
+        var out = new ArrayList<Usable>();
+        for (var row : rows) {
+            if (row.value != null) out.add(new Usable(row.skillName, row.name, row.value, List.of(row.hosts.split("\n"))));
+        }
+        return out;
     }
 
     /** Delete every secret of a skill the operator removes from the agent, as its credentials folder goes with it. */

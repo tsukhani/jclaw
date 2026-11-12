@@ -60,6 +60,16 @@ When you open a skill from an agent's column, the **Secrets** panel lists the ke
 
 JClaw stores each value encrypted. No page, agent or API call returns a value, you included, so the panel shows only each secret's name, hosts and when it was set. Only you can add, replace or delete a secret: agents cannot, the Main Agent included. Removing the skill from the agent, or deleting the agent, deletes its secrets. A global skill has no secrets, and neither does a copy of a skill on another agent.
 
+#### How a skill's commands use a secret
+
+A command never receives a secret's value. It receives a stand-in, and JClaw puts the value in only when the command sends it to one of the secret's hosts.
+
+- **Which commands get one.** A shell command gets a secret when it names it, as `$NAS_PASSWORD` or `${NAS_PASSWORD}`, or when it runs in that skill's folder or names it, as `skills/nas-filestation/`. Every other command runs as usual. The skill must be switched on for the agent. Each name can belong to only one skill on an agent, so a second skill's commands can use the first skill's secret by its name.
+- **What the command sees.** The variable holds a stand-in that starts with `jclaw-secret-`. Printing it shows the stand-in, never the value. The command's HTTPS requests go through JClaw, which puts the value where the stand-in stands: in the address, a header, a sign-in, or the body. It encodes the value to suit the place, for example for a form or for JSON.
+- **Where a value can go.** Only to the hosts listed with the secret. A host without a port means port 443, so list a host on another port with its port, such as `nas.example.com:5001`. A request that carries a stand-in to any other host is refused before it leaves your computer, and so is a stand-in that is unknown or whose command has ended. JClaw never follows a redirect for the command. If a service sends a value back, the command receives the stand-in instead.
+- **How long it lasts.** A command's stand-ins work only while that command runs: they stop when it finishes, is stopped or times out. A command started in the background gets no secrets, and its output says so.
+- **What is not covered.** Only HTTPS requests carry a secret. A command that connects by SSH, or to a database, cannot use one.
+
 ### Exporting to Claude
 
 JClaw skills use the same format as Claude's skills. **Export for Claude** (the download icon on a Global Skills row) saves the skill as a zip. Unzip it into `~/.claude/skills/` for Claude Code, or upload the zip as a skill in the Claude app.

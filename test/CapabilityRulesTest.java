@@ -161,6 +161,7 @@ class CapabilityRulesTest extends UnitTest {
     private static final String PRINTING_PACKAGE = "services.printing..";
     private static final String PORT_PROBE_CLASS = "services.LocalSidecarDaemon";
     private static final String BROWSER_PROXY_CLASS = "tools.BrowserScreenProxy";
+    private static final String SECRETS_PROXY_CLASS = "services.secrets.SecretProxy";
 
     /** Matches {@code new java.net.Socket(...)}, {@code new java.net.ServerSocket(...)} and
      *  {@code URL.openConnection()} — constructors, methods and references to either, hence {@code JavaAccess}. */
@@ -213,6 +214,8 @@ class CapabilityRulesTest extends UnitTest {
      * exists to screen what Chromium dials rather than to fetch anything itself (JCLAW-1283).
      * {@code SsrfGuard.PROVIDER_SAFE_SOCKETS} is the same kind of screen for the guarded OkHttp
      * clients: its socket refuses a blocked address before it connects (JCLAW-1448).
+     * {@code SecretProxy} listens on loopback for the commands holding a skill secret's placeholder and
+     * opens each of their requests to put the value in; it reaches the service itself through OkHttp (JF-324).
      */
     @Test
     void rawSocketsAreConfinedToThePrintingStack() {
@@ -220,12 +223,14 @@ class CapabilityRulesTest extends UnitTest {
                 .that().resideOutsideOfPackage(PRINTING_PACKAGE)
                 .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
                 .and().doNotHaveFullyQualifiedName(BROWSER_PROXY_CLASS)
+                .and().doNotHaveFullyQualifiedName(SECRETS_PROXY_CLASS)
                 .and().doNotBelongToAnyOf(SsrfGuard.class)
                 .should().accessTargetWhere(RAW_SOCKET_ACCESS)
                 .because("outbound network access goes through HttpFactories' OkHttp clients "
                         + "(JCLAW-1151); services.printing speaks LPD/9100, LocalSidecarDaemon "
-                        + "binds a loopback port probe, BrowserScreenProxy speaks SOCKS5, and "
-                        + "SsrfGuard's provider sockets screen what OkHttp dials");
+                        + "binds a loopback port probe, BrowserScreenProxy speaks SOCKS5, SecretProxy "
+                        + "listens for commands holding skill secrets, and SsrfGuard's provider sockets "
+                        + "screen what OkHttp dials");
         rule.check(APP_CLASSES);
 
         assertTrue(APP_CLASSES.stream()
@@ -634,17 +639,19 @@ class CapabilityRulesTest extends UnitTest {
     // ===== Test-only seams =====
 
     /** Each seam's owner and methods; a production caller would bind one for everything that follows. */
-    private static final Map<String, Set<String>> TEST_SEAMS = Map.of(
-            "utils.SsrfGuard", Set.of("permitOriginForTest", "callWithHostsForTest"),
-            "tools.jev.JevPage", Set.of("callWithCallLimitForTest"),
-            "mcp.McpElicitations", Set.of("callWithWaitForTest"),
-            "utils.HttpFactories", Set.of("runWith", "callWith"),
-            "utils.AppClock", Set.of("runWith", "callWith"),
-            "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"),
-            "tools.SubagentSpawnTool", Set.of("callWithModelChoiceForTest"),
-            "services.EventLogger", Set.of("captureForTest", "captureMatchingForTest"),
-            "services.OperatorAlerts",
-            Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest"));
+    private static final Map<String, Set<String>> TEST_SEAMS = Map.ofEntries(
+            Map.entry("utils.SsrfGuard", Set.of("permitOriginForTest", "callWithHostsForTest")),
+            Map.entry("tools.jev.JevPage", Set.of("callWithCallLimitForTest")),
+            Map.entry("mcp.McpElicitations", Set.of("callWithWaitForTest")),
+            Map.entry("utils.HttpFactories", Set.of("runWith", "callWith")),
+            Map.entry("utils.AppClock", Set.of("runWith", "callWith")),
+            Map.entry("tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest")),
+            Map.entry("tools.SubagentSpawnTool", Set.of("callWithModelChoiceForTest")),
+            Map.entry("services.EventLogger", Set.of("captureForTest", "captureMatchingForTest")),
+            Map.entry("services.OperatorAlerts",
+                    Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest")),
+            Map.entry("services.secrets.SecretGrants", Set.of("callWithUpstreamForTest", "openForTest")),
+            Map.entry("services.secrets.SecretProxy", Set.of("portForTest", "caForTest")));
 
     private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = seamAccess(TEST_SEAMS);
 

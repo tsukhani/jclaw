@@ -9,7 +9,7 @@ up an authority it was never granted fails `play autotest` with a `because` clau
 naming the capability.
 
 **Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
-holds them too: fourteen methods `app/` may never call, enforced by
+holds them too: nineteen methods `app/` may never call, enforced by
 `noAppClassCallsATestOnlySeam`, with `everyScopedValueSeamInAppIsOnTheList` failing the build on a
 `public static *ForTest` method that binds a `ScopedValue` and is not on it. Each binds a `ScopedValue` for the dynamic extent of
 one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
@@ -26,7 +26,10 @@ start, the browser tool's and a stealth render's, JCLAW-1288), `EventLogger.capt
 matches, for a background-thread logger; listener-based, not a `ScopedValue`) and
 `OperatorAlerts.captureMcpAlertsForTest`, `capturePersonaAlertsForTest` and `captureTaskAlertsForTest`
 (the MCP protocol-switch, withheld persona-file and failed-task alerts any thread decides, with or
-without a destination set; listener-based too).
+without a destination set; listener-based too). `SubagentSpawnTool.callWithModelChoiceForTest` binds the
+model choice a spawn reads, and `SecretGrants.callWithUpstreamForTest` the client every grant it opens
+reaches a service through, so a stub with its own certificate stands in (JF-324); `SecretGrants.openForTest`,
+`SecretProxy.portForTest` and `caForTest` open a grant with no agent and read the proxy's port and CA.
 A binding reaches everything that runs inside it, which is why production never takes
 one: every URL screened, every request sent, every time read. The rule also asserts
 each named seam still exists, so a rename fails it rather than leaving it guarding
@@ -40,7 +43,7 @@ test hooks in `app/`, so banning them needs a frozen store rather than this list
 | --- | --- |
 | Spawn an OS process | 19 files — the sidecar supervisors, media transcoders, harness runners, `tools.ShellExecTool` and `services.BackgroundProcesses` (`lsof`); enumerated in `archunit_store/shell-process-spawners` |
 | Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
-| Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon`, `tools.BrowserScreenProxy` and `utils.SsrfGuard`'s provider-screen socket factory |
+| Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon`, `tools.BrowserScreenProxy`, `services.secrets.SecretProxy`'s loopback listener and `utils.SsrfGuard`'s provider-screen socket factory |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
 | Act as the agent principal | Every routed `/api` action declares `@AgentAccess`: `OPEN`, `OWN_ONLY` or `OPERATOR_ONLY`, with no annotation meaning `OPERATOR_ONLY` (JCLAW-1270) |
 | Read raw memory-graph records | `memory.graph..` and `services.grapheval..` only: a raw record set reads former, denied, retracted and guest claims as current facts, which `memory.graph.GraphView` combines into one answer (JCLAW-1364) |
