@@ -3,7 +3,7 @@ name: gamma-presenter
 description: >-
   Create beautiful AI-generated presentations, documents, webpages, and social posts via the Gamma API. Supports generation from text prompts, templates, multi-page gammas, exports to PDF/PPTX/PNG, and management of existing gammas.
 metadata:
-  version: "1.0.7"
+  version: "1.0.8"
   author: main
   jclaw-icon: "🎨"
   jclaw-tools: filesystem exec
@@ -69,15 +69,17 @@ curl -X POST "https://public-api.gamma.app/v1.0/generations" \
     "textMode": "generate",
     "format": "presentation",
     "numCards": 10,
-    "theme": "theme-id-here",
-    "language": "en",
+    "themeId": "theme-id-here",
+    "textOptions": { "language": "en" },
     "exportAs": "pdf"
   }'
 ```
 
-**textMode options:** `generate` (AI writes), `assist` (AI helps refine), `paste` (no AI, use your text as-is)
+**textMode options:** `generate` (Gamma rewrites and expands your text), `condense` (Gamma summarizes it), `preserve` (Gamma keeps your text as it is)
 
-**format options:** `presentation`, `document`, `webpage`, `social_post`
+`themeId` and `textOptions` are optional: leave `themeId` out for the workspace's default theme. The language goes inside `textOptions`; a top-level `language` is rejected with HTTP 400.
+
+**format options:** `presentation`, `document`, `webpage`, `social`
 
 **exportAs options:** `pdf`, `pptx`, `png` (PNG returns a ZIP with one image per card)
 
@@ -153,7 +155,7 @@ curl -H "X-API-KEY: $GAMMA_API_KEY" \
 When asked to create a Gamma presentation:
 
 1. **Use `$GAMMA_API_KEY`** in each `curl` call as shown above; never read or print the key
-2. **Build the request payload** based on user's specifications (format, numCards, theme, exportAs, etc.)
+2. **Build the request payload** based on user's specifications (format, numCards, themeId, exportAs, etc.)
 3. **Start generation** via `exec` using `curl` to POST `/v1.0/generations`
 4. **Parse the `generationId`** from the response
 5. **Poll for completion** every 5 seconds using `exec` with `curl` GET `/v1.0/generations/{id}`
@@ -166,7 +168,7 @@ When asked to create a Gamma presentation:
 - Describe style: "professional and minimal", "colorful and creative", "corporate and clean"
 - Specify text density: "brief bullet points" vs "detailed explanations"
 - Mention folders: "save to my Marketing folder" (use folder ID from `/folders`)
-- Use `textMode: "paste"` when you already have the full content written
+- Use `textMode: "preserve"` when you already have the full content written
 
 ## Error Handling
 
