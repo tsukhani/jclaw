@@ -427,7 +427,7 @@ public final class HarnessSandbox {
             var readOnly = new ArrayList<Path>();
             readOnly.add(SandboxHiddenRoots.canonical(Play.applicationPath.toPath()));
             if (Play.frameworkPath != null) readOnly.add(SandboxHiddenRoots.canonical(Play.frameworkPath.toPath()));
-            if (!home.isBlank()) readOnly.add(SandboxHiddenRoots.canonical(Path.of(home, ".gradle")));
+            if (!home.isBlank()) readOnly.add(SandboxHiddenRoots.canonical(absHome(home, ".gradle")));
             var backups = SandboxHiddenRoots.canonical(DatabaseService.backupsDir());
             // The backup folder leaves the list so it can be reopened for reading; inside data/ it is still hidden
             // first. conf/ leaves it too: it holds no secret, and the checkout's read-only rule covers it.
