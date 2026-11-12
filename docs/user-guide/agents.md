@@ -13,6 +13,45 @@ The page splits into two sections:
 
 Both kinds use the same configuration surface, with three differences. You cannot change the Main Agent's **Name**. The Main Agent also gets a couple of extra shell privilege controls that custom agents do not need (see "Shell Exec Privileges" below). Only custom agents have **ACP External Harness**.
 
+## What jclaw_api lets each agent do {#jclaw-api-permissions}
+
+`jclaw_api` lets an agent use JClaw's own API: read its chats and tasks, change settings, and more. What a call may do depends on who makes it. In the table, *its own* means what belongs to that agent, and *every agent's* means the Main Agent reaches all agents' rows.
+
+The table covers `jclaw_api` only. An agent also works through its other tools. For example, an agent that has the file tools and the **skill-creator** skill writes a new skill into its own workspace, and an agent that has the `memory` tool keeps its own memories with it.
+
+| What | You | Main Agent | Custom agent with `jclaw_api` |
+| --- | --- | --- | --- |
+| Read, rename, star or pin conversations | All | Every agent's | Its own |
+| Change a conversation's model or thinking level | Yes | Yes | No |
+| Delete a conversation or a message, stop a running reply, or send a chat message through the API | Yes | No | No |
+| Create, change, run, pause or delete tasks, and read their runs | All | Every agent's | Its own, without choosing the model |
+| Mark a task as trusted, or clear the task run history | Yes | No | No |
+| Subagent runs, scrape jobs and background programs: read, stop or delete | All | Every agent's | Its own |
+| Notifications, video jobs, and cost and latency figures | All | Every agent's | Its own |
+| Read an agent's settings, tools and skills | All | Every agent's | Its own |
+| Create an agent, or change an agent's model, prompt or other settings | Yes | Yes | No, not even its own |
+| Delete an agent, switch its tools or skills on or off, give it `jclaw_api`, or manage its workspace files and approvals | Yes | No | No |
+| List and read saved prompts | Yes | Yes | Yes |
+| Create, change, delete, generate or export prompts | Yes | Yes | No |
+| Import prompts | Yes | No | No |
+| Read skills, tools, slash commands, prompt categories, time zones, hosted apps, JClaw's status, and speech, image, video, OCR and printer status | Yes | Yes | Yes |
+| Add a skill to **Global Skills** (from a catalog, a zip or an agent's workspace), rename or delete one, or install one on an agent | Yes | No | No |
+| MCP servers: read, add, change, remove or test | Yes | Yes | No |
+| Read the configuration, providers and model router; add a provider's model, set the router's lists, refresh prices | Yes | Yes | No |
+| Change a configuration key or a log level | Yes | No | No |
+| See which channel kinds are active | Yes | Yes | Yes |
+| Read the channel setup | Yes | Channel settings and WhatsApp links | Its own WhatsApp links |
+| Add, change or remove a Telegram, Slack or WhatsApp link | Yes | No | No |
+| Read metrics, circuit breakers, and the restart, upgrade and Java status | Yes | Yes | No |
+| Restart, upgrade, back up, restore, repair or compact | Yes | No | No |
+| Memory, logs, sign-in and password, Tailscale, Chrome, telemetry and the software factory | Yes | No | No |
+
+- A custom agent without the switch has none of this. Only you switch `jclaw_api` on, under **Tools** on the agent's page.
+- A subagent never has `jclaw_api`, whatever the agent that started it has, and neither does the eval agent.
+- An agent is offered `jclaw_api` only in a chat whose replies only you read, such as the web chat.
+- A custom agent's task delivers into a web chat only if that agent can reach the chat, unless you or the Main Agent set the delivery.
+- Every change made through `jclaw_api` still goes through your setting under **Settings → Tool Approvals**.
+
 ## Creating or editing an agent
 
 Click **New Agent** at the top of the page, or click an existing agent's name to edit it. The edit view groups configuration into sections, scrollable on one long page.
@@ -43,7 +82,7 @@ Every tool available to the agent appears here, grouped by category: **System**,
 
 A new agent starts with most tools on. A few are off until you switch them on: the shell (`exec`), `agent_spawn`, `jclaw_api`, `memory`, `conversation_search`, `browser`, `skill_read`, printing, the Chrome tools, and image, video and audio generation. The Main Agent has the first six on by default. A subagent's helper copy gets the shell only when the agent that started it has the shell. It never gets `agent_spawn` or `jclaw_api`.
 
-`jclaw_api` lets an agent call JClaw's own API. Only you can switch it on: no agent can switch it on for itself or for another agent. An agent other than the Main Agent reaches only its own things through it: its conversations and their messages, its tasks and their runs, its subagent runs, its prompts, and its own settings, which it can read but not change. It cannot reach another agent's things or see how JClaw is set up, and among the MCP servers it sees only the ones you switched on for it.
+`jclaw_api` lets an agent call JClaw's own API. Only you can switch it on: no agent can switch it on for itself or for another agent. Among the MCP servers, an agent other than the Main Agent sees only the ones you switched on for it. What the tool lets each agent do is in [What jclaw_api lets each agent do](/guide#agents-jclaw-api-permissions).
 
 Tools that need extra setup (an API key, a workspace path, a shell allowlist entry) are configured under the matching [Settings](/guide#settings) section.
 

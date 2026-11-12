@@ -2,7 +2,7 @@
 
 The **Prompts Library** is your personal collection of saved, reusable prompts: the paragraphs you keep re-typing into [Chat](/chat). Save one once, then use **Run** to load it into the composer whenever you need it. You can adjust it before you send. The [Prompts](/prompts) page is where you build, organize, search, and share that collection.
 
-Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. Prompts are operator-level: one library is shared across all your agents, not scoped per agent or per conversation. An agent that has the `jclaw_api` tool can list and read every prompt. Only you and the Main Agent can create, change or delete one.
+Reach for a saved prompt when you have a phrasing that works: a code-review rubric, a summarization style, a brainstorming kickoff. Use one when you would rather pick it from a shelf than rebuild it each time. Prompts are operator-level: one library is shared across all your agents, not scoped per agent or per conversation. An agent that has the `jclaw_api` tool can list and read every prompt. Only you and the Main Agent can create, change or delete one (see [What jclaw_api lets each agent do](/guide#agents-jclaw-api-permissions)).
 
 ## What a prompt is
 
