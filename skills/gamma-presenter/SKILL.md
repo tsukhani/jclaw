@@ -3,10 +3,10 @@ name: gamma-presenter
 description: >-
   Create beautiful AI-generated presentations, documents, webpages, and social posts via the Gamma API. Supports generation from text prompts, templates, multi-page gammas, exports to PDF/PPTX/PNG, and management of existing gammas.
 metadata:
-  version: "1.0.4"
+  version: "1.0.5"
   author: main
   jclaw-icon: "🎨"
-  jclaw-tools: web_fetch filesystem datetime exec
+  jclaw-tools: filesystem exec
   jclaw-commands: ""
 ---
 # Gamma Presenter

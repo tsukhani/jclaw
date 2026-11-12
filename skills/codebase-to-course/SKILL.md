@@ -3,10 +3,10 @@ name: codebase-to-course
 description: >-
   Turn any codebase into a beautiful, interactive, single-page HTML course that teaches how the code works to non-technical vibe coders. Trigger on phrases like "turn this into a course", "explain this codebase interactively", "teach me how this code works", "make a course from this project", or "interactive tutorial from this code". Produces a self-contained HTML file with scroll-based modules, animated visualizations, embedded quizzes, and code↔plain-English side-by-side translations. Adapted from zarazhangrui/codebase-to-course.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
   author: Tarun Sukhani
   jclaw-icon: "🎓"
-  jclaw-tools: filesystem exec web_fetch documents
+  jclaw-tools: filesystem exec
   jclaw-commands: ""
 ---
 # Codebase-to-Course

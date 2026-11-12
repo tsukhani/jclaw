@@ -3,10 +3,10 @@ name: bento-slides
 description: >-
   Create and edit Bento presentations — single-file .bento.html decks whose document is plain JSON in a "#bento-doc" script block. Use whenever the user wants a slide deck or presentation: starting from NOTHING (it downloads the latest Bento app from bento.page automatically), from source material, or by improving an existing .bento.html. Maps content to the right feature (charts, morph transitions, state slides, ken-burns, motion paths) instead of static text slides, then writes the document JSON in place. Full schema + recipes at https://bento.page/agents.md.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   author: Tarun Sukhani
   jclaw-icon: "🍱"
-  jclaw-tools: exec filesystem web_fetch browser
+  jclaw-tools: exec filesystem web_fetch
   jclaw-commands: ""
 ---
 # Authoring Bento decks

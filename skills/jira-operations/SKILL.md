@@ -3,10 +3,10 @@ name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.6"
+  version: "1.0.7"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
-  jclaw-tools: mcp_jira-confluence exec filesystem
+  jclaw-tools: mcp_jira-confluence exec
   jclaw-commands: ""
 ---
 # Jira Operations

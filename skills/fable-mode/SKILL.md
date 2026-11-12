@@ -3,10 +3,10 @@ name: fable-mode
 description: >-
   Enforces staged execution discipline on large tasks: a written stage plan, parallel delegation where the runtime supports it, a failable verification check at each stage, and a skeptical self-review before delivery. Trigger when the user explicitly asks for thorough/systematic/deep work or when the task spans multiple files, sources, or sessions.
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
   author: Tarun Sukhani
   jclaw-icon: "🎭"
-  jclaw-tools: filesystem exec subagent_spawn subagent_yield conversation_send conversation_history web_search web_fetch datetime checklist
+  jclaw-tools: filesystem exec subagent_spawn subagent_yield conversation_send web_search web_fetch datetime checklist
   jclaw-commands: ""
 ---
 # Fable Mode

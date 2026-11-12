@@ -3,10 +3,10 @@ name: visual-explainer
 description: >-
   Generate rich HTML pages or slide decks for diagrams, diff reviews, plan audits, data tables, and project recaps
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   author: Tarun Sukhani
   jclaw-icon: "🖼️"
-  jclaw-tools: filesystem exec documents
+  jclaw-tools: filesystem
   jclaw-commands: ""
 ---
 
