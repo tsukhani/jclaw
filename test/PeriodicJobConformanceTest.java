@@ -17,15 +17,15 @@ import java.util.List;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 /**
- * Every job Play schedules extends {@link PeriodicJob} (JF-23): H2 closes the database at SIGTERM
- * while Play still fires {@code @Every} and {@code @On} jobs, and only the base skips those ticks.
+ * Every job Play schedules extends {@link PeriodicJob} (JF-23): H2's own exit hook can still close the
+ * database at SIGTERM while Play fires {@code @Every} and {@code @On} jobs, and only the base skips those ticks.
  */
 class PeriodicJobConformanceTest extends UnitTest {
 
     private static final ArchRule SCHEDULED_JOBS_EXTEND_PERIODIC_JOB = classes()
             .that().areAnnotatedWith(Every.class).or().areAnnotatedWith(On.class)
             .should().beAssignableTo(PeriodicJob.class)
-            .because("H2 closes the database at SIGTERM while Play still fires scheduled jobs, "
+            .because("H2 can still close the database at SIGTERM while Play fires scheduled jobs, "
                     + "and PeriodicJob skips a tick from then on (JF-23). Extend jobs.PeriodicJob "
                     + "instead of play.jobs.Job");
 

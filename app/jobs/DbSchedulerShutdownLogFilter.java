@@ -24,9 +24,10 @@ import java.util.function.Consumer;
 
 /**
  * Drops db-scheduler's WARN and ERROR events caused by H2's "Database is already closed" (90121) once the JVM
- * is shutting down, and reports the first as one INFO line (JF-187). H2's exit hook closes the database at
- * SIGTERM while db-scheduler keeps polling until ShutdownJob stops it, and the library logs each failed poll
- * itself, out of reach of {@link PeriodicJob}'s guard (JF-23).
+ * is shutting down, and reports the first as one INFO line (JF-187). Where the fork leaves H2's exit hook in
+ * place (see conf/application.conf), that hook closes the database at SIGTERM while db-scheduler keeps polling
+ * until ShutdownJob stops it, and the library logs each failed poll itself, out of reach of
+ * {@link PeriodicJob}'s guard (JF-23).
  */
 public final class DbSchedulerShutdownLogFilter extends AbstractFilter {
 

@@ -23,8 +23,9 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JF-187: db-scheduler polls until ShutdownJob stops it, so a poll after SIGTERM fails on the database
- * H2's exit hook has already closed, and db-scheduler logs that failure itself.
+ * JF-187: db-scheduler polls until ShutdownJob stops it, so a poll after SIGTERM fails when H2's own exit
+ * hook has closed the database (where the fork leaves that hook in place), and db-scheduler logs that
+ * failure itself.
  */
 class DbSchedulerShutdownLogFilterTest extends UnitTest {
 

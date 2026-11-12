@@ -12,8 +12,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * JF-23: a periodic job that ticks between SIGTERM and Play stopping its jobs, when H2's exit hook
- * has already closed the database. Each job runs through Play's own scheduler, as an @Every tick does.
+ * JF-23: a periodic job that ticks between SIGTERM and Play stopping its jobs, when H2's own exit hook
+ * has closed the database (see conf/application.conf for when the fork leaves that hook in place). Each
+ * job runs through Play's own scheduler, as an @Every tick does.
  */
 class PeriodicJobTest extends UnitTest {
 

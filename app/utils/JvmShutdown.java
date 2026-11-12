@@ -9,8 +9,9 @@ public final class JvmShutdown {
     private JvmShutdown() {}
 
     /**
-     * True from the moment the JVM starts its shutdown hooks, before any of them runs: H2's closes the
-     * database then, while Play's is still draining HTTP (JF-23). Read from the
+     * True from the moment the JVM starts its shutdown hooks, before any of them runs: where the fork
+     * leaves H2's in place (see conf/application.conf), it closes the database then, while Play's is
+     * still draining HTTP (JF-23). Read from the
      * {@link IllegalStateException} that {@link Runtime#addShutdownHook} documents for that state, so
      * nothing is registered for good and a dev reload leaks no hook.
      */

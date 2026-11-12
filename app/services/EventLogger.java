@@ -73,9 +73,10 @@ public class EventLogger {
 
     /** Set at the start of graceful shutdown (by {@code ShutdownJob}).
      *  Once true, EventLogger logs to the file only and skips DB persistence:
-     *  H2's own exit hook may already have closed the database, so a batched
-     *  flush would fail to begin a transaction and emit a "Failed to flush N
-     *  event logs" WARN.
+     *  H2's own exit hook can still close the database at SIGTERM, in the cases
+     *  the fork leaves that hook in place (see conf/application.conf), and a
+     *  batched flush would then fail to begin a transaction and emit a "Failed
+     *  to flush N event logs" WARN.
      *  File logging — the actual shutdown observability — is unaffected. */
     private static final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
@@ -119,12 +120,13 @@ public class EventLogger {
     /**
      * Writes {@code batch} with {@code write}, and once more on a new connection outside the pool
      * if that throws; never throws. Production's write is that same new-connection write, in its
-     * own transaction: at SIGTERM, H2's own exit hook can close the database at any moment, under
-     * the pool's connections (Hikari hands a recently used one back unchecked) and before
-     * ShutdownJob's job transaction commits (it waits for every teardown component). A new
-     * connection reopens it; the retry covers a close in the middle of the first write. Public so a
-     * test can make the first write fail without the process-global queue, which any concurrent
-     * test can drain.
+     * own transaction. The fork closes H2 after Play's {@code stop()}, so the first write normally
+     * lands; where it leaves H2's own exit hook in place (see conf/application.conf), that hook can
+     * close the database at any moment after SIGTERM, under the pool's connections (Hikari hands a
+     * recently used one back unchecked) and before ShutdownJob's job transaction commits (it waits
+     * for every teardown component). A new connection reopens it; the retry covers a close in the
+     * middle of the first write. Public so a test can make the first write fail without the
+     * process-global queue, which any concurrent test can drain.
      */
     public static void writeShutdownBatch(List<EventLog> batch, Consumer<List<EventLog>> write) {
         try {

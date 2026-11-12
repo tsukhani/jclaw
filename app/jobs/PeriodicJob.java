@@ -6,12 +6,13 @@ import utils.JvmShutdown;
 
 /**
  * The base of every job Play runs on a schedule ({@code @Every} or {@code @On}). Between SIGTERM and
- * Play stopping its jobs, H2's exit hook has already closed the database (see conf/application.conf),
- * so a tick then is skipped, and one the shutdown cut short is one INFO line, not two ERROR stacks (JF-23).
+ * Play stopping its jobs, H2's own exit hook can still close the database, in the cases the fork leaves
+ * that hook in place (see conf/application.conf), so a tick then is skipped, and one the shutdown cut
+ * short is one INFO line, not two ERROR stacks (JF-23).
  */
 public abstract class PeriodicJob extends Job<Void> {
 
-    /** Skips the whole invocation, so Play's filters never open a transaction on the closed database. */
+    /** Skips the whole invocation, so Play's filters never open a transaction on a database H2 may have closed. */
     @Override
     public boolean init() {
         return !stopping() && super.init();
