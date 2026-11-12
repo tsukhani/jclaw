@@ -205,9 +205,16 @@ The command layer refuses:
 - **`git push`**, except the forms below;
 - **skipping hooks**: `--no-verify`, `git commit -n`, any change to `core.hooksPath`, and `JCLAW_SKIP_TESTS`;
 - **`git stash` with untracked files**;
-- **stopping the instance**: the `jclaw.sh` subcommands the Policy block names, and `kill` aimed at the pid in
-  `server.pid` or at ports 9000 or 9443, unless the command carries `JCLAW_OPERATOR_APPROVED=1`. The agent asks in chat
-  and adds the prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting.
+- **stopping the instance**: the `jclaw.sh` subcommands the Policy block names, run directly or through the `jclaw`
+  shim (`jclaw.cmd` on Windows), which reaches the test install too; `kill` aimed at the pid in `server.pid` or at
+  ports 9000 or 9443; and `pkill` or `killall` that names `server.pid` or those ports, whose pattern matches `java` or,
+  under `pkill -f`, the server's command line, or that gives no pattern but a user, group, parent or tty to match.
+  `pkill -v` is judged inverted. Patterns are judged as JavaScript regexes, so one that does not compile, uses a POSIX
+  class such as `[[:alpha:]]`, or still holds a shell expansion or substitution is refused. A `pkill -f` refused only
+  through the server's command line gets its own message, which points at `pgrep -fl` first: that command line names
+  every library JClaw loads, so a cleanup such as `pkill -f playwright` reaches it by accident. A signal-0 probe passes,
+  and all of these pass when the command carries `JCLAW_OPERATOR_APPROVED=1`. The agent asks in chat and adds the
+  prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting.
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
 `main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, and the deletion of `renovate/*`
@@ -218,5 +225,7 @@ tests the checkout, so a named commit that is not HEAD passes only if it was alr
 It reads flags, not text: a commit message or heredoc that mentions a refused flag passes. It judges HEAD when the call
 starts, so `git commit … && git push` in one call is refused, and it fails closed on a `cd` it cannot resolve. It stops drift and accidents,
 not an agent that writes a refused command into a script and runs it, though the ref layer still sees that script's push
-unless it skips hooks. `pkill` and `killall`, a `sed` into a skill and Codex's `apply_patch` edits are not checked. If
-the guard itself fails, the hook refuses only calls that mention what it guards, and the ref layer refuses the push.
+unless it skips hooks. Not checked: a `sed` into a skill, Codex's `apply_patch` edits, `kill $(pgrep …)`, `kill` of
+pid -1 (every process), a `jclaw.sh` a shell runs after options of its own (`bash -x jclaw.sh stop`) or through
+`source`, and a `pkill` option after the pattern, which GNU's option ordering accepts on Linux. If the guard itself
+fails, the hook refuses only calls that mention what it guards, and the ref layer refuses the push.

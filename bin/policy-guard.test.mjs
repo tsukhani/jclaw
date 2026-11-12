@@ -3,7 +3,7 @@
 // bare remotes, so /deploy's and /renovate's pushes are shown passing through git itself.
 
 import { deepStrictEqual, strictEqual } from "node:assert";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -17,10 +17,12 @@ const GUARD = join(ROOT, "bin", "policy-guard.mjs");
 
 const RELEASE = { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true };
 const SHA = "c".repeat(40);
-const ctx = (state = RELEASE, pid = "4242") => ({
+const ARGV = "/usr/bin/java -cp /repo/precompiled:/Users/x/.gradle/caches/a.jar play.server.Server";
+const ctx = (state = RELEASE, pid = "4242", argv = ARGV) => ({
   cwd: "/repo",
   state: () => state,
   serverPid: () => pid,
+  serverArgv: () => argv,
 });
 const refused = (rule) => ({ rule, reason: REASONS[rule] });
 
@@ -116,6 +118,80 @@ const CASES = [
   ["kill 5555", null],
   ["kill -0 4242", null],
   ["JCLAW_OPERATOR_APPROVED=1 kill 4242", null],
+  ["pkill java", "stop"],
+  ["pkill -9 jav", "stop"],
+  ["pkill -i JAVA", "stop"],
+  ["killall java", "stop"],
+  ["pkill -f play.server.Server", "stopMatch"],
+  ["pkill -f gradle", "stopMatch"],
+  ["killall -m 'ja.*'", "stop"],
+  ["pkill -F server.pid", "stop"],
+  ["pkill -f :9000", "stop"],
+  ["pkill -f '('", "stop"],
+  ["jclaw restart", "stop"],
+  ["~/.local/bin/jclaw --dev stop", "stop"],
+  ["bash ~/.local/bin/jclaw stop", "stop"],
+  ["pkill -f vitest", null],
+  ["pkill node", null],
+  ["pkill -x jav", null],
+  ["killall node", null],
+  ["JCLAW_OPERATOR_APPROVED=1 pkill java", null],
+  ["JCLAW_OPERATOR_APPROVED=1 killall java", null],
+  ["jclaw status", null],
+  ["JCLAW_OPERATOR_APPROVED=1 jclaw restart", null],
+  ["ls ~/.jclaw/jclaw", null],
+  ["pgrep -f play.server.Server", null],
+  // pkill and killall options
+  ["pkill -KILL java", "stop"],
+  ["pkill -SIGKILL node", null],
+  ["pkill -fi PLAY.SERVER", "stopMatch"],
+  ["pkill -Fserver.pid", "stop"],
+  ["pkill -F other.pid", null],
+  ["pkill -u java node", null],
+  ["pkill -u 501", "stop"],
+  ["pkill node java", "stop"],
+  ["pkill -v node", "stop"],
+  ["pkill -v java", null],
+  ["pkill -fv java", null],
+  ["pkill -fvx java", "stopMatch"],
+  ["killall -9 java", "stop"],
+  ["killall -m node", null],
+  ["killall -m '('", "stop"],
+  ["killall jav", null],
+  ["killall -u java node", null],
+  ["killall -c java", "stop"],
+  ["killall -s java", null],
+  ["echo server.pid | xargs pkill -F", "stop"],
+  ["pkill -Fother.pid java", "stop"],
+  ["pkill -ujava node", null],
+  ["pkill -P 1", "stop"],
+  ["pkill -G 20", "stop"],
+  ["pkill -g 0", "stop"],
+  ["pkill -t ttys001", "stop"],
+  ["pkill -f -io PLAY.SERVER.SERVER", "stopMatch"],
+  ["pkill -io JAVA", null],
+  ["pkill --full play.server.Server", "stopMatch"],
+  ["pkill --ignore-case JAVA", "stop"],
+  ["pkill --exact jav", null],
+  ["pkill --inverse node", "stop"],
+  ["pkill -0 java", null],
+  ["killall -0 java", null],
+  ["killall -vu tarun", "stop"],
+  ["killall -vutarun", "stop"],
+  ["killall -u 501", "stop"],
+  ["killall -t ttys001", "stop"],
+  ["killall -d java", null],
+  // patterns the guard cannot read as pkill does
+  ["pkill '[[:alpha:]]ava'", "stop"],
+  ["killall -m '[[:alpha:]]ava'", "stop"],
+  ["killall '[[:alpha:]]ava'", null],
+  ["pkill -f 'vitest[.]js'", null],
+  ['pkill "$NAME"', "stop"],
+  ['pkill -f "$(cat f)"', "stop"],
+  ['killall "${NAME}"', "stop"],
+  ["pkill -f 'vitest$'", null],
+  ["jclaw.cmd restart", "stop"],
+  ["jclaw.cmd status", null],
 ];
 
 for (const [command, rule] of CASES) {
@@ -168,6 +244,33 @@ test("with no server.pid, only the pid file or the port names the server", () =>
   deepStrictEqual(commandVerdict("kill $(lsof -ti :9443)", ctx(RELEASE, "")), refused("stop"));
 });
 
+test("a pkill -f that reaches JClaw only through its command line says so, and points at pgrep -fl", () => {
+  deepStrictEqual(commandVerdict("pkill -f playwright", ctx(RELEASE, "4242", ARGV + " /x/playwright-core.jar")), refused("stopMatch"));
+  strictEqual(REASONS.stopMatch.includes("pgrep -fl"), true);
+  strictEqual(REASONS.stopMatch.includes("JCLAW_OPERATOR_APPROVED=1"), true);
+  deepStrictEqual(commandVerdict("JCLAW_OPERATOR_APPROVED=1 pkill -f gradle", ctx()), null);
+  deepStrictEqual(commandVerdict("pkill java", ctx()), refused("stop"));
+});
+
+test("with no server command line, pkill -f is judged by the name java alone", () => {
+  deepStrictEqual(commandVerdict("pkill -f vitest", ctx(RELEASE, "", "")), null);
+  deepStrictEqual(commandVerdict("pkill java", ctx(RELEASE, "", "")), refused("stop"));
+  deepStrictEqual(commandVerdict("pkill -f java", ctx(RELEASE, "", "")), refused("stop"));
+  deepStrictEqual(commandVerdict("pkill -fv vitest", ctx(RELEASE, "", "")), refused("stop"));
+  deepStrictEqual(commandVerdict("pkill -fv java", ctx(RELEASE, "", "")), null);
+});
+
+test("the server's command line is read only for a pkill -f its name does not settle", () => {
+  let reads = 0;
+  const c = { ...ctx(), serverArgv: () => { reads++; return ARGV; } };
+  for (const command of ["pkill java", "pkill -f java", "pkill node", "killall -m node", "kill 4242", "git status"]) {
+    commandVerdict(command, c);
+  }
+  strictEqual(reads, 0);
+  deepStrictEqual(commandVerdict("pkill -f vitest", c), null);
+  strictEqual(reads, 1);
+});
+
 test("hookVerdict reads Bash commands only, and lets every edit through, an imported skill's included", () => {
   const c = ctx();
   deepStrictEqual(hookVerdict({ tool_name: "Bash", tool_input: { command: "git push" } }, c), refused("push"));
@@ -195,6 +298,32 @@ test("a hook input the guard cannot read is refused only when it mentions what t
   const run = (input) => spawnSync("node", [GUARD, "hook"], { input, encoding: "utf8" });
   strictEqual(JSON.parse(run("{not json git push").stdout).hookSpecificOutput.permissionDecision, "deny");
   strictEqual(run("{not json ls").stdout, "");
+  for (const command of ["jclaw restart", "~/.local/bin/jclaw --dev stop", "bash ~/.local/bin/jclaw stop", "pkill java"]) {
+    strictEqual(JSON.parse(run(`{not json ${command}`).stdout).hookSpecificOutput.permissionDecision, "deny", command);
+  }
+  for (const command of ["jclaw status", "ls ~/.jclaw/jclaw", "cd ~/Programming/jclaw && ls"]) {
+    strictEqual(run(`{not json ${command}`).stdout, "", command);
+  }
+});
+
+test("on a crash, a jclaw stop is still refused in JSON-escaped command text, and the end of the command ends it", () => {
+  const run = (command, rest = "") => spawnSync("node", [GUARD, "hook"],
+    { input: `{"tool_name":"Bash","tool_input":{"command":${JSON.stringify(command)}${rest}`, encoding: "utf8" });
+  for (const command of ["cd /x\njclaw restart", "cd /x\n\tjclaw stop", "jclaw --backend-port 8080 restart",
+    '"jclaw" restart', "jclaw.cmd restart"]) {
+    strictEqual(JSON.parse(run(command).stdout).hookSpecificOutput.permissionDecision, "deny", command);
+  }
+  for (const command of ["jclaw status | grep restart", "jclaw status; echo stop", "ls ~/.jclaw/jclaw\nls restart.log"]) {
+    strictEqual(run(command).stdout, "", command);
+  }
+  strictEqual(run("jclaw status", ',"description":"then restart"').stdout, "");
+});
+
+test("the live hook reads the server's command line for pkill -f without failing", () => {
+  const run = (command) => spawnSync("node", [GUARD, "hook"],
+    { input: JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd: ROOT }), encoding: "utf8" });
+  strictEqual(run("pkill -f vitest").stdout, "");
+  strictEqual(JSON.parse(run("pkill java").stdout).hookSpecificOutput.permissionDecisionReason, REASONS.stop);
 });
 
 test("refsVerdict passes /deploy's and /renovate's refs and refuses every other", () => {
@@ -252,6 +381,22 @@ const inScratchRepo = (body) => {
     rmSync(scratch, { recursive: true, force: true });
   }
 };
+
+test("the live hook judges pkill -f against the command line of the process server.pid names", () => {
+  inScratchRepo(({ work }) => {
+    const marker = `policy-guard-marker-${process.pid}`;
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", marker], { stdio: "ignore" });
+    try {
+      writeFileSync(join(work, "server.pid"), `${child.pid}\n`);
+      const run = (command) => spawnSync("node", [GUARD, "hook"],
+        { input: JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd: work }), encoding: "utf8" });
+      strictEqual(JSON.parse(run(`pkill -f ${marker}`).stdout).hookSpecificOutput.permissionDecisionReason, REASONS.stopMatch);
+      strictEqual(run("pkill -f unrelated").stdout, "");
+    } finally {
+      child.kill();
+    }
+  });
+});
 
 test("through git itself, the pre-push hook lets /deploy's pushes out and refuses the rest", () => {
   inScratchRepo(({ scratch, work, git }) => {

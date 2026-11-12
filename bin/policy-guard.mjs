@@ -4,7 +4,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants, homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,8 +20,15 @@ const APPROVAL = "JCLAW_OPERATOR_APPROVED";
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
 const RESERVED = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac",
   "function", "select", "{", "}", "!", "time", "coproc"]);
-// What a crash still refuses: a parser bug must not open the push path, nor block every other command.
-const TRIGGER = /push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|kill/i;
+// What a crash still refuses: a parser bug must not open the push path, nor block every other command. The `jclaw`
+// shim counts only before a stopping subcommand in the same command, since paths such as ~/.jclaw/jclaw appear in
+// ordinary ones. The hook reads JSON, so a newline or tab may arrive as a \n or \t escape, a quote as \", and a bare "
+// ends the command string.
+const SPACE = String.raw`(?:[ \t]|\\t)+`;
+const WORD = String.raw`(?:[^\s|;&\\"]|\\[^nt])+`;
+const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|jclaw\.cmd|kill`
+  + String.raw`|(?:(?<![\w.-])|(?<=\\[nt]))jclaw(?:\\?["'])?(?:${SPACE}${WORD})*?${SPACE}(?:\\?["'])?`
+  + `(?:${[...STOPS].join("|")})\\b`, "i");
 
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
@@ -34,6 +41,10 @@ export const REASONS = {
     + "in a detached worktree holding HEAD plus your diff instead.",
   stop: "This stops the JClaw instance, which may be serving live work (AGENTS.md Policy): ask the operator in chat, and "
     + `once they approve, rerun the same command prefixed with ${APPROVAL}=1.`,
+  stopMatch: "This pkill -f also reaches the live JClaw server through its command line, which lists every library it "
+    + "loads, so it would stop JClaw along with whatever it targets (AGENTS.md Policy). To clean up other processes, "
+    + "list them with pgrep -fl and kill those by pid or with a narrower pattern. Only to stop JClaw itself, ask the "
+    + `operator in chat, and once they approve, rerun the same command prefixed with ${APPROVAL}=1.`,
 };
 
 const deny = (rule, reason = REASONS[rule]) => ({ rule, reason });
@@ -354,13 +365,104 @@ function gitRule(cmd, ctx) {
   return null;
 }
 
+function namesServer(cmd, line) {
+  const text = cmd.viaXargs ? line : cmd.raws.join(" ");
+  return /server\.pid|:(9000|9443)\b/.test(text);
+}
+
 function killsServer(cmd, ctx, line) {
   const args = cmd.words.slice(1);
   if (args.includes("-0")) return false;
   const pid = ctx.serverPid();
   if (pid && args.includes(pid)) return true;
-  const text = cmd.viaXargs ? line : cmd.raws.join(" ");
-  return /server\.pid|:(9000|9443)\b/.test(text);
+  return namesServer(cmd, line);
+}
+
+const SIGNALS = new Set(Object.keys(constants.signals).map((s) => s.slice(3)));
+const isSignal = (a) => /^-\d+$/.test(a) || SIGNALS.has(a.slice(1).toUpperCase().replace(/^SIG/, ""));
+// pkill's options that take a value, as the next word or the rest of a cluster such as -Fserver.pid.
+const PKILL_VALUES = "FGgPstUu";
+// Linux procps spells the matching flags long too.
+const PKILL_LONG = new Map([["--full", "f"], ["--inverse", "v"], ["--exact", "x"], ["--ignore-case", "i"]]);
+// A shell expansion or substitution the lexer left in a word hides the pattern pkill really gets.
+const EXPANSION = /\$[\w{@*#?$!]|\u0000/;
+// ERE bracket classes such as [[:alpha:]] compile in JS as a plain character set and match something else.
+const POSIX_CLASS = /\[([:=.])[^\]]*\1\]/;
+
+/** BSD getopt: a signal only as the first argument, options until the first operand, and every operand a pattern. */
+function pkillArgs(args) {
+  const flags = new Set();
+  let i = args.length && isSignal(args[0]) ? 1 : 0;
+  for (; i < args.length && args[i].startsWith("-") && args[i] !== "-"; i++) {
+    const a = args[i];
+    if (a === "--") { i++; break; }
+    if (a.startsWith("--")) {
+      if (PKILL_LONG.has(a)) flags.add(PKILL_LONG.get(a));
+      continue;
+    }
+    for (let k = 1; k < a.length; k++) {
+      flags.add(a[k]);
+      if (PKILL_VALUES.includes(a[k])) { if (k === a.length - 1) i++; break; }
+    }
+  }
+  return { flags, patterns: args.slice(i), selected: [..."GgPstUu"].some((f) => flags.has(f)) };
+}
+
+/**
+ * killall's options: a signal anywhere, and -u, -t and -c taking the rest of their cluster or the next word. -c narrows
+ * the match to one procname; it is judged here as though that procname were named.
+ */
+function killallArgs(args) {
+  const flags = new Set();
+  const names = [];
+  let i = 0;
+  for (; i < args.length && args[i].startsWith("-") && args[i] !== "-"; i++) {
+    const a = args[i];
+    if (a === "--") { i++; break; }
+    if (isSignal(a)) continue;
+    for (let k = 1; k < a.length; k++) {
+      flags.add(a[k]);
+      if ("utc".includes(a[k])) {
+        const value = k < a.length - 1 ? a.slice(k + 1) : args[++i] ?? "";
+        if (a[k] === "c") names.push(value);
+        break;
+      }
+    }
+  }
+  return { flags, patterns: [...names, ...args.slice(i)], selected: flags.has("u") || flags.has("t") };
+}
+
+/**
+ * The rule a pkill or killall breaks by being able to signal the server JVM, or null. Its process name is `java`;
+ * pkill -f matches the full command line, so its patterns also meet the server's real one, read only when the name
+ * has not settled it. That match gets its own rule: the command line names every library, so a cleanup such as
+ * pkill -f playwright reaches JClaw by accident, and approving it as asked would stop the instance.
+ */
+function pkillsServer(cmd, ctx, line) {
+  if (cmd.words[1] === "-0") return null;
+  if (namesServer(cmd, line)) return "stop";
+  const pkill = basename(cmd.words[0]) === "pkill";
+  const { flags, patterns, selected } = (pkill ? pkillArgs : killallArgs)(cmd.words.slice(1));
+  // killall -s and -d only print what they would signal.
+  if (!pkill && (flags.has("s") || flags.has("d"))) return null;
+  // With no pattern, a user, group, parent or tty selects every process it covers; -F alone selects only the file's pid.
+  if (!patterns.length) return selected && !(pkill && flags.has("F")) ? "stop" : null;
+  if (patterns.some((p) => EXPANSION.test(p))) return "stop";
+  if (!pkill && !flags.has("m")) return patterns.includes("java") ? "stop" : null;
+  if (patterns.some((p) => POSIX_CLASS.test(p))) return "stop";
+  const exact = pkill && flags.has("x");
+  let regexes;
+  try {
+    regexes = patterns.map((p) => new RegExp(exact ? `^(?:${p})$` : p, pkill && flags.has("i") ? "i" : ""));
+  } catch {
+    return "stop";
+  }
+  const hits = (text) => regexes.some((r) => r.test(text));
+  // -v signals what matches no pattern, so it reaches the server when the name or the command line escapes them all.
+  const inverse = pkill && flags.has("v");
+  if (hits("java") !== inverse) return "stop";
+  const argv = pkill && flags.has("f") ? ctx.serverArgv() : "";
+  return argv !== "" && hits(argv) !== inverse ? "stopMatch" : null;
 }
 
 function commandRule(cmd, ctx, line) {
@@ -372,14 +474,20 @@ function commandRule(cmd, ctx, line) {
   const name = basename(words[0] ?? "");
   if (name === "git") return gitRule(cmd, ctx);
   const approved = assigns.get(APPROVAL) === "1";
-  const script = name === "jclaw.sh" ? words.slice(1)
-    : SHELLS.has(name) && basename(words[1] ?? "") === "jclaw.sh" ? words.slice(2) : null;
+  // The `jclaw` shim, and jclaw.cmd on Windows, run an install's jclaw.sh with the same arguments.
+  const isScript = (w) => /^jclaw(\.sh|\.cmd)?$/.test(w);
+  const script = isScript(name) ? words.slice(1)
+    : SHELLS.has(name) && isScript(basename(words[1] ?? "")) ? words.slice(2) : null;
   if (script && !approved && script.some((a) => STOPS.has(a))) return deny("stop");
   if (name === "kill" && !approved && killsServer(cmd, ctx, line)) return deny("stop");
+  if ((name === "pkill" || name === "killall") && !approved) {
+    const rule = pkillsServer(cmd, ctx, line);
+    if (rule) return deny(rule);
+  }
   return null;
 }
 
-/** The refusal for a Bash command line, or null. `ctx`: {cwd, state(dir, rev), serverPid()}. */
+/** The refusal for a Bash command line, or null. `ctx`: {cwd, state(dir, rev), serverPid(), serverArgv()}. */
 export function commandVerdict(line, ctx) {
   let dir = ctx.cwd;
   for (const cmd of simpleCommands(line)) {
@@ -443,14 +551,24 @@ function gitState(dir, rev = "HEAD") {
 }
 
 function liveContext(cwd) {
+  // The live instance runs from the main checkout, which a worktree reaches through the common git dir.
+  const serverPid = () => {
+    const { common } = gitState(cwd);
+    const file = common && join(dirname(common), "server.pid");
+    return file && existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+  };
   return {
     cwd,
     state: (dir, rev) => gitState(dir, rev),
-    // The live instance runs from the main checkout, which a worktree reaches through the common git dir.
-    serverPid: () => {
-      const { common } = gitState(cwd);
-      const file = common && join(dirname(common), "server.pid");
-      return file && existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+    serverPid,
+    serverArgv: () => {
+      try {
+        const pid = serverPid();
+        return /^\d+$/.test(pid) ? execFileSync("ps", ["-ww", "-o", "command=", "-p", pid],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 }).trim() : "";
+      } catch {
+        return "";
+      }
     },
   };
 }
