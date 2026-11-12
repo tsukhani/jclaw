@@ -75,6 +75,14 @@ public final class SkillSecrets {
     private static final Pattern OPTIONAL = Pattern.compile("(?i)optional\\b.*", Pattern.DOTALL);
     private static final int MAX_SKILL_BYTES = 262_144;
     private static final int MAX_DECLARED = 32;
+    /**
+     * A part of a name (between underscores) that reads as a key, token or password (JF-357). Such a name is always a
+     * secret: the {@code setting} keyword is written by whoever writes SKILL.md, the agent included, and a password
+     * declared as a setting would reach any command in clear, with no host limit.
+     */
+    private static final Pattern CREDENTIAL_PART = Pattern.compile(
+            "[A-Z0-9]*KEY|PASS[A-Z0-9]*|PWD|TOKEN[A-Z0-9]*|SECRET[A-Z0-9]*|CREDENTIALS?|COOKIES?|AUTH[A-Z0-9]*|SESSION[A-Z0-9]*|PIN");
+
     /** {@code [setting] [export] NAME=example   # description}: groups 1 the keyword, 2 the name, 3 the example, 4 the description. */
     private static final Pattern DECLARATION = Pattern.compile(
             "\\s*(?:(setting)\\s+)?(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
@@ -302,7 +310,7 @@ public final class SkillSecrets {
             if (nameRejection(name) != null || !seen.add(name)) continue;
             var description = m.group(4) == null ? "" : m.group(4).strip();
             boolean optional = OPTIONAL.matcher(description).matches();
-            if (m.group(1) != null) {
+            if (m.group(1) != null && !looksLikeCredential(name)) {
                 settings.add(new DeclaredSetting(name, description, m.group(3).strip(), optional));
             } else {
                 var examples = new ArrayList<String>();
@@ -460,6 +468,14 @@ public final class SkillSecrets {
 
 
     /** Why {@code name} cannot name a secret, or null when it can. */
+    /** Whether {@code name} reads as a key, token or password, so that it is only ever a secret (JF-357). */
+    public static boolean looksLikeCredential(String name) {
+        for (var part : name.split("_")) {
+            if (CREDENTIAL_PART.matcher(part).matches()) return true;
+        }
+        return false;
+    }
+
     static @Nullable String nameRejection(String name) {
         if (!NAME.matcher(name).matches()) {
             return "'%s' is not a secret name: use capital letters, digits and underscores, starting with a"

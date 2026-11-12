@@ -59,7 +59,7 @@ When you open a skill from an agent's column, the **Secrets** panel lists the ke
 - **Replace** sets a new value or new hosts. Leave **Value** empty to keep the stored value and change only the hosts.
 - **Delete** removes the secret after you confirm.
 
-Below the secrets, **Settings** lists the values the skill needs that are not secret, such as a service's address, a user name or a path. A setting's value is shown as it is, and **Edit** changes it. A skill's commands receive each setting as it is, under its name, as in `$NAS_URL`. A name is used once on an agent, across its secrets and its settings.
+Below the secrets, **Settings** lists the values the skill needs that are not secret, such as a service's address, a user name or a path. A setting's value is shown as it is, and **Edit** changes it. A skill's commands receive each setting as it is, under its name, as in `$NAS_URL`. A name is used once on an agent, across its secrets and its settings. A name that reads as a key, token or password, such as one ending in `_KEY`, `_PASS` or `_TOKEN`, is always a secret, even if the skill's guide calls it a setting.
 
 A skill is **not runnable** while a secret or setting it needs has no value. The panel says so at its top and names what is missing, the skill's header shows **Not runnable**, and on the Skills page the skill shows **Needs values** under each agent that has it. The agent is not offered the skill until everything it needs has a value. Anything marked optional does not count.
 

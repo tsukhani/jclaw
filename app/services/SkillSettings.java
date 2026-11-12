@@ -37,6 +37,10 @@ public final class SkillSettings {
     public static Listing put(Agent owner, String skill, String name, String value) {
         var rejection = SkillSecrets.nameRejection(name);
         if (rejection != null) throw new SkillSecrets.Refused(rejection);
+        if (SkillSecrets.looksLikeCredential(name)) {
+            throw new SkillSecrets.Refused(("%s reads as a key, token or password, so it can only be a secret: add it under"
+                    + " Secrets, with the hosts it may be sent to.").formatted(name));
+        }
         if (value.isEmpty()) throw new SkillSecrets.Refused("The value is empty.");
         if (value.length() > MAX_VALUE_CHARS) {
             throw new SkillSecrets.Refused("The value is longer than %d characters.".formatted(MAX_VALUE_CHARS));

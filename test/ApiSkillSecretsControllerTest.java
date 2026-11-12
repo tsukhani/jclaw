@@ -388,13 +388,24 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
 
     @Test
     void aNameIsUsedOnceAcrossSecretsAndSettings() throws Exception {
-        assertIsOk(put("SITE_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
-        assertEquals("400 invalid_request Skill 'demo' on this agent has a secret named SITE_KEY. A command finds a value"
-                + " by its name, so each name is used once on an agent.", errorOf(putSetting("SITE_KEY", "{\"value\":\"x\"}")));
+        assertIsOk(put("SITE_ID", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("400 invalid_request Skill 'demo' on this agent has a secret named SITE_ID. A command finds a value"
+                + " by its name, so each name is used once on an agent.", errorOf(putSetting("SITE_ID", "{\"value\":\"x\"}")));
         assertIsOk(putSetting("SITE_URL", "{\"value\":\"https://site.example.org\"}"));
         assertEquals("400 invalid_request Skill 'demo' on this agent has a setting named SITE_URL. A command finds a value"
                 + " by its name, so each name is used once on an agent.",
                 errorOf(put("SITE_URL", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}")));
+    }
+
+    @Test
+    void aNameThatReadsAsACredentialCanOnlyBeASecret() {
+        for (var name : List.of("NAS_PASS", "SONARR_API_KEY", "JIRA_PERSONAL_TOKEN", "APP_SECRET", "ADMIN_PWD", "SITE_COOKIE")) {
+            assertEquals("400 invalid_request " + name + " reads as a key, token or password, so it can only be a secret:"
+                    + " add it under Secrets, with the hosts it may be sent to.",
+                    errorOf(putSetting(name, "{\"value\":\"hunter2hunter2\"}")), name);
+        }
+        assertIsOk(putSetting("TRAKT_CLIENT_ID", "{\"value\":\"0123abcd\"}"));
+        assertEquals(1, json(GET(base())).getAsJsonArray("settings").size());
     }
 
     @Test
@@ -448,6 +459,33 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals(false, Files.exists(state));
         assertEquals(true, Files.isDirectory(AgentService.workspacePath(agentName).resolve("skill-state/other")),
                 "another skill's saved state stays");
+    }
+
+    /** The agent writes its workspace, links included: a linked state folder is never followed into a delete. */
+    @Test
+    void removingTheSkillNeverDeletesWhereALinkedStateFolderLeads() throws Exception {
+        var workspace = AgentService.workspacePath(agentName);
+        var outside = Files.createTempDirectory("jf357-outside-");
+        try {
+            Files.createDirectories(outside.resolve("demo"));
+            Files.writeString(outside.resolve("demo/keep.txt"), "keep\n");
+            Files.createSymbolicLink(workspace.resolve("skill-state"), outside);
+            assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+            assertEquals("keep\n", Files.readString(outside.resolve("demo/keep.txt")), "the state root was a link");
+
+            Files.delete(workspace.resolve("skill-state"));
+            Files.createDirectories(workspace.resolve("skills/demo"));
+            Files.writeString(workspace.resolve("skills/demo/SKILL.md"), "# Demo\n");
+            Files.createDirectories(workspace.resolve("notes"));
+            Files.writeString(workspace.resolve("notes/keep.txt"), "keep\n");
+            Files.createDirectories(workspace.resolve("skill-state"));
+            Files.createSymbolicLink(workspace.resolve("skill-state/demo"), workspace.resolve("notes"));
+            assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+            assertEquals("keep\n", Files.readString(workspace.resolve("notes/keep.txt")), "the skill's state folder was a link");
+        } finally {
+            agents.SkillLoader.clearCache();
+            services.SkillPromotionService.deleteRecursive(outside);
+        }
     }
 
     @Test

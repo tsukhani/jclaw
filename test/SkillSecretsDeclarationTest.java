@@ -155,6 +155,26 @@ class SkillSecretsDeclarationTest extends UnitTest {
         assertEquals(false, found(SkillSecrets.splitDeclaration(skillMd).block()));
     }
 
+    /** The keyword is written by whoever writes SKILL.md: a name that reads as a password is a secret regardless. */
+    @Test
+    void aSettingLineWhoseNameReadsAsACredentialDeclaresASecret() {
+        var skillMd = """
+                ```secrets
+                setting NAS_PASS=nas.example.com:5001        # The password, mislabelled
+                setting SONARR_API_KEY=sonarr.example.com    # The key, mislabelled
+                setting JIRA_PERSONAL_TOKEN=jira.example.com
+                setting SITE_SESSION_ID=x
+                setting TRAKT_CLIENT_ID=0123abcd              # An app id, a setting
+                setting NAS_USER=admin
+                ```
+                """;
+        assertEquals(java.util.List.of("NAS_PASS", "SONARR_API_KEY", "JIRA_PERSONAL_TOKEN", "SITE_SESSION_ID"),
+                SkillSecrets.declaredIn(skillMd).stream().map(SkillSecrets.Declared::name).toList());
+        assertEquals(java.util.List.of("nas.example.com:5001"), SkillSecrets.declaredIn(skillMd).getFirst().exampleHosts());
+        assertEquals(java.util.List.of("TRAKT_CLIENT_ID", "NAS_USER"),
+                SkillSecrets.settingsIn(skillMd).stream().map(SkillSecrets.DeclaredSetting::name).toList());
+    }
+
     @Test
     void aKeyWrittenAsASettingsExampleIsFound() {
         assertEquals(true, found("setting SITE_URL=https://example.com/?apikey=0123456789abcdef0123456789abcdef\n"));

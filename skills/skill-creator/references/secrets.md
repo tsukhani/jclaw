@@ -63,7 +63,7 @@ The operator fills it in in the same panel, where its value is shown in clear. A
 curl -s -H "X-API-Key: $WEATHER_API_KEY" "$WEATHER_BASE_URL/today?city=Paris"
 ```
 
-A value that is the same everywhere, or a default such as a city or a unit, is no setting: write it in SKILL.md. Never create a settings file such as `credentials/config.json`.
+A name that reads as a key, token or password (one with a part such as `KEY`, `PASS`, `TOKEN`, `SECRET`, `PWD`, `COOKIE`, `AUTH` or `SESSION`) is always a secret, even on a `setting` line: never label a password a setting. A value that is the same everywhere, or a default such as a city or a unit, is no setting: write it in SKILL.md. Never create a settings file such as `credentials/config.json`.
 
 ## 4. What a skill saves between runs
 

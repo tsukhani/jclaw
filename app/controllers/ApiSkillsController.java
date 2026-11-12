@@ -35,6 +35,7 @@ import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -697,16 +698,7 @@ public class ApiSkillsController extends Controller {
         SkillPromotionService.revokeAgentAllowlist(agent, name);
         SkillSecrets.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
         SkillSettings.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
-        // What the skill saved for its next run goes with it (JF-357); a skill name is one folder, never a path.
-        var state = WorkspacePathGuard.resolveChild(
-                AgentService.workspacePath(agent.name).resolve(WorkspacePathGuard.SKILL_STATE_DIR), name);
-        if (state != null && Files.isDirectory(state)) {
-            try {
-                SkillPromotionService.deleteRecursive(state);
-            } catch (IOException e) {
-                ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to delete the skill's saved state: " + e.getMessage());
-            }
-        }
+        deleteSavedState(AgentService.workspacePath(agent.name), name);
         deleteSkillDir(dir);
     }
 
@@ -937,6 +929,33 @@ public class ApiSkillsController extends Controller {
 
     /** Recursively delete a skill directory and clear the loader cache. */
     @SuppressWarnings("java:S2259")
+    /**
+     * Delete what a skill saved for its next run (JF-357), only when both {@code skill-state/} and its folder are real
+     * directories inside the workspace. The agent writes its workspace, links included, so either could lead
+     * anywhere, and a delete that followed one would remove whatever it points at.
+     */
+    private static void deleteSavedState(Path workspace, String name) {
+        if (!WorkspacePathGuard.isOneSegment(name)) return;
+        var root = workspace.resolve(WorkspacePathGuard.SKILL_STATE_DIR);
+        var state = root.resolve(name);
+        if (Files.isSymbolicLink(root) || Files.isSymbolicLink(state) || !Files.isDirectory(state, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        Path real;
+        try {
+            real = state.toRealPath();
+        } catch (IOException _) {
+            return;
+        }
+        var contained = WorkspacePathGuard.resolveContained(workspace, WorkspacePathGuard.SKILL_STATE_DIR + "/" + name);
+        if (!real.equals(contained)) return;
+        try {
+            SkillPromotionService.deleteRecursive(state);
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to delete the skill's saved state: " + e.getMessage());
+        }
+    }
+
     private static void deleteSkillDir(Path dir) {
         try {
             SkillPromotionService.deleteRecursive(dir);
