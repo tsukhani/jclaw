@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Pre-push hook: run the tests a push can break before it leaves the laptop.
 # The backend runs only the test classes the pushed change reaches
-# (bin/select-tests.mjs), and the frontend checks only when a frontend input
-# changed; Jenkins runs the whole suite on every push. Skips the run when the
+# (bin/select-tests.mjs), the frontend checks only when a frontend input
+# changed, and the bin/ scripts' node tests only when a bin/ file changed;
+# Jenkins runs the whole Java suite on every push. Skips the run when the
 # current HEAD has already been tested (so the two-remote deploy flow, origin
 # then github, pays once). Cache lives inside $GIT_DIR so it stays local to this
 # clone and is automatically scoped per worktree.
@@ -138,6 +139,7 @@ fi
 # Without an upstream, node or a working selection, the whole suite runs as before.
 backend_scope=all
 run_frontend=1
+run_bin=1
 if base=$(git rev-parse --verify --quiet "@{u}") && command -v node >/dev/null 2>&1 \
         && selection=$(cd "$repo_root" && node bin/select-tests.mjs --base "$base" --head HEAD); then
     case "$selection" in
@@ -151,6 +153,9 @@ if base=$(git rev-parse --verify --quiet "@{u}") && command -v node >/dev/null 2
     if ! grep -qE '^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)' <<< "$changed"; then
         run_frontend=0
     fi
+    if ! grep -qE '^bin/' <<< "$changed"; then
+        run_bin=0
+    fi
 fi
 case "$backend_scope" in
     all) backend_label="the whole suite" ;;
@@ -159,7 +164,19 @@ case "$backend_scope" in
 esac
 frontend_label=run
 [[ "$run_frontend" == 1 ]] || frontend_label=skipped
-echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label. Jenkins runs everything."
+bin_label=run
+[[ "$run_bin" == 1 ]] || bin_label=skipped
+echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label; bin/ tests: $bin_label. Jenkins runs the Java suite."
+
+# Nothing else runs the bin/ scripts' node tests, the policy guard's among them: not ./jclaw.sh test, not Jenkins.
+# Their git runs in scratch repositories, so git's environment for this repository is cleared first (JF-299).
+if [[ "$run_bin" == 1 ]]; then
+    echo "[jclaw pre-push] Running the bin/ script tests..."
+    if ! (cd "$repo_root" && unset $(git rev-parse --local-env-vars) && node --test bin/*.test.mjs); then
+        echo "[jclaw pre-push] The bin/ script tests failed — push aborted." >&2
+        exit 1
+    fi
+fi
 
 echo "[jclaw pre-push] Testing $current_sha before push..."
 # Git exports GIT_DIR to a hook run in a worktree, and a test that runs git in a scratch directory inherits it:
