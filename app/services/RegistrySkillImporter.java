@@ -45,7 +45,7 @@ public final class RegistrySkillImporter {
     private static final Set<String> RESERVED = Set.of("skill-creator", "jclaw-api");
     /** How many unscanned files a warning names before it counts the rest. */
     private static final int NAMED_FILES = 5;
-    private static final Pattern VARIABLE = Pattern.compile("\\$\\{?[A-Za-z_][A-Za-z0-9_]*+}?");
+    private static final Pattern VARIABLE = Pattern.compile("\\$\\{?([A-Za-z_][A-Za-z0-9_]*+)}?");
 
     private RegistrySkillImporter() {}
 
@@ -263,19 +263,23 @@ public final class RegistrySkillImporter {
      * judged by what it holds and only the rest of the file goes to the redactor.
      */
     private static boolean holdsAKey(String relative, String text) {
-        if (!relative.equals("SKILL.md")) return masksSomething(text);
+        if (!relative.equals("SKILL.md")) return !SecretRedactor.redact(text).equals(text);
         var split = SkillSecrets.splitDeclaration(text);
         var block = split.block();
-        return block != null && SkillSecrets.holdsMoreThanDeclarations(block) || masksSomething(split.rest());
+        if (block == null) return !SecretRedactor.redact(text).equals(text);
+        var names = SkillSecrets.declaredIn(text).stream().map(SkillSecrets.Declared::name).toList();
+        return SkillSecrets.holdsMoreThanDeclarations(block) || masksSomething(split.rest(), names);
     }
 
     /**
-     * Whether the redactor masks anything but a shell variable. A skill sends a secret as {@code $NAME}, which the
-     * redactor masks like any value after {@code X-API-Key:}: a reference to a secret is not one. Each reference is
-     * written as the mask first, so the redactor finds nothing left to change where one stood.
+     * Whether the redactor masks anything but a reference to one of the skill's declared secrets. A skill sends a
+     * secret as {@code $NAME}, which the redactor masks like any value after {@code X-API-Key:}: such a reference is
+     * not a value. Each one is written as the mask first, so the redactor finds nothing left to change where it stood.
      */
-    private static boolean masksSomething(String text) {
-        var probe = VARIABLE.matcher(text).replaceAll(Matcher.quoteReplacement(SecretRedactor.MASK));
+    private static boolean masksSomething(String text, List<String> declaredNames) {
+        var probe = VARIABLE.matcher(text).replaceAll(m -> declaredNames.contains(m.group(1))
+                ? Matcher.quoteReplacement(SecretRedactor.MASK)
+                : Matcher.quoteReplacement(m.group()));
         return !SecretRedactor.redact(probe).equals(probe);
     }
 }

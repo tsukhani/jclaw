@@ -347,29 +347,36 @@ public final class SkillSecrets {
     }
 
     /**
-     * Whether a declaration block's text holds something that is not a declaration (JF-353): a word where the example
-     * host belongs that could not be a host, or anything {@link SecretRedactor} masks once the secret's name is set
-     * aside. Naming a secret is what the block is for, so {@code API_KEY=api.example.com} is no finding, though the
-     * redactor alone would mask it. A comment is judged word by word for the same reason: its prose names secrets
-     * ("one line per secret: NAME=host"), and a pasted key is a single word.
+     * Whether a declaration block's text holds something that is not a declaration (JF-353): a name or a word where
+     * the example host belongs that looks like a key, or anything {@link SecretRedactor} masks in a comment, a
+     * description or a line that declares nothing. Only the {@code NAME=} that starts a declaration is set aside:
+     * naming a secret is what the block is for, so {@code API_KEY=api.example.com} is no finding, though the redactor
+     * alone would mask it.
      */
     public static boolean holdsMoreThanDeclarations(String text) {
         for (var line : text.split("\\R")) {
             if (line.isBlank()) continue;
             var m = DECLARATION.matcher(line);
-            if (line.stripLeading().startsWith("#")) {
-                if (anyWordMasked(line)) return true;
+            if (line.stripLeading().startsWith("#") || !m.matches()) {
+                if (masked(line.strip().replaceFirst("^#+", ""))) return true;
                 continue;
             }
-            if (!m.matches()) {
-                if (masked(line)) return true;
-                continue;
-            }
+            if (masked(m.group(1)) || looksRandom(m.group(1).split("_"))) return true;
             for (var example : m.group(2).split("[,\\s]+")) {
                 if (example.isBlank()) continue;
                 if (!isPlausibleExampleHost(example) || masked(example)) return true;
             }
-            if (m.group(3) != null && anyWordMasked(m.group(3))) return true;
+            if (m.group(3) != null && masked(m.group(3))) return true;
+        }
+        return false;
+    }
+
+    /** A part longer than 24 characters that mixes letters and digits reads as a key, not a word or a label. */
+    private static boolean looksRandom(String[] parts) {
+        for (var part : parts) {
+            if (part.length() > 24 && part.chars().anyMatch(Character::isLetter) && part.chars().anyMatch(Character::isDigit)) {
+                return true;
+            }
         }
         return false;
     }
@@ -385,26 +392,13 @@ public final class SkillSecrets {
         } catch (Refused _) {
             return false;
         }
-        if (!host.contains(".") && !host.startsWith("localhost")) return false;
-        for (var label : host.split("[.:]")) {
-            if (label.length() > 24 && label.chars().anyMatch(Character::isLetter)
-                    && label.chars().anyMatch(Character::isDigit)) {
-                return false;
-            }
-        }
-        return true;
+        return (host.contains(".") || host.startsWith("localhost")) && !looksRandom(host.split("[.:]"));
     }
 
     private static boolean masked(String text) {
         return !SecretRedactor.redact(text).equals(text);
     }
 
-    private static boolean anyWordMasked(String text) {
-        for (var word : text.split("\\s+")) {
-            if (masked(word)) return true;
-        }
-        return false;
-    }
 
     /** Why {@code name} cannot name a secret, or null when it can. */
     private static @Nullable String nameRejection(String name) {

@@ -1701,6 +1701,23 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals("[\"SKILL.md\"]", body.get("flaggedFiles").toString());
     }
 
+    /** Only a declared secret's reference is not a value: an undeclared variable after a key header is judged as usual. */
+    @Test
+    void anUploadIsFlaggedForAKeyHeaderThatNamesNoDeclaredSecret() throws Exception {
+        login();
+        var skillMd = "---\nname: weather\ndescription: Tells the weather.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Weather\n\n"
+                + "## Secrets\n\n```secrets\nWEATHER_API_KEY=api.example.com   # The service's API key\n```\n\n"
+                + "```bash\ncurl -s -H \"X-API-Key: $OTHER_KEY\" \"https://api.example.com/v1/today\"\n```\n";
+        var upload = zipFile("weather/SKILL.md", skillMd);
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[\"SKILL.md\"]", body.get("flaggedFiles").toString());
+    }
+
     @Test
     void anUploadIsFlaggedWhenItsSecretsBlockHoldsAValue() throws Exception {
         login();

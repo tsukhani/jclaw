@@ -444,15 +444,22 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         return java.util.Objects.requireNonNull(SkillLoader.splitFrontmatter(promoted).body()).strip();
     }
 
-    private void assertDeclaresTheWeatherKey(String description) {
-        assertEquals(java.util.List.of(new SkillSecrets.Declared("WEATHER_API_KEY", description,
-                        java.util.List.of("api.example-weather.com"), false)),
-                SkillSecrets.declared(promotedGlobal.resolve("weather")));
+    private List<SkillSecrets.Declared> promotedDeclarations() {
+        return SkillSecrets.declared(promotedGlobal.resolve("weather"));
     }
 
-    /** The reviewer reads NAME=host as a key assignment; masked, the promoted skill would declare nothing. */
     @Test
-    void promotionRestoresTheNameAndHostTheReviewerMasked() throws Exception {
+    void aBlockTheReviewerLeftAloneIsPromotedAsItWas() throws Exception {
+        var body = promotedBody(WEATHER, KEPT_BODY);
+
+        assertEquals(KEPT_BODY.strip(), body);
+        assertEquals(List.of(new SkillSecrets.Declared("WEATHER_API_KEY", "The API key",
+                List.of("api.example-weather.com"), false)), promotedDeclarations());
+    }
+
+    /** What the reviewer masked stays masked, the host included; the name it kept still declares the secret. */
+    @Test
+    void aHostTheReviewerMaskedIsNotRestored() throws Exception {
         var body = promotedBody(WEATHER, """
                 # Weather
 
@@ -465,13 +472,23 @@ class SkillLlmMockedPipelineTest extends UnitTest {
                 Ask [EMAIL] for an account.
                 """);
 
-        assertEquals(KEPT_BODY.strip(), body, "the reviewer's other redactions stand; the name and host are restored");
-        assertDeclaresTheWeatherKey("The API key");
+        assertEquals("""
+                # Weather
+
+                ## Secrets
+
+                ```secrets
+                WEATHER_API_KEY=   # The API key
+                ```
+
+                Ask [EMAIL] for an account.""", body);
+        assertEquals(List.of(new SkillSecrets.Declared("WEATHER_API_KEY", "The API key", List.of(), false)),
+                promotedDeclarations());
     }
 
-    /** Free text in the block is the reviewer's: only the name and the validated host come from the original. */
+    /** The block is written from parsed declarations: comment lines, unparsed lines and fence text do not survive. */
     @Test
-    void theRestoredBlockHoldsOnlyNamesHostsAndTheReviewersDescriptions() throws Exception {
+    void theRebuiltBlockHoldsOnlyWhatTheReviewerKeptAsDeclarations() throws Exception {
         var body = promotedBody("""
                 ---
                 name: weather
@@ -489,7 +506,7 @@ class SkillLlmMockedPipelineTest extends UnitTest {
 
                 ```secrets   anything after the language
                 # Ask [EMAIL] before you add these.
-                WEATHER_API_KEY=[API_KEY]   # The API key; [EMAIL] has it
+                WEATHER_API_KEY=api.example-weather.com   # The API key; [EMAIL] has it
                 not a declaration
                 ```
                 """);
@@ -500,30 +517,36 @@ class SkillLlmMockedPipelineTest extends UnitTest {
                 ```secrets
                 WEATHER_API_KEY=api.example-weather.com   # The API key; [EMAIL] has it
                 ```""", body);
-        assertDeclaresTheWeatherKey("The API key; [EMAIL] has it");
     }
 
     @Test
-    void promotionAppendsTheSecretsBlockTheReviewerDropped() throws Exception {
-        var body = promotedBody(WEATHER, """
+    void aDeclarationWhoseNameTheReviewerChangedIsGone() throws Exception {
+        var reviewed = """
                 # Weather
-
-                ## Secrets
-
-                Ask [EMAIL] for an account.
-                """);
-
-        assertEquals("""
-                # Weather
-
-                ## Secrets
-
-                Ask [EMAIL] for an account.
 
                 ```secrets
-                WEATHER_API_KEY=api.example-weather.com
-                ```""", body, "the description went with the reviewer's block; the name and host did not");
-        assertDeclaresTheWeatherKey("");
+                [API_KEY]=[API_KEY]   # The API key
+                ```
+                """;
+        var body = promotedBody(WEATHER, reviewed);
+
+        assertEquals(reviewed.strip(), body, "nothing is rebuilt from a name the reviewer did not keep");
+        assertEquals(List.of(), promotedDeclarations());
+    }
+
+    @Test
+    void aBlockTheReviewerDroppedStaysDropped() throws Exception {
+        var reviewed = """
+                # Weather
+
+                ## Secrets
+
+                Ask [EMAIL] for an account.
+                """;
+        var body = promotedBody(WEATHER, reviewed);
+
+        assertEquals(reviewed.strip(), body);
+        assertEquals(List.of(), promotedDeclarations());
     }
 
     @Test
@@ -544,11 +567,9 @@ class SkillLlmMockedPipelineTest extends UnitTest {
 
         assertEquals("""
                 ```secrets
-                PROXY_PASS=proxy.example-weather.com   # Optional
+                PROXY_PASS=   # Optional
                 ```""", body);
-        assertEquals(java.util.List.of(new SkillSecrets.Declared("PROXY_PASS", "Optional",
-                        java.util.List.of("proxy.example-weather.com"), true)),
-                SkillSecrets.declared(promotedGlobal.resolve("weather")));
+        assertEquals(List.of(new SkillSecrets.Declared("PROXY_PASS", "Optional", List.of(), true)), promotedDeclarations());
     }
 
     /** A block that holds a pasted key is not restored: the reviewer masks it like any other. */

@@ -400,9 +400,9 @@ public class SkillPromotionService {
     }
 
     /**
-     * The secrets a SKILL.md declares, read before the sanitizer sees the file (JF-353). Its lines read as key
-     * assignments, so the sanitizer may mask them, and the promoted skill would declare nothing and look runnable. A
-     * block that holds anything but declarations gets no such help: what the sanitizer returns for it stands.
+     * The secrets a SKILL.md declares, read before the sanitizer sees the file (JF-353), for whether each was optional:
+     * the sanitizer may rewrite a declaration's line and its description with it. A block that holds anything but
+     * declarations gets no such help: what the sanitizer returns for it stands.
      */
     private static @Nullable List<SkillSecrets.Declared> declarationsToRestore(LinkedHashMap<String, String> textFiles) {
         var body = textFiles.get(SKILL_FILE_NAME);
@@ -414,25 +414,26 @@ public class SkillPromotionService {
     }
 
     /**
-     * Rewrite the sanitized SKILL.md's secrets block from the names and example hosts read before it was sanitized,
-     * which {@link SkillSecrets} validated, and the descriptions the sanitizer returned, which are free text. Nothing
-     * else in the original block comes back. The block replaces the one the sanitizer returned, or is appended when it
-     * dropped it.
+     * Rewrite the sanitized SKILL.md's secrets block in the form the panel reads, from what the sanitizer returned:
+     * each declaration it kept by name, with its hosts and description, and nothing else. Nothing the sanitizer
+     * masked comes back, name or host; only whether the original marked a secret optional does. A declaration whose
+     * name the sanitizer changed is gone, and a block it dropped stays dropped.
      */
     private static void restoreDeclaration(@Nullable List<SkillSecrets.Declared> declared,
                                            LinkedHashMap<String, String> sanitized) {
         var body = declared == null ? null : sanitized.get(SKILL_FILE_NAME);
         if (declared == null || body == null) return;
-        var reviewed = new HashMap<String, String>();
-        for (var d : SkillSecrets.declaredIn(body)) reviewed.put(d.name(), d.description());
+        var reviewed = new HashMap<String, SkillSecrets.Declared>();
+        for (var d : SkillSecrets.declaredIn(body)) reviewed.put(d.name(), d);
         var rebuilt = new ArrayList<SkillSecrets.Declared>();
         for (var d : declared) {
-            var description = SkillSecrets.keepOptional(reviewed.getOrDefault(d.name(), ""), d.optional());
-            rebuilt.add(new SkillSecrets.Declared(d.name(), description, d.exampleHosts(), d.optional()));
+            var kept = reviewed.get(d.name());
+            if (kept == null) continue;
+            rebuilt.add(new SkillSecrets.Declared(kept.name(), SkillSecrets.keepOptional(kept.description(), d.optional()),
+                    kept.exampleHosts(), d.optional()));
         }
-        var block = SkillSecrets.declarationBlock(rebuilt);
-        var lifted = SkillSecrets.liftDeclaration(body, block);
-        sanitized.put(SKILL_FILE_NAME, lifted != null ? lifted.text() : body.stripTrailing() + "\n\n" + block + "\n");
+        var lifted = rebuilt.isEmpty() ? null : SkillSecrets.liftDeclaration(body, SkillSecrets.declarationBlock(rebuilt));
+        if (lifted != null) sanitized.put(SKILL_FILE_NAME, lifted.text());
     }
 
     private static void reinjectFrontmatter(SkillLoader.@Nullable FrontmatterSplit originalSplit,

@@ -83,7 +83,7 @@ class SkillSecretsDeclarationTest extends UnitTest {
     @Test
     void aBlockThatOnlyDeclaresHoldsNothingElse() {
         assertEquals(false, found("""
-                # No value goes in this block. One line per secret:  NAME=example-host   # what it is
+                # Each line names one secret and an example host. No value goes here.
 
                 GAMMA_API_KEY=public-api.gamma.app          # A Gamma API key (starts with sk-gamma-), from Settings
                 export NAS_PASS=nas.example.com:5001, backup.example.com   # The DSM account's password itself
@@ -124,6 +124,15 @@ class SkillSecretsDeclarationTest extends UnitTest {
         assertEquals(true, found("GITHUB_KEY=api.github.com   # for example ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"));
         assertEquals(true, found("# the old key was sk-live-4f3c2a1b9e8d7c6b5a4f3c2a\nAPI_KEY=api.example.com\n"));
         assertEquals(true, found("password: hunter2hunter2\n"));
+        assertEquals(true, found("# password: hunter2hunter2\nAPI_KEY=api.example.com\n"), "a comment is judged whole");
+        assertEquals(true, found("API_KEY=api.example.com   # password: hunter2hunter2\n"), "so is a description");
+    }
+
+    @Test
+    void aKeyWrittenAsTheNameIsFound() {
+        assertEquals(true, found("AKIAIOSFODNN7EXAMPLE=api.example.com   # an AWS key id is a valid name\n"));
+        assertEquals(true, found("K9F3A7B2C8D1E6F0A4B5C3D2E1F0=api.example.com\n"));
+        assertEquals(false, found("A_VERY_LONG_BUT_PLAIN_SECRET_NAME_FOR_THE_SERVICE=api.example.com\n"));
     }
 
     /**
