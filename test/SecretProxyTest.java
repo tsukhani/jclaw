@@ -186,6 +186,41 @@ class SecretProxyTest extends UnitTest {
         assertEquals(List.of(), stub.received);
     }
 
+    /** A tunnel to {@code tunnelHost} opened with the grant's login, {@code head} sent raw inside it, and the reply. */
+    private String throughTunnel(String tunnelHost, String head) throws Exception {
+        var proxyUrl = java.net.URI.create(grant.environment().get("HTTPS_PROXY"));
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), SecretProxy.portForTest())) {
+            socket.setSoTimeout(30_000);
+            socket.getOutputStream().write(("CONNECT " + tunnelHost + ":" + stub.port() + " HTTP/1.1\r\n"
+                    + "Proxy-Authorization: Basic "
+                    + Base64.getEncoder().encodeToString(proxyUrl.getUserInfo().getBytes(StandardCharsets.UTF_8))
+                    + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            assertEquals("HTTP/1.1 200 Connection established", readLine(socket.getInputStream()));
+            readLine(socket.getInputStream());
+            var tls = (SSLSocket) trustingJclaw().createSocket(socket, tunnelHost, stub.port(), true);
+            tls.startHandshake();
+            tls.getOutputStream().write(head.getBytes(StandardCharsets.US_ASCII));
+            return new String(tls.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void aRequestTargetThatIsNotAPathIsRefusedBeforeAnySecretIsWritten() throws Exception {
+        var bound = SecretProxyFixture.BOUND + ":" + stub.port();
+        var other = SecretProxyFixture.OTHER + ":" + stub.port();
+        var wrong = new java.util.ArrayList<String>();
+        for (var target : List.of("@" + other + "/echo?k=" + placeholder, ".evil.test/echo?k=" + placeholder,
+                "https://" + other + "/echo?k=" + placeholder, "*")) {
+            var reply = throughTunnel(SecretProxyFixture.BOUND, "GET " + target + " HTTP/1.1\r\nHost: " + bound + "\r\n\r\n");
+            if (!reply.startsWith("HTTP/1.1 403 Forbidden\r\n")
+                    || !reply.endsWith("\r\n\r\nJClaw refused this request: its request target is not a path.\n")) {
+                wrong.add(target + " -> " + reply.lines().findFirst().orElse("(no reply)"));
+            }
+        }
+        assertEquals(List.of(), wrong);
+        assertEquals(List.of(), stub.received);
+    }
+
     private static SSLSocketFactory trustingJclaw() throws Exception {
         var store = java.security.KeyStore.getInstance("PKCS12");
         store.load(null, null);

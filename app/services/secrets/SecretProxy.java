@@ -1,6 +1,7 @@
 package services.secrets;
 
 import okhttp3.Headers;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -53,6 +54,7 @@ public final class SecretProxy {
     private static final int COPY_BUFFER = 16_384;
     /** A body up to this size is rewritten whole and sent with its length; a longer one streams, chunked. */
     static final int BUFFERED_BODY_LIMIT = 1 << 20;
+    private static final String NOT_A_PATH = "its request target is not a path";
     private static final Pattern AUTHORITY = Pattern.compile("([A-Za-z0-9.-]+):(\\d{1,5})");
     private static final Set<String> NOT_FORWARDED = Set.of("connection", "keep-alive", "proxy-authenticate",
             "proxy-authorization", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade", "host",
@@ -181,6 +183,12 @@ public final class SecretProxy {
             refuse(out, grant, "its Host header names %s but its tunnel goes to %s".formatted(hostHeader, host));
             return;
         }
+        // An origin-form target is the only kind a tunnel carries: "@other/..." or ".other/..." after the authority
+        // would name another host, and the secret would be written for this one.
+        if (!head.target().startsWith("/")) {
+            refuse(out, grant, NOT_A_PATH);
+            return;
+        }
         if (head.header("upgrade") != null) {
             reply(out, 501, "Not Implemented", "JClaw's secrets proxy does not carry protocol upgrades.");
             return;
@@ -212,7 +220,8 @@ public final class SecretProxy {
             out.flush();
         }
         var body = body(grant, host, port, head, in, contentType);
-        var url = "https://" + (port == 443 ? host : host + ":" + port) + text(target);
+        var url = upstreamUrl(host, port, text(target));
+        if (url == null) throw new PlaceholderRewriter.Refused(NOT_A_PATH);
         var request = new Request.Builder().url(url).headers(headers.build()).method(head.method(), body).build();
         var bound = grant.upstream();
         var client = bound != null ? bound : upstreamClient();
@@ -288,6 +297,26 @@ public final class SecretProxy {
         return HttpFactories.general().newBuilder().followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).callTimeout(Duration.ZERO).readTimeout(Duration.ofMinutes(5))
                 .writeTimeout(Duration.ofMinutes(5)).build();
+    }
+
+    /**
+     * {@code target} on the tunnel's own host and port, built rather than concatenated, or null when the result would
+     * name any other host, port or login.
+     */
+    private static @Nullable HttpUrl upstreamUrl(String host, int port, String target) {
+        int query = target.indexOf('?');
+        HttpUrl url;
+        try {
+            var builder = new HttpUrl.Builder().scheme("https").host(host).port(port)
+                    .encodedPath(query < 0 ? target : target.substring(0, query));
+            if (query >= 0) builder.encodedQuery(target.substring(query + 1));
+            url = builder.build();
+        } catch (IllegalArgumentException _) {
+            return null;
+        }
+        boolean same = url.host().equals(host) && url.port() == port && url.username().isEmpty()
+                && url.password().isEmpty();
+        return same ? url : null;
     }
 
     private static boolean needsBody(String method) {
