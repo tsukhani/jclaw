@@ -1,3 +1,4 @@
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -6,12 +7,16 @@ import services.RestartService;
 import utils.AppClock;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Covers what a restart WOULD run. The spawn itself is never exercised — this
@@ -24,9 +29,127 @@ class RestartServiceTest extends UnitTest {
     private static final Duration HOLD = Duration.ofMinutes(2);
 
     @AfterEach
-    void clearSeam() {
+    void clearSeam() throws IOException {
         RestartService.spawnerForTest = null;
         RestartService.resetHandOffForTest();
+        deleteRecursively(RestartService.requestFile());
+    }
+
+    @Test
+    void aFailedLaunchLeavesNoRecord() {
+        RestartService.spawnerForTest = plan -> {
+            throw new IllegalStateException("the helper did not start");
+        };
+
+        assertThrows(IllegalStateException.class, () -> RestartService.requestRestart("agent main", 42L));
+
+        assertNull(taken(), "JClaw stays up, so no later boot tells the conversation about a restart that never ran");
+    }
+
+    @Test
+    void aRestartRefusedInsideAnotherAskersHoldKeepsThatAskersRecord() throws Exception {
+        RestartService.spawnerForTest = plan -> { };
+        RestartService.requestRestart("agent main", 7L);
+
+        assertThrows(IllegalStateException.class, () -> RestartService.requestRestart("agent main", 42L));
+
+        var kept = taken();
+        assertEquals(7L, kept == null ? null : kept.conversationId());
+    }
+
+    @Test
+    void aRecordThatCannotBeWrittenDoesNotStopTheRestart() throws Exception {
+        // A directory where the record goes, with a file in it, so neither writing nor clearing it can succeed.
+        Files.createDirectories(RestartService.requestFile());
+        Files.writeString(RestartService.requestFile().resolve("blocker"), "x");
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        var events = EventLogger.captureForTest(() -> {
+            try {
+                RestartService.requestRestart("agent main", 42L);
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertEquals(1, captured.size(), "the restart goes ahead");
+        assertEquals(List.of("WARN The record of who asked for the restart could not be written, so nobody will be "
+                        + "told JClaw is back", "WARN Restarting at the request of agent main — handing off to jclaw.sh"),
+                events.stream().filter(e -> "restart".equals(e.category()) && "WARN".equals(e.level()))
+                        .map(e -> e.level() + " " + e.message()).toList());
+    }
+
+    @Test
+    void aRecordMissingAFieldIsDroppedAndLogged() throws Exception {
+        Files.createDirectories(RestartService.requestFile().getParent());
+        Files.writeString(RestartService.requestFile(), "{\"conversationId\":42}");
+        var taken = new AtomicReference<RestartService.RestartRequest>();
+
+        var events = EventLogger.captureForTest(() -> taken.set(taken()));
+
+        assertNull(taken.get());
+        assertFalse(Files.exists(RestartService.requestFile()));
+        assertEquals(List.of("WARN The record of who asked for the restart could not be read, so nobody is told "
+                        + "JClaw is back"),
+                events.stream().filter(e -> "restart".equals(e.category())).map(e -> e.level() + " " + e.message()).toList());
+    }
+
+    @Test
+    void aRecordFromThisRunsOwnStartIsLeftForTheBootItBelongsTo() throws Exception {
+        RestartService.spawnerForTest = plan -> { };
+        at(HANDED_OFF, () -> RestartService.requestRestart("agent main", 42L));
+
+        assertNull(RestartService.takeRequestBefore(HANDED_OFF), "a dev-mode reload of this run must not consume it");
+        assertTrue(Files.exists(RestartService.requestFile()));
+        assertEquals(new RestartService.RestartRequest(42L, HANDED_OFF),
+                RestartService.takeRequestBefore(HANDED_OFF.plusMillis(1)));
+    }
+
+    @Test
+    void aRestartAskedForFromAConversationIsRecordedOnceForTheNextBoot() throws Exception {
+        RestartService.spawnerForTest = plan -> { };
+
+        at(HANDED_OFF, () -> RestartService.requestRestart("agent main", 42L));
+
+        assertEquals(new RestartService.RestartRequest(42L, HANDED_OFF), taken());
+        assertNull(taken(), "the record is deleted as it is read, so a second boot tells nobody");
+    }
+
+    @Test
+    void aHandOffNoConversationAskedForClearsAnEarlierRecord() throws Exception {
+        RestartService.spawnerForTest = plan -> { };
+        RestartService.requestRestart("agent main", 42L);
+        RestartService.resetHandOffForTest();
+
+        RestartService.requestMaintenance("repair", List.of("--yes"));
+
+        assertNull(taken());
+    }
+
+    @Test
+    void aRefusedHandOffRecordsNothing() throws Exception {
+        RestartService.spawnerForTest = plan -> { };
+        RestartService.requestRestart("the operator", null);
+
+        assertThrows(IllegalStateException.class, () -> RestartService.requestRestart("agent main", 42L));
+
+        assertNull(taken(), "the restart under way was the operator's");
+    }
+
+    @Test
+    void anUnreadableRecordIsDroppedAndLogged() throws Exception {
+        Files.createDirectories(RestartService.requestFile().getParent());
+        Files.writeString(RestartService.requestFile(), "not json");
+        var taken = new AtomicReference<RestartService.RestartRequest>();
+
+        var events = EventLogger.captureForTest(() -> taken.set(taken()));
+
+        assertNull(taken.get());
+        assertFalse(Files.exists(RestartService.requestFile()));
+        assertEquals(List.of("WARN The record of who asked for the restart could not be read, so nobody is told "
+                        + "JClaw is back"),
+                events.stream().filter(e -> "restart".equals(e.category())).map(e -> e.level() + " " + e.message()).toList());
     }
 
     @Test
@@ -43,9 +166,9 @@ class RestartServiceTest extends UnitTest {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;
 
-        at(HANDED_OFF, () -> RestartService.requestRestart("the operator"));
+        at(HANDED_OFF, () -> RestartService.requestRestart("the operator", null));
         var refused = assertThrows(IllegalStateException.class,
-                () -> at(HANDED_OFF.plus(HOLD).minusSeconds(1), () -> RestartService.requestRestart("agent main")));
+                () -> at(HANDED_OFF.plus(HOLD).minusSeconds(1), () -> RestartService.requestRestart("agent main", null)));
 
         assertEquals("A restart is already under way: JClaw is about to stop.", refused.getMessage());
         assertEquals(1, captured.size());
@@ -56,8 +179,8 @@ class RestartServiceTest extends UnitTest {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;
 
-        at(HANDED_OFF, () -> RestartService.requestRestart("the operator"));
-        at(HANDED_OFF.plus(HOLD), () -> RestartService.requestRestart("the operator"));
+        at(HANDED_OFF, () -> RestartService.requestRestart("the operator", null));
+        at(HANDED_OFF.plus(HOLD), () -> RestartService.requestRestart("the operator", null));
 
         assertEquals(2, captured.size(), "a helper that died before stopping JClaw no longer blocks the next restart");
     }
@@ -69,7 +192,7 @@ class RestartServiceTest extends UnitTest {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;
 
-        RestartService.requestRestart("the operator");
+        RestartService.requestRestart("the operator", null);
 
         assertEquals(1, captured.size());
     }
@@ -80,7 +203,7 @@ class RestartServiceTest extends UnitTest {
 
         var events = EventLogger.captureForTest(() -> {
             try {
-                RestartService.requestRestart("agent main");
+                RestartService.requestRestart("agent main", null);
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
@@ -95,15 +218,29 @@ class RestartServiceTest extends UnitTest {
     @Test
     void aProdRestartTellsTheCallerToReadTheProgressOnceJClawIsBack() {
         assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
-                        + "JClaw is back, GET /api/system/restart/progress reports how the restart went.",
+                        + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
+                        + "for.\", and GET /api/system/restart/progress reports how the restart went.",
                 RestartService.planFor("/opt/jclaw/jclaw.sh", false, false).restartNote());
     }
 
     @Test
     void aDevRestartSaysItRecordsNoProgress() {
-        assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
-                        + "dev-mode restart records no progress: JClaw answering again is the sign it is back.",
+        assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                        + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
+                        + "for.\" A dev-mode restart records no progress.",
                 RestartService.planFor("/opt/jclaw/jclaw.sh", true, true).restartNote());
+    }
+
+    /** The record as any later boot would take it. */
+    private static RestartService.@Nullable RestartRequest taken() {
+        return RestartService.takeRequestBefore(Instant.MAX);
+    }
+
+    private static void deleteRecursively(Path path) throws IOException {
+        if (!Files.exists(path)) return;
+        try (var walk = Files.walk(path)) {
+            for (var p : walk.sorted(Comparator.reverseOrder()).toList()) Files.delete(p);
+        }
     }
 
     private static <R> R at(Instant instant, ScopedValue.CallableOp<R, Exception> op) throws Exception {
@@ -166,7 +303,7 @@ class RestartServiceTest extends UnitTest {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;
 
-        var returned = RestartService.requestRestart("the operator");
+        var returned = RestartService.requestRestart("the operator", null);
 
         assertEquals(1, captured.size());
         assertEquals(returned.command(), captured.getFirst().command());

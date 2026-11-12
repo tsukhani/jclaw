@@ -75,6 +75,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     @AfterEach
     void clearRestartStatus() throws IOException {
         Files.deleteIfExists(RestartService.statusFile());
+        Files.deleteIfExists(RestartService.requestFile());
     }
 
     @AfterEach
@@ -129,7 +130,10 @@ class ApiSystemControllerTest extends FunctionalTest {
     // --- Restart ---
 
     @Test
-    void restartAcksWith202AndHandsOffExactlyOnce() {
+    void restartAcksWith202AndHandsOffExactlyOnce() throws IOException {
+        // An earlier asker's record, which the operator's restart must clear.
+        Files.createDirectories(RestartService.requestFile().getParent());
+        Files.writeString(RestartService.requestFile(), "{\"conversationId\":7,\"requestedAt\":0}");
         login();
         var response = POST("/api/system/restart", "application/json", "{}");
 
@@ -143,6 +147,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(expectedNote(body.get("mode").getAsString()), body.get("note").getAsString());
         assertEquals(1, spawned.size());
         assertTrue(spawned.getFirst().command().contains("restart"));
+        assertFalse(Files.exists(RestartService.requestFile()), "the operator's restart has no asking conversation");
     }
 
     // --- AOT cache switch ---
@@ -324,6 +329,9 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(1, spawned.size(), "main's request hands the plan to the restart helper once");
         var body = json(resp);
         assertEquals(expectedNote(body.get("mode").getAsString()), body.get("note").getAsString());
+        var asked = RestartService.takeRequestBefore(Instant.MAX);
+        assertEquals(main.conversationId(), asked == null ? null : asked.conversationId(),
+                "the next boot tells the conversation that asked");
     }
 
     @Test
@@ -686,10 +694,12 @@ class ApiSystemControllerTest extends FunctionalTest {
     /** The 202's note for the plan's mode: this test JVM's own mode decides which one a run reaches. */
     private static String expectedNote(String mode) {
         return "DEV".equals(mode)
-                ? "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
-                        + "dev-mode restart records no progress: JClaw answering again is the sign it is back."
+                ? "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                        + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
+                        + "for.\" A dev-mode restart records no progress."
                 : "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
-                        + "JClaw is back, GET /api/system/restart/progress reports how the restart went.";
+                        + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
+                        + "for.\", and GET /api/system/restart/progress reports how the restart went.";
     }
 
     private record MainAndConversation(Long agentId, Long conversationId) {}

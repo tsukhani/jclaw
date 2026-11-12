@@ -350,6 +350,7 @@ public final class UpgradeService {
             return plan;
         }
 
+        RestartService.clearRequest();
         EventLogger.warn(CATEGORY, "Upgrading on operator request — handing off to jclaw.sh",
                 String.join(" ", plan.command()));
         spawn(plan);

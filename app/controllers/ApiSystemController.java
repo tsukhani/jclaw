@@ -130,8 +130,9 @@ public class ApiSystemController extends Controller {
     public static void restart() {
         RequestPrincipal.requireOperatorOrMain(RESTART);
         var caller = RequestPrincipal.callingAgent();
+        var askingConversationId = RequestPrincipal.callerConversationId();
         // A task fire runs on an unsaved conversation, so main's call from one names none.
-        if (caller != null && RequestPrincipal.callerConversationId() == null) {
+        if (caller != null && askingConversationId == null) {
             ApiResponses.error(409, ApiResponses.CONFLICT, TASK_FIRE_REFUSAL);
             return;
         }
@@ -140,7 +141,8 @@ public class ApiSystemController extends Controller {
         // the catch-all would swallow its own 202 and answer 500 instead.
         RestartService.Plan plan;
         try {
-            plan = RestartService.requestRestart(caller == null ? "the operator" : "agent " + caller.name);
+            plan = RestartService.requestRestart(caller == null ? "the operator" : "agent " + caller.name,
+                    askingConversationId);
         } catch (IllegalStateException e) {
             // No jclaw.sh, a hand-off already under way, or a test without the stub: the app is
             // still up, so this is a plain refusal rather than a half-completed reboot.

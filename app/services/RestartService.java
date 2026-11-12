@@ -1,5 +1,7 @@
 package services;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import mcp.McpConnectionManager;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
@@ -55,7 +57,7 @@ public final class RestartService {
     static final String RESTART_LOG = "logs/restart.log";
 
     /**
-     * Test seam: when non-null, {@link #requestRestart(String)} and {@link #requestMaintenance} hand the
+     * Test seam: when non-null, {@link #requestRestart(String, Long)} and {@link #requestMaintenance} hand the
      * plan here instead of spawning it. Lets tests assert the composed command without rebooting the test
      * JVM.
      */
@@ -97,11 +99,11 @@ public final class RestartService {
          * {@code none} after it.
          */
         public String restartNote() {
+            var back = "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                    + "JClaw is back, the conversation that asked gets \"" + InboundRecoverySweep.RESTART_BACK_NOTE + "\"";
             return "DEV".equals(mode)
-                    ? "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
-                            + "dev-mode restart records no progress: JClaw answering again is the sign it is back."
-                    : "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
-                            + "JClaw is back, GET /api/system/restart/progress reports how the restart went.";
+                    ? back + " A dev-mode restart records no progress."
+                    : back + ", and GET /api/system/restart/progress reports how the restart went.";
         }
     }
 
@@ -115,7 +117,7 @@ public final class RestartService {
     /**
      * Why this instance cannot restart itself, or null when it can. Single
      * source for both the preflight's {@code available} flag and
-     * {@link #requestRestart(String)}'s pre-spawn guard, so the UI never offers a
+     * {@link #requestRestart(String, Long)}'s pre-spawn guard, so the UI never offers a
      * button that the POST would refuse.
      */
     public static @Nullable String unavailableReason() {
@@ -192,6 +194,7 @@ public final class RestartService {
      * seconds later.
      *
      * @param requestedBy who asked, named in the WARN line the old JVM writes last
+     * @param askingConversationId the conversation whose turn asked, told once JClaw is back; null for the operator
      * @return the plan that was launched
      * @throws IllegalStateException if {@code jclaw.sh} is missing or not
      *         executable, checked <em>before</em> anything is spawned so a
@@ -199,7 +202,7 @@ public final class RestartService {
      *         hand-off is under way; or in test mode without {@link #spawnerForTest}
      * @throws IOException if the helper process cannot be started
      */
-    public static Plan requestRestart(String requestedBy) throws IOException {
+    public static Plan requestRestart(String requestedBy, @Nullable Long askingConversationId) throws IOException {
         var unavailable = unavailableReason();
         if (unavailable != null) {
             throw new IllegalStateException("Cannot restart: " + unavailable);
@@ -208,7 +211,8 @@ public final class RestartService {
         // WARN, not INFO: this is the last line the old JVM writes before it is
         // taken down, and it is the anchor an operator looks for when working
         // out why the instance went away.
-        return handOff(plan(), "Restarting at the request of " + requestedBy + " — handing off to jclaw.sh");
+        return handOff(plan(), "Restarting at the request of " + requestedBy + " — handing off to jclaw.sh",
+                askingConversationId);
     }
 
     /**
@@ -222,10 +226,10 @@ public final class RestartService {
         }
         var plan = planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(),
                 subcommand, extraArgs);
-        return handOff(plan, "Handing off to jclaw.sh " + subcommand);
+        return handOff(plan, "Handing off to jclaw.sh " + subcommand, null);
     }
 
-    private static Plan handOff(Plan plan, String warning) throws IOException {
+    private static Plan handOff(Plan plan, String warning, @Nullable Long askingConversationId) throws IOException {
         claimHandOff();
         try {
             var spawner = spawnerForTest;
@@ -233,6 +237,7 @@ public final class RestartService {
                 // A test that forgot the stub would launch the real helper against this checkout.
                 throw new IllegalStateException(TEST_MODE_REFUSAL);
             }
+            recordRequest(askingConversationId);
             EventLogger.warn(CATEGORY, warning, String.join(" ", plan.command()));
             if (spawner != null) {
                 spawner.accept(plan);
@@ -242,7 +247,40 @@ public final class RestartService {
             return plan;
         } catch (RuntimeException | IOException e) {
             releaseHandOff();
+            if (askingConversationId != null) clearRequest();
             throw e;
+        }
+    }
+
+    /**
+     * Written before the helper is spawned, since nothing of this JVM runs after. A hand-off no conversation asked
+     * for clears it, as {@code UpgradeService}'s does; past that, only the sweep's window guards against a stale one.
+     * Best effort: a restart is never refused for the notice's sake.
+     */
+    private static void recordRequest(@Nullable Long askingConversationId) {
+        if (askingConversationId == null) {
+            clearRequest();
+            return;
+        }
+        var json = new JsonObject();
+        json.addProperty("conversationId", askingConversationId);
+        json.addProperty("requestedAt", AppClock.now().toEpochMilli());
+        var file = requestFile();
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, json.toString());
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "The record of who asked for the restart could not be written, so nobody will "
+                    + "be told JClaw is back", e.toString());
+        }
+    }
+
+    /** Removes an earlier asker's record, so the next boot does not tell it about a restart it did not ask for. */
+    public static void clearRequest() {
+        try {
+            Files.deleteIfExists(requestFile());
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "An earlier record of who asked for a restart could not be cleared", e.toString());
         }
     }
 
@@ -256,6 +294,53 @@ public final class RestartService {
 
     private static synchronized void releaseHandOff() {
         handedOffAt = null;
+    }
+
+    /** The conversation whose turn asked for the restart, and when: what the next boot tells "JClaw is back". */
+    public record RestartRequest(long conversationId, Instant requestedAt) {}
+
+    static final String REQUEST_FILE = "logs/restart-request.json";
+
+    /** {@link #REQUEST_FILE}; the autotest server, which shares the checkout, keeps its own. */
+    public static Path requestFile() {
+        return restartFile("restart-request.json");
+    }
+
+    /** Under {@code logs/}, or {@code logs/restart-test/} for the autotest server, which shares the checkout. */
+    private static Path restartFile(String name) {
+        var root = Play.applicationPath.toPath();
+        return Play.runningInTestMode() ? root.resolve("logs/restart-test").resolve(name) : root.resolve("logs").resolve(name);
+    }
+
+    /**
+     * The recorded asker of a restart from before {@code bootCutoff}, deleted as it is read so a second boot tells
+     * nobody; null when there is none. A record from this JVM's own run, as a dev-mode reload re-running the boot
+     * jobs finds, is left for the boot it belongs to.
+     */
+    public static @Nullable RestartRequest takeRequestBefore(Instant bootCutoff) {
+        var file = requestFile();
+        RestartRequest request;
+        try {
+            if (!Files.exists(file)) return null;
+            var json = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            request = new RestartRequest(json.get("conversationId").getAsLong(),
+                    Instant.ofEpochMilli(json.get("requestedAt").getAsLong()));
+        } catch (IOException | RuntimeException e) {
+            EventLogger.warn(CATEGORY, "The record of who asked for the restart could not be read, so nobody is told "
+                    + "JClaw is back", e.toString());
+            clearRequest();
+            return null;
+        }
+        if (!request.requestedAt().isBefore(bootCutoff)) return null;
+        try {
+            Files.delete(file);
+        } catch (IOException e) {
+            // Told once at most: a record that stays would tell the asker again at every boot.
+            EventLogger.warn(CATEGORY, "The record of who asked for the restart could not be removed, so nobody is "
+                    + "told JClaw is back", e.toString());
+            return null;
+        }
+        return request;
     }
 
     /** Ends the hold a stubbed hand-off left, so the next test's restart is not refused as under way. */
@@ -296,7 +381,7 @@ public final class RestartService {
     /** {@link #STATUS_FILE}; the autotest server, which shares the checkout, reads its own. */
     public static Path statusFile() {
         var root = Play.applicationPath.toPath();
-        return Play.runningInTestMode() ? root.resolve("logs/restart-test/restart-status.json") : root.resolve(STATUS_FILE);
+        return restartFile("restart-status.json");
     }
 
     private static final RestartNarrator.Progress NO_RESTART = new RestartNarrator.Progress("none", "", List.of(), 0);

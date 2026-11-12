@@ -28,6 +28,7 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.InboundRecoverySweep;
+import services.RestartService;
 import services.Tx;
 import tools.ConversationSendTool;
 import utils.CircuitBreakers;
@@ -243,6 +244,193 @@ class InboundRecoverySweepTest extends UnitTest {
         assertEquals(List.of(), sent, "the edited placeholder already told the user");
         assertEquals(List.of(new Row("user", "draft the newsletter"),
                 new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(convo));
+    }
+
+    // --- JF-354: the conversation that asked for the restart is told JClaw is back ---
+
+    private static final String BACK = "JClaw is back after the restart you asked for.";
+
+    @Test
+    void theConversationThatAskedForTheRestartIsToldJClawIsBackAndNotToResend() throws Exception {
+        var agent = persistAgent();
+        var peer = "354" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf354-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        appendUserRow(convo, "restart JClaw");
+        commit();
+        backdate(convo);
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            TelegramStreamingRecoveryJob.sweep(cutoff(), new RestartService.RestartRequest(convo.id, PREVIOUS_PROCESS));
+            TelegramStreamingRecoveryJob.sweep(cutoff());
+            sent = sentMessages(telegram);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of(new Sent(peer, BACK)), sent);
+        assertEquals(List.of(new Row("user", "restart JClaw"), new Row("assistant", BACK)), rows(convo));
+        assertEquals(0, llmCalls.get(), "the restart turn is not run again");
+    }
+
+    @Test
+    void aWebConversationThatAskedIsToldJClawIsBackWhileAnotherCutOffTurnStillGetsTheInterruptNote() throws Exception {
+        var agent = persistAgent();
+        var web = persistConversation(agent, "web", "admin");
+        appendUserRow(web, "restart JClaw");
+        var peer = "354" + (System.nanoTime() % 1_000_000);
+        var other = persistConversation(agent, "telegram", peer);
+        var token = "jf354-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        appendUserRow(other, "summarize my inbox");
+        commit();
+        backdate(web);
+        backdate(other);
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            TelegramStreamingRecoveryJob.sweep(cutoff(), new RestartService.RestartRequest(web.id, PREVIOUS_PROCESS));
+            sent = sentMessages(telegram);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of(new Row("user", "restart JClaw"), new Row("assistant", BACK)), rows(web));
+        assertEquals(List.of(new Sent(peer, TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), sent);
+        assertEquals(List.of(new Row("user", "summarize my inbox"),
+                new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(other));
+    }
+
+    @Test
+    void theAskingConversationsStreamingPlaceholderIsEditedToTheNoticeAndNoSecondMessageIsSent() throws Exception {
+        var agent = persistAgent();
+        var peer = "354" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf354-" + System.nanoTime();
+
+        List<String> edited;
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            bindTelegram(agent, token, peer);
+            appendUserRow(convo, "restart JClaw");
+            Conversation streaming = Conversation.findById(convo.id);
+            streaming.activeStreamMessageId = 3540;
+            streaming.activeStreamChatId = peer;
+            streaming.save();
+            commit();
+            backdate(convo);
+
+            TelegramStreamingRecoveryJob.sweep(cutoff(), new RestartService.RestartRequest(convo.id, PREVIOUS_PROCESS));
+            edited = telegram.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("editMessageText"))
+                    .map(r -> JsonParser.parseString(r.body()).getAsJsonObject().get("text").getAsString())
+                    .toList();
+            sent = sentMessages(telegram);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of(BACK), edited);
+        assertEquals(List.of(), sent, "the edited placeholder already told the user");
+        assertEquals(List.of(new Row("user", "restart JClaw"), new Row("assistant", BACK)), rows(convo));
+    }
+
+    @Test
+    void aRestartRecordCountsWithinAnHourOfThePreviousRunsLastWriteAndBeforeThisRunStarted() {
+        var stoppedAt = Instant.parse("2026-11-12T12:00:00Z");
+        var boot = stoppedAt.plus(Duration.ofHours(3));
+        var lookback = InboundRecoverySweep.NOTE_LOOKBACK;
+
+        assertEquals(42L, InboundRecoverySweep.restartAsker(request(stoppedAt.minus(lookback)), boot, stoppedAt));
+        assertNull(InboundRecoverySweep.restartAsker(request(stoppedAt.minus(lookback).minusMillis(1)), boot, stoppedAt));
+        assertEquals(42L, InboundRecoverySweep.restartAsker(request(stoppedAt.plus(lookback)), boot, stoppedAt));
+        assertNull(InboundRecoverySweep.restartAsker(request(stoppedAt.plus(lookback).plusMillis(1)), boot, stoppedAt),
+                "a record far newer than the database's last write belongs to a database restored since");
+        assertEquals(42L, InboundRecoverySweep.restartAsker(request(stoppedAt), stoppedAt.plusMillis(1), stoppedAt));
+        assertNull(InboundRecoverySweep.restartAsker(request(stoppedAt), stoppedAt, stoppedAt),
+                "a record from this run's own start is not the previous run's");
+        assertNull(InboundRecoverySweep.restartAsker(request(stoppedAt), boot, null), "no previous run wrote anything");
+        assertNull(InboundRecoverySweep.restartAsker(null, boot, stoppedAt));
+    }
+
+    @Test
+    void anAskerThatSentAMessageSinceTheBootGetsNoNotice() {
+        var agent = persistAgent();
+        var convo = persistConversation(agent, "web", "admin");
+        appendUserRow(convo, "restart JClaw");
+        commit();
+        backdate(convo);
+        appendUserRow(convo, "are you back?");
+        commit();
+
+        TelegramStreamingRecoveryJob.sweep(cutoff(), new RestartService.RestartRequest(convo.id, PREVIOUS_PROCESS));
+
+        assertEquals(List.of(new Row("user", "restart JClaw"), new Row("user", "are you back?")), rows(convo));
+    }
+
+    @Test
+    void aRestartNoticeTheChannelCannotDeliverIsLoggedWithItsConversation() {
+        var agent = persistAgent();
+        var peer = "354" + (System.nanoTime() % 1_000_000);
+        var convo = persistConversation(agent, "telegram", peer);
+        var token = "jf354-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        appendUserRow(convo, "restart JClaw");
+        commit();
+        backdate(convo);
+
+        List<EventLogger.Captured> events;
+        try {
+            // Nothing listens on port 1, so the send is refused at once.
+            TelegramChannel.installForTest(token, TelegramUrl.builder().schema("http").host("127.0.0.1").port(1).build());
+            events = EventLogger.captureForTest(() -> TelegramStreamingRecoveryJob.sweep(cutoff(),
+                    new RestartService.RestartRequest(convo.id, PREVIOUS_PROCESS)));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of("WARN Boot recovery: the restart notice for conversation " + convo.id + " was not delivered"),
+                events.stream().filter(e -> e.category().equals("queue") && e.level().equals("WARN"))
+                        .map(e -> e.level() + " " + e.message()).toList());
+        assertEquals(List.of(new Row("user", "restart JClaw"), new Row("assistant", BACK)), rows(convo));
+    }
+
+    @Test
+    void aRecordNamingAConversationThatIsGoneTellsNobodyAndOthersStillGetTheInterruptNote() throws Exception {
+        var agent = persistAgent();
+        var peer = "354" + (System.nanoTime() % 1_000_000);
+        var other = persistConversation(agent, "telegram", peer);
+        var token = "jf354-" + System.nanoTime();
+        bindTelegram(agent, token, peer);
+        appendUserRow(other, "summarize my inbox");
+        commit();
+        backdate(other);
+
+        List<Sent> sent;
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            TelegramStreamingRecoveryJob.sweep(cutoff(), new RestartService.RestartRequest(other.id + 1000, PREVIOUS_PROCESS));
+            sent = sentMessages(telegram);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+
+        assertEquals(List.of(new Sent(peer, TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), sent);
+        assertEquals(List.of(new Row("user", "summarize my inbox"),
+                new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(other));
+    }
+
+    private static RestartService.RestartRequest request(Instant requestedAt) {
+        return new RestartService.RestartRequest(42L, requestedAt);
     }
 
     @Test

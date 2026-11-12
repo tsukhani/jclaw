@@ -10,6 +10,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.InboundRecoverySweep;
+import services.RestartService;
 import services.Tx;
 import utils.AotTraining;
 
@@ -45,6 +46,11 @@ import java.util.stream.Collectors;
  * started. The cutoff is the JVM's start, so nothing this process wrote is
  * touched.
  *
+ * <p>JF-354: it also reads and deletes {@link RestartService}'s record of the
+ * conversation that asked for the restart, which gets
+ * {@link InboundRecoverySweep#RESTART_BACK_NOTE} on its placeholder and its
+ * channel in place of the note.
+ *
  * <p>Runs after {@link DefaultConfigJob} and the priority-0 jobs that
  * register tools and MCP servers, because a re-queued message runs a turn.
  * {@code @NoTransaction} so each write commits on its own, before the
@@ -57,7 +63,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
     private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_TELEGRAM = "telegram";
 
-    /** User-facing text edited into each orphaned placeholder. */
+    /** User-facing text edited into each orphaned placeholder but the restart asker's. */
     public static final String INTERRUPT_NOTE = InboundRecoverySweep.INTERRUPT_NOTE;
 
     @Override
@@ -65,16 +71,27 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         var runtime = ManagementFactory.getRuntimeMXBean();
         // jclaw.sh stops a training JVM right after its first answered request: a re-queued turn would die mid-call.
         if (AotTraining.isTrainingRun(runtime.getInputArguments())) return;
-        sweep(Instant.ofEpochMilli(runtime.getStartTime()));
+        var start = Instant.ofEpochMilli(runtime.getStartTime());
+        // After the training check: a restart's training JVM boots first and must leave the record to the real boot.
+        sweep(start, RestartService.takeRequestBefore(start));
+    }
+
+    /** {@link #sweep(Instant, RestartService.RestartRequest)} after a restart nobody asked for in a conversation. */
+    public static InboundRecoverySweep.Outcome sweep(Instant bootCutoff) {
+        return sweep(bootCutoff, null);
     }
 
     /**
-     * The boot sweep, which tests run with a cutoff of their own.
+     * The boot sweep, which tests run with a cutoff and a restart record of their own: only the boot reads the
+     * record's file, so no test consumes another's.
      *
      * @param bootCutoff placeholders and rows from before it belong to a process that no longer runs
+     * @param restart    who asked for the restart that ended the previous run; null for nobody
      */
-    public static InboundRecoverySweep.Outcome sweep(Instant bootCutoff) {
-        return InboundRecoverySweep.run(bootCutoff, recoverPlaceholders(bootCutoff));
+    public static InboundRecoverySweep.Outcome sweep(Instant bootCutoff, RestartService.@Nullable RestartRequest restart) {
+        var stoppedAt = InboundRecoverySweep.previousRunStopped(bootCutoff);
+        var asker = InboundRecoverySweep.restartAsker(restart, bootCutoff, stoppedAt);
+        return InboundRecoverySweep.run(bootCutoff, stoppedAt, recoverPlaceholders(bootCutoff, asker), asker);
     }
 
     /**
@@ -82,11 +99,14 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
      * without waiting for a JVM restart.
      */
     public static void recoverAll() {
-        recoverPlaceholders(null);
+        recoverPlaceholders(null, null);
     }
 
-    /** Edit every orphaned placeholder from before {@code cutoff} (any, when null); returns the conversations edited. */
-    private static Set<Long> recoverPlaceholders(@Nullable Instant cutoff) {
+    /**
+     * Edit every orphaned placeholder from before {@code cutoff} (any, when null); returns the conversations edited.
+     * The restart's asker gets {@link InboundRecoverySweep#RESTART_BACK_NOTE}, every other the interrupt note.
+     */
+    private static Set<Long> recoverPlaceholders(@Nullable Instant cutoff, @Nullable Long restartAsker) {
         List<Conversation> orphans = Tx.run(() -> cutoff == null
                 ? Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL").fetch()
                 : Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL AND updatedAt < ?1", cutoff).fetch());
@@ -104,7 +124,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         var edited = new HashSet<Long>();
         for (var orphan : orphans) {
             try {
-                if (recoverOne(orphan, tokensByAgentId)) edited.add(orphan.id);
+                var note = orphan.id.equals(restartAsker) ? InboundRecoverySweep.RESTART_BACK_NOTE : INTERRUPT_NOTE;
+                if (recoverOne(orphan, tokensByAgentId, note)) edited.add(orphan.id);
             } catch (Exception e) {
                 // Per-row failures must not stop the batch. Most commonly the
                 // user deleted the chat / message and Telegram 400s us.
@@ -128,7 +149,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
     }
 
     /** Returns whether the placeholder now carries the note. */
-    private static boolean recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId)
+    private static boolean recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId, String note)
             throws TelegramApiException {
         // Clear the checkpoint first in a separate transaction. If the
         // editMessageText below fails, we still want the column cleared so
@@ -163,10 +184,10 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
             return false;
         }
 
-        TelegramChannel.editMessageText(botToken, chatId, messageId, INTERRUPT_NOTE);
+        TelegramChannel.editMessageText(botToken, chatId, messageId, note);
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
-                "Recovery: interrupted-note written to orphan messageId=%d for conversation %d"
+                "Recovery: note written to orphan messageId=%d for conversation %d"
                         .formatted(messageId, convId));
         return true;
     }
