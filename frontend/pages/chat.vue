@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  ArrowDownIcon,
   ArrowDownTrayIcon,
   ArrowUturnLeftIcon,
   EyeIcon,
@@ -58,6 +57,7 @@ import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
 import ChatChecklist from '~/components/chat/ChatChecklist.vue'
 import McpElicitationForm from '~/components/chat/McpElicitationForm.vue'
+import ScrollJumpButton from '~/components/ScrollJumpButton.vue'
 import { useMcpElicitations } from '~/composables/useMcpElicitations'
 import { hasOpenItem } from '~/utils/checklist'
 import { syncVisualEnabled } from '~/utils/visual/spec'
@@ -1201,32 +1201,17 @@ function exportConversation() {
             </div>
           </div>
           <!--
-          Shown only while the reader has scrolled up. A zero-height sticky row holds it at the list's visible bottom,
-          above whatever is docked under the list, without adding scroll height. It stays after the content column:
-          useChatScroll observes the list's first child.
+          Shown only while the reader has scrolled up, at the list's visible bottom above whatever is docked under the
+          list. It stays after the content column: useChatScroll observes the list's first child.
         -->
-          <div
+          <ScrollJumpButton
             v-if="scrolledAway"
-            class="sticky bottom-2 h-0 flex items-start justify-center pointer-events-none"
+            direction="down"
+            data-testid="chat-jump-latest"
+            @click="jumpToLatest"
           >
-            <button
-              type="button"
-              data-testid="chat-jump-latest"
-              class="pointer-events-auto -translate-y-full inline-flex items-center gap-1.5 rounded-full
-                     border border-neutral-200 dark:border-neutral-700/50 bg-surface-elevated px-3 py-1.5
-                     text-xs font-medium text-fg-primary hover:bg-muted transition-colors
-                     shadow-[0_1px_2px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_#0000004d]
-                     focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
-              @mousedown.prevent
-              @click="jumpToLatest"
-            >
-              <ArrowDownIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-              Jump to latest
-            </button>
-          </div>
+            Jump to latest
+          </ScrollJumpButton>
         </div>
 
         <!--

@@ -20,23 +20,30 @@
  */
 import { computed, onMounted, onUnmounted, ref, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from '#imports'
-import { ArrowUpIcon, Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { sections } from '~/components/guide/sections'
 import GuideRenderer from '~/components/guide/GuideRenderer.vue'
+import ScrollJumpButton from '~/components/ScrollJumpButton.vue'
 
 const route = useRoute()
 const router = useRouter()
 const activeSectionId = ref<string>(sections[0]?.id ?? '')
 const mobileNavOpen = ref(false)
 
-// Back-to-top affordance. The layout's <main> owns the scroll (overflow-auto
-// in default.vue), so we track its scrollTop rather than window's. `scrolledDown`
-// gates the "Scroll to the top" hint under the Clawdia mascot: it flips true the
-// moment the reader leaves the top — whether by scrolling or by jumping to any
-// section past the first (a TOC click smooth-scrolls <main>, firing scroll
-// events) — and back to false once they're returned to the top.
+// Back to top. The layout's <main> owns the scroll (overflow-auto in
+// default.vue), so we track its scrollTop rather than window's. `scrolledDown`
+// shows the button: it flips true the moment the reader leaves the top —
+// whether by scrolling or by jumping to any section past the first (a TOC
+// click smooth-scrolls <main>, firing scroll events) — and back to false once
+// they're returned to the top.
 const scroller = ref<HTMLElement | null>(null)
 const scrolledDown = ref(false)
+const pageTitle = ref<HTMLElement | null>(null)
+
+// Back to top floats over the bottom of <main>, where Tab scrolls a link that enters from below: this padding stops
+// that link above the button instead of behind it (WCAG 2.4.11, technique C43). <main> is the layout's, shared with
+// every page, so the guide adds it on mount and takes it off on unmount.
+const BACK_TO_TOP_CLEARANCE = 'scroll-pb-12'
 
 function updateScrolled() {
   const el = scroller.value
@@ -94,15 +101,16 @@ function jumpTo(sectionId: string, anchorId?: string) {
 
 /**
  * Smooth-scroll the page's scroll container back to the very top.
- * Wired to the Clawdia mascot in the right gutter so a single click
- * gets the operator out of deep scroll without hunting for a separate
- * back-to-top button.
  *
  * The scroll container is the layout-level <main>, not window —
  * default.vue gives <main> overflow-auto so it owns the scroll. Falls
  * back to window scroll if the element isn't reachable (test envs).
  */
-function scrollToTop() {
+function scrollToTop(e: MouseEvent) {
+  // A press never focuses the button, so only a keyboard user arrives here with focus on it, and the button unmounts
+  // at the top, dropping that focus to <body>: it moves to the title, where the next Tab reaches the contents.
+  // preventScroll, because focusing the off-screen title would jump there and cut the smooth scroll short.
+  if (document.activeElement === e.currentTarget) pageTitle.value?.focus({ preventScroll: true })
   const el = scroller.value ?? document.querySelector('main')
   if (el) {
     el.scrollTo({ top: 0, behavior: 'smooth' })
@@ -158,6 +166,7 @@ onMounted(async () => {
   jumpToHash(route.hash)
   scroller.value = document.querySelector('main')
   scroller.value?.addEventListener('scroll', updateScrolled, { passive: true })
+  scroller.value?.classList.add(BACK_TO_TOP_CLEARANCE)
   updateScrolled()
 })
 
@@ -177,6 +186,7 @@ onUnmounted(() => {
   observer?.disconnect()
   observer = null
   scroller.value?.removeEventListener('scroll', updateScrolled)
+  scroller.value?.classList.remove(BACK_TO_TOP_CLEARANCE)
 })
 
 const tocItems = computed(() => sections.map(s => ({
@@ -187,28 +197,46 @@ const tocItems = computed(() => sections.map(s => ({
 </script>
 
 <template>
-  <div>
-    <h1 class="text-lg font-semibold text-fg-strong mb-6">
-      User Guide
-    </h1>
+  <div class="max-w-5xl">
+    <!-- max-w-5xl (64rem) is the TOC rail, its gap and the reading column (w-56 + gap-8 + max-w-3xl): the header row
+         ends where the column does, so Clawdia stands over the first card's right corner at every width. Her negative
+         bottom margin cancels the row's, so she stands on that card's top edge: keep the two pairs equal. -->
+    <div class="flex items-end justify-between gap-4 mb-4 md:mb-3">
+      <div>
+        <h1
+          ref="pageTitle"
+          tabindex="-1"
+          class="text-lg font-semibold text-fg-strong mb-6 md:mb-0"
+        >
+          User Guide
+        </h1>
 
-    <!-- Mobile TOC toggle. On md+ the sticky rail handles navigation; on
-         narrower viewports the rail collapses behind this button to keep
-         the reading column wide enough to be readable. -->
-    <button
-      type="button"
-      class="md:hidden mb-4 flex items-center gap-2 px-3 py-2 text-sm text-fg-strong border border-border rounded-lg bg-surface-elevated hover:bg-muted/40 transition-colors"
-      :aria-expanded="mobileNavOpen"
-      aria-controls="guide-toc-mobile"
-      @click="mobileNavOpen = !mobileNavOpen"
-    >
-      <component
-        :is="mobileNavOpen ? XMarkIcon : Bars3Icon"
-        class="w-4 h-4"
-        aria-hidden="true"
-      />
-      <span>{{ mobileNavOpen ? 'Hide contents' : 'Contents' }}</span>
-    </button>
+        <!-- Mobile TOC toggle. On md+ the sticky rail handles navigation; on
+             narrower viewports the rail collapses behind this button to keep
+             the reading column wide enough to be readable. -->
+        <button
+          type="button"
+          class="md:hidden flex items-center gap-2 px-3 py-2 text-sm text-fg-strong border border-border rounded-lg bg-surface-elevated hover:bg-muted/40 transition-colors"
+          :aria-expanded="mobileNavOpen"
+          aria-controls="guide-toc-mobile"
+          @click="mobileNavOpen = !mobileNavOpen"
+        >
+          <component
+            :is="mobileNavOpen ? XMarkIcon : Bars3Icon"
+            class="w-4 h-4"
+            aria-hidden="true"
+          />
+          <span>{{ mobileNavOpen ? 'Hide contents' : 'Contents' }}</span>
+        </button>
+      </div>
+      <img
+        src="/clawdia-reading.webp"
+        alt=""
+        width="134"
+        height="150"
+        class="shrink-0 w-18 md:w-20 h-auto mr-4 md:mr-6 -mb-4 md:-mb-3"
+      >
+    </div>
 
     <div class="flex flex-col md:flex-row gap-8">
       <!-- TOC rail. Sticky on desktop; an overlay panel on mobile that
@@ -254,13 +282,9 @@ const tocItems = computed(() => sections.map(s => ({
         </nav>
       </aside>
 
-      <!-- Reading rail + right-side mascot rail. The flex wrapper lets
-           Clawdia live in the gutter to the right of the reading column,
-           sticky and pinned at the top alongside the TOC. items-start
-           keeps each child's sticky origin honest (without it, a flex
-           container's default stretch alignment would defeat sticky). -->
-      <div class="flex-1 min-w-0 flex items-start gap-8">
-        <div class="flex-1 min-w-0 max-w-3xl space-y-8">
+      <div class="flex-1 min-w-0 max-w-3xl">
+        <!-- space-y-8 spaces the sections only: on the column it would add margin to the Back to top row too. -->
+        <div class="space-y-8">
           <section
             v-for="s in sections"
             :id="s.id"
@@ -290,61 +314,14 @@ const tocItems = computed(() => sections.map(s => ({
           </section>
         </div>
 
-        <!-- Reading-Clawdia mascot, pinned in the right gutter alongside
-             the TOC. xl:flex (not md:flex) because at md/lg the reading
-             column already eats most of the horizontal budget — squeezing
-             a 134px mascot into a narrow gutter there would crowd the
-             text. shrink-0 keeps the mascot at its natural width so the
-             reading column gives ground first on tighter widths. Wraps
-             the <img> in a <button> so a click scrolls the page back to
-             the top — handy when the operator is deep in the guide; a
-             flex-col stacks the fading "Scroll to the top" hint beneath
-             the mascot, so clicking the image or the hint both scroll up.
-             The button's aria-label conveys the action; the img's alt is
-             empty because inside an interactive container the picture
-             is the visual handle, not independent content. -->
-        <button
-          type="button"
-          title="Scroll to the top"
-          aria-label="Scroll to the top"
-          class="group hidden xl:flex xl:flex-col xl:items-center shrink-0 xl:sticky xl:top-4 cursor-pointer
-                 hover:brightness-110 focus-visible:outline focus-visible:outline-2
-                 focus-visible:outline-emerald-600 dark:focus-visible:outline-emerald-500 focus-visible:outline-offset-4
-                 rounded-lg transition"
+        <ScrollJumpButton
+          v-if="scrolledDown"
+          direction="up"
+          data-testid="guide-back-to-top"
           @click="scrollToTop"
         >
-          <img
-            src="/clawdia-reading.webp"
-            alt=""
-            width="134"
-            height="150"
-          >
-          <!-- "Scroll to the top" hint: fades in below Clawdia whenever the
-               reader has left the top of the guide (scrolled down or jumped to
-               a section past the first), and fades back out once they're
-               returned to the top. aria-hidden because the button's aria-label
-               already names the action for assistive tech. -->
-          <Transition
-            enter-active-class="transition duration-300 ease-out"
-            enter-from-class="opacity-0 translate-y-1"
-            enter-to-class="opacity-100 translate-y-0"
-            leave-active-class="transition duration-200 ease-in"
-            leave-from-class="opacity-100 translate-y-0"
-            leave-to-class="opacity-0 translate-y-1"
-          >
-            <span
-              v-if="scrolledDown"
-              aria-hidden="true"
-              class="mt-2 flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 whitespace-nowrap transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300"
-            >
-              <ArrowUpIcon
-                class="w-3.5 h-3.5 shrink-0"
-                aria-hidden="true"
-              />
-              Scroll to the top
-            </span>
-          </Transition>
-        </button>
+          Back to top
+        </ScrollJumpButton>
       </div>
     </div>
   </div>

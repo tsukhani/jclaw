@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, onTestFinished, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Guide from '~/pages/guide.vue'
@@ -37,6 +37,35 @@ describe('User Guide page', () => {
     vi.restoreAllMocks()
   })
 
+  // The guide scrolls the layout's <main>, which component tests don't mount: give the page one, in the document so
+  // focus can move, recording the scroll call jsdom does not implement.
+  async function mountInMain(route = '/guide') {
+    const main = document.body.appendChild(document.createElement('main'))
+    onTestFinished(() => main.remove())
+    const scrollTo = vi.fn()
+    main.scrollTo = scrollTo as unknown as typeof main.scrollTo
+    const component = await mountSuspended(Guide, { route, attachTo: main.appendChild(document.createElement('div')) })
+    await flushPromises()
+    const scrollMain = async (top: number) => {
+      main.scrollTop = top
+      main.dispatchEvent(new Event('scroll'))
+      await flushPromises()
+    }
+    const backToTop = () => component.find('[data-testid="guide-back-to-top"]')
+    return { main, component, scrollTo, scrollMain, backToTop }
+  }
+
+  it('pads the bottom of <main> while the guide is open, and only then', async () => {
+    const { main, component } = await mountInMain()
+
+    // jsdom lays nothing out, so pin the scroll padding a browser honours when Tab scrolls a link up from below.
+    expect([...main.classList]).toEqual(['scroll-pb-12'])
+
+    // <main> is the layout's: every other page keeps its own scrolling.
+    component.unmount()
+    expect([...main.classList]).toEqual([])
+  })
+
   it('renders one TOC entry per registered section', async () => {
     const component = await mountSuspended(Guide)
     await flushPromises()
@@ -59,19 +88,60 @@ describe('User Guide page', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.hash).toBe('#prompts'))
   })
 
-  it('clears the fragment when the reader jumps back to the top', async () => {
-    const component = await mountSuspended(Guide, { route: '/guide#tasks' })
-    await flushPromises()
+  it('scrolls to the top, highlights the first section and clears the fragment when Back to top is pressed', async () => {
+    const { component, scrollTo, scrollMain, backToTop } = await mountInMain('/guide#tasks')
     const router = useRouter()
+    await scrollMain(500)
 
-    // The mascot in the right gutter is the back-to-top control; the image and
-    // its hint share one clickable wrapper.
-    await component.find('img[src="/clawdia-reading.webp"]').trigger('click')
+    await backToTop().trigger('click')
 
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+    const active = component.findAll('[aria-current="true"]').map(el => el.attributes('data-testid'))
+    expect(active).toEqual(['guide-toc-item-getting-started'])
     // A URL still naming a section is wrong to copy once the reader is at the
     // top of the guide.
     await vi.waitFor(() => expect(router.currentRoute.value.hash).toBe(''))
     expect(router.currentRoute.value.path).toBe('/guide')
+  })
+
+  it('moves focus to the page title when Back to top is pressed from the keyboard', async () => {
+    const { component, scrollMain, backToTop } = await mountInMain()
+    await scrollMain(500)
+    ;(backToTop().element as HTMLElement).focus()
+    expect(document.activeElement).toBe(backToTop().element)
+
+    await backToTop().trigger('click')
+
+    // The button unmounts once the reader is back at the top, which would drop focus to <body>.
+    const title = component.find('h1').element
+    expect(title.textContent?.trim()).toBe('User Guide')
+    expect(document.activeElement).toBe(title)
+  })
+
+  it('leaves focus where it was when Back to top is pressed with the mouse', async () => {
+    const { component, scrollMain, backToTop } = await mountInMain()
+    await scrollMain(500)
+    const tocItem = component.find('[data-testid="guide-toc-item-chat"]').element as HTMLElement
+    tocItem.focus()
+
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    backToTop().element.dispatchEvent(press)
+    await backToTop().trigger('click')
+
+    // Cancelling the press is what stops a browser from focusing the button.
+    expect(press.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(tocItem)
+  })
+
+  it('shows Clawdia at every width, as a picture rather than a control', async () => {
+    const component = await mountSuspended(Guide)
+    await flushPromises()
+
+    const clawdia = component.find('img[src="/clawdia-reading.webp"]')
+    expect(clawdia.attributes('alt')).toBe('')
+    expect(clawdia.element.closest('button')).toBeNull()
+    // jsdom applies no media queries, so pin the absence of the class that hid her below 1280px.
+    expect(clawdia.element.closest('.hidden')).toBeNull()
   })
 
   it('highlights the owning section when the URL names a heading inside it', async () => {
@@ -206,38 +276,21 @@ describe('User Guide page', () => {
     expect(apiCalls).toEqual([])
   })
 
-  it('fades the "Scroll to the top" hint in only when the reader has left the top', async () => {
-    // The guide's scroll container is the layout <main> (overflow-auto in
-    // default.vue). Component tests don't mount the layout, so provide a
-    // <main> for the page's onMounted to bind its scroll listener to, then
-    // drive its scrollTop to simulate the reader moving down and back up.
-    const main = document.createElement('main')
-    document.body.appendChild(main)
-    try {
-      const component = await mountSuspended(Guide)
-      await flushPromises()
+  it('shows Back to top only once the reader is more than 8px from the top', async () => {
+    const { scrollMain, backToTop } = await mountInMain()
+    expect(backToTop().exists()).toBe(false)
 
-      // At the top: the mascot is present but the hint text is not. (The
-      // button's aria-label is an attribute, so .text() excludes it — the
-      // only way "Scroll to the top" lands in text content is the visible
-      // hint span.)
-      expect(component.text()).not.toContain('Scroll to the top')
+    await scrollMain(8)
+    expect(backToTop().exists()).toBe(false)
 
-      // Reader scrolls down → the hint fades in.
-      main.scrollTop = 500
-      main.dispatchEvent(new Event('scroll'))
-      await flushPromises()
-      expect(component.text()).toContain('Scroll to the top')
+    await scrollMain(9)
+    const button = backToTop()
+    expect(button.element.tagName).toBe('BUTTON')
+    expect(button.attributes('type')).toBe('button')
+    expect(button.text()).toBe('Back to top')
 
-      // Returned to the top → the hint disappears.
-      main.scrollTop = 0
-      main.dispatchEvent(new Event('scroll'))
-      await flushPromises()
-      expect(component.text()).not.toContain('Scroll to the top')
-    }
-    finally {
-      main.remove()
-    }
+    await scrollMain(0)
+    expect(backToTop().exists()).toBe(false)
   })
 
   it('mounts cleanly with an unknown URL hash', async () => {
