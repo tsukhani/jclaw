@@ -156,6 +156,24 @@ class SkillSecretGrantsTest extends UnitTest {
         }
     }
 
+    /**
+     * The bundle a command is told to trust is JClaw's file: every sandboxed command can read it, on Linux too, where
+     * a custom agent's sandbox has a temp folder of its own, and none can remove or replace it.
+     */
+    @Test
+    void aSandboxedCommandCanReadTheTrustBundleAndCannotRemoveIt() {
+        var previous = ConfigService.get("shell.allowlist", null);
+        ConfigService.set("shell.allowlist", "echo,test,rm");
+        try {
+            var out = run(new ShellExecTool(), "test -n \"$API_KEY\" && test -r \"$SSL_CERT_FILE\" && echo readable;"
+                    + " rm -f \"$SSL_CERT_FILE\" \"$NODE_EXTRA_CA_CERTS\" 2>/dev/null; test -r \"$SSL_CERT_FILE\" && echo kept");
+            assertEquals("readable\nkept", out.strip());
+        } finally {
+            if (previous == null) ConfigService.delete("shell.allowlist");
+            else ConfigService.set("shell.allowlist", previous);
+        }
+    }
+
     @Test
     void aBackgroundCommandGetsNoSecretAndIsToldSo() {
         var previous = ConfigService.get("shell.allowlist", null);

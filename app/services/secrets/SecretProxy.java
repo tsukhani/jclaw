@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -92,6 +93,15 @@ public final class SecretProxy {
 
     int port() {
         return server.getLocalPort();
+    }
+
+    /**
+     * The folder of the trust files commands are pointed at, or null before the first grant. Every sandbox mounts it
+     * read-only: a command must be able to read it wherever its sandbox puts the temp folder, and none may replace
+     * what other commands trust.
+     */
+    public static @Nullable Path trustFolder() {
+        return SecretsCa.folderIfCreated();
     }
 
     /** The port, for a test that drives the proxy with a client of its own. */

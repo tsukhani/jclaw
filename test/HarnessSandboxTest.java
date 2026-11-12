@@ -1100,4 +1100,20 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(profile.contains("(allow file-write* (subpath \"/tmp/jclaw-evil"),
                 "the session path must still be granted (escaping must not corrupt it)");
     }
+
+    /**
+     * JF-324: the secrets proxy's trust folder lives in the temp folder, which a Linux sandbox replaces with an empty
+     * one. It is passed as an allowance, so the allowance must be bound after that temp folder or it would be hidden.
+     */
+    @Test
+    void aLinuxSandboxBindsAnAllowanceAfterItsOwnTempFolder() {
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), new File("/srv/ws"), List.of("/tmp/jclaw-secrets-proxy-1"),
+                "/home/op", List.of(), false);
+        int temp = argv.indexOf("/tmp");
+        assertEquals("--tmpfs", argv.get(temp - 1));
+        int bind = argv.indexOf("--ro-bind-try");
+        assertTrue(bind > temp, "the allowance is bound before the temp folder that would hide it: " + argv);
+        assertTrue(argv.get(bind + 1).endsWith("/jclaw-secrets-proxy-1"), argv.toString());
+        assertEquals(argv.get(bind + 1), argv.get(bind + 2));
+    }
 }

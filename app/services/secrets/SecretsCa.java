@@ -107,6 +107,12 @@ final class SecretsCa {
         }
     }
 
+    /** The folder holding both trust files, or null while no command has needed them yet. */
+    static @Nullable Path folderIfCreated() {
+        var ca = instance;
+        return ca == null ? null : ca.caFile.getParent();
+    }
+
     /** The CA alone, for a tool that adds it to its own roots ({@code NODE_EXTRA_CA_CERTS}). */
     Path caFile() {
         return caFile;

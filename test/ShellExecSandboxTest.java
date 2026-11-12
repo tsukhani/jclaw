@@ -794,4 +794,16 @@ class ShellExecSandboxTest extends UnitTest {
         var top = run(main(), "top -l 1 -n 0");
         assertEquals(0, top.get("exitCode").getAsInt(), top.toString());
     }
+
+    /** JF-324: the files commands are told to trust stay readable to the fenced shell, and it cannot remove them. */
+    @Test
+    void theMainAgentsFencedShellCannotRemoveTheSecretsTrustFiles() {
+        assumeTrue(HarnessSandbox.availability().available(), "no sandbox on this host");
+        services.secrets.SecretProxy.caForTest();
+        var bundle = services.secrets.SecretProxy.trustFolder().resolve("bundle.pem");
+        ConfigService.set("shell.allowlist", "rm,head");
+        run(main(), "rm -f " + bundle);
+        assertTrue(Files.exists(bundle), "the fenced shell removed " + bundle);
+        assertEquals(0, run(main(), "head -c 1 " + bundle).get("exitCode").getAsInt());
+    }
 }

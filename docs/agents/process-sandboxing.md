@@ -79,6 +79,16 @@ it shares `/tmp` and the PID namespace with the host. Another process's environm
 `ps -E` prints none for a same-user process (measured).
 `ShellExecSandboxTest` pins both platform forms and probes the real one on the host.
 
+**Every sandbox takes the secrets proxy's trust folder read-only (JF-324).** A command holding a skill secret is
+pointed at two files in the temp folder, `SecretProxy.trustFolder()`. A Linux sandbox replaces `/tmp` with an empty
+one, where they would be missing and every HTTPS call would fail its certificate check, and a macOS sandbox may write
+the shared temp folders, where a command could remove or replace what other commands trust. So
+`HarnessSandbox.withTrustFolder` adds the folder to the allowances, which Linux binds read-only after its temp folder
+(`HarnessSandboxTest.aLinuxSandboxBindsAnAllowanceAfterItsOwnTempFolder`), `macTrustFolderReadOnly` ends a macOS
+profile with a write deny, and `MainFence.current` lists it with the program files. Measured in the dev image
+(bubblewrap 0.11.1): with the allowance the file reads and `rm` fails with "Read-only file system"; without it the
+file is absent.
+
 **A custom agent's shell cannot attach to a JVM outside it (JF-290).** An attached client can load
 code into a JVM or dump its heap, and JClaw's own holds the internal bearer token. HotSpot's attach
 handshake has two steps: SIGQUIT makes the JVM look for a trigger file (`.attach_pid<pid>`, in its

@@ -8,6 +8,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.ExecutableProbeSupport;
 import services.database.DatabaseService;
+import services.secrets.SecretProxy;
 import utils.ChannelOriginTrust;
 import utils.SandboxHiddenRoots;
 import utils.SubprocessEnv;
@@ -360,7 +361,7 @@ public final class HarnessSandbox {
         }
         if (os.contains("linux")) {
             requireBinary(BWRAP, configKey);
-            return linuxArgv(argv, writeRoot, allowances, configKey);
+            return linuxArgv(argv, writeRoot, withTrustFolder(allowances), configKey);
         }
         throw new SandboxUnavailableException(
                 ("%s is enabled but this platform (%s) has no supported sandbox "
@@ -391,7 +392,7 @@ public final class HarnessSandbox {
         if (ready.mechanism().equals(BWRAP)) {
             var resolvConf = realPath(RESOLV_CONF);
             var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
-            return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, extraReads, home,
+            return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, withTrustFolder(extraReads), home,
                     linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()),
                     deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids())), Map.of());
         }
@@ -399,7 +400,7 @@ public final class HarnessSandbox {
         var temp = customAgentTempDir(writeRoot);
         var profile = customAgentMacosProfile(writeRoot, home, SandboxHiddenRoots.current(),
                 deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(pathEnv, home, extraReads), plainFolderRealPath(temp));
-        var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile));
+        var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile + macTrustFolderReadOnly()));
         out.addAll(argv);
         return new ConfinedShell(List.copyOf(out), Map.of("TMPDIR", temp.toString()));
     }
@@ -409,6 +410,25 @@ public final class HarnessSandbox {
      * its rules count on, which go into the environment after the caller's own.
      */
     public record ConfinedShell(List<String> argv, Map<String, String> env) {}
+
+    /**
+     * JF-324: the secrets proxy's trust files sit in the temp folder, which a Linux sandbox replaces with an empty
+     * one and a macOS sandbox may write. So each sandbox takes their folder read-only: {@code allowances} with it
+     * added, which Linux binds read-only after its temp folder.
+     */
+    private static List<String> withTrustFolder(List<String> allowances) {
+        var trust = SecretProxy.trustFolder();
+        if (trust == null) return allowances;
+        var out = new ArrayList<>(allowances);
+        out.add(SandboxHiddenRoots.canonical(trust).toString());
+        return List.copyOf(out);
+    }
+
+    /** The macOS half of {@link #withTrustFolder}: a last rule, so no temp-folder write grant outranks it. */
+    private static String macTrustFolderReadOnly() {
+        var trust = SecretProxy.trustFolder();
+        return trust == null ? "" : rule("deny", "file-write*", SandboxHiddenRoots.canonical(trust).toString());
+    }
 
     /**
      * What the Main Agent's fence protects (JF-325), as canonical paths, the form Seatbelt and bwrap match.
@@ -432,6 +452,8 @@ public final class HarnessSandbox {
             readOnly.add(SandboxHiddenRoots.canonical(Play.applicationPath.toPath()));
             if (Play.frameworkPath != null) readOnly.add(SandboxHiddenRoots.canonical(Play.frameworkPath.toPath()));
             if (!home.isBlank()) readOnly.add(SandboxHiddenRoots.canonical(absHome(home, ".gradle")));
+            var trust = SecretProxy.trustFolder();
+            if (trust != null) readOnly.add(SandboxHiddenRoots.canonical(trust));
             var backups = SandboxHiddenRoots.canonical(DatabaseService.backupsDir());
             // The backup folder leaves the list so it can be reopened for reading; inside data/ it is still hidden
             // first. conf/ leaves it too: it holds no secret, and the checkout's read-only rule covers it.
@@ -818,7 +840,7 @@ public final class HarnessSandbox {
         var out = new ArrayList<String>();
         out.add("sandbox-exec");
         out.add("-p");
-        out.add(profile);
+        out.add(profile + macTrustFolderReadOnly());
         out.addAll(argv);
         return List.copyOf(out);
     }
