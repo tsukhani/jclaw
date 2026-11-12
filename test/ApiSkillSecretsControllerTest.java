@@ -202,8 +202,8 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     private void declare(String skill, String lines) throws Exception {
         var dir = AgentService.workspacePath(agentName).resolve("skills/" + skill);
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"), "---\nname: " + skill + "\ndescription: test skill\n---\n# " + skill + "\n");
-        Files.writeString(dir.resolve("secrets.example"), lines);
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: " + skill + "\ndescription: test skill\n---\n# " + skill
+                + "\n\n## Secrets\n\n```secrets\n" + lines + "```\n\nUse `$API_KEY` in each call.\n");
         agents.SkillLoader.clearCache();
     }
 
@@ -219,7 +219,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         return "not listed";
     }
 
-    /** JF-348: the list also names what the skill's secrets.example declares, and whether the agent holds each. */
+    /** JF-348: the list also names what the skill's SKILL.md declares, and whether the agent holds each. */
     @Test
     void theListNamesWhatTheSkillDeclaresAndWhetherEachIsSet() throws Exception {
         declare("demo", """
@@ -253,7 +253,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aSkillWithoutTheFileDeclaresNothingAndIsRunnable() throws Exception {
+    void aSkillWithoutTheBlockDeclaresNothingAndIsRunnable() throws Exception {
         var dir = AgentService.workspacePath(agentName).resolve("skills/demo");
         Files.writeString(dir.resolve("SKILL.md"), "---\nname: demo\ndescription: test skill\n---\n# demo\n");
         agents.SkillLoader.clearCache();

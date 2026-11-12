@@ -40,7 +40,7 @@ Skills are not written on this page. Ways to get one:
 
 - **Browse catalog**: the button at the top of the page opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
 - **Import zip**: the button beside **Browse catalog** takes a skill zip, either one exported from JClaw or a skill built for Claude. It runs the same checks as a catalog import, and the skill keeps its files where they are. If **Global Skills** already has a skill of that name, the page asks before replacing it. An upload older than the version in the library is refused.
-- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
+- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). If the skill needs a key or a password, the agent does not ask you for it in chat. It lists each secret in the skill's own guide, and the skill shows **Needs secrets** until you add them in its Secrets panel. Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
@@ -48,7 +48,7 @@ Click any skill row to open a **read-only** viewer of its files. Files in a skil
 
 Agents cannot open those files either. The file and documents tools refuse any file in a skill's `credentials/` folder, and so do printing, uploading a file in Chrome and sending a file in a Telegram reply. An agent can still save a new value there, and the skill's own scripts read it. JClaw does not publish an app whose folder holds a skill's `credentials/` folder or a link to another file.
 
-After an import the page warns you about two things. If no malware scanner is set up, the skill's binary files were not scanned, and the warning names them. If a zip holds a file outside `credentials/` that looks like it holds a key, the warning names that file too: every agent can read it, so move the key into `credentials/`.
+After an import the page warns you about two things. If no malware scanner is set up, the skill's binary files were not scanned, and the warning names them. If a zip holds a file outside `credentials/` that looks like it holds a key, the warning names that file too: every agent can read it. Remove the key from the file, and add it in the skill's Secrets panel on the agent that uses it. A skill's guide is not named for listing the secrets the skill needs, only when that list holds something that looks like a value.
 
 ### Secrets
 
@@ -61,9 +61,9 @@ When you open a skill from an agent's column, the **Secrets** panel lists the ke
 
 A skill is **not runnable** while a secret it needs has no value. The panel says so at its top and names the missing secrets, the skill's header shows **Not runnable**, and on the Skills page the skill shows **Needs secrets** under each agent that has it. The agent is not offered the skill until every needed secret has a value. A secret marked optional does not count.
 
-A skill says what it needs in a file named `secrets.example` in its folder, with one line for each secret: the name, an example host, and a comment that says what it is, as in `NAS_PASS=nas.example.com:5001   # The DSM account's password`. A comment that starts with "Optional" marks a secret the skill can run without. No value goes in that file.
+A skill says what it needs in its own guide, `SKILL.md`, in a code block marked `secrets`. The block has one line for each secret: the name, an example host, and a comment that says what it is, as in `NAS_PASS=nas.example.com:5001   # The DSM account's password`. A comment that starts with "Optional" marks a secret the skill can run without. No value goes in that block.
 
-That file is part of the skill, and an agent can change the files of its own skills. So read a description and an example host as a hint, not as a fact. JClaw never fills in a host from the file: the secret goes only to the hosts you type. Before you save, check each host against the real service.
+That guide is part of the skill, and an agent can change the files of its own skills. So read a description and an example host as a hint, not as a fact. JClaw never fills in a host from the file: the secret goes only to the hosts you type. Before you save, check each host against the real service.
 
 JClaw stores each value encrypted. No page, agent or API call returns a value, you included, so the panel shows only each secret's name, hosts and when it was set. Only you can add, replace or delete a secret: agents cannot, the Main Agent included. Removing the skill from the agent, or deleting the agent, deletes its secrets. A global skill has no secrets, and neither does a copy of a skill on another agent.
 

@@ -57,6 +57,11 @@ class SkillSecretGrantsTest extends UnitTest {
         AgentService.delete(Agent.findById(agent.id));
     }
 
+    private void declare(String skill, String lines) throws Exception {
+        Files.writeString(workspace.resolve("skills/" + skill + "/SKILL.md"),
+                "---\nname: " + skill + "\ndescription: test skill\n---\n# " + skill + "\n\n```secrets\n" + lines + "```\n");
+    }
+
     private List<String> given(String command) {
         return given(command, workspace);
     }
@@ -100,10 +105,8 @@ class SkillSecretGrantsTest extends UnitTest {
      */
     @Test
     void aSkillStillWaitingForASecretKeepsGivingTheOnesItHolds() throws Exception {
-        Files.writeString(workspace.resolve("skills/demo/secrets.example"),
-                "API_KEY=api.example.com      # held\nNOT_YET=api.example.com      # not provided\n");
-        Files.writeString(workspace.resolve("skills/demo-two/secrets.example"),
-                "TWO_KEY=two.example.com      # its own\nAPI_KEY=api.example.com      # demo's\n");
+        declare("demo", "API_KEY=api.example.com      # held\nNOT_YET=api.example.com      # not provided\n");
+        declare("demo-two", "TWO_KEY=two.example.com      # its own\nAPI_KEY=api.example.com      # demo's\n");
         agents.SkillLoader.clearCache();
 
         var offered = Tx.run(() -> agents.SkillLoader.loadSkills(agent.name).stream().map(s -> s.name()).toList());

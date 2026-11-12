@@ -239,7 +239,7 @@ public class SkillLoader {
     }
 
     /**
-     * JF-348: a skill whose secrets.example names a required secret it cannot be given is not runnable, so the agent
+     * JF-348: a skill whose SKILL.md declares a required secret it cannot be given is not runnable, so the agent
      * is not offered it. A subagent works in its owner's workspace with its owner's secrets, so the owner's
      * switched-on skills are the ones that provide them.
      */

@@ -751,7 +751,7 @@ describe('Skills page — import a skill zip', () => {
             'No malware scanner is set up, so this skill\'s binary files were not scanned: tools/wacli. '
             + 'Set one up in Settings → Malware and Virus Scanners.',
             'These files look like they hold a key and stay readable to your agents: config.json. '
-            + 'Move the keys into credentials/.',
+            + 'Remove the keys from them, and add each one in the skill\'s Secrets panel on the agent that uses it.',
           ],
         }
       },

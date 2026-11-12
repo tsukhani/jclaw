@@ -1659,9 +1659,61 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals("[\"config.json\"]", body.get("flaggedFiles").toString(),
                 "a key outside credentials/ is named; the one inside it and the README are not");
         assertEquals(java.util.List.of("These files look like they hold a key and stay readable to your agents: "
-                + "config.json. Move the keys into credentials/."), warnings(body));
+                + "config.json. Remove the keys from them, and add each one in the skill's Secrets panel on the agent that uses it."), warnings(body));
         assertEquals("{\"apiKey\": \"sk-live-4f3c2a1b9e8d7c6b5a4f\"}",
                 Files.readString(globalSkillsDir.resolve("notes/config.json")), "the upload keeps its layout");
+    }
+
+    /** JF-353: a SKILL.md's secrets block names secrets by design, so naming one is not "holding a key". */
+    @Test
+    void anUploadIsNotFlaggedForDeclaringItsSecrets() throws Exception {
+        login();
+        var skillMd = "---\nname: weather\ndescription: Tells the weather.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Weather\n\n"
+                + "## Secrets\n\n```secrets\nWEATHER_API_KEY=api.example.com   # The service's API key\n```\n\n"
+                + "```bash\ncurl -s -H \"X-API-Key: $WEATHER_API_KEY\" \"https://api.example.com/v1/today\"\n```\n";
+        var upload = zipFile("weather/SKILL.md", skillMd);
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[]", body.get("flaggedFiles").toString());
+        assertEquals(java.util.List.of(), warnings(body));
+        assertEquals(java.util.List.of("WEATHER_API_KEY"),
+                services.SkillSecrets.declared(globalSkillsDir.resolve("weather")).stream().map(d -> d.name()).toList(),
+                "the imported skill still declares its secret");
+    }
+
+    @Test
+    void anUploadIsFlaggedWhenItsCommandsCarryAKeyRatherThanTheVariable() throws Exception {
+        login();
+        var skillMd = "---\nname: weather\ndescription: Tells the weather.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Weather\n\n"
+                + "## Secrets\n\n```secrets\nWEATHER_API_KEY=api.example.com   # The service's API key\n```\n\n"
+                + "```bash\ncurl -s -H \"X-API-Key: 0123456789abcdef0123456789abcdef\" \"https://api.example.com/v1/today\"\n```\n";
+        var upload = zipFile("weather/SKILL.md", skillMd);
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[\"SKILL.md\"]", body.get("flaggedFiles").toString());
+    }
+
+    @Test
+    void anUploadIsFlaggedWhenItsSecretsBlockHoldsAValue() throws Exception {
+        login();
+        var skillMd = "---\nname: leaky\ndescription: Leaks.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Leaky\n\n"
+                + "```secrets\nLEAKY_API_KEY=0123456789abcdef0123456789abcdef   # pasted by mistake\n```\n";
+        var upload = zipFile("leaky/SKILL.md", skillMd);
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[\"SKILL.md\"]", body.get("flaggedFiles").toString());
     }
 
     @Test

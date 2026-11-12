@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Imports a skill from the external catalog into JClaw's global registry:
@@ -43,6 +45,7 @@ public final class RegistrySkillImporter {
     private static final Set<String> RESERVED = Set.of("skill-creator", "jclaw-api");
     /** How many unscanned files a warning names before it counts the rest. */
     private static final int NAMED_FILES = 5;
+    private static final Pattern VARIABLE = Pattern.compile("\\$\\{?[A-Za-z_][A-Za-z0-9_]*+}?");
 
     private RegistrySkillImporter() {}
 
@@ -149,7 +152,7 @@ public final class RegistrySkillImporter {
             var warnings = new ArrayList<>(result.warnings());
             if (!flagged.isEmpty()) {
                 warnings.add("These files look like they hold a key and stay readable to your agents: %s. %s"
-                        .formatted(String.join(", ", flagged), "Move the keys into credentials/."));
+                        .formatted(String.join(", ", flagged), "Remove the keys from them, and add each one in the skill's Secrets panel on the agent that uses it."));
             }
             return ImportResult.imported(name, flagged, warnings);
         } catch (IllegalArgumentException e) {
@@ -250,8 +253,29 @@ public final class RegistrySkillImporter {
         for (var relative : publishedFiles(skillDir)) {
             if (relative.startsWith("credentials/") || !SkillLoader.isTextFile(relative)) continue;
             var text = Files.readString(skillDir.resolve(relative));
-            if (!SecretRedactor.redact(text).equals(text)) flagged.add(relative);
+            if (holdsAKey(relative, text)) flagged.add(relative);
         }
         return flagged;
+    }
+
+    /**
+     * A SKILL.md's secrets block names secrets by design, which the redactor reads as assignments, so the block is
+     * judged by what it holds and only the rest of the file goes to the redactor.
+     */
+    private static boolean holdsAKey(String relative, String text) {
+        if (!relative.equals("SKILL.md")) return masksSomething(text);
+        var split = SkillSecrets.splitDeclaration(text);
+        var block = split.block();
+        return block != null && SkillSecrets.holdsMoreThanDeclarations(block) || masksSomething(split.rest());
+    }
+
+    /**
+     * Whether the redactor masks anything but a shell variable. A skill sends a secret as {@code $NAME}, which the
+     * redactor masks like any value after {@code X-API-Key:}: a reference to a secret is not one. Each reference is
+     * written as the mask first, so the redactor finds nothing left to change where one stood.
+     */
+    private static boolean masksSomething(String text) {
+        var probe = VARIABLE.matcher(text).replaceAll(Matcher.quoteReplacement(SecretRedactor.MASK));
+        return !SecretRedactor.redact(probe).equals(probe);
     }
 }

@@ -4,6 +4,7 @@ import agents.SkillLoader;
 import models.Agent;
 import models.SkillSecret;
 import org.jspecify.annotations.Nullable;
+import utils.SecretRedactor;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -11,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -46,16 +48,22 @@ public final class SkillSecrets {
     public record Listing(String name, List<String> hosts, Instant setAt) {}
 
     /**
-     * A secret a skill says it needs (JF-348), from {@value #DECLARATION_FILE} in its folder: what the panel offers
-     * the operator to add. {@code exampleHosts} are the skill author's examples, never bound to anything. A secret is
-     * required unless its description starts with the word "optional".
+     * A secret a skill says it needs (JF-348), from the {@value #DECLARATION_BLOCK} block of its SKILL.md: what the
+     * panel offers the operator to add. {@code exampleHosts} are the skill author's examples, never bound to
+     * anything. A secret is required unless its description starts with the word "optional".
      */
     public record Declared(String name, String description, List<String> exampleHosts, boolean optional) {}
 
-    /** The file a skill declares its secrets in: {@code NAME=example-host   # what it is}, one per line, no value. */
-    public static final String DECLARATION_FILE = "secrets.example";
+    /**
+     * The language of the fenced block in a skill's SKILL.md that declares its secrets (JF-353), one
+     * {@code NAME=example-host   # what it is} per line and never a value. It sits in the file the agent already
+     * reads, so the declaration and the instructions cannot drift apart, and no extra file needs a place in a skill.
+     */
+    public static final String DECLARATION_BLOCK = "secrets";
+    private static final String SKILL_FILE = "SKILL.md";
+    private static final Pattern FENCE = Pattern.compile(" {0,3}(`{3,}|~{3,})[ \\t]*([^\\s`]*).*");
     private static final Pattern OPTIONAL = Pattern.compile("(?i)optional\\b.*", Pattern.DOTALL);
-    private static final int MAX_DECLARATION_BYTES = 16_384;
+    private static final int MAX_SKILL_BYTES = 262_144;
     private static final int MAX_DECLARED = 32;
     private static final Pattern DECLARATION = Pattern.compile(
             "\\s*(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
@@ -138,17 +146,113 @@ public final class SkillSecrets {
      * breaks the panel. Empty when the skill ships no file.
      */
     public static List<Declared> declared(Path skillDir) {
-        var file = skillDir.resolve(DECLARATION_FILE);
-        List<String> lines;
+        var file = skillDir.resolve(SKILL_FILE);
+        String skillMd;
         try {
-            if (!Files.isRegularFile(file) || Files.size(file) > MAX_DECLARATION_BYTES) return List.of();
-            lines = Files.readAllLines(file);
+            if (!Files.isRegularFile(file) || Files.size(file) > MAX_SKILL_BYTES) return List.of();
+            skillMd = Files.readString(file);
         } catch (IOException | UncheckedIOException _) {
             return List.of();
         }
+        return declaredIn(skillMd);
+    }
+
+    /** The secrets {@code skillMd}'s declaration block declares; empty when it has none. */
+    public static List<Declared> declaredIn(String skillMd) {
+        var block = splitDeclaration(skillMd).block();
+        return block == null ? List.of() : declarationsIn(block);
+    }
+
+    /**
+     * A declaration block, fences included, written from parsed declarations alone: no comment line, no text that
+     * did not parse, nothing after the fence. What it holds is only what {@link #declaredIn} would read back.
+     */
+    public static String declarationBlock(List<Declared> declared) {
+        var out = new StringBuilder("```").append(DECLARATION_BLOCK).append('\n');
+        for (var d : declared) {
+            out.append(d.name()).append('=').append(String.join(", ", d.exampleHosts()));
+            if (!d.description().isEmpty()) out.append("   # ").append(d.description());
+            out.append('\n');
+        }
+        return out.append("```").toString();
+    }
+
+    /** {@code description} still marking the secret optional, so a rewritten description keeps what it meant. */
+    public static String keepOptional(String description, boolean optional) {
+        if (!optional || OPTIONAL.matcher(description).matches()) return description;
+        return description.isEmpty() ? "Optional" : "Optional. " + description;
+    }
+
+    /** A SKILL.md apart: the lines inside its declaration block, or null when it has none, and everything else. */
+    public record Split(@Nullable String block, String rest) {}
+
+    /**
+     * {@code skillMd} with its declaration block set apart: the first top-level fenced block whose language is
+     * {@value #DECLARATION_BLOCK}. A block inside another fence is an example of the format, as in a guide that shows
+     * it, and declares nothing; a block the file never closes declares nothing either.
+     */
+    public static Split splitDeclaration(String skillMd) {
+        var lines = skillMd.split("\\R", -1);
+        var at = declarationFences(lines);
+        if (at == null) return new Split(null, skillMd);
+        var block = new StringBuilder();
+        var rest = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            (i > at.open() && i < at.close() ? block : rest).append(lines[i]).append('\n');
+        }
+        return new Split(block.toString(), rest.toString());
+    }
+
+    /** {@code fenced} is the declaration block with its fences; {@code text} has {@code replacement} in its place. */
+    public record Lifted(String fenced, String block, String text) {}
+
+    /** {@code skillMd} with its declaration block, fences included, replaced by {@code replacement}; null when none. */
+    public static @Nullable Lifted liftDeclaration(String skillMd, String replacement) {
+        var lines = skillMd.split("\\R", -1);
+        var at = declarationFences(lines);
+        if (at == null) return null;
+        var fenced = String.join("\n", Arrays.asList(lines).subList(at.open(), at.close() + 1));
+        var block = new StringBuilder();
+        for (int i = at.open() + 1; i < at.close(); i++) block.append(lines[i]).append('\n');
+        var text = new ArrayList<String>(Arrays.asList(lines).subList(0, at.open()));
+        text.add(replacement);
+        text.addAll(Arrays.asList(lines).subList(at.close() + 1, lines.length));
+        return new Lifted(fenced, block.toString(), String.join("\n", text));
+    }
+
+    private record Fences(int open, int close) {}
+
+    private static @Nullable Fences declarationFences(String[] lines) {
+        String fence = null;
+        boolean declaring = false;
+        int open = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (fence == null) {
+                var m = FENCE.matcher(lines[i]);
+                if (m.matches()) {
+                    fence = m.group(1);
+                    declaring = m.group(2).equals(DECLARATION_BLOCK);
+                    open = i;
+                }
+            } else if (closes(lines[i], fence)) {
+                if (declaring) return new Fences(open, i);
+                fence = null;
+                declaring = false;
+            }
+        }
+        return null;
+    }
+
+    /** A fence closes on a run of its own character, at least as long, with nothing after it. */
+    private static boolean closes(String line, String fence) {
+        var run = line.strip();
+        return run.length() >= fence.length() && run.chars().allMatch(c -> c == fence.charAt(0));
+    }
+
+    private static List<Declared> declarationsIn(String block) {
         var out = new ArrayList<Declared>();
         var seen = new LinkedHashSet<String>();
-        for (var line : lines) {
+        for (var line : block.split("\\R")) {
             if (line.isBlank() || line.stripLeading().startsWith("#")) continue;
             var m = DECLARATION.matcher(line);
             if (!m.matches()) continue;
@@ -240,6 +344,66 @@ public final class SkillSecrets {
     /** As {@link #provided(Agent)}, for the loader itself, which cannot ask its own cache while filling it. */
     public static Provided provided(Agent owner, Supplier<Set<String>> enabledFolders) {
         return new Provided(owner, enabledFolders);
+    }
+
+    /**
+     * Whether a declaration block's text holds something that is not a declaration (JF-353): a word where the example
+     * host belongs that could not be a host, or anything {@link SecretRedactor} masks once the secret's name is set
+     * aside. Naming a secret is what the block is for, so {@code API_KEY=api.example.com} is no finding, though the
+     * redactor alone would mask it. A comment is judged word by word for the same reason: its prose names secrets
+     * ("one line per secret: NAME=host"), and a pasted key is a single word.
+     */
+    public static boolean holdsMoreThanDeclarations(String text) {
+        for (var line : text.split("\\R")) {
+            if (line.isBlank()) continue;
+            var m = DECLARATION.matcher(line);
+            if (line.stripLeading().startsWith("#")) {
+                if (anyWordMasked(line)) return true;
+                continue;
+            }
+            if (!m.matches()) {
+                if (masked(line)) return true;
+                continue;
+            }
+            for (var example : m.group(2).split("[,\\s]+")) {
+                if (example.isBlank()) continue;
+                if (!isPlausibleExampleHost(example) || masked(example)) return true;
+            }
+            if (m.group(3) != null && anyWordMasked(m.group(3))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A host name or address as the store takes one, with a dot unless it is localhost, and no long label mixing
+     * letters and digits: a key written where the host belongs is one unbroken word, or a dotted run of random ones.
+     */
+    private static boolean isPlausibleExampleHost(String example) {
+        String host;
+        try {
+            host = normalizeHosts(List.of(example)).getFirst();
+        } catch (Refused _) {
+            return false;
+        }
+        if (!host.contains(".") && !host.startsWith("localhost")) return false;
+        for (var label : host.split("[.:]")) {
+            if (label.length() > 24 && label.chars().anyMatch(Character::isLetter)
+                    && label.chars().anyMatch(Character::isDigit)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean masked(String text) {
+        return !SecretRedactor.redact(text).equals(text);
+    }
+
+    private static boolean anyWordMasked(String text) {
+        for (var word : text.split("\\s+")) {
+            if (masked(word)) return true;
+        }
+        return false;
     }
 
     /** Why {@code name} cannot name a secret, or null when it can. */

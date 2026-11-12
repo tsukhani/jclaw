@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -258,9 +259,11 @@ public class SkillPromotionService {
         stripCredentialFiles(textFiles);
 
         SkillLoader.FrontmatterSplit originalSplit = stashFrontmatter(textFiles);
+        var declared = declarationsToRestore(textFiles);
 
         var sanitized = sanitizeWithLlm(textFiles);
 
+        restoreDeclaration(declared, sanitized);
         reinjectFrontmatter(originalSplit, sanitized);
 
         writeToGlobalRegistry(skillDir, skillName, sanitized, binaryFiles);
@@ -394,6 +397,42 @@ public class SkillPromotionService {
             textFiles.put(SKILL_FILE_NAME, originalSplit.body() != null ? originalSplit.body() : "");
         }
         return originalSplit;
+    }
+
+    /**
+     * The secrets a SKILL.md declares, read before the sanitizer sees the file (JF-353). Its lines read as key
+     * assignments, so the sanitizer may mask them, and the promoted skill would declare nothing and look runnable. A
+     * block that holds anything but declarations gets no such help: what the sanitizer returns for it stands.
+     */
+    private static @Nullable List<SkillSecrets.Declared> declarationsToRestore(LinkedHashMap<String, String> textFiles) {
+        var body = textFiles.get(SKILL_FILE_NAME);
+        if (body == null) return null;
+        var block = SkillSecrets.splitDeclaration(body).block();
+        if (block == null || SkillSecrets.holdsMoreThanDeclarations(block)) return null;
+        var declared = SkillSecrets.declaredIn(body);
+        return declared.isEmpty() ? null : declared;
+    }
+
+    /**
+     * Rewrite the sanitized SKILL.md's secrets block from the names and example hosts read before it was sanitized,
+     * which {@link SkillSecrets} validated, and the descriptions the sanitizer returned, which are free text. Nothing
+     * else in the original block comes back. The block replaces the one the sanitizer returned, or is appended when it
+     * dropped it.
+     */
+    private static void restoreDeclaration(@Nullable List<SkillSecrets.Declared> declared,
+                                           LinkedHashMap<String, String> sanitized) {
+        var body = declared == null ? null : sanitized.get(SKILL_FILE_NAME);
+        if (declared == null || body == null) return;
+        var reviewed = new HashMap<String, String>();
+        for (var d : SkillSecrets.declaredIn(body)) reviewed.put(d.name(), d.description());
+        var rebuilt = new ArrayList<SkillSecrets.Declared>();
+        for (var d : declared) {
+            var description = SkillSecrets.keepOptional(reviewed.getOrDefault(d.name(), ""), d.optional());
+            rebuilt.add(new SkillSecrets.Declared(d.name(), description, d.exampleHosts(), d.optional()));
+        }
+        var block = SkillSecrets.declarationBlock(rebuilt);
+        var lifted = SkillSecrets.liftDeclaration(body, block);
+        sanitized.put(SKILL_FILE_NAME, lifted != null ? lifted.text() : body.stripTrailing() + "\n\n" + block + "\n");
     }
 
     private static void reinjectFrontmatter(SkillLoader.@Nullable FrontmatterSplit originalSplit,

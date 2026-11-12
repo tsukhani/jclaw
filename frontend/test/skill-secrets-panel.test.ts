@@ -193,7 +193,7 @@ describe('SkillSecretsPanel', () => {
     expect(wrapper.text()).toContain('None.')
   })
 
-  // ===== JF-348: what the skill declares in secrets.example =====
+  // ===== JF-348: what the skill declares in its SKILL.md =====
 
   const declared = {
     secrets: [{ name: 'NAS_PASS', hosts: ['nas.example.com:5001'], setAt: '2026-11-12T08:00:00Z' }],

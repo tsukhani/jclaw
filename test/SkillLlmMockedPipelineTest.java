@@ -15,6 +15,7 @@ import services.ConfigService;
 import services.RegistrySkillImporter;
 import services.SkillConformanceService;
 import services.SkillPromotionService;
+import services.SkillSecrets;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -61,6 +62,7 @@ class SkillLlmMockedPipelineTest extends UnitTest {
     private static volatile String nextAssistantContent = "{}";
 
     private Path stagedDir;
+    private Path promotedGlobal;
 
     @BeforeAll
     static void startServer() throws IOException {
@@ -130,6 +132,13 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         llm.ProviderRegistry.refresh();
         if (stagedDir != null && Files.exists(stagedDir)) {
             SkillPromotionService.deleteRecursive(stagedDir);
+        }
+        if (promotedGlobal != null) {
+            play.Play.configuration.remove("jclaw.skills.path");
+            SkillRegistryTool.deleteBySkill("weather");
+            SkillPromotionService.deleteRecursive(promotedGlobal);
+            SkillLoader.clearCache();
+            promotedGlobal = null;
         }
     }
 
@@ -387,6 +396,184 @@ class SkillLlmMockedPipelineTest extends UnitTest {
             SkillRegistryTool.deleteBySkill("claude-built-probe");
             SkillLoader.clearCache();
         }
+    }
+
+    // ==================== the secrets block across promotion (JF-353) ====================
+
+    private static final String WEATHER = """
+            ---
+            name: weather
+            description: Tells the weather.
+            ---
+            # Weather
+
+            ## Secrets
+
+            ```secrets
+            WEATHER_API_KEY=api.example-weather.com   # The API key
+            ```
+
+            Ask admin@example.com for an account.
+            """;
+
+    private static final String KEPT_BODY = """
+            # Weather
+
+            ## Secrets
+
+            ```secrets
+            WEATHER_API_KEY=api.example-weather.com   # The API key
+            ```
+
+            Ask [EMAIL] for an account.
+            """;
+
+    /** Promotes {@code skillMd} through a reviewer that answers {@code reviewed}; returns the promoted SKILL.md's body. */
+    private String promotedBody(String skillMd, String reviewed) throws Exception {
+        promotedGlobal = Files.createTempDirectory("skill-llm-mock-global-");
+        play.Play.configuration.setProperty("jclaw.skills.path", promotedGlobal.toString());
+        SkillLoader.clearCache();
+        Files.writeString(stagedDir.resolve("SKILL.md"), skillMd);
+        var answer = new JsonObject();
+        answer.addProperty("SKILL.md", reviewed);
+        nextAssistantContent = answer.toString();
+
+        assertTrue(SkillPromotionService.publishToGlobal(stagedDir, "weather", false));
+
+        var promoted = Files.readString(promotedGlobal.resolve("weather/SKILL.md"));
+        return java.util.Objects.requireNonNull(SkillLoader.splitFrontmatter(promoted).body()).strip();
+    }
+
+    private void assertDeclaresTheWeatherKey(String description) {
+        assertEquals(java.util.List.of(new SkillSecrets.Declared("WEATHER_API_KEY", description,
+                        java.util.List.of("api.example-weather.com"), false)),
+                SkillSecrets.declared(promotedGlobal.resolve("weather")));
+    }
+
+    /** The reviewer reads NAME=host as a key assignment; masked, the promoted skill would declare nothing. */
+    @Test
+    void promotionRestoresTheNameAndHostTheReviewerMasked() throws Exception {
+        var body = promotedBody(WEATHER, """
+                # Weather
+
+                ## Secrets
+
+                ```secrets
+                WEATHER_API_KEY=[API_KEY]   # The API key
+                ```
+
+                Ask [EMAIL] for an account.
+                """);
+
+        assertEquals(KEPT_BODY.strip(), body, "the reviewer's other redactions stand; the name and host are restored");
+        assertDeclaresTheWeatherKey("The API key");
+    }
+
+    /** Free text in the block is the reviewer's: only the name and the validated host come from the original. */
+    @Test
+    void theRestoredBlockHoldsOnlyNamesHostsAndTheReviewersDescriptions() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                # Weather
+
+                ```secrets   anything after the language
+                # Ask admin@example.com before you add these.
+                WEATHER_API_KEY=api.example-weather.com   # The API key; admin@example.com has it
+                not a declaration
+                ```
+                """, """
+                # Weather
+
+                ```secrets   anything after the language
+                # Ask [EMAIL] before you add these.
+                WEATHER_API_KEY=[API_KEY]   # The API key; [EMAIL] has it
+                not a declaration
+                ```
+                """);
+
+        assertEquals("""
+                # Weather
+
+                ```secrets
+                WEATHER_API_KEY=api.example-weather.com   # The API key; [EMAIL] has it
+                ```""", body);
+        assertDeclaresTheWeatherKey("The API key; [EMAIL] has it");
+    }
+
+    @Test
+    void promotionAppendsTheSecretsBlockTheReviewerDropped() throws Exception {
+        var body = promotedBody(WEATHER, """
+                # Weather
+
+                ## Secrets
+
+                Ask [EMAIL] for an account.
+                """);
+
+        assertEquals("""
+                # Weather
+
+                ## Secrets
+
+                Ask [EMAIL] for an account.
+
+                ```secrets
+                WEATHER_API_KEY=api.example-weather.com
+                ```""", body, "the description went with the reviewer's block; the name and host did not");
+        assertDeclaresTheWeatherKey("");
+    }
+
+    @Test
+    void anOptionalSecretStaysOptionalWhenTheReviewerDropsItsDescription() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                ```secrets
+                PROXY_PASS=proxy.example-weather.com   # Optional. The proxy's password
+                ```
+                """, """
+                ```secrets
+                PROXY_PASS=[PASSWORD]
+                ```
+                """);
+
+        assertEquals("""
+                ```secrets
+                PROXY_PASS=proxy.example-weather.com   # Optional
+                ```""", body);
+        assertEquals(java.util.List.of(new SkillSecrets.Declared("PROXY_PASS", "Optional",
+                        java.util.List.of("proxy.example-weather.com"), true)),
+                SkillSecrets.declared(promotedGlobal.resolve("weather")));
+    }
+
+    /** A block that holds a pasted key is not restored: the reviewer masks it like any other. */
+    @Test
+    void aSecretsBlockHoldingAKeyIsLeftToTheReviewer() throws Exception {
+        var reviewed = """
+                # Weather
+
+                ```secrets
+                WEATHER_API_KEY=[API_KEY]   # pasted by mistake
+                ```
+                """;
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                # Weather
+
+                ```secrets
+                WEATHER_API_KEY=0123456789abcdef0123456789abcdef   # pasted by mistake
+                ```
+                """, reviewed);
+
+        assertEquals(reviewed.strip(), body);
     }
 
     // ==================== sanitizeWithLlm ====================

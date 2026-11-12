@@ -4,7 +4,7 @@
 whatsapp-notifier/
 ├── SKILL.md
 ├── credentials/
-│   └── api-config.json       # WhatsApp API credentials
+│   └── api-config.json       # The API's address and the sender's number: settings, no secret
 └── tools/
     ├── wacli                  # WhatsApp CLI binary
     └── README.md              # Usage docs for the binary
@@ -16,7 +16,7 @@ Note: the `version` entry is omitted from the frontmatter you write — the file
 
 **Output Location:** If this skill generates files (HTML, documents, etc.), store them in `{skill-name}/` at the root of the agent's workspace (e.g., `my-skill/`) so users can easily find and download them.
 
-```markdown
+````markdown
 ---
 name: whatsapp-notifier
 description: >-
@@ -24,18 +24,25 @@ description: >-
 metadata:
   author: main
   jclaw-icon: "💬"
-  jclaw-tools: exec filesystem
+  jclaw-tools: exec
   jclaw-commands: wacli
 ---
 
 # WhatsApp Notifier
 
+## Secrets
+
+The operator adds this in the skill's Secrets panel on the Skills page. An agent cannot.
+
+```secrets
+WHATSAPP_API_TOKEN=api.example-whatsapp.com   # The API token, from the provider's dashboard
+```
+
 When asked to send a WhatsApp message:
 
-1. Read credentials from `credentials/api-config.json` using the `filesystem` tool
-2. Use the `exec` tool to run `tools/wacli` to send the message
-3. Confirm delivery status to the user
-```
+1. Use the `exec` tool to run `tools/wacli` to send the message. It reads its settings from `credentials/api-config.json` and takes the token as `$WHATSAPP_API_TOKEN`
+2. Confirm delivery status to the user
+````
 
 Compare with a **prompt-only** skill (no binaries, no file I/O):
 

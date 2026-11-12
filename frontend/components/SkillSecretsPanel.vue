@@ -4,7 +4,7 @@
  * returns a value, so this panel only ever shows names, hosts and when each was set. A typed value is cleared from
  * the form as soon as it is saved.
  *
- * JF-348: the skill's secrets.example declares what it needs. Each declared secret is listed with its state, and
+ * JF-348: the skill's SKILL.md declares what it needs, in its secrets block. Each declared secret is listed with its state, and
  * while a required one has no value the skill is not runnable, which the panel says at its top.
  */
 import type { ApiErrorDetails } from '~/types/api'
@@ -351,7 +351,7 @@ watch(() => [props.agentId, props.skillName], () => {
           class="mt-1 w-full font-mono text-xs bg-surface border border-border px-2 py-1 text-fg-strong"
         >
       </label>
-      <!-- secrets.example sits in the agent's workspace, which the agent can write: its text is a hint, never a fact. -->
+      <!-- A skill's SKILL.md sits in the agent's workspace, which the agent can write: its text is a hint, never a fact. -->
       <p
         v-if="formDeclared !== null"
         class="text-xs text-amber-800 dark:text-amber-300"

@@ -3,7 +3,7 @@ name: gamma-presenter
 description: >-
   Create beautiful AI-generated presentations, documents, webpages, and social posts via the Gamma API. Supports generation from text prompts, templates, multi-page gammas, exports to PDF/PPTX/PNG, and management of existing gammas.
 metadata:
-  version: "1.0.8"
+  version: "1.0.9"
   author: main
   jclaw-icon: "🎨"
   jclaw-tools: filesystem exec
@@ -18,9 +18,13 @@ Generate polished presentations, documents, webpages, and social media posts usi
 - Gamma account with Pro, Ultra, Team, or Business plan (required for API key)
 - The API key in JClaw's secret store, as `GAMMA_API_KEY`
 
-## API Key Setup
+## Secrets
 
-The operator does this once; an agent cannot.
+```secrets
+GAMMA_API_KEY=public-api.gamma.app   # A Gamma API key (starts with sk-gamma-), from Settings, API Keys
+```
+
+The operator adds it once; an agent cannot.
 
 1. Log in to Gamma at https://gamma.app
 2. Go to **Settings → API Keys**

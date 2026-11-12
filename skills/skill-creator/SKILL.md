@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -19,8 +19,8 @@ Every skill MUST follow this layout:
 ```
 {skill-name}/                  # kebab-case name (required)
 ├── SKILL.md                   # Skill definition with YAML frontmatter (required)
-├── credentials/               # Credential/config files only (optional)
-│   └── *.json, *.txt, *.env   # API keys, tokens, auth configs — TEXT FILES ONLY
+├── credentials/               # Settings files only (optional)
+│   └── *.json, *.txt, *.env   # Addresses, user names, paths — TEXT FILES ONLY
 ├── references/                # Detailed material SKILL.md points to (optional)
 │   └── *.md                   # Catalogs, templates, examples — TEXT FILES ONLY
 └── tools/                     # Binary tools and their docs (optional)
@@ -31,7 +31,7 @@ Every skill MUST follow this layout:
 ### Rules
 
 - **Binaries are ONLY allowed in the `tools/` folder.** No binaries in the root folder or `credentials/` folder.
-- The `credentials/` folder may ONLY contain text files (json, txt, env, yaml, properties).
+- The `credentials/` folder may ONLY contain text files (json, txt, env, yaml, properties) that hold settings. A key, token or password NEVER goes in any file.
 - The `references/` folder may ONLY contain text files, one level deep: a reference file never points to another reference file.
 - The skill root folder may ONLY contain `SKILL.md` and the three subfolders.
 - Skill names must be kebab-case (e.g., `web-scraper`, `slack-notifier`), at most 64 characters, and the same as the folder name.
@@ -45,6 +45,15 @@ A SKILL.md MUST stay under 20,000 characters (about 5,000 tokens, or 500 lines).
 3. Where a section moved, leave one line in SKILL.md saying when to read it, e.g. "Before any course operation, read `skills/{skill-name}/references/courses.md` with the filesystem tool's readFile."
 4. A reference file over 100 lines starts with a short table of contents.
 5. A skill with a `references/` folder MUST list `filesystem` in `jclaw-tools`, so it is never offered to an agent that cannot read its references.
+
+## Secrets
+
+Only the operator can give a skill an API key, token or password, in JClaw's secret store. A command that names `$NAME` gets a stand-in; JClaw puts the real value in only on requests to that secret's hosts. A skill that needs a secret MUST have a `## Secrets` section in its SKILL.md that:
+
+1. Declares each secret in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is`. JClaw reads that block to fill the skill's Secrets panel; no agent is offered the skill until every required secret has a value.
+2. Tells the agent to use `$NAME` in its commands.
+
+Never write a value into a file or ask for one in chat. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
 
 ## Frontmatter layout
 
@@ -106,16 +115,17 @@ Every skill MUST include a `jclaw-icon` entry under `metadata` — a single emoj
    - If the skill has entries in `jclaw-commands`, reference each bundled binary by its path in the body (e.g., `tools/wacli`) so the reader can find it
    - Example inputs and expected outputs
    - Edge cases and error handling
+   - If the skill needs secrets, the `## Secrets` section with its `secrets` block (see Secrets)
    - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`{skill-name}/\` at the root of the agent's workspace (e.g., \`my-skill/\`).`
    - Count the characters: a draft over 18,000 is split into `references/` as the SKILL.md size limit section describes.
-   - **Leave the `version` entry out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. **Set an explicit `version` only when the user asks to promote the skill forward** — e.g., "bump to v1.0.0", "promote to 1.1", "this is a breaking change, make it 2.0.0". In that case, add `version: "X.Y.Z"` under `metadata` with your intended target. The value MUST be strictly greater than the next auto-bump target; anything lower or invalid is silently ignored and the system uses its auto-bump instead. Patterns: minor bump (new feature) `1.0.3 → 1.1.0`, major bump (breaking change) `1.2.0 → 2.0.0`, stable promotion from alpha `0.0.6 → 1.0.0`. A version-only promotion (no other content changes) can be done with a single `editFile` that replaces the existing `version: "…"` line.
+   - **Leave the `version` entry out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. Set an explicit `version` only when the user asks to promote the skill forward; before you do, read `skills/skill-creator/references/versioning.md` with the filesystem tool's readFile.
 5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
    - Write `skills/{skill-name}/SKILL.md` with `writeFile` (brand-new files use `writeFile`; existing files should use `editFile` — see the Refactoring section).
-   - If credentials are needed, create `credentials/` with placeholder files
+   - If it needs settings (an address, a user name), create `credentials/` with placeholder files
    - If binary tools are needed, create `tools/` with documentation. Every binary dropped here MUST also appear in `jclaw-commands`, and every name in `jclaw-commands` MUST correspond to a file in `tools/`.
-   - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/credentials/api.json` / ... / `*** End Patch`.
-6. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist.
+   - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/credentials/config.json` / ... / `*** End Patch`.
+6. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist. If it declares secrets, name each one and tell the user to add it in the skill's Secrets panel on the Skills page.
 
 ### Rules for the `jclaw-tools` entry
 
@@ -138,7 +148,8 @@ When asked to refactor or update an existing skill, or when you notice a skill t
 1. **Audit** the existing skill directory by listing all files and subfolders.
 2. **Identify violations and changes needed:**
    - Any binary files in the root folder or `credentials/` → must move to `tools/`
-   - Any credential/config files in the root folder → must move to `credentials/`
+   - Any settings files in the root folder → must move to `credentials/`
+   - A key, token or password in a file, or read from one → move it to the secret store (see Secrets)
    - Any files other than SKILL.md in the root folder → categorize and move to the correct subfolder
    - Missing YAML frontmatter in SKILL.md → add it
    - JClaw entries at the top level of the frontmatter (`version`, `author`, `icon`, `tools`, `commands`) → move them under `metadata` as `version`, `author`, `jclaw-icon`, `jclaw-tools` and `jclaw-commands`, lists written as space-separated strings. The filesystem tool also does this when it saves the file.
@@ -150,7 +161,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
    - Missing `author` → add it under `metadata`. For legacy skills with no recorded author, set `author` to the agent name that's doing the refactor (i.e., your own agent name from your Environment section). Do NOT invent a historical author.
 3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
-5. **Update the SKILL.md with `editFile`, not `writeFile`.** For any refactor that touches an existing SKILL.md, use `editFile` with a batch of `{oldText, newText}` entries. This is dramatically more efficient than rewriting the whole file and is also the only way to edit a skill body that would exceed your output token budget as a single `writeFile` argument. Each `oldText` must appear exactly once in the file — include enough surrounding context (a surrounding line or two) to guarantee uniqueness. For cross-file refactors (e.g., moving a binary from the skill root into `tools/` AND updating SKILL.md to reference the new path), use `applyPatch` to do both changes atomically in one tool call. Leave the `version` entry alone by default — the filesystem tool auto-bumps the patch component on every material write. **Only set an explicit `version` when the user asks to promote the skill forward** (e.g., "bump to v1.0.0", "promote to 2.0", "this is a breaking change"); in that case include a `version: "X.Y.Z"` edit in the same batch, with a value strictly greater than the auto-bump target. The filesystem tool response will quote the final version — report it to the user.
+5. **Update the SKILL.md with `editFile`, not `writeFile`.** For any refactor that touches an existing SKILL.md, use `editFile` with a batch of `{oldText, newText}` entries. This is dramatically more efficient than rewriting the whole file and is also the only way to edit a skill body that would exceed your output token budget as a single `writeFile` argument. Each `oldText` must appear exactly once in the file — include enough surrounding context (a surrounding line or two) to guarantee uniqueness. For cross-file refactors (e.g., moving a binary from the skill root into `tools/` AND updating SKILL.md to reference the new path), use `applyPatch` to do both changes atomically in one tool call. Leave the `version` entry alone by default — the filesystem tool auto-bumps the patch component on every material write. **Only set an explicit `version` when the user asks to promote the skill forward**; in that case read `skills/skill-creator/references/versioning.md` first and include the `version: "X.Y.Z"` edit in the same batch. The filesystem tool response will quote the final version — report it to the user.
 6. **Verify** the final structure matches the standard layout.
 7. **Report** what was changed and quote the new version as reported by the filesystem tool.
 
@@ -164,9 +175,6 @@ Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store ou
 
 ## Guidelines
 
-- Keep skill names short and descriptive (kebab-case)
-- Write clear, actionable instructions that an LLM can follow
-- Reference tools ONLY by the exact names from the live Tool Catalog in your system prompt — nothing else is valid
 - Skills should be focused on one task — create multiple skills for complex workflows
 - Skills you create go into your workspace and are available only to you
 - An admin can promote a skill to global by copying it to the shared skills directory

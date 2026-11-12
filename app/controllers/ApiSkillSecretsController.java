@@ -36,7 +36,7 @@ public class ApiSkillSecretsController extends Controller {
     public record SecretView(String name, List<String> hosts, String setAt) {}
 
     /**
-     * A secret the skill's {@code secrets.example} declares (JF-348). {@code setIn} is the skill of the agent that
+     * A secret the skill's SKILL.md declares in its {@code secrets} block (JF-348). {@code setIn} is the skill of the agent that
      * holds it, since a name is used once on an agent; {@code set} says this skill can be given it, which it cannot
      * when the holder is another skill that is switched off.
      */
@@ -52,7 +52,7 @@ public class ApiSkillSecretsController extends Controller {
     public record SecretDeletedResponse(boolean deleted) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SecretsResponse.class)))
-    @Operation(summary = "List a skill's secrets on an agent, and the ones its secrets.example declares: names, hosts and when each was set, never a value")
+    @Operation(summary = "List a skill's secrets on an agent, and the ones its SKILL.md declares: names, hosts and when each was set, never a value")
     @AgentAccess(value = OPERATOR_ONLY, reason = "names the secrets a skill holds and the hosts they reach")
     public static void list(Long id, String name) {
         var owner = requireOwner(id);
