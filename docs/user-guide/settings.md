@@ -216,7 +216,7 @@ The CLI and the panel share one implementation. With the instance running, `back
 
 The operator actions that change this instance, ordered by how often one is wanted: upgrading JClaw, and the Java it runs on, is the reason to open this page, restarting is the follow-up, and a password reset is rare enough that it sits last.
 
-This section was previously three, **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
+The addresses `?section=password`, `?section=upgrade` and `?section=restart` also open this section.
 
 ### Upgrade and restart
 
@@ -550,8 +550,6 @@ The Manual card edits the URL, username and password directly. If the backend wo
 | `web_scrape.proxy.dataimpulse.<plan>.password` | *(unset)* | That plan's password, masked like every other secret. |
 | `web_scrape.proxy.dataimpulse.plan` | *(unset)* | The plan the DataImpulse gateway is reached with. While it is set and the URL is DataImpulse's `http://` gateway, the username and password above are not used. Refused until the plan has a login and a password. |
 | `web_scrape.proxy.dataimpulse.targeting` | *(unset)* | Country and session parameters added after every plan's login, such as `cr.de;sessttl.30`. |
-
-A DataImpulse proxy saved before plans existed moves to the Residential plan when JClaw starts: its login and password become that plan's, and the parameters in its username become the targeting.
 
 Credentials belong in the username and password settings, never in the URL, which is shown unmasked; JClaw uses a `socks5://` proxy without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused. Saving a `socks5://` address in the Manual card clears the stored username and password first.
 
