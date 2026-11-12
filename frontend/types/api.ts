@@ -781,6 +781,8 @@ export interface AgentSkill {
   commands?: string[]
   /** Optional emoji or symbol from the SKILL.md `icon:` frontmatter; empty string when not declared. */
   icon?: string
+  /** Required secrets its secrets.example declares that the agent does not hold; not runnable while any is listed. */
+  needsValues?: string[]
   [key: string]: unknown
 }
 

@@ -74,11 +74,9 @@ public final class SecretGrants {
 
         // The owner's list, not the running agent's: a subagent runs in its owner's workspace, and its own list drops
         // a skill that asks for a tool it lacks, though the commands of that skill are what it was started to run.
-        var enabled = new HashSet<String>();
-        for (var skill : SkillLoader.loadSkills(found.ownerName())) {
-            var folder = skill.location().getParent();
-            if (folder != null && folder.getFileName() != null) enabled.add(folder.getFileName().toString());
-        }
+        // The switched-on skills, not the offered ones: a skill still waiting for one secret keeps giving the others
+        // it holds, which another skill may declare (JF-348).
+        var enabled = SkillLoader.enabledSkillFolders(found.ownerName());
         var skillsRoot = AgentService.workspacePath(found.ownerName()).resolve("skills").toAbsolutePath().normalize();
         var where = workdir.toAbsolutePath().normalize();
         var chosen = new ArrayList<SkillSecrets.Usable>();

@@ -910,6 +910,26 @@ async function exportRefusal(e: unknown): Promise<string> {
   return apiErrorDetails(e).message
 }
 
+/** JF-348: the open agent skill's missing required secrets, from the same listing that flags its chip. */
+const editingNeedsValues = computed<string[]>(() => {
+  const id = editingAgentId.value
+  const open = editing.value
+  if (id == null || !open) return []
+  const name = open.folderName || open.name
+  const listed = agentSkillsMap.value[id]?.find(s => (s.folderName || s.name) === name)
+  return listed?.needsValues ?? []
+})
+
+async function reloadSkillsOf(agentId: number | null) {
+  if (agentId == null) return
+  try {
+    agentSkillsMap.value[agentId] = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
+  }
+  catch {
+    // The flag keeps its last state; the panel itself already shows what is missing.
+  }
+}
+
 async function editAgentSkill(agentId: number, skill: AgentSkill) {
   const request = viewerLoads.begin()
   try {
@@ -1421,6 +1441,16 @@ function totalSkillCount(agentId: number) {
                       >{{ skill.icon }}</span>
                       <span class="text-xs text-fg-strong font-mono truncate">{{ skill.name }}</span>
                       <button
+                        v-if="skill.needsValues?.length"
+                        type="button"
+                        class="text-xs text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 shrink-0"
+                        :title="`Not runnable: needs ${skill.needsValues.join(', ')}`"
+                        :data-testid="`needs-secrets-${agent.id}-${skill.name}`"
+                        @click.stop="editAgentSkill(agent.id, skill)"
+                      >
+                        Needs secrets
+                      </button>
+                      <button
                         v-if="updateAvailable(skill)"
                         class="text-xs text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
                         :title="`Update to v${updateAvailable(skill)}`"
@@ -1551,6 +1581,11 @@ function totalSkillCount(agentId: number) {
                 {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
               </span>
               <span
+                v-if="editingNeedsValues.length"
+                class="text-xs text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1"
+                data-testid="viewer-not-runnable"
+              >Not runnable</span>
+              <span
                 v-else
                 class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
               >global</span>
@@ -1628,6 +1663,7 @@ function totalSkillCount(agentId: number) {
         v-if="editingAgentId != null"
         :agent-id="editingAgentId"
         :skill-name="editing.folderName || editing.name"
+        @changed="reloadSkillsOf(editingAgentId)"
       />
       <!-- What SKILL.md and its references cost an agent's conversation once read. -->
       <div

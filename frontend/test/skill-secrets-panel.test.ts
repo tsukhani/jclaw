@@ -192,4 +192,85 @@ describe('SkillSecretsPanel', () => {
     expect(deleted).toBe(true)
     expect(wrapper.text()).toContain('None.')
   })
+
+  // ===== JF-348: what the skill declares in secrets.example =====
+
+  const declared = {
+    secrets: [{ name: 'NAS_PASS', hosts: ['nas.example.com:5001'], setAt: '2026-11-12T08:00:00Z' }],
+    expected: [
+      { name: 'API_KEY', description: 'The service\'s API key', exampleHosts: ['api.example.com'], optional: false, set: false, setIn: null },
+      { name: 'NAS_PASS', description: 'The password itself', exampleHosts: ['nas.example.com:5001'], optional: false, set: true, setIn: 'demo' },
+      { name: 'PROXY_PASS', description: 'Optional. The proxy\'s password', exampleHosts: [], optional: true, set: false, setIn: null },
+      { name: 'SHARED_PASS', description: 'Shared with another skill', exampleHosts: [], optional: false, set: true, setIn: 'other' },
+    ],
+    missing: ['API_KEY'],
+  }
+
+  it('lists each declared secret with its state and says the skill is not runnable', async () => {
+    registerEndpoint('/api/agents/41/skills/demo/secrets', () => declared)
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 41, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.find('[data-testid="secrets-not-runnable"]').text().replace(/\s+/g, ' '))
+      .toBe('Not runnable: this secret needs a value before the agent can use this skill: API_KEY')
+    expect(wrapper.find('[data-testid="declared-API_KEY"]').text()).toContain('Needs a value')
+    expect(wrapper.find('[data-testid="declared-API_KEY"]').text()).toContain('The service\'s API key')
+    expect(wrapper.find('[data-testid="declared-PROXY_PASS"]').text()).toContain('Optional, not set')
+    expect(wrapper.find('[data-testid="declared-SHARED_PASS"]').text()).toContain('Set in other')
+    expect(wrapper.find('button[aria-label="Add SHARED_PASS"]').exists()).toBe(false)
+    // the one this skill holds is a stored row, with its description, not a declared-only row
+    expect(wrapper.find('[data-testid="declared-NAS_PASS"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="secret-NAS_PASS"]').text()).toContain('The password itself')
+  })
+
+  it('marks a secret held by a switched-off skill as still missing, with no Add', async () => {
+    registerEndpoint('/api/agents/44/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SHARED_PASS', description: 'Shared with another skill', exampleHosts: [], optional: false, set: false, setIn: 'other' },
+      ],
+      missing: ['SHARED_PASS'],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 44, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.find('[data-testid="declared-SHARED_PASS"]').text()).toContain('Set in other, which is switched off')
+    expect(wrapper.find('button[aria-label="Add SHARED_PASS"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="secrets-not-runnable"]').exists()).toBe(true)
+  })
+
+  it('shows no notice when nothing required is missing', async () => {
+    registerEndpoint('/api/agents/42/skills/demo/secrets', () => ({ ...declared, missing: [] }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 42, skillName: 'demo' } })
+    await settle()
+    expect(wrapper.find('[data-testid="secrets-not-runnable"]').exists()).toBe(false)
+  })
+
+  it('adding a declared secret fixes its name, offers its example host, and tells the page', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/43/skills/demo/secrets', () => declared)
+    registerEndpoint('/api/agents/43/skills/demo/secrets/API_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'API_KEY', hosts: ['api.internal.example'], setAt: '2026-11-12T09:00:00Z' }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 43, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add API_KEY"]').trigger('click')
+    const name = wrapper.find('input[name="secret-name"]')
+    expect((name.element as HTMLInputElement).value).toBe('API_KEY')
+    expect(name.attributes('readonly')).toBeDefined()
+    expect(wrapper.find('input[name="secret-hosts"]').attributes('placeholder')).toBe('for example api.example.com')
+    expect(wrapper.find('[data-testid="secret-form-hint"]').text()).toBe('The service\'s API key')
+
+    await wrapper.find('input[name="secret-value"]').setValue('fake-typed-value')
+    await wrapper.find('input[name="secret-hosts"]').setValue('api.internal.example')
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ value: 'fake-typed-value', hosts: ['api.internal.example'] })
+  })
 })

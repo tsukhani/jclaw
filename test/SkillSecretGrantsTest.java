@@ -95,6 +95,24 @@ class SkillSecretGrantsTest extends UnitTest {
     }
 
     /**
+     * JF-348: a skill that still needs one secret is not offered to the agent, yet it keeps giving the secrets it
+     * holds, which another skill may declare.
+     */
+    @Test
+    void aSkillStillWaitingForASecretKeepsGivingTheOnesItHolds() throws Exception {
+        Files.writeString(workspace.resolve("skills/demo/secrets.example"),
+                "API_KEY=api.example.com      # held\nNOT_YET=api.example.com      # not provided\n");
+        Files.writeString(workspace.resolve("skills/demo-two/secrets.example"),
+                "TWO_KEY=two.example.com      # its own\nAPI_KEY=api.example.com      # demo's\n");
+        agents.SkillLoader.clearCache();
+
+        var offered = Tx.run(() -> agents.SkillLoader.loadSkills(agent.name).stream().map(s -> s.name()).toList());
+        assertEquals(List.of("demo-two"), offered, "demo is not runnable; demo-two is, on the key demo holds");
+        assertEquals(List.of("API_KEY"), given("curl -H \"X-Key: $API_KEY\" https://api.example.com/"));
+        assertEquals(List.of("API_KEY", "OTHER_KEY"), given("bash skills/demo/run.sh"));
+    }
+
+    /**
      * A subagent runs in its owner's workspace, and a skill often asks for a tool a subagent lacks, which hides the
      * skill from the subagent's own list. Its commands still get the owner's secrets: the skill is enabled on the owner.
      */

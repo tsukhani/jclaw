@@ -19,6 +19,7 @@ import utils.ApiResponses;
 import utils.WorkspacePathGuard;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,7 +35,16 @@ public class ApiSkillSecretsController extends Controller {
 
     public record SecretView(String name, List<String> hosts, String setAt) {}
 
-    public record SecretsResponse(List<SecretView> secrets) {}
+    /**
+     * A secret the skill's {@code secrets.example} declares (JF-348). {@code setIn} is the skill of the agent that
+     * holds it, since a name is used once on an agent; {@code set} says this skill can be given it, which it cannot
+     * when the holder is another skill that is switched off.
+     */
+    public record ExpectedView(String name, String description, List<String> exampleHosts, boolean optional,
+                               boolean set, @Nullable String setIn) {}
+
+    /** {@code missing} names the required declared secrets not yet provided; the skill runs only when it is empty. */
+    public record SecretsResponse(List<SecretView> secrets, List<ExpectedView> expected, List<String> missing) {}
 
     /** {@code value} may be left out to keep the stored one and change only {@code hosts}. */
     public record SecretWriteRequest(@Nullable String value, List<String> hosts) {}
@@ -42,14 +52,20 @@ public class ApiSkillSecretsController extends Controller {
     public record SecretDeletedResponse(boolean deleted) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SecretsResponse.class)))
-    @Operation(summary = "List a skill's secrets on an agent: names, hosts and when each was set, never a value")
+    @Operation(summary = "List a skill's secrets on an agent, and the ones its secrets.example declares: names, hosts and when each was set, never a value")
     @AgentAccess(value = OPERATOR_ONLY, reason = "names the secrets a skill holds and the hosts they reach")
     public static void list(Long id, String name) {
         var owner = requireOwner(id);
-        requireSkill(owner, name);
+        var dir = requireSkill(owner, name);
         var views = new ArrayList<SecretView>();
         for (var listing : SkillSecrets.list(owner, name)) views.add(view(listing));
-        renderJSON(GSON.toJson(new SecretsResponse(views)));
+        var provided = SkillSecrets.provided(owner);
+        var expected = new ArrayList<ExpectedView>();
+        for (var d : SkillSecrets.declared(dir)) {
+            expected.add(new ExpectedView(d.name(), d.description(), d.exampleHosts(), d.optional(),
+                    provided.to(name, d.name()), provided.holder(d.name())));
+        }
+        renderJSON(GSON.toJson(new SecretsResponse(views, expected, provided.missing(dir))));
     }
 
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SecretWriteRequest.class)))
@@ -103,7 +119,7 @@ public class ApiSkillSecretsController extends Controller {
         return WorkspaceFiles.workspaceOwner(agent);
     }
 
-    private static void requireSkill(Agent owner, String name) {
+    private static Path requireSkill(Agent owner, String name) {
         var dir = WorkspacePathGuard.resolveChild(AgentService.workspacePath(owner.name).resolve("skills"), name);
         if (dir == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
@@ -115,6 +131,7 @@ public class ApiSkillSecretsController extends Controller {
                     "Agent '%s' has no skill '%s'.".formatted(owner.name, name));
             throw ApiResponses.unreachable();
         }
+        return dir;
     }
 
     private static @Nullable String stringOrNull(JsonObject body, String key) {

@@ -54,9 +54,14 @@ After an import the page warns you about two things. If no malware scanner is se
 
 When you open a skill from an agent's column, the **Secrets** panel lists the keys and passwords stored for that skill on that agent. Each secret has a name, a value and the hosts it may be sent to.
 
-- **Add secret** asks for all three. The name uses capital letters, digits and underscores, such as `NAS_PASSWORD`. Each host is a name alone, such as `api.example.com` or `nas.example.com:5001`, with no `https://` or path. Separate hosts with commas or spaces.
+- The panel lists the secrets the skill says it needs, each marked **Needs a value**, **Optional, not set**, or **Set in** another skill of the same agent. **Add** beside one opens the form with its name filled in and an example host shown. A secret set in a skill that is switched off still counts as missing: switch that skill on to use it.
+- **Add secret** adds one the skill does not list, and asks for all three. The name uses capital letters, digits and underscores, such as `NAS_PASSWORD`. Each host is a name alone, such as `api.example.com` or `nas.example.com:5001`, with no `https://` or path. Separate hosts with commas or spaces.
 - **Replace** sets a new value or new hosts. Leave **Value** empty to keep the stored value and change only the hosts.
 - **Delete** removes the secret after you confirm.
+
+A skill is **not runnable** while a secret it needs has no value. The panel says so at its top and names the missing secrets, the skill's header shows **Not runnable**, and on the Skills page the skill shows **Needs secrets** under each agent that has it. The agent is not offered the skill until every needed secret has a value. A secret marked optional does not count.
+
+A skill says what it needs in a file named `secrets.example` in its folder, with one line for each secret: the name, an example host, and a comment that says what it is, as in `NAS_PASS=nas.example.com:5001   # The DSM account's password`. A comment that starts with "Optional" marks a secret the skill can run without. No value goes in that file.
 
 JClaw stores each value encrypted. No page, agent or API call returns a value, you included, so the panel shows only each secret's name, hosts and when it was set. Only you can add, replace or delete a secret: agents cannot, the Main Agent included. Removing the skill from the agent, or deleting the agent, deletes its secrets. A global skill has no secrets, and neither does a copy of a skill on another agent.
 

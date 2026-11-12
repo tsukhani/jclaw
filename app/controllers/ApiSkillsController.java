@@ -95,7 +95,7 @@ public class ApiSkillsController extends Controller {
 
     public record AgentSkillView(String name, String description, boolean isGlobal, String location,
                                  List<String> tools, List<String> commands, String author, String icon,
-                                 String version, String folderName, boolean enabled) {}
+                                 String version, String folderName, boolean enabled, List<String> needsValues) {}
 
     public record SkillToolRef(String name, String description) {}
 
@@ -504,9 +504,14 @@ public class ApiSkillsController extends Controller {
             configMap.put(c.skillName, c.enabled);
         }
 
+        // JF-348: the names (never values) of the required secrets a skill declares and cannot be given; while any
+        // is listed the skill is not runnable.
+        var provided = SkillSecrets.provided(WorkspaceFiles.workspaceOwner(agent));
         return skills.stream().<Map<String, Object>>map(s -> {
             var map = skillToMap(s, false);
             map.put(KEY_ENABLED, configMap.getOrDefault(s.name(), true));
+            var folder = s.location() == null ? null : s.location().getParent();
+            map.put("needsValues", folder == null ? List.of() : provided.missing(folder));
             return map;
         }).toList();
     }

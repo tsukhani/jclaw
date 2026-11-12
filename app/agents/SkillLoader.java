@@ -9,15 +9,19 @@ import play.cache.CacheConfig;
 import play.cache.Caches;
 import services.AgentService;
 import services.EventLogger;
+import services.SkillSecrets;
 import services.Tx;
+import services.WorkspaceFiles;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -118,7 +122,13 @@ public class SkillLoader {
         return SkillVersionManager.bumpPatch(v);
     }
 
-    private static final Cache<String, List<SkillInfo>> skillCache = Caches.named(
+    /**
+     * One agent's scan: the skills it is offered, and the folders of those installed, switched on and with their
+     * tools, whether or not their own secrets are complete.
+     */
+    private record Loaded(List<SkillInfo> offered, Set<String> enabledFolders) {}
+
+    private static final Cache<String, Loaded> skillCache = Caches.named(
             SKILLS,
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(30))
@@ -199,10 +209,65 @@ public class SkillLoader {
     }
 
     public static List<SkillInfo> loadSkills(String agentName) {
-        return skillCache.get(agentName, SkillLoader::loadSkillsFromDisk);
+        return skillCache.get(agentName, SkillLoader::loadFromDisk).offered();
     }
 
-    private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
+    /**
+     * The folders of the agent's skills that are installed, switched on and have their tools, whether or not their
+     * own secrets are complete. A command is given only the secrets these hold (JF-326), so only these can provide
+     * a secret another skill declares (JF-348).
+     */
+    public static Set<String> enabledSkillFolders(String agentName) {
+        return skillCache.get(agentName, SkillLoader::loadFromDisk).enabledFolders();
+    }
+
+    private static Loaded loadFromDisk(String agentName) {
+        var enabled = enabledSkillsFromDisk(agentName);
+        var folders = folderNames(enabled);
+        var offered = new ArrayList<>(enabled);
+        dropSkillsMissingSecrets(offered, agentName, folders);
+        return new Loaded(List.copyOf(offered), folders);
+    }
+
+    private static Set<String> folderNames(List<SkillInfo> skills) {
+        var out = new LinkedHashSet<String>();
+        for (var s : skills) {
+            var folder = s.location() == null ? null : s.location().getParent();
+            if (folder != null && folder.getFileName() != null) out.add(folder.getFileName().toString());
+        }
+        return Collections.unmodifiableSet(out);
+    }
+
+    /**
+     * JF-348: a skill whose secrets.example names a required secret it cannot be given is not runnable, so the agent
+     * is not offered it. A subagent works in its owner's workspace with its owner's secrets, so the owner's
+     * switched-on skills are the ones that provide them.
+     */
+    private static void dropSkillsMissingSecrets(List<SkillInfo> skills, String agentName, Set<String> enabledFolders) {
+        var workspace = AgentService.workspacePath(agentName);
+        Tx.run(() -> {
+            var agent = Agent.findByName(agentName);
+            if (agent == null) return;
+            var owner = WorkspaceFiles.workspaceOwner(agent);
+            var provided = SkillSecrets.provided(owner, () -> owner.name.equals(agent.name)
+                    ? enabledFolders
+                    : folderNames(enabledSkillsFromDisk(owner.name)));
+            skills.removeIf(s -> skillMissingSecrets(s, provided, workspace, agentName));
+        });
+    }
+
+    private static boolean skillMissingSecrets(SkillInfo s, SkillSecrets.Provided provided, Path workspace,
+                                               String agentName) {
+        var folder = s.location() == null ? null : workspace.resolve(s.location()).getParent();
+        if (folder == null) return false;
+        var missing = provided.missing(folder);
+        if (missing.isEmpty()) return false;
+        EventLogger.warn(SKILLS, "Excluding skill '%s' from agent '%s': missing secrets %s"
+                .formatted(s.name(), agentName, missing));
+        return true;
+    }
+
+    private static List<SkillInfo> enabledSkillsFromDisk(String agentName) {
         var allSkills = new ArrayList<SkillInfo>();
 
         // Only scan agent workspace skills — global skills must be explicitly copied to agents

@@ -199,6 +199,145 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals("404 not_found No secret 'MISSING' on skill 'demo'.", errorOf(DELETE(base() + "/MISSING")));
     }
 
+    private void declare(String skill, String lines) throws Exception {
+        var dir = AgentService.workspacePath(agentName).resolve("skills/" + skill);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: " + skill + "\ndescription: test skill\n---\n# " + skill + "\n");
+        Files.writeString(dir.resolve("secrets.example"), lines);
+        agents.SkillLoader.clearCache();
+    }
+
+    private List<String> offeredSkills() {
+        return commitInFreshTx(() -> agents.SkillLoader.loadSkills(agentName).stream().map(s -> s.name()).sorted().toList());
+    }
+
+    private String missingOf(String skill) {
+        for (var e : JsonParser.parseString(getContent(GET("/api/agents/" + agentId + "/skills"))).getAsJsonArray()) {
+            var o = e.getAsJsonObject();
+            if (o.get("name").getAsString().equals(skill)) return o.get("needsValues").toString();
+        }
+        return "not listed";
+    }
+
+    /** JF-348: the list also names what the skill's secrets.example declares, and whether the agent holds each. */
+    @Test
+    void theListNamesWhatTheSkillDeclaresAndWhetherEachIsSet() throws Exception {
+        declare("demo", """
+                # The secrets this skill needs. No value goes in this file.
+                API_KEY=api.example.com          # The service's API key
+                export NAS_PASS=NAS.example.com:5001, backup.example.com   # The password itself
+                PROXY_PASS=nas.example.com       # Optional. The reverse proxy's password
+
+                BARE=
+                lowercase=x.example.com          # not a secret name
+                HTTPS_PROXY=x.example.com        # a name the store refuses
+                BAD_HOST=https://x.example.com/path   # its example is no host
+                API_KEY=other.example.com        # declared twice
+                not a declaration line
+                """);
+        assertIsOk(put("NAS_PASS", "{\"value\":\"v\",\"hosts\":[\"nas.example.com:5001\"]}"));
+        assertIsOk(put("UNDECLARED", "{\"value\":\"v\",\"hosts\":[\"a.example.com\"]}"));
+
+        var body = json(GET(base()));
+        assertEquals(JsonParser.parseString("""
+                [{"name":"API_KEY","description":"The service's API key","exampleHosts":["api.example.com"],"optional":false,"set":false,"setIn":null},
+                 {"name":"NAS_PASS","description":"The password itself","exampleHosts":["nas.example.com:5001","backup.example.com"],"optional":false,"set":true,"setIn":"demo"},
+                 {"name":"PROXY_PASS","description":"Optional. The reverse proxy's password","exampleHosts":["nas.example.com"],"optional":true,"set":false,"setIn":null},
+                 {"name":"BARE","description":"","exampleHosts":[],"optional":false,"set":false,"setIn":null},
+                 {"name":"BAD_HOST","description":"its example is no host","exampleHosts":[],"optional":false,"set":false,"setIn":null}]
+                """), body.get("expected"));
+        assertEquals("[\"API_KEY\",\"BARE\",\"BAD_HOST\"]", body.get("missing").toString());
+        var stored = new ArrayList<String>();
+        for (var e : body.getAsJsonArray("secrets")) stored.add(e.getAsJsonObject().get("name").getAsString());
+        assertEquals(List.of("NAS_PASS", "UNDECLARED"), stored, "a stored secret the file does not declare is still listed");
+    }
+
+    @Test
+    void aSkillWithoutTheFileDeclaresNothingAndIsRunnable() throws Exception {
+        var dir = AgentService.workspacePath(agentName).resolve("skills/demo");
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: demo\ndescription: test skill\n---\n# demo\n");
+        agents.SkillLoader.clearCache();
+        var body = json(GET(base()));
+        assertEquals("[]", body.get("expected").toString());
+        assertEquals("[]", body.get("missing").toString());
+        assertEquals("[]", missingOf("demo"));
+        assertEquals(List.of("demo"), offeredSkills());
+    }
+
+    /** A skill is not runnable, and the agent is not offered it, until every required secret it declares is provided. */
+    @Test
+    void aSkillIsNotRunnableUntilEachRequiredSecretIsProvided() throws Exception {
+        declare("demo", """
+                API_KEY=api.example.com     # The service's API key
+                PROXY_PASS=api.example.com  # optional: the proxy's password
+                """);
+        assertEquals("[\"API_KEY\"]", missingOf("demo"));
+        assertEquals(List.of(), offeredSkills());
+
+        assertIsOk(put("PROXY_PASS", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("[\"API_KEY\"]", missingOf("demo"), "an optional secret does not make a skill runnable");
+        assertEquals(List.of(), offeredSkills());
+
+        assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("[]", missingOf("demo"));
+        assertEquals(List.of("demo"), offeredSkills());
+
+        assertIsOk(DELETE(base() + "/API_KEY"));
+        assertEquals("[\"API_KEY\"]", missingOf("demo"));
+        assertEquals(List.of(), offeredSkills(), "deleting a required secret makes the skill not runnable again");
+    }
+
+    /** A name is used once on an agent, so a secret another skill holds counts as provided. */
+    @Test
+    void aSecretHeldByAnotherSkillOfTheAgentCountsAsProvided() throws Exception {
+        declare("demo", "SHARED_PASS=api.example.com   # The shared password\n");
+        declare("other", "SHARED_PASS=api.example.com   # The shared password\n");
+        assertEquals(List.of(), offeredSkills());
+
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_PASS", "application/json",
+                "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        var expected = json(GET(base())).getAsJsonArray("expected").get(0).getAsJsonObject();
+        assertEquals("{\"name\":\"SHARED_PASS\",\"description\":\"The shared password\",\"exampleHosts\":[\"api.example.com\"],"
+                + "\"optional\":false,\"set\":true,\"setIn\":\"other\"}", expected.toString());
+        assertEquals("[]", missingOf("demo"));
+        assertEquals(List.of("demo", "other"), offeredSkills());
+    }
+
+    /** A command gets a secret only from a skill that is switched on, so a holder that is off provides nothing. */
+    @Test
+    void aSecretHeldByASkillThatIsSwitchedOffDoesNotCount() throws Exception {
+        declare("demo", "SHARED_PASS=api.example.com   # The shared password\n");
+        declare("other", "SHARED_PASS=api.example.com   # The shared password\n");
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_PASS", "application/json",
+                "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("[]", missingOf("demo"));
+
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":false}"));
+        agents.SkillLoader.clearCache();
+
+        assertEquals("[\"SHARED_PASS\"]", missingOf("demo"));
+        var body = json(GET(base()));
+        assertEquals("{\"name\":\"SHARED_PASS\",\"description\":\"The shared password\",\"exampleHosts\":[\"api.example.com\"],"
+                + "\"optional\":false,\"set\":false,\"setIn\":\"other\"}",
+                body.getAsJsonArray("expected").get(0).getAsJsonObject().toString());
+        assertEquals("[\"SHARED_PASS\"]", body.get("missing").toString());
+        assertEquals(List.of(), offeredSkills());
+        assertEquals("[]", missingOf("other"), "the skill that holds the secret needs nothing, switched off or not");
+    }
+
+    /** Switching a skill off does not make it look as if its own secrets were missing. */
+    @Test
+    void aSwitchedOffSkillIsNotFlaggedForTheSecretsItHolds() throws Exception {
+        declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+        assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":false}"));
+        agents.SkillLoader.clearCache();
+
+        assertEquals("[]", missingOf("demo"));
+        assertEquals("[]", json(GET(base())).get("missing").toString());
+        assertEquals(List.of(), offeredSkills(), "it is still switched off");
+    }
+
     @Test
     void deletingASecretRemovesItAndOnlyIt() {
         assertIsOk(put("ONE", "{\"value\":\"v1\",\"hosts\":[\"a.example.com\"]}"));
