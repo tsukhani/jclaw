@@ -110,8 +110,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     public void init() throws IOException {
         LuceneIndexer.open();
         // An empty or short index (first boot, or an operator wiped data/jclaw-lucene/) is
-        // backfilled from the JPA store — slow on a huge transcript history, but pre-v1 JClaw
-        // has hundreds-to-low-thousands of rows.
+        // backfilled from the JPA store, which is slow on a large transcript history.
         // JCLAW-1052: an analyzer change re-tokenizes every document, and the count
         // comparison below does not move. Without this the old index keeps answering
         // with the previous tokenization, so the new query terms match nothing and search

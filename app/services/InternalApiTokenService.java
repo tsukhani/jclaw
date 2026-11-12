@@ -125,7 +125,8 @@ public final class InternalApiTokenService {
      * {@link ApiToken} row goes with it. Deleted rather than revoked on purpose — a revocation
      * here would trip the guard above and refuse to mint the replacement.
      *
-     * <p>Pre-v1 migration: delete this method and its call once every install has booted past it.
+     * <p>Keep it and its call: an install can upgrade straight from any earlier release, and one that
+     * never booted past this migration still holds the plaintext row.
      */
     private static void dropLegacyPlaintextRow() {
         var legacy = ConfigService.get(INTERNAL_TOKEN_CONFIG_KEY);

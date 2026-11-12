@@ -323,13 +323,9 @@ public final class LuceneIndexer {
                                   Map<Scope, SearcherManager> searcherMap) throws IOException {
         var indexDir = indexPath(scope);
         Files.createDirectories(indexDir);
-        // Pre-v1 codec note: if the directory contains segments from an
-        // older Lucene codec (e.g. data/jclaw-lucene/ left over from a
-        // pre-Lucene-10 install), they read fine via the
-        // lucene-backward-codecs path. We don't ship backward-codecs on
-        // the classpath, so segments older than Lucene99 fail to open —
-        // the only way that happens is if an operator drops in segments
-        // from another install. The cleanup story is "wipe the directory".
+        // Segments from a Lucene codec older than the shipped one fail to open: backward-codecs
+        // is deliberately not on the classpath. An upgrade across a codec boundary wipes
+        // data/jclaw-lucene/ instead, and the index rebuilds itself.
         var dir = FSDirectory.open(indexDir);
         IndexWriter writer;
         try {
