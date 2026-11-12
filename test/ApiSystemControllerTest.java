@@ -1,5 +1,8 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import controllers.RequestPrincipal;
+import models.Agent;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,9 +11,12 @@ import play.Play;
 import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.AgentService;
+import services.ConversationService;
 import services.InternalApiTokenService;
 import services.JavaRuntimeService;
 import services.RestartService;
+import services.Tx;
 import services.UpgradeService;
 import utils.RestartNarrator;
 
@@ -22,10 +28,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * The restart, upgrade and Java runtime endpoints. Every test here installs the
@@ -71,6 +80,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     @AfterEach
     void clearSeam() {
         RestartService.spawnerForTest = null;
+        RestartService.resetHandOffForTest();
         UpgradeService.spawnerForTest = null;
         UpgradeService.latestVersionForTest = null;
         UpgradeService.latestNotesForTest = null;
@@ -128,7 +138,9 @@ class ApiSystemControllerTest extends FunctionalTest {
         // RenderJson is a RuntimeException, so the handler caught its own
         // result and answered 500.
         assertEquals(202, response.status.intValue());
-        assertTrue(getContent(response).contains("\"status\":\"ok\""));
+        var body = json(response);
+        assertEquals("ok", body.get("status").getAsString());
+        assertEquals(expectedNote(body.get("mode").getAsString()), body.get("note").getAsString());
         assertEquals(1, spawned.size());
         assertTrue(spawned.getFirst().command().contains("restart"));
     }
@@ -299,8 +311,74 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(constant("play.mvc.Scope$Session", "TS_KEY"), RestartNarrator.EXPIRY_KEY);
     }
 
+    // --- JF-350: the Main Agent restarts the instance through the API, and no other agent does ---
+
     @Test
-    void restartProgressRequiresTheOperator() {
+    void mainRestartsTheInstanceFromAConversationAndIsToldItsTurnEndsWithIt() {
+        var main = mainWithAConversation();
+
+        var resp = asAgent(() -> POST(agentRequest(main.agentId(), main.conversationId()), "/api/system/restart",
+                "application/json", "{}"));
+
+        assertEquals(202, resp.status.intValue());
+        assertEquals(1, spawned.size(), "main's request hands the plan to the restart helper once");
+        var body = json(resp);
+        assertEquals(expectedNote(body.get("mode").getAsString()), body.get("note").getAsString());
+    }
+
+    @Test
+    void mainIsRefusedTheRestartFromAScheduledTaskSoItsRerunCannotRestartJClawAgain() {
+        // A task fire runs on an unsaved conversation, so jclaw_api names none.
+        var main = mainWithAConversation();
+
+        var resp = asAgent(() -> POST(agentRequest(main.agentId(), null), "/api/system/restart",
+                "application/json", "{}"));
+
+        assertEquals(409, resp.status.intValue());
+        assertEquals("A scheduled task can't restart JClaw: the restart cuts the task's run off, and the scheduler "
+                + "runs it again once JClaw is back, which would restart JClaw again. Ask for the restart in a "
+                + "conversation instead.", json(resp).get("message").getAsString());
+        assertEquals(0, spawned.size(), "a refused restart spawns nothing");
+    }
+
+    @Test
+    void aCustomAgentIsRefusedTheRestartAndNothingIsSpawned() {
+        var customId = commit(() -> {
+            var agent = new Agent();
+            agent.name = "jf350-custom-" + UUID.randomUUID().toString().substring(0, 8);
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            return agent.id;
+        });
+
+        var resp = asAgent(() -> POST(agentRequest(customId, null), "/api/system/restart", "application/json", "{}"));
+
+        assertEquals(403, resp.status.intValue());
+        var body = json(resp);
+        assertEquals("agent_scope", body.get("code").getAsString());
+        assertEquals("Only the operator or the main agent may restart the instance.", body.get("message").getAsString());
+        assertEquals(0, spawned.size(), "a refused restart spawns nothing");
+    }
+
+    @Test
+    void mainReadsTheRestartProgress() {
+        var main = mainWithAConversation();
+
+        var resp = asAgent(() -> GET(agentRequest(main.agentId(), main.conversationId()),
+                "/api/system/restart/progress"));
+
+        assertEquals(200, resp.status.intValue());
+        var body = json(resp);
+        assertEquals("jclaw", body.get("source").getAsString());
+        assertEquals("none", body.get("state").getAsString(), "no restart brought this test JVM up");
+        assertTrue(body.get("failure").isJsonNull());
+        assertEquals(0, body.getAsJsonArray("steps").size());
+    }
+
+    @Test
+    void restartProgressRefusesAnUnauthenticatedCaller() {
         assertEquals(401, GET("/api/system/restart/progress").status.intValue());
     }
 
@@ -603,5 +681,67 @@ class ApiSystemControllerTest extends FunctionalTest {
             assertTrue(System.nanoTime() < deadline, "timed out");
             Thread.sleep(10);
         }
+    }
+
+    /** The 202's note for the plan's mode: this test JVM's own mode decides which one a run reaches. */
+    private static String expectedNote(String mode) {
+        return "DEV".equals(mode)
+                ? "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
+                        + "dev-mode restart records no progress: JClaw answering again is the sign it is back."
+                : "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                        + "JClaw is back, GET /api/system/restart/progress reports how the restart went.";
+    }
+
+    private record MainAndConversation(Long agentId, Long conversationId) {}
+
+    /** setup() wipes the database, provisioned main included, so main is created here as AgentSystemTest does. */
+    private static MainAndConversation mainWithAConversation() {
+        return commit(() -> {
+            var found = Agent.findByName(Agent.MAIN_AGENT_NAME);
+            var main = found != null ? found : AgentService.create(Agent.MAIN_AGENT_NAME, "openrouter", "gpt-4.1");
+            return new MainAndConversation(main.id, ConversationService.create(main, "web", "admin").id);
+        });
+    }
+
+    /** A jclaw_api call as it arrives: the bearer, the calling agent, and the conversation its turn runs in. */
+    private static Http.Request agentRequest(Long agentId, @Nullable Long conversationId) {
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        if (conversationId != null) {
+            request.headers.put(RequestPrincipal.CALLER_CONVERSATION_HEADER,
+                    new Http.Header(RequestPrincipal.CALLER_CONVERSATION_HEADER, String.valueOf(conversationId)));
+        }
+        return request;
+    }
+
+    /** A bearer call answers with a Set-Cookie carrying the agent principal; FunctionalTest's cookie jar is JVM-global. */
+    private Http.Response asAgent(Supplier<Http.Response> call) {
+        try {
+            return call.get();
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static <T> T commit(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var thread = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
     }
 }

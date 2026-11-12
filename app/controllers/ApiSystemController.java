@@ -37,6 +37,10 @@ import static utils.GsonHolder.GSON;
 public class ApiSystemController extends Controller {
 
     private static final String READ_STATUS = "read the restart and upgrade status";
+    private static final String RESTART = "restart the instance";
+    static final String TASK_FIRE_REFUSAL = "A scheduled task can't restart JClaw: the restart cuts the task's run "
+            + "off, and the scheduler runs it again once JClaw is back, which would restart JClaw again. Ask for the "
+            + "restart in a conversation instead.";
 
     /**
      * @param available          whether a restart can be performed at all —
@@ -122,17 +126,24 @@ public class ApiSystemController extends Controller {
      * This JVM keeps serving for a couple more seconds so this very response
      * can reach the browser, then the helper stops it.
      */
-    @AgentAccess(value = OPERATOR_ONLY, reason = "stops and relaunches the instance -- availability")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-350): stops and relaunches the instance")
     public static void restart() {
+        RequestPrincipal.requireOperatorOrMain(RESTART);
+        var caller = RequestPrincipal.callingAgent();
+        // A task fire runs on an unsaved conversation, so main's call from one names none.
+        if (caller != null && RequestPrincipal.callerConversationId() == null) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, TASK_FIRE_REFUSAL);
+            return;
+        }
         // The success render stays OUT of the try. Play signals results by
         // throwing, and RenderJson is a RuntimeException — inside the try below
         // the catch-all would swallow its own 202 and answer 500 instead.
         RestartService.Plan plan;
         try {
-            plan = RestartService.requestRestart();
+            plan = RestartService.requestRestart(caller == null ? "the operator" : "agent " + caller.name);
         } catch (IllegalStateException e) {
-            // Install can't be restarted (no jclaw.sh) — the app is still up,
-            // so this is a plain refusal rather than a half-completed reboot.
+            // No jclaw.sh, a hand-off already under way, or a test without the stub: the app is
+            // still up, so this is a plain refusal rather than a half-completed reboot.
             ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
             return;
         } catch (Exception e) {
@@ -144,7 +155,8 @@ public class ApiSystemController extends Controller {
         response.status = 202;
         ApiResponses.ok("mode", plan.mode(),
                 "backendOnly", plan.backendOnly(),
-                "rebuildExpected", plan.rebuildExpected());
+                "rebuildExpected", plan.rebuildExpected(),
+                "note", plan.restartNote());
     }
 
     /**
@@ -165,8 +177,10 @@ public class ApiSystemController extends Controller {
      * is still connecting. The Restart and Java runtime panels poll it until they reload.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RestartProgress.class)))
-    @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's restart panel; the narrator answers it only to the operator's session")
+    @AgentAccess(value = OPEN, reason = "the operator and main only (JF-350): how the restart that brought this JVM up "
+            + "went; while no JVM is up, the narrator answers only the operator's session")
     public static void restartProgress() {
+        RequestPrincipal.requireOperatorOrMain(READ_STATUS);
         var progress = RestartService.progress();
         renderJSON(GSON.toJson(new RestartProgress("jclaw", progress.state(),
                 progress.failure().isEmpty() ? null : progress.failure(), progress.steps(), RestartService.services())));

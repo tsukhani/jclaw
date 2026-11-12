@@ -688,6 +688,11 @@ class JClawApiToolTest extends UnitTest {
                 "the upgrade preflight is read-only and stays callable");
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/restart"),
                 "the restart preflight is read-only and stays callable");
+        // JF-350: main restarts the instance through the API, and checks the restart afterwards.
+        assertTrue(JClawApiTool.isCallable("POST", "/api/system/restart"),
+                "the restart answers the operator and main");
+        assertTrue(JClawApiTool.isCallable("GET", "/api/system/restart/progress"),
+                "the restart's progress answers the operator and main");
     }
 
     @Test
@@ -714,11 +719,9 @@ class JClawApiToolTest extends UnitTest {
         // JCLAW-1020: the semver gate stopped the download leaving the pinned repo, but a
         // legitimate older release is still an attacker's goal — v0.17.77 predates this
         // sprint's fixes, so an agent that could reinstall it would reopen them and then
-        // walk back through. Restart is the availability twin.
+        // walk back through.
         assertFalse(JClawApiTool.isCallable("POST", "/api/system/upgrade"),
                 "upgrade replaces the install and restarts -- OPERATOR_ONLY");
-        assertFalse(JClawApiTool.isCallable("POST", "/api/system/restart"),
-                "restart stops the instance -- OPERATOR_ONLY");
         // JCLAW-1022: the config table holds the instance's own security controls -- the shell
         // allowlist, the approval policy, the funnel switch -- so a caller able to write it
         // widens every other gate rather than defeating one. Reads stay callable, masked, and
@@ -944,6 +947,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/subagents/acp-harnesses
             GET /api/system/java-runtime
             GET /api/system/restart
+            GET /api/system/restart/progress
             GET /api/system/upgrade
             GET /api/system/upgrade/status
             GET /api/task-runs/recent
@@ -985,6 +989,7 @@ class JClawApiToolTest extends UnitTest {
             POST /api/scrape-jobs/{id}/pause
             POST /api/scrape-jobs/{id}/resume
             POST /api/subagent-runs/{id}/kill
+            POST /api/system/restart
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks
             POST /api/tasks/{id}/cancel

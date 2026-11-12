@@ -43,7 +43,8 @@ The table covers `jclaw_api` only. An agent also works through its other tools. 
 | Read the channel setup | Yes | Channel settings and WhatsApp links | Its own WhatsApp links |
 | Add, change or remove a Telegram, Slack or WhatsApp link | Yes | No | No |
 | Read metrics, circuit breakers, and the restart, upgrade and Java status | Yes | Yes | No |
-| Restart, upgrade, back up, restore, repair or compact | Yes | No | No |
+| Restart JClaw, from a conversation (never from a scheduled task) | Yes | Yes | No |
+| Upgrade, back up, restore, repair or compact | Yes | No | No |
 | Memory, logs, sign-in and password, Tailscale, Chrome, telemetry and the software factory | Yes | No | No |
 
 - A custom agent without the switch has none of this. Only you switch `jclaw_api` on, under **Tools** on the agent's page.

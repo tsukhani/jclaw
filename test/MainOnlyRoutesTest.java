@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.RestartService;
 import services.Tx;
 
 import java.util.ArrayList;
@@ -20,8 +21,8 @@ import java.util.function.Supplier;
  * agent header {@code jclaw_api} sends.
  *
  * <p>Each route is paired with the operator's answer on it, since a broken header would 403 every
- * caller; the routes whose operator path reaches the network are left to their own controller
- * tests. {@code main}'s half is in {@code RequestPrincipalPolicyTest}: every route here asks
+ * caller; the routes whose operator path reaches the network or restarts this JVM are left to
+ * their own controller tests. {@code main}'s half is in {@code RequestPrincipalPolicyTest}: every route here asks
  * {@code isOperatorOrMain}, and {@code main} is provisioned at boot, where a sibling's
  * {@code Fixtures.deleteDatabase} can remove it mid-suite.
  */
@@ -33,7 +34,7 @@ class MainOnlyRoutesTest extends FunctionalTest {
     /**
      * @param action         what the refusal says only the operator and main may do
      * @param operatorStatus the operator's status on the same request, or null where answering it
-     *                       would dial out
+     *                       would dial out or restart this JVM
      */
     private record Route(String method, String path, String action, Integer operatorStatus) {}
 
@@ -81,6 +82,8 @@ class MainOnlyRoutesTest extends FunctionalTest {
             new Route("GET", "/api/breakers", "read the instance's metrics", 200),
             new Route("GET", "/api/workspace/stats", "read the instance's metrics", 200),
             new Route("GET", "/api/system/restart", "read the restart and upgrade status", 200),
+            new Route("GET", "/api/system/restart/progress", "read the restart and upgrade status", 200),
+            new Route("POST", "/api/system/restart", "restart the instance", null),
             new Route("GET", "/api/system/upgrade", "read the restart and upgrade status", null),
             new Route("GET", "/api/system/upgrade/status", "read the restart and upgrade status", 204),
             new Route("GET", "/api/system/java-runtime", "read the restart and upgrade status", null));
@@ -107,6 +110,18 @@ class MainOnlyRoutesTest extends FunctionalTest {
     @AfterEach
     void dropCookieJar() {
         clearCookies();
+    }
+
+    @BeforeEach
+    void stubTheRestartHelper() {
+        // The restart route is in the table: a refusal that regressed must not reboot the suite's own JVM.
+        RestartService.spawnerForTest = plan -> fail("a refused caller reached the restart helper: " + plan.command());
+    }
+
+    @AfterEach
+    void clearTheRestartHelper() {
+        RestartService.spawnerForTest = null;
+        RestartService.resetHandOffForTest();
     }
 
     @Test

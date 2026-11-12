@@ -1,8 +1,15 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.RestartService;
+import utils.AppClock;
 
+import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,9 +20,94 @@ import java.util.List;
  */
 class RestartServiceTest extends UnitTest {
 
+    private static final Instant HANDED_OFF = Instant.parse("2026-11-12T12:00:00Z");
+    private static final Duration HOLD = Duration.ofMinutes(2);
+
     @AfterEach
     void clearSeam() {
         RestartService.spawnerForTest = null;
+        RestartService.resetHandOffForTest();
+    }
+
+    @Test
+    void aHandOffThatForgetsTheStubInTestModeIsRefused() {
+        // A subcommand jclaw.sh does not have: were the guard gone, the helper would only print its usage.
+        var refused = assertThrows(IllegalStateException.class,
+                () -> RestartService.requestMaintenance("jf350-no-such-subcommand", List.of()));
+
+        assertEquals("Refusing to spawn the restart helper in test mode without spawnerForTest", refused.getMessage());
+    }
+
+    @Test
+    void aSecondHandOffInsideTheHoldIsRefusedAndSpawnsNothing() throws Exception {
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        at(HANDED_OFF, () -> RestartService.requestRestart("the operator"));
+        var refused = assertThrows(IllegalStateException.class,
+                () -> at(HANDED_OFF.plus(HOLD).minusSeconds(1), () -> RestartService.requestRestart("agent main")));
+
+        assertEquals("A restart is already under way: JClaw is about to stop.", refused.getMessage());
+        assertEquals(1, captured.size());
+    }
+
+    @Test
+    void aHandOffOnceTheHoldHasPassedGoesAhead() throws Exception {
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        at(HANDED_OFF, () -> RestartService.requestRestart("the operator"));
+        at(HANDED_OFF.plus(HOLD), () -> RestartService.requestRestart("the operator"));
+
+        assertEquals(2, captured.size(), "a helper that died before stopping JClaw no longer blocks the next restart");
+    }
+
+    @Test
+    void aRefusedHandOffLeavesNoHoldBehind() throws Exception {
+        assertThrows(IllegalStateException.class,
+                () -> RestartService.requestMaintenance("jf350-no-such-subcommand", List.of()));
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        RestartService.requestRestart("the operator");
+
+        assertEquals(1, captured.size());
+    }
+
+    @Test
+    void theRestartsLastLogLineNamesWhoAskedForIt() {
+        RestartService.spawnerForTest = plan -> { };
+
+        var events = EventLogger.captureForTest(() -> {
+            try {
+                RestartService.requestRestart("agent main");
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        var restart = events.stream().filter(e -> "restart".equals(e.category())).toList();
+        assertEquals(1, restart.size());
+        assertEquals("WARN", restart.getFirst().level());
+        assertEquals("Restarting at the request of agent main — handing off to jclaw.sh", restart.getFirst().message());
+    }
+
+    @Test
+    void aProdRestartTellsTheCallerToReadTheProgressOnceJClawIsBack() {
+        assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                        + "JClaw is back, GET /api/system/restart/progress reports how the restart went.",
+                RestartService.planFor("/opt/jclaw/jclaw.sh", false, false).restartNote());
+    }
+
+    @Test
+    void aDevRestartSaysItRecordsNoProgress() {
+        assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
+                        + "dev-mode restart records no progress: JClaw answering again is the sign it is back.",
+                RestartService.planFor("/opt/jclaw/jclaw.sh", true, true).restartNote());
+    }
+
+    private static <R> R at(Instant instant, ScopedValue.CallableOp<R, Exception> op) throws Exception {
+        return AppClock.callWith(Clock.fixed(instant, ZoneOffset.UTC), op);
     }
 
     @Test
@@ -74,7 +166,7 @@ class RestartServiceTest extends UnitTest {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;
 
-        var returned = RestartService.requestRestart();
+        var returned = RestartService.requestRestart("the operator");
 
         assertEquals(1, captured.size());
         assertEquals(returned.command(), captured.getFirst().command());

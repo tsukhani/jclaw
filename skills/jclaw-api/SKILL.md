@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, change the model router's lists, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.15"
+  version: "1.1.16"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -37,6 +37,7 @@ These staples don't need a discover round-trip first; run `action="discover"` fo
 - **Prompts** — the library is shared: every agent lists every prompt with `GET /api/prompts` and reads one whole with `GET /api/prompts/{id}`. Creating, changing and deleting a prompt (`POST /api/prompts`, `PUT` and `DELETE /api/prompts/{id}`) is `main`'s only; any other agent gets 403 `agent_scope` and asks the user, or `main`, to make the change.
 - **Your own rows** — an agent other than `main` lists and acknowledges only its own notifications, and reads only its own video jobs and its own cost, latency and compression rows, whichever `agentId` it asks for. `main` reads every agent's.
 - **The instance** — its setup (config, logging levels, providers and their models, MCP servers, channel configurations, the model router's status, the coding-harness commands, the guided tour's progress), its host and lifecycle status (metrics, circuit breakers, restart, upgrade and Java-runtime status), and the calls that dial out or spend (prompt generation and export, a provider probe or model discovery, the price refresh, the MCP server test, a printer's options) answer `main` only; any other agent gets 403 `agent_scope`.
+- **Restart** (`main` only) — first `GET /api/system/restart`: it lists the task runs and subagent runs the restart would cut off. Tell the user what it would interrupt and get their yes. Then `POST /api/system/restart` answers 202 and JClaw stops within seconds; your turn ends with it, so say the restart was requested, never that it is done. In your next turn, once JClaw is back, `GET /api/system/restart/progress` reports how it went (`state`: `done`, `failed` with its `failure`, or `none` when no restart left a record, which you report as unconfirmed). From a scheduled task the POST answers 409: ask for the restart in a conversation instead. Never restart JClaw through the shell.
 - **Model router lists** — read a class's list with `GET /api/config/router.<class>.models`; replace it with `PUT /api/router/models/{class}` body `models` (`[{"provider": "…", "model": "…"}]`, tried in that order; `[]` clears it, and the class then uses the chat list). The classes are `chat`, `summarize`, `agentic`, `reasoning` and `coding`. To add, remove or reorder one model, read the list, change it, and send the whole list back. Only the `main` agent may write it (any other agent gets 403 `agent_scope`), and only a model registered under a configured provider is accepted (`GET /api/providers/{name}/models`). Every other router setting is operator-only.
 
 ## Lists, single reads and long responses

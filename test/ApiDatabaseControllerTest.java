@@ -48,6 +48,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
     @AfterEach
     void clearSeams() {
         RestartService.spawnerForTest = null;
+        RestartService.resetHandOffForTest();
         DatabaseService.dataDirForTest = null;
         DatabaseService.backupsDirForTest = null;
         DatabaseService.probeForTest = null;

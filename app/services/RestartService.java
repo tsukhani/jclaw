@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,8 +20,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Reboots this JClaw instance on operator request (the Settings → Restart
- * button, {@code POST /api/system/restart}).
+ * Reboots this JClaw instance at the request of the operator (the Settings → Restart button) or of the
+ * main agent ({@code POST /api/system/restart} through {@code jclaw_api}, JF-350).
  *
  * <p>A JVM cannot restart itself: once {@code System.exit} runs there is no
  * code left to bring it back. So the restart is a <em>handoff</em> — we spawn a
@@ -54,11 +55,23 @@ public final class RestartService {
     static final String RESTART_LOG = "logs/restart.log";
 
     /**
-     * Test seam: when non-null, {@link #requestRestart()} hands the plan here
-     * instead of spawning it. Lets tests assert the composed command without
-     * rebooting the test JVM.
+     * Test seam: when non-null, {@link #requestRestart(String)} and {@link #requestMaintenance} hand the
+     * plan here instead of spawning it. Lets tests assert the composed command without rebooting the test
+     * JVM.
      */
     public static @Nullable Consumer<Plan> spawnerForTest;
+
+    static final String TEST_MODE_REFUSAL = "Refusing to spawn the restart helper in test mode without spawnerForTest";
+    static final String HAND_OFF_UNDER_WAY = "A restart is already under way: JClaw is about to stop.";
+
+    /**
+     * How long one hand-off refuses the next. Two helpers would race each other's stop and start, and
+     * {@code jclaw.sh} holds no lock; past the hold, a helper that died before stopping this JVM no longer
+     * blocks the next restart.
+     */
+    static final Duration HAND_OFF_HOLD = Duration.ofMinutes(2);
+
+    private static @Nullable Instant handedOffAt;
 
     /**
      * A restart that has been resolved but not yet launched.
@@ -76,7 +89,21 @@ public final class RestartService {
      *                        long costs nothing; the copy beside it is worded
      *                        conditionally to match.
      */
-    public record Plan(List<String> command, String mode, boolean backendOnly, boolean rebuildExpected) {}
+    public record Plan(List<String> command, String mode, boolean backendOnly, boolean rebuildExpected) {
+
+        /**
+         * What the restart's caller is told, so an agent reports a request, not a finished restart: its own
+         * turn ends with this JVM. {@code jclaw.sh}'s dev-mode restart records no phases, so progress answers
+         * {@code none} after it.
+         */
+        public String restartNote() {
+            return "DEV".equals(mode)
+                    ? "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. A "
+                            + "dev-mode restart records no progress: JClaw answering again is the sign it is back."
+                    : "JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
+                            + "JClaw is back, GET /api/system/restart/progress reports how the restart went.";
+        }
+    }
 
     private RestartService() {}
 
@@ -88,7 +115,7 @@ public final class RestartService {
     /**
      * Why this instance cannot restart itself, or null when it can. Single
      * source for both the preflight's {@code available} flag and
-     * {@link #requestRestart()}'s pre-spawn guard, so the UI never offers a
+     * {@link #requestRestart(String)}'s pre-spawn guard, so the UI never offers a
      * button that the POST would refuse.
      */
     public static @Nullable String unavailableReason() {
@@ -164,32 +191,24 @@ public final class RestartService {
      * keeps serving until the helper's {@code play stop} arrives a couple of
      * seconds later.
      *
+     * @param requestedBy who asked, named in the WARN line the old JVM writes last
      * @return the plan that was launched
      * @throws IllegalStateException if {@code jclaw.sh} is missing or not
      *         executable, checked <em>before</em> anything is spawned so a
-     *         broken install fails loudly with the app still up
+     *         broken install fails loudly with the app still up; if another
+     *         hand-off is under way; or in test mode without {@link #spawnerForTest}
      * @throws IOException if the helper process cannot be started
      */
-    public static Plan requestRestart() throws IOException {
+    public static Plan requestRestart(String requestedBy) throws IOException {
         var unavailable = unavailableReason();
         if (unavailable != null) {
             throw new IllegalStateException("Cannot restart: " + unavailable);
         }
 
-        var plan = plan();
-
-        if (spawnerForTest != null) {
-            spawnerForTest.accept(plan);
-            return plan;
-        }
-
         // WARN, not INFO: this is the last line the old JVM writes before it is
         // taken down, and it is the anchor an operator looks for when working
         // out why the instance went away.
-        EventLogger.warn(CATEGORY, "Restarting on operator request — handing off to jclaw.sh",
-                String.join(" ", plan.command()));
-        spawn(plan);
-        return plan;
+        return handOff(plan(), "Restarting at the request of " + requestedBy + " — handing off to jclaw.sh");
     }
 
     /**
@@ -203,13 +222,45 @@ public final class RestartService {
         }
         var plan = planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(),
                 subcommand, extraArgs);
-        if (spawnerForTest != null) {
-            spawnerForTest.accept(plan);
+        return handOff(plan, "Handing off to jclaw.sh " + subcommand);
+    }
+
+    private static Plan handOff(Plan plan, String warning) throws IOException {
+        claimHandOff();
+        try {
+            var spawner = spawnerForTest;
+            if (spawner == null && Play.runningInTestMode()) {
+                // A test that forgot the stub would launch the real helper against this checkout.
+                throw new IllegalStateException(TEST_MODE_REFUSAL);
+            }
+            EventLogger.warn(CATEGORY, warning, String.join(" ", plan.command()));
+            if (spawner != null) {
+                spawner.accept(plan);
+            } else {
+                spawn(plan);
+            }
             return plan;
+        } catch (RuntimeException | IOException e) {
+            releaseHandOff();
+            throw e;
         }
-        EventLogger.warn(CATEGORY, "Handing off to jclaw.sh " + subcommand, String.join(" ", plan.command()));
-        spawn(plan);
-        return plan;
+    }
+
+    private static synchronized void claimHandOff() {
+        var now = AppClock.now();
+        if (handedOffAt != null && now.isBefore(handedOffAt.plus(HAND_OFF_HOLD))) {
+            throw new IllegalStateException(HAND_OFF_UNDER_WAY);
+        }
+        handedOffAt = now;
+    }
+
+    private static synchronized void releaseHandOff() {
+        handedOffAt = null;
+    }
+
+    /** Ends the hold a stubbed hand-off left, so the next test's restart is not refused as under way. */
+    public static void resetHandOffForTest() {
+        releaseHandOff();
     }
 
     /**

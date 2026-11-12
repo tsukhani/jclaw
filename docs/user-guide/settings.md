@@ -299,6 +299,8 @@ Reboots this JClaw instance without a shell. The **Restart** button hands off to
 
 Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running, because the moment you most want to reboot is usually the moment something is stuck. So the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
 
+The Main Agent can restart JClaw for you too. Ask it in a conversation. It first checks what the restart would interrupt and tells you, then asks for the restart. Its reply ends when JClaw stops, so it can only say the restart was requested. Once JClaw is back, ask it how the restart went. The restart is a write through its `jclaw_api` tool, which [Tool Approvals](#settings-tool-approvals) decides. A scheduled task cannot restart JClaw, because a task cut off by a restart runs again once JClaw is back and would restart it again. No other agent can restart JClaw.
+
 The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. While it waits, the panel lists each step of the restart as it happens, with the seconds each one took:
 
 - **Stopping JClaw**
