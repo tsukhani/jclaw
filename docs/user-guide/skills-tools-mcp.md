@@ -63,6 +63,8 @@ A skill is **not runnable** while a secret it needs has no value. The panel says
 
 A skill says what it needs in a file named `secrets.example` in its folder, with one line for each secret: the name, an example host, and a comment that says what it is, as in `NAS_PASS=nas.example.com:5001   # The DSM account's password`. A comment that starts with "Optional" marks a secret the skill can run without. No value goes in that file.
 
+That file is part of the skill, and an agent can change the files of its own skills. So read a description and an example host as a hint, not as a fact. JClaw never fills in a host from the file: the secret goes only to the hosts you type. Before you save, check each host against the real service.
+
 JClaw stores each value encrypted. No page, agent or API call returns a value, you included, so the panel shows only each secret's name, hosts and when it was set. Only you can add, replace or delete a secret: agents cannot, the Main Agent included. Removing the skill from the agent, or deleting the agent, deletes its secrets. A global skill has no secrets, and neither does a copy of a skill on another agent.
 
 #### How a skill's commands use a secret

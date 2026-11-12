@@ -239,6 +239,16 @@ describe('SkillSecretsPanel', () => {
     expect(wrapper.find('[data-testid="secrets-not-runnable"]').exists()).toBe(true)
   })
 
+  it('shows the caution only for a secret the skill declares', async () => {
+    registerEndpoint('/api/agents/45/skills/demo/secrets', () => declared)
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 45, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    expect(wrapper.find('[data-testid="secret-form"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="secret-form-caution"]').exists()).toBe(false)
+  })
+
   it('shows no notice when nothing required is missing', async () => {
     registerEndpoint('/api/agents/42/skills/demo/secrets', () => ({ ...declared, missing: [] }))
     const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 42, skillName: 'demo' } })
@@ -266,6 +276,9 @@ describe('SkillSecretsPanel', () => {
     expect(name.attributes('readonly')).toBeDefined()
     expect(wrapper.find('input[name="secret-hosts"]').attributes('placeholder')).toBe('for example api.example.com')
     expect(wrapper.find('[data-testid="secret-form-hint"]').text()).toBe('The service\'s API key')
+    expect(wrapper.find('[data-testid="secret-form-caution"]').text().replace(/\s+/g, ' ')).toBe(
+      'The description and the example host come from the skill\'s own files, which the agent can change. '
+      + 'Enter the host of the real service: the secret is sent to every host you type here.')
 
     await wrapper.find('input[name="secret-value"]').setValue('fake-typed-value')
     await wrapper.find('input[name="secret-hosts"]').setValue('api.internal.example')

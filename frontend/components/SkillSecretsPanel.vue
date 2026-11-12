@@ -351,6 +351,15 @@ watch(() => [props.agentId, props.skillName], () => {
           class="mt-1 w-full font-mono text-xs bg-surface border border-border px-2 py-1 text-fg-strong"
         >
       </label>
+      <!-- secrets.example sits in the agent's workspace, which the agent can write: its text is a hint, never a fact. -->
+      <p
+        v-if="formDeclared !== null"
+        class="text-xs text-amber-800 dark:text-amber-300"
+        data-testid="secret-form-caution"
+      >
+        The description and the example host come from the skill's own files, which the agent can change. Enter the
+        host of the real service: the secret is sent to every host you type here.
+      </p>
       <ApiErrorAlert :error="writeError" />
       <div class="flex items-center gap-2">
         <button
