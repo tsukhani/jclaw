@@ -3,7 +3,7 @@ name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.11"
+  version: "1.0.12"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec
@@ -17,14 +17,15 @@ Perform JIRA operations with intelligent MCP/REST API fallback. Uses the `jira-c
 
 ```secrets
 JIRA_PERSONAL_TOKEN=jira.example.com   # A Jira personal access token, sent as a Bearer token
+setting JIRA_URL=https://jira.example.com   # The Jira address, with https://
 ```
 
 ## Configuration
 
 - `JIRA_PERSONAL_TOKEN`: the PAT for Bearer auth. It lives in JClaw's secret store. The operator adds it once, in this skill's Secrets panel on the Skills page, with the Jira host. Any command that names `$JIRA_PERSONAL_TOKEN` receives a stand-in, and JClaw puts the real token in only on requests to that host.
-- `JIRA_URL`: the base URL (e.g., `[JIRA_URL]`), kept in `config.env` in this skill's folder. Copy `config.env.example` to `config.env` and set it once. Do not look for it, or for the token, in `~/.claude.json` or any other program's settings.
+- `JIRA_URL`: the base URL, a setting the operator fills in in the same panel. A command that names `$JIRA_URL` receives it as it is. Do not look for it, or for the token, in `~/.claude.json` or any other program's settings.
 
-Never read the token from a file. If `$JIRA_PERSONAL_TOKEN` is empty or a call answers 401, the secret is missing: ask the operator to add it.
+Never read the token or the address from a file. If `$JIRA_PERSONAL_TOKEN` or `$JIRA_URL` is empty, or a call answers 401, a value is missing: ask the operator to fill it in in the Secrets panel.
 
 ## Core Principle: MCP First, REST Fallback
 
@@ -114,8 +115,7 @@ curl -sS -X PUT \
 When falling back to REST, construct curl calls as follows:
 
 ```bash
-# $JIRA_PERSONAL_TOKEN comes from JClaw's secret store: naming it is what gives this command its stand-in.
-. skills/jira-operations/config.env   # sets JIRA_URL
+# Naming $JIRA_PERSONAL_TOKEN and $JIRA_URL is what gives this command its stand-in and the address.
 
 curl -sS -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" -H "Content-Type: application/json" \
   -X PUT -d '{"value": 5}' \
