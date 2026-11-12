@@ -15,6 +15,7 @@ import services.printing.PrintTargetGuard;
 import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.HttpKeys;
+import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
@@ -287,6 +288,9 @@ public class PrinterTool implements ToolRegistry.Tool {
             var resolved = WorkspacePathGuard.resolveContained(root, path);
             if (resolved == null) {
                 return "Error: '" + path + "' resolves outside the agent workspace.";
+            }
+            if (WorkspacePathGuard.isInSkillCredentials(root, resolved)) {
+                return ToolErrorTemplates.render(ToolErrorTemplates.fsCredentials(path));
             }
             if (!Files.isRegularFile(resolved)) {
                 return "Error: no such file in the workspace: " + path;

@@ -131,6 +131,54 @@ public final class WorkspacePathGuard {
      *         always exists)
      * @throws IOException if realpath'ing the deepest existing ancestor fails
      */
+    /** The folder, in any letter case, where a skill keeps its secrets: {@code skills/<name>/credentials/}. */
+    private static final String SKILL_CREDENTIALS_DIR = "credentials";
+
+    /**
+     * Whether {@code canonicalTarget} is a skill's credentials folder, or anything inside it, in the workspace at
+     * {@code workspaceRoot} (JF-322). The Skills page masks those files, and no agent tool opens, lists, sends or
+     * packages them: a skill's own scripts read its secrets. Fails closed when the root cannot be resolved.
+     *
+     * @param workspaceRoot   the agent's workspace root, resolved here
+     * @param canonicalTarget a path already resolved by {@link #acquireContained} or {@link #resolveContained}
+     */
+    public static boolean isInSkillCredentials(Path workspaceRoot, Path canonicalTarget) {
+        var segments = skillSegments(workspaceRoot, canonicalTarget);
+        return segments == null || segments.length >= 3 && segments[0].equalsIgnoreCase("skills")
+                && segments[2].equalsIgnoreCase(SKILL_CREDENTIALS_DIR);
+    }
+
+    /**
+     * Whether a folder holds a skill's credentials folder or sits inside one: the workspace root, {@code skills/},
+     * a skill's folder, or anything in its credentials folder (JF-322), for a caller that copies a whole folder.
+     */
+    public static boolean reachesSkillCredentials(Path workspaceRoot, Path canonicalDir) {
+        var segments = skillSegments(workspaceRoot, canonicalDir);
+        if (segments == null) return true;
+        if (segments.length == 0) return true;
+        if (!segments[0].equalsIgnoreCase("skills")) return false;
+        return segments.length <= 2 || segments[2].equalsIgnoreCase(SKILL_CREDENTIALS_DIR);
+    }
+
+    /** {@code target}'s path segments below the resolved root: none for the root itself, one empty segment for a path
+     *  outside it, and null when the root cannot be resolved. */
+    private static String @Nullable [] skillSegments(Path workspaceRoot, Path target) {
+        Path root;
+        try {
+            root = canonicalize(workspaceRoot.toAbsolutePath().normalize());
+        } catch (IOException _) {
+            return null;
+        }
+        if (root == null) return null;
+        var normalized = target.toAbsolutePath().normalize();
+        if (!normalized.startsWith(root)) return new String[] {""};
+        var rel = root.relativize(normalized);
+        if (rel.toString().isEmpty()) return new String[0];
+        var out = new String[rel.getNameCount()];
+        for (int i = 0; i < out.length; i++) out[i] = rel.getName(i).toString();
+        return out;
+    }
+
     static @Nullable Path canonicalize(Path path) throws IOException {
         var existing = path;
         var missingSuffix = new ArrayDeque<Path>();

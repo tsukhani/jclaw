@@ -3,6 +3,7 @@ package channels;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
+import utils.WorkspacePathGuard;
 
 import java.io.File;
 import java.io.IOException;
@@ -409,6 +410,11 @@ public final class TelegramOutboundPlanner {
     private static @Nullable File resolveWorkspaceFile(String agentName, String relativePath) {
         try {
             var path = AgentService.acquireWorkspacePath(agentName, relativePath);
+            if (WorkspacePathGuard.isInSkillCredentials(AgentService.workspacePath(agentName), path)) {
+                EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
+                        "File delivery refused: %s is in a skill's credentials folder".formatted(relativePath));
+                return null;
+            }
             var file = path.toFile();
             if (!file.exists() || !file.isFile()) {
                 EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,

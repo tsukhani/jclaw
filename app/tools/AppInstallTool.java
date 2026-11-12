@@ -14,6 +14,7 @@ import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -176,6 +177,8 @@ public class AppInstallTool implements ToolRegistry.Tool {
             return jsonValid(false, List.of("no built app found for slug '" + slug
                     + "' at the workspace root or under coding/ — build it first."));
         }
+        var refusal = sourceRefusal(agent, src);
+        if (refusal != null) return jsonValid(false, List.of(refusal));
         var issues = validateBuiltApp(src);
         return jsonValid(issues.isEmpty(), issues);
     }
@@ -186,6 +189,8 @@ public class AppInstallTool implements ToolRegistry.Tool {
             return err("no built app found for slug '" + slug
                     + "' at the workspace root or under coding/ — build it in your workspace first.");
         }
+        var refusal = sourceRefusal(agent, src);
+        if (refusal != null) return err(refusal);
         var issues = validateBuiltApp(src);
         if (!issues.isEmpty()) return err("built app is not well-formed: " + String.join("; ", issues));
 
@@ -216,6 +221,10 @@ public class AppInstallTool implements ToolRegistry.Tool {
         }
         Path dest = resolveWorkspaceDir(args, PARAM_DEST, slug, agent);
         if (dest == null) return err("dest escapes your workspace.");
+        if (WorkspacePathGuard.reachesSkillCredentials(WorkspaceFiles.workspacePath(agent.name), dest)) {
+            return err("dest '" + shown(agent, dest) + "' would replace a skill's credentials folder;"
+                    + " stage into a folder of its own.");
+        }
         boolean overwrite = JsonArgs.optBool(args, PARAM_OVERWRITE);
         boolean present = Files.isDirectory(dest);
         try {
@@ -314,6 +323,12 @@ public class AppInstallTool implements ToolRegistry.Tool {
     }
 
     /** The install source relative to the agent workspace (for the result payload). */
+    /** {@link #workspaceRelative}, with the workspace root itself shown as {@code .}. */
+    private static String shown(Agent agent, Path p) {
+        var relative = workspaceRelative(agent, p);
+        return relative.isEmpty() ? "." : relative;
+    }
+
     private static String workspaceRelative(Agent agent, Path p) {
         try {
             return WorkspaceFiles.workspacePath(agent.name).relativize(p).toString();
@@ -350,6 +365,47 @@ public class AppInstallTool implements ToolRegistry.Tool {
     /** True when {@code m} carries a non-null, non-blank string value at {@code field}. */
     private static boolean hasNonBlank(JsonObject m, String field) {
         return m.has(field) && !m.get(field).isJsonNull() && !m.get(field).getAsString().isBlank();
+    }
+
+    /**
+     * Why {@code src} is never published, or null (JF-322): it holds a skill's credentials folder, or it holds a link,
+     * which {@link #copyTree} would publish as its target's contents, a skill's credentials or a file outside the
+     * workspace alike.
+     */
+    private static @Nullable String sourceRefusal(Agent agent, Path src) {
+        if (WorkspacePathGuard.reachesSkillCredentials(WorkspaceFiles.workspacePath(agent.name), src)) {
+            return "'" + shown(agent, src) + "' holds a skill's credentials folder, which is never published.";
+        }
+        String link;
+        try {
+            link = firstLink(src);
+        } catch (IOException e) {
+            return "'" + shown(agent, src) + "' could not be checked for links ("
+                    + e.getClass().getSimpleName() + ").";
+        }
+        if (link != null) {
+            return "'" + link + "' is a link, and an app is published only as plain files: build the app into a folder"
+                    + " without links.";
+        }
+        return null;
+    }
+
+    /** The first symbolic link or multi-link file under {@code dir}, relative to it, or null. */
+    private static @Nullable String firstLink(Path dir) throws IOException {
+        try (Stream<Path> walk = Files.walk(dir)) {
+            for (Path p : walk.toList()) {
+                if (Files.isSymbolicLink(p)) return dir.relativize(p).toString();
+                if (Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)
+                        && Files.getAttribute(p, "unix:nlink", LinkOption.NOFOLLOW_LINKS) instanceof Number n
+                        && n.intValue() > 1) {
+                    return dir.relativize(p).toString();
+                }
+            }
+        } catch (UnsupportedOperationException _) {
+            // No unix:nlink on this file system: the symbolic-link check above still ran for what it walked.
+            return null;
+        }
+        return null;
     }
 
     /** Recursively copy the {@code src} tree into {@code dst}; returns the file count. */

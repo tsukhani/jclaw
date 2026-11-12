@@ -8,7 +8,9 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.printing.PrinterDefaults;
 import tools.PrinterTool;
+import utils.ToolErrorTemplates;
 
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 
@@ -328,5 +330,15 @@ class PrinterToolTest extends UnitTest {
                 "expected default-on tools to be visible; got: " + visible);
         assertFalse(visible.contains(PrinterTool.TOOL_NAME),
                 "printer must be hidden from an agent that has not opted in, got: " + visible);
+    }
+
+    @Test
+    void printRefusesAFileInASkillsCredentialsFolderBeforeSendingIt() throws Exception {
+        var dir = AgentService.workspacePath(agent.name).resolve("skills/demo/credentials");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("key.pdf"), "%PDF-1.4 secret");
+        var path = "skills/demo/credentials/key.pdf";
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.fsCredentials(path)),
+                run("{\"action\":\"print\",\"host\":\"127.0.0.1\",\"path\":\"" + path + "\"}"));
     }
 }

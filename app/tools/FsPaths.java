@@ -61,6 +61,15 @@ final class FsPaths {
     }
 
     /**
+     * JF-322: a skill's credentials folder is closed to every file action but a whole-file write, which stores a
+     * value and reports nothing of what was there. Returns the refusal's template, or null when the action may run.
+     */
+    static @Nullable ErrorTemplate checkSkillCredentials(String action, Path workspace, Path target, String path) {
+        if (FileSystemTools.ACTION_WRITE_FILE.equals(action)) return null;
+        return WorkspacePathGuard.isInSkillCredentials(workspace, target) ? ToolErrorTemplates.fsCredentials(path) : null;
+    }
+
+    /**
      * Skill-creator is read-only for every agent except 'main'. Only the main agent may
      * modify the skill-creator skill itself; other agents can use it to create and refactor
      * OTHER skills but cannot alter skill-creator. Returns the refusal's template if blocked,

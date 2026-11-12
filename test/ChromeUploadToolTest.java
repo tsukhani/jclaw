@@ -175,4 +175,20 @@ class ChromeUploadToolTest extends UnitTest {
             assertTrue(ToolRegistry.loadDisabledTools(agent).contains("chrome_script"));
         });
     }
+
+    @Test
+    void aFileInASkillsCredentialsFolderIsNeverUploadedByAnyRoute() throws Exception {
+        Files.createDirectories(workspace.resolve("skills/demo/credentials"));
+        Files.writeString(workspace.resolve("skills/demo/credentials/key.txt"), "secret");
+        Files.createSymbolicLink(workspace.resolve("key-link.txt"), workspace.resolve("skills/demo/credentials/key.txt"));
+        var fake = onAllowedTab();
+        ChromeBridgeSync.with(fake, () -> {
+            for (var path : List.of("skills/demo/credentials/key.txt", "SKILLS/demo/Credentials/key.txt",
+                    "skills/demo/../demo/credentials/key.txt", "key-link.txt")) {
+                assertEquals("Error: '" + path + "' is in a skill's credentials folder, which no agent tool opens.",
+                        run(path));
+                assertTrue(fake.sent.isEmpty(), path);
+            }
+        });
+    }
 }

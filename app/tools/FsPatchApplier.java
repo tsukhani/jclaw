@@ -11,6 +11,7 @@ import tools.UnifiedPatchParser.PatchLine;
 import tools.UnifiedPatchParser.PatchParseException;
 import utils.ErrorTemplate;
 import utils.ToolErrorTemplates;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -113,6 +114,9 @@ final class FsPatchApplier {
             }
             var guardError = FsPaths.checkSkillCreatorReadOnly(agent, workspace, target);
             if (guardError != null) return PatchResolution.err(guardError);
+            if (WorkspacePathGuard.isInSkillCredentials(workspace, target)) {
+                return PatchResolution.err(ToolErrorTemplates.fsCredentials(op.path()));
+            }
 
             // Capture the Optional once so the isPresent check and the get share
             // a single reference — addresses SonarQube S3655, which can't prove
@@ -127,6 +131,9 @@ final class FsPatchApplier {
                 }
                 var moveGuard = FsPaths.checkSkillCreatorReadOnly(agent, workspace, moveTarget);
                 if (moveGuard != null) return PatchResolution.err(moveGuard);
+                if (WorkspacePathGuard.isInSkillCredentials(workspace, moveTarget)) {
+                    return PatchResolution.err(ToolErrorTemplates.fsCredentials(newPathOpt.get()));
+                }
             }
             resolved.add(new ResolvedOp(op, target, moveTarget));
         }

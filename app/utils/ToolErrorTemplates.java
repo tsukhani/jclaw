@@ -39,6 +39,7 @@ public final class ToolErrorTemplates {
     public static final String FS_PATH_MISSING = "fs_path_missing";
     public static final String FS_PATH_REFUSED = "fs_path_refused";
     public static final String FS_READ_ONLY = "fs_read_only";
+    public static final String FS_CREDENTIALS = "fs_credentials";
     public static final String FS_NOT_FOUND = "fs_not_found";
     public static final String FS_NOT_A_DIRECTORY = "fs_not_a_directory";
     public static final String FS_TOO_LARGE = "fs_too_large";
@@ -215,6 +216,14 @@ public final class ToolErrorTemplates {
                 "Only the 'main' agent may modify skill-creator. Other agents can use it to author "
                         + "other skills, but not alter it. To get an updated skill-creator, ask the user "
                         + "to drag it from the global skills registry onto this agent's card.",
+                null);
+    }
+
+    public static ErrorTemplate fsCredentials(String path) {
+        return new ErrorTemplate(FS_CREDENTIALS,
+                "'%s' is in a skill's credentials folder, which no agent tool opens.".formatted(path),
+                "A skill's own scripts read its secrets: run the skill's script instead of reading or sending the "
+                        + "file. The operator manages these files on the Skills page.",
                 null);
     }
 

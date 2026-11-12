@@ -27,6 +27,8 @@ import services.OcrHealthProbe;
 import services.OcrInstallHint;
 import utils.JsonArgs;
 import utils.TikaHolder;
+import utils.ToolErrorTemplates;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -160,6 +162,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
             return ToolRegistry.ToolResult.text(
                     "Error: Path '%s' escapes the workspace directory.".formatted(relativePath));
         }
+        var workspace = AgentService.workspacePath(agent.name);
+        if (WorkspacePathGuard.isInSkillCredentials(workspace, target)) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.fsCredentials(relativePath));
+        }
 
         return switch (action) {
             case ACTION_READ -> ToolRegistry.ToolResult.text(readDocument(target));
@@ -184,6 +190,9 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 } catch (SecurityException _) {
                     yield ToolRegistry.ToolResult.text(
                             "Error: sourcePath '%s' escapes the workspace directory.".formatted(sourceRelative));
+                }
+                if (WorkspacePathGuard.isInSkillCredentials(workspace, source)) {
+                    yield ToolRegistry.ToolResult.error(ToolErrorTemplates.fsCredentials(sourceRelative));
                 }
                 if (!Files.exists(source)) {
                     yield ToolRegistry.ToolResult.text("Error: sourcePath not found: %s".formatted(sourceRelative));

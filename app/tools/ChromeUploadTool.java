@@ -7,6 +7,8 @@ import org.jspecify.annotations.Nullable;
 import services.ChromeBridge;
 import services.ChromeBridgePolicy;
 import services.PersonaFileApprovals;
+import utils.ToolErrorTemplates;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -108,6 +110,10 @@ public class ChromeUploadTool implements ToolRegistry.Tool {
         }
         var resolved = FsPaths.resolveTargetPath(args, agent, "upload");
         if (resolved.error() != null) return ChromeControlTool.ERROR + resolved.resolvedError().whatBroke();
+        if (WorkspacePathGuard.isInSkillCredentials(resolved.resolvedWorkspace(), resolved.resolvedTarget())) {
+            return ChromeControlTool.ERROR
+                    + ToolErrorTemplates.fsCredentials(args.get(ARG_PATH).getAsString()).whatBroke();
+        }
         var file = resolved.resolvedTarget().toAbsolutePath().normalize();
         var name = file.getFileName();
         if (name == null || !Files.isRegularFile(file)) return ChromeControlTool.ERROR + "that is not a file in your workspace.";

@@ -46,6 +46,8 @@ Skills are not written on this page. Ways to get one:
 
 Click any skill row to open a **read-only** viewer of its files. Files in a skill's `credentials/` folder show masked: a JSON file shows its keys with `[CREDENTIAL]` for each value, and any other file shows only `[CREDENTIAL]`. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
 
+Agents cannot open those files either. The file and documents tools refuse any file in a skill's `credentials/` folder, and so do printing, uploading a file in Chrome and sending a file in a Telegram reply. An agent can still save a new value there, and the skill's own scripts read it. JClaw does not publish an app whose folder holds a skill's `credentials/` folder or a link to another file.
+
 After an import the page warns you about two things. If no malware scanner is set up, the skill's binary files were not scanned, and the warning names them. If a zip holds a file outside `credentials/` that looks like it holds a key, the warning names that file too: every agent can read it, so move the key into `credentials/`.
 
 ### Exporting to Claude

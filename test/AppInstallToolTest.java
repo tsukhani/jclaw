@@ -211,4 +211,76 @@ class AppInstallToolTest extends UnitTest {
             // best-effort cleanup
         }
     }
+
+    private Path seedSkillCredentials() throws IOException {
+        var key = workspace.resolve("skills/demo/credentials/key.json");
+        Files.createDirectories(key.getParent());
+        Files.writeString(key, "{\"apiKey\":\"sk-test\"}");
+        return key;
+    }
+
+    @Test
+    void aSourceHoldingASkillsCredentialsFolderIsNeverPublished() throws IOException {
+        var slug = slug();
+        seedSkillCredentials();
+        buildInWorkspace("skills/demo", manifest("Demo", "1.0.0"));
+        assertEquals("Error: 'skills/demo' holds a skill's credentials folder, which is never published.",
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"skills/demo\"}"));
+        assertEquals("Error: 'skills' holds a skill's credentials folder, which is never published.",
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"skills\"}"));
+        assertEquals("Error: '.' holds a skill's credentials folder, which is never published.",
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\".\"}"));
+        assertEquals("{\"valid\":false,\"issues\":[\"'skills/demo' holds a skill's credentials folder, which is never"
+                        + " published.\"]}",
+                run("{\"action\":\"validate\",\"slug\":\"" + slug + "\",\"source\":\"skills/demo\"}"));
+        assertFalse(Files.exists(Play.getFile("public/apps/" + slug).toPath()));
+    }
+
+    @Test
+    void anAppHoldingASymbolicOrHardLinkIsNeverPublished() throws IOException {
+        var slug = slug();
+        var key = seedSkillCredentials();
+        var app = buildInWorkspace("linked", manifest("Linked", "1.0.0"));
+        Files.createSymbolicLink(app.resolve("data.json"), key);
+        assertEquals("Error: 'data.json' is a link, and an app is published only as plain files: build the app into a"
+                        + " folder without links.",
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"linked\"}"));
+
+        Files.delete(app.resolve("data.json"));
+        var other = workspace.resolve("other.txt");
+        Files.writeString(other, "elsewhere");
+        Files.createLink(app.resolve("copy.txt"), other);
+        assertEquals("Error: 'copy.txt' is a link, and an app is published only as plain files: build the app into a"
+                        + " folder without links.",
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"linked\"}"));
+        assertFalse(Files.exists(Play.getFile("public/apps/" + slug).toPath()));
+    }
+
+    @Test
+    void anAppWithoutLinksStillInstallsBesideASkillsCredentials() throws IOException {
+        var slug = slug();
+        seedSkillCredentials();
+        buildInWorkspace("plain", manifest("Plain", "1.0.0"));
+        var o = JsonParser.parseString(
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"plain\"}")).getAsJsonObject();
+        assertTrue(o.get("installed").getAsBoolean(), o.toString());
+        assertEquals(2, o.get("files").getAsInt());
+    }
+
+    @Test
+    void stagingOverASkillsFolderIsRefusedAndLeavesItsCredentials() throws IOException {
+        var slug = slug();
+        buildInWorkspace("staged", manifest("Staged", "1.0.0"));
+        var installed = JsonParser.parseString(
+                run("{\"action\":\"install\",\"slug\":\"" + slug + "\",\"source\":\"staged\"}")).getAsJsonObject();
+        assertTrue(installed.get("installed").getAsBoolean(), installed.toString());
+        var key = seedSkillCredentials();
+        for (var dest : List.of("skills/demo", "skills", "skills/demo/credentials")) {
+            assertEquals("Error: dest '" + dest + "' would replace a skill's credentials folder; stage into a folder of"
+                            + " its own.",
+                    run("{\"action\":\"stage\",\"slug\":\"" + slug + "\",\"dest\":\"" + dest
+                            + "\",\"overwrite\":true}"));
+        }
+        assertEquals("{\"apiKey\":\"sk-test\"}", Files.readString(key));
+    }
 }

@@ -185,6 +185,9 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
         var resolved = FsPaths.resolveTargetPath(args, agent, action);
         if (resolved.error() != null) return FsOutcome.fail(resolved.resolvedError());
+        var credentialsError = FsPaths.checkSkillCredentials(action, resolved.resolvedWorkspace(),
+                resolved.resolvedTarget(), args.get("path").getAsString());
+        if (credentialsError != null) return FsOutcome.fail(credentialsError);
 
         if (FsPaths.isMutatingAction(action)) {
             var guardError = FsPaths.checkSkillCreatorReadOnly(agent, resolved.resolvedWorkspace(), resolved.resolvedTarget());
