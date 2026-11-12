@@ -108,31 +108,31 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
 ## Setup, commands and hooks
 
-- After every fresh clone (including `rm -rf` + re-clone cycles), run `./jclaw.sh setup`. It wires `.githooks/`, installs the frontend dependencies the pre-commit hook's `lint-staged` needs, and checks that both `origin` (Bitbucket) and `github` remotes exist: `core.hooksPath` lives in `.git/config` and `frontend/node_modules/` is gitignored, so no clone carries them. Without it the hooks silently don't fire and `/deploy` fails on the github push.
-- `./jclaw.sh e2e` runs the Playwright suite against whichever mode is listening, with `JCLAW_ADMIN_PASSWORD` from `certs/.env`. It is local UAT, not a gate, and stays out of `./jclaw.sh test` because it needs a live server.
+- After every fresh clone, re-clones included, run `./jclaw.sh setup`: it wires `.githooks/`, installs the frontend dependencies the pre-commit hook's `lint-staged` needs, and checks that the `origin` (Bitbucket) and `github` remotes exist. No clone carries `core.hooksPath` (it lives in `.git/config`) or `frontend/node_modules/`, so without it the hooks silently don't fire and `/deploy` fails on the github push.
+- `./jclaw.sh e2e` runs the Playwright suite against whichever mode is listening, with `JCLAW_ADMIN_PASSWORD` from `certs/.env`. It is local UAT, not a gate, and needs a live server, so `./jclaw.sh test` leaves it out.
 
 ## Topic guides
 
 Each guide holds one subsystem's rules with their reasons, and only the agent working on that subsystem needs it. The line after each link says when to read it and the rule an agent most often gets wrong without it.
 
-- [Trust](docs/agents/trust.md) — before touching `@AgentAccess`, `RequestPrincipal`, `DangerousActionGate`, `app/channels/` inbound handling, tool-approval grants, persona files, or a URL, host or path a model or page supplies. The agent principal and the channel sender are separate axes, and an unbound `ownerInitiated` means guest.
+- [Trust](docs/agents/trust.md) — before touching `@AgentAccess`, `RequestPrincipal`, `DangerousActionGate`, inbound `app/channels/` handling, tool-approval grants, persona files, or a URL, host or path a model or page supplies. The agent principal and the channel sender are separate axes; an unbound `ownerInitiated` means guest.
 - [Test isolation](docs/agents/testing.md) — before a test flips a process-global, or drives a provider, circuit breaker or inbound fixture. Mint your own provider or server name.
 - [Subagents and coding runs](docs/agents/subagents.md) — before touching `SubagentRun`, `SubagentRegistry`, `subagent_spawn`, `AgentRunner.taskFireParent` or `AgentService.delete`. A run has one parent, and its child agent may be the operator's, so never delete one unchecked.
-- [Context pipeline](docs/agents/context-pipeline.md) — before touching `CompressionPipeline`, `CompactionGate`, `ContextWindowManager`, `ContentTypeDetector`, or a tool's `verbatimResult`. A media rewrite goes after compaction, and a SKILL.md stays under 20,000 characters.
+- [Context pipeline](docs/agents/context-pipeline.md) — before touching `CompressionPipeline`, `CompactionGate`, `ContextWindowManager`, `ContentTypeDetector` or a tool's `verbatimResult`. A media rewrite goes after compaction; a SKILL.md stays under 20,000 characters.
 - [Logging and retention](docs/agents/logging.md) — before touching `EventLogger.record`, `SecretRedactor` or a cleanup window. A non-positive retention is `DISABLED`, never a window.
 - [Browser runtime](docs/agents/browser-runtime.md) — before touching `services.browser` or bumping Playwright. `PlaywrightNode.VERSION` must equal driver-bundle's node.
 - [Release signing](docs/agents/release-signing.md) — before touching `bin/sign-release.sh`, `utils.ReleaseSignature`, the installers or the Release stage. Keep `ReleaseSignature` on the JDK alone.
-- [Database maintenance](docs/agents/database-maintenance.md) — before touching `H2Maintenance`, `CredentialCopies` or `H2TraceMask`. Keep them on the JDK, H2 and Gson only, and never let them read the clock.
-- [Architecture](docs/agents/architecture.md) — before changing the build files, `.play-version`, `.githooks/`, or the JVM options.
-- [Outbound HTTP](docs/agents/outbound-http.md) — before adding an outbound call or choosing a client. Clients come from `utils.HttpFactories`; a provider-style URL an operator or agent can change takes a `*Guarded()` tier, and a web URL the model browses stays on `SsrfGuard.SAFE_DNS`.
-- [Wall clock](docs/agents/wall-clock.md) — before reading the time, freezing it in a test, or forking a thread that must carry a binding. Every wall-clock read goes through `utils.AppClock` (`WallClockDisciplineTest`), except the 42 `System.currentTimeMillis()` interval baselines `archunit_store/wall-clock-interval-baselines` keeps on purpose; a `ScopedValue` binding does not cross an executor, while an `InheritableThreadLocal` does, so a fork for a different sender opts out.
-- [Structured concurrency](docs/agents/structured-concurrency.md) — before fanning out work. Use `utils.TaskScope`, never the JDK's preview `StructuredTaskScope`, which javac and ECJ compile to differently-marked bytecode and which interrupts its forks. `TaskScope`'s `close()` waits for every fork without interrupting it, so each wait inside a fork must end on its own.
+- [Database maintenance](docs/agents/database-maintenance.md) — before touching `H2Maintenance`, `CredentialCopies` or `H2TraceMask`. Keep them on the JDK, H2 and Gson, and never let them read the clock.
+- [Architecture](docs/agents/architecture.md) — before changing the build files, `.play-version`, `.githooks/` or the JVM options.
+- [Outbound HTTP](docs/agents/outbound-http.md) — before adding an outbound call or choosing a client. Clients come from `utils.HttpFactories`: a provider-style URL an operator or agent can change takes a `*Guarded()` tier, and a web URL the model browses stays on `SsrfGuard.SAFE_DNS`.
+- [Wall clock](docs/agents/wall-clock.md) — before reading the time, freezing it in a test, or forking a thread that must carry a binding. Every wall-clock read goes through `utils.AppClock` (`WallClockDisciplineTest`). A `ScopedValue` binding does not cross an executor, while an `InheritableThreadLocal` does, so a fork for a different sender opts out.
+- [Structured concurrency](docs/agents/structured-concurrency.md) — before fanning out work. Use `utils.TaskScope`, never the JDK's preview `StructuredTaskScope`: javac and ECJ compile it to differently-marked bytecode, and it interrupts its forks. `TaskScope` never interrupts, so its `close()` waits for every fork, and each wait inside one must end on its own.
 - [Telemetry](docs/agents/telemetry.md) — before touching `services.telemetry`, a span or a metric, or adding a thread hop. OTel `Context` is a `ThreadLocal`, so a new hop wraps with `Context.current().wrap`; a test using the capture seams holds `TelemetryTestSync`.
-- [Nullness](docs/agents/nullness.md) — when NullAway fails a compile, or a package joins its scope. `@NullMarked` does not inherit, so each subpackage carries its own `package-info.java`; annotate a wire type for the provider's documented shape; javac stops at 100 errors, so raise `-Xmaxerrs` before measuring.
+- [Nullness](docs/agents/nullness.md) — when NullAway fails a compile, or a package joins its scope. `@NullMarked` does not inherit, so each subpackage carries its own `package-info.java`; javac stops at 100 errors, so raise `-Xmaxerrs` before measuring.
 - [Resource leaks](docs/agents/resource-leaks.md) — before adding an `AutoCloseable` or a Lucene test. Its constructor or factory carries `@MustBeClosed`; a Lucene test whose window fits one method uses `LuceneTestSync.openLease()`.
-- [Capabilities](docs/agents/capabilities.md) — before code spawns a process, resolves a model-supplied path, opens a connection, adds an `/api` route or adds a `*ForTest` seam. `CapabilityRulesTest` and the frozen stores in `archunit_store/` are the allowlists, and a stale line in a store is deleted by hand.
+- [Capabilities](docs/agents/capabilities.md) — before code spawns a process, resolves a model-supplied path, opens a connection, adds an `/api` route or adds a `*ForTest` seam. `CapabilityRulesTest` and the frozen stores in `archunit_store/` are the allowlists; delete a stale store line by hand.
 - [Chrome bridge](docs/agents/chrome-bridge.md) — before touching `ChromeBridge*`, `ChromeControlTool`, `ChromeBridgePolicy` or `chrome-extension/`. The agent drives the operator's signed-in Chrome: policy is judged on the JClaw side, and loopback and LAN stay blocked even for the main agent.
-- [Process sandboxing](docs/agents/process-sandboxing.md) — before spawning a process model output can steer, or touching `shell.sandbox` or `subagent.acp.sandbox`. Such a process goes through `tools.HarnessSandbox`, which fails closed: never add a fallback that launches unconfined. The `browser` tool sits outside it by a measured verdict.
+- [Process sandboxing](docs/agents/process-sandboxing.md) — before spawning a process model output can steer, or touching `shell.sandbox` or `subagent.acp.sandbox`. Such a process goes through `tools.HarnessSandbox`, which fails closed: never add a fallback that launches unconfined. The `browser` tool stays outside it by a measured verdict.
 - [Sidecars](docs/agents/sidecars.md) — before touching `sidecar/` or a sidecar manager. A new sidecar goes through `LocalSidecarDaemon`, takes an unused literal default port and joins `ShutdownJob`'s list; the spawner store and two conformance tests catch each omission.
 - [Property-based tests](docs/agents/property-tests.md) — before writing a jqwik `@Property`. Every one lives in `test/PropertyBasedTest.java`, with `tries` pinned and the generated inputs in the assertion message.
 - [Evals](docs/agents/evals.md) — before editing `evals/` or running a capture. Suites are edited in place; `--capture` executes tools for real, so run it only against `__evaltest__`.
@@ -141,55 +141,49 @@ Each guide holds one subsystem's rules with their reasons, and only the agent wo
 
 ## Prerequisites
 
-- JDK 25+ (Zulu recommended)
-- `play` command in PATH (custom fork: github.com/tsukhani/play1)
-- Node.js 24.11+ or 26+ — the range Nuxt 4.5's `engines` allows, intersected with this project's 24 floor, enforced by `./jclaw.sh`. Node 25 is excluded because Nuxt excludes it; the dev container and CI both ship 26. `frontend/vitest.config.ts` handles the 25+ Web Storage change itself.
+- JDK 25+ (Zulu recommended).
+- `play` in PATH: the fork at github.com/tsukhani/play1.
+- Node.js 24.11+ or 26+, enforced by `./jclaw.sh`: Nuxt 4.5's `engines` range above this project's 24 floor, which excludes 25. The dev container and CI ship 26.
 - pnpm 12+, installed standalone, never via corepack: [frontend](docs/agents/frontend-toolchain.md).
 
 ## graphify
 
-Optional codebase knowledge graph, local to each clone in `graphify-out/` (gitignored). When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else. It answers structural questions about a symbol you can already name, so get the name with one grep first. After modifying code, run `GRAPHIFY_NO_BACKUP=1 graphify update .`. Which command to use, and its traps: [graphify](docs/agents/graphify.md).
+Optional codebase knowledge graph in `graphify-out/`, local to each clone and gitignored. When the user types `/graphify`, use the installed graphify skill or instructions before anything else. It answers structural questions about a symbol you can already name, so get the name with one grep first. After modifying code, run `GRAPHIFY_NO_BACKUP=1 graphify update .`. Which command to use, and its traps: [graphify](docs/agents/graphify.md).
 
 ## Behavioral Guidelines
 
 ### 1. Communicate Concisely
 
-**Direct answers. Digestible nuggets. Progressive exchange.**
+The user follows the work as it happens, so make each message scannable in seconds:
 
-The user is tracking the work as it happens, not reading a report at the end. Make it easy to follow.
-
-- Lead with the answer or the action. Skip the preamble. The user can ask for more if they want it.
-- Break multi-step work into small confirmable units rather than dumping a full multi-stage plan up front. Each step's outcome may change the next; don't pre-commit to plans the user hasn't seen the inputs for.
-- After each meaningful step, state in one or two sentences: what just happened, what's next, what (if anything) is blocked. So the user can track progress without re-reading prior messages.
-- Match response length to the size of the question. A one-line ask gets a one-line answer. A multi-step refactor gets the diff summary plus a "next step" hint, not a five-paragraph essay.
-- Keep insights and tangents brief. If a longer explanation might help, offer it ("want me to expand?") rather than emitting it by default.
-
-The signal you're getting this right: the user can scan your message in seconds and know exactly what state things are in.
+- Lead with the answer or the action; skip the preamble.
+- Break multi-step work into small confirmable steps. Each outcome may change the next, so don't commit to a plan whose inputs the user hasn't seen.
+- After each meaningful step, say in a sentence or two what happened, what's next and what is blocked.
+- Match length to the question: a one-line ask gets a one-line answer, a refactor gets the diff summary and the next step.
+- Offer a longer explanation or a tangent ("want me to expand?") rather than writing it by default.
 
 ### 2. Know What Is Verified
 
-**Separate what you ran from what you inferred. Say which is which.**
+Separate what you ran from what you inferred, and say which is which.
 
-- **Claims about external systems need the external system.** How Slack renders an audio attachment, what a provider's API accepts, whether a client plays a codec — these are facts about someone else's software, and reading docs or reasoning from adjacent behaviour is inference, not verification. Infer freely; just label it, and don't let an inference reach a commit message or a ticket as fact.
-- **A green result you did not scope is not evidence.** A quality gate can pass because nothing was measured; a test can pass because its fixture avoids the interesting case. Before reporting a pass, check that the thing you care about was actually exercised.
-- **Validate a measurement harness against a known-zero case** before trusting a number it produces. Time a no-op; assert on an empty input. A harness that reports plausible nonsense is worse than no measurement, because it gets believed.
-- **A flake is a defect until proven environmental — and "environmental" means naming the mechanism.** "Re-ran and it passed" is not a diagnosis. There are known interference cases here (a live app on the test port, parallel worktrees); those are identifiable by name, and anything else is a real failure.
+- **Claims about external systems need the external system.** How Slack renders an attachment, what a provider's API accepts or whether a client plays a codec are facts about someone else's software; reading docs or reasoning from adjacent behavior is inference. Label it, and never let it reach a commit message or a ticket as fact.
+- **A green result you did not scope is not evidence.** A gate can pass because nothing was measured, a test because its fixture avoids the interesting case. Before reporting a pass, check that the thing you care about was exercised.
+- **Validate a measurement harness against a known-zero case** (time a no-op, assert on an empty input) before trusting its numbers: plausible nonsense gets believed.
+- **A flake is a defect until proven environmental, and "environmental" means naming the mechanism.** "Re-ran and it passed" is not a diagnosis. The known interference cases (a live app on the test port, parallel worktrees) have names; anything else is a real failure.
 
 ### 3. Reach For What Exists
 
-**Instrumentation, helpers, and prior verdicts already in the repo beat improvising.**
+Instrumentation, helpers and prior verdicts already in the repo beat improvising:
 
-- Latency questions have `LatencyStats` / `LatencyTrace`, `/api/metrics/latency`, the `./jclaw.sh loadtest` harness, and JProfiler. Prefer them over a hand-rolled stopwatch.
-- Before deciding a static-analysis finding, check how the same rule was already resolved elsewhere in this project. A verdict that contradicts an established one either needs to change both places or is wrong.
-- Match the existing construction for test fixtures and helpers (`AgentService.create`, `commitInFreshTx`, the probe `setForTest` seams) rather than building a parallel one.
+- Latency: `LatencyStats` / `LatencyTrace`, `/api/metrics/latency`, the `./jclaw.sh loadtest` harness and JProfiler, not a hand-rolled stopwatch.
+- A static-analysis finding: check how the same rule was resolved elsewhere in this project. A verdict that contradicts an established one either changes both places or is wrong.
+- Test fixtures and helpers: match the existing construction (`AgentService.create`, `commitInFreshTx`, the probe `setForTest` seams) rather than building a parallel one.
 
 ### 4. Comments Carry Reasoning, Not Narration — Tersely
 
-**Never write a comment that restates the code. Default to no comment; when one is warranted, default to one line.**
+**Never write a comment that restates the code. Default to no comment; when one is warranted, default to one line.** Redundant commenting is the most common defect in agent-written code, and it survives a general instruction to stop, so apply these checks mechanically, not by feel.
 
-Redundant commenting is the most common defect in agent-written code, and the pull toward it is strong enough to survive a general instruction to stop. So this section is checks and examples rather than adjectives — apply it mechanically, not by feel.
-
-**The delete test — run it on every comment you write.** Delete the comment and re-read the code. If the code still conveys everything the comment did, it stays deleted. A comment survives only by carrying what the code cannot: a reason, a constraint, a measurement, or a bug.
+**The delete test, on every comment you write:** delete it and re-read the code. If the code still conveys everything the comment did, it stays deleted. A comment survives only by carrying what the code cannot: a reason, a constraint, a measurement or a bug.
 
 **Never write these:**
 
@@ -211,21 +205,12 @@ for (var p : printers) { ... }
 // JIPP is Kotlin: getStatus() is @NotNull, so a null guard here is dead code.
 ```
 
-**A comment earns its place only by recording one of:**
+**A comment earns its place only by recording one of:** why the code is this way and not the obvious way (name the ticket, benchmark or bug that decided it); a non-obvious invariant or precondition a caller has to hold; the specific failure a guard prevents; or an external contract the code cannot state itself (wire format, provider quirk, library nullability). A longer comment or a Javadoc block has its own bar: read [comments](docs/agents/comments.md) before writing one.
 
-- why the code is this way and not the obvious way — name the ticket, benchmark, or bug that decided it
-- a non-obvious invariant or precondition a caller has to hold
-- the specific failure a guard prevents
-- an external contract the code cannot state itself: wire format, provider quirk, library nullability
+**Provenance for a change belongs in the commit message, not the code.** "Why this must stay" is a comment; "why I added this" is history. Explaining a fix in the code that fixes it duplicates the commit body and ages into noise within one refactor.
 
-**A longer comment or a Javadoc block has its own bar:** [comments](docs/agents/comments.md), before writing one.
-
-**Provenance for a *change* belongs in the commit message, not the code.** "Why this must stay" is a comment; "why I added this" is history. Explaining the bug you just fixed, in the code that fixes it, duplicates the commit body and ages into noise within one refactor.
-
-**During refactors, comments move with the logic they explain.** A comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back.
+**During refactors, comments move with the logic they explain.** A comment recording why a check exists is often the only surviving record of a bug that was hit, and deleting it as clutter is how the bug comes back.
 
 ### 5. Commit Messages Are Public
 
-`/deploy` pushes to **both** remotes, and the GitHub mirror (`github.com/tsukhani/jclaw`) is **public**. Commit bodies, tags and release notes are published artifacts, not internal notes.
-
-Write them factually: what changed, why, what was verified. That is also what makes them useful internally — the constraint costs nothing. Keep genuinely internal material (credentials, customer specifics, unreleased commercial plans) out of them entirely.
+`/deploy` pushes to both remotes, and the GitHub mirror (`github.com/tsukhani/jclaw`) is public, so commit bodies, tags and release notes are published. Write them factually (what changed, why, what was verified), which is also what makes them useful internally, and keep credentials, customer specifics and unreleased commercial plans out entirely.
