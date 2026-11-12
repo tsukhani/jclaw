@@ -3,7 +3,7 @@ name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.8"
+  version: "1.0.9"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec
@@ -16,7 +16,7 @@ Perform JIRA operations with intelligent MCP/REST API fallback. Uses the `jira-c
 ## Configuration
 
 - `JIRA_PERSONAL_TOKEN`: the PAT for Bearer auth. It lives in JClaw's secret store. The operator adds it once, in this skill's Secrets panel on the Skills page, with the Jira host. Any command that names `$JIRA_PERSONAL_TOKEN` receives a stand-in, and JClaw puts the real token in only on requests to that host.
-- `JIRA_URL`: the base URL (e.g., `[JIRA_URL]`), read from `~/.claude.json` via `exec` + `jq`.
+- `JIRA_URL`: the base URL (e.g., `[JIRA_URL]`), kept in `config.env` in this skill's folder. Copy `config.env.example` to `config.env` and set it once. Do not look for it, or for the token, in `~/.claude.json` or any other program's settings.
 
 Never read the token from a file. If `$JIRA_PERSONAL_TOKEN` is empty or a call answers 401, the secret is missing: ask the operator to add it.
 
@@ -109,7 +109,7 @@ When falling back to REST, construct curl calls as follows:
 
 ```bash
 # $JIRA_PERSONAL_TOKEN comes from JClaw's secret store: naming it is what gives this command its stand-in.
-JIRA_URL=$(jq -r '.mcpServers["jira-confluence"].env.JIRA_URL' ~/.claude.json)
+. skills/jira-operations/config.env   # sets JIRA_URL
 
 curl -sS -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" -H "Content-Type: application/json" \
   -X PUT -d '{"value": 5}' \
