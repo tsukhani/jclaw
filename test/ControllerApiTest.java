@@ -607,6 +607,67 @@ class ControllerApiTest extends FunctionalTest {
         assertTrue(elapsedMs < 10_000, "the first frame took " + elapsedMs + " ms, a heartbeat's wait");
     }
 
+    /**
+     * JF-347: a client whose write stalls past the bus's deadline is aborted, and that closes its stream
+     * and unsubscribes it, rather than leaving it open and deaf. The write handler stands in for the
+     * fork's backpressure wait: it parks interruptibly and throws once interrupted, as that wait does.
+     */
+    @Test
+    void anEventsStreamWhoseWriteStallsPastTheDeadlineClosesAndUnsubscribes() throws Exception {
+        var login = POST("/api/auth/login", "application/json", """
+                {"username": "admin", "password": "changeme"}
+                """);
+        assertIsOk(login);
+        var request = newRequest();
+        request.method = "GET";
+        request.url = "/api/events";
+        request.path = "/api/events";
+        request.querystring = "";
+        request.body = new ByteArrayInputStream(new byte[0]);
+        request.cookies = login.cookies;
+        var response = new Http.Response();
+        response.out = new ByteArrayOutputStream();
+        var type = "test.stalled-stream-" + System.nanoTime();
+        var parked = new java.util.concurrent.CountDownLatch(1);
+        // Ends a red run: the next frame (a 30 s heartbeat at the latest) closes the stream, so a stream
+        // the fix failed to close cannot hold the functional-test executor past this test.
+        var abandon = new java.util.concurrent.atomic.AtomicBoolean();
+        response.onWriteChunk(chunk -> {
+            if (abandon.get()) throw new IllegalStateException("test over");
+            if (!new String((byte[]) chunk, StandardCharsets.UTF_8).contains("\"type\":\"" + type + "\"")) return;
+            parked.countDown();
+            try {
+                Thread.sleep(20_000);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException("write aborted", e);
+            }
+        });
+        int before = services.NotificationBus.listenerCount();
+        var done = new java.util.concurrent.CountDownLatch(1);
+        Thread.ofPlatform().daemon().start(() -> {
+            try {
+                makeRequest(request, response);
+            } finally {
+                done.countDown();
+            }
+        });
+        try {
+            long subscribeBy = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (services.NotificationBus.listenerCount() == before && System.nanoTime() < subscribeBy) {
+                Thread.sleep(20);
+            }
+            assertEquals(before + 1, services.NotificationBus.listenerCount(), "the stream never subscribed");
+
+            services.NotificationBus.publish(type, java.util.Map.of("n", 1));
+
+            assertTrue(parked.await(5, TimeUnit.SECONDS), "the stream's write never started");
+            assertTrue(done.await(5, TimeUnit.SECONDS), "the stream stayed open after the bus gave up on its write");
+            assertEquals(before, services.NotificationBus.listenerCount(), "the aborted stream is still subscribed");
+        } finally {
+            abandon.set(true);
+        }
+    }
+
     // =====================
     // ApiConfigController — loadtest-mock reserved key guards
     // =====================

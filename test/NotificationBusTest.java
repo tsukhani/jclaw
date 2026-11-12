@@ -114,7 +114,7 @@ class NotificationBusTest extends UnitTest {
         var type = "test.detached-stalled-" + System.nanoTime();
         var healthy = new java.util.concurrent.CopyOnWriteArrayList<String>();
         var stalled = new java.util.concurrent.CopyOnWriteArrayList<String>();
-        // A cancelled CompletableFuture does not interrupt its write, so the stalled one is freed here at the end.
+        // The deadline interrupts the stalled one; the latch frees it if that interrupt ever stops arriving.
         var unstall = new java.util.concurrent.CountDownLatch(1);
         subscribe(type, healthy::add);
         subscribe(type, msg -> {
@@ -335,6 +335,36 @@ class NotificationBusTest extends UnitTest {
         // Total publish time was bounded by the timeout, not by the slow listener's sleep.
         assertTrue(publishElapsed < NotificationBus.LISTENER_TIMEOUT_MS + 1_000L,
                 "publish() should not block past the per-listener timeout (elapsed=" + publishElapsed + "ms)");
+    }
+
+    @Test
+    void aListenerStillRunningAtTheDeadlineIsInterruptedOncePublishGivesUpOnIt() throws Exception {
+        var type = "test.abort-" + System.nanoTime();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var ended = new java.util.concurrent.CountDownLatch(1);
+        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        subscribe(type, msg -> {
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException _) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+            } finally {
+                ended.countDown();
+            }
+        });
+
+        try {
+            NotificationBus.publish(type, Map.of("n", 1));
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "the listener never started");
+            assertTrue(ended.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "the listener was still running 5 s after publish gave up on it");
+        } finally {
+            release.countDown();
+        }
+        assertTrue(interrupted.get(), "the late listener ended because it was interrupted, not because it was released");
     }
 
     // --- concurrent fan-out: many slow listeners do NOT serialize the publisher ---

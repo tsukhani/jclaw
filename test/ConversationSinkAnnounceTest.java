@@ -175,9 +175,10 @@ class ConversationSinkAnnounceTest extends UnitTest {
                     || !line.contains("\"conversationId\":" + conversation.id + "}")) {
                 return;
             }
+            // Recorded before the wait: past the bus's deadline the wait is interrupted.
+            lines.add(line);
             try {
                 unblock.await();
-                lines.add(line);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }

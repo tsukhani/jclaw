@@ -5,11 +5,11 @@ import play.Logger;
 
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -31,7 +31,8 @@ import static utils.GsonHolder.GSON;
  * wait is bounded to a single shared deadline ({@code LISTENER_TIMEOUT_MS}
  * from the first {@code get}) regardless of listener count — so a
  * slow/stalled SSE writer can never block the fan-out for other subscribers.
- * SSE listeners that throw or time out are removed.
+ * SSE listeners that throw are removed, and one still running at the deadline is
+ * interrupted and removed.
  *
  * <p>{@link #publishDetached} hands that fan-out, wait included, to one bus-owned platform thread, for a
  * publisher on every turn's path that must not wait on a client. Those fan-outs run one at a time, so there a
@@ -75,8 +76,8 @@ public class NotificationBus {
 
     // Per-task virtual threads so every listener dispatch runs concurrently — the
     // per-listener timeout then actually caps the publisher, instead of futures
-    // queueing behind a fixed worker count. SSE writes are blocking socket I/O
-    // (not Thread.sleep), so virtual threads unmount cleanly while a writer stalls.
+    // queueing behind a fixed worker count. A stalled SSE writer parks in the fork's PF-134
+    // backpressure wait (LazyChunkedInput.writeChunk), which unmounts a virtual thread cleanly.
     private static final ExecutorService EXECUTOR = Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("notification-bus-", 0).factory());
 
@@ -91,7 +92,10 @@ public class NotificationBus {
             .inheritInheritableThreadLocals(false)
             .factory());
 
-    /** Subscribe to receive SSE-formatted event strings. Returns an unsubscribe handle. */
+    /**
+     * Subscribe to receive SSE-formatted event strings. Returns an unsubscribe handle. A listener still
+     * running at the fan-out deadline is interrupted, so it must not touch H2 or JPA (AGENTS.md).
+     */
     public static Runnable subscribe(Consumer<String> listener) {
         listeners.add(listener);
         return () -> listeners.remove(listener);
@@ -153,20 +157,11 @@ public class NotificationBus {
     }
 
     private static void fanOut(String ssePayload) {
-        var pairs = new ArrayList<Map.Entry<Consumer<String>, CompletableFuture<Void>>>();
+        var pairs = new ArrayList<Map.Entry<Consumer<String>, Future<?>>>();
         for (var listener : listeners) {
-            var future = CompletableFuture.runAsync(() -> {
-                try {
-                    listener.accept(ssePayload);
-                } finally {
-                    // Clear any interrupt status before the worker thread terminates —
-                    // future.cancel(true) interrupts the thread to abort a stalled
-                    // listener; clearing it keeps the abort from surfacing as a stray
-                    // InterruptedException in any shutdown/finalization on this thread.
-                    Thread.interrupted();
-                }
-            }, EXECUTOR);
-            pairs.add(Map.entry(listener, future));
+            // submit, not CompletableFuture.runAsync: only a FutureTask's cancel(true) interrupts the
+            // task, and a listener past the deadline has to be aborted, not left parked on a client.
+            pairs.add(Map.entry(listener, EXECUTOR.submit(() -> listener.accept(ssePayload))));
         }
 
         // One shared deadline for the whole fan-out: dispatches run concurrently on
@@ -185,7 +180,12 @@ public class NotificationBus {
                 // dropped while late ones are canceled.
                 future.get(Math.max(0L, remainingNanos), TimeUnit.NANOSECONDS);
             } catch (TimeoutException _) {
-                future.cancel(true);
+                // An SSE listener stalls only in the fork's PF-134 backpressure wait
+                // (LazyChunkedInput.writeChunk), on a client that stopped reading. The interrupt throws
+                // out of it and SseStream closes the stream; the client sees the end once it has drained
+                // its backlog, and its EventSource then reconnects. One that finished between the
+                // timeout and the cancel delivered, so it stays.
+                if (!future.cancel(true) && future.state() == Future.State.SUCCESS) continue;
                 failed.add(pair.getKey());
             } catch (ExecutionException _) {
                 failed.add(pair.getKey());
@@ -193,6 +193,8 @@ public class NotificationBus {
                 // Re-set the flag the catch cleared, then stop processing further
                 // futures so the interrupt actually propagates up the call stack.
                 Thread.currentThread().interrupt();
+                // Dropped, so aborted too, as a listener past the deadline is: left running, its stream would stay open.
+                future.cancel(true);
                 failed.add(pair.getKey());
                 break;
             }
