@@ -48,6 +48,9 @@ export const MANAGED_PREFIXES: readonly string[] = [
   'otel.', // JCLAW-34: OpenTelemetry export, endpoint and sampling — Settings (Telemetry)
   'factory.', // AFK factory home override (factory.home), set through the API — Settings (Software Factory)
   'tool.approval.', // JCLAW-1022: off-channel approval policy — Settings (Tool Approvals)
+  'tool.jclawApi.', // JF-293: tool.jclawApi.grantResetApplied, the marker JclawApiGrantResetJob writes at the first
+  // start — no UI surface. It is not stale: deleting it makes the next start remove every custom agent's
+  // jclaw_api grant again.
   'visual.', // Visual fences in chat (visual.enabled) — Settings (Chat). JF-195.
   'voice.', // Turn detection, live transcripts and speech pacing — Settings (Voice Mode)
   'telegram.', // Channel defaults — Channels page (Telegram); approval timeout — Settings (Tool Approvals)
