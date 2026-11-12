@@ -13,6 +13,12 @@ interface BackupInfo {
   createdAt: string
   /** Taken while the data file held credential plaintext (JCLAW-1455), so this copy holds it too. */
   unencrypted?: boolean
+  /**
+   * The write check (JF-311). FAILED on any backup whose name carries the mark; PASSED or NOT_RUN only on the
+   * backup just taken, since a pass leaves no mark to list.
+   */
+  check?: 'PASSED' | 'FAILED' | 'NOT_RUN' | null
+  checkDetail?: string | null
 }
 
 interface TableResult {
@@ -150,7 +156,17 @@ async function backupNow() {
     failure.value = mutationError.value ?? 'The backup was refused.'
     return
   }
-  notice.value = `Backed up to ${res.id} (${formatSize(res.bytes)}).`
+  const written = `Backed up to ${res.id} (${formatSize(res.bytes)})`
+  if (res.check === 'FAILED') {
+    failure.value = `${written}, but it failed its check: ${res.checkDetail}. Restoring it here still works, because a `
+      + 'restore rewrites the database first; opened directly with H2\'s tools, it drops new writes.'
+  }
+  else if (res.check === 'PASSED') {
+    notice.value = `${written}. Checked: ${res.checkDetail}.`
+  }
+  else {
+    notice.value = `${written}. Not checked: ${res.checkDetail ?? 'the server did not say why'}.`
+  }
   await refresh()
 }
 
@@ -662,6 +678,12 @@ const lastOp = computed(() => {
             title="Taken while the data file held the stored credentials in plaintext, so this backup holds them too"
             :data-testid="`db-unencrypted-${b.id}`"
           >Unencrypted</span>
+          <span
+            v-if="b.check === 'FAILED'"
+            class="shrink-0 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+            title="A copy of this backup lost a test write when it was reopened. Restoring it here still works, because a restore rewrites the database first."
+            :data-testid="`db-check-failed-${b.id}`"
+          >Check failed</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ when(b.createdAt) }}</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ formatSize(b.bytes) }}</span>
           <span class="ml-auto flex items-center gap-1 shrink-0">

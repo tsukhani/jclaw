@@ -195,6 +195,168 @@ class H2MaintenanceTest extends UnitTest {
         assertEquals(beforeSha, H2Maintenance.sha256(dataFile(dir)));
     }
 
+    // ---- a copy taken while writes landed (JF-311) ----
+
+    @Test
+    void theModelledCopyDropsAWriteAndRowsItShowedWhenOpenedAsItIs() throws Exception {
+        var extract = BackupFixtures.extractDatabase(BackupFixtures.aCopyTakenWhileWritesLanded(tmp), tmp.resolve("as-is"));
+        long shown;
+        // One session: the first read-write open is the one whose writes the next open drops.
+        try (var c = open(extract); var s = c.createStatement()) {
+            try (var rs = s.executeQuery("SELECT COUNT(*) FROM t")) {
+                rs.next();
+                shown = rs.getLong(1);
+            }
+            s.execute("INSERT INTO t VALUES(-1, 'a write after the open')");
+            try (var rs = s.executeQuery("SELECT COUNT(*) FROM t")) {
+                rs.next();
+                assertEquals(shown + 1, rs.getLong(1), "the session sees its own write");
+            }
+        }
+        var reopened = count(extract, "t");
+        assertTrue(reopened < shown, "the fixture must be the fault this suite guards against: " + shown
+                + " rows at the first open, " + reopened + " at the next, without the write. If both match, H2 no longer"
+                + " falls back on this file; measure JF-311 again before trusting the rest of this section");
+    }
+
+    @Test
+    void aRestoreFromACopyTakenWhileWritesLandedKeepsLaterWritesAndEveryRowItShowed() throws Exception {
+        var zip = BackupFixtures.aCopyTakenWhileWritesLanded(tmp);
+        var shown = H2Maintenance.referenceCounts(BackupFixtures.extractDatabase(zip, tmp.resolve("read-only"))).counts().get("PUBLIC.T");
+
+        var dir = Files.createDirectories(tmp.resolve("restored"));
+        H2Maintenance.restore(zip, dir);
+        assertEquals(shown, count(dir, "t"), "the restore holds every row the backup showed");
+        try (var c = open(dir); var s = c.createStatement()) {
+            s.execute("INSERT INTO t VALUES(-1, 'a write after the restore')");
+        }
+        assertEquals(shown + 1, count(dir, "t"), "a write after the restore is still there at the next open");
+        assertEquals(shown + 1, count(dir, "t"), "and at the one after");
+    }
+
+    @Test
+    void aRestoreLeavesTheRewriteInPlaceAndNoScratchFileBeside() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 10);
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+
+        var result = H2Maintenance.restore(zip, dir);
+
+        assertEquals(List.of(H2Maintenance.DATA_FILE, H2Maintenance.PRE_RESTORE_FILE, H2Maintenance.GRAPH_DIR).stream()
+                .sorted().toList(), names(dir), "no extract, rewrite or check copy is left beside the data file");
+        assertEquals(2, result.tables());
+        assertEquals(Files.size(dataFile(dir)), result.restoredBytes());
+        assertEquals(Files.size(dir.resolve(H2Maintenance.PRE_RESTORE_FILE)), result.backupBytes(),
+                "the backup's file is the one it was taken from, byte for byte in size");
+        assertEquals(10, count(dir, "note"));
+        assertEquals(List.of("WRITING", "OTHER", "CODING"), categories(dir));
+    }
+
+    @Test
+    void theWriteCheckFailsTheModelledCopyPassesAGoodBackupAndChangesNeither() throws Exception {
+        var data = Files.createDirectories(tmp.resolve("data"));
+        var torn = BackupFixtures.aCopyTakenWhileWritesLanded(tmp);
+        var tornSha = H2Maintenance.sha256(torn);
+        var src = Files.createDirectories(tmp.resolve("src"));
+        buildDatabase(src, 20);
+        var good = tmp.resolve("good.zip");
+        try (var c = open(src)) {
+            H2Maintenance.backupOnline(c, good);
+        }
+        var goodSha = H2Maintenance.sha256(good);
+
+        assertEquals(new H2Maintenance.WriteCheck(H2Maintenance.Outcome.FAILED,
+                "a copy of it reopened at an older version, without the write made to it"),
+                H2Maintenance.checkKeepsWrites(torn, data));
+        assertEquals(new H2Maintenance.WriteCheck(H2Maintenance.Outcome.PASSED, "a copy of it kept a test write across a reopen"),
+                H2Maintenance.checkKeepsWrites(good, data));
+
+        assertEquals(tornSha, H2Maintenance.sha256(torn));
+        assertEquals(goodSha, H2Maintenance.sha256(good));
+        assertEquals(List.of(), names(data), "the throwaway copy goes whatever the outcome");
+    }
+
+    @Test
+    void theWriteCheckSaysWhyACopyFailedOrCouldNotBeMade() throws Exception {
+        var data = Files.createDirectories(tmp.resolve("data"));
+        var noDatabase = tmp.resolve("no-db.zip");
+        try (var z = new ZipOutputStream(Files.newOutputStream(noDatabase))) {
+            z.putNextEntry(new ZipEntry("readme.txt"));
+            z.write("hello".getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        assertEquals(new H2Maintenance.WriteCheck(H2Maintenance.Outcome.FAILED, "the archive holds no jclaw.mv.db"),
+                H2Maintenance.checkKeepsWrites(noDatabase, data));
+
+        var notAStore = tmp.resolve("not-a-store.zip");
+        try (var z = new ZipOutputStream(Files.newOutputStream(notAStore))) {
+            z.putNextEntry(new ZipEntry(H2Maintenance.DATA_FILE));
+            z.write("H:2,but nothing after it".getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        var unopenable = H2Maintenance.checkKeepsWrites(notAStore, data);
+        assertEquals(H2Maintenance.Outcome.FAILED, unopenable.outcome());
+        assertTrue(unopenable.detail().startsWith("a copy of it would not take a write: "), unopenable.detail());
+
+        var aFileWhereTheDataDirectoryShouldBe = Files.writeString(tmp.resolve("not-a-dir"), "x");
+        var notRun = H2Maintenance.checkKeepsWrites(notAStore, aFileWhereTheDataDirectoryShouldBe);
+        assertEquals(H2Maintenance.Outcome.NOT_RUN, notRun.outcome());
+        assertTrue(notRun.detail().startsWith("the copy could not be unpacked: "), notRun.detail());
+        assertEquals(List.of(), names(data));
+    }
+
+    @Test
+    void aBackupThatFailedTheCheckIsRenamedOnceSoEveryListingSaysSo() throws Exception {
+        var backups = Files.createDirectories(tmp.resolve("backups"));
+        var zip = Files.copy(BackupFixtures.aCopyTakenWhileWritesLanded(tmp), backups.resolve("jclaw-20261111T202739Z.zip"));
+
+        var marked = H2Maintenance.markCheckFailed(zip);
+
+        assertEquals("jclaw-20261111T202739Z" + H2Maintenance.CHECK_FAILED_SUFFIX, marked.getFileName().toString());
+        assertEquals(marked, H2Maintenance.markCheckFailed(marked), "marking twice keeps the one name");
+        assertEquals(List.of("jclaw-20261111T202739Z.check-failed.zip"),
+                H2Maintenance.listBackups(backups).stream().map(H2Maintenance.BackupFile::name).toList());
+        assertTrue(H2Maintenance.checkFailed(marked.getFileName().toString()));
+        assertFalse(H2Maintenance.checkFailed("jclaw-20261111T202739Z.zip"));
+        assertTrue(H2Maintenance.validateBackup(marked).ok(), "a marked backup is still a backup, and restores");
+    }
+
+    @Test
+    void theOfflineBackupCommandChecksItsCopyAndMarksOneThatFails() throws Exception {
+        var out = new ByteArrayOutputStream();
+        var print = new PrintStream(out, true, StandardCharsets.UTF_8);
+
+        var good = Files.createDirectories(tmp.resolve("good"));
+        buildDatabase(good, 3);
+        var goodZip = tmp.resolve("good.zip");
+        assertEquals(0, H2Maintenance.run(new String[]{"backup", good.toString(), goodZip.toString()}, print));
+        assertEquals("checked: a copy of it kept a test write across a reopen", lastLine(out));
+
+        // A closed file that is itself the modelled copy: its offline backup copies it as it is.
+        var torn = BackupFixtures.extractDatabase(BackupFixtures.aCopyTakenWhileWritesLanded(tmp), tmp.resolve("torn"));
+        var tornZip = tmp.resolve("torn-backup.zip");
+        out.reset();
+        assertEquals(1, H2Maintenance.run(new String[]{"backup", torn.toString(), tornZip.toString()}, print));
+        assertFalse(Files.exists(tornZip));
+        assertTrue(Files.exists(tmp.resolve("torn-backup" + H2Maintenance.CHECK_FAILED_SUFFIX)));
+        assertEquals("check failed: a copy of it reopened at an older version, without the write made to it. Restoring it"
+                + " with 'restore' still works, because a restore rewrites the database first; opened directly, it drops"
+                + " new writes.", lastLine(out));
+
+        var restored = Files.createDirectories(tmp.resolve("restored"));
+        out.reset();
+        assertEquals(0, H2Maintenance.run(new String[]{"restore", restored.toString(),
+                tmp.resolve("torn-backup" + H2Maintenance.CHECK_FAILED_SUFFIX).toString()}, print));
+        assertTrue(lastLine(out).matches("restored jclaw\\.mv\\.db \\([0-9.]+ [KM]?B, rewritten from the backup's [0-9.]+ [KM]?B;"
+                + " 1 table checked row for row, and a test write kept across a reopen\\)"), lastLine(out));
+    }
+
+    private static String lastLine(ByteArrayOutputStream out) {
+        var lines = out.toString(StandardCharsets.UTF_8).strip().split("\n");
+        return lines[lines.length - 1];
+    }
+
     // ---- the memory graph beside the database ----
 
     private static List<String> zipNames(Path zip) throws Exception {
@@ -667,7 +829,7 @@ class H2MaintenanceTest extends UnitTest {
     }
 
     @Test
-    void restoringABackupTakenWhileTheFileHeldPlaintextMarksTheCompactionDueAgain() throws Exception {
+    void restoringABackupTakenWhileTheFileHeldPlaintextBringsBackNoOldCopies() throws Exception {
         var dir = Files.createDirectories(tmp.resolve("d"));
         buildDatabase(dir, 3);
         var zip = tmp.resolve("held-plaintext.zip");
@@ -687,9 +849,12 @@ class H2MaintenanceTest extends UnitTest {
         var before = H2Maintenance.sha256(dataFile(dir));
         assertEquals(1, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(), "yesterday"}, print));
         assertEquals(before, H2Maintenance.sha256(dataFile(dir)), "a stamp that is not one refuses before the swap");
-        assertEquals(0, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(),
-                stamp(now.plus(2, ChronoUnit.HOURS))}, print));
-        assertEquals(CredentialCopies.OldCopies.PLAINTEXT, CredentialCopies.read(dir).due());
+        var restoredAt = now.plus(2, ChronoUnit.HOURS);
+        assertEquals(0, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(), stamp(restoredAt)}, print));
+        var copies = CredentialCopies.read(dir);
+        assertNull(copies.due(), "the restore rewrote the file with its live rows alone, so the backup's free pages stayed behind");
+        assertEquals(restoredAt.truncatedTo(ChronoUnit.SECONDS).toString(), copies.compactedAt());
+        assertEquals(3, count(dir, "note"));
     }
 
     // ---- the standalone guarantee jclaw.sh relies on ----

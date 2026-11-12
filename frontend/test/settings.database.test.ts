@@ -42,6 +42,16 @@ const Harness = defineComponent({
 
 let status: Record<string, unknown>
 let posts: Array<{ url: string, body: unknown }> = []
+/** What POST /backups answers: the new backup and its write check (JF-311). */
+let backupAnswer: Record<string, unknown>
+const passedBackup = {
+  id: 'jclaw-20260909T140000Z.zip',
+  bytes: 62_000_000,
+  createdAt: '2026-09-09T14:00:00Z',
+  unencrypted: false,
+  check: 'PASSED',
+  checkDetail: 'a copy of it kept a test write across a reopen',
+}
 
 function healthy(over: Record<string, unknown> = {}) {
   return {
@@ -107,7 +117,7 @@ for (const url of ['/api/system/database/backups', '/api/system/database/restore
     handler: async (event) => {
       const body: unknown = await readBody(event).catch(() => null)
       posts.push({ url, body })
-      if (url.endsWith('/backups')) return { id: 'jclaw-20260909T140000Z.zip', bytes: 62_000_000, createdAt: '2026-09-09T14:00:00Z' }
+      if (url.endsWith('/backups')) return backupAnswer
       if (url.endsWith('/clean')) return { ok: true, reason: '', deleted: [{}, {}], reclaimedBytes: 326_000_000 }
       return { status: 'ok', rebuildExpected: false }
     },
@@ -143,6 +153,7 @@ beforeEach(() => {
   clearNuxtData()
   posts = []
   status = healthy()
+  backupAnswer = passedBackup
   document.body.innerHTML = ''
 })
 
@@ -184,12 +195,54 @@ describe('Settings → Database', () => {
     expect(c.find('[data-testid="db-repair"]').classes().join(' ')).toContain('bg-amber-700')
   })
 
-  it('backs up on demand and reports the new file', async () => {
+  it('backs up on demand and reports the new file and its passed check', async () => {
     const c = await mount()
     await c.find('[data-testid="db-backup-now"]').trigger('click')
     await settle()
     expect(posts.map(p => p.url)).toEqual(['/api/system/database/backups'])
-    expect(c.text()).toContain('Backed up to jclaw-20260909T140000Z.zip (59.1 MB)')
+    expect(c.find('[role="status"]').text())
+      .toBe('Backed up to jclaw-20260909T140000Z.zip (59.1 MB). Checked: a copy of it kept a test write across a reopen.')
+  })
+
+  it('reports a backup that failed its check as a failure, and says a restore here still works', async () => {
+    backupAnswer = {
+      ...passedBackup,
+      id: 'jclaw-20260909T140000Z.check-failed.zip',
+      check: 'FAILED',
+      checkDetail: 'a copy of it reopened at an older version, without the write made to it, on the first copy and again on a second',
+    }
+    const c = await mount()
+    await c.find('[data-testid="db-backup-now"]').trigger('click')
+    await settle()
+    const line = c.find('[role="status"] span')
+    expect(line.classes()).toContain('text-red-700')
+    expect(line.text()).toBe('Backed up to jclaw-20260909T140000Z.check-failed.zip (59.1 MB), but it failed its check: a copy'
+      + ' of it reopened at an older version, without the write made to it, on the first copy and again on a second.'
+      + ' Restoring it here still works, because a restore rewrites the database first; opened directly with H2\'s tools,'
+      + ' it drops new writes.')
+  })
+
+  it('says when a backup was written but its check could not run', async () => {
+    backupAnswer = { ...passedBackup, check: 'NOT_RUN', checkDetail: 'the copy could not be unpacked: No space left on device' }
+    const c = await mount()
+    await c.find('[data-testid="db-backup-now"]').trigger('click')
+    await settle()
+    expect(c.find('[role="status"]').text())
+      .toBe('Backed up to jclaw-20260909T140000Z.zip (59.1 MB). Not checked: the copy could not be unpacked: No space left on device.')
+  })
+
+  it('marks a listed backup that failed its check, and only that one', async () => {
+    status = healthy({
+      backups: [
+        { id: 'jclaw-20260909T120000Z.check-failed.zip', bytes: 61_000_000, createdAt: '2026-09-09T12:00:00Z', check: 'FAILED' },
+        { id: 'jclaw-20260908T120000Z.zip', bytes: 60_000_000, createdAt: '2026-09-08T12:00:00Z', check: null },
+      ],
+    })
+    const c = await mount()
+    expect(c.find('[data-testid="db-check-failed-jclaw-20260909T120000Z.check-failed.zip"]').text()).toBe('Check failed')
+    expect(c.find('[data-testid="db-check-failed-jclaw-20260908T120000Z.zip"]').exists()).toBe(false)
+    expect(c.find('[data-testid="db-restore-jclaw-20260909T120000Z.check-failed.zip"]').attributes('disabled'))
+      .toBeUndefined()
   })
 
   it('confirms a restore by naming the backup, and a cancelled dialog issues no request', async () => {

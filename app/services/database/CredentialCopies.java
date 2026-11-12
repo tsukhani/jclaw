@@ -19,7 +19,8 @@ import java.util.zip.ZipFile;
  * Where the stored credentials' plaintext may still sit outside its ciphertext (JCLAW-1455), kept beside the data file as
  * {@value #FILE}. Encrypting a row leaves the plaintext it replaced in the file's free pages, and a backup copies those
  * pages too (both measured on H2 2.5.252), so the file holds plaintext from before the first boot pass until the first
- * compaction after it, and again from a restore that brings plaintext back. Each stretch is a {@link Window}; a backup
+ * compaction after it, and again from a pass that seals plaintext rows, such as those of a restored backup from before
+ * the encryption. A restore rewrites the file, so free pages never come back with one. Each stretch is a {@link Window}; a backup
  * taken inside one holds plaintext. Standalone on the JDK and Gson, like {@link H2Maintenance}, because {@code jclaw.sh}
  * compacts and restores with the app stopped.
  *
@@ -82,17 +83,7 @@ public record CredentialCopies(@Nullable String encryptedAt, List<Window> plaint
                 dueAfter(windows, rekeyed > 0), compactedAt);
     }
 
-    /** After a restore of a backup taken at {@code takenAt}: one taken inside a window brings its plaintext back. */
-    public CredentialCopies afterRestore(Instant takenAt, Instant at) {
-        if (encryptedAt == null || !holdsPlaintext(takenAt) || plaintext.stream().anyMatch(Window::open)) {
-            return this;
-        }
-        var windows = new ArrayList<>(plaintext);
-        windows.add(new Window(at.toString(), null));
-        return new CredentialCopies(encryptedAt, windows, OldCopies.PLAINTEXT, compactedAt);
-    }
-
-    /** After a compaction that rewrote the data file with its live data alone. */
+    /** After a compaction or a restore, both of which rewrite the data file with its live data alone. */
     public CredentialCopies afterCompaction(Instant at) {
         var windows = plaintext.stream().map(w -> w.open() ? new Window(w.from(), at.toString()) : w).toList();
         return new CredentialCopies(encryptedAt, windows, null, at.toString());

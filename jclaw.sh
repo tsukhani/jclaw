@@ -919,13 +919,21 @@ Usage: ${INVOKE} backup [--out <dir>] [--list]
 backup     Write an H2 online backup (a zip of data/jclaw.mv.db) to data/backups/.
            With the instance running it goes through the API and the running
            JVM applies the retention count (db.backup.retention, default 7);
-           stopped, the closed file is zipped directly. --out writes the zip
-           elsewhere; --list shows the backups with date and size.
+           stopped, the closed file is zipped directly. Each backup is then
+           checked: a copy of it is written to, closed and reopened, and the
+           write must still be there. An online backup that fails is taken
+           again once; one that fails again is kept as <name>.check-failed.zip
+           and the command exits 1. --out writes the zip elsewhere; --list
+           shows the backups with date and size.
 restore    Replace the database with a backup. The file is validated first —
            anything that is not an H2 backup is refused and nothing changes.
-           A running instance is stopped and started again; the current file
-           and graph are kept as data/jclaw.mv.db.pre-restore and
-           data/memory-graph.pre-restore until the next backup.
+           The backup's database is rewritten into a fresh file, every table's
+           row count is checked, and a copy must keep a test write across a
+           reopen, before it replaces data/jclaw.mv.db; so a backup that
+           failed its check restores whole too. A running instance is stopped
+           and started again; the current file and graph are kept as
+           data/jclaw.mv.db.pre-restore and data/memory-graph.pre-restore
+           until the next backup.
 repair     The recovery procedure, run for you: H2's Recover tool reads the
            damaged file into a script, the file and its trace are moved aside,
            a fresh database is rebuilt from the script (ENUM columns cast back
@@ -6979,9 +6987,11 @@ do_db_backup() {
             echo "Error: backup failed (HTTP $status): $body"
             exit 1
         fi
-        local id bytes dir
+        local id bytes dir check detail
         id=$(printf '%s' "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
         bytes=$(printf '%s' "$body" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')
+        check=$(printf '%s' "$body" | sed -n 's/.*"check":"\([A-Z_]*\)".*/\1/p')
+        detail=$(printf '%s' "$body" | sed -n 's/.*"checkDetail":"\([^"]*\)".*/\1/p')
         out=$(db_api GET /api/system/database) || exit 1
         dir=$(printf '%s' "${out%$'\n'*}" | sed -n 's/.*"backupsDir":"\([^"]*\)".*/\1/p')
         echo "==> $dir/$id ($(db_human "$bytes"))"
@@ -6989,6 +6999,16 @@ do_db_backup() {
             cp "$dir/$id" "$DB_BACKUP_OUT/$id"
             echo "==> Copied to $DB_BACKUP_OUT/$id"
         fi
+        case "$check" in
+            PASSED) echo "==> Checked: $detail" ;;
+            FAILED)
+                echo "Warning: the backup failed its check: $detail."
+                echo "         Restoring it with '${INVOKE} restore' still works, because a restore rewrites the"
+                echo "         database first; opened directly with H2's tools, it drops new writes."
+                exit 1
+                ;;
+            *) echo "Warning: the backup was written but not checked: ${detail:-the instance did not say why}." ;;
+        esac
     else
         echo "==> Backing up the closed database file..."
         db_engine backup "$SCRIPT_DIR/data" "$backups_dir/jclaw-$(date -u +%Y%m%dT%H%M%SZ).zip"

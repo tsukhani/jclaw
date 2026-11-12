@@ -58,20 +58,38 @@ public final class DatabaseService {
     public static @Nullable Path backupsDirForTest;
     /** Test seam: replaces the {@code SELECT 1} probe. */
     public static @Nullable ProbeForTest probeForTest;
+    /** Test seam: replaces H2's {@code BACKUP TO}, which the in-memory test database refuses; it writes the zip. */
+    public static @Nullable OnlineCopyForTest onlineCopyForTest;
 
     @FunctionalInterface
     public interface ProbeForTest {
         @Nullable String error();
     }
 
+    @FunctionalInterface
+    public interface OnlineCopyForTest {
+        void copy(Path zip) throws IOException;
+    }
+
     private static volatile @Nullable LocalDate lastScheduledRun;
     private static volatile @Nullable String lastScheduledError;
     private static volatile @Nullable Instant lastScheduledAt;
 
-    /** @param unencrypted taken while the data file held credential plaintext, so the backup holds it too */
-    public record BackupInfo(String id, long bytes, String createdAt, boolean unencrypted) {
+    /**
+     * @param unencrypted taken while the data file held credential plaintext, so the backup holds it too
+     * @param check       the write check (JF-311): FAILED for a backup whose name says so; for the backup just taken,
+     *                    what the check found; otherwise null, since a pass leaves no mark to read back
+     * @param checkDetail what the check saw, for the backup just taken
+     */
+    public record BackupInfo(String id, long bytes, String createdAt, boolean unencrypted,
+                             H2Maintenance.@Nullable Outcome check, @Nullable String checkDetail) {
         public BackupInfo(String id, long bytes, String createdAt) {
-            this(id, bytes, createdAt, false);
+            this(id, bytes, createdAt, false, null, null);
+        }
+
+        static BackupInfo listed(String id, long bytes, String createdAt, boolean unencrypted) {
+            return new BackupInfo(id, bytes, createdAt, unencrypted,
+                    H2Maintenance.checkFailed(id) ? H2Maintenance.Outcome.FAILED : null, null);
         }
     }
 
@@ -172,7 +190,7 @@ public final class DatabaseService {
             var dir = backupsDir();
             var out = new ArrayList<BackupInfo>();
             for (var b : H2Maintenance.listBackups(dir)) {
-                out.add(new BackupInfo(b.name(), b.bytes(), b.modified().toInstant().toString(),
+                out.add(BackupInfo.listed(b.name(), b.bytes(), b.modified().toInstant().toString(),
                         copies.holdsPlaintext(CredentialCopies.takenAt(dir.resolve(b.name())))));
             }
             return out;
@@ -205,7 +223,7 @@ public final class DatabaseService {
             var out = new ArrayList<BackupInfo>();
             for (var p : files.filter(f -> isUpgradeCopy(f.getFileName().toString()) && Files.isRegularFile(f)).toList()) {
                 var modified = Files.getLastModifiedTime(p).toInstant();
-                out.add(new BackupInfo(p.getFileName().toString(), Files.size(p), modified.toString(),
+                out.add(BackupInfo.listed(p.getFileName().toString(), Files.size(p), modified.toString(),
                         copies.holdsPlaintext(modified)));
             }
             out.sort((a, b) -> b.createdAt().compareTo(a.createdAt()));
@@ -217,23 +235,63 @@ public final class DatabaseService {
     }
 
     /**
-     * Online backup through the request's own connection: H2's {@code BACKUP TO} needs no
-     * downtime. On success the pre-restore copy has served its purpose and goes, and the
-     * oldest backups beyond the retention count go with it.
+     * Online backup through the request's own connection: H2's {@code BACKUP TO} needs no downtime. Each copy then
+     * takes the write check ({@link H2Maintenance#checkKeepsWrites}, JF-311); one that fails is taken again once, and
+     * a second failure is kept, renamed to say so, because a restore through JClaw rewrites it whole. Unless the check
+     * failed, the pre-restore copy has served its purpose and goes; the oldest backups beyond the retention count go
+     * either way.
      *
      * @throws SQLException when H2 refuses — an in-memory database is not persistent, for one
      */
     public static BackupInfo backupNow() throws SQLException, IOException {
         var dir = Files.createDirectories(backupsDir());
+        var zip = takeOnline(dir);
+        var check = H2Maintenance.checkKeepsWrites(zip, dataDir());
+        var detail = check.detail();
+        if (check.outcome() == H2Maintenance.Outcome.FAILED) {
+            EventLogger.warn(CATEGORY, "Backup " + zip.getFileName() + " failed the write check (" + check.detail()
+                    + "); taking it again");
+            Files.delete(zip);
+            zip = takeOnline(dir);
+            check = H2Maintenance.checkKeepsWrites(zip, dataDir());
+            if (check.outcome() == H2Maintenance.Outcome.FAILED) {
+                zip = H2Maintenance.markCheckFailed(zip);
+                detail = check.detail() + ", on the first copy and again on a second";
+            } else {
+                detail = check.detail() + "; the first copy failed the check and was taken again";
+            }
+        }
+        if (check.outcome() != H2Maintenance.Outcome.FAILED) {
+            Files.deleteIfExists(dataDir().resolve(H2Maintenance.PRE_RESTORE_FILE));
+            H2Maintenance.deleteTree(dataDir().resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR));
+        }
+        prune(dir, retention());
+        var line = "Database backed up to " + zip.getFileName() + " (" + H2Maintenance.human(Files.size(zip)) + "); " + detail;
+        if (check.outcome() == H2Maintenance.Outcome.PASSED) {
+            EventLogger.info(CATEGORY, line);
+        } else {
+            EventLogger.warn(CATEGORY, line);
+        }
+        return new BackupInfo(zip.getFileName().toString(), Files.size(zip), Files.getLastModifiedTime(zip).toInstant().toString(),
+                CredentialCopies.read(dataDir()).holdsPlaintext(CredentialCopies.takenAt(zip)), check.outcome(), detail);
+    }
+
+    /** One online copy, database and graph, into {@code dir} under the current stamp. */
+    private static Path takeOnline(Path dir) throws SQLException, IOException {
         var zip = dir.resolve(BACKUP_PREFIX + STAMP.format(AppClock.now()) + ".zip");
         // Graph writers wait across both steps, so no withdrawal lands between the database and the graph.
         try {
             GraphStore.get().pauseWriters(() -> {
-                // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
-                try {
-                    JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
-                } catch (JDBCException e) {
-                    throw e.getSQLException();
+                var seam = onlineCopyForTest;
+                if (seam != null) {
+                    seam.copy(zip);
+                } else {
+                    // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
+                    try {
+                        JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
+                    } catch (JDBCException e) {
+                        throw e.getSQLException();
+                    }
                 }
                 H2Maintenance.appendGraph(zip, dataDir());
                 return null;
@@ -245,12 +303,7 @@ public final class DatabaseService {
             Files.deleteIfExists(zip);
             throw new IOException(e.getMessage(), e);
         }
-        Files.deleteIfExists(dataDir().resolve(H2Maintenance.PRE_RESTORE_FILE));
-        H2Maintenance.deleteTree(dataDir().resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR));
-        prune(dir, retention());
-        EventLogger.info(CATEGORY, "Database backed up to " + zip.getFileName() + " (" + H2Maintenance.human(Files.size(zip)) + ")");
-        return new BackupInfo(zip.getFileName().toString(), Files.size(zip), Files.getLastModifiedTime(zip).toInstant().toString(),
-                CredentialCopies.read(dataDir()).holdsPlaintext(CredentialCopies.takenAt(zip)));
+        return zip;
     }
 
     /** Keep the newest {@code keep} of this service's own backups; uploads and upgrade copies are not counted. */
@@ -305,6 +358,19 @@ public final class DatabaseService {
                 .orElse(null);
     }
 
+    /**
+     * What the panel shows after "Last scheduled backup failed:" for a backup that was written but did not pass its
+     * write check, or null when it passed.
+     */
+    public static @Nullable String scheduledCheckProblem(BackupInfo info) {
+        var check = info.check();
+        if (check == null || check == H2Maintenance.Outcome.PASSED) {
+            return null;
+        }
+        return (check == H2Maintenance.Outcome.FAILED ? "the write check, so " + info.id() + " is kept marked: "
+                : "the write check could not run on " + info.id() + ": ") + info.checkDetail();
+    }
+
     /** Forget the in-process schedule marker, as a restart would. */
     public static void resetScheduleMarkerForTest() {
         lastScheduledRun = null;
@@ -331,7 +397,7 @@ public final class DatabaseService {
         lastScheduledAt = now.toInstant();
         try {
             var info = backupNow();
-            lastScheduledError = null;
+            lastScheduledError = scheduledCheckProblem(info);
             EventLogger.info(CATEGORY, "Scheduled backup wrote " + info.id());
         } catch (SQLException | IOException | RuntimeException e) {
             lastScheduledError = e.getMessage();

@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -82,6 +83,15 @@ public final class H2Maintenance {
     static final String MODE = "MODE=MYSQL";
     /** Recover's marker for a page it could not read; counted, never parsed further. */
     static final String RECOVER_ERROR_MARKER = "// error:";
+    /** The directory under {@code data/} a write check unpacks its throwaway copy into. */
+    static final String WRITE_CHECK_DIR = DB_NAME + "-write-check";
+    /** The table a write check writes, in its throwaway copy only. */
+    static final String WRITE_CHECK_TABLE = "JCLAW_WRITE_CHECK";
+    /** The name ending of a backup that failed the write check, so every listing of it says so. */
+    public static final String CHECK_FAILED_SUFFIX = ".check-failed.zip";
+    /** A restore's two files beside the data file: the archive's extract, then its rewrite. */
+    static final String RESTORING_DB = DB_NAME + "-restoring";
+    static final String RESTORED_DB = DB_NAME + "-restored";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
@@ -103,8 +113,18 @@ public final class H2Maintenance {
 
     public record BackupCheck(boolean ok, String reason, long dbBytes) {}
 
-    /** @param preRestoreCopy the displaced file's new name, or null when there was none */
-    public record RestoreResult(long restoredBytes, @Nullable String preRestoreCopy) {}
+    public enum Outcome { PASSED, FAILED, NOT_RUN }
+
+    /** @param detail what the check saw, in words */
+    public record WriteCheck(Outcome outcome, String detail) {}
+
+    /**
+     * @param restoredBytes  the rewritten data file now in place
+     * @param backupBytes    the database file as the archive held it
+     * @param tables         tables whose row counts the rewrite matched
+     * @param preRestoreCopy the displaced file's new name, or null when there was none
+     */
+    public record RestoreResult(long restoredBytes, long backupBytes, int tables, @Nullable String preRestoreCopy) {}
 
     public record FileEntry(String name, long bytes, String sha256) {}
 
@@ -290,56 +310,167 @@ public final class H2Maintenance {
         }
     }
 
+    // ---- the write check (JF-311) ----
+
+    /**
+     * Unpack the archive's database to a throwaway copy under {@code dataDir}, write to it, close it, open it again and
+     * read the write back. A copy that {@code BACKUP TO} took while writes landed can open, take a session's writes, and
+     * at the next open fall back to an older version that drops them, and rows the first open showed with them, with no
+     * error anywhere; this is how that copy shows itself. The zip is never changed, and the copy goes whatever the outcome.
+     */
+    public static WriteCheck checkKeepsWrites(Path zip, Path dataDir) {
+        var work = dataDir.resolve(WRITE_CHECK_DIR);
+        try {
+            deleteTree(work);
+            Files.createDirectories(work);
+            try (var archive = new ZipFile(zip.toFile())) {
+                var entry = databaseEntry(archive);
+                if (entry == null) {
+                    return new WriteCheck(Outcome.FAILED, "the archive holds no " + DATA_FILE);
+                }
+                try (var in = archive.getInputStream(entry)) {
+                    Files.copy(in, work.resolve(DATA_FILE));
+                }
+            }
+            return keepsWrites(work);
+        } catch (IOException e) {
+            return new WriteCheck(Outcome.NOT_RUN, "the copy could not be unpacked: " + firstLine(e.getMessage()));
+        } finally {
+            try {
+                deleteTree(work);
+            } catch (IOException _) {
+                // The next check clears the directory before it starts.
+            }
+        }
+    }
+
+    /** {@link #checkKeepsWrites} on a database file already on disk, through a copy of it. */
+    static WriteCheck checkFileKeepsWrites(Path dbFile, Path dataDir) throws IOException {
+        var work = dataDir.resolve(WRITE_CHECK_DIR);
+        deleteTree(work);
+        Files.createDirectories(work);
+        try {
+            Files.copy(dbFile, work.resolve(DATA_FILE));
+            return keepsWrites(work);
+        } finally {
+            deleteTree(work);
+        }
+    }
+
+    /** The check itself, on {@code dir}'s own database, which it changes: callers pass a copy. */
+    private static WriteCheck keepsWrites(Path dir) {
+        var token = UUID.randomUUID().toString();
+        // A handful of pages are read; a small cache keeps this second database cheap inside the app's JVM.
+        var url = url(dir) + ";IFEXISTS=TRUE;CACHE_SIZE=4096";
+        try {
+            try (var c = DriverManager.getConnection(url, "", ""); var s = c.createStatement()) {
+                s.execute("CREATE TABLE IF NOT EXISTS " + WRITE_CHECK_TABLE + "(TOKEN VARCHAR(36))");
+                s.execute("INSERT INTO " + WRITE_CHECK_TABLE + " VALUES('" + token + "')");
+            }
+        } catch (SQLException e) {
+            return new WriteCheck(Outcome.FAILED, "a copy of it would not take a write: " + firstLine(e.getMessage()));
+        }
+        var lost = new WriteCheck(Outcome.FAILED, "a copy of it reopened at an older version, without the write made to it");
+        try (var c = DriverManager.getConnection(url, "", ""); var s = c.createStatement()) {
+            try (var rs = s.executeQuery("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC' "
+                    + "AND TABLE_NAME = '" + WRITE_CHECK_TABLE + "'")) {
+                if (!rs.next() || rs.getLong(1) == 0) {
+                    return lost;
+                }
+            }
+            try (var rs = s.executeQuery("SELECT COUNT(*) FROM " + WRITE_CHECK_TABLE + " WHERE TOKEN = '" + token + "'")) {
+                return rs.next() && rs.getLong(1) == 1
+                        ? new WriteCheck(Outcome.PASSED, "a copy of it kept a test write across a reopen")
+                        : lost;
+            }
+        } catch (SQLException e) {
+            return new WriteCheck(Outcome.FAILED, "a copy of it would not reopen after a write: " + firstLine(e.getMessage()));
+        }
+    }
+
+    /** Rename a backup that failed the write check to end in {@value #CHECK_FAILED_SUFFIX}; returns the new path. */
+    public static Path markCheckFailed(Path zip) throws IOException {
+        var name = zip.getFileName().toString();
+        if (name.endsWith(CHECK_FAILED_SUFFIX)) {
+            return zip;
+        }
+        var stem = name.endsWith(".zip") ? name.substring(0, name.length() - ".zip".length()) : name;
+        return Files.move(zip, zip.resolveSibling(stem + CHECK_FAILED_SUFFIX), StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    public static boolean checkFailed(String backupName) {
+        return backupName.endsWith(CHECK_FAILED_SUFFIX);
+    }
+
     // ---- restore ----
 
     /**
-     * Replace the database with the one inside {@code zip}. The current file becomes
-     * {@value #PRE_RESTORE_FILE}; the archive is extracted beside it and moved into place
-     * atomically, so an interrupted extract leaves the old file where it was.
+     * Replace the database with the one inside {@code zip}. The archive's file is extracted beside the data file and
+     * rewritten into a fresh one ({@link #rewriteMatching}), which must hold every table's rows and keep a test write
+     * across a reopen before it moves into place; the current file becomes {@value #PRE_RESTORE_FILE}. Anything that
+     * fails before the move leaves the old file where it was.
+     *
+     * <p>The rewrite is what keeps later writes (JF-311): an extract opened as it is can take a session's writes and drop
+     * them at the next open. The extract is read through read-only opens alone. On such a file a read-write session,
+     * even one that ends in {@code SHUTDOWN COMPACT}, leaves the older version behind and loses rows the first open
+     * showed (a spliced copy went from 1,900 rows to 1,000).
      *
      * @throws IllegalArgumentException when {@code zip} fails {@link #validateBackup}
      */
-    public static RestoreResult restore(Path zip, Path dataDir) throws IOException {
+    public static RestoreResult restore(Path zip, Path dataDir) throws IOException, SQLException {
         return restore(zip, dataDir, null);
     }
 
     /**
      * {@link #restore(Path, Path)}, and with {@code stamp}, the time of the restore, record in {@link CredentialCopies}
-     * that a backup taken while the data file held credential plaintext has brought it back.
+     * that the data file is a fresh rewrite: whatever old copies the backup's free pages held did not come with it.
      */
-    public static RestoreResult restore(Path zip, Path dataDir, @Nullable String stamp) throws IOException {
+    public static RestoreResult restore(Path zip, Path dataDir, @Nullable String stamp) throws IOException, SQLException {
         var check = validateBackup(zip);
         if (!check.ok()) {
             throw new IllegalArgumentException(check.reason());
         }
         var restoredAt = stamp == null ? null : stampInstant(stamp);
-        var takenAt = CredentialCopies.takenAt(zip);
         var target = dataDir.resolve(DATA_FILE);
-        var staging = dataDir.resolve(DATA_FILE + ".restoring");
+        var staging = dataDir.resolve(RESTORING_DB + ".mv.db");
+        var rewritten = dataDir.resolve(RESTORED_DB + ".mv.db");
+        deleteDatabaseFiles(dataDir, RESTORING_DB);
+        deleteDatabaseFiles(dataDir, RESTORED_DB);
         var graphStaging = extractGraph(zip, dataDir);
-        try (var in = new ZipInputStream(Files.newInputStream(zip))) {
-            ZipEntry entry;
-            var found = false;
-            while ((entry = in.getNextEntry()) != null) {
-                if (entry.getName().equals(DATA_FILE) || entry.getName().endsWith("/" + DATA_FILE)) {
-                    Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);
-                    found = true;
-                    break;
+        int tables;
+        try {
+            try (var archive = new ZipFile(zip.toFile())) {
+                var entry = databaseEntry(archive);
+                if (entry == null) {
+                    throw new IllegalArgumentException("no " + DATA_FILE + " inside the archive");
+                }
+                try (var in = archive.getInputStream(entry)) {
+                    Files.copy(in, staging);
                 }
             }
-            if (!found) {
-                throw new IllegalArgumentException("no " + DATA_FILE + " inside the archive");
+            var counts = readOnlyCounts(staging);
+            rewriteMatching(staging, rewritten, counts);
+            tables = counts.size();
+            var writes = checkFileKeepsWrites(rewritten, dataDir);
+            if (writes.outcome() != Outcome.PASSED) {
+                throw new IOException("the rewritten database did not pass the write check (" + writes.detail()
+                        + "); " + DATA_FILE + " is unchanged");
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | SQLException | RuntimeException e) {
             deleteTree(graphStaging);
+            deleteDatabaseFiles(dataDir, RESTORING_DB);
+            deleteDatabaseFiles(dataDir, RESTORED_DB);
             throw e;
         }
+        var backupBytes = Files.size(staging);
         String displaced = null;
         if (Files.exists(target)) {
             Files.move(target, dataDir.resolve(PRE_RESTORE_FILE), StandardCopyOption.REPLACE_EXISTING);
             displaced = PRE_RESTORE_FILE;
         }
-        Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        Files.move(rewritten, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        deleteDatabaseFiles(dataDir, RESTORING_DB);
+        deleteDatabaseFiles(dataDir, RESTORED_DB);
         Files.deleteIfExists(dataDir.resolve(LOCK_FILE));
         var graph = dataDir.resolve(GRAPH_DIR);
         if (Files.exists(graph)) {
@@ -350,10 +481,10 @@ public final class H2Maintenance {
         Files.move(graphStaging, graph, StandardCopyOption.ATOMIC_MOVE);
         if (restoredAt != null) {
             var copies = CredentialCopies.read(dataDir);
-            var next = copies.afterRestore(takenAt, restoredAt);
+            var next = copies.afterCompaction(restoredAt);
             if (!next.equals(copies)) next.write(dataDir);
         }
-        return new RestoreResult(Files.size(target), displaced);
+        return new RestoreResult(Files.size(target), backupBytes, tables, displaced);
     }
 
     /**
@@ -736,7 +867,7 @@ public final class H2Maintenance {
         if (!Files.isRegularFile(dataFile)) {
             throw new IOException("no " + DATA_FILE + " in " + dataDir);
         }
-        deleteCompactingCopy(dataDir);
+        deleteDatabaseFiles(dataDir, COMPACTING_DB);
         Map<String, Long> before;
         // A plain open, not read-only: H2 refuses it while another process holds the file, and its SHUTDOWN
         // finishes whatever an unclean stop left, so the copy starts from a closed file.
@@ -749,29 +880,44 @@ public final class H2Maintenance {
         var beforeBytes = Files.size(dataFile);
         var copy = dataDir.resolve(COMPACTING_DB + ".mv.db");
         try {
-            MVStore.compact(dataFile.toString(), copy.toString(), false, null);
-            Map<String, Long> after;
-            try (var connection = DriverManager.getConnection(
-                    "jdbc:h2:file:" + dataDir.toAbsolutePath().resolve(COMPACTING_DB) + ";" + MODE
-                            + ";ACCESS_MODE_DATA=r;IFEXISTS=TRUE", "", "")) {
-                after = tableCounts(connection);
-            }
-            if (!after.equals(before)) {
-                throw new IOException("the compacted copy does not match the data file (" + before + " before, "
-                        + after + " after); " + DATA_FILE + " is unchanged");
-            }
+            rewriteMatching(dataFile, copy, before);
             Files.move(copy, dataFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } finally {
-            deleteCompactingCopy(dataDir);
+            deleteDatabaseFiles(dataDir, COMPACTING_DB);
         }
         H2TraceMask.maskTraces(dataDir);
         CredentialCopies.read(dataDir).afterCompaction(at).write(dataDir);
         return new CompactResult(beforeBytes, Files.size(dataFile), before.size());
     }
 
-    private static void deleteCompactingCopy(Path dataDir) throws IOException {
+    /**
+     * Rewrite the closed {@code source} into a fresh {@code target} holding its live data alone, and check that every
+     * table has {@code expected} rows there. {@code source} is only ever read; on a mismatch {@code target} is left for
+     * the caller to delete.
+     */
+    private static void rewriteMatching(Path source, Path target, Map<String, Long> expected) throws IOException, SQLException {
+        MVStore.compact(source.toString(), target.toString(), false, null);
+        var after = readOnlyCounts(target);
+        if (!after.equals(expected)) {
+            throw new IOException("the rewritten copy does not match " + source.getFileName() + " (" + expected + " before, "
+                    + after + " after); " + DATA_FILE + " is unchanged");
+        }
+    }
+
+    /** Every PUBLIC table's row count in {@code dbFile} (a {@code <name>.mv.db}), through a read-only open. */
+    private static Map<String, Long> readOnlyCounts(Path dbFile) throws SQLException {
+        var name = dbFile.getFileName().toString();
+        var base = dbFile.toAbsolutePath().resolveSibling(name.substring(0, name.length() - ".mv.db".length()));
+        try (var connection = DriverManager.getConnection(
+                "jdbc:h2:file:" + base + ";" + MODE + ";ACCESS_MODE_DATA=r;IFEXISTS=TRUE", "", "")) {
+            return tableCounts(connection);
+        }
+    }
+
+    /** Remove a scratch database's files from {@code dir}: its data file, lock and trace. */
+    private static void deleteDatabaseFiles(Path dir, String name) throws IOException {
         for (var suffix : List.of(".mv.db", ".lock.db", ".trace.db")) {
-            Files.deleteIfExists(dataDir.resolve(COMPACTING_DB + suffix));
+            Files.deleteIfExists(dir.resolve(name + suffix));
         }
     }
 
@@ -979,9 +1125,9 @@ public final class H2Maintenance {
 
     static final String USAGE = """
             usage: H2Maintenance <command> ...
-              backup   <dataDir> <zip>            zip a closed database
+              backup   <dataDir> <zip>            zip a closed database, then check that a copy keeps a write
               validate <zip>                      check a zip is an H2 backup
-              restore  <dataDir> <zip> [stamp]    replace the database with the zip's
+              restore  <dataDir> <zip> [stamp]    replace the database with a checked rewrite of the zip's
               repair   <dataDir> <stamp>          recover, rebuild, verify, compact; write repair-<stamp>.json
               compact  <dataDir> <stamp>          rewrite the file with its live data alone, removing old credential copies
               clean    <dataDir> [--dry-run]      delete what the latest repair manifest lists
@@ -1014,10 +1160,21 @@ public final class H2Maintenance {
         switch (args[0]) {
             case "backup" -> {
                 require(args, 3);
+                var dataDir = Path.of(args[1]);
                 var zip = Path.of(args[2]);
-                backupOffline(Path.of(args[1]), zip);
+                backupOffline(dataDir, zip);
+                var check = checkKeepsWrites(zip, dataDir);
+                if (check.outcome() == Outcome.FAILED) {
+                    zip = markCheckFailed(zip);
+                }
                 out.println(zip.toAbsolutePath() + " (" + human(Files.size(zip)) + ")");
-                return 0;
+                out.println(switch (check.outcome()) {
+                    case PASSED -> "checked: " + check.detail();
+                    case FAILED -> "check failed: " + check.detail() + ". Restoring it with 'restore' still works, because"
+                            + " a restore rewrites the database first; opened directly, it drops new writes.";
+                    case NOT_RUN -> "not checked: " + check.detail();
+                });
+                return check.outcome() == Outcome.FAILED ? 1 : 0;
             }
             case "validate" -> {
                 require(args, 2);
@@ -1028,7 +1185,9 @@ public final class H2Maintenance {
             case "restore" -> {
                 require(args, 3);
                 var result = restore(Path.of(args[2]), Path.of(args[1]), args.length > 3 ? args[3] : null);
-                out.println("restored " + DATA_FILE + " (" + human(result.restoredBytes()) + ")"
+                out.println("restored " + DATA_FILE + " (" + human(result.restoredBytes()) + ", rewritten from the backup's "
+                        + human(result.backupBytes()) + "; " + result.tables() + (result.tables() == 1 ? " table" : " tables")
+                        + " checked row for row, and a test write kept across a reopen)"
                         + (result.preRestoreCopy() == null ? "" : "; previous file kept as " + result.preRestoreCopy()));
                 return 0;
             }

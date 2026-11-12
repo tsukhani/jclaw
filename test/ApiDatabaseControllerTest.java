@@ -1,3 +1,4 @@
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,16 +17,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
  * The database endpoints (JCLAW-1165). Every handoff test installs {@code spawnerForTest}
  * first — without it a POST would stop the tree the suite is running from. The test database
- * is in-memory, so the online backup is exercised here only for the refusal H2 answers with;
- * the backup itself is covered against a file database in {@code H2MaintenanceTest}.
+ * is in-memory, so H2's online copy is exercised here only for the refusal it answers with;
+ * the copy itself is covered against a file database in {@code H2MaintenanceTest}, and the
+ * route's handling of what the copy's write check found through {@code onlineCopyForTest}.
  */
 class ApiDatabaseControllerTest extends FunctionalTest {
 
@@ -146,6 +151,50 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         var response = POST("/api/system/database/backups", "application/json", "{}");
         assertEquals(409, response.status.intValue());
         assertTrue(getContent(response).contains("H2 refused the backup"), getContent(response));
+    }
+
+    /** POST a backup whose online copies are {@code copies}, in order, and return the response's JSON. */
+    private JsonObject backUpWith(Path... copies) {
+        var queue = new ArrayDeque<>(List.of(copies));
+        DatabaseService.onlineCopyForTest = zip -> Files.copy(queue.remove(), zip);
+        try {
+            var response = POST("/api/system/database/backups", "application/json", "{}");
+            assertEquals(201, response.status.intValue(), getContent(response));
+            return JsonParser.parseString(getContent(response)).getAsJsonObject();
+        } finally {
+            DatabaseService.onlineCopyForTest = null;
+        }
+    }
+
+    private Map<String, String> listedChecks() {
+        var checks = new HashMap<String, String>();
+        JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject().getAsJsonArray("backups")
+                .forEach(b -> checks.put(b.getAsJsonObject().get("id").getAsString(),
+                        b.getAsJsonObject().get("check").isJsonNull() ? "none" : b.getAsJsonObject().get("check").getAsString()));
+        return checks;
+    }
+
+    @Test
+    void aBackupThatPassesItsWriteCheckSaysSoAndIsListedUnmarked() throws Exception {
+        login();
+        var json = backUpWith(BackupFixtures.aGoodBackup(Files.createDirectories(tmp.resolve("fx"))));
+
+        assertEquals("PASSED", json.get("check").getAsString());
+        assertEquals("a copy of it kept a test write across a reopen", json.get("checkDetail").getAsString());
+        assertEquals(Map.of(json.get("id").getAsString(), "none"), listedChecks(), "a pass leaves no mark");
+    }
+
+    @Test
+    void aBackupThatFailsItsWriteCheckTwiceIsStillWrittenAndListedAsFailed() throws Exception {
+        login();
+        var torn = BackupFixtures.aCopyTakenWhileWritesLanded(Files.createDirectories(tmp.resolve("fx")));
+        var json = backUpWith(torn, torn);
+
+        assertEquals("FAILED", json.get("check").getAsString());
+        assertEquals("a copy of it reopened at an older version, without the write made to it, on the first copy and"
+                + " again on a second", json.get("checkDetail").getAsString());
+        assertTrue(json.get("id").getAsString().endsWith(H2Maintenance.CHECK_FAILED_SUFFIX), json.get("id").getAsString());
+        assertEquals(Map.of(json.get("id").getAsString(), "FAILED"), listedChecks(), "the failure is read back from the name");
     }
 
     @Test

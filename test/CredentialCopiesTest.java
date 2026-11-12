@@ -62,21 +62,13 @@ class CredentialCopiesTest extends UnitTest {
     }
 
     @Test
-    void plaintextBroughtBackOpensANewWindowWhetherAPassOrARestoreFindsIt() {
+    void plaintextAPassSealsAgainOpensANewWindow() {
         var clean = CredentialCopies.NONE.afterPass(1, 0, MIGRATED).afterCompaction(COMPACTED);
 
         var resealed = clean.afterPass(2, 0, AFTER);
         assertEquals(OldCopies.PLAINTEXT, resealed.due(), "a pass that seals plaintext again: a restore of an old backup");
         assertFalse(resealed.holdsPlaintext(AFTER.minusSeconds(1)), "a backup between the two windows stays clean");
         assertTrue(resealed.holdsPlaintext(AFTER.plusSeconds(1)));
-
-        var restored = clean.afterRestore(BETWEEN, AFTER);
-        assertEquals(OldCopies.PLAINTEXT, restored.due(),
-                "a backup taken before the compaction brings back plaintext the pass cannot see, in its free pages");
-        assertTrue(restored.holdsPlaintext(AFTER.plusSeconds(1)));
-        assertEquals(clean, clean.afterRestore(AFTER, AFTER.plusSeconds(60)), "restoring a clean backup changes nothing");
-        assertEquals(CredentialCopies.NONE, CredentialCopies.NONE.afterRestore(BEFORE, AFTER),
-                "before the first pass there is no record to keep");
     }
 
     @Test

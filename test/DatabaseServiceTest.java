@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -32,6 +33,74 @@ class DatabaseServiceTest extends UnitTest {
     void clearSeams() {
         DatabaseService.backupsDirForTest = null;
         DatabaseService.dataDirForTest = null;
+        DatabaseService.onlineCopyForTest = null;
+    }
+
+    // ---- the write check after each online backup (JF-311) ----
+
+    /** Point the service at temp directories, with a displaced file a restore would have left, and the copies in order. */
+    private Path backupsWith(Path... copies) throws Exception {
+        var data = Files.createDirectories(tmp.resolve("data"));
+        Files.writeString(data.resolve(H2Maintenance.PRE_RESTORE_FILE), "the file a restore displaced");
+        DatabaseService.dataDirForTest = data;
+        DatabaseService.backupsDirForTest = Files.createDirectories(tmp.resolve("backups"));
+        var queue = new ArrayDeque<>(List.of(copies));
+        DatabaseService.onlineCopyForTest = zip -> Files.copy(queue.remove(), zip);
+        return DatabaseService.backupsDirForTest;
+    }
+
+    private static List<String> names(Path dir) throws Exception {
+        try (var files = Files.list(dir)) {
+            return files.map(p -> p.getFileName().toString()).sorted().toList();
+        }
+    }
+
+    @Test
+    void aBackupThatPassesItsCheckIsKeptAsItIsAndThePreRestoreCopyGoes() throws Exception {
+        var backups = backupsWith(BackupFixtures.aGoodBackup(Files.createDirectories(tmp.resolve("fx"))));
+
+        var info = DatabaseService.backupNow();
+
+        assertEquals(H2Maintenance.Outcome.PASSED, info.check());
+        assertEquals("a copy of it kept a test write across a reopen", info.checkDetail());
+        assertTrue(info.id().matches("jclaw-\\d{8}T\\d{6}Z\\.zip"), info.id());
+        assertEquals(List.of(info.id()), names(backups));
+        assertEquals(List.of(), names(DatabaseService.dataDir()), "the pre-restore copy has served its purpose");
+        assertNull(DatabaseService.scheduledCheckProblem(info));
+    }
+
+    @Test
+    void aBackupThatFailsItsCheckIsTakenAgainOnceAndTheSecondCopyKept() throws Exception {
+        var fx = Files.createDirectories(tmp.resolve("fx"));
+        var backups = backupsWith(BackupFixtures.aCopyTakenWhileWritesLanded(fx), BackupFixtures.aGoodBackup(fx));
+
+        var info = DatabaseService.backupNow();
+
+        assertEquals(H2Maintenance.Outcome.PASSED, info.check());
+        assertEquals("a copy of it kept a test write across a reopen; the first copy failed the check and was taken again",
+                info.checkDetail());
+        assertEquals(List.of(info.id()), names(backups), "the failed copy is gone, and only the second is listed");
+        assertNull(DatabaseService.listBackups().getFirst().check(), "a pass leaves no mark");
+    }
+
+    @Test
+    void aBackupThatFailsTwiceIsKeptMarkedAndThePreRestoreCopyStays() throws Exception {
+        var torn = BackupFixtures.aCopyTakenWhileWritesLanded(Files.createDirectories(tmp.resolve("fx")));
+        var backups = backupsWith(torn, torn);
+
+        var info = DatabaseService.backupNow();
+
+        assertEquals(H2Maintenance.Outcome.FAILED, info.check());
+        assertTrue(info.id().matches("jclaw-\\d{8}T\\d{6}Z\\.check-failed\\.zip"), info.id());
+        assertEquals(List.of(info.id()), names(backups));
+        var listed = DatabaseService.listBackups().getFirst();
+        assertEquals(info.id(), listed.id());
+        assertEquals(H2Maintenance.Outcome.FAILED, listed.check(), "the name carries the mark to every later listing");
+        assertEquals(List.of(H2Maintenance.PRE_RESTORE_FILE), names(DatabaseService.dataDir()),
+                "a backup that failed its check does not retire the way back from the last restore");
+        assertEquals("the write check, so " + info.id() + " is kept marked: a copy of it reopened at an older version,"
+                + " without the write made to it, on the first copy and again on a second",
+                DatabaseService.scheduledCheckProblem(info));
     }
 
     private static void touch(Path dir, String name, Instant modified) throws Exception {
