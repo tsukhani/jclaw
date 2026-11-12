@@ -133,15 +133,15 @@ describe('User Guide page', () => {
     expect(document.activeElement).toBe(tocItem)
   })
 
-  it('shows Clawdia at every width, as a picture rather than a control', async () => {
+  // jsdom applies no media or container queries, so where she stands at each width can only be checked in a browser.
+  it('renders one Clawdia, as a picture rather than a control', async () => {
     const component = await mountSuspended(Guide)
     await flushPromises()
 
-    const clawdia = component.find('img[src="/clawdia-reading.webp"]')
-    expect(clawdia.attributes('alt')).toBe('')
-    expect(clawdia.element.closest('button')).toBeNull()
-    // jsdom applies no media queries, so pin the absence of the class that hid her below 1280px.
-    expect(clawdia.element.closest('.hidden')).toBeNull()
+    const clawdias = component.findAll('img[src="/clawdia-reading.webp"]')
+    expect(clawdias).toHaveLength(1)
+    expect(clawdias[0]!.attributes('alt')).toBe('')
+    expect(clawdias[0]!.element.closest('button')).toBeNull()
   })
 
   it('highlights the owning section when the URL names a heading inside it', async () => {

@@ -196,11 +196,13 @@ const tocItems = computed(() => sections.map(s => ({
   <div class="@container">
     <!-- The root is full width, unlike the header row and the body, so Back to top can sit at <main>'s right edge,
          clear of the reading column; as the @container it labels the button only where that edge leaves it room. -->
-    <!-- max-w-5xl (64rem) is the TOC rail, its gap and the reading column (w-56 + gap-8 + max-w-3xl): the header row
-         ends where the column does, so Clawdia stands over the first card's right corner at every width. Her negative
-         bottom margin cancels the row's, so she stands on that card's top edge: keep the two pairs equal. -->
-    <div class="max-w-5xl flex items-end justify-between gap-4 mb-4 md:mb-3">
-      <div>
+    <!-- Clawdia never sets the title's height, so the title tops the page as on every other page. On a phone she
+         stands beside the title and the Contents button, which stack taller than her, her -mb-4 cancelling the row's
+         gap-y-4 so she stands on the first card. From @6xl (72rem) she pins in the gutter beside the body, which is
+         64rem (w-56 + gap-8 + max-w-3xl): 64rem + gap-x-8 + w-20 fits in 72rem, so she never narrows the reading
+         column. Between the two neither fits, and she hides. -->
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-4 md:gap-y-6 @6xl:grid-cols-[minmax(0,64rem)_auto] @6xl:gap-x-8">
+      <div class="col-start-1 row-start-1">
         <h1
           ref="pageTitle"
           tabindex="-1"
@@ -232,82 +234,83 @@ const tocItems = computed(() => sections.map(s => ({
         alt=""
         width="134"
         height="150"
-        class="shrink-0 w-18 md:w-20 h-auto mr-4 md:mr-6 -mb-4 md:-mb-3"
+        class="hidden max-md:block @6xl:block col-start-2 row-start-1 self-end w-18 h-auto mr-4 -mb-4
+               @6xl:row-start-2 @6xl:self-start @6xl:sticky @6xl:top-4 @6xl:w-20 @6xl:mr-0 @6xl:mb-0"
       >
-    </div>
 
-    <div class="max-w-5xl flex flex-col md:flex-row gap-8">
-      <!-- TOC rail. Sticky on desktop; an overlay panel on mobile that
-           closes on link click via jumpTo above. -->
-      <aside
-        id="guide-toc-mobile"
-        :class="[
-          'md:w-56 md:shrink-0 md:sticky md:top-4 md:self-start',
-          mobileNavOpen ? 'block' : 'hidden md:block',
-        ]"
-        aria-label="User guide table of contents"
-      >
-        <nav class="border border-border rounded-xl bg-surface-elevated overflow-hidden">
-          <div class="px-3 py-2 border-b border-border text-[11px] font-medium uppercase tracking-wide text-fg-muted">
-            Sections
-          </div>
-          <ul class="py-1">
-            <li
-              v-for="item in tocItems"
-              :key="item.id"
-            >
-              <button
-                type="button"
-                :class="[
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
-                  activeSectionId === item.id
-                    ? 'bg-emerald-50/60 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-medium'
-                    : 'text-fg-strong hover:bg-muted/40',
-                ]"
-                :aria-current="activeSectionId === item.id ? 'true' : undefined"
-                :data-testid="`guide-toc-item-${item.id}`"
-                @click="jumpTo(item.id)"
-              >
-                <component
-                  :is="item.icon"
-                  class="w-3.5 h-3.5 shrink-0"
-                  aria-hidden="true"
-                />
-                <span class="truncate">{{ item.title }}</span>
-              </button>
-            </li>
-          </ul>
-        </nav>
-      </aside>
-
-      <div class="flex-1 min-w-0 max-w-3xl space-y-8">
-        <section
-          v-for="s in sections"
-          :id="s.id"
-          :key="s.id"
-          :data-section-id="s.id"
-          class="border border-border rounded-xl bg-surface-elevated p-6"
+      <div class="col-start-1 row-start-2 col-span-2 @6xl:col-span-1 max-w-5xl flex flex-col md:flex-row gap-8">
+        <!-- TOC rail. Sticky on desktop; an overlay panel on mobile that
+             closes on link click via jumpTo above. -->
+        <aside
+          id="guide-toc-mobile"
+          :class="[
+            'md:w-56 md:shrink-0 md:sticky md:top-4 md:self-start',
+            mobileNavOpen ? 'block' : 'hidden md:block',
+          ]"
+          aria-label="User guide table of contents"
         >
-          <!-- Section header: icon + title. Mirrors the icon shown in the
-               TOC so operators can scan the page and see the same visual
-               anchor that brought them here. The markdown's leading h1 is
-               suppressed (suppressFirstH1) so the title isn't duplicated. -->
-          <header class="flex items-center gap-3 mb-6">
-            <component
-              :is="s.icon"
-              class="w-7 h-7 shrink-0 text-fg-strong"
-              aria-hidden="true"
+          <nav class="border border-border rounded-xl bg-surface-elevated overflow-hidden">
+            <div class="px-3 py-2 border-b border-border text-[11px] font-medium uppercase tracking-wide text-fg-muted">
+              Sections
+            </div>
+            <ul class="py-1">
+              <li
+                v-for="item in tocItems"
+                :key="item.id"
+              >
+                <button
+                  type="button"
+                  :class="[
+                    'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
+                    activeSectionId === item.id
+                      ? 'bg-emerald-50/60 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-medium'
+                      : 'text-fg-strong hover:bg-muted/40',
+                  ]"
+                  :aria-current="activeSectionId === item.id ? 'true' : undefined"
+                  :data-testid="`guide-toc-item-${item.id}`"
+                  @click="jumpTo(item.id)"
+                >
+                  <component
+                    :is="item.icon"
+                    class="w-3.5 h-3.5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span class="truncate">{{ item.title }}</span>
+                </button>
+              </li>
+            </ul>
+          </nav>
+        </aside>
+
+        <div class="flex-1 min-w-0 max-w-3xl space-y-8">
+          <section
+            v-for="s in sections"
+            :id="s.id"
+            :key="s.id"
+            :data-section-id="s.id"
+            class="border border-border rounded-xl bg-surface-elevated p-6"
+          >
+            <!-- Section header: icon + title. Mirrors the icon shown in the
+                 TOC so operators can scan the page and see the same visual
+                 anchor that brought them here. The markdown's leading h1 is
+                 suppressed (suppressFirstH1) so the title isn't duplicated. -->
+            <header class="flex items-center gap-3 mb-6">
+              <component
+                :is="s.icon"
+                class="w-7 h-7 shrink-0 text-fg-strong"
+                aria-hidden="true"
+              />
+              <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
+                {{ s.title }}
+              </h1>
+            </header>
+            <GuideRenderer
+              :section-id="s.id"
+              :content="s.content"
+              suppress-first-h1
             />
-            <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
-              {{ s.title }}
-            </h1>
-          </header>
-          <GuideRenderer
-            :section-id="s.id"
-            :content="s.content"
-            suppress-first-h1
-          />
-        </section>
+          </section>
+        </div>
       </div>
     </div>
 
