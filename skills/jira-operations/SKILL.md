@@ -3,7 +3,7 @@ name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.7"
+  version: "1.0.8"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec
@@ -15,11 +15,10 @@ Perform JIRA operations with intelligent MCP/REST API fallback. Uses the `jira-c
 
 ## Configuration
 
-Credentials are read from `~/.claude.json`:
-- `JIRA_URL` — base URL (e.g., `[JIRA_URL]`)
-- `JIRA_PERSONAL_TOKEN` — PAT for Bearer auth
+- `JIRA_PERSONAL_TOKEN`: the PAT for Bearer auth. It lives in JClaw's secret store. The operator adds it once, in this skill's Secrets panel on the Skills page, with the Jira host. Any command that names `$JIRA_PERSONAL_TOKEN` receives a stand-in, and JClaw puts the real token in only on requests to that host.
+- `JIRA_URL`: the base URL (e.g., `[JIRA_URL]`), read from `~/.claude.json` via `exec` + `jq`.
 
-The skill reads this file via `exec` + `jq` to construct `curl` fallback calls.
+Never read the token from a file. If `$JIRA_PERSONAL_TOKEN` is empty or a call answers 401, the secret is missing: ask the operator to add it.
 
 ## Core Principle: MCP First, REST Fallback
 
@@ -38,7 +37,7 @@ For every operation:
 
 ```bash
 curl -sS -X PUT \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"value": N}' \
   "$JIRA_URL/rest/agile/1.0/issue/{issueKey}/estimation?boardId={boardId}"
@@ -68,7 +67,7 @@ curl -sS -X PUT \
    a. Use direct REST API to set `customfield_10002`:
       ```bash
       curl -sS -X PUT \
-        -H "Authorization: Bearer $TOKEN" \
+        -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{"fields": {"customfield_10002": "EPIC-123"}}' \
         "$JIRA_URL/rest/api/2/issue/{issueKey}"
@@ -109,29 +108,18 @@ curl -sS -X PUT \
 When falling back to REST, construct curl calls as follows:
 
 ```bash
-# Read token from ~/.claude.json (do NOT print it)
-TOKEN=$(jq -r '.mcpServers["jira-confluence"].env.JIRA_PERSONAL_TOKEN' ~/.claude.json)
+# $JIRA_PERSONAL_TOKEN comes from JClaw's secret store: naming it is what gives this command its stand-in.
 JIRA_URL=$(jq -r '.mcpServers["jira-confluence"].env.JIRA_URL' ~/.claude.json)
 
-# Use -K config file to keep token off argv
-CONFIG_FILE=$(mktemp)
-cat > "$CONFIG_FILE" <<EOF
-header = "Authorization: Bearer $TOKEN"
-header = "Content-Type: application/json"
-EOF
-chmod 600 "$CONFIG_FILE"
-
-curl -sS -K "$CONFIG_FILE" -X PUT -d '{"value": 5}' \
+curl -sS -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" -H "Content-Type: application/json" \
+  -X PUT -d '{"value": 5}' \
   "$JIRA_URL/rest/agile/1.0/issue/ISSUE-KEY/estimation?boardId=BOARD_ID"
-
-rm -f "$CONFIG_FILE"
 ```
 
 **Security rules:**
-- Never put the token on the curl command line (use `-K` config file)
+- The command holds only a stand-in; never try to read the real token from a file or another program
 - Never echo request headers (avoid `-v`, use `-i` for response only if needed)
-- Delete the temp config file immediately after use
-- Do NOT return the token in any response
+- A background command gets no secrets, so run these calls in the foreground
 
 ## Error Handling
 

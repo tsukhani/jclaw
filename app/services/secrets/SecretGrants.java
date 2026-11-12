@@ -23,10 +23,10 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
- * Which secrets a shell command gets, and the live grants the proxy redeems (JF-324). A command gets a secret of one
- * of its agent's enabled skills when it names the secret ({@code $NAS_PASSWORD} or {@code ${NAS_PASSWORD}}) or runs
- * in, or names, that skill's folder ({@code skills/nas-filestation/}). Every other command runs as before, with no
- * proxy and no placeholder.
+ * Which secrets a shell command gets, and the live grants the proxy redeems (JF-324). A command gets a secret of a
+ * skill enabled on the agent that owns its workspace when it names the secret ({@code $NAS_PASSWORD} or
+ * {@code ${NAS_PASSWORD}}) or runs in, or names, that skill's folder ({@code skills/nas-filestation/}). Every other
+ * command runs as before, with no proxy and no placeholder.
  */
 public final class SecretGrants {
 
@@ -64,7 +64,6 @@ public final class SecretGrants {
 
     private static @Nullable Found choose(Agent agent, String command, Path workdir) {
         if (agent.id == null) return null;
-        var agentName = agent.name;
         @Nullable Found found = Tx.run(() -> {
             Agent current = Agent.findById(agent.id);
             if (current == null) return null;
@@ -73,12 +72,14 @@ public final class SecretGrants {
         });
         if (found == null || found.secrets().isEmpty()) return null;
 
+        // The owner's list, not the running agent's: a subagent runs in its owner's workspace, and its own list drops
+        // a skill that asks for a tool it lacks, though the commands of that skill are what it was started to run.
         var enabled = new HashSet<String>();
-        for (var skill : SkillLoader.loadSkills(agentName)) {
+        for (var skill : SkillLoader.loadSkills(found.ownerName())) {
             var folder = skill.location().getParent();
             if (folder != null && folder.getFileName() != null) enabled.add(folder.getFileName().toString());
         }
-        var skillsRoot = AgentService.workspacePath(agentName).resolve("skills").toAbsolutePath().normalize();
+        var skillsRoot = AgentService.workspacePath(found.ownerName()).resolve("skills").toAbsolutePath().normalize();
         var where = workdir.toAbsolutePath().normalize();
         var chosen = new ArrayList<SkillSecrets.Usable>();
         for (var secret : found.secrets()) {

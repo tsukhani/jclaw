@@ -64,11 +64,12 @@ JClaw stores each value encrypted. No page, agent or API call returns a value, y
 
 A command never receives a secret's value. It receives a stand-in, and JClaw puts the value in only when the command sends it to one of the secret's hosts.
 
-- **Which commands get one.** A shell command gets a secret when it names it, as `$NAS_PASSWORD` or `${NAS_PASSWORD}`, or when it runs in that skill's folder or names it, as `skills/nas-filestation/`. Every other command runs as usual. The skill must be switched on for the agent. Each name can belong to only one skill on an agent, so a second skill's commands can use the first skill's secret by its name.
+- **Which commands get one.** A shell command gets a secret when it names it, as `$NAS_PASSWORD` or `${NAS_PASSWORD}`, or when it runs in that skill's folder or names it, as `skills/nas-filestation/`. Every other command runs as usual. The skill must be switched on for the agent, and a subagent's commands get the secrets of the agent it works for. Each name can belong to only one skill on an agent, so a second skill's commands can use the first skill's secret by its name.
 - **What the command sees.** The variable holds a stand-in that starts with `jclaw-secret-`. Printing it shows the stand-in, never the value. The command's HTTPS requests go through JClaw, which puts the value where the stand-in stands: in the address, a header, a sign-in, or the body. It encodes the value to suit the place, for example for a form or for JSON.
 - **Where a value can go.** Only to the hosts listed with the secret. A host without a port means port 443, so list a host on another port with its port, such as `nas.example.com:5001`. A request that carries a stand-in to any other host is refused before it leaves your computer, and so is a stand-in that is unknown or whose command has ended. JClaw never follows a redirect for the command. If a service sends a value back, the command receives the stand-in instead.
 - **How long it lasts.** A command's stand-ins work only while that command runs: they stop when it finishes, is stopped or times out. A command started in the background gets no secrets, and its output says so.
 - **What is not covered.** Only HTTPS requests carry a secret. A command that connects by SSH, or to a database, cannot use one.
+- **A sign-in's session is not protected.** When a command signs in with a stored password and the service answers with a session id or key, the command receives that session as ordinary text. Keep sessions short on such services. A plain API key has no such gap.
 
 ### Exporting to Claude
 

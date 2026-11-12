@@ -94,6 +94,36 @@ class SkillSecretGrantsTest extends UnitTest {
         assertEquals(List.of("TWO_KEY"), given("bash skills/demo-two/run.sh"));
     }
 
+    /**
+     * A subagent runs in its owner's workspace, and a skill often asks for a tool a subagent lacks, which hides the
+     * skill from the subagent's own list. Its commands still get the owner's secrets: the skill is enabled on the owner.
+     */
+    @Test
+    void aSubagentsCommandGetsTheSecretsOfASkillEnabledOnItsOwner() throws Exception {
+        Files.writeString(workspace.resolve("skills/demo/SKILL.md"),
+                "---\nname: demo\ndescription: test skill\nmetadata:\n  jclaw-tools: filesystem\n---\n# demo\n");
+        var sub = Tx.run(() -> {
+            var child = AgentService.create(agent.name + "-sub", "openrouter", "gpt-4.1", null, null, false,
+                    Agent.findById(agent.id));
+            var off = new models.AgentToolConfig();
+            off.agent = child;
+            off.toolName = "filesystem";
+            off.enabled = false;
+            off.save();
+            return child;
+        });
+        agents.SkillLoader.clearCache();
+        try {
+            assertTrue(agents.SkillLoader.loadSkills(sub.name).stream().noneMatch(s -> s.name().equals("demo")),
+                    "the fixture must hide the skill from the subagent's own list, or the test proves nothing");
+            try (SecretGrant grant = SecretGrants.forCommand(sub, "bash skills/demo/run.sh", workspace, false)) {
+                assertEquals(List.of("API_KEY", "OTHER_KEY"), grant == null ? List.of() : grant.names());
+            }
+        } finally {
+            Tx.run(() -> AgentService.delete(Agent.findById(sub.id)));
+        }
+    }
+
     @Test
     void aSecretNameIsUsedOnceOnAnAgent() {
         var refused = assertThrows(SkillSecrets.Refused.class, () -> Tx.run(() ->

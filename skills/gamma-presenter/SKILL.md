@@ -3,7 +3,7 @@ name: gamma-presenter
 description: >-
   Create beautiful AI-generated presentations, documents, webpages, and social posts via the Gamma API. Supports generation from text prompts, templates, multi-page gammas, exports to PDF/PPTX/PNG, and management of existing gammas.
 metadata:
-  version: "1.0.5"
+  version: "1.0.6"
   author: main
   jclaw-icon: "🎨"
   jclaw-tools: filesystem exec
@@ -16,14 +16,18 @@ Generate polished presentations, documents, webpages, and social media posts usi
 ## Prerequisites
 
 - Gamma account with Pro, Ultra, Team, or Business plan (required for API key)
-- API key stored in `credentials/gamma-api-key.txt`
+- The API key in JClaw's secret store, as `GAMMA_API_KEY`
 
 ## API Key Setup
+
+The operator does this once; an agent cannot.
 
 1. Log in to Gamma at https://gamma.app
 2. Go to **Settings → API Keys**
 3. Generate a new API key (starts with `sk-gamma-`)
-4. Save it to `credentials/gamma-api-key.txt` in this skill's directory
+4. In JClaw, open this skill from the agent's column on the Skills page and add a secret named `GAMMA_API_KEY`, with the host `public-api.gamma.app`
+
+Any command that names `$GAMMA_API_KEY` receives a stand-in, and JClaw puts the real key in only on requests to that host. Never look for the key in a file. If a call answers 401 or `$GAMMA_API_KEY` is empty, the secret is missing: ask the operator to add it.
 
 ## Quick Reference
 
@@ -59,7 +63,7 @@ Generate polished presentations, documents, webpages, and social media posts usi
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/generations" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $GAMMA_API_KEY" \
   -d '{
     "inputText": "Your content or prompt here",
     "textMode": "generate",
@@ -80,7 +84,7 @@ curl -X POST "https://public-api.gamma.app/v1.0/generations" \
 ### 2. Poll for Generation Completion
 
 ```bash
-curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $GAMMA_API_KEY" \
   "https://public-api.gamma.app/v1.0/generations/{generationId}"
 ```
 
@@ -97,7 +101,7 @@ Poll every 5 seconds until `status` is `completed` or `failed`.
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/generations/from-template" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $GAMMA_API_KEY" \
   -d '{
     "templateGammaId": "template-id-here",
     "textMode": "generate",
@@ -110,7 +114,7 @@ curl -X POST "https://public-api.gamma.app/v1.0/generations/from-template" \
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/gammas/{gammaId}/export" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $GAMMA_API_KEY" \
   -d '{
     "format": "pptx"
   }'
@@ -123,7 +127,7 @@ Then poll: `GET /v1.0/exports/{exportId}`
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/images" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $GAMMA_API_KEY" \
   -d '{
     "prompt": "A hero image of a futuristic city skyline at sunset",
     "aspectRatio": "16:9"
@@ -134,13 +138,13 @@ curl -X POST "https://public-api.gamma.app/v1.0/images" \
 
 ### List Themes
 ```bash
-curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $GAMMA_API_KEY" \
   "https://public-api.gamma.app/v1.0/themes"
 ```
 
 ### List Folders
 ```bash
-curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $GAMMA_API_KEY" \
   "https://public-api.gamma.app/v1.0/folders"
 ```
 
@@ -148,7 +152,7 @@ curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)"
 
 When asked to create a Gamma presentation:
 
-1. **Read the API key** from `skills/gamma-presenter/credentials/gamma-api-key.txt` using the `filesystem` tool
+1. **Use `$GAMMA_API_KEY`** in each `curl` call as shown above; never read or print the key
 2. **Build the request payload** based on user's specifications (format, numCards, theme, exportAs, etc.)
 3. **Start generation** via `exec` using `curl` to POST `/v1.0/generations`
 4. **Parse the `generationId`** from the response
@@ -168,7 +172,7 @@ When asked to create a Gamma presentation:
 
 | Status | Meaning | Action |
 |---|---|---|
-| `401` | Invalid API key | Check `credentials/gamma-api-key.txt` |
+| `401` | Invalid or missing API key | Ask the operator to check the `GAMMA_API_KEY` secret on the Skills page |
 | `403` | Insufficient credits | Purchase more credits in Gamma settings |
 | `429` | Rate limited | Wait and retry with exponential backoff |
 | `422` | Invalid parameters | Check request payload against API docs |
