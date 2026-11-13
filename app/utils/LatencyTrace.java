@@ -65,6 +65,8 @@ public final class LatencyTrace {
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicInteger memoryRecallCount = new AtomicInteger();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
+    private final AtomicLong toolCallTailMs = new AtomicLong();
+    private final AtomicBoolean toolCallTailSeen = new AtomicBoolean();
     private final AtomicInteger llmCallCount = new AtomicInteger();
     private final AtomicInteger llmCachedCallCount = new AtomicInteger();
     private final AtomicInteger toolVerifyCount = new AtomicInteger();
@@ -225,6 +227,15 @@ public final class LatencyTrace {
         routeMs.set(elapsedMs);
     }
 
+
+    /**
+     * Record how long one model call's stream ran on after its first tool call was complete (JF-370), summed over the
+     * turn's calls. Instance-bound because the stream's completion runs on the provider's IO thread.
+     */
+    public void addToolCallTail(long elapsedMs) {
+        toolCallTailMs.addAndGet(elapsedMs);
+        toolCallTailSeen.set(true);
+    }
 
     /** Record the wall-clock cost of a single tool-execution round. */
     public void addToolRound(long elapsedMs) {
@@ -517,6 +528,7 @@ public final class LatencyTrace {
             emit("tool_exec", toolExecMs.get());
             emit("tool_round_count", toolRoundCount.get());
         }
+        if (toolCallTailSeen.get()) emit("tool_call_tail", toolCallTailMs.get());
     }
 
     /**

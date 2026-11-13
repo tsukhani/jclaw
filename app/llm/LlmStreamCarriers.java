@@ -65,6 +65,9 @@ interface LlmStreamCarriers {
         private final ReentrantLock reasoningLock =
                 new ReentrantLock();
         volatile @Nullable Usage usage;
+        /** nanoTime of the latest chunk carrying a tool call, and of the moment a second call began; 0 until then (JF-370). */
+        volatile long lastToolCallChunkNanos;
+        volatile long secondToolCallNanos;
         /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
         volatile TokenUsageEstimator.@Nullable ChatRequestTokens promptTokenEstimate;
         /** JTokkit-measured completion tokens for streamed content/tool calls/reasoning. */

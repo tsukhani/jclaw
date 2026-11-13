@@ -649,6 +649,18 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
     }
 
+    /**
+     * How long the stream ran on after its first tool call's arguments were complete: from the moment a second call
+     * began, or with one call from its last chunk, to the end (JF-370). That is the most a call started early could
+     * save, and nothing records it otherwise.
+     */
+    private static void noteToolCallTail(@Nullable LatencyTrace trace, StreamAccumulator accumulator) {
+        if (trace == null || accumulator.toolCalls.isEmpty() || accumulator.lastToolCallChunkNanos == 0) return;
+        long firstDone = accumulator.secondToolCallNanos != 0
+                ? accumulator.secondToolCallNanos : accumulator.lastToolCallChunkNanos;
+        trace.addToolCallTail(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - firstDone));
+    }
+
     // ─── Streaming chat ──────────────────────────────────────────────────
 
     // S107: streaming chat needs the conversation shape (model, messages, tools,
@@ -848,6 +860,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                     accumulator.reasoningTokenEstimate = TokenUsageEstimator.estimateReasoning(
                             model, accumulator.reasoningText());
                     noteCachedCall(trace, accumulator.usage);
+                    noteToolCallTail(trace, accumulator);
                     accumulator.markComplete();
                 },
                 e -> {
@@ -915,6 +928,13 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // detects id / function-name mismatches and allocates
         // fresh slots so parallel calls stay distinct.
         ToolCallChunkMerger.mergeToolCallChunks(delta.toolCalls(), toolCallAccumulator);
+        if (delta.toolCalls() != null && !delta.toolCalls().isEmpty()) {
+            long now = System.nanoTime();
+            accumulator.lastToolCallChunkNanos = now;
+            if (accumulator.secondToolCallNanos == 0 && toolCallAccumulator.size() >= 2) {
+                accumulator.secondToolCallNanos = now;
+            }
+        }
         if (choice.finishReason() != null) {
             accumulator.finishReason = choice.finishReason();
         }
