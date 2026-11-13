@@ -52,6 +52,9 @@ import java.util.List;
 public class DefaultConfigJob extends Job<Void> {
 
     private static final String EVENT_CATEGORY_AGENT = "agent";
+
+    /** The skill that walks an agent through designing a scheduled task (JF-379). */
+    public static final String TASK_CREATOR = "task-creator";
     private static final String EVENT_CATEGORY_SYSTEM = "system";
     private static final String CONFIG_VALUE_FALSE = "false";
     /** Written once the history-limit floor has run, so a limit an operator lowers afterwards survives restarts. */
@@ -399,6 +402,8 @@ public class DefaultConfigJob extends Job<Void> {
         // copyToAgentWorkspace performs an atomic swap; re-running it is a no-op
         // when the workspace copy is already up to date.
         seedSkillCreatorForMain();
+        // JF-379: main creates most tasks, so it always holds the registry's task-creator.
+        seedSkillForMain(TASK_CREATOR, "task-creator skill installed for main agent (task design guidance seeded)");
     }
 
     /**
@@ -420,28 +425,12 @@ public class DefaultConfigJob extends Job<Void> {
         seedJClawApiSkillForMain();
     }
 
-    /** Mirror of {@link #seedSkillCreatorForMain} for the jclaw-api skill.
-     *  Skipped silently if the global registry doesn't ship the skill —
+    /** The jclaw-api skill for main. Skipped silently if the global registry doesn't ship it —
      *  the tool stays callable for any agent that has it allowlisted,
      *  but main won't see the curated SKILL.md until an operator drops
      *  it back in. */
     private void seedJClawApiSkillForMain() {
-        var skillName = "jclaw-api";
-        var globalSkillMd = SkillLoader.globalSkillsPath()
-                .resolve(skillName).resolve("SKILL.md");
-        if (!Files.exists(globalSkillMd)) {
-            Logger.info("jclaw-api skill not present in global registry — skipping bootstrap");
-            return;
-        }
-        var main = Agent.findByName("main");
-        if (main == null) return;
-        try {
-            SkillPromotionService.copyToAgentWorkspace(main, skillName);
-            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
-                    "jclaw-api skill installed for main agent (in-process API access seeded)");
-        } catch (IOException e) {
-            Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
-        }
+        seedSkillForMain("jclaw-api", "jclaw-api skill installed for main agent (in-process API access seeded)");
     }
 
     /**
@@ -456,21 +445,29 @@ public class DefaultConfigJob extends Job<Void> {
      * with an actionable error.
      */
     private void seedSkillCreatorForMain() {
-        var skillName = SkillPromotionService.SKILL_CREATOR_NAME;
-        var globalSkillMd = SkillLoader.globalSkillsPath()
-                .resolve(skillName).resolve("SKILL.md");
+        seedSkillForMain(SkillPromotionService.SKILL_CREATOR_NAME,
+                "Skill-creator installed for main agent (promotion capability seeded)");
+    }
+
+    /**
+     * Copy the global registry's {@code skillName} into {@code main}'s workspace, logging
+     * {@code installedNote} once it is there. Runs on every boot, so main always holds the
+     * registry's current version; skipped silently when the registry does not ship the skill
+     * or there is no main agent yet.
+     */
+    public static void seedSkillForMain(String skillName, String installedNote) {
+        var globalSkillMd = SkillLoader.globalSkillsPath().resolve(skillName).resolve("SKILL.md");
         if (!Files.exists(globalSkillMd)) {
-            Logger.info("Skill-creator not present in global registry — skipping bootstrap");
+            Logger.info("%s not present in global registry — skipping bootstrap", skillName);
             return;
         }
         var main = Agent.findByName("main");
         if (main == null) return;
         try {
             SkillPromotionService.copyToAgentWorkspace(main, skillName);
-            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
-                    "Skill-creator installed for main agent (promotion capability seeded)");
+            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null, installedNote);
         } catch (IOException e) {
-            Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());
+            Logger.warn("Failed to bootstrap %s for main: %s", skillName, e.getMessage());
         }
     }
 

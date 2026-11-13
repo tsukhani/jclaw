@@ -17,6 +17,15 @@ You do not create tasks from the [Tasks](/tasks) page directly. The page is a vi
 
 The agent calls `task_manager` with a `createTask` action, translates your phrasing into a schedule string, and your task appears on [Tasks](/tasks) within seconds.
 
+The main agent follows the built-in **task-creator** skill when it creates or changes a task. The skill has it:
+
+- write steps that name each tool and action exactly, with its arguments
+- give the task only the tools those steps need, and say what the task must never do
+- stop and report when a step fails, instead of trying another way
+- run the task once to check it, asking you first if that run would email or message anyone else, or change something other people use
+
+JClaw installs the skill on the main agent every time it starts. Another agent gets it when you install it on that agent from the [Skills](/skills) page.
+
 ### The unified schedule string
 
 There is one creation action, `createTask`. It takes a single `schedule` parameter, and the agent picks one of four shapes:
