@@ -2046,8 +2046,6 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 "a value a switched-on skill holds is given to every skill");
 
         assertIsOk(PUT("/api/agents/" + id + "/skills/nas", "application/json", "{\"enabled\":false}"));
-        // The switch leaves SkillLoader's 30-second cache of switched-on folders as it was.
-        SkillLoader.clearCache();
 
         assertEquals("{\"needs\":[\"NAS_PASS\",\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{\"NAS_PASS\":\"nas\"},\"keeps\":[]}",
                 getContent(GET(base)));

@@ -597,6 +597,9 @@ public class ApiSkillsController extends Controller {
         }
         config.enabled = enabled;
         config.save();
+        // The cached scan decides what the agent is offered and what SecretGrants gives a command, so a stale one keeps
+        // a switched-off skill's secrets flowing. After the commit: a scan before it would re-cache the old row for 30 s.
+        Tx.afterCommit(SkillLoader::clearCache);
 
         renderJSON(gson.toJson(new SkillToggleResponse(name, enabled, "ok")));
     }
@@ -645,6 +648,8 @@ public class ApiSkillsController extends Controller {
             if (config != null && !config.enabled) {
                 config.enabled = true;
                 config.save();
+                // The copy cleared the cache before this save, so clear it again once the save commits.
+                Tx.afterCommit(SkillLoader::clearCache);
             }
 
             renderJSON(gson.toJson(new SkillCopyResponse(name, "ok", replacing)));

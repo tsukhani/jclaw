@@ -17,6 +17,8 @@ import services.AgentService;
 import services.EventLogger;
 import services.KeptSkillFiles;
 import services.Tx;
+import services.secrets.SecretGrant;
+import services.secrets.SecretGrants;
 import utils.CredentialCipher;
 
 import java.io.IOException;
@@ -26,6 +28,7 @@ import java.nio.file.Files;
 import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -318,10 +321,11 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_PASS", "application/json",
                 "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
         assertEquals("[]", missingOf("demo"));
+        assertEquals(List.of("SHARED_PASS"), granted("echo $SHARED_PASS"));
 
         assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":false}"));
-        agents.SkillLoader.clearCache();
 
+        assertEquals(List.of(), granted("echo $SHARED_PASS"), "the skill holding it is switched off");
         assertEquals("[\"SHARED_PASS\"]", missingOf("demo"));
         var body = json(GET(base()));
         assertEquals("{\"name\":\"SHARED_PASS\",\"description\":\"The shared password\",\"exampleHosts\":[\"api.example.com\"],"
@@ -338,11 +342,50 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         declare("demo", "API_KEY=api.example.com   # The service's API key\n");
         assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
         assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":false}"));
-        agents.SkillLoader.clearCache();
 
         assertEquals("[]", missingOf("demo"));
         assertEquals("[]", json(GET(base())).get("missing").toString());
         assertEquals(List.of(), offeredSkills(), "it is still switched off");
+    }
+
+    /**
+     * JF-388: the switch takes effect at once, for what the agent is offered and for the secrets and settings the
+     * next command is given.
+     */
+    @Test
+    void switchingASkillOffStopsItAndItsSecretsAtOnceAndSwitchingItOnBringsThemBack() throws Exception {
+        declare("demo", "API_KEY=api.example.com   # The service's API key\n"
+                + "setting DEMO_URL=https://demo.example.com   # The demo address\n");
+        assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        assertIsOk(putSetting("DEMO_URL", "{\"value\":\"https://demo.example.com\"}"));
+        // Read once first, so a cached scan is what the switch has to replace.
+        assertEquals(List.of("demo"), offeredSkills());
+        assertEquals(List.of("API_KEY"), granted("bash skills/demo/run.sh"));
+        assertEquals(Map.of("DEMO_URL", "https://demo.example.com"), settingsGiven("bash skills/demo/run.sh"));
+
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":false}"));
+        assertEquals(List.of(), offeredSkills());
+        assertEquals(List.of(), granted("bash skills/demo/run.sh"));
+        assertEquals(Map.of(), settingsGiven("bash skills/demo/run.sh"));
+
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":true}"));
+        assertEquals(List.of("demo"), offeredSkills());
+        assertEquals(List.of("API_KEY"), granted("bash skills/demo/run.sh"));
+        assertEquals(Map.of("DEMO_URL", "https://demo.example.com"), settingsGiven("bash skills/demo/run.sh"));
+    }
+
+    private Map<String, String> settingsGiven(String command) {
+        return commitInFreshTx(() -> SecretGrants.settingsFor(Agent.findById(agentId), command,
+                AgentService.workspacePath(agentName)));
+    }
+
+    private List<String> granted(String command) {
+        return commitInFreshTx(() -> {
+            try (SecretGrant grant = SecretGrants.forCommand(Agent.findById(agentId), command,
+                    AgentService.workspacePath(agentName), false)) {
+                return grant == null ? List.<String>of() : grant.names();
+            }
+        });
     }
 
     // ==================== settings (JF-357) ====================
