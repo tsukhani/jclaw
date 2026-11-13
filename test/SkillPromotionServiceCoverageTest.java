@@ -46,7 +46,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     void setup() throws Exception {
         Fixtures.deleteDatabase();
         globalSkillsDir = Files.createTempDirectory("skill-promotion-cov-");
-        play.Play.configuration.setProperty("jclaw.skills.path", globalSkillsDir.toString());
+        SkillsPathSync.point(globalSkillsDir);
         SkillLoader.clearCache();
     }
 
@@ -55,7 +55,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         if (globalSkillsDir != null && Files.exists(globalSkillsDir)) {
             SkillPromotionService.deleteRecursive(globalSkillsDir);
         }
-        play.Play.configuration.remove("jclaw.skills.path");
+        SkillsPathSync.restore();
         SkillLoader.clearCache();
         for (var name : seededAgentNames) {
             try {

@@ -3,6 +3,7 @@ import agents.ToolRegistry;
 import jobs.DefaultConfigJob;
 import models.Agent;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
@@ -30,9 +31,19 @@ class TaskCreatorSkillTest extends UnitTest {
 
     private final List<Path> created = new ArrayList<>();
 
+    @BeforeEach
+    void emptyRegistry() throws IOException {
+        var registry = Files.createTempDirectory("jf379-registry-");
+        created.add(registry);
+        SkillsPathSync.point(registry);
+        SkillLoader.clearCache();
+    }
+
     @AfterEach
     void removeCopies() throws IOException {
-        for (var dir : created) deleteTree(dir);
+        SkillsPathSync.restore();
+        SkillLoader.clearCache();
+        for (var dir : created.reversed()) deleteTree(dir);
     }
 
     // ==================== skill-creator's conventions ====================

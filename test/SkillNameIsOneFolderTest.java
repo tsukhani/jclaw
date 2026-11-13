@@ -8,7 +8,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.AgentService;
@@ -59,7 +58,7 @@ class SkillNameIsOneFolderTest extends FunctionalTest {
         AuthFixture.seedAdminPassword("changeme");
         bearer = AuthFixture.seedBearerToken();
         globalSkills = Files.createTempDirectory("jf291-skills-");
-        Play.configuration.setProperty("jclaw.skills.path", globalSkills.toString());
+        SkillsPathSync.point(globalSkills);
         SkillLoader.clearCache();
         seedSkill(globalSkills, "probe");
 
@@ -80,7 +79,7 @@ class SkillNameIsOneFolderTest extends FunctionalTest {
     @AfterEach
     void cleanUp() throws IOException {
         clearCookies();
-        Play.configuration.remove("jclaw.skills.path");
+        SkillsPathSync.restore();
         SkillLoader.clearCache();
         if (Files.exists(globalSkills)) SkillPromotionService.deleteRecursive(globalSkills);
         var workspace = AgentService.workspacePath(agentName);

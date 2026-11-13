@@ -45,7 +45,7 @@ class SkillAllowlistTest extends UnitTest {
         // Point the global skills registry at a fresh temp dir so we're not
         // contaminated by the repo's shipped skills/.
         globalSkillsDir = Files.createTempDirectory("skill-allowlist-test-global-");
-        play.Play.configuration.setProperty("jclaw.skills.path", globalSkillsDir.toString());
+        SkillsPathSync.point(globalSkillsDir);
         SkillLoader.clearCache();
     }
 
@@ -54,7 +54,7 @@ class SkillAllowlistTest extends UnitTest {
         if (globalSkillsDir != null && Files.exists(globalSkillsDir)) {
             SkillPromotionService.deleteRecursive(globalSkillsDir);
         }
-        play.Play.configuration.remove("jclaw.skills.path");
+        SkillsPathSync.restore();
         deleteDir(AgentService.workspacePath("allowlist-agent"));
     }
 

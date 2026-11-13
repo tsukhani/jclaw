@@ -134,7 +134,7 @@ class SkillLlmMockedPipelineTest extends UnitTest {
             SkillPromotionService.deleteRecursive(stagedDir);
         }
         if (promotedGlobal != null) {
-            play.Play.configuration.remove("jclaw.skills.path");
+            SkillsPathSync.restore();
             SkillRegistryTool.deleteBySkill("weather");
             SkillPromotionService.deleteRecursive(promotedGlobal);
             SkillLoader.clearCache();
@@ -431,7 +431,7 @@ class SkillLlmMockedPipelineTest extends UnitTest {
     /** Promotes {@code skillMd} through a reviewer that answers {@code reviewed}; returns the promoted SKILL.md's body. */
     private String promotedBody(String skillMd, String reviewed) throws Exception {
         promotedGlobal = Files.createTempDirectory("skill-llm-mock-global-");
-        play.Play.configuration.setProperty("jclaw.skills.path", promotedGlobal.toString());
+        SkillsPathSync.point(promotedGlobal);
         SkillLoader.clearCache();
         Files.writeString(stagedDir.resolve("SKILL.md"), skillMd);
         var answer = new JsonObject();

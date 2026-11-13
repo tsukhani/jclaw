@@ -49,7 +49,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         AuthFixture.seedAdminPassword("changeme");
 
         globalSkillsDir = Files.createTempDirectory("api-skills-test-global-");
-        play.Play.configuration.setProperty("jclaw.skills.path", globalSkillsDir.toString());
+        SkillsPathSync.point(globalSkillsDir);
         SkillLoader.clearCache();
     }
 
@@ -58,7 +58,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         if (globalSkillsDir != null && Files.exists(globalSkillsDir)) {
             SkillPromotionService.deleteRecursive(globalSkillsDir);
         }
-        play.Play.configuration.remove("jclaw.skills.path");
+        SkillsPathSync.restore();
         SkillLoader.clearCache();
         for (var name : seededAgentNames) {
             try {
