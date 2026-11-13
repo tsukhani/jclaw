@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 
@@ -205,7 +206,9 @@ public final class WorkspacePathGuard {
     static @Nullable Path canonicalize(Path path) throws IOException {
         var existing = path;
         var missingSuffix = new ArrayDeque<Path>();
-        while (existing != null && !Files.exists(existing)) {
+        // A dangling link is an entry, not a missing name: kept as written, a write through it created its target
+        // wherever it pointed (JF-400). Not followed here, toRealPath below throws on it and every caller fails closed.
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
             missingSuffix.push(existing.getFileName());
             existing = existing.getParent();
         }

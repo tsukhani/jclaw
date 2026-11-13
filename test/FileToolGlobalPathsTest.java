@@ -181,6 +181,30 @@ class FileToolGlobalPathsTest extends UnitTest {
                 run(main, action("readFile", relative, null)));
     }
 
+    /** JF-400: a dangling link outside the fence that points into certs/ creates nothing there. */
+    @Test
+    void aGlobalPathThroughADanglingLinkIntoJclawsFoldersCreatesNothing() throws IOException {
+        var certs = Play.applicationPath.toPath().resolve("certs");
+        Files.createDirectories(certs);
+        var planted = remember(SandboxHiddenRoots.canonical(certs.resolve("jf400-planted-" + UUID.randomUUID() + ".txt")));
+        var link = outside.resolve("into-certs.txt");
+        Files.createSymbolicLink(link, planted);
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.fsPathRefused(
+                        "'" + link + "' passes through a link that leads nowhere")),
+                run(main, action("writeFile", link.toString(), "planted")));
+        assertFalse(Files.exists(planted));
+    }
+
+    /** JF-400: a file with a second hard link is refused, as inside a workspace: the second name may sit in a fenced folder. */
+    @Test
+    void aHardLinkedFileOutsideTheWorkspaceIsRefused() throws IOException {
+        var original = Files.writeString(outside.resolve("original.txt"), "linked");
+        var second = Files.createLink(outside.resolve("second.txt"), original);
+        assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.fsPathRefused(("Path '%s' is a hardlink (nlink=2); "
+                        + "rejected to prevent cross-sandbox inode aliasing.").formatted(second))),
+                run(main, action("readFile", second.toString(), null)));
+    }
+
     private String run(Agent agent, String argsJson) {
         return tool.execute(argsJson, agent);
     }

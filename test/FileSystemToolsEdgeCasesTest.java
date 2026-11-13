@@ -214,6 +214,24 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         assertEquals("a\n", Files.readString(workspace.resolve("mine.md")));
     }
 
+    /** JF-400: a dangling link the agent's shell made in its workspace creates nothing outside through a write. */
+    @Test
+    void aWriteThroughADanglingLinkCreatesNothingOutsideTheWorkspace() throws Exception {
+        var outside = Files.createTempDirectory("fs-dangling-outside").toRealPath();
+        var link = workspace.resolve("planted-link.txt");
+        try {
+            Files.createDirectories(workspace);
+            Files.createSymbolicLink(link, outside.resolve("planted.txt"));
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.fsPathRefused(
+                            "Path 'planted-link.txt' escapes the workspace.")),
+                    tool.execute(fileAction("writeFile", "planted-link.txt", "x"), agent));
+            assertFalse(Files.exists(outside.resolve("planted.txt")));
+        } finally {
+            Files.deleteIfExists(link);
+            deleteDir(outside);
+        }
+    }
+
     /** The rule covers only the built-in skills: a skill of the agent's own stays writable. */
     @Test
     void aCustomAgentStillWritesASkillOfItsOwn() throws Exception {

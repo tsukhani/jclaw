@@ -12,6 +12,7 @@ import utils.WorkspacePathGuard;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.Objects;
 
 /**
  * JF-394: an absolute or home-relative path the Main Agent's file tool takes while its {@code allowGlobalPaths} toggle
@@ -42,10 +43,17 @@ final class FsGlobalPaths {
     static Resolution resolve(Agent agent, String path, boolean mutating) {
         var home = System.getProperty("user.home", "");
         var expanded = path.equals("~") ? home : path.startsWith("~/") ? home + path.substring(1) : path;
+        // Contained by the filesystem root, so the guard adds only what it does for a workspace: a dangling link
+        // refused, two resolutions that must agree, and a file with a second hard link refused (JF-400).
+        var root = Objects.requireNonNull(AgentService.workspacePath(agent.name).toAbsolutePath().getRoot());
         Path target;
         try {
-            target = SandboxHiddenRoots.canonical(expanded);
-        } catch (InvalidPathException e) {
+            if (WorkspacePathGuard.resolveContained(root, expanded) == null) {
+                return Resolution.refused(ToolErrorTemplates.fsPathRefused(
+                        "'%s' passes through a link that leads nowhere".formatted(path)));
+            }
+            target = WorkspacePathGuard.acquireContained(root, expanded);
+        } catch (InvalidPathException | SecurityException e) {
             return Resolution.refused(ToolErrorTemplates.fsPathRefused(e.getMessage()));
         }
         var workspace = SandboxHiddenRoots.canonical(AgentService.workspacePath(agent.name));
@@ -71,10 +79,6 @@ final class FsGlobalPaths {
             if (WorkspacePathGuard.isInSkillCredentials(owner, target)) {
                 return Resolution.refused(ToolErrorTemplates.fsCredentials(path));
             }
-        }
-        // A link swapped between the two resolutions would land where these checks never looked.
-        if (!SandboxHiddenRoots.canonical(expanded).equals(target)) {
-            return Resolution.refused(ToolErrorTemplates.fsPathRefused("the path changed while it was resolved"));
         }
         return Resolution.ok(target);
     }

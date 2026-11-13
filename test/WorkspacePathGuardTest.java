@@ -46,6 +46,46 @@ class WorkspacePathGuardTest extends UnitTest {
                 "a lexical .. escape must return null");
     }
 
+    /**
+     * JF-400: a dangling link is an entry, not a missing name, so a path that ends in one or passes through one fails
+     * closed, and nothing is created where it points.
+     */
+    @Test
+    void aDanglingLinkAtTheEndOrInTheMiddleOfAPathIsRefused() throws Exception {
+        var base = Files.createTempDirectory("wpg-dangling").toRealPath();
+        try {
+            var ws = Files.createDirectories(base.resolve("ws"));
+            var outside = Files.createDirectories(base.resolve("outside"));
+            Files.createSymbolicLink(ws.resolve("file-link.txt"), outside.resolve("planted.txt"));
+            Files.createSymbolicLink(ws.resolve("dir-link"), outside.resolve("missing-dir"));
+
+            assertNull(WorkspacePathGuard.resolveContained(ws, "file-link.txt"));
+            assertNull(WorkspacePathGuard.resolveContained(ws, "dir-link/planted.txt"));
+            var refused = assertThrows(SecurityException.class,
+                    () -> WorkspacePathGuard.acquireContained(ws, "file-link.txt"));
+            assertEquals("Path 'file-link.txt' escapes the workspace.", refused.getMessage());
+            assertFalse(Files.exists(outside.resolve("planted.txt")));
+        } finally {
+            deleteRecursive(base);
+        }
+    }
+
+    /** A file not yet made, and a link to a file inside the root, resolve as before. */
+    @Test
+    void aMissingFileAndALinkInsideTheRootStillResolve() throws Exception {
+        var base = Files.createTempDirectory("wpg-inside").toRealPath();
+        try {
+            var ws = Files.createDirectories(base.resolve("ws"));
+            Files.writeString(ws.resolve("real.txt"), "x");
+            Files.createSymbolicLink(ws.resolve("alias.txt"), ws.resolve("real.txt"));
+
+            assertEquals(ws.resolve("new/file.txt"), WorkspacePathGuard.resolveContained(ws, "new/file.txt"));
+            assertEquals(ws.resolve("real.txt"), WorkspacePathGuard.acquireContained(ws, "alias.txt"));
+        } finally {
+            deleteRecursive(base);
+        }
+    }
+
     // ==================== resolveChild: one entry directly inside the root ====================
 
     @Test
