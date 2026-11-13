@@ -219,7 +219,7 @@ class PlaywrightNodeTest extends UnitTest {
         return new OkHttpClient.Builder().addInterceptor(canned).build();
     }
 
-    private static byte[] tarXz(Map<String, String> files) throws IOException {
+    static byte[] tarXz(Map<String, String> files) throws IOException {
         var bytes = new ByteArrayOutputStream();
         try (var tar = new TarArchiveOutputStream(new XZCompressorOutputStream(bytes))) {
             for (var f : files.entrySet()) {
@@ -244,7 +244,7 @@ class PlaywrightNodeTest extends UnitTest {
         return bytes.toByteArray();
     }
 
-    private static String sha256(byte[] data) {
+    static String sha256(byte[] data) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data));
         } catch (java.security.NoSuchAlgorithmException e) {

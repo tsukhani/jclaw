@@ -196,6 +196,17 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theScriptHeapCapMustBeAWholeNumberOfAtLeastSixteenMegabytes() {
+        var expected = "script.nodeHeapMb must be a whole number of megabytes, at least 16.";
+        assertRefused(expected, "script.nodeHeapMb", "15");
+        assertRefused(expected, "script.nodeHeapMb", "0");
+        assertRefused(expected, "script.nodeHeapMb", "256MB");
+        assertRefused(expected, "script.nodeHeapMb", "");
+        assertAccepted("script.nodeHeapMb", "16");
+        assertAccepted("script.nodeHeapMb", "4096");
+    }
+
+    @Test
     void aPrimaryOrAcpProviderMustBeConfigured() {
         assertRefused("Provider 'jclaw1402-none' is not configured. llm.primaryProvider must name a provider "
                 + "from Settings > LLM Providers.", "llm.primaryProvider", "jclaw1402-none");

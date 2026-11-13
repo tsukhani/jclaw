@@ -808,10 +808,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         var platform = status.platform();
         var build = platform == null ? null : PlaywrightNode.build(platform);
         if (build == null) throw new IllegalStateException("no Node.js build for " + platform);
-        BrowserSetup.step("Downloading the browser driver (Node.js %s)".formatted(PlaywrightNode.VERSION));
         try {
-            var node = PlaywrightNode.download(build, BrowserSetup.cacheRoot(), BrowserSetup::percent);
-            EventLogger.info("tool", "Downloaded the Playwright driver's Node.js to " + node);
+            BrowserSetup.downloadNode(build, BrowserSetup.cacheRoot(), BrowserSetup.CURRENT,
+                    "Downloading the browser driver (Node.js %s)".formatted(PlaywrightNode.VERSION));
         } catch (IOException e) {
             BrowserSetup.failed("The browser driver could not be downloaded: " + e.getMessage());
             EventLogger.warn("tool", "Playwright driver download failed: %s".formatted(e.getMessage()));

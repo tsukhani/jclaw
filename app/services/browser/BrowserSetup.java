@@ -3,6 +3,7 @@ package services.browser;
 import com.google.gson.JsonParser;
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import services.EventLogger;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -13,12 +14,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 /**
  * The browser tool's first-use setup as the chat progress bar and the Settings browser panel see
- * it: the Playwright driver's Node.js and Playwright's own Chromium install. PlaywrightBrowserTool
- * runs both under one lock, so a single set of fields describes whatever setup is in flight.
+ * it: the Playwright driver's Node.js and Playwright's own Chromium install, plus the same Node.js
+ * fetched for scripts ({@link ScriptNode}) without Chromium. PlaywrightBrowserTool runs its setup
+ * under one lock and every Node.js download shares another, so a single set of fields describes
+ * whatever is in flight.
  */
 public final class BrowserSetup {
 
@@ -34,10 +38,13 @@ public final class BrowserSetup {
         private volatile @Nullable String step;
         private volatile @Nullable Integer percent;
         private volatile @Nullable String error;
+        private volatile boolean nodeDownload;
 
         public void begin() {
-            step = null;
-            percent = null;
+            if (!nodeDownload) {
+                step = null;
+                percent = null;
+            }
             error = null;
             active = true;
         }
@@ -54,8 +61,26 @@ public final class BrowserSetup {
         /** Ends the setup; a failure recorded during it stays readable until the next begin. */
         public void end() {
             active = false;
-            step = null;
-            percent = null;
+            if (!nodeDownload) {
+                step = null;
+                percent = null;
+            }
+        }
+
+        // A Node download keeps its own flag, apart from the browser's setup, so a script's
+        // download never ends a setup the browser joined while it ran.
+        void downloadStarted(String what) {
+            if (!active) error = null;
+            nodeDownload = true;
+            step(what);
+        }
+
+        void downloadEnded() {
+            nodeDownload = false;
+            if (!active) {
+                step = null;
+                percent = null;
+            }
         }
 
         public void failed(String why) {
@@ -70,6 +95,8 @@ public final class BrowserSetup {
         }
 
         public boolean active() { return active; }
+        /** The browser's setup or a Node download outside it: what Settings and the chat show in flight. */
+        public boolean inFlight() { return active || nodeDownload; }
         public @Nullable String currentStep() { return step; }
         public @Nullable Integer currentPercent() { return percent; }
         public @Nullable String lastError() { return error; }
@@ -101,10 +128,41 @@ public final class BrowserSetup {
     }
 
     public static Snapshot snapshot() {
+        return snapshot(CURRENT);
+    }
+
+    public static Snapshot snapshot(Progress progress) {
         var d = driver();
-        return new Snapshot(CURRENT.active(), CURRENT.currentStep(), CURRENT.currentPercent(), CURRENT.lastError(),
+        return new Snapshot(progress.inFlight(), progress.currentStep(), progress.currentPercent(), progress.lastError(),
                 d.source().name().toLowerCase(Locale.ROOT),
                 d.platform(), PlaywrightNode.VERSION, chromiumInstalled());
+    }
+
+    // Held across the download, so the browser's setup and a script's that both find Node missing
+    // share one download rather than racing two.
+    private static final ReentrantLock NODE_DOWNLOAD_LOCK = new ReentrantLock();
+
+    /**
+     * Download {@code build} into {@code cacheRoot} with {@link PlaywrightNode#download}, unless it is
+     * already there, showing {@code step} and the percent on {@code progress} while it runs.
+     */
+    public static Path downloadNode(PlaywrightNode.Build build, Path cacheRoot, Progress progress, String step)
+            throws IOException {
+        NODE_DOWNLOAD_LOCK.lock();
+        try {
+            var installed = PlaywrightNode.installedNode(cacheRoot, build.platform());
+            if (Files.isRegularFile(installed)) return installed;
+            progress.downloadStarted(step);
+            try {
+                var node = PlaywrightNode.download(build, cacheRoot, progress::percent);
+                EventLogger.info("tool", "Downloaded Node.js %s to %s".formatted(PlaywrightNode.VERSION, node));
+                return node;
+            } finally {
+                progress.downloadEnded();
+            }
+        } finally {
+            NODE_DOWNLOAD_LOCK.unlock();
+        }
     }
 
     // ── Playwright's `install chromium` output ────────────────────────────────

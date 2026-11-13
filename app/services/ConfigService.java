@@ -31,6 +31,7 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
+import services.browser.ScriptNode;
 import services.database.DatabaseService;
 import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
@@ -403,6 +404,8 @@ public class ConfigService {
             atLeast(TaskFireDeadline.IDLE_KEY, 0, " must be a whole number of seconds; 0 turns the limit off."),
             atLeast(JClawFailureHandler.PAUSE_AFTER_KEY, 0, " must be a whole number of failed runs; 0 turns pausing off."),
             atLeast(BackgroundProcesses.LIFETIME_KEY, 0, " must be a whole number of hours; 0 never stops a process."),
+            atLeast(ScriptNode.HEAP_KEY, ScriptNode.MIN_HEAP_MB,
+                    " must be a whole number of megabytes, at least " + ScriptNode.MIN_HEAP_MB + "."),
             configuredProvider(ProviderRegistry.PRIMARY_PROVIDER_KEY),
             under(VoiceSettings.PREFIX, VoiceSettings::rejectionFor),
             // A zero timeout expires an approval prompt before anyone can answer it.
