@@ -1,0 +1,75 @@
+{
+  "id": "parallel-calls",
+  "description": "Does the agent send tool calls that do not depend on each other in one response, and still wait when one needs another's result? Each model call a turn spends costs a time to first token before any tool runs (JF-365).",
+  "requiredTools": [
+    "datetime"
+  ],
+  "cases": [
+    {
+      "id": "three-independent-dates-in-one-response",
+      "input": "Using the datetime tool, tell me the dates 30, 60 and 90 days after 2024-02-14.",
+      "rubric": "Three calculations, none needing another's result, so all three calls belong in the first response: one tool round and the answer, two model calls. Sent one per round, the turn spends four. 2024 is a leap year, so the dates are 2024-03-15, 2024-04-14 and 2024-05-14.",
+      "checks": [
+        {
+          "kind": "tools_called_exactly",
+          "args": [
+            "datetime",
+            "datetime",
+            "datetime"
+          ]
+        },
+        {
+          "kind": "max_llm_calls",
+          "limit": 2
+        },
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)(2024-03-15|march 15|15 march|mar 15|15 mar)"
+          ]
+        },
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)(2024-04-14|april 14|14 april|apr 14|14 apr)"
+          ]
+        },
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)(2024-05-14|may 14|14 may)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "a-dependent-date-waits-for-the-first",
+      "input": "Using the datetime tool, find the date 100 days after 2024-02-14, then the date 100 days after that one.",
+      "rubric": "The second date needs the first one's result, so batching both calls blind would compute it from the wrong base. One call adding 200 days is also correct. 100 days after 2024-02-14 is 2024-05-24, and 100 days after that is 2024-09-01.",
+      "checks": [
+        {
+          "kind": "tools_called_within",
+          "args": [
+            "datetime"
+          ]
+        },
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)(2024-05-24|may 24|24 may)"
+          ]
+        },
+        {
+          "kind": "matches",
+          "args": [
+            "(?i)(2024-09-01|september 1(?!\\d)|1 september|sep 1(?!\\d)|1 sep)"
+          ]
+        },
+        {
+          "kind": "max_llm_calls",
+          "limit": 3
+        }
+      ]
+    }
+  ]
+}
