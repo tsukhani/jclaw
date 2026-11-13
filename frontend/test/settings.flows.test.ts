@@ -1394,7 +1394,7 @@ describe('Settings page — Shell Execution', () => {
     await flushPromises()
     const note = component.find('[data-testid="sandbox-unavailable"]')
     expect(note.exists()).toBe(true)
-    expect(note.text()).toBe('This host has no sandbox mechanism (\'bwrap\' is not available: bwrap: No permissions to create a new namespace). Custom agents\' shell commands are refused here, and with this on, the main agent\'s are too.')
+    expect(note.text()).toBe('This host has no sandbox mechanism (\'bwrap\' is not available: bwrap: No permissions to create a new namespace). Shell commands are refused here, the main agent\'s as well as custom agents\'.')
   })
 })
 

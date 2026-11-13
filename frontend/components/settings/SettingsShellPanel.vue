@@ -246,7 +246,7 @@ async function stopProcess(pid: number) {
               data-testid="sandbox-unavailable"
               class="text-xs text-amber-800 dark:text-amber-400"
             >
-              This host has no sandbox mechanism ({{ sandboxData.reason }}). Custom agents' shell commands are refused here, and with this on, the main agent's are too.
+              This host has no sandbox mechanism ({{ sandboxData.reason }}). Shell commands are refused here, the main agent's as well as custom agents'.
             </p>
           </div>
         </div>
