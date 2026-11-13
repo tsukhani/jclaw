@@ -154,7 +154,26 @@ public final class UsageMetricsBuilder {
 
         addModelInfoFields(usageMap, modelInfo);
         addResolvedModelIdentity(usageMap, agent, conversation);
+        addDiscardedCall(usageMap, turnUsage.discarded());
         return gson.toJson(usageMap);
+    }
+
+    /**
+     * JF-377: the call the turn started on the previous turn's model and then discarded, beside the reply's own counts
+     * rather than in them, since those are priced at the answering model's rates.
+     */
+    private static void addDiscardedCall(JsonObject usageMap, LlmProvider.TurnUsage.@Nullable DiscardedCall call) {
+        if (call == null) return;
+        var json = new JsonObject();
+        json.addProperty("provider", call.provider());
+        json.addProperty("model", call.modelId());
+        json.addProperty("prompt", call.promptTokens());
+        json.addProperty("completion", call.completionTokens());
+        json.addProperty("usageSource", call.providerUsage() ? "provider" : "jtokkit");
+        if (call.costUsd() > 0d) json.addProperty("costUsd", call.costUsd());
+        if (call.promptPrice() >= 0) json.addProperty("promptPrice", call.promptPrice());
+        if (call.completionPrice() >= 0) json.addProperty("completionPrice", call.completionPrice());
+        usageMap.add("discarded", json);
     }
 
     /**

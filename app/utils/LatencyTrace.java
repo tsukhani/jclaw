@@ -61,6 +61,8 @@ public final class LatencyTrace {
     private final AtomicLong persistMs = new AtomicLong();
     private final AtomicLong queryEmbedMs = new AtomicLong();
     private final AtomicLong routeMs = new AtomicLong(-1);
+    private final AtomicLong speculationHitMs = new AtomicLong(-1);
+    private final AtomicLong speculationMissMs = new AtomicLong(-1);
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicInteger memoryRecallCount = new AtomicInteger();
@@ -225,6 +227,15 @@ public final class LatencyTrace {
      */
     public void recordRoute(long elapsedMs) {
         routeMs.set(elapsedMs);
+    }
+
+    /**
+     * Record how a call started on the previous turn's model while the router decided ended (JF-377): kept, with how
+     * long it had run when the route confirmed it, or discarded, with how long it ran before it was cancelled. Each
+     * segment's count is how many turns it happened on, and the two counts together are the turns that speculated.
+     */
+    public void recordRouteSpeculation(boolean kept, long elapsedMs) {
+        (kept ? speculationHitMs : speculationMissMs).set(Math.max(0L, elapsedMs));
     }
 
 
@@ -403,6 +414,7 @@ public final class LatencyTrace {
         recordPrologueSubSegments(prologueDone);
         recordStreamSegments(prologueDone);
         recordToolSegments();
+        recordRouteSpeculationSegments();
         recordLlmCallSegments();
         recordToolVerificationSegments();
         recordMemorySegments();
@@ -529,6 +541,13 @@ public final class LatencyTrace {
             emit("tool_round_count", toolRoundCount.get());
         }
         if (toolCallTailSeen.get()) emit("tool_call_tail", toolCallTailMs.get());
+    }
+
+    private void recordRouteSpeculationSegments() {
+        long hit = speculationHitMs.get();
+        if (hit >= 0) emit("route_speculation_hit", hit);
+        long miss = speculationMissMs.get();
+        if (miss >= 0) emit("route_speculation_miss", miss);
     }
 
     /**

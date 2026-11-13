@@ -112,6 +112,7 @@ class RoutedTurnTest extends UnitTest {
     void theRouteJsonNamesTheServedModelAndFlagsAFailover() {
         var json = decision(FALLBACK).toJson(FALLBACK, true);
         assertEquals("chat", json.get("class").getAsString());
+        assertEquals("low", json.get("effort").getAsString(), "the next turn starts its call early at this effort");
         assertEquals("openrouter", json.get("provider").getAsString());
         assertEquals("z-ai/glm-5.3-flash", json.get("model").getAsString());
         assertTrue(json.get("failover").getAsBoolean());

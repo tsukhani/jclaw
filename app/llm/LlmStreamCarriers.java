@@ -93,6 +93,21 @@ interface LlmStreamCarriers {
          */
         volatile long firstContentNanos = 0L;
         private final CountDownLatch latch = new CountDownLatch(1);
+        private volatile @Nullable Runnable cancel;
+
+        void cancelWith(Runnable cancel) {
+            this.cancel = cancel;
+        }
+
+        /**
+         * End the call unread (JF-377): the round settles at once with an error, nothing it streams afterwards reaches
+         * its consumers, and its HTTP call is aborted, which never interrupts a thread. A no-op once the round is
+         * complete.
+         */
+        public void cancel() {
+            var c = cancel;
+            if (c != null) c.run();
+        }
 
         public void appendReasoningText(String text) {
             if (text == null) return;
@@ -189,6 +204,8 @@ interface LlmStreamCarriers {
         public @Nullable String finishReason() { return finishReason; }
         public @Nullable Usage usage() { return usage; }
         public @Nullable Exception error() { return error; }
+        public TokenUsageEstimator.@Nullable ChatRequestTokens promptTokenEstimate() { return promptTokenEstimate; }
+        public TokenUsageEstimator.@Nullable TokenCount completionTokenEstimate() { return completionTokenEstimate; }
 
         /**
          * Fluent construction of a round fixture for the default-package unit
@@ -311,6 +328,29 @@ interface LlmStreamCarriers {
          * historical bubbles consistent with how they first appeared.
          */
         private final StringBuilder reasoningText = new StringBuilder();
+
+        /**
+         * A call the turn started and cancelled unseen (JF-377). Its provider bills it, but it is no part of the
+         * reply, so it stays out of the sums above, which the answering model's prices apply to.
+         *
+         * @param providerUsage whether the counts are the provider's, which only a call that finished reports;
+         *                      otherwise they are the local tokenizer's
+         * @param costUsd       the cost the provider reported, or 0 when it reported none
+         * @param promptPrice   the model's price per million prompt tokens, or -1 when unknown, as is
+         *                      {@code completionPrice}
+         */
+        public record DiscardedCall(String provider, String modelId, int promptTokens, int completionTokens,
+                                    boolean providerUsage, double costUsd, double promptPrice, double completionPrice) {}
+
+        private @Nullable DiscardedCall discarded;
+
+        public synchronized void discarded(DiscardedCall call) {
+            discarded = call;
+        }
+
+        public synchronized @Nullable DiscardedCall discarded() {
+            return discarded;
+        }
 
         public synchronized void addRound(StreamAccumulator acc) {
             if (acc == null) return;

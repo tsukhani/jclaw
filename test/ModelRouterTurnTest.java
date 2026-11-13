@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
+import llm.routing.ReasoningEffort;
 import llm.routing.RouteDecision.Target;
 import llm.routing.RouterPolicy;
 import llm.routing.SubscriptionUsage;
@@ -40,8 +41,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * picked, records the route beside the model that actually answered, fails over when that model
  * refuses before saying anything, and is accepted wherever a model is chosen.
  *
- * <p>This and {@code CompactionSummaryModelTest} are the only classes that write the process-global {@code router.*}
- * model lists, both under {@link JevBreakerTestSync}; every other router test passes its policy explicitly. Its turns
+ * <p>This, {@code CompactionSummaryModelTest} and {@code RouteSpeculationTest} are the only classes that write the
+ * process-global {@code router.*} model lists, all under {@link JevBreakerTestSync}; every other router test passes its
+ * policy explicitly. Its turns
  * read the stored classifier, which {@code RouterPolicyTest} and {@code ApiDecisionControllerTest} store for a moment,
  * so each test here holds {@link JevBreakerTestSync} as they do.
  */
@@ -113,6 +115,7 @@ class ModelRouterTurnTest extends UnitTest {
 
         var prior = TurnRouting.readPriorTurn(convo.id, null);
         assertEquals(TaskClass.CHAT, prior.taskClass(), "the next turn reads the route back for stickiness");
+        assertEquals(ReasoningEffort.LOW, prior.effort(), "and the effort, which a call it starts early runs at");
         assertEquals(new Target(subscription, "test-model"), prior.target());
         assertEquals(12, prior.promptTokens());
     }

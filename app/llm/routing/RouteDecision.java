@@ -56,6 +56,7 @@ public record RouteDecision(TaskClass taskClass, ReasoningEffort effort, Target 
     public JsonObject toJson(Target served, boolean failover) {
         var json = new JsonObject();
         json.addProperty("class", taskClass.id());
+        json.addProperty("effort", effort.id());
         json.addProperty("provider", served.provider());
         json.addProperty("model", served.modelId());
         json.addProperty("reason", reason());

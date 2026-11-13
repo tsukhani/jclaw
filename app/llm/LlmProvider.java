@@ -681,7 +681,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
                            @Nullable String channel) {
         chatStream(LlmResilience.beginStream(config.name()), model, messages, tools,
-                onChunk, onComplete, onError, maxTokens, thinkingMode, channel);
+                onChunk, onComplete, onError, maxTokens, thinkingMode, channel, _ -> { });
     }
 
     /**
@@ -689,30 +689,31 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * means it was refused. Split out for {@link #chatStreamAccumulateWithFailover}, which has to
      * know whether the primary admits the stream without spending a second HALF_OPEN probe to ask.
      */
-    @SuppressWarnings("java:S107") // same call surface as chatStream, plus the admission
+    @SuppressWarnings("java:S107") // same call surface as chatStream, plus the admission and the cancel handle
     private void chatStream(LlmResilience.@Nullable StreamGuard guard,
                             String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                             Consumer<ChatCompletionChunk> onChunk,
                             Runnable onComplete, Consumer<Exception> onError,
                             @Nullable Integer maxTokens, @Nullable String thinkingMode,
-                            @Nullable String channel) {
+                            @Nullable String channel, Consumer<Runnable> publishCancel) {
         if (guard == null) {
             onError.accept(LlmResilience.openBreakerFailure(config.name()));
             return;
         }
         dispatchStream(guard, model, messages, tools, onChunk, onComplete, onError,
-                maxTokens, thinkingMode, channel);
+                maxTokens, thinkingMode, channel, publishCancel);
     }
 
     /** One whole streaming call, the JCLAW-1076 tools retry included — the unit {@code guard} records a
-     *  single breaker outcome for. Never call it directly: that bypasses the provider's breaker. */
+     *  single breaker outcome for. Never call it directly: that bypasses the provider's breaker.
+     *  {@code publishCancel} receives, before the call starts, what ends it unread (JF-377). */
     @SuppressWarnings("java:S107") // same call surface as chatStream, which this is the body of
     private void dispatchStream(LlmResilience.StreamGuard guard,
                                 String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                                 Consumer<ChatCompletionChunk> onChunk,
                                 Runnable onComplete, Consumer<Exception> onError,
                                 @Nullable Integer maxTokens, @Nullable String thinkingMode,
-                                @Nullable String channel) {
+                                @Nullable String channel, Consumer<Runnable> publishCancel) {
         // JCLAW-882: the streaming dispatch point. Counted here rather than inside
         // the virtual thread below, because the turn binding lives on the calling
         // thread — the stream thread and the provider's IO thread carry none.
@@ -755,13 +756,30 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             var abortCall = cancelTransport.get();
             if (abortCall != null) abortCall.run();
         });
+        // A cancel can land before the stream thread has a call to abort, so whichever of the two comes second aborts.
+        var cancelled = new AtomicBoolean();
+        Consumer<Runnable> publishTransport = abort -> {
+            cancelTransport.set(abort);
+            if (cancelled.get()) abort.run();
+        };
+        publishCancel.accept(() -> {
+            cancelled.set(true);
+            if (settled.compareAndSet(false, true)) {
+                guard.cancelled();
+                var e = new LlmException("Stream cancelled before it was read");
+                call.failed(e);
+                onError.accept(e);
+            }
+            var abortCall = cancelTransport.get();
+            if (abortCall != null) abortCall.run();
+        });
         // The transport runs on its own virtual thread, which inherits no OTel context; the
         // wrap carries the span so the HTTP client span nests under it.
         var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
         var wire = wireFor(request);
         Thread.ofVirtual().name("llm-stream").start(call.context().wrap(() ->
                 streamOnce(wire, request, observedChunk, observedComplete, observedError,
-                        cancelTransport::set, channel, true)));
+                        publishTransport, channel, true)));
     }
 
     /**
@@ -867,7 +885,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                     accumulator.error = e;
                     accumulator.markComplete();
                 },
-                maxTokens, thinkingMode, channel);
+                maxTokens, thinkingMode, channel, accumulator::cancelWith);
 
         return accumulator;
     }

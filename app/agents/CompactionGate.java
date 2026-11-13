@@ -144,6 +144,7 @@ public final class CompactionGate {
             return current;
         }
 
+        RouteSpeculation.yieldBeforeInlineCompaction(conversationId);
         long startNs = System.nanoTime();
         var progress = CompactionProgress.open(estimatedTokens);
         var running = RUNNING.get(conversationId);

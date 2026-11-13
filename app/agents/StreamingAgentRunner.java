@@ -8,6 +8,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import llm.routing.RouteDecision;
 import llm.routing.RoutedTurn;
 import llm.routing.SubscriptionUsage;
 import memory.MemoryAutoCapture;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -385,7 +387,8 @@ final class StreamingAgentRunner {
 
     /**
      * Phase 2 entry: a conversation on the model router (JCLAW-1222) gets its model chosen first and the
-     * whole loop bound to that choice; any other conversation runs the loop as it is.
+     * whole loop bound to that choice; any other conversation runs the loop as it is. A routed turn that may speculate
+     * starts its call on the previous turn's model while the router decides ({@link RouteSpeculation}).
      */
     @SuppressWarnings("java:S107") // streamLlmLoop's call surface plus the turn's attachments
     private static void streamRoutedLlmLoop(Agent agent, Conversation conversation, String channelType,
@@ -395,16 +398,27 @@ final class StreamingAgentRunner {
                                             TurnCancellation.Registration[] yieldKillRef)
             throws InterruptedException {
         var embedding = QueryEmbedPrefetch.startForRoutedTurn(agent, conversation, userMessage, trace);
-        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType, trace);
-        if (route == null) {
-            if (TurnRouting.usesRouter(agent, conversation)) {
-                cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
-                return;
-            }
+        if (!TurnRouting.usesRouter(agent, conversation)) {
             FallbackTurn.run(agent, conversation, () -> {
                 streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink, yieldKillRef);
                 return null;
             });
+            return;
+        }
+        var prior = TurnRouting.priorTurn(conversation);
+        var speculation = RouteSpeculation.start(agent, conversation, prior, userMessage, attachments, channelType,
+                trace);
+        if (speculation != null) {
+            QueryEmbedPrefetch.callWith(embedding, () -> {
+                streamSpeculatively(speculation, agent, conversation, channelType, userMessage, isCancelled, cb, trace,
+                        sink, yieldKillRef);
+                return null;
+            });
+            return;
+        }
+        var route = TurnRouting.decide(agent, conversation, prior, userMessage, attachments, channelType, trace);
+        if (route == null) {
+            cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
             return;
         }
         QueryEmbedPrefetch.callWith(embedding, () -> RoutedTurn.callWith(route, conversation, () -> {
@@ -415,41 +429,143 @@ final class StreamingAgentRunner {
         }));
     }
 
-    /**
-     * Phase 2 of streaming: assemble the prompt, resolve the provider, and run
-     * the streaming LLM call loop (including tool-call continuation, retry on
-     * transient errors, truncation handling, and usage reporting).
-     */
-    // S107: the loop's surface plus the turn's yield-kill slot. MustBeClosed: the kill stays armed in that slot until a
-    // terminal closes it, just before the release (runStreaming).
-    @SuppressWarnings({"java:S107", "MustBeClosed"})
-    private static void streamLlmLoop(Agent agent, Conversation conversation,
-                                       String channelType, String userMessage,
-                                       AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
-                                       LatencyTrace trace, AgentExecutionSink sink,
-                                       TurnCancellation.Registration[] yieldKillRef)
-            throws InterruptedException {
+    /** A round 1 started on the previous turn's model while the router decided, with the inputs it was built on. */
+    private record Speculated(Round1Request request, LlmProvider.StreamAccumulator call,
+                              RouteSpeculation.ModelInputs inputs, long startedNanos) {
+        long runningMs() {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        }
+    }
 
+    /** What a speculated turn hands {@link #streamLlmLoop}: the round 1 the route kept, or the call it discarded. */
+    private record SpeculationOutcome(Long conversationId, @Nullable Speculated kept,
+                                      LlmProvider.TurnUsage.@Nullable DiscardedCall discarded) {}
+
+    private static final ScopedValue<SpeculationOutcome> SPECULATION = ScopedValue.newInstance();
+
+    private static @Nullable SpeculationOutcome speculationFor(Conversation conversation) {
+        if (!SPECULATION.isBound()) return null;
+        var outcome = SPECULATION.get();
+        return outcome.conversationId().equals(conversation.id) ? outcome : null;
+    }
+
+    /**
+     * JF-377: build the prompt for the previous turn's model and start its call, its output held, while the router
+     * decides on another thread. A route that keeps the model and every input the request took from it releases the
+     * held output, and the turn goes on from that call; any other route cancels it and runs the turn on its own model.
+     */
+    @SuppressWarnings("java:S107") // streamLlmLoop's call surface plus the speculation
+    private static void streamSpeculatively(RouteSpeculation speculation, Agent agent, Conversation conversation,
+                                            String channelType, String userMessage, AtomicBoolean isCancelled,
+                                            AgentRunner.StreamingCallbacks cb, LatencyTrace trace,
+                                            AgentExecutionSink sink, TurnCancellation.Registration[] yieldKillRef)
+            throws InterruptedException {
+        var held = new RouteSpeculation.Held(cb);
+        Speculated started;
+        try {
+            started = speculation.onPreviousModel(conversation,
+                    () -> startRound1(agent, conversation, channelType, userMessage, isCancelled, held.callbacks(), trace));
+        } catch (RouteSpeculation.Abandoned _) {
+            started = null;
+        }
+        if (started == null && CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
+        RouteDecision route;
+        try {
+            route = speculation.awaitRoute();
+        } catch (RuntimeException | Error e) {
+            if (started != null) discard(started, held, trace);
+            throw e;
+        }
+        if (route == null) {
+            if (started != null) discard(started, held, trace);
+            cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
+            return;
+        }
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) {
+            if (started != null) discard(started, held, trace);
+            return;
+        }
+        var speculated = started;
+        RoutedTurn.callWith(route, conversation, () -> {
+            var kept = speculated != null
+                    && speculated.inputs().equals(RouteSpeculation.ModelInputs.of(agent, conversation)) ? speculated : null;
+            LlmProvider.TurnUsage.DiscardedCall discarded = null;
+            if (kept != null) {
+                trace.recordRouteSpeculation(true, kept.runningMs());
+            } else if (speculated != null) {
+                discarded = discard(speculated, held, trace);
+                var reason = route.primary().equals(speculation.target())
+                        ? "its request no longer matches the route (thinking level or model settings)"
+                        : "the router chose " + route.primary().describe();
+                EventLogger.info("router", agent.name, channelType, "Discarded the call started on %s while the router decided: %s"
+                        .formatted(speculation.target().describe(), reason));
+            }
+            cb.onStatus().accept(routeFrame(agent, conversation));
+            if (kept != null) held.release();
+            var outcome = new SpeculationOutcome(Objects.requireNonNull(conversation.id), kept, discarded);
+            ScopedValue.where(SPECULATION, outcome).call(() -> {
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink, yieldKillRef);
+                return null;
+            });
+            return null;
+        });
+    }
+
+    private static LlmProvider.TurnUsage.DiscardedCall discard(Speculated started, RouteSpeculation.Held held,
+                                                               LatencyTrace trace) {
+        var discarded = RouteSpeculation.discard(started.call(), held, started.inputs());
+        trace.recordRouteSpeculation(false, started.runningMs());
+        return discarded;
+    }
+
+    /** The prompt build and round 1's dispatch, under the previous turn's model; null when the build ended the turn. */
+    private static @Nullable Speculated startRound1(Agent agent, Conversation conversation, String channelType,
+                                                    String userMessage, AtomicBoolean isCancelled,
+                                                    AgentRunner.StreamingCallbacks held, LatencyTrace trace) {
+        var request = prepareRound1(agent, conversation, channelType, userMessage, isCancelled, held, trace);
+        if (request == null) return null;
+        var inputs = RouteSpeculation.ModelInputs.of(agent, conversation);
+        long startedNanos = System.nanoTime();
+        // streamFirstRoundWithRetry's first dispatch, with the null fallback a routed turn's round 1 takes.
+        var call = LlmProvider.chatStreamAccumulateWithFailover(request.primary(), null,
+                Objects.requireNonNull(inputs.modelId(), "agent has no model configured"),
+                request.prepared().messages(), request.prepared().tools(), held.onToken(), held.onReasoning(),
+                request.maxTokens(), request.thinkingMode(), channelType);
+        return new Speculated(request, call, inputs, startedNanos);
+    }
+
+    /** Round 1's request as the prompt build left it, for the model the turn's route binds. */
+    private record Round1Request(LlmProvider primary, AgentPromptPreparer.PreparedPrologue prepared,
+                                 @Nullable String thinkingMode, @Nullable Integer maxTokens,
+                                 @Nullable ModelInfo modelInfo, boolean supportsAudio) {}
+
+    /**
+     * Phase 2's prologue: resolve the provider, build and rewrite the prompt, and size the call. Null when the turn
+     * ended here, its callbacks already told: no provider, or a cancel.
+     */
+    private static @Nullable Round1Request prepareRound1(Agent agent, Conversation conversation, String channelType,
+                                                         String userMessage, AtomicBoolean isCancelled,
+                                                         AgentRunner.StreamingCallbacks cb, LatencyTrace trace) {
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
 
         var primary = resolveStreamingProvider(agent, conversation, channelType, cb);
-        if (primary == null) return;
+        if (primary == null) return null;
 
-        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return null;
 
         var prepared = AgentPromptPreparer.buildStreamingPrologue(agent, conversation, channelType, userMessage);
 
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_BUILT);
 
-        var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
-        var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
-        var supportsVisionForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsVision();
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
+        var supportsAudioForStream = modelInfo != null && modelInfo.supportsAudio();
+        var supportsVisionForStream = modelInfo != null && modelInfo.supportsVision();
         prepared = rewriteReportingCompaction(agent, conversation, primary, prepared,
                 supportsAudioForStream, supportsVisionForStream, cb.onStatus());
         var messages = prepared.messages();
 
-        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return null;
 
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
@@ -461,17 +577,51 @@ final class StreamingAgentRunner {
                                 messages.size(), tools.size(), prepared.assembled().skills().size(),
                                 thinkingMode != null ? ", thinking=" + thinkingMode : ""));
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
-        var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
+
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        return new Round1Request(primary, prepared, thinkingMode, maxTokens, modelInfo, supportsAudioForStream);
+    }
+
+    /**
+     * Phase 2 of streaming: assemble the prompt, resolve the provider, and run
+     * the streaming LLM call loop (including tool-call continuation, retry on
+     * transient errors, truncation handling, and usage reporting). A speculated
+     * turn's round 1, when its route kept it, stands in for the prompt build
+     * and the first dispatch.
+     */
+    // S107: the loop's surface plus the turn's yield-kill slot. MustBeClosed: the kill stays armed in that slot until a
+    // terminal closes it, just before the release (runStreaming).
+    @SuppressWarnings({"java:S107", "MustBeClosed"})
+    private static void streamLlmLoop(Agent agent, Conversation conversation,
+                                       String channelType, String userMessage,
+                                       AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
+                                       LatencyTrace trace, AgentExecutionSink sink,
+                                       TurnCancellation.Registration[] yieldKillRef)
+            throws InterruptedException {
+
+        var speculation = speculationFor(conversation);
+        var kept = speculation != null ? speculation.kept() : null;
+        var request = kept != null ? kept.request()
+                : prepareRound1(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+        if (request == null) return;
+        var primary = request.primary();
+        var prepared = request.prepared();
+        var messages = prepared.messages();
+        var tools = prepared.tools();
+        var thinkingMode = request.thinkingMode();
+        var maxTokens = request.maxTokens();
+        var modelInfo = request.modelInfo();
 
         // Stream with tool call handling (HTTP, no JPA)
-        trace.mark(LatencyTrace.PROLOGUE_DONE);
-        var streamStartMs = System.currentTimeMillis();
+        var streamStartMs = System.currentTimeMillis() - (kept != null ? kept.runningMs() : 0L);
         // Turn-level cumulative usage. Each LLM round (first round here, plus
         // any tool-result continuation rounds inside handleToolCallsStreaming)
         // folds its per-round usage into this object. buildUsageJson below
         // reads from this cumulative so stats pills reflect the whole turn,
         // not just round 1 (JCLAW-76).
         var turnUsage = new LlmProvider.TurnUsage();
+        var discarded = speculation != null ? speculation.discarded() : null;
+        if (discarded != null) turnUsage.discarded(discarded);
         // JCLAW-108: route the actual LLM call through the effective modelId,
         // so conversation overrides take effect on the wire. Failover and
         // tool-loop continuations use the same effective id.
@@ -489,8 +639,8 @@ final class StreamingAgentRunner {
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
         // (no-longer-audio) messages rather than re-sending the rejected audio.
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
-                maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream,
-                roundOneFallback);
+                maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, request.supportsAudio(),
+                roundOneFallback, kept != null ? kept.call() : null);
         if (round1 == null) return; // canceled mid-stream
         var accumulator = round1.accumulator();
         messages = round1.messages();
@@ -509,7 +659,7 @@ final class StreamingAgentRunner {
             fallback = ModelResolver.fallbackFor(agent, conversation);
             roundOneFallback = fallback;
             accumulator = streamFirstRoundWithRetry(primary, effectiveModelIdForCall, messages, tools, cb,
-                    maxTokens, thinkingMode, channelType, isCancelled, agent, fallback);
+                    maxTokens, thinkingMode, channelType, isCancelled, agent, fallback, null);
             if (accumulator == null) return; // canceled mid-stream
             if (accumulator.error() != null) SubscriptionUsage.noteFailure(accumulator.error());
         }
@@ -635,7 +785,8 @@ final class StreamingAgentRunner {
 
     /**
      * Run the round-1 streaming call and retry once on transient HTTP 5xx errors.
-     * Returns {@code null} when cancellation fired during either await.
+     * Returns {@code null} when cancellation fired during either await. A
+     * {@code started} call, already dispatched, is awaited in place of the first.
      *
      * <p>JCLAW-1182: the dispatch is secondary-aware, the way the synchronous loop's has been
      * since JCLAW-300. Only the breaker-open case fails over, and it is the only one that can:
@@ -647,9 +798,10 @@ final class StreamingAgentRunner {
             @Nullable List<ToolDef> tools,
             AgentRunner.StreamingCallbacks cb, @Nullable Integer maxTokens,
             @Nullable String thinkingMode, @Nullable String channelType,
-            AtomicBoolean isCancelled, Agent agent, LlmProvider.@Nullable Fallback fallback)
+            AtomicBoolean isCancelled, Agent agent, LlmProvider.@Nullable Fallback fallback,
+            LlmProvider.@Nullable StreamAccumulator started)
             throws InterruptedException {
-        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(
+        var accumulator = started != null ? started : LlmProvider.chatStreamAccumulateWithFailover(
                 primary, fallback, effectiveModelIdForCall, messages, tools,
                 cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode, channelType);
 
@@ -687,7 +839,7 @@ final class StreamingAgentRunner {
      * guard is what makes the re-stream safe (a partially-streamed reply can't be un-sent). When no
      * usable transcript results (Whisper failed/timed out) the original 4xx is surfaced unchanged.
      */
-    @SuppressWarnings("java:S107") // mirrors streamFirstRoundWithRetry's call surface + audio context
+    @SuppressWarnings("java:S107") // mirrors streamFirstRoundWithRetry's call surface + audio context and a started call
     private static @Nullable StreamRound1 streamRound1WithAudioFallback(
             LlmProvider primary, String effectiveModelId, List<ChatMessage> messages,
             @Nullable List<ToolDef> tools,
@@ -695,9 +847,10 @@ final class StreamingAgentRunner {
             @Nullable String thinkingMode, @Nullable String channelType,
             AtomicBoolean isCancelled, Agent agent, Conversation conversation,
             AgentPromptPreparer.PreparedPrologue prepared,
-            boolean supportsAudio, LlmProvider.@Nullable Fallback fallback) throws InterruptedException {
+            boolean supportsAudio, LlmProvider.@Nullable Fallback fallback,
+            LlmProvider.@Nullable StreamAccumulator started) throws InterruptedException {
         var acc = streamFirstRoundWithRetry(primary, effectiveModelId, messages, tools, cb, maxTokens,
-                thinkingMode, channelType, isCancelled, agent, fallback);
+                thinkingMode, channelType, isCancelled, agent, fallback, started);
         if (acc == null) return null;
 
         if (prepared.audioBearers().isEmpty()) return new StreamRound1(acc, messages); // no audio → no log
@@ -716,7 +869,7 @@ final class StreamingAgentRunner {
                     "Provider %s rejected the audio format; retrying with a Whisper transcript"
                             .formatted(primary.config().name()));
             var retry = streamFirstRoundWithRetry(primary, effectiveModelId, rewritten, tools, cb, maxTokens,
-                    thinkingMode, channelType, isCancelled, agent, fallback);
+                    thinkingMode, channelType, isCancelled, agent, fallback, null);
             if (retry == null) return null;
             AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
                     retry.error() == null ? "downgraded" : OUTCOME_ERROR,

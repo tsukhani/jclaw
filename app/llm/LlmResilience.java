@@ -404,6 +404,15 @@ public final class LlmResilience {
             breaker.recordFailure(probeWindow);
         }
 
+        /**
+         * The caller cancelled the stream (JF-377), which says nothing about the provider, so no outcome is charged.
+         * A HALF_OPEN probe still hands its permit back, by the success the 4xx rule above reports.
+         */
+        public void cancelled() {
+            retire();
+            if (claim() && holdsPermit()) breaker.recordSuccess(0L, probeWindow);
+        }
+
         private boolean holdsPermit() {
             return probeWindow == CircuitBreaker.ANY_WINDOW
                     ? breaker.state() == CircuitBreaker.State.HALF_OPEN

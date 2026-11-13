@@ -3,6 +3,7 @@ package agents;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.routing.ModelRouter;
+import llm.routing.ReasoningEffort;
 import llm.routing.RouteDecision;
 import llm.routing.RouteDecision.Target;
 import llm.routing.TaskClass;
@@ -22,6 +23,7 @@ import utils.LatencyTrace;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Routes a turn whose conversation runs on {@code router/auto} (JCLAW-1222): reads what the previous
@@ -34,9 +36,13 @@ public final class TurnRouting {
 
     private TurnRouting() {}
 
-    /** The previous turn as the router reads it; the class and model are null unless it was routed. */
-    public record PriorTurn(@Nullable TaskClass taskClass, @Nullable Target target, int toolCalls, int promptTokens) {
-        static final PriorTurn NONE = new PriorTurn(null, null, 0, 0);
+    /**
+     * The previous turn as the router reads it; the class, effort and model are null unless it was routed, and the
+     * effort also on a record saved before routes carried it.
+     */
+    public record PriorTurn(@Nullable TaskClass taskClass, @Nullable ReasoningEffort effort, @Nullable Target target,
+                            int toolCalls, int promptTokens) {
+        static final PriorTurn NONE = new PriorTurn(null, null, null, 0, 0);
     }
 
     /** True when the conversation's configured model is the router. */
@@ -54,12 +60,7 @@ public final class TurnRouting {
                                                  @Nullable List<AttachmentService.Input> attachments,
                                                  @Nullable String channel, @Nullable LatencyTrace trace) {
         if (!usesRouter(agent, conversation)) return null;
-        long startNs = System.nanoTime();
-        try {
-            return decide(agent, conversation, userMessage, attachments, channel);
-        } finally {
-            if (trace != null) trace.recordRoute(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs));
-        }
+        return timed(trace, () -> decide(agent, conversation, userMessage, attachments, channel));
     }
 
     /** {@link #decide(Agent, Conversation, String, List, String, LatencyTrace)} for a turn whose prologue is not timed. */
@@ -67,9 +68,39 @@ public final class TurnRouting {
                                                  @Nullable List<AttachmentService.Input> attachments,
                                                  @Nullable String channel) {
         if (!usesRouter(agent, conversation)) return null;
+        return route(agent, priorTurn(conversation), userMessage, attachments, channel);
+    }
+
+    /**
+     * {@link #decide(Agent, Conversation, String, List, String, LatencyTrace)} on {@code prior}, already read with
+     * {@link #priorTurn}.
+     */
+    public static @Nullable RouteDecision decide(Agent agent, Conversation conversation, PriorTurn prior,
+                                                 String userMessage, @Nullable List<AttachmentService.Input> attachments,
+                                                 @Nullable String channel, @Nullable LatencyTrace trace) {
+        if (!usesRouter(agent, conversation)) return null;
+        return timed(trace, () -> route(agent, prior, userMessage, attachments, channel));
+    }
+
+    private static @Nullable RouteDecision timed(@Nullable LatencyTrace trace, Supplier<@Nullable RouteDecision> route) {
+        long startNs = System.nanoTime();
+        try {
+            return route.get();
+        } finally {
+            if (trace != null) trace.recordRoute(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs));
+        }
+    }
+
+    /** The previous turn of {@code conversation} since its {@code /reset}, or none for an unsaved one. */
+    public static PriorTurn priorTurn(Conversation conversation) {
         var conversationId = conversation.id;
         var since = conversation.contextSince;
-        var prior = conversationId != null ? Tx.run(() -> readPriorTurn(conversationId, since)) : PriorTurn.NONE;
+        return conversationId != null ? Tx.run(() -> readPriorTurn(conversationId, since)) : PriorTurn.NONE;
+    }
+
+    private static @Nullable RouteDecision route(Agent agent, PriorTurn prior, String userMessage,
+                                                 @Nullable List<AttachmentService.Input> attachments,
+                                                 @Nullable String channel) {
         var request = new ModelRouter.RouteRequest(userMessage, prior.taskClass(), prior.target(),
                 prior.toolCalls(), prior.promptTokens() + userMessage.length() / 4,
                 hasKind(attachments, MessageAttachment.KIND_IMAGE), hasKind(attachments, MessageAttachment.KIND_AUDIO),
@@ -95,12 +126,14 @@ public final class TurnRouting {
         if (assistant == null) return PriorTurn.NONE;
         var usage = parseObject(assistant.usageJson);
         TaskClass taskClass = null;
+        ReasoningEffort effort = null;
         Target target = null;
         var promptTokens = 0;
         if (usage != null) {
             var route = usage.get("route");
             if (route != null && route.isJsonObject()) {
                 taskClass = TaskClass.fromId(JsonArgs.optString(route.getAsJsonObject(), "class"));
+                effort = ReasoningEffort.fromId(JsonArgs.optString(route.getAsJsonObject(), "effort"));
                 var provider = JsonArgs.optString(usage, "modelProvider");
                 var model = JsonArgs.optString(usage, "modelId");
                 if (provider != null && model != null) target = new Target(provider, model);
@@ -113,7 +146,7 @@ public final class TurnRouting {
         var toolCalls = user == null ? 0L : Message.count(
                 "conversation.id = ?1 AND role = ?2 AND createdAt > ?3 AND createdAt < ?4",
                 conversationId, MessageRole.TOOL.value, user.createdAt, assistant.createdAt);
-        return new PriorTurn(taskClass, target, (int) Math.min(toolCalls, Integer.MAX_VALUE), promptTokens);
+        return new PriorTurn(taskClass, effort, target, (int) Math.min(toolCalls, Integer.MAX_VALUE), promptTokens);
     }
 
     private static boolean hasKind(@Nullable List<AttachmentService.Input> attachments, String kind) {

@@ -16,6 +16,7 @@ import services.decision.OllamaDecision;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -51,6 +52,8 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     public static final String JEV = "jev";
     /** Absent means true: credit protection is what an operator who has set nothing should get. */
     public static final String PREFER_PREPAID = "router.preferPrepaid";
+    /** Absent means {@link Speculation#PREPAID}. */
+    public static final String SPECULATE = "router.speculate";
     public static final double DEFAULT_DOWNSHIFT_AT = 0.75;
     public static final double DEFAULT_EXHAUSTED_AT = 0.95;
     public static final int DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 8;
@@ -58,6 +61,35 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     public static final double DEFAULT_JEV_MIN_CONFIDENCE = 0.50;
 
     private static final String MODELS_SUFFIX = ".models";
+
+    /**
+     * Where a routed turn may start its model call on the previous turn's model while the router decides (JF-377). A
+     * call the router then overrules is discarded, and its provider bills it all the same.
+     */
+    public enum Speculation {
+        /** Only on a subscription or self-hosted provider, whose bill a discarded call does not raise. */
+        PREPAID,
+        ALL,
+        OFF;
+
+        public String id() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        public static @Nullable Speculation fromId(@Nullable String id) {
+            if (id == null) return null;
+            for (var s : values()) {
+                if (s.id().equals(id.trim())) return s;
+            }
+            return null;
+        }
+    }
+
+    /** The operator's {@link #SPECULATE}, {@link Speculation#PREPAID} when unset. */
+    public static Speculation speculation() {
+        var mode = Speculation.fromId(ConfigService.get(SPECULATE));
+        return mode != null ? mode : Speculation.PREPAID;
+    }
 
     /** One configured model, in the order the operator ranked it. */
     public record Candidate(String provider, String model) {
@@ -146,12 +178,15 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                     || "false".equalsIgnoreCase(String.valueOf(value).trim())
                     ? null : PREFER_PREPAID + " must be true or false.";
         }
+        if (key.equals(SPECULATE)) {
+            return Speculation.fromId(value) != null ? null : SPECULATE + " must be prepaid, all or off.";
+        }
         for (var c : TaskClass.values()) {
             if (key.equals(modelsKey(c))) return modelsRejection(key, value);
         }
         return key + " is not a router setting. Use " + modelsKey(TaskClass.CHAT)
                 + " (or another task class: summarize, agentic, reasoning, coding), "
-                + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + PREFER_PREPAID + ", " + CLASSIFIER_PROVIDER
+                + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + PREFER_PREPAID + ", " + SPECULATE + ", " + CLASSIFIER_PROVIDER
                 + ", " + CLASSIFIER_MODEL + ", " + CLASSIFIER_TIMEOUT_SECONDS + " or " + JEV_MIN_CONFIDENCE + ".";
     }
 
