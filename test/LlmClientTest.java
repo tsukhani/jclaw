@@ -505,26 +505,85 @@ class LlmClientTest extends UnitTest {
     }
 
     @Test
-    void openrouter_cache_trailingToolMessageSkipsBreakpoint() {
-        // Mid-round tool loop case: last message is role=tool. No cache tag
-        // on that message (would be wasted — tool_result text varies every
-        // call). System breakpoint still fires.
-        var req = chatRequest("anthropic/claude-3-7-sonnet",
-                List.of(llm.LlmTypes.ChatMessage.system("sys"),
-                        llm.LlmTypes.ChatMessage.user("hello"),
-                        llm.LlmTypes.ChatMessage.toolResult("call_1", "web_fetch", "tool output")));
+    void openrouter_cache_aToolRoundPutsTheHistoryBreakpointOnTheLastToolResult() {
+        // JF-366: rounds 2 onward used to carry system breakpoints alone, so the provider
+        // prefilled the whole history again every round. A tool result never changes once
+        // written, so a breakpoint there lets the next round read all of it.
+        var req = chatRequest("anthropic/claude-3-7-sonnet", toolRound(llm.LlmTypes.ChatMessage.user("look it up")));
 
         var body = serialize(openRouterProvider(), req);
         var messages = body.getAsJsonArray("messages");
-        var last = messages.get(messages.size() - 1).getAsJsonObject();
+        var tool = messages.get(messages.size() - 1).getAsJsonObject();
+        var blocks = tool.getAsJsonArray("content");
 
-        assertEquals("tool", last.get("role").getAsString());
-        // tool_result content stays as a plain string — breakpoint B did NOT
-        // touch it (it walks away early on non-user trailing messages).
-        assertTrue(last.get("content").isJsonPrimitive(),
-                "tool_result must stay as plain string, not block-array");
-        // System breakpoint still applied.
-        assertTrue(firstSystem(body).get("content").isJsonArray());
+        assertEquals("tool", tool.get("role").getAsString());
+        assertEquals(1, blocks.size());
+        assertEquals("tool output", blocks.get(0).getAsJsonObject().get("text").getAsString());
+        assertEquals("ephemeral", blocks.get(0).getAsJsonObject().getAsJsonObject("cache_control")
+                .get("type").getAsString());
+        assertFalse(tool.has("cache_control"), "OpenRouter refuses a marker on the tool message itself");
+        assertFalse(messages.get(1).toString().contains("cache_control"),
+                "one history breakpoint, on the last stable message: the user's message carries none");
+        assertTrue(firstSystem(body).get("content").isJsonArray(), "the system breakpoint still applies");
+    }
+
+    @Test
+    void openrouter_cache_onAToolRoundTheTurnsClockStaysInsideTheCachedPrefix() {
+        // The clock is fixed for the whole turn, so on a tool round it sits before the
+        // breakpoint and is read back with the rest; only the turn's first call leaves it
+        // past the breakpoint (JCLAW-900).
+        var req = chatRequest("anthropic/claude-3-7-sonnet", toolRound(
+                llm.LlmTypes.ChatMessage.user("follow-up"),
+                llm.LlmTypes.ChatMessage.user(agents.CurrentTimeInjector.block())));
+
+        var messages = serialize(openRouterProvider(), req).getAsJsonArray("messages");
+        var clock = messages.get(2).getAsJsonObject();
+        var tool = messages.get(messages.size() - 1).getAsJsonObject();
+
+        assertTrue(clock.get("content").isJsonPrimitive(), "the clock message is left as it is");
+        assertTrue(tool.getAsJsonArray("content").get(0).getAsJsonObject().has("cache_control"));
+    }
+
+    @Test
+    void openrouter_cache_aTrailingAssistantDraftGetsNoBreakpoint() {
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("sys"),
+                        llm.LlmTypes.ChatMessage.user("hello"),
+                        llm.LlmTypes.ChatMessage.assistant("")));
+
+        var messages = serialize(openRouterProvider(), req).getAsJsonArray("messages");
+
+        assertFalse(messages.get(1).toString().contains("cache_control"));
+        assertFalse(messages.get(2).toString().contains("cache_control"));
+    }
+
+    @Test
+    void openrouter_cache_aToolRoundStaysWithinTheBreakpointBudget() {
+        var core = agents.SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER;
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var messages = new java.util.ArrayList<>(toolRound(llm.LlmTypes.ChatMessage.user("look it up")));
+        messages.set(0, llm.LlmTypes.ChatMessage.system("stable\n" + core + "\ncore\n" + marker + "\ndynamic"));
+
+        assertEquals(3, breakpointCount(messages),
+                "the two system breakpoints and one on the last tool result, within Anthropic's 4");
+    }
+
+    @Test
+    void openrouter_cache_aToolRoundOnAModelWithoutExplicitCachingGetsNoBreakpoint() {
+        var req = chatRequest("openai/gpt-4", toolRound(llm.LlmTypes.ChatMessage.user("look it up")));
+
+        assertFalse(serialize(openRouterProvider(), req).toString().contains("cache_control"));
+    }
+
+    /** {@code system}, then {@code head}, then an assistant call to web_fetch and its result. */
+    private static List<llm.LlmTypes.ChatMessage> toolRound(llm.LlmTypes.ChatMessage... head) {
+        var messages = new java.util.ArrayList<llm.LlmTypes.ChatMessage>();
+        messages.add(llm.LlmTypes.ChatMessage.system("sys"));
+        messages.addAll(List.of(head));
+        messages.add(llm.LlmTypes.ChatMessage.assistant("", List.of(
+                new ToolCall("call_1", "function", new FunctionCall("web_fetch", "{}")))));
+        messages.add(llm.LlmTypes.ChatMessage.toolResult("call_1", "web_fetch", "tool output"));
+        return messages;
     }
 
     @Test

@@ -99,18 +99,18 @@ public final class OpenRouterProvider extends LlmProvider {
         // JCLAW-128: two-breakpoint strategy for Anthropic-routed models. Under
         // Anthropic's canonical tools → system → messages ordering, a breakpoint
         // on the stable system prefix caches (tools + stable system), and a
-        // second breakpoint on the trailing user message extends the cached
-        // prefix through the full conversation history. Each turn only re-
-        // prefills the one new user message; multi-round tool loops within a
-        // turn reuse the breakpoint from the previous round. Anthropic permits
-        // up to 4 cache breakpoints per request — we emit 2.
+        // second breakpoint on the history's last stable message extends the
+        // cached prefix through the conversation: the user's message on a turn's
+        // first call, the last tool result on a tool round (JF-366). Anthropic
+        // permits up to 4 cache breakpoints per request — we emit at most 3,
+        // two on the system blocks and one on the history.
         //
         // OpenAI/DeepSeek/Grok/Gemini 2.5 cache implicitly and need no directive.
         // The else-branch leaves the marker in place deliberately — LlmProvider scrubs it
         // after this hook returns, for every provider at once.
         if (requiresExplicitCacheControl(chatRequest.model())) {
             splitSystemMessageAtCacheBoundary(request);
-            injectTrailingUserMessageCacheBreakpoint(request);
+            injectHistoryCacheBreakpoint(request);
         }
     }
 
@@ -204,17 +204,18 @@ public final class OpenRouterProvider extends LlmProvider {
 
     /**
      * Attach {@code cache_control: ephemeral} to the last block of the final
-     * message when that message's role is {@code user}. No-op otherwise —
-     * during multi-round tool loops the final message is {@code tool}, and
-     * mid-stream the final message may be an empty {@code assistant} draft;
-     * neither should receive a cache tag.
+     * message, the clock block aside, when that message is the user's or a tool
+     * result. A tool result never changes once written, so on a tool round the
+     * breakpoint there lets each round read the history the round before wrote;
+     * with the user's message as the only anchor, rounds 2 onward carried system
+     * breakpoints alone and prefilled the whole history again (JF-366). An
+     * {@code assistant} draft, which may be empty mid-stream, gets none.
      *
-     * Effect: the cached prefix extends through the full conversation history
-     * up to and including the current user turn. On the next turn (or the
-     * next tool-loop round), everything up to this breakpoint is eligible for
-     * a cache read.
+     * <p>On a tool message the marker goes on a content part: OpenRouter moves a
+     * part's marker onto Anthropic's {@code tool_result} block and refuses one on
+     * the message itself, as Hermes found ({@code agent/prompt_caching.py}).
      */
-    private static void injectTrailingUserMessageCacheBreakpoint(JsonObject request) {
+    private static void injectHistoryCacheBreakpoint(JsonObject request) {
         if (!request.has(FIELD_MESSAGES) || !request.get(FIELD_MESSAGES).isJsonArray()) return;
         var messages = request.getAsJsonArray(FIELD_MESSAGES);
         if (messages.isEmpty()) return;
@@ -232,7 +233,9 @@ public final class OpenRouterProvider extends LlmProvider {
         var last = messages.get(idx);
         if (!last.isJsonObject()) return;
         var msg = last.getAsJsonObject();
-        if (!msg.has("role") || !MessageRole.USER.value.equals(msg.get("role").getAsString())) return;
+        if (!msg.has("role")) return;
+        var role = msg.get("role").getAsString();
+        if (!MessageRole.USER.value.equals(role) && !MessageRole.TOOL.value.equals(role)) return;
 
         var blocks = ensureBlockArrayContent(msg);
         if (blocks == null || blocks.isEmpty()) return;
