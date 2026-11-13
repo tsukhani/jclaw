@@ -23,8 +23,10 @@ import services.ConversationService;
 import services.EventLogger;
 import services.SubagentRegistry;
 import services.Tx;
+import tools.DocumentsTool;
 import tools.FileSystemTools;
 import tools.ShellExecTool;
+import tools.SkillReadTool;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -629,6 +631,149 @@ class ParallelToolExecutionTest extends UnitTest {
             ShellSandboxSync.release();
             deleteDir(AgentService.workspacePath(WORKSPACE_AGENT));
         }
+    }
+
+    // ─── JF-369: reads in the workspace group run at once, writes keep their place ──────────
+
+    /** A workspace-group tool whose call only reads when its arguments say so, recording each call's start and end. */
+    private ToolRegistry.Tool workspaceStub(List<String> events) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return "ws_stub"; }
+            @Override public String description() { return "Reads or writes for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+            @Override public boolean readsOnly(String argsJson) {
+                return "read".equals(ToolRegistry.actionOf(argsJson));
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                var label = com.google.gson.JsonParser.parseString(argsJson).getAsJsonObject().get("label").getAsString();
+                events.add(label + ":start");
+                int nowRunning = concurrentExecutions.incrementAndGet();
+                peakConcurrency.updateAndGet(p -> Math.max(p, nowRunning));
+                try {
+                    Thread.sleep(TOOL_SLEEP_MS);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    concurrentExecutions.decrementAndGet();
+                    events.add(label + ":end");
+                }
+                return "done-" + label;
+            }
+        };
+    }
+
+    private static ToolCall workspaceCall(String action, String label) {
+        return new ToolCall(label, "function", new FunctionCall("ws_stub",
+                "{\"action\":\"%s\",\"label\":\"%s\"}".formatted(action, label)));
+    }
+
+    private List<ChatMessage> runWorkspaceCalls(List<String> events, ToolCall... calls) throws Exception {
+        ToolRegistry.publish(List.of(workspaceStub(events)));
+        long[] ids = seedAgentAndConversation();
+        var messages = new ArrayList<ChatMessage>();
+        invokeParallel(List.of(calls), (Agent) Agent.findById(ids[0]), ids[1], messages, new AtomicBoolean(false));
+        return messages;
+    }
+
+    @Test
+    void threeReadsInOneResponseRunAtTheSameTime() throws Exception {
+        var events = Collections.synchronizedList(new ArrayList<String>());
+        long t0 = System.nanoTime();
+        var messages = runWorkspaceCalls(events,
+                workspaceCall("read", "r1"), workspaceCall("read", "r2"), workspaceCall("read", "r3"));
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        assertEquals(3, peakConcurrency.get(), "the three reads must overlap: " + events);
+        assertTrue(elapsedMs < TOOL_SLEEP_MS * 2,
+                "three %d ms reads took %d ms, where one after another takes %d".formatted(
+                        TOOL_SLEEP_MS, elapsedMs, TOOL_SLEEP_MS * 3));
+        assertEquals(List.of("r1", "r2", "r3"), messages.stream().map(ChatMessage::toolCallId).toList(),
+                "results go back in declared order");
+        assertEquals(List.of("done-r1", "done-r2", "done-r3"), contents(messages));
+    }
+
+    @Test
+    void aWriteWaitsForTheReadsBeforeItAndHoldsBackTheReadsAfterIt() throws Exception {
+        var events = Collections.synchronizedList(new ArrayList<String>());
+        var messages = runWorkspaceCalls(events,
+                workspaceCall("read", "r1"), workspaceCall("read", "r2"), workspaceCall("write", "w"),
+                workspaceCall("read", "r3"), workspaceCall("read", "r4"));
+
+        var writeStart = events.indexOf("w:start");
+        assertTrue(writeStart > events.indexOf("r1:end") && writeStart > events.indexOf("r2:end"), events.toString());
+        var writeEnd = events.indexOf("w:end");
+        assertTrue(events.indexOf("r3:start") > writeEnd && events.indexOf("r4:start") > writeEnd, events.toString());
+        assertEquals(2, peakConcurrency.get(), "two reads at a time, never the write beside one: " + events);
+        assertEquals(List.of("r1", "r2", "w", "r3", "r4"), messages.stream().map(ChatMessage::toolCallId).toList());
+    }
+
+    @Test
+    void aLoneReadBetweenWritesKeepsItsPlace() throws Exception {
+        var events = Collections.synchronizedList(new ArrayList<String>());
+        runWorkspaceCalls(events, workspaceCall("write", "w1"), workspaceCall("read", "r"), workspaceCall("write", "w2"));
+
+        assertEquals(List.of("w1:start", "w1:end", "r:start", "r:end", "w2:start", "w2:end"), events);
+        assertEquals(1, peakConcurrency.get());
+    }
+
+    @Test
+    void aFileReadBeforeAWriteSeesTheOldTextAndOneAfterItTheNew() throws Exception {
+        ToolRegistry.publish(List.of(new FileSystemTools()));
+        try {
+            long[] ids = Tx.run(() -> {
+                var created = AgentService.create(WORKSPACE_AGENT, "test", "test");
+                var conv = ConversationService.create(created, "web", "tester");
+                return new long[]{created.id, conv.id};
+            });
+            Files.writeString(AgentService.workspacePath(WORKSPACE_AGENT).resolve("note.txt"), "old");
+            var read = "{\"action\":\"readFile\",\"path\":\"note.txt\"}";
+            var calls = List.of(
+                    new ToolCall("before-1", "function", new FunctionCall("filesystem", read)),
+                    new ToolCall("before-2", "function", new FunctionCall("filesystem", read)),
+                    new ToolCall("write", "function", new FunctionCall("filesystem",
+                            "{\"action\":\"writeFile\",\"path\":\"note.txt\",\"content\":\"new\"}")),
+                    new ToolCall("after-1", "function", new FunctionCall("filesystem", read)),
+                    new ToolCall("after-2", "function", new FunctionCall("filesystem", read)));
+            var messages = new ArrayList<ChatMessage>();
+            var agent = (Agent) Agent.findById(ids[0]);
+            var conv = (Conversation) Tx.run(() -> ConversationService.findById(ids[1]));
+            DangerousActionGate.withOwnerInitiated(true, () -> {
+                ParallelToolExecutor.executeToolsParallel(calls, agent, ids[1], messages,
+                        null, null, null, new AtomicBoolean(false), new ConversationSink(conv), null);
+                return null;
+            });
+
+            var byId = new java.util.LinkedHashMap<String, String>();
+            for (var m : messages) byId.put(m.toolCallId(), String.valueOf(m.content()));
+            assertEquals(List.of("before-1", "before-2", "write", "after-1", "after-2"), List.copyOf(byId.keySet()));
+            assertTrue(byId.get("before-1").contains("old") && byId.get("before-2").contains("old"), byId.toString());
+            assertTrue(byId.get("after-1").contains("new") && byId.get("after-2").contains("new"), byId.toString());
+            assertFalse(byId.get("after-1").contains("old"), byId.toString());
+        } finally {
+            deleteDir(AgentService.workspacePath(WORKSPACE_AGENT));
+        }
+    }
+
+    @Test
+    void onlyActionsThatReadAreDeclaredReadOnly() {
+        var fs = new FileSystemTools();
+        assertTrue(fs.readsOnly("{\"action\":\"readFile\",\"path\":\"a\"}"));
+        assertTrue(fs.readsOnly("{\"action\":\"listFiles\",\"path\":\".\"}"));
+        for (var action : List.of("writeFile", "appendFile", "editFile", "editLines", "applyPatch")) {
+            assertFalse(fs.readsOnly("{\"action\":\"%s\",\"path\":\"a\"}".formatted(action)), action);
+        }
+        assertFalse(fs.readsOnly("{\"path\":\"a\"}"), "no action");
+        assertFalse(fs.readsOnly("not json"), "malformed arguments");
+        var documents = new DocumentsTool();
+        assertTrue(documents.readsOnly("{\"action\":\"readDocument\",\"path\":\"a.pdf\"}"));
+        assertFalse(documents.readsOnly("{\"action\":\"writeDocument\",\"path\":\"a.pdf\"}"));
+        assertTrue(new SkillReadTool().readsOnly("{}"));
+        assertFalse(new ShellExecTool().readsOnly("{\"command\":\"cat a\"}"), "a command can do anything");
+        assertFalse(ToolRegistry.readsOnly("no_such_tool", "{\"action\":\"readFile\"}"));
+        assertFalse(ToolRegistry.readsOnly("filesystem", null));
     }
 
     private static void deleteDir(Path dir) {

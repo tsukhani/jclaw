@@ -16,6 +16,7 @@ import services.EventLogger;
 import services.SubagentRegistry;
 import services.TaskRunRegistry;
 import utils.LatencyTrace;
+import utils.VirtualThreads;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -365,18 +366,57 @@ public final class ParallelToolExecutor {
         }
     }
 
-    /** Body of one serial work unit: dispatch calls in declared order. */
+    /**
+     * Body of one serial work unit: dispatch calls in declared order, except that a run of two or more calls that only
+     * read ({@link ToolRegistry#readsOnly}) goes at once (JF-369). Any other call is a barrier: it starts once the calls
+     * before it have ended, and nothing after it starts before it ends, so a read sees every write declared ahead of it
+     * and none declared after it (JF-126).
+     */
     private static void runSerialGroup(DispatchContext ctx, ToolRegistry.ToolResult[] results, List<Integer> group) {
         try {
-            for (int idx : group) {
+            int i = 0;
+            while (i < group.size()) {
                 if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
-                results[idx] = runToolCallSafely(
-                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
-                        ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());
+                int end = i;
+                while (end < group.size() && readsOnly(ctx, group.get(end))) end++;
+                if (end - i >= 2) {
+                    runReadsAtOnce(ctx, results, group.subList(i, end));
+                    i = end;
+                } else {
+                    runInGroup(ctx, results, group.get(i));
+                    i++;
+                }
             }
         } finally {
             ctx.latch().countDown();
         }
+    }
+
+    private static boolean readsOnly(DispatchContext ctx, int idx) {
+        var call = ctx.toolCalls().get(idx).function();
+        return ToolRegistry.readsOnly(call.name(), call.arguments());
+    }
+
+    private static void runInGroup(DispatchContext ctx, ToolRegistry.ToolResult[] results, int idx) {
+        if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
+        results[idx] = runToolCallSafely(
+                ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
+                ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());
+    }
+
+    /** One virtual thread per read, carrying the group thread's turn and subagent bindings as each call's own does. */
+    private static void runReadsAtOnce(DispatchContext ctx, ToolRegistry.ToolResult[] results, List<Integer> reads) {
+        var turnTrace = LatencyTrace.current();
+        var subagentRun = SubagentRegistry.currentRun();
+        var tasks = new ArrayList<Runnable>(reads.size());
+        for (int idx : reads) {
+            tasks.add(() -> {
+                try (var _ = LatencyTrace.bind(turnTrace)) {
+                    SubagentRegistry.runAs(subagentRun, () -> runInGroup(ctx, results, idx));
+                }
+            });
+        }
+        VirtualThreads.runAll("agent-tool-read", tasks);
     }
 
     /**

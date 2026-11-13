@@ -17,6 +17,7 @@ import services.LoadTestRunner;
 import services.TaskToolPolicy;
 import services.Tx;
 import utils.ErrorTemplate;
+import utils.JsonArgs;
 import utils.ToolErrorTemplates;
 
 import java.time.Duration;
@@ -284,6 +285,11 @@ public class ToolRegistry {
          *  will receive, so the classification matches the call that would run. */
         default boolean dangerous(String argsJson) { return dangerous(); }
 
+        /** Whether this call only reads, so that in its {@link #serializationGroup() serialization group} it may run at
+         *  the same time as the reads declared next to it (JF-369). A call that changes anything, or one whose effect
+         *  the tool cannot know ({@code exec}), keeps its place in declared order and stays false. */
+        default boolean readsOnly(String argsJson) { return false; }
+
         /** As {@link #dangerous(String)}, for a tool whose danger depends on which agent is calling:
          *  {@code chrome_control} lets only the main agent be exempt from approving a form submit. */
         default boolean dangerous(String argsJson, Agent agent) { return dangerous(argsJson); }
@@ -460,6 +466,22 @@ public class ToolRegistry {
         var tool = tools.get(toolName);
         if (tool == null) return toolName;
         return tool.serializationGroup();
+    }
+
+    /** {@link Tool#readsOnly(String)} of the registered tool; false for an unknown name or arguments that are not a JSON object. */
+    public static boolean readsOnly(@Nullable String toolName, @Nullable String argsJson) {
+        var tool = tools.get(toolName);
+        return tool != null && argsJson != null && tool.readsOnly(argsJson);
+    }
+
+    /** The {@code action} string of a call's arguments, or null when they are not a JSON object or name none. */
+    public static @Nullable String actionOf(String argsJson) {
+        try {
+            var parsed = JsonParser.parseString(argsJson);
+            return parsed.isJsonObject() ? JsonArgs.optString(parsed.getAsJsonObject(), "action") : null;
+        } catch (RuntimeException _) {
+            return null;
+        }
     }
 
     /** JCLAW-382: resolve a tool's {@link Tool#dangerous()} flag by name,

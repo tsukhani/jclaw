@@ -93,6 +93,11 @@ public class DocumentsTool implements ToolRegistry.Tool {
     }
 
     @Override
+    public boolean readsOnly(String argsJson) {
+        return ACTION_READ.equals(ToolRegistry.actionOf(argsJson));
+    }
+
+    @Override
     public List<ToolAction> actions() {
         return List.of(
                 new ToolAction(ACTION_READ,   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),

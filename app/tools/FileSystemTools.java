@@ -78,6 +78,12 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     @Override
+    public boolean readsOnly(String argsJson) {
+        var action = ToolRegistry.actionOf(argsJson);
+        return ACTION_READ_FILE.equals(action) || ACTION_LIST_FILES.equals(action);
+    }
+
+    @Override
     public List<ToolAction> actions() {
         return List.of(
                 new ToolAction(ACTION_READ_FILE,   "Read file content up to 1 MB"),

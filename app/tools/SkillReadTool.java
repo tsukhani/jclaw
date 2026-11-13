@@ -54,6 +54,11 @@ public class SkillReadTool implements ToolRegistry.Tool {
         return ToolRegistry.WORKSPACE_GROUP;
     }
 
+    @Override
+    public boolean readsOnly(String argsJson) {
+        return true;
+    }
+
     /** MAX_CHARS already bounds the result, and a compressed skill would only come back through ccr_retrieve. */
     @Override
     public boolean verbatimResult(String argsJson) {
