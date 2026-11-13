@@ -495,6 +495,62 @@ class HarnessSandboxTest extends UnitTest {
      * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
      * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
      */
+    /**
+     * JF-387: a homeReads folder bound back after the $HOME tmpfs brings back every secret folder inside it, so each
+     * such secret is hidden again after every bind, as macOS denies them last.
+     */
+    @Test
+    void linuxHidesASecretFolderInsideAnAllowedHomeFolderAgain() throws Exception {
+        var home = Files.createTempDirectory("jf387-home");
+        try {
+            var gcloud = Files.createDirectories(home.resolve(".config/gcloud"));
+            var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), home.resolve("ws").toFile(),
+                    List.of(home.resolve(".config").toString()), home.toString(), List.of(), false);
+
+            int bind = indexOfPair(argv, "--ro-bind-try", SandboxHiddenRoots.canonical(home.resolve(".config")).toString());
+            int mask = indexOfPair(argv, "--tmpfs", SandboxHiddenRoots.canonical(gcloud).toString());
+            assertTrue(bind >= 0, "the allowed folder is bound, argv=" + argv);
+            assertTrue(mask > bind, "the secret folder is hidden after the folder holding it, argv=" + argv);
+            assertEquals(List.of("/bin/sh", "-c", "true"), argv.subList(argv.size() - 3, argv.size()));
+        } finally {
+            deleteTree(home);
+        }
+    }
+
+    @Test
+    void linuxCoversASecretFileInsideAnAllowedHomeFolderWithDevNull() throws Exception {
+        var home = Files.createTempDirectory("jf387-home");
+        try {
+            var gcloud = home.resolve(".config/gcloud");
+            Files.createDirectories(gcloud.getParent());
+            Files.writeString(gcloud, "not a folder");
+            var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), home.resolve("ws").toFile(),
+                    List.of(home.resolve(".config").toString()), home.toString(), List.of(), false);
+
+            var masked = SandboxHiddenRoots.canonical(gcloud).toString();
+            int at = argv.indexOf(masked);
+            assertTrue(at >= 2, "argv=" + argv);
+            assertEquals(List.of("--ro-bind", "/dev/null", masked), argv.subList(at - 2, at + 1));
+        } finally {
+            deleteTree(home);
+        }
+    }
+
+    @Test
+    void linuxAddsNoMountForASecretThatDoesNotExist() throws Exception {
+        var home = Files.createTempDirectory("jf387-home");
+        try {
+            Files.createDirectories(home.resolve(".config"));
+            var withSecretAbsent = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), home.resolve("ws").toFile(),
+                    List.of(home.resolve(".config").toString()), home.toString(), List.of(), false);
+
+            assertFalse(withSecretAbsent.contains(SandboxHiddenRoots.canonical(home.resolve(".config/gcloud")).toString()),
+                    "nothing to hide, and a mount point bwrap cannot create would stop the run: " + withSecretAbsent);
+        } finally {
+            deleteTree(home);
+        }
+    }
+
     @Test
     void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
         var home = System.getProperty("user.home");

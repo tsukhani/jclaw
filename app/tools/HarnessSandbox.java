@@ -1167,8 +1167,29 @@ public final class HarnessSandbox {
             out.add(root.toString());
         }
         out.addAll(reopened);
+        out.addAll(homeSecretMasks(allowances, home));
         out.addAll(argv);
         return List.copyOf(out);
+    }
+
+    /**
+     * Hides again each {@link #DENY_READ_HOME} secret that lies inside an allowed folder, which a bind after the
+     * {@code $HOME} tmpfs brought back (JF-387); last, as the macOS profile denies them last. A secret that does not
+     * exist adds nothing: bwrap could not create its mount point inside a read-only bind, and would start nothing.
+     */
+    private static List<String> homeSecretMasks(List<String> allowances, String home) {
+        var homePath = SandboxHiddenRoots.lexical(home);
+        if (homePath == null) return List.of();
+        var allowed = new ArrayList<Path>();
+        for (var a : allowances) allowed.add(SandboxHiddenRoots.canonical(absHome(home, a)));
+        var out = new ArrayList<String>();
+        for (var secret : DENY_READ_HOME) {
+            var path = SandboxHiddenRoots.canonical(homePath.resolve(secret));
+            if (allowed.stream().noneMatch(a -> strictlyBelow(path, a))) continue;
+            if (Files.isDirectory(path)) out.addAll(List.of("--tmpfs", path.toString()));
+            else if (Files.exists(path)) out.addAll(List.of("--ro-bind", "/dev/null", path.toString()));
+        }
+        return out;
     }
 
     /**
