@@ -311,8 +311,10 @@ public final class OpenRouterProvider extends LlmProvider {
      */
     private static boolean requiresExplicitCacheControl(String model) {
         if (model == null) return false;
-        if (model.startsWith("anthropic/") || model.startsWith("qwen/")) return true;
+        // OpenRouter's "latest" aliases (~anthropic/claude-sonnet-latest) name the same family behind a tilde.
+        var id = model.startsWith("~") ? model.substring(1) : model;
+        if (id.startsWith("anthropic/") || id.startsWith("qwen/")) return true;
         // Gemini 2.5 Pro/Flash cache implicitly; older Gemini variants need cache_control.
-        return model.startsWith("google/gemini-") && !model.startsWith("google/gemini-2.5-");
+        return id.startsWith("google/gemini-") && !id.startsWith("google/gemini-2.5-");
     }
 }

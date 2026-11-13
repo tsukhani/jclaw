@@ -575,6 +575,21 @@ class LlmClientTest extends UnitTest {
         assertFalse(serialize(openRouterProvider(), req).toString().contains("cache_control"));
     }
 
+    @Test
+    void openrouter_cache_aTildeAliasOfAnAnthropicModelGetsTheSameBreakpoints() {
+        // OpenRouter's "latest" aliases carry a leading tilde (~anthropic/claude-sonnet-latest), which the
+        // prefix rule did not see, so a conversation on one cached nothing at all.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var messages = List.of(llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\ndynamic"),
+                llm.LlmTypes.ChatMessage.user("hello"));
+
+        var json = serialize(openRouterProvider(), chatRequest("~anthropic/claude-sonnet-latest", messages)).toString();
+        int count = 0;
+        for (int idx = 0; (idx = json.indexOf("cache_control", idx)) >= 0; idx++) count++;
+
+        assertEquals(2, count, "the system prefix and the user's message, as for anthropic/claude-sonnet-5.5");
+    }
+
     /** {@code system}, then {@code head}, then an assistant call to web_fetch and its result. */
     private static List<llm.LlmTypes.ChatMessage> toolRound(llm.LlmTypes.ChatMessage... head) {
         var messages = new java.util.ArrayList<llm.LlmTypes.ChatMessage>();
