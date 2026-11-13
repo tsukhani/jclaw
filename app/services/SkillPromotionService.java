@@ -104,7 +104,8 @@ public class SkillPromotionService {
      * Copy a global skill into the agent's workspace using atomic staging.
      * Assumes tool validation and malware scanning have already passed. Replacing
      * a copy first copies what {@link KeptSkillFiles#select} picks in it to the
-     * kept files, and the new copy holds only what the registry ships.
+     * kept files, and the new copy holds what the registry ships plus those same
+     * files where the registry ships nothing (JF-405).
      */
     public static void copyToAgentWorkspace(Agent agent, String skillName) throws IOException {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);
@@ -136,12 +137,22 @@ public class SkillPromotionService {
                 });
             }
         };
+        // A skill that reads its credentials files must still find them after the update (JF-405).
+        AtomicDirSwap.StagingPopulator populate = staging -> {
+            copyRegistry.populate(staging);
+            if (!replacing) return;
+            var carried = KeptSkillFiles.carryOver(targetDir, globalDir, staging);
+            if (!carried.isEmpty()) {
+                EventLogger.info(EVENT_CATEGORY_SKILLS, agent.name, null, "Carried %d file(s) of skill %s's old copy into the update: %s"
+                        .formatted(carried.size(), skillName, String.join(", ", carried)));
+            }
+        };
         // The swap deletes the old copy, with whatever the operator put in it (JF-352): take that out first.
         var kept = replacing
                 ? KeptSkillFiles.copyOut(WorkspaceFiles.workspaceOwner(agent), skillName, targetDir, globalDir)
                 : null;
         try {
-            AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, copyRegistry);
+            AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, populate);
         } catch (IOException | RuntimeException e) {
             // A backup still on disk means the old copy had already left its place, so what was kept stays.
             if (kept != null && !Files.exists(backupDir, LinkOption.NOFOLLOW_LINKS)) KeptSkillFiles.discard(kept);

@@ -404,7 +404,7 @@ describe('SkillSecretsPanel', () => {
 
     await wrapper.find(`button[aria-label="${keptLabel}"]`).trigger('click')
     await settle()
-    expect(document.body.textContent).toContain('Delete credentials/gamma-api-key.txt? JClaw keeps no other copy of it.')
+    expect(document.body.textContent).toContain('Delete the kept copy of credentials/gamma-api-key.txt? The skill\'s own folder is not changed.')
     dialogButton('Cancel')!.click()
     await settle()
 

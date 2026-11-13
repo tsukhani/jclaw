@@ -123,23 +123,9 @@ public final class KeptSkillFiles {
         var selected = select(oldCopy, newVersion);
         if (selected.isEmpty()) return null;
         var folder = newFolder(skillDir(owner, skill));
-        var copied = new ArrayList<String>();
+        List<String> copied;
         try {
-            var realOld = oldCopy.toRealPath();
-            for (var path : selected) {
-                var source = oldCopy.resolve(path);
-                // The agent can write its copy while this reads it: a file, or a folder above it, that became a link
-                // since the walk is skipped rather than followed.
-                if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS) || !source.toRealPath().startsWith(realOld)) {
-                    continue;
-                }
-                var target = folder.resolve(path);
-                Files.createDirectories(target.getParent());
-                try (var in = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {
-                    Files.copy(in, target);
-                }
-                copied.add(path);
-            }
+            copied = copySelected(oldCopy, selected, folder, false);
         } catch (IOException | RuntimeException e) {
             discard(folder);
             throw e;
@@ -151,6 +137,51 @@ public final class KeptSkillFiles {
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Kept %d file(s) of skill %s's old copy before the update: %s"
                 .formatted(copied.size(), skill, String.join(", ", copied)));
         return folder;
+    }
+
+    /**
+     * Copy what {@link #select} picks out of {@code oldCopy} into the new copy being staged at {@code staging}, so a skill
+     * that reads its credentials files keeps running after an update (JF-405). A path the new version ships is never
+     * replaced, and each file keeps its permissions. Returns the paths carried over.
+     */
+    public static List<String> carryOver(Path oldCopy, Path newVersion, Path staging) throws IOException {
+        var selected = select(oldCopy, newVersion);
+        return selected.isEmpty() ? List.of() : copySelected(oldCopy, selected, staging, true);
+    }
+
+    /**
+     * Copy each of {@code paths} from {@code oldCopy} to the same path under {@code target}, never through a link, and
+     * return the paths copied. {@code intoNewCopy} skips a path that already exists there and keeps each file's
+     * permissions, since the file stays where a skill reads it.
+     */
+    private static List<String> copySelected(Path oldCopy, List<String> paths, Path target, boolean intoNewCopy)
+            throws IOException {
+        var copied = new ArrayList<String>();
+        var realOld = oldCopy.toRealPath();
+        var realTarget = target.toRealPath();
+        var posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+        for (var path : paths) {
+            var source = oldCopy.resolve(path);
+            // The agent can write its copy while this reads it: a file, or a folder above it, that became a link
+            // since the walk is skipped rather than followed.
+            if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS) || !source.toRealPath().startsWith(realOld)) {
+                continue;
+            }
+            var to = target.resolve(path);
+            var folder = to.getParent();
+            if (folder == null || (intoNewCopy && Files.exists(to, LinkOption.NOFOLLOW_LINKS))) continue;
+            Files.createDirectories(folder);
+            // The new copy is staged in the agent's workspace too: never write through a folder it made a link.
+            if (!folder.toRealPath().startsWith(realTarget)) continue;
+            try (var in = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {
+                Files.copy(in, to);
+            }
+            if (intoNewCopy && posix) {
+                Files.setPosixFilePermissions(to, Files.getPosixFilePermissions(source, LinkOption.NOFOLLOW_LINKS));
+            }
+            copied.add(path);
+        }
+        return copied;
     }
 
     private static Path newFolder(Path skillDir) throws IOException {

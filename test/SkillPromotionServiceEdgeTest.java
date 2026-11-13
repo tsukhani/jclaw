@@ -433,14 +433,15 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
     }
 
     @Test
-    void anUpdateKeepsTheKeyFileOfTheOldCopyAndTheNewCopyHoldsOnlyWhatShips() throws Exception {
+    void anUpdateKeepsACopyOfTheKeyFileAndPutsTheFileBackInTheNewCopy() throws Exception {
         var agent = agentWithOldCopy("keep-key-file", "gamma");
         write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf352\n");
 
         SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
 
         assertEquals(Map.of("credentials/gamma-api-key.txt", "sk-gamma-fake-jf352\n"), keptFiles(agent, "gamma"));
-        assertEquals(List.of("SKILL.md"), filesIn(agentCopy(agent, "gamma")));
+        assertEquals(List.of("SKILL.md", "credentials/gamma-api-key.txt"), filesIn(agentCopy(agent, "gamma")));
+        assertEquals("sk-gamma-fake-jf352\n", Files.readString(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt")));
         assertTrue(Files.readString(agentCopy(agent, "gamma").resolve("SKILL.md")).contains("version: 2.0.0"));
         var kept = KeptSkillFiles.find(agent, "gamma", KeptSkillFiles.list(agent, "gamma").getFirst().id());
         assertTrue(kept.startsWith(KeptSkillFiles.root().resolve(String.valueOf(agent.id)).resolve("gamma")),
@@ -458,7 +459,8 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         SkillPromotionService.copyToAgentWorkspace(agent, "jira");
 
         assertEquals(Map.of("config.env", "JIRA_URL=\"https://jira.internal.example\"\n"), keptFiles(agent, "jira"));
-        assertEquals(List.of("SKILL.md", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+        assertEquals(List.of("SKILL.md", "config.env", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+        assertEquals("JIRA_URL=\"https://jira.internal.example\"\n", Files.readString(agentCopy(agent, "jira").resolve("config.env")));
     }
 
     @Test
@@ -470,7 +472,8 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         SkillPromotionService.copyToAgentWorkspace(agent, "jira");
 
         assertEquals(Map.of("config.env", "JIRA_URL=\"https://jira.internal.example\"\n"), keptFiles(agent, "jira"));
-        assertEquals(List.of("SKILL.md", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+        assertEquals(List.of("SKILL.md", "config.env", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+        assertEquals("JIRA_URL=\"https://jira.internal.example\"\n", Files.readString(agentCopy(agent, "jira").resolve("config.env")));
     }
 
     @Test
@@ -588,7 +591,7 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
 
         assertEquals(Map.of("Credentials/gamma-api-key.txt", "sk-gamma-fake-jf352\n"), keptFiles(agent, "gamma"));
-        assertEquals(List.of("SKILL.md"), filesIn(agentCopy(agent, "gamma")));
+        assertEquals(List.of("Credentials/gamma-api-key.txt", "SKILL.md"), filesIn(agentCopy(agent, "gamma")));
     }
 
     @Test

@@ -9,7 +9,7 @@
  *
  * JF-357: the same block declares settings, values that are not secret; they are listed and edited below the secrets.
  *
- * JF-352: the files an update took out of the skill's old copy are listed last, never with their content. A secret or a
+ * JF-352: the copies JClaw kept of the old copy's files at an update are listed last, never with their content. A secret or a
  * setting can take its value from one, and the server deletes that file once each name it assigns that the skill
  * declares has a value.
  */
@@ -166,7 +166,7 @@ async function remove(secret: Secret) {
 async function removeKept(file: KeptSkillFile) {
   const ok = await confirm({
     title: 'Delete kept file',
-    message: `Delete ${file.path}? JClaw keeps no other copy of it.`,
+    message: `Delete the kept copy of ${file.path}? The skill's own folder is not changed.`,
     confirmText: 'Delete',
     variant: 'danger',
   })
@@ -496,10 +496,11 @@ watch(() => [props.agentId, props.skillName], () => {
         <span class="text-xs text-fg-muted">{{ kept.length }}</span>
       </div>
       <p class="px-4 pb-2 text-xs text-fg-muted">
-        Files an update took out of this skill's old copy, such as a key or a config file you edited. JClaw keeps them
-        outside the agent's workspace, so the skill and the agent cannot read them, and never shows what they hold. To
-        use one, choose it under Value from when you add or replace a secret or a setting. JClaw deletes the file once
-        each name in it that this skill asks for has a value.
+        Copies of the files this skill's old copy held when it was updated, such as a key or a config file you edited.
+        The update put the files themselves back in the new copy, unless the new version ships its own file there. JClaw
+        keeps these copies outside the agent's workspace, so the skill and the agent cannot read them, and never shows
+        what they hold. To use one, choose it under Value from when you add or replace a secret or a setting. JClaw
+        deletes a copy once each name in it that this skill asks for has a value.
       </p>
       <ApiErrorAlert
         v-if="keptError"

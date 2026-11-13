@@ -569,8 +569,8 @@ function updateWarning(preview: SkillUpdatePreview): string {
   }
   if (preview.keeps.length) {
     const one = preview.keeps.length === 1
-    parts.push(`JClaw moves ${one ? 'this file' : 'these files'} of the old copy out of the skill, where the agent `
-      + `cannot read ${one ? 'it' : 'them'}, and lists ${one ? 'it' : 'them'} in the skill's Secrets panel: `
+    parts.push(`The new copy keeps ${one ? 'this file' : 'these files'} of the old copy, unless the new version ships `
+      + `its own file there, and the skill's Secrets panel lists a copy of ${one ? 'it' : 'each'}: `
       + `${preview.keeps.join(', ')}.`)
   }
   return parts.join('\n\n')

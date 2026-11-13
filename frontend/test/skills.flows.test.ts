@@ -872,8 +872,8 @@ describe('Skills page — an update names what it needs and keeps (JF-352)', () 
 
   const preview = { needs: ['GAMMA_API_KEY'], heldBySwitchedOff: {}, keeps: ['credentials/gamma-api-key.txt'] }
   const warning = 'The new version needs a value this agent does not have yet: GAMMA_API_KEY. Add it in the skill\'s'
-    + ' Secrets panel.\n\nJClaw moves this file of the old copy out of the skill, where the agent cannot read it, and'
-    + ' lists it in the skill\'s Secrets panel: credentials/gamma-api-key.txt.'
+    + ' Secrets panel.\n\nThe new copy keeps this file of the old copy, unless the new version ships its own file there,'
+    + ' and the skill\'s Secrets panel lists a copy of it: credentials/gamma-api-key.txt.'
 
   function olderCopy(displayName = 'web-search') {
     setupApi({
@@ -947,13 +947,29 @@ describe('Skills page — an update names what it needs and keeps (JF-352)', () 
     await flushPromises()
 
     await clickUpdate(component)
-    expect(dialogMessage()).toBe('Update \'web-search\' to version 2.0.0?\n\nJClaw moves this file of the old copy out of'
-      + ' the skill, where the agent cannot read it, and lists it in the skill\'s Secrets panel: config.env.')
+    expect(dialogMessage()).toBe('Update \'web-search\' to version 2.0.0?\n\nThe new copy keeps this file of the old copy,'
+      + ' unless the new version ships its own file there, and the skill\'s Secrets panel lists a copy of it: config.env.')
     dialogButton('Cancel')!.click()
     await flushPromises()
     await flushPromises()
 
     expect(calls.copied).toBe(false)
+  })
+
+  it('names each of two kept files and says a copy of each is listed', async () => {
+    copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview',
+      () => ({ needs: [], heldBySwitchedOff: {}, keeps: ['config.env', 'credentials/token'] }))
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    await clickUpdate(component)
+    expect(dialogMessage()).toBe('Update \'web-search\' to version 2.0.0?\n\nThe new copy keeps these files of the old copy,'
+      + ' unless the new version ships its own file there, and the skill\'s Secrets panel lists a copy of each:'
+      + ' config.env, credentials/token.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
   })
 
   it('a preview that fails replaces nothing and says why', async () => {

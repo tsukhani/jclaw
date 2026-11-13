@@ -1915,8 +1915,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
         var keptAt = java.time.Instant.parse(entry.get("keptAt").getAsString());
         assertFalse(keptAt.isBefore(before) || keptAt.isAfter(java.time.Instant.now().plusSeconds(1)), keptAt.toString());
         assertFalse(getContent(listing).contains(KEY), getContent(listing));
-        assertEquals(List.of("SKILL.md"), filesOf(copyOf("keep-preview", "gamma")),
-                "the new copy holds only what the registry ships");
+        assertEquals(List.of("SKILL.md", "credentials/gamma-api-key.txt"), filesOf(copyOf("keep-preview", "gamma")),
+                "the new copy holds what the registry ships and the operator's credentials (JF-405)");
     }
 
     private static String statusAndMessage(play.mvc.Http.Response response) {
@@ -1939,6 +1939,77 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
         assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[\"config.env\"]}",
                 getContent(GET("/api/agents/" + id + "/skills/jira/update-preview")));
+    }
+
+    /** A value no key-shape mask matches, so a command's output shows it as it is. */
+    private static final String NAS_KEY = "fake-nas-key-jf405";
+
+    @Test
+    void anUpdateCarriesTheCredentialsFolderIntoTheNewCopyAndTheSkillsScriptStillReadsTheKey() throws Exception {
+        login();
+        var id = agentWithOldCopy("carry-creds", "nas", "");
+        Files.writeString(globalSkillsDir.resolve("nas").resolve("run.sh"),
+                ". \"$(dirname \"$0\")/credentials/nas.env\"; echo \"read $NAS_KEY\"\n");
+        var old = copyOf("carry-creds", "nas");
+        Files.createDirectories(old.resolve("credentials"));
+        Files.writeString(old.resolve("credentials/nas.env"), "NAS_KEY=" + NAS_KEY + "\n");
+        Files.setPosixFilePermissions(old.resolve("credentials/nas.env"),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        var base = "/api/agents/" + id + "/skills/nas";
+
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+
+        var updated = copyOf("carry-creds", "nas");
+        assertEquals(List.of("SKILL.md", "credentials/nas.env", "run.sh"), filesOf(updated));
+        assertEquals("NAS_KEY=" + NAS_KEY + "\n", Files.readString(updated.resolve("credentials/nas.env")));
+        assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(
+                Files.getPosixFilePermissions(updated.resolve("credentials/nas.env"))));
+        var kept = keptOf(GET(base + "/kept"));
+        assertEquals(1, kept.size(), "the kept copy and its import offer stay as JF-352 made them");
+        assertEquals("credentials/nas.env", kept.get(0).getAsJsonObject().get("path").getAsString());
+
+        // The subject is the file being there for the script, not confinement: a host with no working sandbox
+        // would refuse a custom agent's confined run.
+        ShellSandboxSync.acquireUnconfined();
+        var previous = services.ConfigService.get("shell.allowlist");
+        try {
+            services.ConfigService.set("shell.allowlist", "sh");
+            var args = new com.google.gson.JsonObject();
+            args.addProperty("command", "sh skills/nas/run.sh");
+            var text = new tools.ShellExecTool().execute(args.toString(), Agent.findByName("carry-creds"));
+            var result = com.google.gson.JsonParser.parseString(text).getAsJsonObject();
+            assertEquals("0 read " + NAS_KEY, result.get("exitCode").getAsInt() + " " + result.get("output").getAsString().strip(), text);
+        } finally {
+            if (previous == null) services.ConfigService.delete("shell.allowlist");
+            else services.ConfigService.set("shell.allowlist", previous);
+            ShellSandboxSync.release();
+        }
+    }
+
+    @Test
+    void anUpdateWhoseCarryOverFailsIsRefusedAndLeavesTheOldCopyAndNoKeptFiles() throws Exception {
+        login();
+        var id = agentWithOldCopy("carry-fails", "nas", "");
+        // The library ships a file where the old copy's credentials folder must go, so carrying it over fails.
+        Files.writeString(globalSkillsDir.resolve("nas").resolve("credentials"), "shipped");
+        var old = copyOf("carry-fails", "nas");
+        var skillMd = Files.readString(old.resolve("SKILL.md"));
+        Files.createDirectories(old.resolve("credentials"));
+        Files.writeString(old.resolve("credentials/nas.env"), "NAS_KEY=" + NAS_KEY + "\n");
+
+        var response = POST("/api/agents/" + id + "/skills/nas/copy", "application/json", "{}");
+
+        var body = getContent(response);
+        assertEquals(500, (int) response.status, body);
+        assertTrue(body.matches("Failed to copy skill: " + java.util.regex.Pattern.quote(old.toString()) + "\\.copying-\\d+/credentials"),
+                body);
+        assertEquals(List.of("SKILL.md", "credentials/nas.env"), filesOf(old));
+        assertEquals(skillMd, Files.readString(old.resolve("SKILL.md")), "the old copy is still in place");
+        try (var entries = Files.list(old.getParent())) {
+            assertEquals(List.of("nas"), entries.map(p -> p.getFileName().toString()).toList(), "no staging copy is left");
+        }
+        assertEquals("{\"kept\":[]}", getContent(GET("/api/agents/" + id + "/skills/nas/kept")),
+                "what the update kept goes with it");
     }
 
     @Test
