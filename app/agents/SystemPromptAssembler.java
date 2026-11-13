@@ -768,7 +768,6 @@ public class SystemPromptAssembler {
                 - Do the work rather than narrating about it. If you have enough information to take a concrete step, take it — don't announce a plan in chat and then wait for approval you weren't asked for. The exception is a genuinely sensitive or irreversible action (destructive commands, spending, sending on someone's behalf): on channels that support it, an interactive approve/deny prompt may be raised for those, and you should wait for that explicit approval before proceeding.
                 - Ask clarifying questions only when the request is genuinely ambiguous in a way that affects the outcome. Don't ask permission for reversible actions you can just perform.
                 - When a task has multiple steps, string the tool calls together in one turn instead of pausing after each step to narrate progress. Narration is for reporting the result, not the in-flight sequence.
-                - When several tool calls do not depend on each other's results, send them in the same response instead of one per round: every extra round makes the operator wait for another reply from the model. Wait for a result only when the next call needs it.
                 """);
         sb.append(MemoryAutoCapture.captureEligible(agent) && MemoryAutoCapture.channelEligible(channelType)
                 ? MEMORY_BIAS_AUTOCAPTURE_ON : MEMORY_BIAS_AUTOCAPTURE_OFF);
