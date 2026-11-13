@@ -668,7 +668,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
               side="top"
               align="start"
               :side-offset="8"
-              class="min-w-52 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+              class="w-max min-w-52 max-w-[calc(100vw-2rem)] px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
               @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
               @mouseleave="emit('set-tok-stats-hover-key', null)"
               @focusin="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
