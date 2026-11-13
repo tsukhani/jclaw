@@ -957,6 +957,10 @@ public class AgentRunner {
         // null FK.
         boolean committed = sink.commit(() ->
                 sink.appendAssistantMessage(response, null, usageJson, null, truncated));
+        if (committed) {
+            CompactionGate.afterReply(agent, conversation, loopInput.primary(),
+                    UsageMetricsBuilder.lastRequestTokens(turnUsage));
+        }
 
         EventLogger.info("llm", agent.name, conversation.channelType,
                 "Response generated (%d chars%s)".formatted(response.length(),

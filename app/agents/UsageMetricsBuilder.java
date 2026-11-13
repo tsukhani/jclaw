@@ -239,6 +239,12 @@ public final class UsageMetricsBuilder {
         if (route != null) usageMap.add("route", route);
     }
 
+    /** The turn's last call, prompt and completion: about the size of the request the next turn starts from. */
+    static int lastRequestTokens(LlmProvider.TurnUsage turnUsage) {
+        return turnUsage.hasProviderUsage() ? turnUsage.lastPromptTokens() + turnUsage.lastCompletionTokens()
+                : turnUsage.lastJtokkitPromptTokens() + turnUsage.lastJtokkitCompletionTokens();
+    }
+
     /**
      * Fold one round into the turn and send the context that call ran on as a {@code contextTokens}
      * status frame, so the chat's context meter moves each round instead of only when the turn ends.

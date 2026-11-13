@@ -239,6 +239,38 @@ class SessionCompactorTest extends UnitTest {
         assertTrue(SessionCompactor.shouldCompact(budget + 1, large, 0, 0));
     }
 
+    // ─── nearCompaction: the margin a reply's compaction starts within (JF-367) ──
+
+    @Test
+    void aReplysCompactionStartsTenPercentShortOfTheTriggerAndNotOneTokenBefore() {
+        var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
+        assertTrue(SessionCompactor.nearCompaction(135_000, 0, large), "the 150,000 cap fires first");
+        assertFalse(SessionCompactor.nearCompaction(134_999, 0, large));
+        assertTrue(SessionCompactor.nearCompaction(400_000, 0, large), "past the trigger is near it too");
+    }
+
+    @Test
+    void theMarginIsTakenOfTheTriggerOnTheRoomLeftAfterTheFixedPart() {
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        // Half the 360,000 left after 40,000 fixed fires at 220,000, well inside any reserve another class sets.
+        var mi = new ModelInfo("m", "M", 400_000, 8192, false);
+        assertTrue(SessionCompactor.nearCompaction(198_000, 40_000, mi));
+        assertFalse(SessionCompactor.nearCompaction(197_999, 40_000, mi));
+    }
+
+    @Test
+    void withBothHalvesOffTheMarginIsTakenOfTheWindowRuleAndWithNoWindowNothingIsNear() {
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "0");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        var mi = new ModelInfo("m", "M", 200_000, 8192, false);
+        long fires = 200_000L - SessionCompactor.effectiveReserveTokens() + 1;
+        int opens = (int) (fires - fires / 10);
+        assertTrue(SessionCompactor.nearCompaction(opens, 0, mi));
+        assertFalse(SessionCompactor.nearCompaction(opens - 1, 0, mi));
+        assertFalse(SessionCompactor.nearCompaction(Integer.MAX_VALUE - 1, 0, null));
+        assertFalse(SessionCompactor.nearCompaction(Integer.MAX_VALUE - 1, 0, new ModelInfo("m", "M", 0, 0, false)));
+    }
+
     @Test
     void theWindowRuleStillFiresWhenItComesFirst() {
         var small = new ModelInfo("m", "M", 20_000, 4096, false);

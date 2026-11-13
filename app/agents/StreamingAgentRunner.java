@@ -573,7 +573,7 @@ final class StreamingAgentRunner {
 
         trace.mark(LatencyTrace.STREAM_BODY_END);
         boolean committed = finalizeStreamingTurn(post.content(), post.replyTruncated(), turnUsage, modelInfo,
-                streamStartMs, agent, conversation, channelType, trace, sink, cb);
+                streamStartMs, agent, conversation, primary, channelType, trace, sink, cb);
 
         // JCLAW-39: async memory auto-capture for the completed streaming turn.
         // Placed after finalize (response persisted + terminal emitted) so it
@@ -804,8 +804,9 @@ final class StreamingAgentRunner {
     private static boolean finalizeStreamingTurn(String content, boolean replyTruncated,
                                                LlmProvider.TurnUsage turnUsage,
                                                @Nullable ModelInfo modelInfo, long streamStartMs,
-                                               Agent agent, Conversation conversation, String channelType,
-                                               LatencyTrace trace, AgentExecutionSink sink, AgentRunner.StreamingCallbacks cb) {
+                                               Agent agent, Conversation conversation, LlmProvider primary,
+                                               String channelType, LatencyTrace trace, AgentExecutionSink sink,
+                                               AgentRunner.StreamingCallbacks cb) {
         // Build usage JSON before persisting so it can be stored alongside the message.
         // JCLAW-108: pass the conversation so resolved (override-aware) model identity
         // goes into usageJson. streamBodyMs (FIRST_TOKEN → STREAM_BODY_END) is the
@@ -820,6 +821,10 @@ final class StreamingAgentRunner {
         boolean committed = sink.commit(() ->
             sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
         trace.recordPersist((System.nanoTime() - persistStartNs) / 1_000_000L);
+        // Ahead of the completion, so a turn sent on it finds the compaction this reply starts already running.
+        if (committed) {
+            CompactionGate.afterReply(agent, conversation, primary, UsageMetricsBuilder.lastRequestTokens(turnUsage));
+        }
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
         return committed;
     }

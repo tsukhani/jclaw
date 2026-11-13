@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.CompactionGate;
 import agents.ToolRegistry;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -87,7 +88,7 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     @Test
     void theSummaryCallSendsTheAgentsOwnPrefixAndToolsWithTheInstructionLast() throws Exception {
-        startProvider(n -> text(n == 2 ? "SUMMARY-JF154" : "Reply " + n));
+        startProviderBy(request -> text(isSummary(request) ? "SUMMARY-JF154" : "Reply"));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-prefix");
         seed(convo, 4, 40);
@@ -97,27 +98,36 @@ class CompactionSummaryRequestTest extends UnitTest {
             run(agent, convo, "First question");
             seed(convo, 24, 32_000);
             commit();
+            // Past the trigger on a window that takes it: sent as it is, the summary written beside it (JF-367).
             run(agent, convo, "Second question");
+            awaitCompaction(convo.id);
+            run(agent, convo, "Third question");
         });
 
-        assertEquals(3, requests.size(), "turn one, the summary, then turn two");
-        var turnOne = requests.get(0).getAsJsonArray("messages");
-        var summary = requests.get(1).getAsJsonArray("messages");
-        var turnTwo = requests.get(2).getAsJsonArray("messages");
+        assertEquals(4, requests.size(), "three turns and one summary");
+        var summaries = requests.stream().filter(CompactionSummaryRequestTest::isSummary).toList();
+        var turnRequests = requests.stream().filter(r -> !isSummary(r)).toList();
+        assertEquals(1, summaries.size());
+        var turnOne = turnRequests.get(0).getAsJsonArray("messages");
+        var summary = summaries.getFirst().getAsJsonArray("messages");
+        var turnThree = turnRequests.get(2).getAsJsonArray("messages");
+        assertFalse(content(turnRequests.get(1).getAsJsonArray("messages").get(0))
+                .contains(SessionCompactor.PRIOR_SUMMARY_HEADER), "the turn past the trigger went uncompacted");
 
         // Everything turn one sent but its trailing clock message is the summary call's prefix.
         int shared = turnOne.size() - 1;
         assertEquals(slice(turnOne, 0, shared), slice(summary, 0, shared));
-        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
-        assertEquals(requests.get(0).get("tools"), requests.get(1).get("tools"));
-        assertEquals(requests.get(2).get("tools"), requests.get(1).get("tools"), "the turn whose prefix is summarized");
+        assertEquals(List.of(TOOL), toolNames(turnRequests.get(0)));
+        assertEquals(turnRequests.get(0).get("tools"), summaries.getFirst().get("tools"));
+        assertEquals(turnRequests.get(1).get("tools"), summaries.getFirst().get("tools"),
+                "the turn whose prefix is summarized");
         var instruction = summary.get(summary.size() - 1).getAsJsonObject();
         assertEquals("user", instruction.get("role").getAsString());
         assertEquals(SECTIONS, headings(instruction.get("content").getAsString()));
 
-        // The summarized turns and the turns kept verbatim are the stored rows, split on a user row.
+        // The summarized turns and the turns the next one keeps verbatim are the stored rows, split on a user row.
         var summarized = slice(summary, 1, summary.size() - 1);
-        var kept = slice(turnTwo, 1, turnTwo.size() - 1);
+        var kept = slice(turnThree, 1, turnThree.size() - 1);
         assertEquals("user", kept.getFirst().getAsJsonObject().get("role").getAsString());
         var sent = new ArrayList<String>();
         for (var m : summarized) sent.add(roleAndContent(m));
@@ -126,36 +136,39 @@ class CompactionSummaryRequestTest extends UnitTest {
 
         var stored = latestCompaction(convo.id);
         assertEquals(content(summary.get(0)) + "\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
-                + SessionCompactor.segmentLabel(stored) + "\n\nSUMMARY-JF154", content(turnTwo.get(0)));
+                + SessionCompactor.segmentLabel(stored) + "\n\nSUMMARY-JF154", content(turnThree.get(0)));
         assertEquals("SUMMARY-JF154", stored.summary);
         assertEquals(summarized.size(), stored.turnCount);
     }
 
     @Test
     void aToolCallReplyIsRetriedOnceWithoutToolsAndItsToolNeverRuns() throws Exception {
-        startProvider(n -> switch (n) {
-            case 1 -> toolCall();
-            case 2 -> text("SUMMARY-AFTER-RETRY");
-            default -> text("Reply after compaction.");
-        });
+        var summaryCalls = new AtomicInteger();
+        startProviderBy(request -> !isSummary(request) ? text("Reply.")
+                : summaryCalls.incrementAndGet() == 1 ? toolCall() : text("SUMMARY-AFTER-RETRY"));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-retry");
         seed(convo, 24, 32_000);
         commit();
 
         var result = new AtomicReference<AgentRunner.RunResult>();
-        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(run(agent, convo, "Next?")));
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> {
+            result.set(run(agent, convo, "Next?"));
+            awaitCompaction(convo.id);
+        });
 
-        assertEquals(3, requests.size(), "the summary, its retry, then the turn");
-        assertEquals(List.of(TOOL), toolNames(requests.get(0)));
-        var retry = requests.get(1);
+        var summaries = requests.stream().filter(CompactionSummaryRequestTest::isSummary).toList();
+        assertEquals(3, requests.size(), "the turn, the summary and its retry");
+        assertEquals(2, summaries.size());
+        assertEquals(List.of(TOOL), toolNames(summaries.get(0)));
+        var retry = summaries.get(1);
         assertFalse(retry.has("tools"), "the retry carries no tools");
         var retryMessages = retry.getAsJsonArray("messages");
         assertEquals(List.of("system", "user"), roles(retryMessages));
         assertEquals(SECTIONS, headings(content(retryMessages.get(0))));
         assertEquals(0, toolRuns.get());
         assertEquals("SUMMARY-AFTER-RETRY", latestCompaction(convo.id).summary);
-        assertEquals("Reply after compaction.", result.get().response());
+        assertEquals("Reply.", result.get().response());
         assertEquals(0L, (long) Tx.run(() -> Message.count("conversation.id = ?1 AND role = ?2",
                 convo.id, MessageRole.TOOL.value)));
     }
@@ -355,11 +368,17 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     private void startProvider(IntFunction<String> replyForCall) throws Exception {
         var calls = new AtomicInteger();
+        startProviderBy(request -> replyForCall.apply(calls.incrementAndGet()));
+    }
+
+    /** A provider answering each request by what it asks, for a turn and a summary that run at the same time. */
+    private void startProviderBy(java.util.function.Function<JsonObject, String> replyFor) throws Exception {
         llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         llmServer.createContext("/chat/completions", exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            requests.add(JsonParser.parseString(body).getAsJsonObject());
-            LlmReplyFixture.send(exchange, replyForCall.apply(calls.incrementAndGet()));
+            var request = JsonParser.parseString(body).getAsJsonObject();
+            requests.add(request);
+            LlmReplyFixture.send(exchange, replyFor.apply(request));
         });
         llmServer.start();
         ConfigService.set("provider." + PROVIDER + ".baseUrl", "http://127.0.0.1:" + llmServer.getAddress().getPort());
@@ -434,6 +453,28 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertFalse(thread.isAlive(), "the turn must finish within 60 s");
         if (error.get() != null) throw error.get();
         return result.get();
+    }
+
+    /** Whether {@code request} is a summary call: its instruction is last, or the system prompt of a transcript. */
+    private static boolean isSummary(JsonObject request) {
+        var messages = request.getAsJsonArray("messages");
+        for (var m : List.of(messages.get(0), messages.get(messages.size() - 1))) {
+            var content = m.getAsJsonObject().get("content");
+            if (content != null && content.isJsonPrimitive() && headings(content.getAsString()).equals(SECTIONS)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void awaitCompaction(Long conversationId) {
+        var running = CompactionGate.runningForTest(conversationId);
+        if (running == null) return;
+        try {
+            running.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new AssertionError("the compaction did not end", e);
+        }
     }
 
     private static SessionCompaction latestCompaction(Long conversationId) {

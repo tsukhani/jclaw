@@ -184,6 +184,23 @@ public final class SessionCompactor {
                 || estimatedTokens > windowBudget(modelInfo);
     }
 
+    /**
+     * JF-367: how far ahead of the trigger, in percent of the size at which it fires, a compaction starts after a reply:
+     * room for what the next turn adds before its gate measures it, its message and its recall.
+     */
+    public static final int BACKGROUND_MARGIN_PERCENT = 10;
+
+    /**
+     * Whether a request of {@code estimatedTokens} is past {@link #shouldCompact(int, int, ModelInfo)}'s trigger or the
+     * window budget, or within {@link #BACKGROUND_MARGIN_PERCENT} of whichever comes first. False when neither can fire.
+     */
+    public static boolean nearCompaction(int estimatedTokens, int fixedTokens, @Nullable ModelInfo modelInfo) {
+        long fires = Math.min(triggerThreshold(modelInfo, triggerPercent(), triggerTokens(), fixedTokens),
+                (long) windowBudget(modelInfo) + 1);
+        if (fires >= Integer.MAX_VALUE) return false;
+        return estimatedTokens >= fires - fires * BACKGROUND_MARGIN_PERCENT / 100;
+    }
+
     /** {@link #triggerThreshold(ModelInfo, int, int, int)} with nothing fixed. */
     public static int triggerThreshold(@Nullable ModelInfo modelInfo, int triggerPercent, int triggerTokens) {
         return triggerThreshold(modelInfo, triggerPercent, triggerTokens, 0);

@@ -805,8 +805,9 @@ public final class Commands {
         int tokensBefore = TokenUsageEstimator.estimateChatRequest(modelId, turn.messages(), turn.tools()).promptTokens();
         long startNs = System.nanoTime();
         var progress = CompactionProgress.open(tokensBefore);
-        var result = progress.around(() -> SessionCompactor.compact(current.id, summary.first().label(), turn, summary,
-                /*force*/ true, args, summary.callTokens(), Integer.MAX_VALUE));
+        var result = progress.around(() -> CompactionGate.runExclusive(current.id, () -> SessionCompactor.compact(
+                current.id, summary.first().label(), turn, summary, /*force*/ true, args, summary.callTokens(),
+                Integer.MAX_VALUE)));
         long tookMs = (System.nanoTime() - startNs) / 1_000_000L;
         int[] tokensAfter = {0};
         if (result.compacted()) {

@@ -482,8 +482,8 @@ class CompactionGateTest extends UnitTest {
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         startLlmServer(simpleResponse("RESERVE SUMMARY"));
         var provider = ownProvider(1_000_000);
+        var conv = ConversationService.create(agent, "web", "user1");
         try {
-            var conv = ConversationService.create(agent, "web", "user1");
             for (int i = 0; i < 25; i++) {
                 ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
                         "turn " + i, null, null, null);
@@ -499,13 +499,15 @@ class CompactionGateTest extends UnitTest {
 
             assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
                     List.of(), below - 1), "one token short of the trigger");
-            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
-                    List.of(), below);
-            assertTrue(((String) rebuilt.messages().getFirst().content())
-                            .endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + latestLabel(conv.id)
-                                    + "\n\nRESERVE SUMMARY"),
-                    "the reserve reached the trigger, so the rebuilt prompt carries the summary");
+            assertNull(CompactionGate.runningForTest(conv.id), "and no compaction starts");
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), below), "the window takes the request, so it goes as it is");
+            awaitCompaction(conv.id);
+            assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
+                            + latestLabel(conv.id) + "\n\nRESERVE SUMMARY"),
+                    "the reserve reached the trigger, so the next turn's prompt carries the summary");
         } finally {
+            awaitCompaction(conv.id);
             removeProvider(provider);
         }
     }
@@ -522,21 +524,25 @@ class CompactionGateTest extends UnitTest {
             var current = new MessageHydrator.Hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi")),
                     List.of(), List.of(), List.of());
 
-            var triggerOnly = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
-                    agent, conv.id, Set.of(), primary, current, List.of(), 150_000));
-            var pastTheWindow = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
+            // The request the window takes is compacted on another thread, which logs the skip.
+            var triggerOnly = compactionLinesWhile(() -> {
+                CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current, List.of(), 150_000);
+                awaitCompaction(conv.id);
+            });
+            var pastTheWindow = compactionLinesWhile(() -> CompactionGate.maybeCompactAndRebuild(
                     agent, conv.id, Set.of(), primary, current, List.of(), 1_000_000));
 
-            var triggerAgain = EventLogger.captureForTest(() -> CompactionGate.maybeCompactAndRebuild(
-                    agent, conv.id, Set.of(), primary, current, List.of(), 150_000));
+            var triggerAgain = compactionLinesWhile(() -> {
+                CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current, List.of(), 150_000);
+                awaitCompaction(conv.id);
+            });
 
-            assertEquals(1, compactionLines(triggerOnly).size());
-            assertTrue(compactionLines(triggerOnly).getFirst().startsWith("Compaction skipped (no safe boundary or "
-                    + "below min-turns) at an estimated "), compactionLines(triggerOnly).toString());
-            assertEquals(List.of(), compactionLines(triggerAgain),
-                    "the same floor is not logged a second time");
+            assertEquals(1, triggerOnly.size());
+            assertTrue(triggerOnly.getFirst().startsWith("Compaction skipped (no safe boundary or "
+                    + "below min-turns) at an estimated "), triggerOnly.toString());
+            assertEquals(List.of(), triggerAgain, "the same floor is not logged a second time");
             assertEquals(List.of("Compaction skipped (no safe boundary or below min-turns); "
-                    + "the context-window trim is left to fit the prompt"), compactionLines(pastTheWindow));
+                    + "the context-window trim is left to fit the prompt"), pastTheWindow);
         } finally {
             removeProvider(provider);
         }
@@ -550,8 +556,8 @@ class CompactionGateTest extends UnitTest {
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
         startLlmServer(simpleResponse("ROOM SUMMARY"));
         var provider = ownProvider(100_000);
+        var conv = ConversationService.create(agent, "web", "user1");
         try {
-            var conv = ConversationService.create(agent, "web", "user1");
             for (int i = 0; i < 25; i++) {
                 ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
                         "turn " + i, null, null, null);
@@ -568,11 +574,14 @@ class CompactionGateTest extends UnitTest {
 
             assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
                     List.of(), threshold - sent - 1), "one token short of the share of the room left");
-            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
-                    List.of(), threshold - sent);
-            assertTrue(((String) rebuilt.messages().getFirst().content()).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
+            assertNull(CompactionGate.runningForTest(conv.id));
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), threshold - sent));
+            awaitCompaction(conv.id);
+            assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
                     + "\n\n" + latestLabel(conv.id) + "\n\nROOM SUMMARY"), "at the threshold it compacts");
         } finally {
+            awaitCompaction(conv.id);
             ConfigService.delete(SessionCompactor.TRIGGER_PERCENT_KEY);
             ConfigService.delete(SessionCompactor.TRIGGER_TOKENS_KEY);
             removeProvider(provider);
@@ -591,8 +600,8 @@ class CompactionGateTest extends UnitTest {
             summary.handle(exchange);
         });
         var provider = ownProvider(1_000_000);
+        var conv = ConversationService.create(agent, "web", "user1");
         try {
-            var conv = ConversationService.create(agent, "web", "user1");
             for (int i = 0; i < 40; i++) {
                 ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
                         "turn " + i, null, null, null);
@@ -613,17 +622,102 @@ class CompactionGateTest extends UnitTest {
             assertEquals(0, requests.get());
 
             ConfigService.delete(SessionCompactor.ON_ROW_LIMIT_KEY);
-            var rebuilt = CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current, List.of(), 0);
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), 0), "the newest rows go as they are");
+            awaitCompaction(conv.id);
 
             assertEquals(1, requests.get());
-            assertTrue(((String) rebuilt.messages().getFirst().content()).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
+            assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
                     + "\n\n" + latestLabel(conv.id) + "\n\nROW SUMMARY"), "on by default past the limit");
         } finally {
+            awaitCompaction(conv.id);
+            removeProvider(provider);
+        }
+    }
+
+    // ─── One compaction at a time (JF-367) ──────────────────────────────
+
+    @Test
+    void aRequestTheWindowDoesNotTakeWaitsForTheRunningSummaryAndStartsNoSecond() throws Exception {
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
+        var requests = new AtomicInteger();
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var summary = simpleResponse("WAITED SUMMARY");
+        startLlmServer(exchange -> {
+            requests.incrementAndGet();
+            try {
+                release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            summary.handle(exchange);
+        });
+        var provider = ownProvider(1_000_000);
+        var conv = ConversationService.create(agent, "web", "user1");
+        try {
+            for (int i = 0; i < 25; i++) {
+                ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                        "turn " + i, null, null, null);
+            }
+            commitAndReopen();
+            var primary = llm.ProviderRegistry.get(provider);
+            var current = new MessageHydrator.Hydration(List.of(ChatMessage.system("SP"), ChatMessage.user("hi")),
+                    List.of(), List.of(), List.of());
+            assertSame(current, CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), primary, current,
+                    List.of(), 150_000), "a request the window takes starts the summary and goes");
+            assertNotNull(CompactionGate.runningForTest(conv.id));
+
+            var rebuilt = new java.util.concurrent.atomic.AtomicReference<MessageHydrator.Hydration>();
+            var turn = Thread.ofVirtual().start(() -> rebuilt.set(CompactionGate.maybeCompactAndRebuild(agent, conv.id,
+                    Set.of(), primary, current, List.of(), 1_000_000)));
+            turn.join(300);
+            assertTrue(turn.isAlive(), "a request past the window waits for the running summary");
+            release.countDown();
+            turn.join(30_000);
+            assertFalse(turn.isAlive());
+
+            assertEquals(1, requests.get(), "it waited for that summary rather than writing a second");
+            commitAndReopen();
+            assertTrue(((String) rebuilt.get().messages().getFirst().content()).endsWith(
+                    SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + latestLabel(conv.id) + "\n\nWAITED SUMMARY"),
+                    "and is sent on it");
+        } finally {
+            release.countDown();
+            awaitCompaction(conv.id);
             removeProvider(provider);
         }
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    private static void awaitCompaction(Long conversationId) {
+        var running = CompactionGate.runningForTest(conversationId);
+        if (running == null) return;
+        try {
+            running.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new AssertionError("the compaction did not end", e);
+        }
+    }
+
+    /** The system prompt the conversation's next turn starts from. */
+    private String nextSystemPrompt(Long conversationId) {
+        commitAndReopen();
+        var next = CompactionGate.nextTurnRequest(agent, conversationId);
+        assertNotNull(next);
+        return (String) next.messages().getFirst().content();
+    }
+
+    /** This class's compaction lines that any thread logs while {@code body} runs. */
+    private List<String> compactionLinesWhile(Runnable body) {
+        var lines = new java.util.ArrayList<String>();
+        EventLogger.captureMatchingForTest(e -> "compaction".equals(e.category()) && agent.name.equals(e.agentId()),
+                seen -> {
+                    body.run();
+                    for (var e : seen) lines.add(e.message());
+                });
+        return lines;
+    }
 
     /** The label of the segment the gate just stored, which the rebuilt prompt carries above it (JF-161). */
     private static String latestLabel(Long conversationId) {
