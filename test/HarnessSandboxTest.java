@@ -476,6 +476,14 @@ class HarnessSandboxTest extends UnitTest {
             var harnessProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), new ClaudeAdapter(), false).get(2);
             var custom = HarnessSandbox.wrapCustomAgentShell(List.of("true"), session.toFile());
             var customProfile = custom.argv().get(2);
+            // Read after the wrap: once any class in this JVM starts the secrets proxy its trust folder stays, and every
+            // profile then ends with that folder's write deny.
+            var trust = services.secrets.SecretProxy.trustFolder();
+            var trustRule = trust == null ? ""
+                    : "(deny file-write* (subpath \"%s\"))\n".formatted(SandboxHiddenRoots.canonical(trust));
+            if (!trustRule.isEmpty() && customProfile.endsWith(trustRule)) {
+                customProfile = customProfile.substring(0, customProfile.length() - trustRule.length());
+            }
 
             for (var rule : List.of("(deny signal", ".java_pid", "unix-socket", "lsopen", "file-write-unlink")) {
                 assertFalse(mainProfile.contains(rule), mainProfile);
