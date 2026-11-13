@@ -40,6 +40,8 @@ public final class ToolErrorTemplates {
     public static final String FS_PATH_REFUSED = "fs_path_refused";
     public static final String FS_READ_ONLY = "fs_read_only";
     public static final String FS_CREDENTIALS = "fs_credentials";
+    public static final String FS_JCLAW_FOLDER = "fs_jclaw_folder";
+    public static final String FS_PROGRAM_FILES = "fs_program_files";
     public static final String FS_NOT_FOUND = "fs_not_found";
     public static final String FS_NOT_A_DIRECTORY = "fs_not_a_directory";
     public static final String FS_TOO_LARGE = "fs_too_large";
@@ -232,6 +234,25 @@ public final class ToolErrorTemplates {
                         + " Nothing was written.",
                 "Change only the lines you need with editFile, leaving the masked lines out of oldText and newText."
                         + " If the file needs a new credential, ask the operator to put it there.");
+    }
+
+    /** JF-394: a global path of the Main Agent's that lies in one of JClaw's own folders, as its shell's fence hides them. */
+    public static ErrorTemplate fsJclawFolder(String path) {
+        return new ErrorTemplate(FS_JCLAW_FOLDER,
+                "'%s' is in one of JClaw's own folders (data, certs or logs), which no agent tool reads or writes."
+                        .formatted(path),
+                "They hold JClaw's database, its keys and its logs. JClaw's own data is reached through the jclaw_api "
+                        + "tool; the backup folder alone can be read.",
+                null);
+    }
+
+    /** JF-394: a write to JClaw's program files through a global path, which the Main Agent's shell may only read. */
+    public static ErrorTemplate fsProgramFiles(String path) {
+        return new ErrorTemplate(FS_PROGRAM_FILES,
+                "'%s' is in JClaw's program files, which the main agent may read but not change.".formatted(path),
+                "JClaw's code, its framework and the Gradle caches load on the next restart, so they stay read-only. "
+                        + "The workspaces inside them can be changed.",
+                null);
     }
 
     public static ErrorTemplate fsCredentials(String path) {

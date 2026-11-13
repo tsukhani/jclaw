@@ -108,7 +108,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 'editLines' edits by 1-indexed inclusive line numbers when you already know which lines to change (e.g., after readFile). The file's native line endings (LF vs CRLF) and UTF-8 encoding are preserved. All operations validate before any are written. \
                 'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Update File: / *** Add File: / *** Delete File: / *** Move to:). All files are validated before any are written. \
                 'listFiles' lists a directory. \
-                All paths are relative to the workspace. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.""";
+                Paths are relative to the workspace. The main agent, when its operator allows global paths, may also give an absolute or ~/ path outside it, except into JClaw's own data, certs and logs folders and its program files, which it may only read. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.""";
     }
 
     @Override
@@ -128,7 +128,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                                 SchemaKeys.ENUM, ACTIONS,
                                 SchemaKeys.DESCRIPTION, "The file operation to perform")),
                         Map.entry("path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "File or directory path relative to workspace (required for all actions except applyPatch)")),
+                                SchemaKeys.DESCRIPTION, "File or directory path relative to workspace, or absolute for the main agent when global paths are allowed (required for all actions except applyPatch)")),
                         Map.entry(ARG_CONTENT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Content to write (for writeFile and appendFile actions)")),
                         Map.entry(ARG_EDITS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,

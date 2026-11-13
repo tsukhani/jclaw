@@ -100,18 +100,15 @@ final class FsPatchApplier {
     }
 
     /**
-     * Resolve + validate paths and enforce the skill-creator read-only guard for every op,
+     * Resolve + validate paths and enforce the built-in skills' read-only guard for every op,
      * building the ResolvedOp list the application phase needs. Bails on the first error.
      */
     private static PatchResolution resolvePatchOps(List<FileOp> ops, Agent agent, Path workspace) {
         var resolved = new ArrayList<ResolvedOp>();
         for (var op : ops) {
-            Path target;
-            try {
-                target = AgentService.acquireWorkspacePath(agent.name, op.path());
-            } catch (SecurityException e) {
-                return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
-            }
+            var resolvedTarget = FsPaths.resolvePath(agent, op.path(), true);
+            if (resolvedTarget.error() != null) return PatchResolution.err(resolvedTarget.resolvedError());
+            var target = resolvedTarget.resolvedTarget();
             var guardError = FsPaths.checkBuiltInSkillReadOnly(agent, workspace, target);
             if (guardError != null) return PatchResolution.err(guardError);
             if (WorkspacePathGuard.isInSkillCredentials(workspace, target)) {
@@ -124,11 +121,9 @@ final class FsPatchApplier {
             var newPathOpt = (op instanceof FileOp.Update u) ? u.newPath() : Optional.<String>empty();
             Path moveTarget = null;
             if (newPathOpt.isPresent()) {
-                try {
-                    moveTarget = AgentService.acquireWorkspacePath(agent.name, newPathOpt.get());
-                } catch (SecurityException e) {
-                    return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
-                }
+                var resolvedMove = FsPaths.resolvePath(agent, newPathOpt.get(), true);
+                if (resolvedMove.error() != null) return PatchResolution.err(resolvedMove.resolvedError());
+                moveTarget = resolvedMove.resolvedTarget();
                 var moveGuard = FsPaths.checkBuiltInSkillReadOnly(agent, workspace, moveTarget);
                 if (moveGuard != null) return PatchResolution.err(moveGuard);
                 if (WorkspacePathGuard.isInSkillCredentials(workspace, moveTarget)) {

@@ -45,11 +45,24 @@ final class FsPaths {
         if (!args.has("path")) {
             return TargetPath.err(ToolErrorTemplates.fsPathMissing(action));
         }
-        var relativePath = args.get("path").getAsString();
+        return resolvePath(agent, args.get("path").getAsString(), isMutatingAction(action));
+    }
+
+    /**
+     * {@code path} for {@code agent}: inside its workspace, or anywhere {@link FsGlobalPaths} lets the Main Agent reach
+     * with its {@code allowGlobalPaths} toggle on (JF-394). The workspace returned is always the agent's own, so a path
+     * outside it meets none of the workspace's own rules, as the Main Agent's shell meets none.
+     */
+    static TargetPath resolvePath(Agent agent, String path, boolean mutating) {
         var workspace = AgentService.workspacePath(agent.name);
+        if (FsGlobalPaths.isGlobal(path) && FsGlobalPaths.allowed(agent)) {
+            var global = FsGlobalPaths.resolve(agent, path, mutating);
+            var target = global.target();
+            return target != null ? TargetPath.ok(workspace, target)
+                    : TargetPath.err(java.util.Objects.requireNonNull(global.error()));
+        }
         try {
-            var target = AgentService.acquireWorkspacePath(agent.name, relativePath);
-            return TargetPath.ok(workspace, target);
+            return TargetPath.ok(workspace, AgentService.acquireWorkspacePath(agent.name, path));
         } catch (SecurityException e) {
             return TargetPath.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
         }

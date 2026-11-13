@@ -44,7 +44,7 @@ test hooks in `app/`, so banning them needs a frozen store rather than this list
 | Capability | Holders |
 | --- | --- |
 | Spawn an OS process | 20 files — the sidecar supervisors, media transcoders, harness runners, `tools.ShellExecTool`, `tools.ScriptProcess` (a script's interpreter, always inside `HarnessSandbox.wrapScript`) and `services.BackgroundProcesses` (`lsof`); enumerated in `archunit_store/shell-process-spawners` |
-| Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
+| Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`, or for the Main Agent's absolute paths under `allowGlobalPaths` `tools.FsGlobalPaths` against `HarnessSandbox.MainFence` (JF-394); the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
 | Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon`, `tools.BrowserScreenProxy`, `services.secrets.SecretProxy`'s loopback listener and `utils.SsrfGuard`'s provider-screen socket factory |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
 | Act as the agent principal | Every routed `/api` action declares `@AgentAccess`: `OPEN`, `OWN_ONLY` or `OPERATOR_ONLY`, with no annotation meaning `OPERATOR_ONLY` (JCLAW-1270) |

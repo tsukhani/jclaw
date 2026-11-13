@@ -154,7 +154,7 @@ Two toggles govern how strictly the Main Agent's shell tools enforce safety. Cus
 | Setting | Default | Effect |
 |------------------------|---------|--------------------------------------------------------------------------------------------|
 | **Bypass allowlist** | off | When on, the Main Agent can run any shell command, not just the operator-curated allowlist. |
-| **Allow global paths** | off | When on, the Main Agent can read and write outside its workspace directory. |
+| **Allow global paths** | off | When on, the Main Agent's commands and its file tool can reach outside its workspace directory. JClaw's own data, certificate and log folders stay closed, and JClaw's program files can be read but not changed. |
 
 :::gotcha
 **Bypass allowlist** removes the safety floor. Enable it only on a Main Agent you trust, on a machine where you are comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).

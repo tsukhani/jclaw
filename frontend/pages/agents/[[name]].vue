@@ -2615,7 +2615,7 @@ const agentKinds = [
             <div>
               <span class="text-sm text-fg-strong">Allow global paths</span>
               <div class="text-xs text-fg-muted mt-0.5">
-                Execute commands outside the agent workspace directory
+                Run commands and open files outside the agent workspace directory
               </div>
             </div>
             <button
