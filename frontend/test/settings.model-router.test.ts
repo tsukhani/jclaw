@@ -103,10 +103,16 @@ registerEndpoint('/api/router/status', () => ({
     { provider: 'ollama-cloud-b', prepaid: true, usageSource: true, windows: {}, fetchedAt: '2026-10-15T13:17:00Z' },
   ],
   unavailable: {},
+  classifierAlert,
 }))
+
+let classifierAlert: Record<string, unknown> | null = null
 
 beforeEach(() => {
   clearNuxtData()
+  classifierAlert = null
+  useState('router:classifierAlert').value = null
+  useState<boolean>('auth:authenticated').value = true
   posts = []
   deletes = []
   ops = []
@@ -242,6 +248,25 @@ describe('SettingsModelRouterPanel', () => {
     await box.setValue(true)
     await vi.waitFor(() => expect(deletes).toContain('router.preferPrepaid'), { timeout: 5000 })
     await flushPromises()
+  })
+
+  it('shows the classifier alert under the model picker while the router reports one', async () => {
+    classifierAlert = {
+      classifier: 'ollama-cloud/deepseek-v4-flash',
+      consecutiveFailures: 4,
+      since: '2026-11-13T05:22:26Z',
+      lastError: 'HTTP 410 from ollama-cloud: retired',
+    }
+    const c = await mountSuspended(Harness)
+    await vi.waitFor(() => expect(c.find('[data-testid="router-classifier-alert"]').text()).toBe(
+      'The router\'s classifier ollama-cloud/deepseek-v4-flash has failed on 4 turns in a row, so keyword rules are '
+      + 'choosing the models: HTTP 410 from ollama-cloud: retired'))
+  })
+
+  it('shows no classifier alert while the classifier works', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.find('[data-testid="router-classifier-alert"]').exists()).toBe(false)
   })
 
   it('defaults the classifier to the keyword rules and writes both keys when a model is picked', async () => {

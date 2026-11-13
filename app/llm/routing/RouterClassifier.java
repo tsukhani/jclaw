@@ -91,6 +91,9 @@ public final class RouterClassifier {
             Choose the single best class and effort, e.g. "reasoning high". Answer with two words."""
             .formatted(lines(CLASS_DEFINITIONS, TaskClass::id), lines(EFFORT_DEFINITIONS, ReasoningEffort::id));
 
+    /** A prompt any classifier can label, for {@link #probe}. */
+    static final String PROBE_PROMPT = "What time is it in Tokyo right now?";
+
     private static final Pattern CLASS_WORD = Pattern.compile("(?<![a-z])(chat|summarize|agentic|reasoning|coding)(?![a-z])");
     private static final Pattern EFFORT_WORD = Pattern.compile("(?<![a-z])(low|medium|high)(?![a-z])");
 
@@ -122,33 +125,35 @@ public final class RouterClassifier {
     private static Classification ask(Candidate classifier, String message, @Nullable TaskClass priorClass,
                                       int priorToolCalls, RouterPolicy policy, Supplier<@Nullable String> jevKey) {
         if (RouterPolicy.JEV.equals(classifier.provider())) {
-            return orRules(JevRouterClassifier.classify(message, jevKey.get(), policy.jevMinConfidence(),
+            return orRules(classifier, JevRouterClassifier.classify(message, jevKey.get(), policy.jevMinConfidence(),
                     policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
         }
         if (OllamaDecision.PROVIDER.equals(classifier.provider())) {
-            return orRules(JevRouterClassifier.classifyWithOllama(message, OllamaDecision.baseUrl(), classifier.model(),
+            return orRules(classifier, JevRouterClassifier.classifyWithOllama(message, OllamaDecision.baseUrl(), classifier.model(),
                     policy.jevMinConfidence(), policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
         }
         if (LayaDecision.PROVIDER.equals(classifier.provider())) {
-            return orRules(JevRouterClassifier.classifyWithLaya(message, LayaDecision.baseUrl(), LayaDecision.apiKey(),
+            return orRules(classifier, JevRouterClassifier.classifyWithLaya(message, LayaDecision.baseUrl(), LayaDecision.apiKey(),
                     classifier.model(), policy.jevMinConfidence(), policy.classifierTimeoutSeconds()),
                     message, priorClass, priorToolCalls);
         }
         if (BasetenDecision.PROVIDER.equals(classifier.provider())) {
-            return orRules(JevRouterClassifier.classifyWithBaseten(message, BasetenDecision.apiKey(), classifier.model(),
+            return orRules(classifier, JevRouterClassifier.classifyWithBaseten(message, BasetenDecision.apiKey(), classifier.model(),
                     policy.jevMinConfidence(), policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
         }
 
         var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
         var labeled = parse(answer);
         if (labeled != null) {
+            ClassifierHealth.succeeded(classifier.describe());
             var effort = parseEffort(answer);
             return new Classification(labeled, effort != null ? effort : labeled.defaultEffort(),
                     List.of("classified by " + classifier.describe()));
         }
         if (answer != null) {
-            EventLogger.warn(ROUTER, "Classifier %s answered with no class (%s); using the keyword rules"
-                    .formatted(classifier.describe(), answer.isBlank() ? "empty" : abbreviate(answer)));
+            var reason = "answered with no class (%s)".formatted(answer.isBlank() ? "empty" : abbreviate(answer));
+            EventLogger.warn(ROUTER, "Classifier %s %s; using the keyword rules".formatted(classifier.describe(), reason));
+            ClassifierHealth.failed(classifier.describe(), reason);
         }
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
     }
@@ -191,10 +196,18 @@ public final class RouterClassifier {
         if (model != null) OllamaDecision.pinAfresh(baseUrl, model);
     }
 
-    /** The decision's class and effort, or the keyword rules' when it cannot answer, is not sure enough, or its breaker is open. */
-    private static Classification orRules(JevRouterClassifier.Verdict verdict, String message,
+    /**
+     * The decision's class and effort, or the keyword rules' when it cannot answer, is not sure enough, or its breaker is
+     * open. Only a verdict that is no {@link JevRouterClassifier.Verdict#signal()} counts as a failure: an unsure class
+     * is the provider working, and a breaker turning the call away follows failures already counted.
+     */
+    private static Classification orRules(Candidate classifier, JevRouterClassifier.Verdict verdict, String message,
                                           @Nullable TaskClass priorClass, int priorToolCalls) {
-        if (verdict.classification() != null) return verdict.classification();
+        if (verdict.classification() != null) {
+            ClassifierHealth.succeeded(classifier.describe());
+            return verdict.classification();
+        }
+        if (!verdict.signal()) ClassifierHealth.failed(classifier.describe(), verdict.reason());
         var rules = PromptClassifier.classify(message, priorClass, priorToolCalls);
         if (!verdict.signal() || verdict.reason() == null) return rules;
         var signals = new ArrayList<>(rules.signals());
@@ -216,6 +229,7 @@ public final class RouterClassifier {
         if (provider == null) {
             EventLogger.warn(ROUTER, "Classifier provider '%s' is not configured; using the keyword rules"
                     .formatted(classifier.provider()));
+            ClassifierHealth.failed(classifier.describe(), "provider '%s' is not configured".formatted(classifier.provider()));
             return null;
         }
         var prompt = truncate(message);
@@ -227,10 +241,28 @@ public final class RouterClassifier {
         } catch (RuntimeException e) {
             EventLogger.warn(ROUTER, "Classifier %s failed (%s); using the keyword rules"
                     .formatted(classifier.describe(), e.getMessage()));
+            ClassifierHealth.failed(classifier.describe(), e.getMessage());
             return null;
         }
         var answer = firstContent(response);
         return answer != null ? answer : "";
+    }
+
+    /**
+     * Why {@code classifier} cannot classify, from one call to its provider with a test prompt, or null when the provider
+     * answered. Settings makes this call before storing a classifier, because the model list it checks is JClaw's own
+     * and can still name a model the provider has since retired.
+     */
+    public static @Nullable String probe(Candidate classifier, int timeoutSeconds) {
+        var provider = ProviderRegistry.get(classifier.provider());
+        if (provider == null) return "provider '%s' is not configured".formatted(classifier.provider());
+        try {
+            provider.chat(classifier.model(), List.of(ChatMessage.system(INSTRUCTIONS), ChatMessage.user(PROBE_PROMPT)),
+                    List.of(), MAX_ANSWER_TOKENS, null, timeoutSeconds, ROUTER);
+            return null;
+        } catch (RuntimeException e) {
+            return ClassifierHealth.clean(e.getMessage());
+        }
     }
 
     /** The first class named anywhere in the answer, so {@code "reasoning."} and {@code {"class":"chat"}} both read. */

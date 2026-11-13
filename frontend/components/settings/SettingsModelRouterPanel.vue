@@ -51,6 +51,7 @@ const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
 const { configData, saving, refresh, configValue, getProviderModels, providersData } = useSettingsConfig()
 const { saveError, attempt } = useSaveAttempt()
+const { alert: classifierAlert } = useClassifierAlert()
 
 // Lazy: the status call reads each Ollama Cloud provider's usage over the network, and must not
 // hold the panel open while it does.
@@ -487,6 +488,14 @@ function usageTone(fraction: number): string {
             @update:model-value="saveClassifier"
           />
         </div>
+        <p
+          v-if="classifierAlert"
+          class="px-4 pb-2.5 text-xs text-amber-700 dark:text-amber-400"
+          role="status"
+          data-testid="router-classifier-alert"
+        >
+          {{ classifierAlertMessage(classifierAlert) }}
+        </p>
         <p
           v-if="!jevKeySet"
           class="px-4 pb-2.5 text-xs text-fg-muted"

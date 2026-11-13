@@ -214,7 +214,13 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                 || BasetenDecision.PROVIDER.equals(named)) {
             return key.equals(CLASSIFIER_PROVIDER) ? null : decisionModelRejection(named, v);
         }
-        return registeredModelRejection(provider, model);
+        var rejection = registeredModelRejection(provider, model);
+        if (rejection != null || model == null || model.isBlank()) return rejection;
+        var classifier = new Candidate(named, model.strip());
+        var failure = RouterClassifier.probe(classifier,
+                ConfigService.getInt(CLASSIFIER_TIMEOUT_SECONDS, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS));
+        return failure == null ? null
+                : "%s %s failed a test classification: %s".formatted(CLASSIFIER_MODEL, classifier.describe(), failure);
     }
 
     /**

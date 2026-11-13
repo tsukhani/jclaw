@@ -1,3 +1,4 @@
+import llm.LlmResilience;
 import llm.ProviderRegistry;
 import llm.routing.RouterPolicy;
 import llm.routing.RouterPolicy.Candidate;
@@ -17,6 +18,7 @@ import services.ConfigService;
 import services.decision.BasetenDecision;
 import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
+import utils.CircuitBreakers;
 import utils.HttpFactories;
 
 import java.net.ConnectException;
@@ -84,6 +86,63 @@ class RouterPolicyTest extends UnitTest {
                     .body(ResponseBody.create(listing ? tags : "{}", MediaType.get("application/json"))).build();
         };
         return HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(server).build(), body);
+    }
+
+    /** Runs {@code body} against a provider that answers every call with {@code code} and {@code reply}. */
+    private <T> T withProvider(int code, String reply, Supplier<T> body) {
+        Interceptor server = chain -> {
+            paths.add(chain.request().url().encodedPath());
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(code).message("canned")
+                    .body(ResponseBody.create(reply, MediaType.get("application/json"))).build();
+        };
+        return HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(server).build(), body);
+    }
+
+    private static String completion(String content) {
+        return "{\"id\":\"c\",\"model\":\"m1\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\","
+                + "\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"}}]}";
+    }
+
+    /** {@code body} with this class's provider stored as the classifier's, removed again afterwards. */
+    private void withClassifierProvider(Runnable body) {
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, provider);
+        try {
+            body.run();
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    @Test
+    void aClassifierModelItsProviderRefusesIsNotSavedAndTheProvidersErrorSaysWhy() {
+        var retired = "{\"error\":\"m1 was retired on September 25, 2026.\"}";
+        withClassifierProvider(() -> assertEquals(
+                RouterPolicy.CLASSIFIER_MODEL + " " + provider + "/m1 failed a test classification: HTTP 410 from "
+                        + provider + ": " + retired,
+                withProvider(410, retired, () -> RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "m1"))));
+        assertEquals(List.of("/v1/chat/completions"), paths, "one test call, to the provider's chat endpoint");
+    }
+
+    @Test
+    void aClassifierModelThatAnswersTheTestCallIsSaved() {
+        withClassifierProvider(() -> assertNull(
+                withProvider(200, completion("chat low"), () -> RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, " m1 "))));
+        assertEquals(1, paths.size());
+    }
+
+    @Test
+    void aModelJClawDoesNotListIsRefusedWithoutCallingTheProvider() {
+        withClassifierProvider(() -> assertEquals("Provider '" + provider + "' has no model with id 'm9'.",
+                withProvider(200, completion("chat"), () -> RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "m9"))));
+        assertEquals(List.of(), paths);
+    }
+
+    @Test
+    void aProviderWriteWithNoModelStoredMakesNoTestCall() {
+        assertNull(withProvider(410, "{}", () -> RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, provider)));
+        assertEquals(List.of(), paths);
     }
 
     @Test

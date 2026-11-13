@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import llm.ProviderRegistry;
+import llm.routing.ClassifierHealth;
 import llm.routing.ModelRouter;
 import llm.routing.RouterPolicy;
 import llm.routing.SubscriptionUsage;
@@ -43,9 +44,14 @@ public class ApiRouterController extends Controller {
     public record ProviderUsage(String provider, boolean prepaid, boolean usageSource,
                                 Map<String, Double> windows, @Nullable String fetchedAt) {}
 
-    /** @param unavailable providers or models a quota failure has benched, with the time each returns */
+    /**
+     * @param unavailable     providers or models a quota failure has benched, with the time each returns
+     * @param classifierAlert the classifier's alert while it has failed {@link ClassifierHealth#ALERT_AFTER} turns in a
+     *                        row, else null
+     */
     public record RouterStatusResponse(boolean available, double downshiftAt, double exhaustedAt,
-                                       List<ProviderUsage> providers, Map<String, String> unavailable) {}
+                                       List<ProviderUsage> providers, Map<String, String> unavailable,
+                                       ClassifierHealth.@Nullable Alert classifierAlert) {}
 
     /** @param partial true for the span still running, the newest */
     public record UsageBucket(String from, String until, long requestCount, boolean partial) {}
@@ -101,8 +107,10 @@ public class ApiRouterController extends Controller {
         }
         var unavailable = new LinkedHashMap<String, String>();
         SubscriptionUsage.unavailableMarks().forEach((k, until) -> unavailable.put(k, until.toString()));
+        var classifier = policy.classifier();
         renderJSON(GSON.toJson(new RouterStatusResponse(policy.available(), policy.downshiftAt(),
-                policy.exhaustedAt(), providers, unavailable)));
+                policy.exhaustedAt(), providers, unavailable,
+                ClassifierHealth.alertFor(classifier != null ? classifier.describe() : null))));
     }
 
     /**

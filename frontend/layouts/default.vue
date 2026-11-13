@@ -243,6 +243,7 @@ onUnmounted(() => {
 })
 
 const route = useRoute()
+const { alert: classifierAlert } = useClassifierAlert()
 const breadcrumbExtra = useBreadcrumbExtra()
 
 /**
@@ -794,6 +795,13 @@ const navGroups: NavGroup[] = [
         variant="error"
         action-text="Retry"
         @action="retryStatus"
+      />
+      <StatusBanner
+        v-else-if="classifierAlert"
+        :message="classifierAlertMessage(classifierAlert)"
+        variant="warning"
+        action-text="Router settings"
+        @action="navigateTo('/settings?section=model-router')"
       />
 
       <!-- Content -->

@@ -13,6 +13,7 @@ import llm.LlmResilience;
 import llm.OllamaProvider;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
+import llm.routing.ClassifierHealth;
 import llm.routing.ModelRouter;
 import llm.routing.RouterClassifier;
 import llm.routing.RouterPolicy;
@@ -588,6 +589,7 @@ public class ConfigService {
                 }
             },
             ConfigService::settleOllamaClassifier,
+            (key, _) -> publishClassifierHealth(key),
             // The registry otherwise re-reads the pin only once a minute.
             (key, _) -> {
                 if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) ProviderRegistry.refresh();
@@ -636,6 +638,13 @@ public class ConfigService {
         if (key.equals("tts." + TtsEngine.SIDECAR.id() + ".model") && TtsSidecarManager.isRunning()) {
             TtsSidecarManager.prewarmModelAsync();
         }
+    }
+
+    /** A settings write can change which classifier routes, and with it whether an alert stands. */
+    private static void publishClassifierHealth(String key) {
+        if (!key.equals(RouterPolicy.CLASSIFIER_PROVIDER) && !key.equals(RouterPolicy.CLASSIFIER_MODEL)) return;
+        var classifier = RouterPolicy.load().classifier();
+        ClassifierHealth.publishCurrent(classifier != null ? classifier.describe() : null);
     }
 
     // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338),
@@ -784,6 +793,7 @@ public class ConfigService {
         if (isOllamaClassifierKey(key) && !Play.runningInTestMode()) {
             RouterClassifier.settleOllamaModelsInBackground();
         }
+        publishClassifierHealth(key);
     }
 
     /** The keys that decide which Ollama decision model, on which server, the router keeps loaded. */

@@ -2,6 +2,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
+import llm.routing.ClassifierHealth;
 import llm.routing.ModelRouter;
 import llm.routing.ReasoningEffort;
 import llm.routing.RouterClassifier;
@@ -156,6 +157,59 @@ class RouterClassifierTest extends UnitTest {
         assertEquals(TaskClass.AGENTIC, c.taskClass());
         assertFalse(c.signals().getFirst().startsWith("classified by"));
         assertNotNull(c.classifierMs(), "the failed call still cost the turn its time");
+    }
+
+    @Test
+    void threeRefusedClassificationsInARowRaiseTheAlertAndTheNextAnswerClearsIt() {
+        var retired = "{\"error\":\"tiny was retired\"}";
+        for (var i = 0; i < 2; i++) {
+            HttpFactories.runWith(canned(410, retired), () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        }
+        assertNull(ClassifierHealth.alertFor(provider + "/tiny"), "two failures are no alert yet");
+
+        var third = HttpFactories.callWith(canned(410, retired),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertEquals(TaskClass.AGENTIC, third.taskClass(), "the keyword rules still route the turn");
+        var alert = ClassifierHealth.alertFor(provider + "/tiny");
+        assertEquals(3, alert.consecutiveFailures());
+        assertEquals("HTTP 410 from " + provider + ": " + retired, alert.lastError());
+
+        HttpFactories.runWith(canned(200, completion("reasoning")),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertNull(ClassifierHealth.alertFor(provider + "/tiny"));
+    }
+
+    @Test
+    void anAnswerThatNamesNoClassCountsAsAFailedClassification() {
+        for (var i = 0; i < 3; i++) {
+            HttpFactories.runWith(canned(200, completion("banana")),
+                    () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        }
+        assertEquals("answered with no class (banana)", ClassifierHealth.alertFor(provider + "/tiny").lastError());
+    }
+
+    @Test
+    void aFollowUpThatSkipsTheClassifierLeavesItsCountAlone() {
+        for (var i = 0; i < 2; i++) {
+            HttpFactories.runWith(canned(410, "{}"), () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        }
+        HttpFactories.runWith(canned(410, "{}"), () -> RouterClassifier.classify("thanks", TaskClass.CHAT, 0, withClassifier()));
+        assertEquals(2, requests.size(), "the acknowledgment never reached the classifier");
+        assertNull(ClassifierHealth.alertFor(provider + "/tiny"));
+    }
+
+    @Test
+    void theProbeReportsTheProvidersErrorAndSendsOnlyTheTestPrompt() {
+        var retired = "{\"error\":\"tiny was retired\"}";
+        assertEquals("HTTP 410 from " + provider + ": " + retired, HttpFactories.callWith(canned(410, retired),
+                () -> RouterClassifier.probe(new Candidate(provider, "tiny"), 8)));
+        var sent = JsonParser.parseString(requests.getFirst()).getAsJsonObject().getAsJsonArray("messages");
+        assertEquals(2, sent.size());
+        assertEquals("What time is it in Tokyo right now?", sent.get(1).getAsJsonObject().get("content").getAsString());
+        assertNull(HttpFactories.callWith(canned(200, completion("chat")),
+                () -> RouterClassifier.probe(new Candidate(provider, "tiny"), 8)));
+        assertEquals("provider 'rc-missing' is not configured",
+                RouterClassifier.probe(new Candidate("rc-missing", "tiny"), 8));
     }
 
     @Test
