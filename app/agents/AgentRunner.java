@@ -861,7 +861,8 @@ public class AgentRunner {
         checkTurnCancel(turnCancel);
 
         // JCLAW-1222: a conversation on the model router gets its model first, bound for the whole turn.
-        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType);
+        var embedding = QueryEmbedPrefetch.startForRoutedTurn(agent, conversation, userMessage, trace);
+        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType, trace);
         if (route == null && TurnRouting.usesRouter(agent, conversation)) {
             Tx.run(() -> {
                 if (!skipUserAppend) sink.appendUserMessage(userMessage, attachments);
@@ -876,9 +877,9 @@ public class AgentRunner {
                     () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
                             broadcast, turnCancel));
         }
-        return RoutedTurn.callWith(route, conversation,
+        return QueryEmbedPrefetch.callWith(embedding, () -> RoutedTurn.callWith(route, conversation,
                 () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace,
-                        broadcast, turnCancel));
+                        broadcast, turnCancel)));
     }
 
     /** The sync turn from prologue to persisted reply; {@link #runAfterAcquire} owns the trace and the queue. */

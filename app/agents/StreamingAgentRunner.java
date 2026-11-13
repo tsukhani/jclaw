@@ -394,7 +394,8 @@ final class StreamingAgentRunner {
                                             LatencyTrace trace, AgentExecutionSink sink,
                                             TurnCancellation.Registration[] yieldKillRef)
             throws InterruptedException {
-        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType);
+        var embedding = QueryEmbedPrefetch.startForRoutedTurn(agent, conversation, userMessage, trace);
+        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType, trace);
         if (route == null) {
             if (TurnRouting.usesRouter(agent, conversation)) {
                 cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
@@ -406,12 +407,12 @@ final class StreamingAgentRunner {
             });
             return;
         }
-        RoutedTurn.callWith(route, conversation, () -> {
+        QueryEmbedPrefetch.callWith(embedding, () -> RoutedTurn.callWith(route, conversation, () -> {
             // Emitted before the prologue so the chat shows the model while the reply is still streaming.
             cb.onStatus().accept(routeFrame(agent, conversation));
             streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink, yieldKillRef);
             return null;
-        });
+        }));
     }
 
     /**

@@ -46,6 +46,29 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     expect(keys.slice(ttftIdx + 1).some(k => k.startsWith('prologue_'))).toBe(false)
   })
 
+  it('lists the model router after the other parts of Prompt, labelled for the reader', () => {
+    const rows = buildLatencyRows({
+      prologue: h(3, 500),
+      prologue_prompt: h(3, 480),
+      prologue_route: h(3, 380),
+      prologue_embed_query: h(3, 68),
+      prologue_assemble: h(3, 470),
+      prologue_rewrite: h(3, 5),
+    })
+
+    const keys = rows.map(r => r.key)
+    expect(keys.slice(keys.indexOf('prologue_prompt'))).toEqual([
+      'prologue_prompt',
+      'prologue_assemble',
+      'prologue_rewrite',
+      'prologue_embed_query',
+      'prologue_route',
+    ])
+    const route = rows.find(r => r.key === 'prologue_route')!
+    expect(route.isChild).toBe(true)
+    expect(route.label).toBe('Model router')
+  })
+
   it('flags children with isChild and assigns clean labels', () => {
     const rows = buildLatencyRows({
       prologue: h(1, 20),

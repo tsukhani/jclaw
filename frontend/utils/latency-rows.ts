@@ -246,11 +246,12 @@ export const PROLOGUE_CHILDREN_ORDER = [
   'prologue_conv',
   'prologue_tools',
   'prologue_prompt',
-  // The three below decompose Prompt rather than continuing the chain, so they
+  // The ones below decompose Prompt rather than continuing the chain, so they
   // follow it and do not sum with their siblings.
   'prologue_assemble',
   'prologue_rewrite',
   'prologue_embed_query',
+  'prologue_route',
 ] as const
 
 export const PROLOGUE_CHILD_LABELS: Record<string, string> = {
@@ -261,6 +262,7 @@ export const PROLOGUE_CHILD_LABELS: Record<string, string> = {
   prologue_assemble: 'Assemble',
   prologue_rewrite: 'Rewrite',
   prologue_embed_query: 'Query embedding',
+  prologue_route: 'Model router',
 }
 
 function isPrologueChildKey(key: string): boolean {

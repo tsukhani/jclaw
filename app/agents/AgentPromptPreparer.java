@@ -4,7 +4,6 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
-import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -93,9 +92,7 @@ final class AgentPromptPreparer {
                                         AgentExecutionSink sink, LatencyTrace trace) {
         // JCLAW-960: BEFORE the Tx. Everything below runs in one transaction by design, so
         // recall's embedding round-trip would otherwise hold a pooled connection across it.
-        long embedStartNs = System.nanoTime();
-        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        var queryEmbedding = QueryEmbedPrefetch.embed(userMessage);
         return Tx.run(() -> {
             // Re-read inside the transaction; the caller resolved this id moments ago, so a
             // miss means the row vanished mid-turn rather than a bad id.
@@ -217,9 +214,7 @@ final class AgentPromptPreparer {
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
                                                    String channelType, String userMessage) {
         // JCLAW-960: BEFORE the Tx — see the sibling call in prepareSyncData.
-        long embedStartNs = System.nanoTime();
-        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        var queryEmbedding = QueryEmbedPrefetch.embed(userMessage);
         return Tx.run(() -> {
             var convo = Objects.requireNonNull(ConversationService.findById(conversation.id),
                     "conversation disappeared mid-turn");

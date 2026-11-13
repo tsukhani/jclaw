@@ -284,6 +284,8 @@ public final class LoadTestRunner {
             "queue_wait",
             "prologue", "prologue_parse", "prologue_conv",
             "prologue_prompt", "prologue_tools",
+            // Decompose prologue_prompt, so they do not sum with the chain above; a router A/B reads them (JF-364).
+            "prologue_assemble", "prologue_rewrite", "prologue_embed_query", "prologue_route",
             "dispatcher_wait",
             "ttft", "stream_body", "persist", "terminal_tail"
     };

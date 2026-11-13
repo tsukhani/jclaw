@@ -17,9 +17,11 @@ import services.EventLogger;
 import services.ModelOverrideResolver;
 import services.Tx;
 import utils.JsonArgs;
+import utils.LatencyTrace;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Routes a turn whose conversation runs on {@code router/auto} (JCLAW-1222): reads what the previous
@@ -48,6 +50,19 @@ public final class TurnRouting {
      * that case — and also when it is but no listed model resolves, which a caller tells apart with
      * {@link #usesRouter}.
      */
+    public static @Nullable RouteDecision decide(Agent agent, Conversation conversation, String userMessage,
+                                                 @Nullable List<AttachmentService.Input> attachments,
+                                                 @Nullable String channel, @Nullable LatencyTrace trace) {
+        if (!usesRouter(agent, conversation)) return null;
+        long startNs = System.nanoTime();
+        try {
+            return decide(agent, conversation, userMessage, attachments, channel);
+        } finally {
+            if (trace != null) trace.recordRoute(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs));
+        }
+    }
+
+    /** {@link #decide(Agent, Conversation, String, List, String, LatencyTrace)} for a turn whose prologue is not timed. */
     public static @Nullable RouteDecision decide(Agent agent, Conversation conversation, String userMessage,
                                                  @Nullable List<AttachmentService.Input> attachments,
                                                  @Nullable String channel) {

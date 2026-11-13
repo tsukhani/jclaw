@@ -60,6 +60,7 @@ public final class LatencyTrace {
     private final AtomicLong toolExecMs = new AtomicLong();
     private final AtomicLong persistMs = new AtomicLong();
     private final AtomicLong queryEmbedMs = new AtomicLong();
+    private final AtomicLong routeMs = new AtomicLong(-1);
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicInteger memoryRecallCount = new AtomicInteger();
@@ -213,6 +214,15 @@ public final class LatencyTrace {
         var trace = CURRENT.get();
         if (trace == null) return;
         trace.queryEmbedMs.addAndGet(elapsedMs);
+    }
+
+    /**
+     * Record the model router's choice for this turn, its classifier call included (JF-364). Before this segment the
+     * classifier's wait could only be inferred, from the Main Agent's {@code prologue_assemble} running about 400 ms
+     * longer than an agent's off the router. Recorded only on a routed turn, so its absence means no router ran.
+     */
+    public void recordRoute(long elapsedMs) {
+        routeMs.set(elapsedMs);
     }
 
 
@@ -435,6 +445,8 @@ public final class LatencyTrace {
         // to the chain — same rule as the pair above.
         long embed = queryEmbedMs.get();
         if (embed > 0) emit("prologue_embed_query", embed);
+        long route = routeMs.get();
+        if (route >= 0) emit("prologue_route", route);
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
