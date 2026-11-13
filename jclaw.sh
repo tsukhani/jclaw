@@ -310,6 +310,8 @@ Load-test options (only used with the 'loadtest' command):
                           growing conversation. Mutually exclusive with
                           --message. The repo ships loadtest/prompts.txt with
                           50 fair-comparison prompts for convenience.
+  --tool-agent            Drive the single-tool load-test agent, so a run
+                          measures tool rounds. Needs --provider and --model.
 
 Examples:
   ${INVOKE} setup                                    # One-time setup after fresh clone
@@ -1030,6 +1032,11 @@ Options:
                           than a recall test. Mutually exclusive with
                           --message. The repo ships loadtest/prompts.txt
                           with 50 fair-comparison prompts.
+  --tool-agent            Drive __loadtest_tools__, whose one tool is
+                          loadtest_sleep, instead of __loadtest__, which has
+                          none, so a run measures tool rounds. Needs
+                          --provider and --model: a real model must choose to
+                          call the tool.
 
 Examples:
   ${INVOKE} loadtest                                                                                # 10 workers x 5-turn conversations, mock
@@ -1624,6 +1631,8 @@ LT_MESSAGE=""
 # --message. Mutually exclusive with --message. Validated below: file must
 # exist and contain at least LT_TURNS non-blank lines.
 LT_PROMPTS_FILE=""
+# Drive __loadtest_tools__ (one tool, loadtest_sleep) instead of __loadtest__ (none).
+LT_TOOL_AGENT=false
 # JSON-encoded prompts array, populated from LT_PROMPTS_FILE in the
 # validation block. Embedded in the loadtest body when non-empty.
 LT_PROMPTS_JSON=""
@@ -1714,6 +1723,10 @@ while [[ $# -gt 0 ]]; do
         --prompts)
             LT_PROMPTS_FILE="$2"
             shift 2
+            ;;
+        --tool-agent)
+            LT_TOOL_AGENT=true
+            shift
             ;;
         --install-ca)
             HTTPS_INSTALL_CA=true
@@ -1926,6 +1939,10 @@ fi
 LT_REAL=false
 if [[ -n "$LT_PROVIDER" && -n "$LT_MODEL" ]]; then
     LT_REAL=true
+fi
+if [[ "$LT_TOOL_AGENT" == true && "$LT_REAL" != true ]]; then
+    echo "Error: --tool-agent needs --provider and --model: a real model must choose to call the tool."
+    exit 1
 fi
 
 # --prompts validation. Resolve and read the file once here, so a missing
@@ -4604,7 +4621,7 @@ do_loadtest() {
     if [[ "$LT_REAL" != true ]]; then
         echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
     else
-        echo "    compress=$LT_COMPRESS"
+        echo "    compress=$LT_COMPRESS tool-agent=$LT_TOOL_AGENT"
     fi
     # Show what the workers will actually send. Three modes:
     #  --prompts    → show file path + prompt count (varied prompt per turn)
@@ -4645,6 +4662,9 @@ do_loadtest() {
     # well-formed and long enough by the time we get here.
     if [[ -n "$LT_PROMPTS_JSON" ]]; then
         body="$body,\"prompts\":$LT_PROMPTS_JSON"
+    fi
+    if [[ "$LT_TOOL_AGENT" == true ]]; then
+        body="$body,\"toolAgent\":true"
     fi
     body="$body}"
 
