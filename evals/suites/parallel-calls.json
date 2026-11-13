@@ -50,6 +50,7 @@
         {
           "kind": "tools_called_within",
           "args": [
+            "datetime",
             "datetime"
           ]
         },

@@ -1043,6 +1043,22 @@ class AgentSystemTest extends UnitTest {
     }
 
     @Test
+    void executionBiasAsksForIndependentToolCallsInOneResponseAboveTheCacheBoundary() {
+        // JF-365: on the operator's own models, three independent calls shared one response in 3 of 9 turns.
+        var agent = AgentService.create("parallel-calls-agent", "openrouter", "gpt-4.1");
+        var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
+        var line = "- When several tool calls do not depend on each other's results, send them in the same response"
+                + " instead of one per round: every extra round makes the operator wait for another reply from the"
+                + " model. Wait for a result only when the next call needs it.";
+
+        var lineIdx = prompt.indexOf(line);
+        assertTrue(lineIdx > prompt.indexOf("## Execution Bias"), "the line belongs to Execution Bias");
+        assertTrue(lineIdx < prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER),
+                "above the cache boundary, so every turn's prefix stays the same");
+        assertEquals(lineIdx, prompt.lastIndexOf(line), "stated once");
+    }
+
+    @Test
     void assembleEnvironmentIncludesModelAndRuntime() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1-new");
         var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
