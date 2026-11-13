@@ -500,7 +500,8 @@ watch(() => [props.agentId, props.skillName], () => {
         The update put the files themselves back in the new copy, unless the new version ships its own file there. JClaw
         keeps these copies outside the agent's workspace, so the skill and the agent cannot read them, and never shows
         what they hold. To use one, choose it under Value from when you add or replace a secret or a setting. JClaw
-        deletes a copy once each name in it that this skill asks for has a value.
+        deletes a copy once each name in it that this skill asks for has a value, and the skill's own file with it while
+        that file is unchanged and holds only names this skill asks for, so no plain copy is left in the skill.
       </p>
       <ApiErrorAlert
         v-if="keptError"

@@ -283,7 +283,7 @@ public final class KeptSkillFiles {
         var text = text(file);
         var reading = reading(text, name, pathOf(file));
         var saved = SkillSecrets.put(owner, skill, name, reading.value(), hosts);
-        afterImport(owner, skill, skillDir, file, reading.whole() ? null : text, "secret " + name);
+        afterImport(owner, skill, skillDir, file, reading.whole() ? null : text, name, "secret " + name);
         return saved;
     }
 
@@ -295,7 +295,7 @@ public final class KeptSkillFiles {
         // A whole file is most often a key, which a setting would show in clear and hand to every command.
         if (reading.whole()) throw new SkillSecrets.Refused("A setting takes its value from a NAME=value line.");
         var saved = SkillSettings.put(owner, skill, name, reading.value());
-        afterImport(owner, skill, skillDir, file, text, "setting " + name);
+        afterImport(owner, skill, skillDir, file, text, name, "setting " + name);
         return saved;
     }
 
@@ -386,14 +386,16 @@ public final class KeptSkillFiles {
     /**
      * Delete the imported {@code file} once the store commits, unless {@code text}, its assignments (null for a file
      * that was one value), names a value the skill declares that the agent still lacks: a rolled-back write, or a value
-     * still waiting, keeps it.
+     * still waiting, keeps it. {@code name} is what a file of one value was stored as.
      */
     private static void afterImport(Agent owner, String skill, Path skillDir, Path file, @Nullable String text,
-                                    String storedAs) {
-        var waiting = text == null ? List.<String>of() : waiting(owner, declaredByUpperCase(skillDir), text);
+                                    String name, String storedAs) {
+        var declared = declaredByUpperCase(skillDir);
+        var waiting = text == null ? List.<String>of() : waiting(owner, declared, text);
         if (waiting.isEmpty()) {
+            var holdsOnlyDeclared = text == null ? declared.containsKey(name.toUpperCase(Locale.ROOT)) : onlyDeclared(text, declared);
             deleteAfterCommit(owner, skill, file, "Kept file %s of skill %s stored as %s and deleted"
-                    .formatted(pathOf(file), skill, storedAs));
+                    .formatted(pathOf(file), skill, storedAs), holdsOnlyDeclared ? skillDir : null);
             return;
         }
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Kept file %s of skill %s stored as %s and kept for %s"
@@ -427,7 +429,7 @@ public final class KeptSkillFiles {
             }
             if (!declaredIn(text, declared).isEmpty() && waiting(owner, declared, text).isEmpty()) {
                 deleteAfterCommit(owner, skill, file, "Kept file %s of skill %s deleted: each name in it the skill"
-                        .formatted(pathOf(file), skill) + " declares has a value");
+                        .formatted(pathOf(file), skill) + " declares has a value", onlyDeclared(text, declared) ? skillDir : null);
             }
         }
     }
@@ -460,10 +462,30 @@ public final class KeptSkillFiles {
         return assigned.stream().filter(name -> provided.holder(name) == null).toList();
     }
 
-    private static void deleteAfterCommit(Agent owner, String skill, Path file, String done) {
+    /**
+     * Whether each line of {@code text} is blank, a comment or an assignment of a name the skill declares: only then
+     * does the skill's own copy hold nothing a script might still read once every value in it is stored.
+     */
+    private static boolean onlyDeclared(String text, Map<String, String> declared) {
+        for (var line : text.split("\\R")) {
+            var trimmed = line.strip();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            var m = ASSIGNMENT.matcher(line);
+            if (!m.matches() || !declared.containsKey(m.group(1).toUpperCase(Locale.ROOT))) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Delete kept {@code file} once the store commits. With {@code skillDir}, first delete the skill's own copy of it,
+     * which an update put back (JF-405), so a value moved into the store leaves no plain copy in the skill: only while
+     * that copy is a regular file inside the skill holding the kept bytes, since the agent may have changed it.
+     */
+    private static void deleteAfterCommit(Agent owner, String skill, Path file, String done, @Nullable Path skillDir) {
         var agent = owner.name;
         var path = pathOf(file);
         Tx.afterCommit(() -> {
+            if (skillDir != null) deleteSkillCopy(agent, skill, skillDir, file);
             try {
                 Files.deleteIfExists(file);
                 pruneEmpty(file.getParent());
@@ -473,6 +495,23 @@ public final class KeptSkillFiles {
                         "Kept file %s of skill %s could not be deleted: %s".formatted(path, skill, e.getMessage()));
             }
         });
+    }
+
+    private static void deleteSkillCopy(String agent, String skill, Path skillDir, Path kept) {
+        var path = pathOf(kept);
+        var copy = skillDir.resolve(path);
+        try {
+            if (!Files.isRegularFile(copy, LinkOption.NOFOLLOW_LINKS) || !copy.toRealPath().startsWith(skillDir.toRealPath())
+                    || Files.mismatch(copy, kept) != -1L) {
+                return;
+            }
+            Files.delete(copy);
+            EventLogger.info(LOG_CATEGORY, agent, null,
+                    "Skill %s's own copy of %s deleted: each name in it has a value".formatted(skill, path));
+        } catch (IOException e) {
+            EventLogger.warn(LOG_CATEGORY, agent, null,
+                    "Skill %s's own copy of %s could not be deleted: %s".formatted(skill, path, e.getMessage()));
+        }
     }
 
     /** Delete one kept file; false when there was none. */

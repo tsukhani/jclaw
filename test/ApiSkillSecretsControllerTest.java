@@ -1212,6 +1212,106 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals(List.of("config.env"), keptPaths(), "a file naming nothing the skill declares is never used up");
     }
 
+    // ==================== the skill's own copy goes with a used-up kept file (JF-405) ====================
+
+    /** Put {@code content} at {@code path} in demo's own folder, as an update carries a kept file back into it. */
+    private java.nio.file.Path putBack(String path, String content) throws Exception {
+        var copy = AgentService.workspacePath(agentName).resolve("skills/demo").resolve(path);
+        Files.createDirectories(copy.getParent());
+        Files.writeString(copy, content);
+        return copy;
+    }
+
+    @Test
+    void movingADeclaredKeyFileIntoTheVaultDeletesTheSkillsUnchangedCopyToo() throws Exception {
+        declare("demo", "GAMMA_API_KEY=public-api.gamma.app   # The Gamma key\n");
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        var copy = putBack("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()),
+                seen -> assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}")));
+
+        assertEquals(List.of(), keptPaths());
+        assertFalse(Files.exists(copy, java.nio.file.LinkOption.NOFOLLOW_LINKS), "no plain copy of the key is left in the skill");
+        assertEquals(List.of(
+                "Secret GAMMA_API_KEY added for skill demo, sent only to public-api.gamma.app",
+                "Skill demo's own copy of credentials/gamma-api-key.txt deleted: each name in it has a value",
+                "Kept file credentials/gamma-api-key.txt of skill demo stored as secret GAMMA_API_KEY and deleted"),
+                events.stream().map(EventLogger.Captured::message).toList());
+    }
+
+    @Test
+    void aKeyFileStoredUnderANameTheSkillDoesNotDeclareLeavesTheSkillsCopy() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        var copy = putBack("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+        assertEquals(List.of(), keptPaths());
+        assertEquals(VALUE + "\n", Files.readString(copy), "a skill that declares nothing may still read its file");
+    }
+
+    @Test
+    void aSkillCopyChangedSinceTheUpdateStays() throws Exception {
+        declare("demo", "GAMMA_API_KEY=public-api.gamma.app   # The Gamma key\n");
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        var copy = putBack("credentials/gamma-api-key.txt", "fake-newer-key-jf405\n");
+
+        assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+        assertEquals(List.of(), keptPaths());
+        assertEquals("fake-newer-key-jf405\n", Files.readString(copy));
+    }
+
+    @Test
+    void anEnvFileTakesTheSkillsCopyWithItOnlyOnceItsLastDeclaredNameHasAValue() throws Exception {
+        declare("demo", "NAS_PASS=nas.example.com   # The DSM password\nsetting NAS_USER=admin   # The DSM user\n");
+        var text = "# DSM sign-in\nexport NAS_PASS='" + VALUE + "'\nNAS_USER=operator\n";
+        var id = keep("credentials/nas.env", text);
+        var copy = putBack("credentials/nas.env", text);
+
+        assertIsOk(put("NAS_PASS", "{" + keptJson(id) + ",\"hosts\":[\"nas.example.com\"]}"));
+        assertEquals(text, Files.readString(copy), "NAS_USER still waits for its value");
+
+        assertIsOk(putSetting("NAS_USER", "{\"value\":\"typed-operator\"}"));
+
+        assertEquals(List.of(), keptPaths());
+        assertFalse(Files.exists(copy, java.nio.file.LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void anEnvFileWithALineTheSkillDoesNotDeclareLeavesTheSkillsCopy() throws Exception {
+        declare("demo", "NAS_PASS=nas.example.com   # The DSM password\n");
+        var text = "NAS_PASS=" + VALUE + "\nNAS_HOST=nas.lan\n";
+        var id = keep("credentials/nas.env", text);
+        var copy = putBack("credentials/nas.env", text);
+
+        assertIsOk(put("NAS_PASS", "{" + keptJson(id) + ",\"hosts\":[\"nas.example.com\"]}"));
+
+        assertEquals(List.of(), keptPaths(), "NAS_HOST is not declared, so it never holds the kept file back");
+        assertEquals(text, Files.readString(copy), "a script may still read NAS_HOST from it");
+    }
+
+    @Test
+    void aLinkAtTheSkillsPathIsNotDeleted() throws Exception {
+        declare("demo", "GAMMA_API_KEY=public-api.gamma.app   # The Gamma key\n");
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        var outside = Files.createTempFile("jf405-outside-", ".txt");
+        try {
+            Files.writeString(outside, VALUE + "\n");
+            var link = AgentService.workspacePath(agentName).resolve("skills/demo/credentials/gamma-api-key.txt");
+            Files.createDirectories(link.getParent());
+            Files.createSymbolicLink(link, outside);
+
+            assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+            assertTrue(Files.isSymbolicLink(link), "the link stays");
+            assertEquals(VALUE + "\n", Files.readString(outside), "and what it points at");
+        } finally {
+            Files.deleteIfExists(outside);
+        }
+    }
+
     @Test
     void aBase64KeyWithPaddingIsImportedWholeAndThenDeleted() throws Exception {
         var id = keep("credentials/gamma-api-key.txt", "ZmFrZS1nYW1tYS1rZXktamYzNTI=\n");
