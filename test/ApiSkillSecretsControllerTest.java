@@ -1,3 +1,4 @@
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import controllers.AgentAccess;
@@ -5,6 +6,7 @@ import controllers.ApiSkillSecretsController;
 import controllers.RequestPrincipal;
 import jobs.CredentialEncryptionJob;
 import models.Agent;
+import models.AgentSkillConfig;
 import models.SkillSecret;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,7 +31,11 @@ import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -386,6 +392,285 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
                 return grant == null ? List.<String>of() : grant.names();
             }
         });
+    }
+
+    // ==================== a running command's secrets (JF-390) ====================
+
+    private static String secretJson(String value, SecretProxyFixture stub) {
+        return "{\"value\":\"" + value + "\",\"hosts\":[\"" + SecretProxyFixture.BOUND + ":" + stub.port() + "\"]}";
+    }
+
+    /** The grant a running command holds, opened as the shell tool opens one, its service the stub. */
+    @MustBeClosed
+    private SecretGrant running(SecretProxyFixture stub, String command) {
+        return running(stub, agentId, agentName, command, () -> {});
+    }
+
+    /** As {@link #running(SecretProxyFixture, String)}, for agent {@code id}, with {@code midScan} run in its skill scan. */
+    @MustBeClosed
+    @SuppressWarnings("MustBeClosed") // opened in a fresh transaction and returned for the test to close
+    private static SecretGrant running(SecretProxyFixture stub, Long id, String name, String command, Runnable midScan) {
+        var grant = commitInFreshTx(() -> agents.SkillLoader.callWithScanHookForTest(midScan, () ->
+                SecretGrants.callWithUpstreamForTest(stub.upstream(), () -> SecretGrants.forCommand(
+                        Agent.findById(id), command, AgentService.workspacePath(name), false))));
+        assertNotNull(grant, "the fixture must give the command a secret, or the test proves nothing");
+        return grant;
+    }
+
+    /** The command sends {@code name}'s stand-in and the stub receives {@code value}. */
+    private static void assertSent(SecretGrant grant, SecretProxyFixture stub, String name, String value) throws Exception {
+        var placeholder = grant.environment().get(name);
+        assertEquals("200 method=GET\ntarget=/echo\nx-api-key=" + placeholder + "\nauthorization=null\nbody=",
+                stub.send(grant, placeholder));
+        assertEquals(value, stub.received.getLast().header("X-Api-Key"));
+    }
+
+    /** The command sends {@code name}'s stand-in, the proxy refuses it naming the secret, and nothing reaches the stub. */
+    private static void assertNoLongerGiven(SecretGrant grant, SecretProxyFixture stub, String name) throws Exception {
+        int before = stub.received.size();
+        assertEquals("403 JClaw refused this request: secret " + name + " is no longer given to this command: what gave it"
+                + " changed after the command started, or could not be re-checked.\n",
+                stub.send(grant, grant.environment().get(name)));
+        assertEquals(before, stub.received.size(), "a refused request reaches nothing");
+    }
+
+    private Http.Response switchSkill(String skill, boolean enabled) {
+        return PUT("/api/agents/" + agentId + "/skills/" + skill, "application/json", "{\"enabled\":" + enabled + "}");
+    }
+
+    @Test
+    void switchingASkillOffStopsARunningCommandSendingItsSecretAndTheValueStaysMasked() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var grant = running(stub, "bash skills/demo/run.sh")) {
+                assertSent(grant, stub, "API_KEY", VALUE);
+
+                assertIsOk(switchSkill("demo", false));
+
+                assertNoLongerGiven(grant, stub, "API_KEY");
+                assertEquals("200 method=GET\ntarget=/echo\nx-api-key=" + grant.environment().get("API_KEY")
+                        + "\nauthorization=null\nbody=", stub.send(grant, VALUE),
+                        "a value a service sends back still reaches the command as its stand-in");
+                assertEquals(List.of(), granted("bash skills/demo/run.sh"));
+            }
+        }
+    }
+
+    @Test
+    void switchingOneSkillOffLeavesARunningCommandTheSecretsOfAnother() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            declare("demo-two", "TWO_KEY=two.example.com   # The other service's key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo-two/secrets/TWO_KEY", "application/json",
+                    secretJson("fake-two-value-jf390", stub)));
+            try (var grant = running(stub, "echo $API_KEY $TWO_KEY")) {
+                assertEquals(List.of("API_KEY", "TWO_KEY"), grant.names());
+
+                assertIsOk(switchSkill("demo", false));
+
+                assertNoLongerGiven(grant, stub, "API_KEY");
+                assertSent(grant, stub, "TWO_KEY", "fake-two-value-jf390");
+            }
+        }
+    }
+
+    @Test
+    void deletingASecretStopsARunningCommandSendingIt() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var grant = running(stub, "echo $API_KEY")) {
+                assertSent(grant, stub, "API_KEY", VALUE);
+
+                assertIsOk(DELETE(base() + "/API_KEY"));
+
+                assertNoLongerGiven(grant, stub, "API_KEY");
+            }
+        }
+    }
+
+    /** A new value or new hosts stop the old stand-in; storing the same value and hosts again stops nothing. */
+    @Test
+    void replacingASecretStopsItsOldStandInAndStoringItUnchangedKeepsIt() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var first = running(stub, "echo $API_KEY")) {
+                assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+                assertSent(first, stub, "API_KEY", VALUE);
+
+                assertIsOk(put("API_KEY", secretJson("fake-second-value-jf390", stub)));
+                assertNoLongerGiven(first, stub, "API_KEY");
+            }
+            try (var second = running(stub, "echo $API_KEY")) {
+                assertSent(second, stub, "API_KEY", "fake-second-value-jf390");
+
+                assertIsOk(put("API_KEY", "{\"hosts\":[\"" + SecretProxyFixture.BOUND + ":" + stub.port()
+                        + "\",\"backup.example.com\"]}"));
+                assertNoLongerGiven(second, stub, "API_KEY");
+            }
+        }
+    }
+
+    @Test
+    void removingASkillStopsARunningCommandSendingItsSecret() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var grant = running(stub, "echo $API_KEY")) {
+                assertSent(grant, stub, "API_KEY", VALUE);
+
+                assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+
+                assertNoLongerGiven(grant, stub, "API_KEY");
+            }
+        }
+    }
+
+    @Test
+    void deletingTheAgentStopsItsRunningCommandsSecrets() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var grant = running(stub, "echo $API_KEY")) {
+                assertSent(grant, stub, "API_KEY", VALUE);
+
+                assertIsOk(DELETE("/api/agents/" + agentId));
+
+                assertNoLongerGiven(grant, stub, "API_KEY");
+            }
+        }
+    }
+
+    /**
+     * A change that commits after the command's secrets were read and before its grant opens: the grant is checked
+     * again once it is open, so the old value's stand-in is refused.
+     */
+    @Test
+    void aChangeCommittedWhileACommandsSecretsAreChosenLeavesItsOldStandInRefused() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            agents.SkillLoader.clearCache();
+            var replaced = new AtomicBoolean();
+            try (var grant = running(stub, agentId, agentName, "echo $API_KEY", () -> {
+                if (replaced.compareAndSet(false, true)) assertIsOk(put("API_KEY", secretJson("fake-second-value-jf390", stub)));
+            })) {
+                assertTrue(replaced.get(), "the secret must be replaced while the command's secrets are chosen");
+                assertEquals(List.of(), grant.names(), "the command holds none of what it was chosen");
+                assertNoLongerGiven(grant, stub, "API_KEY");
+            }
+            try (var next = running(stub, "echo $API_KEY")) {
+                assertSent(next, stub, "API_KEY", "fake-second-value-jf390");
+            }
+        }
+    }
+
+    @Test
+    void switchingASkillOffOnOneAgentLeavesAnotherAgentsRunningCommandItsSecret() throws Exception {
+        var otherName = "jf390-other-" + UUID.randomUUID().toString().substring(0, 8);
+        Long otherId = commitInFreshTx(() -> AgentService.create(otherName, "openrouter", "gpt-4.1").id);
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            var otherDemo = AgentService.workspacePath(otherName).resolve("skills/demo");
+            Files.createDirectories(otherDemo);
+            Files.copy(AgentService.workspacePath(agentName).resolve("skills/demo/SKILL.md"), otherDemo.resolve("SKILL.md"));
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            assertIsOk(PUT("/api/agents/" + otherId + "/skills/demo/secrets/API_KEY", "application/json",
+                    secretJson("fake-other-agent-value-jf390", stub)));
+            try (var mine = running(stub, "echo $API_KEY");
+                 var theirs = running(stub, otherId, otherName, "echo $API_KEY", () -> {})) {
+                assertIsOk(switchSkill("demo", false));
+
+                assertNoLongerGiven(mine, stub, "API_KEY");
+                assertSent(theirs, stub, "API_KEY", "fake-other-agent-value-jf390");
+            }
+        } finally {
+            commitInFreshTx(() -> {
+                Agent other = Agent.findById(otherId);
+                if (other != null) AgentService.delete(other);
+                return null;
+            });
+            KeptSkillFiles.deleteForAgent(otherId);
+        }
+    }
+
+    /** The write and the after-commit check the switch route makes, in a transaction of the test's own. */
+    private void switchDemoOff(boolean rollBack) {
+        commitInFreshTx(() -> {
+            Agent agent = Agent.findById(agentId);
+            var config = new AgentSkillConfig();
+            config.agent = agent;
+            config.skillName = "demo";
+            config.enabled = false;
+            config.save();
+            SecretGrants.reconcileAfterCommit(agent);
+            if (rollBack) throw new IllegalStateException("rolled back after the switch");
+            return null;
+        });
+    }
+
+    @Test
+    void aSwitchThatRollsBackLeavesARunningCommandItsSecret() throws Exception {
+        try (var stub = new SecretProxyFixture()) {
+            declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+            assertIsOk(put("API_KEY", secretJson(VALUE, stub)));
+            try (var grant = running(stub, "echo $API_KEY")) {
+                var thrown = assertThrows(RuntimeException.class, () -> switchDemoOff(true));
+                assertEquals("rolled back after the switch", thrown.getCause().getMessage());
+
+                assertSent(grant, stub, "API_KEY", VALUE);
+                assertEquals(List.of("API_KEY"), granted("echo $API_KEY"));
+
+                switchDemoOff(false);
+                assertNoLongerGiven(grant, stub, "API_KEY");
+            }
+        }
+    }
+
+    /**
+     * A scan that read the config before a switch and stores its result after the switch cleared the cache: that
+     * result is never served, and the next read scans again.
+     */
+    @Test
+    void aScanRunningAcrossASwitchIsNotServedAfterIt() throws Exception {
+        declare("demo", "API_KEY=api.example.com   # The service's API key\n");
+        var read = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var paused = new AtomicBoolean();
+        var failure = new AtomicReference<Throwable>();
+        var scan = Thread.ofPlatform().start(() -> {
+            try {
+                agents.SkillLoader.callWithScanHookForTest(() -> {
+                    if (!paused.compareAndSet(false, true)) return;
+                    read.countDown();
+                    try {
+                        if (!release.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("never released");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                }, () -> agents.SkillLoader.enabledSkillFolders(agentName));
+            } catch (Throwable t) {
+                failure.set(t);
+                read.countDown();
+            }
+        });
+        try {
+            assertTrue(read.await(10, TimeUnit.SECONDS), "the scan must reach its hook");
+            assertNull(failure.get());
+            assertIsOk(switchSkill("demo", false));
+        } finally {
+            release.countDown();
+            scan.join(15_000);
+        }
+        assertFalse(scan.isAlive(), "the scan must finish");
+        assertNull(failure.get());
+
+        assertEquals(Set.of(), commitInFreshTx(() -> agents.SkillLoader.enabledSkillFolders(agentName)));
+        assertEquals(List.of(), offeredSkills());
     }
 
     // ==================== settings (JF-357) ====================

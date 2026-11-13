@@ -1,14 +1,23 @@
+import agents.SkillLoader;
 import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import mcp.McpConnectionManager;
 import mcp.McpServerTool;
 import mcp.McpToolAdapter;
 import mcp.McpToolDef;
+import mcp.jsonrpc.JsonRpc;
+import mockwebserver3.Dispatcher;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import models.Agent;
 import models.AgentToolConfig;
+import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,12 +29,18 @@ import services.evals.EvalCapture;
 import services.evals.EvalCase;
 import services.evals.EvalCheck;
 import services.evals.EvalSuite;
+import services.secrets.SecretGrant;
+import services.secrets.SecretGrants;
 import tools.JClawApiTool;
+import utils.CircuitBreakers;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 class ApiToolsControllerTest extends FunctionalTest {
 
@@ -498,7 +513,7 @@ class ApiToolsControllerTest extends FunctionalTest {
         var id = createAgent("bulk-delete-agent");
         Integer deleted = fetchInFreshTx(() -> {
             Agent agent = Agent.findById(id);
-            var server = new models.McpServer();
+            var server = new McpServer();
             server.name = "jira";
             server.transport = models.McpServer.Transport.STDIO;
             server.configJson = "{\"command\":\"true\",\"args\":[]}";
@@ -528,6 +543,171 @@ class ApiToolsControllerTest extends FunctionalTest {
         });
         assertTrue(survivorsIntact,
                 "the server-level row and the unrelated native row both survive");
+    }
+
+    // --- JF-390: a tool switch stops a skill and its secrets at once, a running command's included ---
+
+    private static final String SECRET_VALUE = "fake-api-key-jf390-4b2e";
+
+    /** An agent whose skill demo needs {@code tool} and holds API_KEY, which only the stub may be sent. */
+    private Long agentWithSkillNeeding(String name, String tool, SecretProxyFixture stub) throws Exception {
+        var id = createAgent(name);
+        var dir = AgentService.workspacePath(name).resolve("skills/demo");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\nname: demo\ndescription: test skill\nmetadata:\n  jclaw-tools: " + tool + "\n---\n# demo\n");
+        SkillLoader.clearCache();
+        assertIsOk(PUT("/api/agents/" + id + "/skills/demo/secrets/API_KEY", "application/json", "{\"value\":\""
+                + SECRET_VALUE + "\",\"hosts\":[\"" + SecretProxyFixture.BOUND + ":" + stub.port() + "\"]}"));
+        return id;
+    }
+
+    private static void deleteAgent(Long id) {
+        fetchInFreshTx(() -> {
+            Agent agent = Agent.findById(id);
+            if (agent != null) AgentService.delete(agent);
+            return null;
+        });
+    }
+
+    /** The grant a command of the skill gets, opened as the shell tool opens one, its service the stub; null for none. */
+    @MustBeClosed
+    @SuppressWarnings("MustBeClosed") // opened in a fresh transaction and returned for the test to close
+    private static @Nullable SecretGrant commandGrant(Long id, String name, SecretProxyFixture stub) {
+        return fetchInFreshTx(() -> SecretGrants.callWithUpstreamForTest(stub.upstream(), () -> SecretGrants.forCommand(
+                Agent.findById(id), "bash skills/demo/run.sh", AgentService.workspacePath(name), false)));
+    }
+
+    private static void assertTheSwitchStopsTheSkillAndItsSecrets(Long id, String name, SecretProxyFixture stub,
+                                                                  Runnable switchOff) throws Exception {
+        // Read once first, so cached scans are what the switch has to replace.
+        assertEquals(Set.of("demo"), fetchInFreshTx(() -> SkillLoader.enabledSkillFolders(name)));
+        try (var running = commandGrant(id, name, stub)) {
+            assertNotNull(running, "the fixture must give the command its secret, or the test proves nothing");
+            var placeholder = running.environment().get("API_KEY");
+            assertEquals("200 method=GET\ntarget=/echo\nx-api-key=" + placeholder + "\nauthorization=null\nbody=",
+                    stub.send(running, placeholder));
+            assertEquals(SECRET_VALUE, stub.received.getLast().header("X-Api-Key"));
+
+            switchOff.run();
+
+            assertEquals(Set.of(), fetchInFreshTx(() -> SkillLoader.enabledSkillFolders(name)));
+            assertEquals(List.of(), fetchInFreshTx(() -> SkillLoader.loadSkills(name).stream()
+                    .map(SkillLoader.SkillInfo::name).toList()));
+            try (var next = commandGrant(id, name, stub)) {
+                assertNull(next, "a new command gets none of the skill's secrets");
+            }
+            assertEquals("403 JClaw refused this request: secret API_KEY is no longer given to this command: what gave it"
+                    + " changed after the command started, or could not be re-checked.\n", stub.send(running, placeholder));
+            assertEquals(1, stub.received.size(), "the refused request reaches nothing");
+        }
+    }
+
+    @Test
+    void switchingOffAToolASkillNeedsStopsTheSkillAndItsSecretsARunningCommandsIncluded() throws Exception {
+        login();
+        var name = "jf390-tool-" + UUID.randomUUID().toString().substring(0, 8);
+        try (var stub = new SecretProxyFixture()) {
+            var id = agentWithSkillNeeding(name, "filesystem", stub);
+            try {
+                assertTheSwitchStopsTheSkillAndItsSecrets(id, name, stub, () -> assertIsOk(PUT(
+                        "/api/agents/" + id + "/tools/filesystem", "application/json", "{\"enabled\":false}")));
+            } finally {
+                deleteAgent(id);
+            }
+        }
+    }
+
+    @Test
+    void switchingOffAnMcpServerASkillNeedsStopsTheSkillAndItsSecretsARunningCommandsIncluded() throws Exception {
+        login();
+        var server = "jf390-" + UUID.randomUUID().toString().substring(0, 8);
+        var name = "jf390-group-" + UUID.randomUUID().toString().substring(0, 8);
+        try (var stub = new SecretProxyFixture()) {
+            withExternalGroups(() -> publishFakeServer(server), () -> {
+                var id = agentWithSkillNeeding(name, "mcp_" + server, stub);
+                try {
+                    var group = "/api/agents/" + id + "/tool-groups/" + server;
+                    assertIsOk(PUT(group, "application/json", "{\"enabled\":true}"));
+                    assertTheSwitchStopsTheSkillAndItsSecrets(id, name, stub,
+                            () -> assertIsOk(PUT(group, "application/json", "{\"enabled\":false}")));
+                } finally {
+                    deleteAgent(id);
+                }
+            });
+        }
+    }
+
+    private static MockResponse rpc(Object id, String result) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result + "}").build();
+    }
+
+    /**
+     * An agent whose skill needs a connected MCP server it is granted, checked as {@code switchOff}, given the server's
+     * id, takes the server away on the MCP Servers page.
+     */
+    private void assertTakingTheServerAwayStopsTheSkillAndItsSecrets(Consumer<Long> switchOff)
+            throws Exception {
+        login();
+        var server = "jf390-" + UUID.randomUUID().toString().substring(0, 8);
+        var name = "jf390-server-" + UUID.randomUUID().toString().substring(0, 8);
+        Long id = null;
+        ToolRegistrySync.canonicalForTest();
+        try (var http = new MockWebServer(); var stub = new SecretProxyFixture()) {
+            http.setDispatcher(new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    if (!(JsonRpc.decode(request.getBody().utf8()) instanceof JsonRpc.Request r)) {
+                        return new MockResponse.Builder().code(202).build();
+                    }
+                    return switch (r.method()) {
+                        case "server/discover" -> rpc(r.id(),
+                                "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":{}}}");
+                        case "tools/list" -> rpc(r.id(), "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo.\","
+                                + "\"inputSchema\":{\"type\":\"object\"}}]}");
+                        default -> rpc(r.id(), "{}");
+                    };
+                }
+            });
+            http.start();
+            var cfg = new JsonObject();
+            cfg.addProperty("url", http.url("/mcp").toString());
+            var row = fetchInFreshTx(() -> {
+                var srv = new McpServer();
+                srv.name = server;
+                srv.enabled = true;
+                srv.transport = McpServer.Transport.HTTP;
+                srv.configJson = cfg.toString();
+                srv.save();
+                return srv;
+            });
+            McpConnectionManager.connect(row);
+            for (int i = 0; McpConnectionManager.status(server) != McpServer.Status.CONNECTED; i++) {
+                if (i == 500) fail("never connected: " + McpConnectionManager.lastError(server));
+                Thread.sleep(20);
+            }
+            var agentId = agentWithSkillNeeding(name, "mcp_" + server, stub);
+            id = agentId;
+            assertIsOk(PUT("/api/agents/" + agentId + "/tool-groups/" + server, "application/json", "{\"enabled\":true}"));
+            assertTheSwitchStopsTheSkillAndItsSecrets(agentId, name, stub, () -> switchOff.accept(row.id));
+        } finally {
+            McpConnectionManager.stop(server);
+            CircuitBreakers.remove("mcp:" + server);
+            ToolRegistrySync.release();
+            if (id != null) deleteAgent(id);
+        }
+    }
+
+    @Test
+    void disablingAnMcpServerStopsASkillThatNeedsItAndItsSecretsARunningCommandsIncluded() throws Exception {
+        assertTakingTheServerAwayStopsTheSkillAndItsSecrets(serverId -> assertIsOk(PUT("/api/mcp-servers/" + serverId,
+                "application/json", "{\"enabled\":false}")));
+    }
+
+    @Test
+    void deletingAnMcpServerStopsASkillThatNeedsItAndItsSecretsARunningCommandsIncluded() throws Exception {
+        assertTakingTheServerAwayStopsTheSkillAndItsSecrets(serverId -> assertIsOk(DELETE("/api/mcp-servers/" + serverId)));
     }
 
     // --- JF-142: catalog rows, and one tool's own read ---

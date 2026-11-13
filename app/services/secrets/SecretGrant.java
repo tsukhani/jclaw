@@ -6,17 +6,22 @@ import org.jspecify.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * The secrets one command run was given (JF-324): a placeholder for each, the proxy login that redeems them, and
  * nothing else. The command's environment holds only the placeholders; the values stay here, in JClaw, and the
  * proxy writes one into a request only when that request goes to one of the secret's hosts. Closing the grant,
- * when the command exits, is stopped or times out, makes every placeholder worthless.
+ * when the command exits, is stopped or times out, makes every placeholder worthless; revoking a binding, when a
+ * change means a new command would no longer be given that secret (JF-390), makes its placeholder worthless.
  */
 public final class SecretGrant implements AutoCloseable {
 
@@ -40,16 +45,20 @@ public final class SecretGrant implements AutoCloseable {
     private final String id;
     private final byte[] token;
     private final String ownerName;
+    private final boolean forAgent;
     private final Map<String, Binding> byPlaceholder;
     private final List<Binding> byValueLength;
+    private final Set<String> revoked = ConcurrentHashMap.newKeySet();
     private final @Nullable OkHttpClient upstream;
     private volatile boolean closed;
 
     @MustBeClosed
-    SecretGrant(String id, String token, String ownerName, List<Binding> bindings, @Nullable OkHttpClient upstream) {
+    SecretGrant(String id, String token, String ownerName, boolean forAgent, List<Binding> bindings,
+                @Nullable OkHttpClient upstream) {
         this.id = id;
         this.token = token.getBytes(StandardCharsets.US_ASCII);
         this.ownerName = ownerName;
+        this.forAgent = forAgent;
         var map = new LinkedHashMap<String, Binding>();
         for (var b : bindings) map.put(b.placeholder(), b);
         this.byPlaceholder = Map.copyOf(map);
@@ -67,6 +76,11 @@ public final class SecretGrant implements AutoCloseable {
         return ownerName;
     }
 
+    /** False for a grant a test opened with no agent behind it, which no agent's change may revoke. */
+    boolean forAgent() {
+        return forAgent;
+    }
+
     /** The upstream client a test bound with {@link SecretGrants#callWithUpstreamForTest}, or null for the default. */
     @Nullable OkHttpClient upstream() {
         return upstream;
@@ -81,16 +95,35 @@ public final class SecretGrant implements AutoCloseable {
     }
 
     @Nullable Binding binding(String placeholder) {
-        return closed ? null : byPlaceholder.get(placeholder);
+        return closed || revoked.contains(placeholder) ? null : byPlaceholder.get(placeholder);
+    }
+
+    /** The binding {@code placeholder} stood for until {@link #revokeUnless} stopped it, or null. */
+    @Nullable Binding revoked(String placeholder) {
+        return closed || !revoked.contains(placeholder) ? null : byPlaceholder.get(placeholder);
+    }
+
+    /**
+     * Stop every binding {@code keep} rejects, for the rest of the run, and return the names of those stopped by this
+     * call, sorted. A stopped binding stays in {@link #bindings}, so a value a service sends back is still masked.
+     */
+    List<String> revokeUnless(Predicate<Binding> keep) {
+        var stopped = new ArrayList<String>();
+        for (var b : byPlaceholder.values()) {
+            if (!keep.test(b) && revoked.add(b.placeholder())) stopped.add(b.name());
+        }
+        stopped.sort(null);
+        return stopped;
     }
 
     List<Binding> bindings() {
         return byValueLength;
     }
 
-    /** The secrets' names, sorted, for the event that records what a command was given. */
+    /** The names of the secrets this run still holds, sorted, for the event that records what a command was given. */
     public List<String> names() {
-        return byPlaceholder.values().stream().map(Binding::name).sorted().toList();
+        return byPlaceholder.values().stream().filter(b -> !revoked.contains(b.placeholder())).map(Binding::name).sorted()
+                .toList();
     }
 
     /**

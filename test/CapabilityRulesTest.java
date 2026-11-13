@@ -651,6 +651,7 @@ class CapabilityRulesTest extends UnitTest {
             Map.entry("services.OperatorAlerts",
                     Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest")),
             Map.entry("services.secrets.SecretGrants", Set.of("callWithUpstreamForTest", "openForTest")),
+            Map.entry("agents.SkillLoader", Set.of("callWithScanHookForTest")),
             Map.entry("services.secrets.SecretProxy", Set.of("portForTest", "caForTest")));
 
     private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = seamAccess(TEST_SEAMS);

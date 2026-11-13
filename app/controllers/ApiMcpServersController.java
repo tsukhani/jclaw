@@ -26,6 +26,7 @@ import play.mvc.With;
 import services.EventLogger;
 import services.McpServerService;
 import services.Tx;
+import services.secrets.SecretGrants;
 import utils.ApiResponses;
 import utils.JsonArgs;
 
@@ -236,7 +237,15 @@ public class ApiMcpServersController extends Controller {
             // strand any. Restoring one here would reintroduce the coupling it removed.
         }
         McpServerService.syncRuntime(row);
+        // Disabling or renaming takes the server's tools from every agent; a reconnect replaces them a moment later.
+        if (!row.enabled || !priorName.equals(row.name)) reconcileEveryAgent();
         renderJSON(gson.toJson(McpServerService.View.of(row)));
+    }
+
+    /** A server's tools are every agent's, so changing them can stop any agent's skill and its secrets. */
+    private static void reconcileEveryAgent() {
+        List<Agent> agents = Agent.findAll();
+        for (var agent : agents) SecretGrants.reconcileAfterCommit(agent);
     }
 
     @SuppressWarnings("java:S2259")
@@ -266,6 +275,7 @@ public class ApiMcpServersController extends Controller {
         // cannot know its per-agent disabled-tool sets are now stale. stop() clears them
         // too, but only when the server was connected — a disabled one never reaches that.
         ToolRegistry.clearDisabledToolsCache();
+        reconcileEveryAgent();
         ApiResponses.ok("deleted", true);
     }
 

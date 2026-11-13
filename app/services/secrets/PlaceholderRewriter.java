@@ -127,6 +127,11 @@ final class PlaceholderRewriter {
         private byte[] valueFor(String token) throws Refused {
             var binding = grant.binding(token);
             if (binding == null) {
+                var withdrawn = grant.revoked(token);
+                if (withdrawn != null) {
+                    throw new Refused(("secret %s is no longer given to this command: what gave it changed after the"
+                            + " command started, or could not be re-checked").formatted(withdrawn.name()));
+                }
                 throw new Refused("it carries a secret placeholder this command was not given, or one whose command"
                         + " has ended");
             }

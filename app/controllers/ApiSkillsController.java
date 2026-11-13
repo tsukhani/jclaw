@@ -31,6 +31,7 @@ import services.WorkspaceFiles;
 import services.catalog.CatalogPage;
 import services.catalog.CatalogQuery;
 import services.catalog.CatalogRegistry;
+import services.secrets.SecretGrants;
 import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
@@ -599,7 +600,7 @@ public class ApiSkillsController extends Controller {
         config.save();
         // The cached scan decides what the agent is offered and what SecretGrants gives a command, so a stale one keeps
         // a switched-off skill's secrets flowing. After the commit: a scan before it would re-cache the old row for 30 s.
-        Tx.afterCommit(SkillLoader::clearCache);
+        SecretGrants.reconcileAfterCommit(agent);
 
         renderJSON(gson.toJson(new SkillToggleResponse(name, enabled, "ok")));
     }
@@ -649,7 +650,7 @@ public class ApiSkillsController extends Controller {
                 config.enabled = true;
                 config.save();
                 // The copy cleared the cache before this save, so clear it again once the save commits.
-                Tx.afterCommit(SkillLoader::clearCache);
+                SecretGrants.reconcileAfterCommit(agent);
             }
 
             renderJSON(gson.toJson(new SkillCopyResponse(name, "ok", replacing)));
@@ -828,6 +829,7 @@ public class ApiSkillsController extends Controller {
                         "Could not delete the kept files of skill %s: %s".formatted(name, e.getMessage()));
             }
         });
+        SecretGrants.reconcileAfterCommit(agent);
         deleteSavedState(AgentService.workspacePath(agent.name), name);
         deleteSkillDir(dir);
     }

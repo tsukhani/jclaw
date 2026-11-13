@@ -25,6 +25,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -124,9 +126,10 @@ public class SkillLoader {
 
     /**
      * One agent's scan: the skills it is offered, and the folders of those installed, switched on and with their
-     * tools, whether or not their own secrets are complete.
+     * tools, whether or not their own secrets are complete. {@code generation} is {@link #clearCache}'s count when
+     * the scan began.
      */
-    private record Loaded(List<SkillInfo> offered, Set<String> enabledFolders) {}
+    private record Loaded(List<SkillInfo> offered, Set<String> enabledFolders, long generation) {}
 
     private static final Cache<String, Loaded> skillCache = Caches.named(
             SKILLS,
@@ -140,8 +143,24 @@ public class SkillLoader {
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
+    private static final AtomicLong GENERATION = new AtomicLong();
+    private static final int STALE_RETRIES = 3;
+    private static final ScopedValue<Runnable> AFTER_SCAN_READ_FOR_TEST = ScopedValue.newInstance();
+
+    /**
+     * Every read after this rescans. A count rather than an eviction: an eviction misses a scan already running, which
+     * then stores what it read before, and can block until that scan ends.
+     */
     public static void clearCache() {
-        skillCache.invalidateAll();
+        GENERATION.incrementAndGet();
+    }
+
+    /**
+     * Run {@code body} with {@code afterRead} run by each scan it starts, once the scan has read the config and before
+     * its result is stored, so a test can change and clear what a running scan read.
+     */
+    public static <T> T callWithScanHookForTest(Runnable afterRead, Supplier<T> body) {
+        return ScopedValue.where(AFTER_SCAN_READ_FOR_TEST, afterRead).call(body::get);
     }
 
     /**
@@ -209,7 +228,7 @@ public class SkillLoader {
     }
 
     public static List<SkillInfo> loadSkills(String agentName) {
-        return skillCache.get(agentName, SkillLoader::loadFromDisk).offered();
+        return loaded(agentName).offered();
     }
 
     /**
@@ -218,15 +237,31 @@ public class SkillLoader {
      * a secret another skill declares (JF-348).
      */
     public static Set<String> enabledSkillFolders(String agentName) {
-        return skillCache.get(agentName, SkillLoader::loadFromDisk).enabledFolders();
+        return loaded(agentName).enabledFolders();
+    }
+
+    /**
+     * The cached scan, unless it began before the latest {@link #clearCache}, when it may hold what that cleared;
+     * after a few clears in a row, a scan of its own, not cached.
+     */
+    private static Loaded loaded(String agentName) {
+        var loaded = skillCache.get(agentName, SkillLoader::loadFromDisk);
+        for (int retry = 0; retry < STALE_RETRIES && loaded.generation() != GENERATION.get(); retry++) {
+            // Play's Cache has no conditional remove: check first, so a fresh scan another reader stored stays.
+            if (skillCache.getIfPresent(agentName) == loaded) skillCache.invalidate(agentName);
+            loaded = skillCache.get(agentName, SkillLoader::loadFromDisk);
+        }
+        return loaded.generation() == GENERATION.get() ? loaded : loadFromDisk(agentName);
     }
 
     private static Loaded loadFromDisk(String agentName) {
+        long began = GENERATION.get();
         var enabled = enabledSkillsFromDisk(agentName);
         var folders = folderNames(enabled);
         var offered = new ArrayList<>(enabled);
         dropSkillsMissingSecrets(offered, agentName, folders);
-        return new Loaded(List.copyOf(offered), folders);
+        if (AFTER_SCAN_READ_FOR_TEST.isBound()) AFTER_SCAN_READ_FOR_TEST.get().run();
+        return new Loaded(List.copyOf(offered), folders, began);
     }
 
     private static Set<String> folderNames(List<SkillInfo> skills) {

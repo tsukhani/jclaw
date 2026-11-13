@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.SkillLoader;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,7 +17,9 @@ import services.AgentService;
 import services.KeptSkillFiles;
 import services.SkillSecrets;
 import services.SkillSettings;
+import services.Tx;
 import services.WorkspaceFiles;
+import services.secrets.SecretGrants;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
 
@@ -130,6 +133,7 @@ public class ApiSkillSecretsController extends Controller {
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read the kept file: " + e.getMessage());
             throw ApiResponses.unreachable();
         }
+        SecretGrants.reconcileAfterCommit(owner);
         KeptSkillFiles.deleteUsedUp(owner, name, dir, kept);
         renderJSON(GSON.toJson(view(saved)));
     }
@@ -144,6 +148,7 @@ public class ApiSkillSecretsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No secret '%s' on skill '%s'.".formatted(secret, name));
             throw ApiResponses.unreachable();
         }
+        SecretGrants.reconcileAfterCommit(owner);
         renderJSON(GSON.toJson(new SecretDeletedResponse(true)));
     }
 
@@ -175,6 +180,8 @@ public class ApiSkillSecretsController extends Controller {
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read the kept file: " + e.getMessage());
             throw ApiResponses.unreachable();
         }
+        // SkillSettings clears the cache before the commit, where a scan between would re-cache the old list for 30 s.
+        Tx.afterCommit(SkillLoader::clearCache);
         KeptSkillFiles.deleteUsedUp(owner, name, dir, kept);
         renderJSON(GSON.toJson(new SettingView(saved.name(), saved.value(), saved.setAt().toString())));
     }
@@ -189,6 +196,7 @@ public class ApiSkillSecretsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No setting '%s' on skill '%s'.".formatted(setting, name));
             throw ApiResponses.unreachable();
         }
+        Tx.afterCommit(SkillLoader::clearCache);
         renderJSON(GSON.toJson(new SecretDeletedResponse(true)));
     }
 

@@ -1,7 +1,9 @@
 package services.secrets;
 
 import agents.SkillLoader;
+import agents.ToolRegistry;
 import com.google.errorprone.annotations.MustBeClosed;
+import io.opentelemetry.context.Context;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.Nullable;
@@ -22,6 +24,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -41,6 +46,8 @@ public final class SecretGrants {
     private static final String BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final ConcurrentHashMap<String, SecretGrant> LIVE = new ConcurrentHashMap<>();
+    /** Bumped by each {@link #reconcile}, so a grant chosen before one and opened after it can tell. */
+    private static final AtomicLong RECONCILES = new AtomicLong();
     private static final ScopedValue<OkHttpClient> UPSTREAM_FOR_TEST = ScopedValue.newInstance();
 
     private SecretGrants() {}
@@ -52,10 +59,11 @@ public final class SecretGrants {
      */
     @MustBeClosed
     public static @Nullable SecretGrant forCommand(Agent agent, String command, Path workdir, boolean background) {
+        long seen = RECONCILES.get();
         var chosen = background ? null : choose(agent, command, workdir);
         if (chosen == null) return null;
         return open(chosen.ownerName(), chosen.secrets(), UPSTREAM_FOR_TEST.isBound() ? UPSTREAM_FOR_TEST.get() : null,
-                true);
+                true, seen);
     }
 
     /** Whether {@link #forCommand} would give {@code command} a secret, without opening a grant. */
@@ -124,7 +132,7 @@ public final class SecretGrants {
     /** A grant for {@code secrets} with no agent behind it, for the proxy's own tests. */
     @MustBeClosed
     public static SecretGrant openForTest(List<SkillSecrets.Usable> secrets, @Nullable OkHttpClient upstream) {
-        return open("test", secrets, upstream, false);
+        return open("test", secrets, upstream, false, RECONCILES.get());
     }
 
     /**
@@ -133,6 +141,84 @@ public final class SecretGrants {
      */
     public static <T> T callWithUpstreamForTest(OkHttpClient client, Supplier<T> body) {
         return ScopedValue.where(UPSTREAM_FOR_TEST, client).call(body::get);
+    }
+
+    /**
+     * Once the ambient transaction commits, clear {@code changed}'s disabled tools and {@link SkillLoader}'s cache, in
+     * that order, and {@link #reconcile} the grants of its workspace owner; a change that rolls back revokes nothing.
+     */
+    public static void reconcileAfterCommit(Agent changed) {
+        var ownerName = WorkspaceFiles.workspaceOwner(changed).name;
+        Tx.afterCommit(() -> {
+            ToolRegistry.invalidateDisabledToolsCache(changed);
+            SkillLoader.clearCache();
+            reconcile(ownerName);
+        });
+    }
+
+    /**
+     * Each open grant of {@code ownerName}'s workspace stops every secret a new command would no longer get from a
+     * switched-on skill, with the same name, value and hosts; the command keeps running, and keeps its other secrets.
+     * Run once the change has committed and {@link SkillLoader}'s cache is clear.
+     */
+    private static void reconcile(String ownerName) {
+        RECONCILES.incrementAndGet();
+        var open = LIVE.values().stream().filter(g -> g.forAgent() && g.ownerName().equals(ownerName)).toList();
+        if (!open.isEmpty()) revokeWithdrawn(ownerName, open);
+    }
+
+    private record Given(String skill, String name, String value, Set<String> hosts) {
+        static Given of(String skill, String name, String value, List<String> hosts) {
+            return new Given(skill, name, value, Set.copyOf(hosts));
+        }
+    }
+
+    private static void revokeWithdrawn(String ownerName, List<SecretGrant> grants) {
+        Set<Given> given;
+        try {
+            given = givenNow(ownerName);
+        } catch (RuntimeException e) {
+            // Fail closed: a secret whose grant cannot be re-checked is no longer sent.
+            given = Set.of();
+            EventLogger.warn("skill", ownerName, null,
+                    "Could not check the running commands' secrets after a change, so they are stopped: " + e);
+        }
+        var still = given;
+        for (var grant : grants) {
+            var stopped = grant.revokeUnless(b -> still.contains(Given.of(b.skill(), b.name(), b.value(), b.hosts())));
+            if (!stopped.isEmpty()) {
+                EventLogger.info("skill", ownerName, null,
+                        "A running command can no longer send the secrets " + String.join(", ", stopped));
+            }
+        }
+    }
+
+    /**
+     * What a new command of the owner's workspace could be given now, read on a thread of its own: an after-commit
+     * callback still holds the finished transaction, which {@link Tx#run} would join rather than open a fresh one.
+     */
+    private static Set<Given> givenNow(String ownerName) {
+        var read = new FutureTask<Set<Given>>(() -> {
+            List<SkillSecrets.Usable> usable = Tx.run(() -> {
+                var owner = Agent.findByName(ownerName);
+                return owner == null ? List.<SkillSecrets.Usable>of() : SkillSecrets.usable(owner);
+            });
+            var enabled = SkillLoader.enabledSkillFolders(ownerName);
+            var out = new HashSet<Given>();
+            for (var s : usable) {
+                if (enabled.contains(s.skill())) out.add(Given.of(s.skill(), s.name(), s.value(), s.hosts()));
+            }
+            return out;
+        });
+        Thread.ofVirtual().name("secret-grants-reconcile").start(Context.current().wrap(read));
+        try {
+            return read.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted", e);
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof RuntimeException re ? re : new IllegalStateException(e.getCause());
+        }
     }
 
     static @Nullable SecretGrant byLogin(String id, String token) {
@@ -147,7 +233,7 @@ public final class SecretGrants {
     @MustBeClosed
     @SuppressWarnings("MustBeClosed") // made in a retry loop until its id is free, then returned for the caller to close
     private static SecretGrant open(String ownerName, List<SkillSecrets.Usable> secrets, @Nullable OkHttpClient upstream,
-                                    boolean record) {
+                                    boolean forAgent, long reconcilesSeen) {
         var bindings = new ArrayList<SecretGrant.Binding>();
         Set<String> used = new HashSet<>();
         for (var s : secrets) {
@@ -159,10 +245,15 @@ public final class SecretGrants {
         }
         SecretGrant grant;
         do {
-            grant = new SecretGrant(random(26), random(32), ownerName, bindings, upstream);
+            grant = new SecretGrant(random(26), random(32), ownerName, forAgent, bindings, upstream);
         } while (LIVE.putIfAbsent(grant.id(), grant) != null);
-        if (record) {
-            EventLogger.info("skill", ownerName, null, "A command was given the secrets " + String.join(", ", grant.names()));
+        if (forAgent) {
+            // A change that committed while the secrets were chosen reconciled the live grants before this one was live.
+            if (RECONCILES.get() != reconcilesSeen) revokeWithdrawn(ownerName, List.of(grant));
+            var held = grant.names();
+            if (!held.isEmpty()) {
+                EventLogger.info("skill", ownerName, null, "A command was given the secrets " + String.join(", ", held));
+            }
         }
         return grant;
     }

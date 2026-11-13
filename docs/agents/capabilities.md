@@ -9,7 +9,7 @@ up an authority it was never granted fails `play autotest` with a `because` clau
 naming the capability.
 
 **Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
-holds them too: nineteen methods `app/` may never call, enforced by
+holds them too: twenty methods `app/` may never call, enforced by
 `noAppClassCallsATestOnlySeam`, with `everyScopedValueSeamInAppIsOnTheList` failing the build on a
 `public static *ForTest` method that binds a `ScopedValue` and is not on it. Each binds a `ScopedValue` for the dynamic extent of
 one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
@@ -29,7 +29,9 @@ matches, for a background-thread logger; listener-based, not a `ScopedValue`) an
 without a destination set; listener-based too). `SubagentSpawnTool.callWithModelChoiceForTest` binds the
 model choice a spawn reads, and `SecretGrants.callWithUpstreamForTest` the client every grant it opens
 reaches a service through, so a stub with its own certificate stands in (JF-324); `SecretGrants.openForTest`,
-`SecretProxy.portForTest` and `caForTest` open a grant with no agent and read the proxy's port and CA.
+`SecretProxy.portForTest` and `caForTest` open a grant with no agent and read the proxy's port and CA, and
+`SkillLoader.callWithScanHookForTest` runs a hook in each skill scan once it has read the config, so a test can change
+what a running scan read (JF-390).
 A binding reaches everything that runs inside it, which is why production never takes
 one: every URL screened, every request sent, every time read. The rule also asserts
 each named seam still exists, so a rename fails it rather than leaving it guarding

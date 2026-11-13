@@ -3,6 +3,7 @@ import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 import okhttp3.Credentials;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -158,6 +159,17 @@ public final class SecretProxyFixture implements AutoCloseable {
         var proxyUrl = URI.create(grant.environment().get("HTTPS_PROXY"));
         var userInfo = proxyUrl.getUserInfo().split(":", 2);
         return through(userInfo[0], userInfo[1]);
+    }
+
+    /**
+     * The status and body a command holding {@code grant} gets when it sends {@code headerValue} as {@code X-Api-Key}
+     * to {@link #BOUND}'s {@code /echo} through the proxy.
+     */
+    public String send(SecretGrant grant, String headerValue) throws Exception {
+        try (var response = through(grant).newCall(new Request.Builder()
+                .url("https://" + BOUND + ":" + port() + "/echo").header("X-Api-Key", headerValue).build()).execute()) {
+            return response.code() + " " + response.body().string();
+        }
     }
 
     public static OkHttpClient through(String user, String token) throws Exception {

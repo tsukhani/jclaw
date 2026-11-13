@@ -7,6 +7,7 @@ import memory.graph.GraphLifecycle;
 import models.Agent;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
+import services.secrets.SecretGrants;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -93,6 +94,8 @@ public final class AgentDeletionCascade {
             GraphLifecycle.deleteAgentAfterCommit(node.id);
             deleteKeptFilesAfterCommit(node.id, node.name);
         }
+        // The FK cascade takes the secrets without a trace, so the running commands' grants are checked once it commits.
+        SecretGrants.reconcileAfterCommit(agent);
         ConfigService.clearCache();
         // JCLAW-673: evict the subtree's SUBAGENT_RUN + TASK full-text docs while
         // the rows still exist. The DB cascade removes the rows but never fires
