@@ -1,5 +1,7 @@
 package services.secrets;
 
+import utils.HttpKeys;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
@@ -38,7 +40,7 @@ final class PlaceholderRewriter {
         if (semi >= 0) type = type.substring(0, semi);
         type = type.strip();
         if (type.equals("application/x-www-form-urlencoded")) return Encoding.FORM;
-        if (type.equals("application/json") || type.endsWith("+json")) return Encoding.JSON;
+        if (type.equals(HttpKeys.APPLICATION_JSON) || type.endsWith("+json")) return Encoding.JSON;
         return Encoding.RAW;
     }
 
