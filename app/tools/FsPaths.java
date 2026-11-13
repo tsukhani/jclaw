@@ -70,17 +70,12 @@ final class FsPaths {
     }
 
     /**
-     * Skill-creator is read-only for every agent except 'main'. Only the main agent may
-     * modify the skill-creator skill itself; other agents can use it to create and refactor
-     * OTHER skills but cannot alter skill-creator. Returns the refusal's template if blocked,
-     * or null if the path is OK to mutate.
+     * The built-in skills ({@link utils.BuiltInSkills}) are read-only for every agent except 'main' (JF-392): another
+     * agent uses its copies and authors skills of its own, but alters none of them. Returns the refusal's template if
+     * blocked, or null if the path may change.
      */
-    static @Nullable ErrorTemplate checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
+    static @Nullable ErrorTemplate checkBuiltInSkillReadOnly(Agent agent, Path workspace, Path target) {
         if ("main".equalsIgnoreCase(agent.name)) return null;
-        var skillCreatorDir = WorkspacePathGuard.resolveContained(workspace, "skills/skill-creator");
-        if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
-            return ToolErrorTemplates.fsReadOnly(agent.name);
-        }
-        return null;
+        return WorkspacePathGuard.isInBuiltInSkill(workspace, target) ? ToolErrorTemplates.fsReadOnly(agent.name) : null;
     }
 }

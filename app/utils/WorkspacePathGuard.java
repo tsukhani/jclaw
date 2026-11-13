@@ -158,6 +158,18 @@ public final class WorkspacePathGuard {
     }
 
     /**
+     * Whether {@code canonicalTarget} is a built-in skill's folder, or inside one, in the workspace at
+     * {@code workspaceRoot} (JF-392). {@code skills} and the skill's name match in any letter case, as a macOS volume
+     * matches them, so a case variant reaches the same folder and gets the same answer. Fails closed when the root
+     * cannot be resolved.
+     */
+    public static boolean isInBuiltInSkill(Path workspaceRoot, Path canonicalTarget) {
+        var segments = skillSegments(workspaceRoot, canonicalTarget);
+        return segments == null || segments.length >= 2 && segments[0].equalsIgnoreCase("skills")
+                && BuiltInSkills.isBuiltIn(segments[1]);
+    }
+
+    /**
      * Whether a folder holds a skill's credentials folder or sits inside one: the workspace root, {@code skills/},
      * a skill's folder, anything in its credentials folder (JF-322), or anything in the skill-state folder (JF-357),
      * for a caller that copies a whole folder.

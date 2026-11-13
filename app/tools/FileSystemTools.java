@@ -203,7 +203,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
         if (credentialsError != null) return FsOutcome.fail(credentialsError);
 
         if (FsPaths.isMutatingAction(action)) {
-            var guardError = FsPaths.checkSkillCreatorReadOnly(agent, resolved.resolvedWorkspace(), resolved.resolvedTarget());
+            var guardError = FsPaths.checkBuiltInSkillReadOnly(agent, resolved.resolvedWorkspace(), resolved.resolvedTarget());
             if (guardError != null) return FsOutcome.fail(guardError);
         }
 

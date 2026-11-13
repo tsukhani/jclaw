@@ -72,6 +72,20 @@ and writing, while its own workspace is read, written and resolved by `pwd -P`. 
 with the install in the temp folder, `realpath` in its own workspace included. `main`'s fence and a run
 `shell.sandbox` confines keep `SandboxHiddenRoots.current()` alone.
 
+A custom agent's copies of the built-in skills (`utils.BuiltInSkills`: `skill-creator`, `jclaw-api` and
+`task-creator`) are read-only to its shell, as the file tool keeps them (JF-392). On macOS
+`customAgentMacosProfile` denies writes and hard links on each folder after the workspace reopen, and the unlink
+of `skills/` and of the workspace itself: Seatbelt matches by path, so a rename would carry a folder out from
+under its rule. On Linux each folder is a read-only bind after the workspace's, with `skills/` bound onto itself
+just before them (`HarnessSandbox.pinSkillsFolder`). The kernel renames no mount point, and without that bind
+`mv skills` carried the read-only binds along and left the names free for a folder of the run's own on its next
+run (measured in a throwaway container of the published image). Measured on macOS
+(`HarnessSandboxTest.macACustomAgentCannotChangeItsBuiltInSkillByAnyRouteTried`) and in that container: a write,
+a removal, a new file, moving the folder or `skills/`, and a hard link are refused, and on macOS a case variant,
+a symbolic link and moving the whole workspace too, while reading the skill and writing skills of its own still
+work. Where an agent has no `skills/` folder at all, the Linux binds find nothing to bind and its shell can make a
+folder by a built-in's name; it then holds no built-in copy, and the file tool still refuses the name.
+
 **The Main Agent's shell is fenced from JClaw's own files (JF-325).** While `shell.sandbox` does not
 confine it, `main`'s `exec` and its copies run through `HarnessSandbox.wrapMainFence` (`Confinement.FENCE`):
 everything stays as it was except `HarnessSandbox.MainFence`. The secret folders (`SandboxHiddenRoots.current()`

@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.4"
+  version: "1.3.5"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -134,7 +134,7 @@ Every skill MUST include a `jclaw-icon` entry under `metadata` — a single emoj
 
 ## Self-modification restriction
 
-**`skill-creator` itself is read-only for every agent except `main`.** Only the `main` agent can modify the skill-creator skill. All other agents can use skill-creator to create or refactor OTHER skills, but cannot alter skill-creator's own SKILL.md or any file inside `skills/skill-creator/`. If a user asks a non-main agent to modify skill-creator, explain: "I cannot modify my own skill-creator — only the main agent can. If you want skill-creator updated, modify it on the main agent and promote it to the global registry, then drag it from global onto my agent card to get the new version."
+**The built-in skills are read-only for every agent except `main`.** `skill-creator`, `jclaw-api` and `task-creator` ship with JClaw, and only the `main` agent can change them. Every other agent can use them, and can create or refactor skills of its own, but cannot alter any file inside `skills/skill-creator/`, `skills/jclaw-api/` or `skills/task-creator/`, through the file tool or its shell. If a user asks a non-main agent to change one, explain: "I cannot change a built-in skill — only the main agent can. If you want it updated, change it on the main agent and promote it to the global registry, then drag it from global onto my agent card to get the new version."
 
 If the global skill-creator is updated to a newer version, out-of-date copies on non-main agents are automatically hidden from `<available_skills>` — the agent cannot use skill-creator again until the user drags the updated version from global onto my agent card.
 

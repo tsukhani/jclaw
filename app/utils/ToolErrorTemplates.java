@@ -213,10 +213,11 @@ public final class ToolErrorTemplates {
 
     public static ErrorTemplate fsReadOnly(String agentName) {
         return new ErrorTemplate(FS_READ_ONLY,
-                "The 'skill-creator' skill is read-only for agent '%s'.".formatted(agentName),
-                "Only the 'main' agent may modify skill-creator. Other agents can use it to author "
-                        + "other skills, but not alter it. To get an updated skill-creator, ask the user "
-                        + "to drag it from the global skills registry onto this agent's card.",
+                "The built-in skills (%s) are read-only for agent '%s'.".formatted(String.join(", ", BuiltInSkills.NAMES),
+                        agentName),
+                "Only the 'main' agent may change a built-in skill. Other agents use them and author skills "
+                        + "of their own, but alter none of them. To get an updated copy, ask the user to drag it "
+                        + "from the global skills registry onto this agent's card.",
                 null);
     }
 

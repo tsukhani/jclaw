@@ -12,6 +12,7 @@ import services.KeptSkillFiles;
 import services.WorkspaceFiles;
 import services.database.DatabaseService;
 import services.secrets.SecretProxy;
+import utils.BuiltInSkills;
 import utils.ChannelOriginTrust;
 import utils.SandboxHiddenRoots;
 import utils.SubprocessEnv;
@@ -400,9 +401,11 @@ public final class HarnessSandbox {
         if (ready.mechanism().equals(BWRAP)) {
             var resolvConf = realPath(RESOLV_CONF);
             var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
-            return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, withTrustFolder(extraReads), home,
+            var readOnly = new ArrayList<>(extraReads);
+            readOnly.addAll(builtInSkillFolders(writeRoot));
+            return new ConfinedShell(inOwnUserNamespace(pinSkillsFolder(linuxArgv(argv, writeRoot, withTrustFolder(readOnly), home,
                     linuxHiddenRoots(ownSecretFolders(), hidden),
-                    deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids())), Map.of());
+                    deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids()), writeRoot)), Map.of());
         }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
         var temp = customAgentTempDir(writeRoot);
@@ -1025,8 +1028,54 @@ public final class HarnessSandbox {
                 + socketAllow("subpath", ownTemp)
                 + socketAllow("path-literal", MAC_MDNS_SOCKET);
         return macosProfile(writeRoot, List.of(), home, hidden, denyNetwork, homeReads)
-                + sockets + sharedTempStaysInPlace(writeRoot.getAbsolutePath(), ownTemp)
+                + sockets + sharedTempStaysInPlace(writeRoot.getAbsolutePath(), ownTemp) + builtInSkillsReadOnly(writeRoot)
                 + MAC_DENY_LAUNCH_SERVICES + MAC_DENY_SIGNALS_OUTSIDE + MAC_DENY_JVM_ATTACH;
+    }
+
+    /**
+     * A custom agent's copies of the built-in skills ({@link BuiltInSkills}) under {@code writeRoot}, which its run may
+     * read but not change (JF-392), canonical as Seatbelt and bwrap match them. On Linux each is a read-only bind after
+     * the write root's.
+     */
+    public static List<String> builtInSkillFolders(File writeRoot) {
+        var skills = SandboxHiddenRoots.canonical(writeRoot.toPath()).resolve("skills");
+        return BuiltInSkills.NAMES.stream().map(name -> skills.resolve(name).toString()).toList();
+    }
+
+    /**
+     * {@code bwrapArgv} with the write root's {@code skills/} bound onto itself just before the built-in skills'
+     * read-only binds. The kernel renames or removes no mount point, so the run cannot move {@code skills/} aside: that
+     * carried the read-only binds along and left the built-in names free for a folder of the run's own the next time
+     * (measured in the container image).
+     */
+    public static List<String> pinSkillsFolder(List<String> bwrapArgv, File writeRoot) {
+        var skills = SandboxHiddenRoots.canonical(writeRoot.toPath()).resolve("skills").toString();
+        var first = builtInSkillFolders(writeRoot).getFirst();
+        for (int i = 0; i + 1 < bwrapArgv.size(); i++) {
+            if ("--ro-bind-try".equals(bwrapArgv.get(i)) && first.equals(bwrapArgv.get(i + 1))) {
+                var out = new ArrayList<>(bwrapArgv);
+                out.addAll(i, List.of("--bind-try", skills, skills));
+                return List.copyOf(out);
+            }
+        }
+        return bwrapArgv;
+    }
+
+    /**
+     * Seatbelt matches by path: each built-in skill's folder is denied writes and hard links, since a link elsewhere
+     * writes the same file, and neither {@code skills/} nor the write root may be renamed or removed, which would carry
+     * a built-in folder out from under its rule.
+     */
+    private static String builtInSkillsReadOnly(File writeRoot) {
+        var root = SandboxHiddenRoots.canonical(writeRoot.toPath());
+        var sb = new StringBuilder();
+        for (var folder : builtInSkillFolders(writeRoot)) {
+            sb.append(rule("deny", "file-write* file-link", folder));
+        }
+        for (var dir : List.of(root.resolve("skills"), root)) {
+            sb.append("(deny file-write-unlink (literal \"").append(escapeSeatbelt(dir.toString())).append("\"))\n");
+        }
+        return sb.toString();
     }
 
     private static String socketAllow(String filter, String path) {

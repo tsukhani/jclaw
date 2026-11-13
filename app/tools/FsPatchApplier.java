@@ -112,7 +112,7 @@ final class FsPatchApplier {
             } catch (SecurityException e) {
                 return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
             }
-            var guardError = FsPaths.checkSkillCreatorReadOnly(agent, workspace, target);
+            var guardError = FsPaths.checkBuiltInSkillReadOnly(agent, workspace, target);
             if (guardError != null) return PatchResolution.err(guardError);
             if (WorkspacePathGuard.isInSkillCredentials(workspace, target)) {
                 return PatchResolution.err(ToolErrorTemplates.fsCredentials(op.path()));
@@ -129,7 +129,7 @@ final class FsPatchApplier {
                 } catch (SecurityException e) {
                     return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
                 }
-                var moveGuard = FsPaths.checkSkillCreatorReadOnly(agent, workspace, moveTarget);
+                var moveGuard = FsPaths.checkBuiltInSkillReadOnly(agent, workspace, moveTarget);
                 if (moveGuard != null) return PatchResolution.err(moveGuard);
                 if (WorkspacePathGuard.isInSkillCredentials(workspace, moveTarget)) {
                     return PatchResolution.err(ToolErrorTemplates.fsCredentials(newPathOpt.get()));

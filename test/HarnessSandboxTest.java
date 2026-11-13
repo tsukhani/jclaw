@@ -17,6 +17,7 @@ import tools.ClaudeAdapter;
 import tools.GenericAdapter;
 import tools.HarnessSandbox;
 import tools.PiAdapter;
+import utils.BuiltInSkills;
 import utils.SandboxHiddenRoots;
 
 import java.io.File;
@@ -202,6 +203,15 @@ class HarnessSandboxTest extends UnitTest {
                 asMains.remove("--unshare-pid");
                 asMains.remove("--new-session");
                 if (!ownProc) asMains.addAll(indexOfPair(asMains, "--tmpfs", "/tmp") + 2, List.of("--proc", "/proc"));
+                int writeBind = indexOfPair(asMains, "--bind", SandboxHiddenRoots.canonical(session).toString());
+                int pinned = indexOfPair(asMains, "--bind-try", SandboxHiddenRoots.canonical(session).resolve("skills").toString());
+                assertTrue(pinned > writeBind && writeBind >= 0, "skills/ is bound onto itself after the workspace, argv=" + wrapped);
+                asMains.subList(pinned, pinned + 3).clear();
+                for (var builtIn : HarnessSandbox.builtInSkillFolders(root)) {
+                    int at = indexOfPair(asMains, "--ro-bind-try", builtIn);
+                    assertTrue(at > writeBind && writeBind >= 0, "a built-in skill is bound read-only after the workspace, argv=" + wrapped);
+                    asMains.subList(at, at + 3).clear();
+                }
                 for (var own : HarnessSandbox.customAgentHiddenRoots()) {
                     int at = SandboxHiddenRoots.current().contains(own) ? -1 : indexOfPair(asMains, "--tmpfs", own.toString());
                     if (at >= 0) asMains.subList(at, at + 2).clear();
@@ -339,6 +349,110 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
+     * JF-392: a custom agent's built-in skill folders are bound read-only after its workspace's read-write bind, with
+     * skills/ bound onto itself just before them, so the run can neither write them nor move skills/ aside.
+     */
+    @Test
+    void linuxCustomAgentArgvBindsTheBuiltInSkillsReadOnlyAfterItsWorkspace() {
+        var writeRoot = new File("/app/workspace/agent-x");
+        var hidden = HarnessSandbox.customAgentHiddenRoots(List.of(Path.of("/app/data")), Path.of("/app/workspace"),
+                Path.of("/app/skills"));
+        var builtIns = HarnessSandbox.builtInSkillFolders(writeRoot);
+        assertEquals(List.of("/app/workspace/agent-x/skills/skill-creator", "/app/workspace/agent-x/skills/jclaw-api",
+                "/app/workspace/agent-x/skills/task-creator"), builtIns);
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--new-session",
+                        "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/root",
+                        "--tmpfs", "/app/data", "--tmpfs", "/app/workspace", "--tmpfs", "/app/skills",
+                        "--bind", "/app/workspace/agent-x", "/app/workspace/agent-x",
+                        "--bind-try", "/app/workspace/agent-x/skills", "/app/workspace/agent-x/skills",
+                        "--ro-bind-try", builtIns.get(0), builtIns.get(0), "--ro-bind-try", builtIns.get(1), builtIns.get(1),
+                        "--ro-bind-try", builtIns.get(2), builtIns.get(2), "/bin/sh", "-c", "true"),
+                HarnessSandbox.pinSkillsFolder(HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), writeRoot,
+                        builtIns, "/root", hidden, false, true, List.of(), HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC),
+                        writeRoot));
+    }
+
+    /** JF-392: a custom agent's wrap denies every built-in skill folder after it reopens its own workspace. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macACustomAgentsWrapKeepsItsBuiltInSkillsReadOnly() throws Exception {
+        var writeRoot = WorkspaceFiles.workspaceRoot().resolve("jf392-" + java.util.UUID.randomUUID()).toFile();
+        var temp = HarnessSandbox.customAgentTempDir(writeRoot);
+        ShellSandboxSync.acquire();
+        try {
+            var profile = HarnessSandbox.wrapCustomAgentShell(List.of("true"), writeRoot).argv().get(2);
+            var root = SandboxHiddenRoots.canonical(writeRoot.toPath());
+            int reopen = profile.indexOf("(allow file-read* file-write* (subpath \"" + root + "\"))\n");
+            assertTrue(reopen >= 0, "its own workspace is reopened: " + profile);
+            for (var name : BuiltInSkills.NAMES) {
+                var deny = "(deny file-write* file-link (subpath \"" + root.resolve("skills").resolve(name) + "\"))\n";
+                assertTrue(profile.indexOf(deny) > reopen, name + " is denied after the reopen: " + profile);
+            }
+            assertTrue(profile.contains("(deny file-write-unlink (literal \"" + root.resolve("skills") + "\"))\n"), profile);
+            assertTrue(profile.contains("(deny file-write-unlink (literal \"" + root + "\"))\n"), profile);
+        } finally {
+            Files.deleteIfExists(temp);
+            ShellSandboxSync.release();
+        }
+    }
+
+    /**
+     * JF-392, measured: a custom agent's shell reads its copy of a built-in skill but changes it by no route tried here
+     * (a write, a removal, a new file, a case variant, moving the folder, skills/ or the whole workspace, a hard or a
+     * symbolic link), while copying it out and writing a skill of its own still work.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macACustomAgentCannotChangeItsBuiltInSkillByAnyRouteTried() throws Exception {
+        var base = SandboxHiddenRoots.canonical(Files.createTempDirectory("jf392-install-"));
+        try {
+            var own = Files.createDirectories(base.resolve("workspace/agent-x"));
+            var builtIn = Files.createDirectories(own.resolve("skills/task-creator"));
+            Files.createDirectories(own.resolve("skills/my-skill"));
+            var ownTemp = Files.createDirectories(base.resolve("own-temp"));
+            Files.writeString(builtIn.resolve("SKILL.md"), "shipped\n");
+            var hidden = HarnessSandbox.customAgentHiddenRoots(SandboxHiddenRoots.current(), base.resolve("workspace"),
+                    base.resolve("skills"));
+            var profile = HarnessSandbox.customAgentMacosProfile(own.toFile(), System.getProperty("user.home"), hidden,
+                    false, List.of(), ownTemp.toString());
+            var script = String.join("\n",
+                    "cat skills/task-creator/SKILL.md",
+                    "{ echo x >> skills/task-creator/SKILL.md; } 2>/dev/null || echo NO-APPEND",
+                    "rm skills/task-creator/SKILL.md 2>/dev/null || echo NO-REMOVE",
+                    "touch skills/task-creator/new.md 2>/dev/null || echo NO-NEW-FILE",
+                    "{ echo x >> skills/Task-Creator/SKILL.md; } 2>/dev/null || echo NO-CASE-VARIANT",
+                    "mv skills/task-creator moved 2>/dev/null || echo NO-MOVE-FOLDER",
+                    "mv skills skills-moved 2>/dev/null || echo NO-MOVE-SKILLS",
+                    "mv '%s' '%s' 2>/dev/null || echo NO-MOVE-WORKSPACE".formatted(own, base.resolve("away")),
+                    "ln skills/task-creator/SKILL.md hard.md 2>/dev/null || echo NO-HARD-LINK",
+                    "ln -s skills/task-creator/SKILL.md soft.md && { { echo x >> soft.md; } 2>/dev/null || echo NO-WRITE-VIA-SYMLINK; }",
+                    "cp skills/task-creator/SKILL.md copy.md && echo COPIED",
+                    "echo mine > skills/my-skill/SKILL.md && cat skills/my-skill/SKILL.md");
+            var proc = new ProcessBuilder("sandbox-exec", "-p", profile, "/bin/sh", "-c", script)
+                    .directory(own.toFile()).redirectErrorStream(true).start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the run finished");
+            assertEquals("""
+                    shipped
+                    NO-APPEND
+                    NO-REMOVE
+                    NO-NEW-FILE
+                    NO-CASE-VARIANT
+                    NO-MOVE-FOLDER
+                    NO-MOVE-SKILLS
+                    NO-MOVE-WORKSPACE
+                    NO-HARD-LINK
+                    NO-WRITE-VIA-SYMLINK
+                    COPIED
+                    mine
+                    """, out);
+            assertEquals("shipped\n", Files.readString(builtIn.resolve("SKILL.md")));
+        } finally {
+            deleteTree(base);
+        }
+    }
+
+    /**
      * JF-391, measured: with JClaw outside the home folder, a custom agent can neither read nor write another agent's
      * workspace or the skills folder, while its own workspace stays readable, writable and resolvable by path.
      */
@@ -408,6 +522,11 @@ class HarnessSandboxTest extends UnitTest {
                 (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
                 (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
                 (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/skill-creator"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/jclaw-api"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/task-creator"))
+                (deny file-write-unlink (literal "/h/u/jc/workspace/a/skills"))
+                (deny file-write-unlink (literal "/h/u/jc/workspace/a"))
                 (deny lsopen)
                 (deny signal (require-not (target same-sandbox)))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
@@ -429,6 +548,11 @@ class HarnessSandboxTest extends UnitTest {
         assertEquals(HarnessSandbox.macosProfile(root, List.of(), "/h/u", hidden, true, homeReads) + """
                 (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "/h/u/jc/workspace/a")) (require-not (subpath "/private/var/folders/x/T/jclaw-0a1b2c3d"))))
                 (deny file-write-unlink (literal "/private/var/folders/x/T/jclaw-0a1b2c3d"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/skill-creator"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/jclaw-api"))
+                (deny file-write* file-link (subpath "/h/u/jc/workspace/a/skills/task-creator"))
+                (deny file-write-unlink (literal "/h/u/jc/workspace/a/skills"))
+                (deny file-write-unlink (literal "/h/u/jc/workspace/a"))
                 (deny lsopen)
                 (deny signal (require-not (target same-sandbox)))
                 (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
@@ -499,10 +623,16 @@ class HarnessSandboxTest extends UnitTest {
                     (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
                     (deny file-write-unlink (require-all (vnode-type DIRECTORY SOCKET) (require-any (subpath "/private/tmp") (subpath "/private/var/folders")) (require-not (subpath "%2$s")) (require-not (subpath "%3$s"))))
                     (deny file-write-unlink (literal "%3$s"))
+                    (deny file-write* file-link (subpath "%4$s/skills/skill-creator"))
+                    (deny file-write* file-link (subpath "%4$s/skills/jclaw-api"))
+                    (deny file-write* file-link (subpath "%4$s/skills/task-creator"))
+                    (deny file-write-unlink (literal "%4$s/skills"))
+                    (deny file-write-unlink (literal "%4$s"))
                     (deny lsopen)
                     (deny signal (require-not (target same-sandbox)))
                     (deny network-outbound file-write* file-link (regex #"/\\.java_pid[^/]*$"))
-                    """.formatted(System.getProperty("user.home"), session.toFile().getAbsolutePath(), temp.toRealPath())),
+                    """.formatted(System.getProperty("user.home"), session.toFile().getAbsolutePath(), temp.toRealPath(),
+                    SandboxHiddenRoots.canonical(session))),
                     customProfile);
         } finally {
             Files.deleteIfExists(temp);

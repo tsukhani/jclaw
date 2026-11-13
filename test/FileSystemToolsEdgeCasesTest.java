@@ -1,3 +1,4 @@
+import com.google.gson.JsonObject;
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -6,13 +7,17 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import tools.FileSystemTools;
+import utils.BuiltInSkills;
+import utils.ToolErrorTemplates;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Edge-case and error-path coverage for {@link FileSystemTools}: argument
- * validation, the skill-creator read-only guard, readFile/writeFile/listFiles
+ * validation, the built-in skills' read-only guard, readFile/writeFile/listFiles
  * failure modes, editFile diagnostics (partial-match snippets, regex errors,
  * CRLF ambiguity), and editLines operation validation. Complements the
  * happy-path coverage in ToolSystemTest and the CRLF-splice regression tests
@@ -143,21 +148,93 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
     }
 
     @Test
-    void mainAgentMayWriteInsideSkillCreator() throws Exception {
+    void mainAgentMayWriteInsideEveryBuiltInSkill() throws Exception {
         var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         var mainWs = AgentService.workspacePath("main");
-        Files.createDirectories(mainWs.resolve("skills").resolve("skill-creator"));
-        var probe = mainWs.resolve("skills").resolve("skill-creator").resolve("guard-probe.txt");
-        try {
-            var result = tool.execute("""
-                    {"action": "writeFile", "path": "skills/skill-creator/guard-probe.txt",
-                     "content": "main can write"}
-                    """, mainAgent);
-            assertTrue(result.startsWith("File written successfully"), "got: " + result);
-            assertEquals("main can write", Files.readString(probe));
-        } finally {
-            Files.deleteIfExists(probe);
+        for (var name : BuiltInSkills.NAMES) {
+            Files.createDirectories(mainWs.resolve("skills").resolve(name));
+            var probe = mainWs.resolve("skills").resolve(name).resolve("guard-probe.txt");
+            try {
+                var result = tool.execute(fileAction("writeFile", "skills/" + name + "/guard-probe.txt", "main can write"),
+                        mainAgent);
+                assertTrue(result.startsWith("File written successfully"), name + " got: " + result);
+                assertEquals("main can write", Files.readString(probe), name);
+            } finally {
+                Files.deleteIfExists(probe);
+            }
         }
+    }
+
+    /**
+     * JF-392: jclaw-api and task-creator are as read-only as skill-creator for an agent other than main, by any letter
+     * case of the folder or of skills/, as a macOS volume matches them. Reading still works.
+     */
+    @Test
+    void everyBuiltInSkillIsReadOnlyForACustomAgentInAnyLetterCase() throws Exception {
+        var refusal = ToolErrorTemplates.render(ToolErrorTemplates.fsReadOnly(AGENT_NAME));
+        for (var name : List.of("jclaw-api", "task-creator")) {
+            var dir = Files.createDirectories(workspace.resolve("skills").resolve(name));
+            Files.writeString(dir.resolve("SKILL.md"), "shipped " + name);
+            for (var path : List.of("skills/" + name + "/SKILL.md", "skills/" + name.toUpperCase(Locale.ROOT) + "/SKILL.md",
+                    "Skills/" + name + "/notes.md")) {
+                assertEquals(refusal, tool.execute(fileAction("writeFile", path, "hacked"), agent), path);
+                assertEquals(refusal, tool.execute(fileAction("appendFile", path, "x"), agent), path);
+            }
+            assertEquals("shipped " + name, Files.readString(dir.resolve("SKILL.md")), name);
+            assertFalse(Files.exists(dir.resolve("notes.md")), name);
+            assertEquals("shipped " + name, tool.execute(fileAction("readFile", "skills/" + name + "/SKILL.md", null), agent));
+        }
+    }
+
+    /** A patch can neither add a file inside a built-in skill nor move one of the agent's own files into it. */
+    @Test
+    void aPatchCannotAddOrMoveAFileIntoABuiltInSkill() throws Exception {
+        var refusal = ToolErrorTemplates.render(ToolErrorTemplates.fsReadOnly(AGENT_NAME));
+        Files.createDirectories(workspace.resolve("skills/task-creator"));
+        Files.writeString(workspace.resolve("mine.md"), "a\n");
+
+        assertEquals(refusal, tool.execute(patchAction("""
+                *** Begin Patch
+                *** Add File: skills/task-creator/planted.md
+                +planted
+                *** End of File
+                *** End Patch
+                """), agent));
+        assertEquals(refusal, tool.execute(patchAction("""
+                *** Begin Patch
+                *** Update File: mine.md
+                *** Move to: skills/jclaw-api/mine.md
+                -a
+                +b
+                *** End of File
+                *** End Patch
+                """), agent));
+        assertFalse(Files.exists(workspace.resolve("skills/task-creator/planted.md")));
+        assertFalse(Files.exists(workspace.resolve("skills/jclaw-api/mine.md")));
+        assertEquals("a\n", Files.readString(workspace.resolve("mine.md")));
+    }
+
+    /** The rule covers only the built-in skills: a skill of the agent's own stays writable. */
+    @Test
+    void aCustomAgentStillWritesASkillOfItsOwn() throws Exception {
+        var result = tool.execute(fileAction("writeFile", "skills/my-skill/notes.md", "mine"), agent);
+        assertTrue(result.startsWith("File written successfully"), "got: " + result);
+        assertEquals("mine", Files.readString(workspace.resolve("skills/my-skill/notes.md")));
+    }
+
+    private static String fileAction(String action, String path, String content) {
+        var json = new JsonObject();
+        json.addProperty("action", action);
+        json.addProperty("path", path);
+        if (content != null) json.addProperty("content", content);
+        return json.toString();
+    }
+
+    private static String patchAction(String patch) {
+        var json = new JsonObject();
+        json.addProperty("action", "applyPatch");
+        json.addProperty("patch", patch);
+        return json.toString();
     }
 
     // ==================== readFile / writeFile / appendFile / listFiles errors ====================

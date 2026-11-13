@@ -5,6 +5,7 @@ import agents.SkillLoader;
 import org.jspecify.annotations.Nullable;
 import services.scanners.Scanner;
 import services.scanners.ScannerRegistry;
+import utils.BuiltInSkills;
 import utils.SecretRedactor;
 
 import java.io.File;
@@ -14,7 +15,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,7 +42,6 @@ public final class RegistrySkillImporter {
 
     private static final String CATEGORY = "skills";
     /** Built-in skills that must never be overwritten by an import. */
-    private static final Set<String> RESERVED = Set.of("skill-creator", "jclaw-api");
     /** How many unscanned files a warning names before it counts the rest. */
     private static final int NAMED_FILES = 5;
     private static final Pattern VARIABLE = Pattern.compile("\\$\\{?([A-Za-z_][A-Za-z0-9_]*+)}?");
@@ -200,7 +199,7 @@ public final class RegistrySkillImporter {
         var name = conform.skillName();
         if (!conform.ok() || name == null) return ImportResult.fail(conform.message());
 
-        if (RESERVED.contains(name)) {
+        if (BuiltInSkills.isBuiltIn(name)) {
             return ImportResult.fail("'%s' is a reserved built-in skill and cannot be imported".formatted(name));
         }
         var stop = beforePublish != null ? beforePublish.apply(name) : null;
