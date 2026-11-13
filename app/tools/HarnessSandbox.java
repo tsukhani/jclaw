@@ -1,6 +1,7 @@
 package tools;
 
 import agents.DangerousActionGate;
+import agents.SkillLoader;
 import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -8,6 +9,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.ExecutableProbeSupport;
 import services.KeptSkillFiles;
+import services.WorkspaceFiles;
 import services.database.DatabaseService;
 import services.secrets.SecretProxy;
 import utils.ChannelOriginTrust;
@@ -394,16 +396,17 @@ public final class HarnessSandbox {
         var home = System.getProperty("user.home", "");
         var extraReads = extraHomeReads(home);
         var pathEnv = SubprocessEnv.filteredHostEnv().get("PATH");
+        var hidden = customAgentHiddenRoots();
         if (ready.mechanism().equals(BWRAP)) {
             var resolvConf = realPath(RESOLV_CONF);
             var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
             return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, withTrustFolder(extraReads), home,
-                    linuxHiddenRoots(ownSecretFolders(), SandboxHiddenRoots.current()),
+                    linuxHiddenRoots(ownSecretFolders(), hidden),
                     deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids())), Map.of());
         }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
         var temp = customAgentTempDir(writeRoot);
-        var profile = customAgentMacosProfile(writeRoot, home, SandboxHiddenRoots.current(),
+        var profile = customAgentMacosProfile(writeRoot, home, hidden,
                 deniesNetwork(SHELL_SANDBOX_KEY), homeReadReopens(pathEnv, home, extraReads), plainFolderRealPath(temp));
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", profile + macTrustFolderReadOnly()));
         out.addAll(argv);
@@ -1085,6 +1088,25 @@ public final class HarnessSandbox {
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String configKey) {
         return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""),
                 linuxHiddenRoots(ownSecretFolders(), SandboxHiddenRoots.current()), deniesNetwork(configKey));
+    }
+
+    /**
+     * What a custom agent's run hides beyond {@link SandboxHiddenRoots#current}: every agent's workspace and the
+     * shared skills folder, with its own workspace reopened beneath. The hidden home folder covers both only while
+     * JClaw lives inside it, and the container image installs it at {@code /app} with the home folder at
+     * {@code /root} (JF-391).
+     */
+    public static List<Path> customAgentHiddenRoots() {
+        return customAgentHiddenRoots(SandboxHiddenRoots.current(), WorkspaceFiles.workspaceRoot(),
+                SkillLoader.globalSkillsPath());
+    }
+
+    /** {@link #customAgentHiddenRoots()} for the install given, public so a test can pin it on any host. */
+    public static List<Path> customAgentHiddenRoots(List<Path> state, Path workspaceRoot, Path skillsRoot) {
+        var roots = new LinkedHashSet<>(state);
+        roots.add(SandboxHiddenRoots.canonical(workspaceRoot));
+        roots.add(SandboxHiddenRoots.canonical(skillsRoot));
+        return List.copyOf(roots);
     }
 
     /** JClaw's own secret folders, which may not exist yet: the backups and the files skill updates kept. */

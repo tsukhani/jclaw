@@ -1,3 +1,4 @@
+import agents.SkillLoader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import services.CodingRunFolders;
 import services.ConfigService;
 import services.EventLogger;
 import services.KeptSkillFiles;
+import services.WorkspaceFiles;
 import services.database.DatabaseService;
 import tools.ClaudeAdapter;
 import tools.GenericAdapter;
@@ -200,6 +202,10 @@ class HarnessSandboxTest extends UnitTest {
                 asMains.remove("--unshare-pid");
                 asMains.remove("--new-session");
                 if (!ownProc) asMains.addAll(indexOfPair(asMains, "--tmpfs", "/tmp") + 2, List.of("--proc", "/proc"));
+                for (var own : HarnessSandbox.customAgentHiddenRoots()) {
+                    int at = SandboxHiddenRoots.current().contains(own) ? -1 : indexOfPair(asMains, "--tmpfs", own.toString());
+                    if (at >= 0) asMains.subList(at, at + 2).clear();
+                }
                 assertEquals(HarnessSandbox.inOwnUserNamespace(
                         HarnessSandbox.linuxArgv(argv, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY)), asMains,
                         "network=" + network);
@@ -283,6 +289,103 @@ class HarnessSandboxTest extends UnitTest {
         var reopen = profile.indexOf("(allow file-read* file-write* (subpath \"/h/u/jc/data/run\"))\n");
         assertTrue(deny >= 0 && reopen > deny, profile);
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"/h/u/jc/data/allow\"))"), profile);
+    }
+
+    /**
+     * JF-391: a custom agent's wrap hides every workspace and the shared skills folder after its write grants, then
+     * reopens its own workspace, so an install outside the home folder shows it nothing of another agent's.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macACustomAgentsWrapHidesEveryWorkspaceAndTheSharedSkillsFolder() throws Exception {
+        var writeRoot = WorkspaceFiles.workspaceRoot().resolve("jf391-" + java.util.UUID.randomUUID()).toFile();
+        var temp = HarnessSandbox.customAgentTempDir(writeRoot);
+        ShellSandboxSync.acquire();
+        try {
+            var profile = HarnessSandbox.wrapCustomAgentShell(List.of("true"), writeRoot).argv().get(2);
+            var workspaces = SandboxHiddenRoots.canonical(WorkspaceFiles.workspaceRoot());
+            var skills = SandboxHiddenRoots.canonical(SkillLoader.globalSkillsPath());
+            var own = SandboxHiddenRoots.canonical(writeRoot.toPath());
+            int hideWorkspaces = profile.indexOf("(deny file-read* file-write* (subpath \"" + workspaces + "\"))\n");
+            int hideSkills = profile.indexOf("(deny file-read* file-write* (subpath \"" + skills + "\"))\n");
+            int reopenOwn = profile.indexOf("(allow file-read* file-write* (subpath \"" + own + "\"))\n");
+            assertTrue(hideWorkspaces >= 0, "every workspace is hidden: " + profile);
+            assertTrue(hideSkills >= 0, "the skills folder is hidden: " + profile);
+            assertTrue(reopenOwn > hideWorkspaces && reopenOwn > hideSkills, "its own workspace comes back after: " + profile);
+        } finally {
+            Files.deleteIfExists(temp);
+            ShellSandboxSync.release();
+        }
+    }
+
+    /**
+     * JF-391: the container image installs JClaw at /app with the home folder at /root, so hiding the home folder
+     * hides nothing of JClaw's. A custom agent's argv covers every workspace and the skills folder, and binds its own
+     * workspace back after them, since a later mount hides an earlier one beneath it.
+     */
+    @Test
+    void linuxCustomAgentArgvOutsideTheHomeFolderHidesTheOtherWorkspacesAndTheSkillsFolder() {
+        var state = List.of(Path.of("/app/data"), Path.of("/app/certs"), Path.of("/app/conf"), Path.of("/app/logs"));
+        var hidden = HarnessSandbox.customAgentHiddenRoots(state, Path.of("/app/workspace"), Path.of("/app/skills"));
+        assertEquals(List.of(Path.of("/app/data"), Path.of("/app/certs"), Path.of("/app/conf"), Path.of("/app/logs"),
+                Path.of("/app/workspace"), Path.of("/app/skills")), hidden);
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-pid", "--new-session",
+                        "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/root",
+                        "--tmpfs", "/app/data", "--tmpfs", "/app/certs", "--tmpfs", "/app/conf", "--tmpfs", "/app/logs",
+                        "--tmpfs", "/app/workspace", "--tmpfs", "/app/skills",
+                        "--bind", "/app/workspace/agent-x", "/app/workspace/agent-x", "/bin/sh", "-c", "true"),
+                HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), new File("/app/workspace/agent-x"), List.of(),
+                        "/root", hidden, false, true, List.of(), HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC));
+    }
+
+    /**
+     * JF-391, measured: with JClaw outside the home folder, a custom agent can neither read nor write another agent's
+     * workspace or the skills folder, while its own workspace stays readable, writable and resolvable by path.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macACustomAgentOutsideTheHomeFolderReachesOnlyItsOwnWorkspace() throws Exception {
+        var base = SandboxHiddenRoots.canonical(Files.createTempDirectory("jf391-install-"));
+        try {
+            var own = Files.createDirectories(base.resolve("workspace/agent-x"));
+            var other = Files.createDirectories(base.resolve("workspace/main"));
+            var skill = Files.createDirectories(base.resolve("skills/probe-skill"));
+            var ownTemp = Files.createDirectories(base.resolve("own-temp"));
+            Files.writeString(own.resolve("mine.txt"), "mine\n");
+            Files.writeString(other.resolve("marker.txt"), "theirs\n");
+            Files.writeString(skill.resolve("SKILL.md"), "skill\n");
+            var hidden = HarnessSandbox.customAgentHiddenRoots(SandboxHiddenRoots.current(), base.resolve("workspace"),
+                    base.resolve("skills"));
+            var profile = HarnessSandbox.customAgentMacosProfile(own.toFile(), System.getProperty("user.home"), hidden,
+                    false, List.of(), ownTemp.toString());
+            var script = String.join("\n",
+                    "cat '%s' 2>/dev/null || echo NO-READ-OTHER".formatted(other.resolve("marker.txt")),
+                    "ls '%s' >/dev/null 2>&1 || echo NO-LIST-WORKSPACES".formatted(base.resolve("workspace")),
+                    "cat '%s' 2>/dev/null || echo NO-READ-SKILLS".formatted(skill.resolve("SKILL.md")),
+                    "touch '%s' 2>/dev/null || echo NO-WRITE-OTHER".formatted(other.resolve("written")),
+                    "touch '%s' 2>/dev/null || echo NO-WRITE-SKILLS".formatted(skill.resolve("written")),
+                    "cat mine.txt",
+                    "touch own.txt && echo WROTE-OWN",
+                    "[ \"$(pwd -P)\" = '%s' ] && echo PWD-RESOLVES".formatted(own),
+                    "[ \"$(realpath own.txt)\" = '%s' ] && echo REALPATH-RESOLVES".formatted(own.resolve("own.txt")));
+            var proc = new ProcessBuilder("sandbox-exec", "-p", profile, "/bin/sh", "-c", script)
+                    .directory(own.toFile()).redirectErrorStream(true).start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the run finished");
+            assertEquals("""
+                    NO-READ-OTHER
+                    NO-LIST-WORKSPACES
+                    NO-READ-SKILLS
+                    NO-WRITE-OTHER
+                    NO-WRITE-SKILLS
+                    mine
+                    WROTE-OWN
+                    PWD-RESOLVES
+                    REALPATH-RESOLVES
+                    """, out);
+        } finally {
+            deleteTree(base);
+        }
     }
 
     /**

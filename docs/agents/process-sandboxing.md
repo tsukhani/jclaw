@@ -61,6 +61,17 @@ JClaw's own `PATH` (`SubprocessEnv.filteredHostEnv()`), never from a `PATH` the 
 boundary, plus its canonical path when that differs and is also below `<home>`.
 `HarnessSandboxTest.macProfileForACustomAgentHidesTheHomeFolder` pins the full text.
 
+A custom agent's hidden roots are JClaw's state folders plus every agent's workspace and the shared
+skills folder (`HarnessSandbox.customAgentHiddenRoots`, JF-391), with its own workspace reopened beneath
+them on both platforms. Hiding the home folder covers those two only while JClaw lives inside it, and the
+container image installs JClaw at `/app` with the home folder at `/root`. Measured in a throwaway
+container of the published image under `seccomp-bwrap.json`, with the argv the compiled class built:
+before the fix the run read another agent's workspace and `skills/`; after it both are refused for reading
+and writing, while its own workspace is read, written and resolved by `pwd -P`. On macOS,
+`HarnessSandboxTest.macACustomAgentOutsideTheHomeFolderReachesOnlyItsOwnWorkspace` measures the same
+with the install in the temp folder, `realpath` in its own workspace included. `main`'s fence and a run
+`shell.sandbox` confines keep `SandboxHiddenRoots.current()` alone.
+
 **The Main Agent's shell is fenced from JClaw's own files (JF-325).** While `shell.sandbox` does not
 confine it, `main`'s `exec` and its copies run through `HarnessSandbox.wrapMainFence` (`Confinement.FENCE`):
 everything stays as it was except `HarnessSandbox.MainFence`. The secret folders (`SandboxHiddenRoots.current()`
