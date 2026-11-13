@@ -269,6 +269,34 @@ class SubagentSpawnToolTest extends UnitTest {
         assertTrue(ofAFencedTask.contains("web_search"), "and it keeps the ones the task allows: " + ofAFencedTask);
     }
 
+    // JF-386: a tool the list marks for subagents only reaches the child, beside the list's other tools.
+    @Test
+    void aSubagentIsOfferedAToolItsTaskMarksForSubagentsOnly() throws Exception {
+        var offered = new CopyOnWriteArrayList<java.util.Set<String>>();
+        startLlmServer(exchange -> {
+            var request = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes())).getAsJsonObject();
+            var names = new java.util.TreeSet<String>();
+            if (request.has("tools")) {
+                for (var tool : request.getAsJsonArray("tools")) {
+                    names.add(tool.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
+                }
+            }
+            offered.add(names);
+            LlmReplyFixture.send(exchange, simpleResponse("child done"));
+        });
+        configureProvider();
+        var fenced = createAgent("p-task-tools-marked", "spawn-provider", "test-model");
+        var fencedRun = seedTaskRun(fenced, null, null, "[\"subagent_spawn\",\"web_search\",\"subagents:filesystem\"]");
+        commitAndReopen();
+
+        spawnInTaskFire(fenced.id, fencedRun, "web", "{\"task\":\"do work\"}");
+        var ofTheChild = offered.getLast();
+
+        assertTrue(ofTheChild.contains("filesystem"), "the marked tool reaches the subagent: " + ofTheChild);
+        assertTrue(java.util.Set.of("subagent_spawn", "web_search", "filesystem").containsAll(ofTheChild),
+                "and nothing outside the list does: " + ofTheChild);
+    }
+
     // The list follows the chain: a child of a fenced child reads it off its parent conversation.
     @Test
     void aNestedSubagentInheritsTheToolListItsParentConversationCarries() throws Exception {

@@ -43,7 +43,7 @@ class TaskCreatorSkillTest extends UnitTest {
 
         assertNotNull(info, "SKILL.md must parse");
         assertEquals("task-creator", info.name());
-        assertEquals("1.0.0", info.version());
+        assertEquals("1.0.1", info.version());
         assertEquals("Tarun Sukhani", info.author());
         assertEquals("⏰", info.icon());
         assertTrue(info.toolsDeclared());

@@ -137,6 +137,21 @@ describe('TaskPermissions', () => {
     expect(c.find('[data-testid="task-model-pill"]').text()).toBe('kimi-k2.6')
   })
 
+  // JF-386: a tool for the task's subagents only shows its plain name and says so.
+  it('labels an entry marked for subagents only, in both forms', async () => {
+    for (const raw of ['["subagents:exec","web_search"]', 'subagents:exec,web_search']) {
+      const c = await mount(raw)
+      const pills = c.findAll('[data-testid="task-tool-pill"]')
+      expect(pills.map(p => [p.element.firstChild?.textContent, p.attributes('data-subagents-only') ?? null])).toEqual([
+        ['exec', 'true'],
+        ['web_search', null],
+      ])
+      expect(pills[0]!.find('[data-testid="task-tool-subagents-only"]').text()).toBe('subagents only')
+      expect(pills[0]!.attributes('title')).toBe('For this task\'s subagents only: the task\'s own run is not offered it.')
+      expect(pills[1]!.find('[data-testid="task-tool-subagents-only"]').exists()).toBe(false)
+    }
+  })
+
   // JF-378: a narrowed entry naming an action its connected server does not offer is marked.
   describe('an action its server does not offer', () => {
     beforeEach(() => clearNuxtData())

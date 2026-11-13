@@ -220,7 +220,9 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_ENABLED_TOOL_NAMES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of tool names this task may use. Null = full toolset. "
                                 + "An MCP server is one name, mcp_<server>, which allows all its actions; "
-                                + "mcp_<server>/<action> allows only that action of the server.")),
+                                + "mcp_<server>/<action> allows only that action of the server. "
+                                + "subagents:<name> (e.g. subagents:exec) gives a tool to the task's subagents only: "
+                                + "the task's own run is not offered it.")),
                 Map.entry(KEY_AUTO_DELETE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "Auto-delete a one-shot reminder after it fires successfully. Defaults true for reminders, false for regular tasks; set false to KEEP a fired reminder. Recurring reminders and regular tasks are never auto-deleted.")),
                 Map.entry(KEY_TIMEZONE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,

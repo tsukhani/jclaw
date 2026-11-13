@@ -594,7 +594,10 @@ public class AgentRunner {
 
         Tx.run(() -> sink.appendUserMessage(userPrompt, null));
         // Here, not in runTaskTurn: a fallback turn runs that again, and the warning is one per fire.
-        TaskToolPolicy.warnOfUnofferedActions(allowedTools, taskName, agent.name, McpConnectionManager::listedActions);
+        TaskToolPolicy.warnOfUnofferedActions(TaskToolPolicy.forSubagents(allowedTools), taskName, agent.name,
+                McpConnectionManager::listedActions);
+        // JF-386: an entry marked for subagents only reaches them through the list they inherit, never this run.
+        var ownRunTools = TaskToolPolicy.forOwnRun(allowedTools);
 
         var stubConv = new Conversation();
         stubConv.agent = agent;
@@ -607,10 +610,10 @@ public class AgentRunner {
         }
         if (route == null) {
             return FallbackTurn.run(agent, stubConv,
-                    () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
+                    () -> runTaskTurn(agent, userPrompt, sink, ownRunTools, taskName, stubConv));
         }
         return RoutedTurn.callWith(route, stubConv,
-                () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
+                () -> runTaskTurn(agent, userPrompt, sink, ownRunTools, taskName, stubConv));
     }
 
     /**

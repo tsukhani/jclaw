@@ -55,9 +55,9 @@ Call create_drive_file(file_name: "<the PDF's file name>", folder_id: "0AI...", 
 
 **Bad.** An upload was refused because the file sat in a folder the server would not read. The task's subagent, which held `exec` to run a stamping script, wrote another script that uploaded the file to Drive directly. The run reported success, and the failure went unnoticed for two months.
 
-**Why.** Nothing said to stop. And a subagent inherits the task's whole tool list, so a subagent that needs `exec` for one script can use it for anything.
+**Why.** Nothing said to stop. And the list held `exec` for the subagent's sake, so the task's own run had the shell too, and a subagent that needs `exec` for one script can use it for anything.
 
-**Good.** In the constraints step: "If any action fails, stop and report the error: never work around it with another action, a script, a copied or re-encoded file." In the subagent's step: "The subagent only stamps: it must not upload, move, rename or delete any file, and must not reach Drive, Gmail or any other service, through a tool or a script. It returns the signed PDF's path." Then fix the cause: here, the folder the server reads.
+**Good.** Give the subagent its tool alone: `subagents:exec` in the list, not `exec`, so the task's own run is never offered the shell. In the constraints step: "If any action fails, stop and report the error: never work around it with another action, a script, a copied or re-encoded file." In the subagent's step: "The subagent only stamps: it must not upload, move, rename or delete any file, and must not reach Drive, Gmail or any other service, through a tool or a script. It returns the signed PDF's path." Then fix the cause: here, the folder the server reads.
 
 ## 6. A send step instead of delivery
 

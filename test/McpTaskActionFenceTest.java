@@ -232,6 +232,39 @@ class McpTaskActionFenceTest extends UnitTest {
         assertEquals("", serverHistory());
     }
 
+    // ==================== JF-386: an action for subagents only ====================
+
+    private static final String MARKED = "[\"" + HANDLE + "/search_messages\",\"subagents:" + HANDLE + "/send_message\"]";
+
+    @Test
+    void theFireIsNotOfferedAnActionItsListMarksForSubagents() throws Exception {
+        var run = seedTaskRun("marker", MARKED);
+
+        assertEquals(List.of("search_messages"), actionNames(asTaskRun(run, "{}").text()));
+        assertEquals(ToolRegistry.ToolResult.Outcome.NOT_ENABLED,
+                asTaskRun(run, "{\"tool\": \"send_message\"}").outcome());
+        assertEquals("", serverHistory());
+    }
+
+    @Test
+    void aSubagentIsOfferedTheActionItsInheritedListMarks() throws Exception {
+        var conversationId = Tx.run(() -> {
+            var conv = ConversationService.create(agent, "web", "u-jf386");
+            conv.enabledToolNames = MARKED;
+            conv.save();
+            return conv.id;
+        });
+        var tool = new McpServerTool(SERVER);
+
+        var listed = ToolContext.withScope(conversationId, null, () -> tool.executeRich("{}", agent));
+        var sent = ToolContext.withScope(conversationId, null,
+                () -> tool.executeRich("{\"tool\": \"send_message\", \"args\": {}}", agent));
+
+        assertEquals(List.of("search_messages", "send_message"), actionNames(listed.text()));
+        assertEquals("ok:send_message", sent.text());
+        assertEquals("send_message", serverHistory());
+    }
+
     // ==================== the prompt's catalog ====================
 
     @Test

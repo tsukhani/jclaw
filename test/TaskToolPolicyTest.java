@@ -246,6 +246,66 @@ class TaskToolPolicyTest extends UnitTest {
                 unofferedWarnings(Set.of("mcp_a/b/y"), lists));
     }
 
+    // ==================== JF-386: a tool for subagents only ====================
+
+    @Test
+    void parsesEntriesMarkedForSubagentsInBothShapes() {
+        assertEquals(Set.of("subagents:exec", "web_search"), TaskToolPolicy.parse("[\"subagents:exec\",\"web_search\"]"));
+        assertEquals(Set.of("subagents:exec", "web_search"), TaskToolPolicy.parse("subagents:exec,web_search"));
+    }
+
+    @Test
+    void theFiresOwnRunDropsEveryMarkedEntry() {
+        assertEquals(Set.of("web_search", "mcp_gw/search"),
+                TaskToolPolicy.forOwnRun(Set.of("web_search", "subagents:exec", "mcp_gw/search", "subagents:mcp_gw/send")));
+    }
+
+    @Test
+    void aListMarkingEveryEntryLeavesTheFiresOwnRunNoToolsNotEveryTool() {
+        assertEquals(Set.of(), TaskToolPolicy.forOwnRun(Set.of("subagents:exec")));
+    }
+
+    @Test
+    void aSubagentGetsTheWholeListWithTheMarksRemoved() {
+        assertEquals(Set.of("web_search", "exec", "mcp_gw/search", "mcp_gw/send"),
+                TaskToolPolicy.forSubagents(Set.of("web_search", "subagents:exec", "mcp_gw/search", "subagents:mcp_gw/send")));
+    }
+
+    @Test
+    void noListStaysNoListForBothViews() {
+        assertNull(TaskToolPolicy.forOwnRun(null));
+        assertNull(TaskToolPolicy.forSubagents(null));
+    }
+
+    @Test
+    void aMarkWithNoToolAfterItGivesTheSubagentNothing() {
+        assertEquals(Set.of("web_search"), TaskToolPolicy.forSubagents(Set.of("web_search", "subagents:")));
+    }
+
+    @Test
+    void aSubagentsInheritedListOffersItsMarkedTools() {
+        var kept = TaskToolPolicy.restrictSubagent(defs("exec", "web_search", "filesystem"),
+                "[\"web_search\",\"subagents:exec\"]", "helper");
+        assertEquals(List.of("exec", "web_search"), namesOf(kept));
+    }
+
+    @Test
+    void aMarkCannotOfferAToolTheSubagentsOwnAgentLacks() {
+        // The list only narrows the subagent's own definitions: a tool its agent is not given stays absent.
+        var kept = TaskToolPolicy.restrictSubagent(defs("web_search", "filesystem"),
+                "[\"web_search\",\"subagents:exec\"]", "helper");
+        assertEquals(List.of("web_search"), namesOf(kept));
+    }
+
+    @Test
+    void theFiresAuditLineNeitherWithholdsNorMissesAMarkedTool() {
+        var events = EventLogger.captureForTest(() -> TaskToolPolicy.restrict(defs("exec", "web_search"),
+                TaskToolPolicy.forOwnRun(Set.of("web_search", "subagents:exec")), "stamper", "main"));
+        assertEquals(List.of("INFO TOOL_BLOCKED_BY_TASK_POLICY Task 'stamper' (agent 'main') restricted to 1 of 2 tools; "
+                        + "withheld: exec"),
+                events.stream().map(e -> e.level() + " " + e.category() + " " + e.message()).toList());
+    }
+
     @Test
     void aSubagentsInheritedActionEntryOffersTheHandle() {
         var kept = TaskToolPolicy.restrictSubagent(defs("exec", "mcp_gw"), "[\"mcp_gw/search\"]", "helper");

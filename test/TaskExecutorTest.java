@@ -563,6 +563,40 @@ class TaskExecutorTest extends UnitTest {
     }
 
     @Test
+    void aToolMarkedForSubagentsOnlyIsNotOfferedToTheFireItself() throws Exception {
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+
+        var agent = createAgent("marked-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "marked", "Do it.", Task.Type.IMMEDIATE);
+        task.enabledToolNames = "[\"subagents:filesystem\",\"datetime\"]";
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+
+        assertEquals(List.of("datetime"), toolNamesSentToModel());
+    }
+
+    @Test
+    void aListMarkingEveryToolForSubagentsLeavesTheFireNoToolsNotEveryTool() throws Exception {
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+
+        var agent = createAgent("all-marked-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "all-marked", "Do it.", Task.Type.IMMEDIATE);
+        task.enabledToolNames = "[\"subagents:filesystem\"]";
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+
+        assertEquals(List.of(), toolNamesSentToModel());
+    }
+
+    @Test
     void withoutAnAllowlistTheAgentsFullToolsetIsOffered() throws Exception {
         startLlmServer(simpleResponse("done"));
         configureProvider();

@@ -38,13 +38,20 @@ public final class TaskToolPolicy {
     /** Between an MCP server's handle and one of its actions in an entry. */
     public static final char ACTION_SEPARATOR = '/';
 
+    /**
+     * Starts an entry that gives a tool to the fire's subagents alone (JF-386), {@code subagents:exec}: the fire's
+     * own run is not offered it, and every subagent it starts, at any depth, is. A subagent inherits the fire's
+     * list unchanged, so without the mark a tool only a subagent needs had to be the fire's too.
+     */
+    public static final String SUBAGENTS_ONLY = "subagents:";
+
     /** {@code EventLog.message} is {@code length = 500}; oversized text fails the insert. */
     private static final int MESSAGE_LIMIT = 500;
 
     /** Registered tool names: natives like {@code web_search}, MCP handles like
      *  {@code mcp_google-workspace-mcp}, and one action of a handle. Gates the delimited form
      *  so stray prose cannot pass as a tool list. */
-    private static final Pattern TOOL_NAME = Pattern.compile("[A-Za-z0-9_./-]+");
+    private static final Pattern TOOL_NAME = Pattern.compile("[A-Za-z0-9_.:/-]+");
 
     /**
      * A run's allow-list, and who holds it, for a refusal to name.
@@ -154,6 +161,30 @@ public final class TaskToolPolicy {
                         .formatted(taskName, agentName, named)));
     }
 
+    /**
+     * The entries a fire's own run may use: all but those marked {@link #SUBAGENTS_ONLY}. A list whose every entry
+     * is marked leaves the run no tools, never every tool, so the result is empty rather than null.
+     */
+    public static @Nullable Set<String> forOwnRun(@Nullable Set<String> allowed) {
+        if (allowed == null) return null;
+        var own = new LinkedHashSet<String>();
+        for (var entry : allowed) {
+            if (!entry.startsWith(SUBAGENTS_ONLY)) own.add(entry);
+        }
+        return own;
+    }
+
+    /** The entries a subagent of the fire may use: the whole list, each marked entry with its mark removed. */
+    public static @Nullable Set<String> forSubagents(@Nullable Set<String> allowed) {
+        if (allowed == null) return null;
+        var all = new LinkedHashSet<String>();
+        for (var entry : allowed) {
+            var name = entry.startsWith(SUBAGENTS_ONLY) ? entry.substring(SUBAGENTS_ONLY.length()).trim() : entry;
+            if (!name.isEmpty()) all.add(name);
+        }
+        return all;
+    }
+
     /** The action {@code entry} names on {@code handle}, or null when it names none of that server's. */
     private static @Nullable String actionOf(String entry, String handle) {
         var cut = handle.length();
@@ -175,14 +206,14 @@ public final class TaskToolPolicy {
             if (conversationId != null) {
                 String own = Conversation.find(
                         "select c.enabledToolNames from Conversation c where c.id = ?1", conversationId).first();
-                var allowed = parseQuietly(own);
+                var allowed = forSubagents(parseQuietly(own));
                 if (allowed != null) return new RunToolList(allowed, "the tool list this subagent inherited");
             }
             if (taskRunId == null) return null;
             Object[] task = TaskRun.find(
                     "select r.task.name, r.task.enabledToolNames from TaskRun r where r.id = ?1", taskRunId).first();
             if (task == null) return null;
-            var allowed = parseQuietly((String) task[1]);
+            var allowed = forOwnRun(parseQuietly((String) task[1]));
             return allowed == null ? null : new RunToolList(allowed, "task '" + task[0] + "''s tool list");
         });
     }
@@ -262,9 +293,12 @@ public final class TaskToolPolicy {
         return kept;
     }
 
-    /** The allow-list a conversation carries ({@code Conversation.enabledToolNames}), or null when it carries none. */
+    /**
+     * The allow-list a conversation carries ({@code Conversation.enabledToolNames}), or null when it carries none.
+     * Only a subagent's or a hand-off's conversation carries one, so its {@link #SUBAGENTS_ONLY} entries are its own.
+     */
     public static @Nullable Set<String> allowListOf(@Nullable String allowListJson) {
-        return allowListJson == null || allowListJson.isBlank() ? null : parse(allowListJson);
+        return allowListJson == null || allowListJson.isBlank() ? null : forSubagents(parse(allowListJson));
     }
 
     /**

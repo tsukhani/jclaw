@@ -23,7 +23,7 @@ const emit = defineEmits<{ trust: [] }>()
  * punctuation that fails to parse is malformed and reads as unrestricted, as it does
  * server-side.
  */
-const TOOL_NAME = /^[A-Za-z0-9_./-]+$/
+const TOOL_NAME = /^[A-Za-z0-9_.:/-]+$/
 
 const tools = computed<string[] | null>(() => {
   const raw = props.enabledToolNames
@@ -43,10 +43,22 @@ const tools = computed<string[] | null>(() => {
   }
 })
 
-/** The MCP handle an `mcp_<server>/<action>` entry names, or null for any other entry. */
+/** JF-386: `subagents:<name>` gives a tool to the task's subagents alone, as services.TaskToolPolicy reads it. */
+const SUBAGENTS_ONLY = 'subagents:'
+
+function subagentsOnly(entry: string): boolean {
+  return entry.startsWith(SUBAGENTS_ONLY)
+}
+
+function unmarked(entry: string): string {
+  return subagentsOnly(entry) ? entry.slice(SUBAGENTS_ONLY.length).trim() : entry
+}
+
+/** The MCP handle an `mcp_<server>/<action>` entry names, marked or not, or null for any other entry. */
 function handleOf(entry: string): string | null {
-  const cut = entry.indexOf('/')
-  return entry.startsWith('mcp_') && cut > 0 ? entry.slice(0, cut) : null
+  const name = unmarked(entry)
+  const cut = name.indexOf('/')
+  return name.startsWith('mcp_') && cut > 0 ? name.slice(0, cut) : null
 }
 
 const narrowedHandles = computed(() =>
@@ -78,7 +90,14 @@ const { data: offered } = useLazyAsyncData(
 function unoffered(entry: string): boolean {
   const handle = handleOf(entry)
   const names = handle ? offered.value?.[handle] : undefined
-  return !!handle && !!names && !names.includes(entry.slice(handle.length + 1))
+  return !!handle && !!names && !names.includes(unmarked(entry).slice(handle.length + 1))
+}
+
+function pillTitle(entry: string): string | undefined {
+  const parts = []
+  if (subagentsOnly(entry)) parts.push('For this task\'s subagents only: the task\'s own run is not offered it.')
+  if (unoffered(entry)) parts.push(`${handleOf(entry)} does not offer this action, so the task's runs cannot use it.`)
+  return parts.length ? parts.join(' ') : undefined
 }
 
 /** web and voice are the operator origins (utils.ChannelOriginTrust); absent reads as UNKNOWN and fails closed. */
@@ -173,10 +192,15 @@ const model = computed(() => {
         :key="tool"
         class="text-[11px] px-1.5 py-0.5 border font-mono"
         :class="unoffered(tool) ? 'border-amber-500/40 text-amber-700 dark:text-amber-400' : 'border-border text-fg-strong'"
-        :title="unoffered(tool) ? `${handleOf(tool)} does not offer this action, so the task's runs cannot use it.` : undefined"
+        :title="pillTitle(tool)"
         :data-unoffered="unoffered(tool) || undefined"
+        :data-subagents-only="subagentsOnly(tool) || undefined"
         data-testid="task-tool-pill"
-      >{{ tool }}</span>
+      >{{ unmarked(tool) }}<span
+        v-if="subagentsOnly(tool)"
+        class="ml-1 font-sans text-fg-muted"
+        data-testid="task-tool-subagents-only"
+      >subagents only</span></span>
     </div>
   </section>
 </template>

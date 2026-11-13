@@ -7,7 +7,7 @@ description: >-
   schedule, change, fix or review a recurring or one-off task with task_manager. A plain reminder needs only its
   own short section here.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: Tarun Sukhani
   jclaw-icon: "⏰"
   jclaw-tools: task_manager jclaw_api filesystem
@@ -66,7 +66,7 @@ Walk the job step by step and write down the tool each step needs. For each step
 - **Step 1 is the constraints step.** It names the tools the task uses, lists what it must never do, and states the stop-and-report rule (rules 4 and 5).
 - **Every later step does one thing.** It names the action with its arguments written out, `action_name(argument: value, ...)`, with every fixed value spelled in full: IDs, folder IDs, sheet ranges, labels, addresses and file paths. Say what to do with the result.
 - **Write the conditions down.** If a step depends on an earlier result, say so ("if nothing matched, stop with no output").
-- **A subagent's step says what it may touch.** A subagent inherits the task's whole tool list. When a subagent needs a tool the task itself must not use (`exec` to run a script, say), step 1 says the task never calls that tool itself. The subagent's step then says what it may do and that it must not touch anything else, through a tool or a script. JClaw does not enforce this split: it is an instruction, so keep it short and explicit.
+- **A subagent's step says what it may touch.** A subagent inherits the task's tool list. When a subagent needs a tool the task itself must not use (`exec` to run a script, say), mark that tool for subagents only (step 5), so the task's own run is never offered it. The subagent's step still says what the subagent may do and that it must not touch anything else, through a tool or a script.
 
 ### 5. Set the tool list
 
@@ -79,7 +79,8 @@ Build `enabledToolNames` from your list in step 3:
 | `ccr_retrieve` | always: it reads back a tool result that was too large to show in full |
 | `datetime` | only when a step asks for the time; every run already gets the current time |
 | `subagent_spawn` | only when a step delegates to a subagent |
-| `exec` | only when a step, or a subagent's step, runs a command |
+| `exec` | only when a step of the task itself runs a command |
+| `subagents:<tool>` | a tool only a subagent's step needs, such as `subagents:exec`: the task's own run is not offered it, and every subagent it starts is |
 
 Leave out `message`: delivery sends the output. Leave out `jclaw_api` unless a step calls a JClaw route. A tool that is "nice to have" stays out: a run that needs a tool its list lacks gets a clear refusal, while a tool it never needed is only a way to go wrong.
 
