@@ -96,8 +96,13 @@ public class SystemPromptAssembler {
      * @param recalledMemories the turn's {@value #RECALL_HEADING} block, or empty when nothing was recalled. Not
      *                         part of {@code systemPrompt}: callers send it in {@link CurrentTimeInjector}'s
      *                         trailing message, where a recall that changes per turn misses no history (JF-152).
+     * @param withheldSkills   the skills the turn would list but for a value they need, as
+     *                         {@link SkillLoader#formatWithheldSkills} writes them, or empty. Sent in the same trailing
+     *                         message, on a turn the owner reads alone, so adding a value changes no cached prefix
+     *                         until the skill is offered (JF-327).
      */
-    public record AssembledPrompt(String systemPrompt, List<SkillLoader.SkillInfo> skills, String recalledMemories) {}
+    public record AssembledPrompt(String systemPrompt, List<SkillLoader.SkillInfo> skills, String recalledMemories,
+                                  String withheldSkills) {}
 
     /** Where recalled memories go instead of the system prompt, as the prompt introspection endpoints report it. */
     public static final String RECALL_PLACEMENT = "Recalled memories are not part of the system prompt. Each turn "
@@ -223,7 +228,8 @@ public class SystemPromptAssembler {
                                             @Nullable Conversation conversation) {
         var builder = new SectionedBuilder();
         var built = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding, conversation);
-        return new AssembledPrompt(builder.sb.toString(), built.skills(), built.recalledMemories());
+        return new AssembledPrompt(builder.sb.toString(), built.skills(), built.recalledMemories(),
+                built.withheldSkills());
     }
 
     /**
@@ -320,7 +326,7 @@ public class SystemPromptAssembler {
     }
 
     /** What {@link #buildPrompt} produces beside the system prompt text it writes into its builder. */
-    private record Built(List<SkillLoader.SkillInfo> skills, String recalledMemories) {}
+    private record Built(List<SkillLoader.SkillInfo> skills, String recalledMemories, String withheldSkills) {}
 
     private static Built buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
                                      @Nullable Set<String> disabledTools,
@@ -342,7 +348,7 @@ public class SystemPromptAssembler {
             b.startSection("Execution Bias");
             appendExecutionBiasSection(b.sb, agent, channelType);
             appendChannelGuidance(b, channelType);
-            return new Built(List.of(), "");
+            return new Built(List.of(), "", "");
         }
 
         // 0. Role & operating contract — what this agent is (a JClaw agent), who it
@@ -363,9 +369,13 @@ public class SystemPromptAssembler {
 
         // 4. Skills
         var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
-        var skills = SkillLoader.loadSkills(agent.name).stream()
+        var scan = SkillLoader.scan(agent.name);
+        var skills = scan.offered().stream()
                 .filter(s -> !ToolRegistry.needsOnlyWithheldOwnerTools(s.tools(), effectiveDisabled))
                 .toList();
+        var withheldSkills = SkillLoader.formatWithheldSkills(scan.withheld().stream()
+                .filter(w -> !ToolRegistry.needsOnlyWithheldOwnerTools(w.skill().tools(), effectiveDisabled))
+                .toList());
         if (!skills.isEmpty()) {
             var skillAccess = SkillLoader.SkillAccess.of(effectiveDisabled);
             b.startSection("Skills");
@@ -514,7 +524,7 @@ public class SystemPromptAssembler {
             ConversationService.markReadOutsideContent(conversation.id);
         }
 
-        return new Built(skills, recall.toString());
+        return new Built(skills, recall.toString(), withheldSkills);
     }
 
     private static void appendRoleSection(StringBuilder sb) {

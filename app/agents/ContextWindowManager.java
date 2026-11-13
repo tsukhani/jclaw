@@ -284,7 +284,7 @@ public final class ContextWindowManager {
      * (JCLAW-1232).
      *
      * @param reservedTokens tokens sent after the trim, which the target leaves room for: the
-     *                       turn's recalled memories ({@link #reservedTokens})
+     *                       turn's recalled memories and withheld skills ({@link #reservedTokens})
      */
     static MessageHydrator.Hydration trimToContextWindow(MessageHydrator.Hydration hydration, Agent agent,
                                                          Conversation conv, LlmProvider provider,
@@ -295,7 +295,8 @@ public final class ContextWindowManager {
 
     /**
      * What {@code text} costs the prompt, scaled as the trim scales a message. The turn's recalled
-     * memories join the list after compaction and the trim, so both reserve this for them (JF-152).
+     * memories and withheld skills join the list after compaction and the trim, so both reserve this for them
+     * (JF-152, JF-327).
      */
     static int reservedTokens(String text, Agent agent, Conversation conv, LlmProvider provider) {
         if (text.isEmpty()) return 0;

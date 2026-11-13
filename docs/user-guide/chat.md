@@ -20,6 +20,8 @@ Closing or refreshing the page is safe. Your conversation history is server-side
 
 The **Agent:** dropdown in the header lists the agents on the [Agents](/agents) page (subagents aside), starting on the Main Agent. With only one agent, it shows that agent's name instead. The composer at the bottom always sends to the currently selected agent.
 
+A skill switched on for the agent is not offered to it while a secret or setting the skill needs has no value. A **Needs values** notice above the conversation then names each such skill and what it needs, as in "gamma-presenter isn't offered to this agent until it has GAMMA_API_KEY". **Open Secrets panel** opens the [Skills](/skills) page at that skill on this agent, with its Secrets panel in view (see [Secrets](/guide#skills-tools-mcp-secrets)). A value that another skill of the agent holds is named with that skill, and **Open** with that skill's name opens it instead. "Set in radarr, which is switched off" means switch radarr on, rather than adding the value again. "Set in radarr, which is not offered right now (a tool it needs is off)" means switch on the tool radarr needs. The agent is told the same names on every turn you start, so when you ask it for something such a skill does, it can say what is missing and where to add it. It is told the names only, never a value. A turn someone else starts, such as a guest's message on Telegram or WhatsApp, is not told.
+
 If you do not have any agents yet, [Agents](/guide#agents) is the next stop. Come back when you do.
 
 ## Sending a message

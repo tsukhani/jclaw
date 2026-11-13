@@ -99,9 +99,17 @@ public class ApiSkillsController extends Controller {
                                   List<String> tools, List<String> commands, String author, String icon,
                                   String version, String folderName, String content) {}
 
+    /**
+     * One of an agent's skills. {@code needsValues}, the required secrets and settings it declares that the agent
+     * cannot be given (JF-348); for each of those another skill of the agent holds, that skill, in
+     * {@code heldBySwitchedOff} when its switch is off and in {@code heldByNotOffered} when it is on but not offered;
+     * {@code withheld}, whether the agent is not offered this skill for those values alone (JF-327).
+     */
     public record AgentSkillView(String name, String description, boolean isGlobal, String location,
                                  List<String> tools, List<String> commands, String author, String icon,
-                                 String version, String folderName, boolean enabled, List<String> needsValues) {}
+                                 String version, String folderName, boolean enabled, List<String> needsValues,
+                                 Map<String, String> heldBySwitchedOff, Map<String, String> heldByNotOffered,
+                                 boolean withheld) {}
 
     public record SkillToolRef(String name, String description) {}
 
@@ -527,12 +535,20 @@ public class ApiSkillsController extends Controller {
 
         // JF-348: the names (never values) of the required secrets a skill declares and cannot be given; while any
         // is listed the skill is not runnable.
-        var provided = SkillSecrets.provided(WorkspaceFiles.workspaceOwner(agent));
+        var owner = WorkspaceFiles.workspaceOwner(agent);
+        var provided = SkillSecrets.provided(owner);
+        var withheld = new HashSet<String>();
+        for (var w : SkillLoader.withheldSkills(owner.name)) withheld.add(w.folder());
         return skills.stream().<Map<String, Object>>map(s -> {
             var map = skillToMap(s, false);
             map.put(KEY_ENABLED, configMap.getOrDefault(s.name(), true));
             var folder = s.location() == null ? null : s.location().getParent();
-            map.put("needsValues", folder == null ? List.of() : provided.missing(folder));
+            var missing = folder == null ? List.<String>of() : provided.missing(folder);
+            map.put("needsValues", missing);
+            map.put("heldBySwitchedOff", provided.heldBySwitchedOff(missing));
+            map.put("heldByNotOffered", provided.heldByNotOffered(missing));
+            map.put("withheld", folder != null && folder.getFileName() != null
+                    && withheld.contains(folder.getFileName().toString()));
             return map;
         }).toList();
     }
@@ -689,12 +705,7 @@ public class ApiSkillsController extends Controller {
         }
         var provided = SkillSecrets.provided(WorkspaceFiles.workspaceOwner(agent));
         var needs = provided.missing(globalDir);
-        var heldBySwitchedOff = new LinkedHashMap<String, String>();
-        for (var need : needs) {
-            var holder = provided.holder(need);
-            if (holder != null) heldBySwitchedOff.put(need, holder);
-        }
-        renderJSON(gson.toJson(new SkillUpdatePreview(needs, heldBySwitchedOff, keeps)));
+        renderJSON(gson.toJson(new SkillUpdatePreview(needs, provided.heldBySwitchedOff(needs), keeps)));
     }
 
     /** GET /api/agents/{id}/skills/{name}/kept — The files kept from the skill's old copies. */

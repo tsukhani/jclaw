@@ -699,7 +699,8 @@ public class AgentRunner {
         messages.add(ChatMessage.user(userPrompt));
         // Task fires reuse the same clock and recall placement as the streaming path: as
         // a trailing message, not in the system prompt (see CurrentTimeInjector).
-        messages = new ArrayList<>(CurrentTimeInjector.inject(messages, assembled.recalledMemories(), null));
+        messages = new ArrayList<>(CurrentTimeInjector.inject(messages, assembled.recalledMemories(),
+                AgentPromptPreparer.withheldFor(assembled, ownerTools)));
 
         var providerName = ModelResolver.effectiveModelProvider(agent, stubConv);
         var primary = providerName != null ? ProviderRegistry.get(providerName) : null;

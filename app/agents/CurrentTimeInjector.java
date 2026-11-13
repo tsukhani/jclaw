@@ -60,7 +60,9 @@ import java.util.List;
  * left the system prompt for the same reason the clock did: recall runs on every user
  * message, so a recalled set that changed between turns missed the cache for every history
  * token behind the system message. The message is built once per turn, so it is identical
- * on every model round of that turn.
+ * on every model round of that turn. The skills withheld for a missing value
+ * ({@link SystemPromptAssembler.AssembledPrompt#withheldSkills}, JF-327) ride it for the same
+ * reason: a value added while a skill still lacks another changes them and no cached prefix.
  *
  * <h2>Call-site contract</h2>
  * <p>Every path that finalizes a message list for an LLM call MUST end with

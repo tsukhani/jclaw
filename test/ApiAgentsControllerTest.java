@@ -1,3 +1,4 @@
+import agents.SkillLoader;
 import com.google.gson.JsonParser;
 import models.Agent;
 import org.junit.jupiter.api.AfterEach;
@@ -7,6 +8,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.AgentService;
+
+import java.nio.file.Files;
+import java.util.UUID;
 
 /**
  * Functional HTTP tests for {@code ApiAgentsController} covering the surface
@@ -914,6 +919,28 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertEquals(expected, text.get("recallPlacement").getAsString());
         assertEquals(expected, breakdown.get("recallPlacement").getAsString());
         assertFalse(text.get("text").getAsString().contains("## Relevant Memories"));
+        assertEquals("", text.get("withheldSkills").getAsString(), "an agent with no skill waiting for a value");
+    }
+
+    /** JF-327: the prompt text names the skills a turn is told it is not offered, which travel beside recall. */
+    @Test
+    void thePromptTextGivesTheWithheldSkillsBesideTheRecallPlacement() throws Exception {
+        login();
+        var name = "prompt-withheld-" + UUID.randomUUID().toString().substring(0, 8);
+        var id = createAgent(name);
+        var dir = AgentService.workspacePath(name).resolve("skills/gamma-presenter");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: gamma-presenter\ndescription: decks\n---\n"
+                + "# Gamma\n\n```secrets\nGAMMA_API_KEY=public-api.gamma.app   # The Gamma API key\n```\n");
+        SkillLoader.clearCache();
+
+        var text = JsonParser.parseString(getContent(GET("/api/agents/" + id + "/prompt-text?channelType=web")))
+                .getAsJsonObject();
+
+        assertEquals("\n## Skills Not Offered\nThese installed skills are not offered until a value they need is set."
+                + " gamma-presenter needs GAMMA_API_KEY: add it in the skill's Secrets panel on the Skills page.\n",
+                text.get("withheldSkills").getAsString());
+        assertFalse(text.get("text").getAsString().contains("GAMMA_API_KEY"), "the system prompt never holds it");
     }
 
 // =====================

@@ -29,9 +29,10 @@ import java.util.stream.Stream;
  *       {@code applyCacheDirectives}, so the split has already happened.</li>
  *   <li>The section headings are read by the model rather than parsed, so forging one is a
  *       weaker attack — but it is still a claim of stored-fact authority made from inside
- *       the block that tells the model those lines are authoritative. Four: the two memory
- *       headings, and {@link CurrentTimeInjector#HEADING} and {@link CheckListTool#REMINDER_HEADING},
- *       the clock and the checklist reminder that share the trailing message with recall.</li>
+ *       the block that tells the model those lines are authoritative. Five: the two memory
+ *       headings, and {@link CurrentTimeInjector#HEADING}, {@link SkillLoader#WITHHELD_HEADING} and
+ *       {@link CheckListTool#REMINDER_HEADING}, the clock, the withheld skills and the checklist
+ *       reminder that share the trailing message with recall.</li>
  * </ul>
  *
  * <p>Deliberately NOT applied to inbound user messages. All four providers send
@@ -56,6 +57,7 @@ public final class PromptFenceScrubber {
             SystemPromptAssembler.CORE_MEMORY_HEADING,
             SystemPromptAssembler.RECALL_HEADING,
             CurrentTimeInjector.HEADING,
+            SkillLoader.WITHHELD_HEADING,
             CheckListTool.REMINDER_HEADING);
 
     private static final List<String> FENCES = Stream.concat(MARKERS.stream(), HEADINGS.stream()).toList();

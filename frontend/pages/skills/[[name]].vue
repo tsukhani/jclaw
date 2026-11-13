@@ -907,6 +907,22 @@ watch(() => route.params.name, (raw) => {
   else router.replace('/skills')
 }, { immediate: true })
 
+// JF-327: /skills?agent=<id>&skill=<folder>, the chat's withheld-skills link, opens that agent's copy with its Secrets
+// panel in view. The query is dropped once read, since an agent skill has no URL of its own and closes in place.
+const secretsPanel = ref<{ $el?: Element } | null>(null)
+watch(() => [route.query.agent, route.query.skill], async ([rawAgent, rawSkill]) => {
+  if (route.params.name || typeof rawAgent !== 'string' || typeof rawSkill !== 'string') return
+  const agentId = Number(rawAgent)
+  const skill = Number.isInteger(agentId)
+    ? agentSkillsMap.value[agentId]?.find(s => (s.folderName || s.name) === rawSkill)
+    : undefined
+  void router.replace('/skills')
+  if (!skill) return
+  await editAgentSkill(agentId, skill)
+  await nextTick()
+  secretsPanel.value?.$el?.scrollIntoView?.({ block: 'start' })
+}, { immediate: true })
+
 function skillFileApiBase() {
   const folderName = editing.value?.folderName || editing.value?.name
   if (editingAgentId.value != null) {
@@ -1724,6 +1740,7 @@ function totalSkillCount(agentId: number) {
 
       <SkillSecretsPanel
         v-if="editingAgentId != null"
+        ref="secretsPanel"
         :agent-id="editingAgentId"
         :skill-name="editing.folderName || editing.name"
         @changed="reloadSkillsOf(editingAgentId)"

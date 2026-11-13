@@ -1021,9 +1021,12 @@ describe('Agents page — Inspect prompt dialog', () => {
       skills: [],
       tools: [],
     }))
+    const withheld = '\n## Skills Not Offered\nThese installed skills are not offered until a value they need is set.'
+      + ' gamma-presenter needs GAMMA_API_KEY: add it in the skill\'s Secrets panel on the Skills page.\n'
     registerEndpoint('/api/agents/2/prompt-text', () => ({
       text: '## Your Role\nYou are a helpful agent.',
       recallPlacement: placement,
+      withheldSkills: withheld,
     }))
     setupAgentsApi()
     const component = await mountSuspended(Agents)
@@ -1037,6 +1040,8 @@ describe('Agents page — Inspect prompt dialog', () => {
     await component.find('[data-testid="view-full-prompt"]').trigger('click')
     await flushPromises()
     expect(component.find('[data-testid="prompt-text-recall-placement"]').text()).toBe(placement)
+    // JF-327: the withheld skills travel in the same message as recall, so the dialog shows them beside it.
+    expect(component.find('[data-testid="prompt-text-withheld-skills"] pre').text()).toBe(withheld.trim())
   })
 
   it('View Full shows raw and rendered markdown panes, and toggles between them', async () => {

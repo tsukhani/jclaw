@@ -51,11 +51,12 @@ final class AgentPromptPreparer {
      * Read-only prologue data computed for the synchronous path in a single
      * JPA transaction. Threads the resolved provider pair and the media bearers
      * through to the capability-rewrite step and the tool loop, and the turn's
-     * recalled memories through to the trailing message.
+     * recalled memories and withheld skills through to the trailing message.
      */
     record PreparedData(
         List<ChatMessage> messages,
         String recalledMemories,
+        String withheldSkills,
         LlmProvider primary,
         LlmProvider.@Nullable Fallback fallback,
         List<ToolDef> tools,
@@ -71,6 +72,7 @@ final class AgentPromptPreparer {
      */
     record PreparedPrologue(
         SystemPromptAssembler.AssembledPrompt assembled,
+        String withheldSkills,
         List<ChatMessage> messages,
         List<ToolDef> tools,
         Set<String> disabledTools,
@@ -132,7 +134,8 @@ final class AgentPromptPreparer {
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-            return Optional.of(new PreparedData(hydration.messages(), assembled.recalledMemories(), primary, fallback, tools,
+            return Optional.of(new PreparedData(hydration.messages(), assembled.recalledMemories(),
+                    withheldFor(assembled, ownerReadsAlone), primary, fallback, tools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers()));
         });
     }
@@ -156,9 +159,9 @@ final class AgentPromptPreparer {
         // unless the agent's compression is on. When compaction fires it
         // rebuilds from originals; trimToContextWindow below stays the net.
         var compressedMessages = prunedAndCompressed(prepared.messages(), agent, conversation);
-        // Recall joins the list after compaction and the trim, so both count it here (JF-152).
-        int recallTokens = ContextWindowManager.reservedTokens(prepared.recalledMemories(), agent, conversation,
-                prepared.primary());
+        // Recall and the withheld skills join the list after compaction and the trim, so both count them here (JF-152).
+        int trailingTokens = ContextWindowManager.reservedTokens(prepared.recalledMemories() + prepared.withheldSkills(),
+                agent, conversation, prepared.primary());
         // JCLAW-1232: the bearers travel WITH the list. Compaction rebuilds it and the trim drops
         // its head, so the hydration-time positions the media rewrites below address are only
         // valid if each step hands back the bearers that match the list it produced.
@@ -166,9 +169,9 @@ final class AgentPromptPreparer {
                 agent, conversationId, null, prepared.primary(),
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
-                prepared.tools(), recallTokens);
+                prepared.tools(), trailingTokens);
         var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
-                prepared.primary(), prepared.tools(), recallTokens);
+                prepared.primary(), prepared.tools(), trailingTokens);
         var finalMessages = hydration.messages();
         // JCLAW-165: when the active model lacks supportsAudio, await
         // any in-flight transcription futures and rewrite the user
@@ -191,8 +194,9 @@ final class AgentPromptPreparer {
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
         finalMessages = CurrentTimeInjector.inject(finalMessages, prepared.recalledMemories(),
-                CheckListTool.reminder(conversation, finalMessages));
-        return new PreparedData(finalMessages, prepared.recalledMemories(), prepared.primary(), prepared.fallback(),
+                prepared.withheldSkills() + Objects.toString(CheckListTool.reminder(conversation, finalMessages), ""));
+        return new PreparedData(finalMessages, prepared.recalledMemories(), prepared.withheldSkills(),
+                prepared.primary(), prepared.fallback(),
                 prepared.tools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
@@ -227,7 +231,8 @@ final class AgentPromptPreparer {
                     queryEmbedding, convo);
             var hydration = MessageHydrator.buildMessages(turnSystemPrompt(assembled0.systemPrompt(), convo), convo);
             var toolDefs = turnTools(agent, convo, ownerReadsAlone);
-            return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
+            return new PreparedPrologue(assembled0, withheldFor(assembled0, ownerReadsAlone), hydration.messages(),
+                    toolDefs, disabledTools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });
     }
@@ -251,8 +256,9 @@ final class AgentPromptPreparer {
         // when compaction is skipped or fails.
         // JCLAW-465: same content-aware compression hook on the streaming path.
         var compressedMessages = prunedAndCompressed(prepared.messages(), agent, conversation);
-        // Recall joins the list after compaction and the trim, so both count it here (JF-152).
-        int recallTokens = ContextWindowManager.reservedTokens(prepared.assembled().recalledMemories(), agent,
+        // Recall and the withheld skills join the list after compaction and the trim, so both count them here (JF-152).
+        var recalled = prepared.assembled().recalledMemories();
+        int trailingTokens = ContextWindowManager.reservedTokens(recalled + prepared.withheldSkills(), agent,
                 conversation, primary);
         // JCLAW-1232: bearers travel with the list through the rebuild and the trim — see the
         // sibling comment in rewriteSyncMedia.
@@ -260,9 +266,9 @@ final class AgentPromptPreparer {
                 agent, conversation.id, prepared.disabledTools(), primary,
                 new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
                         prepared.imageBearers(), prepared.videoBearers()),
-                prepared.tools(), recallTokens);
+                prepared.tools(), trailingTokens);
         var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
-                primary, prepared.tools(), recallTokens);
+                primary, prepared.tools(), trailingTokens);
         var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(hydration.messages(),
                 hydration.audioBearers(), supportsAudioForStream);
         // JCLAW-215: caption image attachments for non-vision models, mirroring
@@ -276,11 +282,16 @@ final class AgentPromptPreparer {
         // the cacheable prefix — and the whole history sitting behind it — stays
         // byte-stable across turns. Injected last, after compaction/trim/media
         // rewrites, so nothing downstream rebuilds the list and drops it.
-        return new PreparedPrologue(prepared.assembled(),
-                CurrentTimeInjector.inject(finalMessages, prepared.assembled().recalledMemories(),
-                        CheckListTool.reminder(conversation, finalMessages)),
+        return new PreparedPrologue(prepared.assembled(), prepared.withheldSkills(),
+                CurrentTimeInjector.inject(finalMessages, recalled, prepared.withheldSkills()
+                        + Objects.toString(CheckListTool.reminder(conversation, finalMessages), "")),
                 prepared.tools(), prepared.disabledTools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
+    }
+
+    /** The withheld skills name the operator's secrets, so only a turn the owner reads alone is told them (JF-327). */
+    static String withheldFor(SystemPromptAssembler.AssembledPrompt assembled, boolean ownerReadsAlone) {
+        return ownerReadsAlone ? assembled.withheldSkills() : "";
     }
 
     // ─── What every turn on a conversation shares, and /compact with it (JF-154) ───

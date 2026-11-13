@@ -276,7 +276,8 @@ public class ApiAgentsController extends Controller {
      * than the operator asks to read the prompt.
      *
      * <p>{@code recallPlacement} says where recalled memories go, since they are not in
-     * this text (JF-152).
+     * this text (JF-152), and {@code withheldSkills} is the block naming the skills not offered for a missing value,
+     * which a turn the owner reads alone sends in the same message (JF-327), or empty.
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
@@ -285,7 +286,8 @@ public class ApiAgentsController extends Controller {
         var agent = requireAgent(id);
         var assembled = SystemPromptAssembler.assemble(agent, null, null, requireBreakdownChannel());
         renderJSON(gson.toJson(Map.of("text", assembled.systemPrompt(),
-                "recallPlacement", SystemPromptAssembler.RECALL_PLACEMENT)));
+                "recallPlacement", SystemPromptAssembler.RECALL_PLACEMENT,
+                "withheldSkills", assembled.withheldSkills())));
     }
 
     /**

@@ -2,6 +2,7 @@ package services;
 
 import agents.SkillLoader;
 import models.Agent;
+import models.AgentSkillConfig;
 import models.SkillSecret;
 import models.SkillSetting;
 import org.jspecify.annotations.Nullable;
@@ -60,6 +61,12 @@ public final class SkillSecrets {
      * block: a value that is not secret, which the operator fills in on the panel. {@code example} is a hint only.
      */
     public record DeclaredSetting(String name, String description, String example, boolean optional) {}
+
+    /**
+     * The skill of an agent that holds a value another of its skills lacks (JF-327): {@code switchedOff} when its switch
+     * is off, otherwise it is on but not offered, as when a tool it needs is off.
+     */
+    public record Holder(String skill, boolean switchedOff) {}
 
     /** What a block declares: its secrets and its settings, each in the block's order. */
     public record Declarations(List<Declared> secrets, List<DeclaredSetting> settings) {}
@@ -397,6 +404,42 @@ public final class SkillSecrets {
                 if (!d.optional() && !to(folder.toString(), d.name())) out.add(d.name());
             }
             return List.copyOf(out);
+        }
+
+        /**
+         * For each of {@code missing} that another installed skill of the agent holds, that skill (JF-352, JF-327). A
+         * name {@link #missing} lists is never held by a skill that is offered, and one held by a skill no longer
+         * installed has no holder.
+         */
+        public Map<String, Holder> holdersOf(List<String> missing) {
+            var out = new LinkedHashMap<String, Holder>();
+            var skills = AgentService.workspacePath(owner.name).resolve("skills");
+            for (var name : missing) {
+                var holder = holder(name);
+                var dir = holder == null ? null : WorkspaceFiles.resolveContained(skills, holder);
+                if (holder == null || dir == null || !Files.isRegularFile(dir.resolve(SKILL_FILE))) continue;
+                var config = AgentSkillConfig.findByAgentAndSkill(owner, holder);
+                out.put(name, new Holder(holder, config != null && !config.enabled));
+            }
+            return out;
+        }
+
+        /** {@link #holdersOf}, keeping only the holders whose switch is off. */
+        public Map<String, String> heldBySwitchedOff(List<String> missing) {
+            var out = new LinkedHashMap<String, String>();
+            holdersOf(missing).forEach((name, held) -> {
+                if (held.switchedOff()) out.put(name, held.skill());
+            });
+            return out;
+        }
+
+        /** {@link #holdersOf}, keeping only the holders that are switched on but not offered. */
+        public Map<String, String> heldByNotOffered(List<String> missing) {
+            var out = new LinkedHashMap<String, String>();
+            holdersOf(missing).forEach((name, held) -> {
+                if (!held.switchedOff()) out.put(name, held.skill());
+            });
+            return out;
         }
     }
 

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -125,11 +126,24 @@ public class SkillLoader {
     }
 
     /**
-     * One agent's scan: the skills it is offered, and the folders of those installed, switched on and with their
-     * tools, whether or not their own secrets are complete. {@code generation} is {@link #clearCache}'s count when
-     * the scan began.
+     * A skill installed, switched on and with its tools that the agent is not offered, because a required secret or
+     * setting it declares has no value it can be given (JF-348, JF-357): its folder and those names, never a value.
      */
-    private record Loaded(List<SkillInfo> offered, Set<String> enabledFolders, long generation) {}
+    public record WithheldSkill(SkillInfo skill, String folder, List<Need> needs) {}
+
+    /** A name a withheld skill needs; {@code holder} is the agent's other skill that holds it, or null when none does. */
+    public record Need(String name, SkillSecrets.@Nullable Holder holder) {}
+
+    /** What one scan offers an agent and what it withholds for a missing value, read together. */
+    public record Scan(List<SkillInfo> offered, List<WithheldSkill> withheld) {}
+
+    /**
+     * One agent's scan: the skills it is offered, those withheld for a missing value, and the folders of those
+     * installed, switched on and with their tools, whether or not their own secrets are complete. {@code generation}
+     * is {@link #clearCache}'s count when the scan began.
+     */
+    private record Loaded(List<SkillInfo> offered, List<WithheldSkill> withheld, Set<String> enabledFolders,
+                          long generation) {}
 
     private static final Cache<String, Loaded> skillCache = Caches.named(
             SKILLS,
@@ -241,6 +255,21 @@ public class SkillLoader {
     }
 
     /**
+     * The agent's skills that are switched on and have their tools but are not offered, because a value they need is
+     * not set (JF-327), in the order {@link #loadSkills} lists skills. A subagent's are judged by its owner's
+     * secrets and switches, where the values live.
+     */
+    public static List<WithheldSkill> withheldSkills(String agentName) {
+        return loaded(agentName).withheld();
+    }
+
+    /** {@link #loadSkills} and {@link #withheldSkills} from one scan, so a clear between two reads cannot split them. */
+    public static Scan scan(String agentName) {
+        var loaded = loaded(agentName);
+        return new Scan(loaded.offered(), loaded.withheld());
+    }
+
+    /**
      * The cached scan, unless it began before the latest {@link #clearCache}, when it may hold what that cleared;
      * after a few clears in a row, a scan of its own, not cached.
      */
@@ -259,9 +288,9 @@ public class SkillLoader {
         var enabled = enabledSkillsFromDisk(agentName);
         var folders = folderNames(enabled);
         var offered = new ArrayList<>(enabled);
-        dropSkillsMissingSecrets(offered, agentName, folders);
+        var withheld = withholdSkillsMissingValues(offered, agentName, folders);
         if (AFTER_SCAN_READ_FOR_TEST.isBound()) AFTER_SCAN_READ_FOR_TEST.get().run();
-        return new Loaded(List.copyOf(offered), folders, began);
+        return new Loaded(List.copyOf(offered), withheld, folders, began);
     }
 
     private static Set<String> folderNames(List<SkillInfo> skills) {
@@ -275,31 +304,40 @@ public class SkillLoader {
 
     /**
      * JF-348: a skill whose SKILL.md declares a required secret it cannot be given is not runnable, so the agent
-     * is not offered it. A subagent works in its owner's workspace with its owner's secrets, so the owner's
-     * switched-on skills are the ones that provide them.
+     * is not offered it: this removes each such skill from {@code skills} and returns them. A subagent works in its
+     * owner's workspace with its owner's secrets, so the owner's switched-on skills are the ones that provide them.
      */
-    private static void dropSkillsMissingSecrets(List<SkillInfo> skills, String agentName, Set<String> enabledFolders) {
+    private static List<WithheldSkill> withholdSkillsMissingValues(List<SkillInfo> skills, String agentName,
+                                                                   Set<String> enabledFolders) {
         var workspace = AgentService.workspacePath(agentName);
-        Tx.run(() -> {
+        return Tx.run(() -> {
             var agent = Agent.findByName(agentName);
-            if (agent == null) return;
+            if (agent == null) return List.<WithheldSkill>of();
             var owner = WorkspaceFiles.workspaceOwner(agent);
             var provided = SkillSecrets.provided(owner, () -> owner.name.equals(agent.name)
                     ? enabledFolders
                     : folderNames(enabledSkillsFromDisk(owner.name)));
-            skills.removeIf(s -> skillMissingSecrets(s, provided, workspace, agentName));
+            var withheld = new ArrayList<WithheldSkill>();
+            skills.removeIf(s -> {
+                var w = withheldForMissingValues(s, provided, workspace, agentName);
+                if (w != null) withheld.add(w);
+                return w != null;
+            });
+            return List.copyOf(withheld);
         });
     }
 
-    private static boolean skillMissingSecrets(SkillInfo s, SkillSecrets.Provided provided, Path workspace,
-                                               String agentName) {
+    private static @Nullable WithheldSkill withheldForMissingValues(SkillInfo s, SkillSecrets.Provided provided,
+                                                                     Path workspace, String agentName) {
         var folder = s.location() == null ? null : workspace.resolve(s.location()).getParent();
-        if (folder == null) return false;
+        if (folder == null || folder.getFileName() == null) return null;
         var missing = provided.missing(folder);
-        if (missing.isEmpty()) return false;
-        EventLogger.warn(SKILLS, "Excluding skill '%s' from agent '%s': missing secrets %s"
+        if (missing.isEmpty()) return null;
+        EventLogger.warn(SKILLS, "Excluding skill '%s' from agent '%s': missing values %s"
                 .formatted(s.name(), agentName, missing));
-        return true;
+        var holders = provided.holdersOf(missing);
+        var needs = missing.stream().map(name -> new Need(name, holders.get(name))).toList();
+        return new WithheldSkill(s, folder.getFileName().toString(), needs);
     }
 
     private static List<SkillInfo> enabledSkillsFromDisk(String agentName) {
@@ -465,6 +503,64 @@ public class SkillLoader {
 
         sb.append("</available_skills>");
         return sb.toString();
+    }
+
+    /** Heading of the block {@link #formatWithheldSkills} writes. */
+    public static final String WITHHELD_HEADING = "## Skills Not Offered";
+    private static final int MAX_WITHHELD_CHARS = 2_000;
+    private static final Pattern UNPRINTABLE = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]");
+
+    /**
+     * The block naming {@code withheld} for the turn's trailing message (JF-327), or "" when the list is empty: each
+     * skill's folder, the names it needs and where each is set, up to {@value #MAX_WITHHELD_CHARS} characters and
+     * then how many more. Names only, never a value, a host or a description.
+     */
+    public static String formatWithheldSkills(List<WithheldSkill> withheld) {
+        if (withheld.isEmpty()) return "";
+        var line = new StringBuilder("These installed skills are not offered until a value they need is set.");
+        int shown = 0;
+        for (var w : withheld) {
+            var sentences = withheldSentences(w);
+            if (line.length() + sentences.length() > MAX_WITHHELD_CHARS) break;
+            line.append(sentences);
+            shown++;
+        }
+        if (shown < withheld.size()) line.append(" And %d more.".formatted(withheld.size() - shown));
+        // A folder name is whatever the disk allows, so it must not open a section of its own on every later turn.
+        return "\n" + WITHHELD_HEADING + "\n" + PromptFenceScrubber.scrubForInjection(line.toString(), "withheld skills")
+                + "\n";
+    }
+
+    private static String withheldSentences(WithheldSkill w) {
+        var folder = printable(w.folder());
+        var toAdd = new ArrayList<String>();
+        var byHolder = new LinkedHashMap<SkillSecrets.Holder, List<String>>();
+        for (var need : w.needs()) {
+            var holder = need.holder();
+            if (holder == null) toAdd.add(printable(need.name()));
+            else byHolder.computeIfAbsent(holder, _ -> new ArrayList<>()).add(printable(need.name()));
+        }
+        var out = new StringBuilder();
+        if (!toAdd.isEmpty()) {
+            out.append(" %s needs %s: add %s in the skill's Secrets panel on the Skills page."
+                    .formatted(folder, String.join(", ", toAdd), toAdd.size() == 1 ? "it" : "them"));
+        }
+        // A name is used once on an agent, so a value another skill holds cannot be added again.
+        for (var held : byHolder.entrySet()) {
+            var skill = printable(held.getKey().skill());
+            var names = String.join(", ", held.getValue());
+            var them = held.getValue().size() == 1 ? "it" : "them";
+            out.append(held.getKey().switchedOff()
+                    ? " %s needs %s, set in %s, which is switched off: switch %s on so %s can use %s."
+                            .formatted(folder, names, skill, skill, folder, them)
+                    : (" %s needs %s, set in %s, which is not offered right now (a tool it needs is off): switch that"
+                            + " tool on so %s can use %s.").formatted(folder, names, skill, folder, them));
+        }
+        return out.toString();
+    }
+
+    private static String printable(String name) {
+        return UNPRINTABLE.matcher(name).replaceAll("");
     }
 
     /** How the turn's tools let the agent open a listed skill's SKILL.md (JF-146). */

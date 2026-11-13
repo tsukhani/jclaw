@@ -781,8 +781,16 @@ export interface AgentSkill {
   commands?: string[]
   /** Optional emoji or symbol from the SKILL.md `icon:` frontmatter; empty string when not declared. */
   icon?: string
+  /** The skill's folder in the agent's workspace, which the API paths name. */
+  folderName?: string
   /** Required secrets and settings its SKILL.md declares that the agent cannot be given; not runnable while any is listed. */
   needsValues?: string[]
+  /** For each of `needsValues` another skill of the agent holds whose switch is off, that skill. */
+  heldBySwitchedOff?: Record<string, string>
+  /** For each of `needsValues` another skill of the agent holds that is on but not offered (a tool it needs is off), that skill. */
+  heldByNotOffered?: Record<string, string>
+  /** Whether the agent is not offered this skill for `needsValues` alone, as each turn it starts is told. */
+  withheld?: boolean
   [key: string]: unknown
 }
 

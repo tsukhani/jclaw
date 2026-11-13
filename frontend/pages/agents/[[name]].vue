@@ -735,6 +735,8 @@ const promptChartEntries = computed<PromptBreakdownEntry[]>(() => {
 const promptTextOpen = ref(false)
 const promptText = ref('')
 const promptTextRecallPlacement = ref('')
+/** JF-327: the withheld-skills block the next turn the owner reads alone carries beside recall, or ''. */
+const promptTextWithheldSkills = ref('')
 const promptTextLoading = ref(false)
 const promptTextError = ref('')
 
@@ -768,12 +770,13 @@ async function openPromptText() {
   promptTextError.value = ''
   promptTextLoading.value = true
   try {
-    const res = await $fetch<{ text: string, recallPlacement: string }>(
+    const res = await $fetch<{ text: string, recallPlacement: string, withheldSkills?: string }>(
       `/api/agents/${promptBreakdownAgent.value.id}/prompt-text?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
     )
     if (promptLoads.isCurrent(request)) {
       promptText.value = res.text
       promptTextRecallPlacement.value = res.recallPlacement
+      promptTextWithheldSkills.value = res.withheldSkills ?? ''
     }
   }
   catch (e: unknown) {
@@ -3590,6 +3593,14 @@ const agentKinds = [
               receives it. Tool schemas travel separately and are not part of this text.
               <span data-testid="prompt-text-recall-placement">{{ promptTextRecallPlacement }}</span>
             </p>
+            <div
+              v-if="promptTextWithheldSkills"
+              class="text-xs text-fg-muted mb-2"
+              data-testid="prompt-text-withheld-skills"
+            >
+              A turn you start also sends, in that message:
+              <pre class="font-mono whitespace-pre-wrap break-words mt-1">{{ promptTextWithheldSkills.trim() }}</pre>
+            </div>
             <!-- Panes scroll independently: the raw string and its rendered form
                  have very different heights, so a shared scroller would strand
                  one of them. -->

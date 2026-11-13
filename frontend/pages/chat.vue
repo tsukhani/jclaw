@@ -56,6 +56,7 @@ import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
 import ChatChecklist from '~/components/chat/ChatChecklist.vue'
+import type { WithheldSkill } from '~/components/chat/ChatWithheldSkillsNotice.vue'
 import McpElicitationForm from '~/components/chat/McpElicitationForm.vue'
 import ScrollJumpButton, { SCROLL_JUMP_CLEARANCE } from '~/components/ScrollJumpButton.vue'
 import { useMcpElicitations } from '~/composables/useMcpElicitations'
@@ -654,15 +655,49 @@ const { data: agentToolsData, execute: loadAgentTools } = useLazyFetch<AgentTool
   () => `/api/agents/${selectedAgentId.value}/tools`,
   { default: () => [], immediate: false },
 )
-const { data: agentSkillsData, execute: loadAgentSkills } = useLazyFetch<AgentSkill[]>(
-  () => `/api/agents/${selectedAgentId.value}/skills`,
-  { default: () => [], immediate: false },
-)
+// For every agent: the withheld-skills notice reads it as well as the no-tools one. Kept with the agent it was fetched
+// for, so a switch shows nothing until the new agent's list arrives rather than the previous agent's.
+const agentSkillsFetched = ref<{ agentId: number, skills: AgentSkill[] } | null>(null)
+const agentSkillLoads = useLatestRequest()
+async function loadAgentSkills() {
+  const agentId = selectedAgentId.value
+  if (agentId == null) return
+  const request = agentSkillLoads.begin()
+  try {
+    const skills = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
+    if (agentSkillLoads.isCurrent(request)) agentSkillsFetched.value = { agentId, skills }
+  }
+  catch {
+    // The notices keep their last state; the Skills page shows the same list.
+  }
+}
+const agentSkillsData = computed(() =>
+  agentSkillsFetched.value?.agentId === selectedAgentId.value ? agentSkillsFetched.value.skills : [])
+watch(selectedAgentId, () => loadAgentSkills(), { immediate: true })
+// A value the operator adds on the Skills page, or a turn that changed a skill, shows without a reload.
+watch([streaming, backgroundBusy], ([now, busy], [before, wasBusy]) => {
+  if ((before && !now) || (wasBusy && !busy)) loadAgentSkills()
+})
+onMounted(() => window.addEventListener('focus', loadAgentSkills))
+onBeforeUnmount(() => window.removeEventListener('focus', loadAgentSkills))
 watch([modelCannotUseTools, selectedAgentId], ([cannot, agentId]) => {
   if (!cannot || !agentId) return
   loadAgentTools()
-  loadAgentSkills()
 }, { immediate: true })
+
+// JF-327: the skills the agent is not offered until a value they need is set, as each turn it starts is told. A
+// subagent transcript is another agent's, so it shows none.
+const withheldSkills = computed<WithheldSkill[]>(() => {
+  if (subagentTranscript.value) return []
+  return agentSkillsData.value
+    .filter(s => s.withheld)
+    .map(s => ({
+      folder: s.folderName || s.name,
+      needs: s.needsValues ?? [],
+      heldBySwitchedOff: s.heldBySwitchedOff ?? {},
+      heldByNotOffered: s.heldByNotOffered ?? {},
+    }))
+})
 
 const noToolsNotice = computed(() => {
   if (!modelCannotUseTools.value) return null
@@ -979,6 +1014,12 @@ function exportConversation() {
           :model-label="noToolsNotice.modelLabel"
           :tool-count="noToolsNotice.toolCount"
           :skill-count="noToolsNotice.skillCount"
+        />
+
+        <ChatWithheldSkillsNotice
+          v-if="withheldSkills.length && selectedAgentId != null"
+          :agent-id="selectedAgentId"
+          :skills="withheldSkills"
         />
 
         <!--

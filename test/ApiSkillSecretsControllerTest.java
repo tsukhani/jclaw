@@ -342,6 +342,75 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals("[]", missingOf("other"), "the skill that holds the secret needs nothing, switched off or not");
     }
 
+    /** What the agent's skill list says the skill needs, who holds each value, and whether it is withheld for them. */
+    private String needsOf(String skill) {
+        for (var e : JsonParser.parseString(getContent(GET("/api/agents/" + agentId + "/skills"))).getAsJsonArray()) {
+            var o = e.getAsJsonObject();
+            if (!o.get("name").getAsString().equals(skill)) continue;
+            var out = new JsonObject();
+            for (var key : List.of("needsValues", "heldBySwitchedOff", "heldByNotOffered", "withheld")) out.add(key, o.get(key));
+            return out.toString();
+        }
+        return "not listed";
+    }
+
+    private void declareWithTool(String skill, String tool, String lines) throws Exception {
+        var dir = AgentService.workspacePath(agentName).resolve("skills/" + skill);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: " + skill + "\ndescription: test skill\nmetadata:\n"
+                + "  jclaw-tools: " + tool + "\n---\n# " + skill + "\n\n```secrets\n" + lines + "```\n");
+        agents.SkillLoader.clearCache();
+    }
+
+    private void switchToolOff(String tool) {
+        commitInFreshTx(() -> {
+            var off = new models.AgentToolConfig();
+            off.agent = Agent.findById(agentId);
+            off.toolName = tool;
+            off.enabled = false;
+            off.save();
+            agents.ToolRegistry.invalidateDisabledToolsCache(off.agent);
+            return null;
+        });
+        agents.SkillLoader.clearCache();
+    }
+
+    /**
+     * JF-327: the list names who holds each missing value, switched off or on but not offered, and flags a skill the
+     * agent is withheld only for values, not one it also lacks a tool for.
+     */
+    @Test
+    void theAgentsSkillListNamesWhoHoldsAMissingValueAndWhichSkillsAreWithheldForValues() throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        try {
+            declare("demo", "SHARED_PASS=api.example.com   # The shared password\nAPI_KEY=api.example.com   # Its own key\n");
+            declare("other", "SHARED_PASS=api.example.com   # The shared password\n");
+            declareWithTool("tooled", "filesystem", "TOOL_KEY=tool.example.com   # The key\n");
+            assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_PASS", "application/json",
+                    "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+            assertEquals("{\"needsValues\":[\"API_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":true}",
+                    needsOf("demo"), "a value a switched-on skill holds is given to every skill");
+
+            assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":false}"));
+
+            assertEquals("{\"needsValues\":[\"SHARED_PASS\",\"API_KEY\"],\"heldBySwitchedOff\":{\"SHARED_PASS\":\"other\"},"
+                    + "\"heldByNotOffered\":{},\"withheld\":true}", needsOf("demo"));
+            assertEquals("{\"needsValues\":[],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":false}",
+                    needsOf("other"));
+
+            assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":true}"));
+            declareWithTool("other", "filesystem", "SHARED_PASS=api.example.com   # The shared password\n");
+            switchToolOff("filesystem");
+
+            assertEquals("{\"needsValues\":[\"SHARED_PASS\",\"API_KEY\"],\"heldBySwitchedOff\":{},"
+                    + "\"heldByNotOffered\":{\"SHARED_PASS\":\"other\"},\"withheld\":true}", needsOf("demo"));
+            assertEquals("{\"needsValues\":[\"TOOL_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":false}",
+                    needsOf("tooled"), "a skill that also lacks a tool is not withheld for its value alone");
+        } finally {
+            ToolRegistrySync.release();
+        }
+    }
+
     /** Switching a skill off does not make it look as if its own secrets were missing. */
     @Test
     void aSwitchedOffSkillIsNotFlaggedForTheSecretsItHolds() throws Exception {
