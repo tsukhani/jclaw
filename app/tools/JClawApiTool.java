@@ -309,8 +309,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
             text = part(method, text, from);
             var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
             return note == null || note.isBlank()
-                    ? "HTTP %d\n%s".formatted(status, text)
-                    : "HTTP %d\nNote: %s\n%s".formatted(status, note.strip(), text);
+                    ? "HTTP %s\n%s".formatted(status, text)
+                    : "HTTP %s\nNote: %s\n%s".formatted(status, note.strip(), text);
         } catch (IOException e) {
             logCall(agent, origin, call + ": failed, " + e.getMessage(), false);
             return "Error: HTTP request failed: " + e.getMessage();

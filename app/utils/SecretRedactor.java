@@ -129,7 +129,7 @@ public final class SecretRedactor {
         var shapes = new Starts();
         shapeStarts(text, userinfo, shapes);
         var out = replaceAt(USERINFO, text, userinfo, m -> m.group("keep") + MASK);
-        if (out != text) {
+        if (!out.equals(text)) {
             shapes = new Starts();
             shapeStarts(out, new Starts(), shapes);
         }

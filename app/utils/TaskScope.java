@@ -107,6 +107,7 @@ public final class TaskScope<T> implements AutoCloseable {
      * thread does not cut the wait short; it is re-asserted once the wait is over.
      */
     @Override
+    @SuppressWarnings("java:S2142") // the interrupt is re-asserted below, once every fork has ended
     public void close() {
         cancelAll();
         // ExecutorService.close() minus its shutdownNow(), which interrupts every fork

@@ -93,6 +93,7 @@ interface LlmStreamCarriers {
          */
         volatile long firstContentNanos = 0L;
         private final CountDownLatch latch = new CountDownLatch(1);
+        @SuppressWarnings("java:S3077") // a Runnable swapped whole, never changed in place
         private volatile @Nullable Runnable cancel;
 
         void cancelWith(Runnable cancel) {

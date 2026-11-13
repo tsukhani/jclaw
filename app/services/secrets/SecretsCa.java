@@ -58,6 +58,7 @@ final class SecretsCa {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final char[] NO_PASSWORD = new char[0];
 
+    @SuppressWarnings("java:S3077") // set once, then only read
     private static volatile @Nullable SecretsCa instance;
 
     private final KeyPair caKeys;
@@ -66,6 +67,7 @@ final class SecretsCa {
     private final Path bundleFile;
     private final ConcurrentHashMap<String, SSLContext> hostContexts = new ConcurrentHashMap<>();
 
+    @SuppressWarnings("java:S5443") // createTempDirectory makes the folder owner-only (rwx------) on POSIX
     private SecretsCa() throws GeneralSecurityException, IOException {
         caKeys = newKeys();
         var name = new X500Name("CN=JClaw secrets proxy (this machine only)");

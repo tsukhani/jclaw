@@ -358,6 +358,7 @@ public final class H2Maintenance {
     }
 
     /** The check itself, on {@code dir}'s own database, which it changes: callers pass a copy. */
+    @SuppressWarnings("java:S2115") // JClaw's H2 files have no password by design: the folder's owner alone opens them
     private static WriteCheck keepsWrites(Path dir) {
         var token = UUID.randomUUID().toString();
         // A handful of pages are read; a small cache keeps this second database cheap inside the app's JVM.
@@ -365,7 +366,10 @@ public final class H2Maintenance {
         try {
             try (var c = DriverManager.getConnection(url, "", ""); var s = c.createStatement()) {
                 s.execute("CREATE TABLE IF NOT EXISTS " + WRITE_CHECK_TABLE + "(TOKEN VARCHAR(36))");
-                s.execute("INSERT INTO " + WRITE_CHECK_TABLE + " VALUES('" + token + "')");
+                try (var insert = c.prepareStatement("INSERT INTO " + WRITE_CHECK_TABLE + " VALUES(?)")) {
+                    insert.setString(1, token);
+                    insert.executeUpdate();
+                }
             }
         } catch (SQLException e) {
             return new WriteCheck(Outcome.FAILED, "a copy of it would not take a write: " + firstLine(e.getMessage()));
@@ -378,10 +382,13 @@ public final class H2Maintenance {
                     return lost;
                 }
             }
-            try (var rs = s.executeQuery("SELECT COUNT(*) FROM " + WRITE_CHECK_TABLE + " WHERE TOKEN = '" + token + "'")) {
-                return rs.next() && rs.getLong(1) == 1
-                        ? new WriteCheck(Outcome.PASSED, "a copy of it kept a test write across a reopen")
-                        : lost;
+            try (var find = c.prepareStatement("SELECT COUNT(*) FROM " + WRITE_CHECK_TABLE + " WHERE TOKEN = ?")) {
+                find.setString(1, token);
+                try (var rs = find.executeQuery()) {
+                    return rs.next() && rs.getLong(1) == 1
+                            ? new WriteCheck(Outcome.PASSED, "a copy of it kept a test write across a reopen")
+                            : lost;
+                }
             }
         } catch (SQLException e) {
             return new WriteCheck(Outcome.FAILED, "a copy of it would not reopen after a write: " + firstLine(e.getMessage()));
@@ -905,6 +912,7 @@ public final class H2Maintenance {
     }
 
     /** Every PUBLIC table's row count in {@code dbFile} (a {@code <name>.mv.db}), through a read-only open. */
+    @SuppressWarnings("java:S2115") // JClaw's H2 files have no password by design: the folder's owner alone opens them
     private static Map<String, Long> readOnlyCounts(Path dbFile) throws SQLException {
         var name = dbFile.getFileName().toString();
         var base = dbFile.toAbsolutePath().resolveSibling(name.substring(0, name.length() - ".mv.db".length()));

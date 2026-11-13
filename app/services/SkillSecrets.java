@@ -37,8 +37,9 @@ public final class SkillSecrets {
 
     /** An environment-variable name, since the shell receives each secret under its name. */
     static final Pattern NAME = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
+    // Possessive: every label before the last ends in a dot, so giving one back never helps a match (java:S5998).
     private static final Pattern HOST_NAME = Pattern.compile(
-            "(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
+            "(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
     private static final Pattern WITH_PORT = Pattern.compile("(.+):(\\d{1,5})");
 
     /** Names a command's environment already carries, or that route and trust its HTTPS: a secret never replaces one. */

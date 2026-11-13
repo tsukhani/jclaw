@@ -72,15 +72,18 @@ public final class CredentialMask {
      * The values a mask is built from: the stored ones as read at {@code storedAt}, and the saved-state ones with the
      * paths whose stamps, taken before the files were read, say when they must be read again.
      */
+    @SuppressWarnings("java:S6218") // never compared or printed: the cache's one holder
     private record Snapshot(Instant storedAt, Map<String, String> stored, List<Path> watched, long[] stamps,
                             Map<String, String> state, MultiStringMatcher<String> matcher) {}
 
+    @SuppressWarnings("java:S6218") // never compared or printed: one scan's result
     private record StateScan(List<Path> watched, long[] stamps, Map<String, String> values) {}
 
     private static final Object LOCK = new Object();
     /** Counts {@link #invalidate} calls, so a build that began before one never replaces what it cleared. */
     private static final AtomicLong GENERATION = new AtomicLong();
     private static final AtomicBoolean REFRESHING = new AtomicBoolean();
+    @SuppressWarnings("java:S3077") // an immutable snapshot replaced whole
     private static volatile @Nullable Snapshot snapshot;
 
     private CredentialMask() {}

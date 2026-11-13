@@ -63,6 +63,7 @@ public final class SecretProxy {
     private static final Set<String> NOT_RETURNED = Set.of("connection", "keep-alive", "proxy-authenticate",
             "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade", "content-length", "content-encoding");
 
+    @SuppressWarnings("java:S3077") // the running proxy, replaced whole on start and stop
     private static volatile @Nullable SecretProxy running;
 
     private final ServerSocket server;
