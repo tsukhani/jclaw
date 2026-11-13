@@ -54,6 +54,9 @@ import java.util.List;
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class McpServer extends TimestampedModel {
 
+    /** Starts every name {@link #toolName} returns; no native tool's name starts with it. */
+    public static final String HANDLE_PREFIX = "mcp_";
+
     public enum Transport { STDIO, HTTP }
 
     public enum Status { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
@@ -155,7 +158,7 @@ public class McpServer extends TimestampedModel {
      * changes is display only.
      */
     public static String toolName(String serverName, String action) {
-        var handle = "mcp_" + serverName;
+        var handle = HANDLE_PREFIX + serverName;
         return action == null || action.isEmpty() ? handle : handle + "_" + action;
     }
 

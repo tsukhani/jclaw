@@ -1,6 +1,7 @@
 package mcp;
 
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -11,6 +12,7 @@ import models.Agent;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.TaskToolPolicy;
 import services.Tx;
 import utils.ApiResponses;
 import utils.GsonHolder;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -219,16 +222,17 @@ public final class McpServerTool implements ToolRegistry.Tool {
         var read = readArgument(args);
         if (read != null) return readResource(read, agent, args);
 
+        var fence = fence();
         var described = describedNames(args);
-        if (!described.isEmpty()) return describeActions(described, webChat);
+        if (!described.isEmpty()) return describeActions(described, webChat, fence);
 
         // No `tool` → the action list; the model builds its populated calls from the schemas.
         if (!namesAnAction(args)) {
             // A whole envelope wrapped once more also has no outer `tool`, and the catalog
             // does not correct it: the model re-sends the same shape.
-            var nested = nestedEnvelopeHint(args, webChat);
+            var nested = nestedEnvelopeHint(args, webChat, fence);
             return nested.isEmpty()
-                    ? enumerateActions(webChat)
+                    ? enumerateActions(webChat, fence)
                     : ToolRegistry.ToolResult.text(
                             "MCP server '" + serverName + "' was called with no `tool`. " + nested.strip());
         }
@@ -237,6 +241,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
         var actionArgs = args.has("args") && args.get("args").isJsonObject()
                 ? args.getAsJsonObject("args").toString()
                 : "{}";
+        if (fence != null && !fence.actions().contains(actionName)) return refuseUnlisted(actionName, agent, fence);
 
         // Delegate to the per-action adapter that already lives in the
         // registry. The adapter carries the allowlist gate + audit trail,
@@ -252,8 +257,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
             // tens of thousands of tokens and time-to-first-token into the minute range.
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' has no action named '" + actionName + "'. "
-                            + envelopeHint(actionName, args, webChat)
-                            + "Available actions: " + enumerateActionNames(webChat)
+                            + envelopeHint(actionName, args, webChat, fence)
+                            + "Available actions: " + enumerateActionNames(webChat, fence)
                             + ". Call mcp_" + serverName + " with {\"describe\": [\"<action>\"]} "
                             + "for an action's input schema if needed.");
         }
@@ -269,8 +274,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
      * @return a corrective sentence ending in a space, empty for a plain
      *         unknown action (typo, stale tool list).
      */
-    private String envelopeHint(String actionName, JsonObject args, BooleanSupplier webChat) {
-        var nested = nestedEnvelopeHint(args, webChat);
+    private String envelopeHint(String actionName, JsonObject args, BooleanSupplier webChat, @Nullable Fence fence) {
+        var nested = nestedEnvelopeHint(args, webChat, fence);
         if (!nested.isEmpty()) return nested;
         if (actionName.equals(serverName) || actionName.equals(name())) {
             return "That is this server's own name, not an action — `tool` takes the action name. ";
@@ -279,13 +284,13 @@ public final class McpServerTool implements ToolRegistry.Tool {
     }
 
     /** The corrective sentence when {@code args.tool} names a registered action, else empty. */
-    private String nestedEnvelopeHint(JsonObject args, BooleanSupplier webChat) {
+    private String nestedEnvelopeHint(JsonObject args, BooleanSupplier webChat, @Nullable Fence fence) {
         if (args.has("args") && args.get("args").isJsonObject()) {
             var inner = args.getAsJsonObject("args");
             if (inner.has("tool") && inner.get("tool").isJsonPrimitive()) {
                 var nested = inner.get("tool").getAsString();
                 var tool = ToolRegistry.lookupTool(McpServer.toolName(serverName, nested));
-                if (tool != null && offeredHere(tool, webChat)) {
+                if (tool != null && offeredHere(tool, webChat) && (fence == null || fence.actions().contains(nested))) {
                     return "The envelope is nested one level too deep — '" + nested
                             + "' is the action. Call {\"tool\": \"" + nested
                             + "\", \"args\": {...}} with the action's own arguments at the top of `args`. ";
@@ -307,8 +312,34 @@ public final class McpServerTool implements ToolRegistry.Tool {
     }
 
     /** This server's actions the model may see on the turn dispatching this call. */
-    private List<McpToolDef> offeredActions(BooleanSupplier webChat) {
-        return McpViewTools.offered(serverName, McpConnectionManager.toolsForTurn(serverName), webChat);
+    private List<McpToolDef> offeredActions(BooleanSupplier webChat, @Nullable Fence fence) {
+        var offered = McpViewTools.offered(serverName, McpConnectionManager.toolsForTurn(serverName), webChat);
+        return fence == null ? offered : offered.stream().filter(d -> fence.actions().contains(d.name())).toList();
+    }
+
+    /**
+     * The actions of this server a run's tool list names (JF-373), and whose list it is.
+     *
+     * @param holder names the list in a refusal, as {@link TaskToolPolicy.RunToolList#holder()} does
+     */
+    private record Fence(Set<String> actions, String holder) {}
+
+    /** The fence of the run this call serves, or null when that run may use every action. */
+    private @Nullable Fence fence() {
+        var list = TaskToolPolicy.toolListOfRun(ToolContext.conversationId(), ToolContext.taskRunId());
+        if (list == null) return null;
+        var actions = TaskToolPolicy.mcpActions(list.allowed(), name());
+        return actions == null ? null : new Fence(actions, list.holder());
+    }
+
+    /** Refused before the adapter, so the server receives no request; phrased so the model stops rather than retries. */
+    private ToolRegistry.ToolResult refuseUnlisted(String actionName, Agent agent, Fence fence) {
+        EventLogger.warn(TaskToolPolicy.EVENT_CATEGORY, agentName(agent), null,
+                "MCP action '%s' on server '%s' refused: not on %s".formatted(actionName, serverName, fence.holder()));
+        var allowed = fence.actions().isEmpty() ? "none" : String.join(", ", fence.actions());
+        return ToolRegistry.ToolResult.refused(("Error: action '%s' of MCP server '%s' is not on %s, so it was not run. "
+                + "Do not retry it. The actions of this server it allows: %s.")
+                .formatted(actionName, serverName, fence.holder(), allowed), ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
     }
 
     /** MCP Apps' visibility without {@code "model"} keeps an action for the view alone. */
@@ -344,10 +375,10 @@ public final class McpServerTool implements ToolRegistry.Tool {
         return blank && namesAnAction(args) ? null : el;
     }
 
-    private ToolRegistry.ToolResult enumerateActions(BooleanSupplier webChat) {
-        var defs = offeredActions(webChat);
+    private ToolRegistry.ToolResult enumerateActions(BooleanSupplier webChat, @Nullable Fence fence) {
+        var defs = offeredActions(webChat, fence);
         var resources = McpConnectionManager.offersResources(serverName);
-        if ((defs == null || defs.isEmpty()) && !resources) return noActionsOffered();
+        if ((defs == null || defs.isEmpty()) && !resources) return noActionsOffered(fence);
         if (!resources) return catalog(serverName, defs);
         ToolRegistry.ToolResult listed;
         try {
@@ -430,12 +461,26 @@ public final class McpServerTool implements ToolRegistry.Tool {
         return agent != null && agent.name != null ? agent.name : "<unknown>";
     }
 
-    private ToolRegistry.ToolResult describeActions(List<String> names, BooleanSupplier webChat) {
-        var defs = offeredActions(webChat);
-        return defs == null || defs.isEmpty() ? noActionsOffered() : describe(serverName, defs, names);
+    /** An action the run's list leaves out is answered apart from a name the server lacks, so the model does not hunt for a spelling. */
+    private ToolRegistry.ToolResult describeActions(List<String> names, BooleanSupplier webChat, @Nullable Fence fence) {
+        var defs = offeredActions(webChat, null);
+        if (defs == null || defs.isEmpty()) return noActionsOffered(fence);
+        if (fence == null) return describe(serverName, defs, names);
+        var notAllowed = names.stream()
+                .filter(n -> !fence.actions().contains(n) && defs.stream().anyMatch(d -> d.name().equals(n)))
+                .toList();
+        var fenced = defs.stream().filter(d -> fence.actions().contains(d.name())).toList();
+        return describe(serverName, fenced, names.stream().filter(n -> !notAllowed.contains(n)).toList(), payload -> {
+            if (notAllowed.isEmpty()) return;
+            payload.put("notAllowed", notAllowed);
+            payload.put("notAllowedNote", "Not on " + fence.holder() + "; a call to one is refused.");
+        });
     }
 
-    private ToolRegistry.ToolResult noActionsOffered() {
+    private ToolRegistry.ToolResult noActionsOffered(@Nullable Fence fence) {
+        if (fence != null && !McpConnectionManager.tools(serverName).isEmpty()) {
+            return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' offers no action on " + fence.holder() + ".");
+        }
         if (actionsKeptForWebChat()) {
             return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' offers its actions in " + WEB_CHAT_ONLY + ".");
         }
@@ -573,6 +618,11 @@ public final class McpServerTool implements ToolRegistry.Tool {
 
     /** The whole description and input schema of each named action; a name the server lacks is reported as unknown. */
     public static ToolRegistry.ToolResult describe(String serverName, List<McpToolDef> defs, List<String> names) {
+        return describe(serverName, defs, names, _ -> {});
+    }
+
+    private static ToolRegistry.ToolResult describe(String serverName, List<McpToolDef> defs, List<String> names,
+                                                    Consumer<Map<String, Object>> extra) {
         var visible = forModel(defs);
         var known = new ArrayList<McpToolDef>();
         var unknown = new ArrayList<String>();
@@ -583,6 +633,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
         }
         var payload = payload(serverName, null, entries(known, true));
         if (!unknown.isEmpty()) payload.put("unknown", unknown);
+        extra.accept(payload);
         var json = GSON.toJson(payload);
         return new ToolRegistry.ToolResult(json, json);
     }
@@ -625,8 +676,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
      * overkill for a typo-correction signal. Names alone let the model spot the right action; if it actually needs
      * a schema it can ask for that one with {@code describe}.
      */
-    private String enumerateActionNames(BooleanSupplier webChat) {
-        var defs = offeredActions(webChat);
+    private String enumerateActionNames(BooleanSupplier webChat, @Nullable Fence fence) {
+        var defs = offeredActions(webChat, fence);
         if (defs == null || defs.isEmpty()) {
             return actionsKeptForWebChat() ? "(none here: this server offers its actions in " + WEB_CHAT_ONLY + ")"
                     : "(none — server not connected or advertises no actions)";

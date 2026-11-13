@@ -23,7 +23,7 @@ const emit = defineEmits<{ trust: [] }>()
  * punctuation that fails to parse is malformed and reads as unrestricted, as it does
  * server-side.
  */
-const TOOL_NAME = /^[A-Za-z0-9_.-]+$/
+const TOOL_NAME = /^[A-Za-z0-9_./-]+$/
 
 const tools = computed<string[] | null>(() => {
   const raw = props.enabledToolNames

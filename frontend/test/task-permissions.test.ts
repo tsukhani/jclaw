@@ -33,6 +33,16 @@ describe('TaskPermissions', () => {
     expect(pills).toEqual(['datetime', 'web_search', 'mcp_google-workspace-mcp'])
   })
 
+  it('renders a pill per MCP action entry in both forms, as TaskToolPolicy parses them', async () => {
+    // JF-373: before the separator joined the name pattern, the comma form read as unrestricted.
+    const json = await mount('["mcp_gw/search_gmail_messages","web_search"]')
+    expect(json.findAll('[data-testid="task-tool-pill"]').map(p => p.text()))
+      .toEqual(['mcp_gw/search_gmail_messages', 'web_search'])
+    const comma = await mount('mcp_gw/search_gmail_messages,web_search')
+    expect(comma.findAll('[data-testid="task-tool-pill"]').map(p => p.text()))
+      .toEqual(['mcp_gw/search_gmail_messages', 'web_search'])
+  })
+
   it('renders a pill for a bare single tool name', async () => {
     const c = await mount('mcp_google-workspace-mcp')
     expect(c.findAll('[data-testid="task-tool-pill"]').map(p => p.text()))

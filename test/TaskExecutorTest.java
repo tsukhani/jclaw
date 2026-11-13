@@ -537,6 +537,32 @@ class TaskExecutorTest extends UnitTest {
     }
 
     @Test
+    void anEntryNamingOneMcpActionOffersThatServersHandle() throws Exception {
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+        // JF-373: the handle is one tool definition for all its actions, so the action entry must offer it.
+        ToolRegistrySync.publishForTest(List.of(new mcp.McpServerTool("jf373exec")));
+        try {
+            var agent = createAgent("narrowed-agent", "test-provider", "test-model");
+            // A custom agent reaches an MCP server only once granted it.
+            var grant = mcp.McpGrants.newRow(agent, "mcp_jf373exec");
+            grant.enabled = true;
+            grant.save();
+            var task = persistTask(agent, "narrowed", "Do it.", Task.Type.IMMEDIATE);
+            task.enabledToolNames = "[\"mcp_jf373exec/search_messages\"]";
+            task.save();
+
+            JPA.em().getTransaction().commit();
+            JPA.em().getTransaction().begin();
+            fireOnVirtualThread(task);
+
+            assertEquals(List.of("mcp_jf373exec"), toolNamesSentToModel());
+        } finally {
+            ToolRegistrySync.release();
+        }
+    }
+
+    @Test
     void withoutAnAllowlistTheAgentsFullToolsetIsOffered() throws Exception {
         startLlmServer(simpleResponse("done"));
         configureProvider();

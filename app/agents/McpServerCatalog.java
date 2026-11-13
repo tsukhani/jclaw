@@ -6,6 +6,7 @@ import mcp.McpViewTools;
 import models.Agent;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
+import services.TaskToolPolicy;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -83,7 +84,7 @@ public final class McpServerCatalog {
         for (var entry : serverHandles.entrySet()) {
             var serverName = entry.getKey();
             var handle = entry.getValue();
-            var actionCount = countActions(serverName, once);
+            var actionCount = countActions(serverName, handle.name(), disabledForAgent, once);
             sb.append("| `").append(handle.name()).append("` | ")
               .append(actionCountLabel(actionCount)).append(" | ")
               .append(describeServer(serverRows.get(serverName), handle))
@@ -102,10 +103,14 @@ public final class McpServerCatalog {
     }
 
     /** {@code <0} means "not yet enumerated"; the server is connected but
-     *  the registry doesn't have a tools-list response cached yet. */
-    private static int countActions(String serverName, BooleanSupplier webChatTurn) {
+     *  the registry doesn't have a tools-list response cached yet. An action a
+     *  tool list leaves out ({@link ToolRegistry#fencedDisabled}) is not counted. */
+    private static int countActions(String serverName, String handle, Set<String> disabled, BooleanSupplier webChatTurn) {
         var defs = McpConnectionManager.toolsForTurn(serverName);
-        return defs == null ? -1 : McpViewTools.offered(serverName, defs, webChatTurn).size();
+        if (defs == null) return -1;
+        var prefix = handle + TaskToolPolicy.ACTION_SEPARATOR;
+        return (int) McpViewTools.offered(serverName, defs, webChatTurn).stream()
+                .filter(d -> !disabled.contains(prefix + d.name())).count();
     }
 
     private static String actionCountLabel(int count) {

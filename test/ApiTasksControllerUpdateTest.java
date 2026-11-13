@@ -274,6 +274,20 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         assertContentMatch("\"enabledToolNames\":\"filesystem,exec\"", resp);
     }
 
+    @Test
+    void anEntryNamingOneMcpActionIsStoredAndReadBackAsWritten() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "narrowed-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"enabledToolNames": ["mcp_gw/search_gmail_messages", "web_search"]}
+                """);
+        assertIsOk(resp);
+
+        var view = JsonParser.parseString(getContent(GET("/api/tasks/" + taskId))).getAsJsonObject();
+        assertEquals("[\"mcp_gw/search_gmail_messages\",\"web_search\"]", view.get("enabledToolNames").getAsString());
+    }
+
     /** JCLAW-1407: a refused patch leaves a value an older write stored, and applies nothing else. */
     @ParameterizedTest(name = "{0}")
     @CsvSource(delimiter = '|', value = {

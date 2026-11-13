@@ -1,6 +1,7 @@
 import llm.LlmTypes.ToolDef;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.TaskToolPolicy;
 
 import java.util.List;
@@ -131,5 +132,73 @@ class TaskToolPolicyTest extends UnitTest {
         var kept = TaskToolPolicy.restrict(defs("exec", "mcp_google-workspace-mcp"),
                 Set.of("mcp_google-workspace-mcp"), "payslip", "main");
         assertEquals(List.of("mcp_google-workspace-mcp"), namesOf(kept));
+    }
+
+    // ==================== JF-373: single actions of an MCP server ====================
+
+    @Test
+    void parsesEntriesNamingSingleActionsInBothShapes() {
+        assertEquals(Set.of("mcp_gw/search_gmail_messages", "web_search"),
+                TaskToolPolicy.parse("[\"mcp_gw/search_gmail_messages\",\"web_search\"]"));
+        assertEquals(Set.of("mcp_gw/search_gmail_messages", "web_search"),
+                TaskToolPolicy.parse("mcp_gw/search_gmail_messages,web_search"));
+    }
+
+    @Test
+    void anActionEntryOffersItsServersHandle() {
+        var kept = TaskToolPolicy.restrict(defs("exec", "mcp_gw", "web_search"),
+                Set.of("mcp_gw/search_gmail_messages", "web_search"), "labeler", "main");
+        assertEquals(List.of("mcp_gw", "web_search"), namesOf(kept));
+    }
+
+    @Test
+    void theAuditLineCountsAnActionEntryAsMatchingItsServer() {
+        var events = EventLogger.captureForTest(() -> TaskToolPolicy.restrict(defs("exec", "mcp_gw"),
+                Set.of("mcp_gw/search_gmail_messages", "mcp_absent/search"), "labeler", "main"));
+        assertEquals(List.of("INFO TOOL_BLOCKED_BY_TASK_POLICY Task 'labeler' (agent 'main') restricted to 1 of 2 "
+                        + "tools; withheld: exec; allow-list names matching no available tool: mcp_absent/search"),
+                events.stream().map(e -> e.level() + " " + e.category() + " " + e.message()).toList());
+    }
+
+    @Test
+    void anActionEntryOffersOnlyTheServerItNames() {
+        // mcp_git is a prefix of mcp_github: only an entry continuing with the separator names an action.
+        var allowed = Set.of("mcp_git/clone");
+        assertTrue(TaskToolPolicy.allows(allowed, "mcp_git"));
+        assertFalse(TaskToolPolicy.allows(allowed, "mcp_github"));
+    }
+
+    @Test
+    void anEntryWithNoActionAfterTheSeparatorOffersNothing() {
+        assertFalse(TaskToolPolicy.allows(Set.of("mcp_gw/"), "mcp_gw"));
+    }
+
+    @Test
+    void aSeparatorAfterANativeToolsNameDoesNotOfferIt() {
+        // Only an MCP server has actions; a stray entry must not grant a native tool whole.
+        assertFalse(TaskToolPolicy.allows(Set.of("web_search/anything"), "web_search"));
+    }
+
+    @Test
+    void mcpActionsIsNullWhenTheRunMayUseEveryAction() {
+        assertNull(TaskToolPolicy.mcpActions(null, "mcp_gw"));
+        assertNull(TaskToolPolicy.mcpActions(Set.of("mcp_gw", "mcp_gw/search"), "mcp_gw"));
+    }
+
+    @Test
+    void mcpActionsListsTheNamedActionsOfThatServerAlone() {
+        assertEquals(Set.of("search", "label"),
+                TaskToolPolicy.mcpActions(Set.of("mcp_gw/search", "mcp_gw/label", "mcp_gwx/send", "exec"), "mcp_gw"));
+    }
+
+    @Test
+    void mcpActionsIsEmptyWhenTheListNamesNoneOfTheServersActions() {
+        assertEquals(Set.of(), TaskToolPolicy.mcpActions(Set.of("exec", "mcp_other/search"), "mcp_gw"));
+    }
+
+    @Test
+    void aSubagentsInheritedActionEntryOffersTheHandle() {
+        var kept = TaskToolPolicy.restrictSubagent(defs("exec", "mcp_gw"), "[\"mcp_gw/search\"]", "helper");
+        assertEquals(List.of("mcp_gw"), namesOf(kept));
     }
 }

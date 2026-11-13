@@ -6,6 +6,7 @@ import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
+import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -13,6 +14,7 @@ import play.cache.Caches;
 import services.CredentialMask;
 import services.EventLogger;
 import services.LoadTestRunner;
+import services.TaskToolPolicy;
 import services.Tx;
 import utils.ErrorTemplate;
 import utils.ToolErrorTemplates;
@@ -650,12 +652,32 @@ public class ToolRegistry {
      * the agent's own, widened by every registered tool the list leaves out. The prompt's tool
      * and MCP catalogs then list what the turn can call, not what the agent could. Null when
      * there is no list, which leaves the assembler on the agent's own set and the prompt unchanged.
+     *
+     * <p>A server the list narrows to some of its actions (JF-373) also adds
+     * {@code mcp_<server>/<action>} for each action it leaves out, so the MCP catalog counts only
+     * the named ones. The per-action adapters' own names cannot carry this: they are disabled for
+     * every fenced turn and for the eval agent, whose servers still offer all their actions.
      */
     public static @Nullable Set<String> fencedDisabled(Agent agent, @Nullable Set<String> allowed) {
         if (allowed == null) return null;
         var disabled = new HashSet<>(loadDisabledTools(agent));
-        for (var tool : listTools()) {
-            if (!allowed.contains(tool.name())) disabled.add(tool.name());
+        var registered = listTools();
+        for (var tool : registered) {
+            if (!TaskToolPolicy.allows(allowed, tool.name())) {
+                disabled.add(tool.name());
+                continue;
+            }
+            var server = tool.group();
+            var actions = tool.isServerLevel() && server != null
+                    ? TaskToolPolicy.mcpActions(allowed, tool.name()) : null;
+            if (actions == null || server == null) continue;
+            var adapterPrefix = McpServer.toolName(server, "") + "_";
+            for (var adapter : registered) {
+                if (adapter.isServerLevel() || !server.equals(adapter.group())
+                        || !adapter.name().startsWith(adapterPrefix)) continue;
+                var action = adapter.name().substring(adapterPrefix.length());
+                if (!actions.contains(action)) disabled.add(tool.name() + TaskToolPolicy.ACTION_SEPARATOR + action);
+            }
         }
         return disabled;
     }
