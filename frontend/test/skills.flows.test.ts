@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { readMultipartFormData, setResponseStatus } from 'h3'
 import { defineComponent, h } from 'vue'
 import Skills from '~/pages/skills/[[name]].vue'
@@ -543,6 +543,8 @@ describe('Skills page — version-update affordance', () => {
         return { status: 'ok' }
       },
     })
+    // Nothing needed and nothing kept: no dialog stands between the click and the copy, as before JF-352.
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => ({ needs: [], heldBySwitchedOff: {}, keeps: [] }))
     setupApi({
       skills: [
         { name: 'web-search', folderName: 'web-search', description: 'Search the web', version: '2.0.0' },
@@ -858,5 +860,187 @@ describe('Skills page — catalog import warnings', () => {
 
     await vi.waitFor(() => expect(document.body.textContent)
       .toContain('canvas-design: No malware scanner is set up, so this skill\'s binary files were not scanned'))
+  })
+})
+
+describe('Skills page — an update names what it needs and keeps (JF-352)', () => {
+  afterEach(() => {
+    const { _state, _resolve } = useConfirm()
+    if (_state.open) _resolve(false)
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+  })
+
+  const preview = { needs: ['GAMMA_API_KEY'], heldBySwitchedOff: {}, keeps: ['credentials/gamma-api-key.txt'] }
+  const warning = 'The new version needs a value this agent does not have yet: GAMMA_API_KEY. Add it in the skill\'s'
+    + ' Secrets panel.\n\nJClaw moves this file of the old copy out of the skill, where the agent cannot read it, and'
+    + ' lists it in the skill\'s Secrets panel: credentials/gamma-api-key.txt.'
+
+  function olderCopy(displayName = 'web-search') {
+    setupApi({
+      skills: [{ name: 'web-search', folderName: 'web-search', description: 'Search the web', version: '2.0.0' }],
+      agents: [{ id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true }],
+      agentSkills: { 1: [{ name: displayName, folderName: 'web-search', enabled: true, version: '1.0.0' }] },
+    })
+  }
+
+  type DropVm = {
+    dragging: { name: string, folderName: string, version: string } | null
+    dragSource: string | null
+    onAgentDrop: (e: Event, agent: { id: number, name: string }) => Promise<void>
+  }
+
+  /** The drop handler is driven directly, as the JCLAW-1221 case does: these are about its dialog, not drag plumbing. */
+  function drop(component: VueWrapper) {
+    const vm = component.findComponent(Skills).vm as unknown as DropVm
+    vm.dragging = { name: 'web-search', folderName: 'web-search', version: '2.0.0' }
+    vm.dragSource = 'global'
+    return vm.onAgentDrop(new Event('drop'), { id: 1, name: 'main-agent' })
+  }
+
+  function copyEndpoint() {
+    const calls = { copied: false }
+    registerEndpoint('/api/agents/1/skills/web-search/copy', {
+      method: 'POST',
+      handler: () => {
+        calls.copied = true
+        return { status: 'ok' }
+      },
+    })
+    return calls
+  }
+
+  function dialogMessage() {
+    return (document.body.querySelector('[role="dialog"] p.whitespace-pre-line')?.textContent ?? '').trim()
+  }
+
+  function dialogButton(text: string) {
+    return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => (b.textContent ?? '').trim() === text)
+  }
+
+  async function clickUpdate(component: VueWrapper) {
+    const updateBtn = component.findAll('button').find(b => (b.attributes('title') ?? '').includes('Update to v2.0.0'))
+    await updateBtn!.trigger('click')
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+  }
+
+  it('names the values the new version needs and the files it keeps, and updates once confirmed', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => preview)
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    await clickUpdate(component)
+
+    expect(dialogMessage()).toBe(`Update 'web-search' to version 2.0.0?\n\n${warning}`)
+    expect(calls.copied).toBe(false)
+    dialogButton('Update')!.click()
+    await vi.waitFor(() => expect(calls.copied).toBe(true))
+  })
+
+  it('cancelling the warning replaces nothing', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => ({ needs: [], heldBySwitchedOff: {}, keeps: ['config.env'] }))
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    await clickUpdate(component)
+    expect(dialogMessage()).toBe('Update \'web-search\' to version 2.0.0?\n\nJClaw moves this file of the old copy out of'
+      + ' the skill, where the agent cannot read it, and lists it in the skill\'s Secrets panel: config.env.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(calls.copied).toBe(false)
+  })
+
+  it('a preview that fails replaces nothing and says why', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', (event) => {
+      setResponseStatus(event, 500)
+      return { type: 'error', code: 'internal_error', message: 'Failed to read the agent\'s copy: Permission denied' }
+    })
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    const updateBtn = component.findAll('button').find(b => (b.attributes('title') ?? '').includes('Update to v2.0.0'))
+    await updateBtn!.trigger('click')
+
+    await vi.waitFor(() => expect(component.text()).toContain('Failed to read the agent\'s copy: Permission denied'))
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(calls.copied).toBe(false)
+  })
+
+  it('dropping a newer version on the agent names what it needs and keeps in the replace dialog', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => preview)
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    const dropped = drop(component)
+    await vi.waitFor(() => expect(dialogButton('Replace')).toBeTruthy())
+    expect(dialogMessage()).toBe('Agent \'main-agent\' has \'web-search\' at version 1.0.0.\n'
+      + `Replace with global version 2.0.0?\n\n${warning}`)
+    expect(calls.copied).toBe(false)
+    dialogButton('Replace')!.click()
+    await dropped
+
+    expect(calls.copied).toBe(true)
+  })
+
+  it('a value another skill holds while switched off is named with that skill, to switch on rather than add', async () => {
+    copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => ({
+      needs: ['SEARCH_API_KEY', 'NAS_PASS', 'NAS_USER'],
+      heldBySwitchedOff: { NAS_PASS: 'nas', NAS_USER: 'nas' },
+      keeps: [],
+    }))
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    await clickUpdate(component)
+
+    expect(dialogMessage()).toBe('Update \'web-search\' to version 2.0.0?\n\nThe new version needs a value this agent does'
+      + ' not have yet: SEARCH_API_KEY. Add it in the skill\'s Secrets panel.\n\nThe new version needs NAS_PASS, NAS_USER,'
+      + ' set in nas, which is switched off. Switch nas on so this skill can use them.')
+  })
+
+  it('a preview that fails on the drop path replaces nothing and says why', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', (event) => {
+      setResponseStatus(event, 500)
+      return { type: 'error', code: 'internal_error', message: 'Failed to read the agent\'s copy: Permission denied' }
+    })
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    await drop(component)
+
+    expect(component.text()).toContain('Failed to read the agent\'s copy: Permission denied')
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(calls.copied).toBe(false)
+  })
+
+  it('a drop finds the agent\'s copy by its folder when its display name differs, and warns before replacing', async () => {
+    const calls = copyEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => preview)
+    olderCopy('Web Search')
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    const dropped = drop(component)
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+    expect(dialogMessage()).toBe('Agent \'main-agent\' has \'web-search\' at version 1.0.0.\n'
+      + `Replace with global version 2.0.0?\n\n${warning}`)
+    dialogButton('Cancel')!.click()
+    await dropped
+
+    expect(calls.copied).toBe(false)
   })
 })

@@ -234,6 +234,10 @@ GET     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.
 GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSkillFiles
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
+# JF-352: an update keeps the operator's files of the old copy outside the workspace.
+GET     /api/agents/{id}/skills/{name}/update-preview   ApiSkillsController.updatePreview
+GET     /api/agents/{id}/skills/{name}/kept             ApiSkillsController.listKept
+DELETE  /api/agents/{id}/skills/{name}/kept/{kept}      ApiSkillsController.deleteKept
 # JF-323: a skill's secrets on an agent. Values go in and never come back out.
 GET     /api/agents/{id}/skills/{name}/secrets          ApiSkillSecretsController.list
 PUT     /api/agents/{id}/skills/{name}/secrets/{secret} ApiSkillSecretsController.put

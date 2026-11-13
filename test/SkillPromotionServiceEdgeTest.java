@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import services.KeptSkillFiles;
 import services.NotificationBus;
 import services.SkillPromotionService;
 import services.Tx;
@@ -19,6 +20,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,6 +44,8 @@ import java.util.concurrent.atomic.AtomicReference;
  *       put; empty {@code credentials/}/{@code tools/} convention dirs are
  *       pruned from the published copy.</li>
  *   <li>{@code deleteRecursive} — tolerates undeletable entries.</li>
+ *   <li>{@code copyToAgentWorkspace} replacing a copy — what the operator put in
+ *       the old copy is kept outside the workspace, and nothing else (JF-352).</li>
  * </ul>
  *
  * <p>Permission-based tests use POSIX file permissions (chmod) and always
@@ -49,6 +55,7 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
 
     private Path globalSkillsDir;
     private final java.util.List<String> seededAgentNames = new java.util.ArrayList<>();
+    private final java.util.List<Long> seededAgentIds = new java.util.ArrayList<>();
 
     @BeforeEach
     void setup() throws Exception {
@@ -74,13 +81,23 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
             } catch (Exception _) {}
         }
         seededAgentNames.clear();
+        for (var id : seededAgentIds) KeptSkillFiles.deleteForAgent(id);
+        seededAgentIds.clear();
     }
 
     // ==================== Helpers ====================
 
     private Agent createAgent(String name) {
         seededAgentNames.add(name);
-        return AgentService.create(name, "openrouter", "gpt-4.1");
+        var agent = AgentService.create(name, "openrouter", "gpt-4.1");
+        seededAgentIds.add(agent.id);
+        // The in-memory database numbers agents from 1 again in every run, and the kept root under tmp/ outlives it.
+        try {
+            KeptSkillFiles.deleteForAgent(agent.id);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return agent;
     }
 
     private static void writeSkillMd(Path dir, String name, String version) throws Exception {
@@ -377,5 +394,238 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
             Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwxr-xr-x"));
             SkillPromotionService.deleteRecursive(dir);
         }
+    }
+
+    // ==================== copyToAgentWorkspace — what an update keeps (JF-352) ====================
+
+    private static Path agentCopy(Agent agent, String skill) {
+        return AgentService.workspacePath(agent.name).resolve("skills").resolve(skill);
+    }
+
+    private static void write(Path file, String text) throws IOException {
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, text);
+    }
+
+    /** Every file kept for the skill, path to content. */
+    private static Map<String, String> keptFiles(Agent agent, String skill) throws IOException {
+        var out = new TreeMap<String, String>();
+        for (var kept : KeptSkillFiles.list(agent, skill)) {
+            out.put(kept.path(), Files.readString(KeptSkillFiles.find(agent, skill, kept.id())));
+        }
+        return out;
+    }
+
+    /** The regular files of a folder, relative and in order. */
+    private static List<String> filesIn(Path dir) throws IOException {
+        try (var walk = Files.walk(dir)) {
+            return walk.filter(Files::isRegularFile).map(p -> dir.relativize(p).toString()).sorted().toList();
+        }
+    }
+
+    /** Install v1 of {@code skill} on the agent, then publish v2 to the registry, as an update finds them. */
+    private Agent agentWithOldCopy(String agentName, String skill) throws Exception {
+        var agent = createAgent(agentName);
+        writeSkillMd(globalSkillsDir.resolve(skill), skill, "1.0.0");
+        SkillPromotionService.copyToAgentWorkspace(agent, skill);
+        writeSkillMd(globalSkillsDir.resolve(skill), skill, "2.0.0");
+        return agent;
+    }
+
+    @Test
+    void anUpdateKeepsTheKeyFileOfTheOldCopyAndTheNewCopyHoldsOnlyWhatShips() throws Exception {
+        var agent = agentWithOldCopy("keep-key-file", "gamma");
+        write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf352\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+        assertEquals(Map.of("credentials/gamma-api-key.txt", "sk-gamma-fake-jf352\n"), keptFiles(agent, "gamma"));
+        assertEquals(List.of("SKILL.md"), filesIn(agentCopy(agent, "gamma")));
+        assertTrue(Files.readString(agentCopy(agent, "gamma").resolve("SKILL.md")).contains("version: 2.0.0"));
+        var kept = KeptSkillFiles.find(agent, "gamma", KeptSkillFiles.list(agent, "gamma").getFirst().id());
+        assertTrue(kept.startsWith(KeptSkillFiles.root().resolve(String.valueOf(agent.id)).resolve("gamma")),
+                "kept beneath the kept root, outside every workspace: " + kept);
+        assertFalse(kept.startsWith(AgentService.workspaceRoot().toAbsolutePath()), kept.toString());
+    }
+
+    @Test
+    void anEditedConfigBesideItsExampleIsKeptAndTheExampleIsNot() throws Exception {
+        var agent = agentWithOldCopy("keep-config", "jira");
+        write(globalSkillsDir.resolve("jira/config.env.example"), "JIRA_URL=\"https://jira.example.com\"\n");
+        write(agentCopy(agent, "jira").resolve("config.env.example"), "JIRA_URL=\"https://jira.example.com\"\n");
+        write(agentCopy(agent, "jira").resolve("config.env"), "JIRA_URL=\"https://jira.internal.example\"\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "jira");
+
+        assertEquals(Map.of("config.env", "JIRA_URL=\"https://jira.internal.example\"\n"), keptFiles(agent, "jira"));
+        assertEquals(List.of("SKILL.md", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+    }
+
+    @Test
+    void anEditedConfigIsKeptWhenOnlyTheNewVersionShipsItsExample() throws Exception {
+        var agent = agentWithOldCopy("keep-new-example", "jira");
+        write(globalSkillsDir.resolve("jira/config.env.example"), "JIRA_URL=\n");
+        write(agentCopy(agent, "jira").resolve("config.env"), "JIRA_URL=\"https://jira.internal.example\"\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "jira");
+
+        assertEquals(Map.of("config.env", "JIRA_URL=\"https://jira.internal.example\"\n"), keptFiles(agent, "jira"));
+        assertEquals(List.of("SKILL.md", "config.env.example"), filesIn(agentCopy(agent, "jira")));
+    }
+
+    @Test
+    void anUpdateOfACopyHoldingOnlyShippedFilesKeepsNothing() throws Exception {
+        var agent = agentWithOldCopy("keep-nothing", "plain");
+        write(globalSkillsDir.resolve("plain/credentials/README.md"), "Put your key here.\n");
+        write(agentCopy(agent, "plain").resolve("credentials/README.md"), "Put your key here.\n");
+        write(agentCopy(agent, "plain").resolve("notes.md"), "an agent's note\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "plain");
+
+        assertEquals(Map.of(), keptFiles(agent, "plain"));
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(String.valueOf(agent.id))), "no folder is made for nothing");
+    }
+
+    @Test
+    void aShippedFileIsKeptOnceItsBytesDifferFromTheNewVersion() throws Exception {
+        var agent = agentWithOldCopy("keep-changed", "plain");
+        write(globalSkillsDir.resolve("plain/credentials/README.md"), "Put your key here.\n");
+        write(globalSkillsDir.resolve("plain/credentials/token.txt"), "replace me\n");
+        write(agentCopy(agent, "plain").resolve("credentials/README.md"), "Put your key here.\n");
+        write(agentCopy(agent, "plain").resolve("credentials/token.txt"), "fake-token-jf352\n");
+
+        assertEquals(List.of("credentials/token.txt"),
+                KeptSkillFiles.select(agentCopy(agent, "plain"), globalSkillsDir.resolve("plain")));
+        SkillPromotionService.copyToAgentWorkspace(agent, "plain");
+
+        assertEquals(Map.of("credentials/token.txt", "fake-token-jf352\n"), keptFiles(agent, "plain"));
+        assertEquals("replace me\n", Files.readString(agentCopy(agent, "plain").resolve("credentials/token.txt")));
+    }
+
+    @Test
+    void aFailedSwapLeavesTheOldCopyInPlaceAndRemovesWhatWasKept() throws Exception {
+        var agent = agentWithOldCopy("keep-swap-fails", "gamma");
+        write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf352\n");
+        var locked = globalSkillsDir.resolve("gamma/locked.md");
+        Files.writeString(locked, "cannot read me");
+        Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+        try {
+            Assertions.assertThrows(IOException.class, () -> SkillPromotionService.copyToAgentWorkspace(agent, "gamma"));
+        } finally {
+            Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-r--r--"));
+        }
+
+        assertEquals("sk-gamma-fake-jf352\n",
+                Files.readString(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt")));
+        assertTrue(Files.readString(agentCopy(agent, "gamma").resolve("SKILL.md")).contains("version: 1.0.0"));
+        assertEquals(Map.of(), keptFiles(agent, "gamma"));
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(String.valueOf(agent.id))));
+    }
+
+    @Test
+    void aLinkIsNeverKeptOrFollowed() throws Exception {
+        var agent = agentWithOldCopy("keep-links", "gamma");
+        var outside = Files.createTempDirectory("jf352-outside-");
+        try {
+            Files.writeString(outside.resolve("secret.txt"), "not the skill's\n");
+            var copy = agentCopy(agent, "gamma");
+            write(copy.resolve("credentials/real.txt"), "fake-real-jf352\n");
+            Files.createSymbolicLink(copy.resolve("credentials/key"), outside.resolve("secret.txt"));
+            Files.createSymbolicLink(copy.resolve("credentials/folder"), outside);
+            Files.writeString(copy.resolve("config.env.example"), "X=1\n");
+            Files.createSymbolicLink(copy.resolve("config.env"), outside.resolve("secret.txt"));
+
+            assertEquals(List.of("credentials/real.txt"), KeptSkillFiles.select(copy, globalSkillsDir.resolve("gamma")));
+            SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+            assertEquals(Map.of("credentials/real.txt", "fake-real-jf352\n"), keptFiles(agent, "gamma"));
+            assertEquals("not the skill's\n", Files.readString(outside.resolve("secret.txt")),
+                    "replacing the copy deletes a link, never what it leads to");
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+        }
+    }
+
+    @Test
+    void aCopyWhoseCredentialsFolderIsALinkKeepsNothing() throws Exception {
+        var agent = agentWithOldCopy("keep-linked-folder", "gamma");
+        var outside = Files.createTempDirectory("jf352-outside-");
+        try {
+            Files.writeString(outside.resolve("gamma-api-key.txt"), "not the skill's\n");
+            Files.createSymbolicLink(agentCopy(agent, "gamma").resolve("credentials"), outside);
+
+            SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+            assertEquals(Map.of(), keptFiles(agent, "gamma"));
+            assertEquals("not the skill's\n", Files.readString(outside.resolve("gamma-api-key.txt")));
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+        }
+    }
+
+    @Test
+    void aSecondUpdateKeepsItsFilesBesideTheFirstUpdatesAndListsTheNewestFirst() throws Exception {
+        var agent = agentWithOldCopy("keep-twice", "gamma");
+        write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "first\n");
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+        write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "second\n");
+        writeSkillMd(globalSkillsDir.resolve("gamma"), "gamma", "3.0.0");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+        var listed = KeptSkillFiles.list(agent, "gamma");
+        assertEquals(2, listed.size());
+        assertEquals("second\n", Files.readString(KeptSkillFiles.find(agent, "gamma", listed.get(0).id())));
+        assertEquals("first\n", Files.readString(KeptSkillFiles.find(agent, "gamma", listed.get(1).id())));
+        assertFalse(listed.get(0).keptAt().isBefore(listed.get(1).keptAt()));
+    }
+
+    @Test
+    void aCredentialsFolderInAnotherLetterCaseIsKept() throws Exception {
+        var agent = agentWithOldCopy("keep-case", "gamma");
+        write(agentCopy(agent, "gamma").resolve("Credentials/gamma-api-key.txt"), "sk-gamma-fake-jf352\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+        assertEquals(Map.of("Credentials/gamma-api-key.txt", "sk-gamma-fake-jf352\n"), keptFiles(agent, "gamma"));
+        assertEquals(List.of("SKILL.md"), filesIn(agentCopy(agent, "gamma")));
+    }
+
+    @Test
+    void anUpdatesKeptFolderIsOpenOnlyToTheAccountJClawRunsAs() throws Exception {
+        var agent = agentWithOldCopy("keep-mode", "gamma");
+        write(agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf352\n");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+        List<Path> folders;
+        try (var entries = Files.list(KeptSkillFiles.root().resolve(String.valueOf(agent.id)).resolve("gamma"))) {
+            folders = entries.toList();
+        }
+        assertEquals(1, folders.size(), folders.toString());
+        assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(folders.getFirst())));
+    }
+
+    @Test
+    void anUnreadableFileInTheOldCopyRefusesTheUpdateKeepsNothingAndLeavesTheOldCopyWhole() throws Exception {
+        var agent = agentWithOldCopy("keep-unreadable", "gamma");
+        // Sorts ahead of the unreadable one, so it is copied out before the failure and must be removed with it.
+        write(agentCopy(agent, "gamma").resolve("credentials/a-readable.txt"), "fake-readable-jf352\n");
+        var key = agentCopy(agent, "gamma").resolve("credentials/gamma-api-key.txt");
+        write(key, "sk-gamma-fake-jf352\n");
+        Files.setPosixFilePermissions(key, PosixFilePermissions.fromString("---------"));
+        try {
+            Assertions.assertThrows(java.nio.file.AccessDeniedException.class,
+                    () -> SkillPromotionService.copyToAgentWorkspace(agent, "gamma"));
+        } finally {
+            Files.setPosixFilePermissions(key, PosixFilePermissions.fromString("rw-r--r--"));
+        }
+
+        assertEquals(List.of("SKILL.md", "credentials/a-readable.txt", "credentials/gamma-api-key.txt"),
+                filesIn(agentCopy(agent, "gamma")));
+        assertTrue(Files.readString(agentCopy(agent, "gamma").resolve("SKILL.md")).contains("version: 1.0.0"));
+        assertEquals("sk-gamma-fake-jf352\n", Files.readString(key));
+        assertEquals(Map.of(), keptFiles(agent, "gamma"));
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(String.valueOf(agent.id))), "nothing is left half-kept");
     }
 }

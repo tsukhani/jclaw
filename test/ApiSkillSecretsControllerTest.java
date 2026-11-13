@@ -15,9 +15,13 @@ import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.AgentService;
 import services.EventLogger;
+import services.KeptSkillFiles;
 import services.Tx;
 import utils.CredentialCipher;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.sql.Connection;
 import java.util.ArrayList;
@@ -42,19 +46,22 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         AuthFixture.seedAdminPassword("changeme");
         agentName = "jf323-" + UUID.randomUUID().toString().substring(0, 8);
         agentId = commitInFreshTx(() -> AgentService.create(agentName, "openrouter", "gpt-4.1").id);
+        // The in-memory database numbers agents from 1 again in every run, and the kept root under tmp/ outlives it.
+        KeptSkillFiles.deleteForAgent(agentId);
         Files.createDirectories(AgentService.workspacePath(agentName).resolve("skills/demo"));
         Files.writeString(AgentService.workspacePath(agentName).resolve("skills/demo/SKILL.md"), "# Demo\n");
         login();
     }
 
     @AfterEach
-    void cleanUp() {
+    void cleanUp() throws Exception {
         clearCookies();
         commitInFreshTx(() -> {
             Agent agent = Agent.findById(agentId);
             if (agent != null) AgentService.delete(agent);
             return null;
         });
+        KeptSkillFiles.deleteForAgent(agentId);
     }
 
     private void login() {
@@ -431,7 +438,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals("400 invalid_request A setting is one line: remove the line breaks.",
                 errorOf(putSetting("SITE_URL", "{\"value\":\"https://a.example.org\\nexport X=1\"}")));
         assertEquals("400 invalid_request The value is empty.", errorOf(putSetting("SITE_URL", "{\"value\":\"\"}")));
-        assertEquals("400 invalid_request The body must be a JSON object with 'value'.", errorOf(putSetting("SITE_URL", "{}")));
+        assertEquals("400 invalid_request The body must be a JSON object with 'value' or 'fromKept'.", errorOf(putSetting("SITE_URL", "{}")));
         assertEquals("400 invalid_request 'site_url' is not a secret name: use capital letters, digits and underscores,"
                 + " starting with a letter, at most 64 characters, as in NAS_PASSWORD.",
                 errorOf(putSetting("site_url", "{\"value\":\"x\"}")));
@@ -646,5 +653,391 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         }
         if (err.get() != null) throw new RuntimeException(err.get());
         return ref.get();
+    }
+
+    // ==================== a value from a kept file (JF-352) ====================
+
+    /** Keep {@code path} of an old copy of demo holding {@code content}, as an update would, and return its id. */
+    private String keep(String path, String content) throws Exception {
+        return keep(path, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String keep(String path, byte[] content) throws Exception {
+        var old = Files.createTempDirectory("jf352-old-");
+        var fresh = Files.createTempDirectory("jf352-new-");
+        try {
+            Files.createDirectories(old.resolve(path).getParent());
+            Files.write(old.resolve(path), content);
+            if (!path.startsWith("credentials/")) Files.writeString(old.resolve(path + ".example"), "");
+            commitInFreshTx(() -> {
+                try {
+                    return KeptSkillFiles.copyOut(Agent.findById(agentId), "demo", old, fresh);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+        } finally {
+            services.SkillPromotionService.deleteRecursive(old);
+            services.SkillPromotionService.deleteRecursive(fresh);
+        }
+        for (var e : kept()) {
+            if (e.getAsJsonObject().get("path").getAsString().equals(path)) return e.getAsJsonObject().get("id").getAsString();
+        }
+        throw new AssertionError("not kept: " + path);
+    }
+
+    private com.google.gson.JsonArray kept() {
+        return json(GET("/api/agents/" + agentId + "/skills/demo/kept")).getAsJsonArray("kept");
+    }
+
+    private static String keptJson(String id) {
+        return "\"fromKept\":\"" + id + "\"";
+    }
+
+    private List<String> keptPaths() {
+        var paths = new ArrayList<String>();
+        for (var e : kept()) paths.add(e.getAsJsonObject().get("path").getAsString());
+        return paths.stream().sorted().toList();
+    }
+
+    private static String plaintext(String sealed) {
+        return CredentialCipher.current().open(SkillSecret.VALUE_FIELD, sealed).plaintext();
+    }
+
+    private static final byte[] BYTE_ORDER_MARK = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+
+    @Test
+    void aSecretTakesTheWholeKeptFileTrimmedAndTheFileIsThenDeleted() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", "  " + VALUE + "\n\n");
+
+        var saved = put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}");
+
+        assertIsOk(saved);
+        assertEquals(List.of("hosts", "name", "setAt"), json(saved).keySet().stream().sorted().toList());
+        assertEquals(VALUE, CredentialCipher.current().open(SkillSecret.VALUE_FIELD, stored("GAMMA_API_KEY")).plaintext());
+        assertEquals("[]", kept().toString(), "the kept file is deleted once its value is stored");
+    }
+
+    @Test
+    void aReplacedSecretCanTakeItsNewValueFromAKeptFile() throws Exception {
+        assertIsOk(put("GAMMA_API_KEY", "{\"value\":\"fake-old-value\",\"hosts\":[\"public-api.gamma.app\"]}"));
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+        assertEquals(VALUE, CredentialCipher.current().open(SkillSecret.VALUE_FIELD, stored("GAMMA_API_KEY")).plaintext());
+        assertEquals(1, rows());
+    }
+
+    /**
+     * Each setting takes its own line, read as a shell reads it, and the file stays until every name in it the skill
+     * declares has a value: OTHER and JIRA_URL_OLD are not declared, so they never hold it back.
+     */
+    @Test
+    void aSettingIsReadFromItsOwnLineAsAShellReadsItAndTheFileGoesOnceEachDeclaredNameInItIsStored() throws Exception {
+        declare("demo", "setting JIRA_URL=https://jira.example.com   # The Jira address\n"
+                + "setting SITE_URL=https://site.example.com   # The site\n"
+                + "setting SITE_PATH=/srv   # Optional. Where the site lives\n");
+        var id = keep("config.env", "# The Jira address\n"
+                + "JIRA_URL=https://first.example.org\n"
+                + "export JIRA_URL='https://jira.example.org/a#b'   # the current one\n"
+                + "JIRA_URL_OLD=https://old.example.org\n"
+                + "SITE_URL=\"https://site.example.org/a \\\"b\\\"\"  # quoted, with a comment after\n"
+                + "SITE_PATH=/srv/site   # unquoted, with a comment\n"
+                + "OTHER=1\n");
+
+        var jira = putSetting("JIRA_URL", "{" + keptJson(id) + "}");
+        assertIsOk(jira);
+        assertEquals("https://jira.example.org/a#b", json(jira).get("value").getAsString());
+        assertEquals(List.of("config.env"), keptPaths(), "SITE_URL and SITE_PATH have no value yet");
+
+        var site = putSetting("SITE_URL", "{" + keptJson(id) + "}");
+        assertIsOk(site);
+        assertEquals("https://site.example.org/a \"b\"", json(site).get("value").getAsString());
+        assertEquals(List.of("config.env"), keptPaths(), "SITE_PATH, though optional, is declared and has no value yet");
+
+        var path = putSetting("SITE_PATH", "{" + keptJson(id) + "}");
+        assertIsOk(path);
+        assertEquals("/srv/site", json(path).get("value").getAsString());
+        assertEquals(List.of(), keptPaths());
+    }
+
+    /** The matrix's multi-value secret: an env-style key file is never stored whole, and goes once it is used up. */
+    @Test
+    void anEnvStyleKeyFileGivesEachNameItsLineAndIsDeletedWhenItsLastDeclaredNameIsStored() throws Exception {
+        declare("demo", "NAS_PASS=nas.example.com   # The DSM password\n"
+                + "setting NAS_USER=admin   # The DSM user\n"
+                + "setting NAS_PORT=5001   # Optional. The DSM port\n");
+        var bodies = new ArrayList<String>();
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+            try {
+                var id = keep("credentials/nas.env", "export NAS_PASS='" + VALUE + "'   # the password\nNAS_USER=operator\n");
+
+                var pass = put("NAS_PASS", "{" + keptJson(id) + ",\"hosts\":[\"nas.example.com\"]}");
+                assertIsOk(pass);
+                bodies.add(getContent(pass));
+                assertEquals(VALUE, plaintext(stored("NAS_PASS")), "only the NAS_PASS line's value is stored");
+                assertEquals(List.of("credentials/nas.env"), keptPaths(), "NAS_USER still waits for its value");
+
+                assertEquals("400 invalid_request The kept file credentials/nas.env has no line NAS_PORT=….",
+                        errorOf(putSetting("NAS_PORT", "{" + keptJson(id) + "}")));
+                assertEquals(List.of("credentials/nas.env"), keptPaths());
+
+                var user = putSetting("NAS_USER", "{" + keptJson(id) + "}");
+                assertIsOk(user);
+                bodies.add(getContent(user));
+                assertEquals("operator", json(user).get("value").getAsString());
+                assertEquals(List.of(), keptPaths(), "every name in it the skill declares now has a value");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        assertEquals(List.of(
+                "Kept 1 file(s) of skill demo's old copy before the update: credentials/nas.env",
+                "Secret NAS_PASS added for skill demo, sent only to nas.example.com",
+                "Kept file credentials/nas.env of skill demo stored as secret NAS_PASS and kept for NAS_USER",
+                "Setting NAS_USER added for skill demo",
+                "Kept file credentials/nas.env of skill demo stored as setting NAS_USER and deleted"),
+                events.stream().map(EventLogger.Captured::message).toList());
+        for (var body : bodies) assertFalse(body.contains(VALUE), body);
+    }
+
+    @Test
+    void typingTheLastDeclaredValueOfAKeptFileDeletesIt() throws Exception {
+        declare("demo", "NAS_PASS=nas.example.com   # The DSM password\nsetting NAS_USER=admin   # The DSM user\n");
+        var id = keep("credentials/nas.env", "NAS_PASS=" + VALUE + "\nNAS_USER=operator\n");
+        keep("config.env", "OTHER=1\n");
+        assertIsOk(put("NAS_PASS", "{" + keptJson(id) + ",\"hosts\":[\"nas.example.com\"]}"));
+        assertEquals(List.of("config.env", "credentials/nas.env"), keptPaths());
+
+        assertIsOk(putSetting("NAS_USER", "{\"value\":\"typed-operator\"}"));
+
+        assertEquals(List.of("config.env"), keptPaths(), "a file naming nothing the skill declares is never used up");
+    }
+
+    @Test
+    void aBase64KeyWithPaddingIsImportedWholeAndThenDeleted() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", "ZmFrZS1nYW1tYS1rZXktamYzNTI=\n");
+
+        assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+        assertEquals("ZmFrZS1nYW1tYS1rZXktamYzNTI=", plaintext(stored("GAMMA_API_KEY")));
+        assertEquals(List.of(), keptPaths());
+    }
+
+    @Test
+    void aValueOnlyAShellCouldReadIsRefusedAndTheFileKept() throws Exception {
+        var id = keep("credentials/key.env", "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----\"\n"
+                + "API_URL=https://$HOST/api\n");
+
+        assertEquals("400 invalid_request The kept file credentials/key.env gives PRIVATE_KEY a quoted value with no"
+                + " closing quote on its line, which JClaw does not read: type the value instead.",
+                errorOf(put("PRIVATE_KEY", "{" + keptJson(id) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals("400 invalid_request The kept file credentials/key.env gives API_URL a value with $ outside single"
+                + " quotes, which only a shell would expand: type the value instead.",
+                errorOf(putSetting("API_URL", "{" + keptJson(id) + "}")));
+
+        assertEquals(0, rows());
+        assertEquals(List.of("credentials/key.env"), keptPaths());
+    }
+
+    /** A whole file is most often a key, which a setting would show in clear. */
+    @Test
+    void aSettingIsNeverTakenFromAWholeFile() throws Exception {
+        var id = keep("credentials/token.txt", "fake-site-user-jf352\n");
+
+        assertEquals("400 invalid_request A setting takes its value from a NAME=value line.",
+                errorOf(putSetting("SITE_USER", "{" + keptJson(id) + "}")));
+
+        assertEquals("[]", json(GET(base())).getAsJsonArray("settings").toString());
+        assertEquals(List.of("credentials/token.txt"), keptPaths());
+    }
+
+    @Test
+    void aWholeFileValueLosesALeadingByteOrderMark() throws Exception {
+        var withMark = new java.io.ByteArrayOutputStream();
+        withMark.write(BYTE_ORDER_MARK);
+        withMark.write((VALUE + "\r\n").getBytes(StandardCharsets.UTF_8));
+        var id = keep("credentials/gamma-api-key.txt", withMark.toByteArray());
+
+        assertIsOk(put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}"));
+
+        assertEquals(VALUE, plaintext(stored("GAMMA_API_KEY")));
+        assertEquals(List.of(), keptPaths());
+    }
+
+    @Test
+    void aLineFileWithAByteOrderMarkStillReadsItsFirstLine() throws Exception {
+        var withMark = new java.io.ByteArrayOutputStream();
+        withMark.write(BYTE_ORDER_MARK);
+        withMark.write("SITE_URL=https://bom.example.org\n".getBytes(StandardCharsets.UTF_8));
+        var id = keep("config.env", withMark.toByteArray());
+
+        var saved = putSetting("SITE_URL", "{" + keptJson(id) + "}");
+
+        assertIsOk(saved);
+        assertEquals("https://bom.example.org", json(saved).get("value").getAsString());
+    }
+
+    @Test
+    void aKeptFileIsReadUpToTheImportLimitAndRefusedOneByteOver() throws Exception {
+        var limit = Math.toIntExact(KeptSkillFiles.MAX_IMPORT_BYTES);
+        var atLimit = keep("credentials/at-limit.txt", VALUE + " ".repeat(limit - VALUE.length()));
+        var overLimit = keep("credentials/over-limit.txt", VALUE + " ".repeat(limit - VALUE.length() + 1));
+
+        assertIsOk(put("AT_LIMIT_KEY", "{" + keptJson(atLimit) + ",\"hosts\":[\"a.example.com\"]}"));
+        assertEquals("400 invalid_request The kept file credentials/over-limit.txt is larger than any value JClaw stores.",
+                errorOf(put("OVER_LIMIT_KEY", "{" + keptJson(overLimit) + ",\"hosts\":[\"a.example.com\"]}")));
+
+        assertEquals(VALUE, plaintext(stored("AT_LIMIT_KEY")));
+        assertEquals(1, rows());
+        assertEquals(List.of("credentials/over-limit.txt"), keptPaths());
+    }
+
+    @Test
+    void aKeptFileThatIsNotTextIsRefusedAndKept() throws Exception {
+        var id = keep("credentials/key.bin", new byte[]{(byte) 0xC3, (byte) 0x28, 0x00, 0x01});
+
+        assertEquals("400 invalid_request The kept file credentials/key.bin is not text.",
+                errorOf(put("API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals("400 invalid_request The kept file credentials/key.bin is not text.",
+                errorOf(putSetting("SITE_URL", "{" + keptJson(id) + "}")));
+
+        assertEquals(0, rows());
+        assertEquals(List.of("credentials/key.bin"), keptPaths());
+    }
+
+    /** The import's store and its delete are one outcome: a store that rolls back leaves the file to try again. */
+    @Test
+    void aStoreThatRollsBackKeepsTheKeptFile() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        var skillDir = AgentService.workspacePath(agentName).resolve("skills/demo");
+
+        var thrown = assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> {
+            Agent owner = Agent.findById(agentId);
+            try {
+                KeptSkillFiles.importSecret(owner, "demo", skillDir, KeptSkillFiles.find(owner, "demo", id),
+                        "GAMMA_API_KEY", List.of("public-api.gamma.app"));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            throw new IllegalStateException("rolled back after the store");
+        }));
+
+        assertEquals("rolled back after the store", thrown.getCause().getMessage());
+        assertEquals(0, rows());
+        assertEquals(List.of("credentials/gamma-api-key.txt"), keptPaths());
+    }
+
+    @Test
+    void anImportTheStoreRefusesKeepsTheKeptFile() throws Exception {
+        var config = keep("config.env", "OTHER=1\n");
+        var empty = keep("credentials/empty.txt", " \n");
+        var key = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        assertEquals("400 invalid_request The kept file config.env has no line JIRA_URL=….",
+                errorOf(putSetting("JIRA_URL", "{" + keptJson(config) + "}")));
+        assertEquals("400 invalid_request The value is empty.",
+                errorOf(put("EMPTY_KEY", "{" + keptJson(empty) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals("400 invalid_request Add at least one host the secret may be sent to.",
+                errorOf(put("GAMMA_API_KEY", "{" + keptJson(key) + ",\"hosts\":[]}")));
+        assertEquals("400 invalid_request Send 'value' or 'fromKept', not both.",
+                errorOf(put("GAMMA_API_KEY", "{\"value\":\"v\"," + keptJson(key) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals("400 invalid_request Send 'value' or 'fromKept', not both.",
+                errorOf(putSetting("JIRA_URL", "{\"value\":\"https://x.example.org\"," + keptJson(config) + "}")));
+
+        assertEquals(0, rows());
+        var paths = new ArrayList<String>();
+        for (var e : kept()) paths.add(e.getAsJsonObject().get("path").getAsString());
+        assertEquals(List.of("config.env", "credentials/empty.txt", "credentials/gamma-api-key.txt"), paths.stream().sorted().toList());
+    }
+
+    @Test
+    void aKeptIdThatLeadsOutOfTheKeptFolderIsRefusedAndAMissingOneIsNotFound() throws Exception {
+        var encoder = java.util.Base64.getUrlEncoder().withoutPadding();
+        var outward = encoder.encodeToString("../../../../certs/.env".getBytes(StandardCharsets.UTF_8));
+        var missing = encoder.encodeToString("20261113T000000.000Z/credentials/x.txt".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals("400 invalid_request '" + outward + "' is not a kept file's id.",
+                errorOf(put("API_KEY", "{" + keptJson(outward) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals("400 invalid_request '" + outward + "' is not a kept file's id.",
+                errorOf(putSetting("SITE_URL", "{" + keptJson(outward) + "}")));
+        assertEquals("404 not_found No kept file '" + missing + "' on skill 'demo'.",
+                errorOf(put("API_KEY", "{" + keptJson(missing) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals(0, rows());
+    }
+
+    /** A kept file of one skill is no kept file of another, as its secrets are not. */
+    @Test
+    void aKeptFileOfAnotherSkillIsNotFound() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        declare("other", "");
+
+        assertEquals("404 not_found No kept file '" + id + "' on skill 'other'.",
+                errorOf(PUT("/api/agents/" + agentId + "/skills/other/secrets/API_KEY", "application/json",
+                        "{" + keptJson(id) + ",\"hosts\":[\"a.example.com\"]}")));
+        assertEquals(1, kept().size());
+    }
+
+    @Test
+    void deletingAKeptFileOfAnotherSkillIsNotFoundAndDeletesNothing() throws Exception {
+        var id = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        assertEquals("404 not_found No kept file '" + id + "' on skill 'other'.",
+                errorOf(DELETE("/api/agents/" + agentId + "/skills/other/kept/" + id)));
+        assertEquals(List.of("credentials/gamma-api-key.txt"), keptPaths());
+    }
+
+    @Test
+    void noLogLineOrResponseCarriesAKeptFilesContent() throws Exception {
+        var bodies = new ArrayList<String>();
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+            try {
+                var key = keep("credentials/gamma-api-key.txt", VALUE + "\n");
+                var config = keep("config.env", "SITE_URL=https://site.example.org\n");
+                bodies.add(kept().toString());
+                bodies.add(getContent(put("GAMMA_API_KEY", "{" + keptJson(key) + ",\"hosts\":[\"public-api.gamma.app\"]}")));
+                bodies.add(getContent(putSetting("SITE_URL", "{" + keptJson(config) + "}")));
+                bodies.add(getContent(GET(base())));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        assertEquals(List.of(
+                "Kept 1 file(s) of skill demo's old copy before the update: credentials/gamma-api-key.txt",
+                "Kept 1 file(s) of skill demo's old copy before the update: config.env",
+                "Secret GAMMA_API_KEY added for skill demo, sent only to public-api.gamma.app",
+                "Kept file credentials/gamma-api-key.txt of skill demo stored as secret GAMMA_API_KEY and deleted",
+                "Setting SITE_URL added for skill demo",
+                "Kept file config.env of skill demo stored as setting SITE_URL and deleted"),
+                events.stream().map(EventLogger.Captured::message).toList());
+        for (var e : events) assertNull(e.details(), e.message());
+        for (var body : bodies) assertFalse(body.contains(VALUE), body);
+    }
+
+    @Test
+    void aRolledBackAgentDeleteKeepsItsKeptFiles() throws Exception {
+        keep("credentials/gamma-api-key.txt", VALUE + "\n");
+
+        var thrown = assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> {
+            AgentService.delete(Agent.findById(agentId));
+            throw new IllegalStateException("rolled back after the delete");
+        }));
+
+        assertEquals("rolled back after the delete", thrown.getCause().getMessage());
+        assertEquals(List.of("credentials/gamma-api-key.txt"), keptPaths());
+    }
+
+    @Test
+    void deletingTheAgentDeletesItsKeptFiles() throws Exception {
+        keep("credentials/gamma-api-key.txt", VALUE + "\n");
+        assertTrue(Files.isDirectory(KeptSkillFiles.root().resolve(String.valueOf(agentId))));
+
+        commitInFreshTx(() -> {
+            AgentService.delete(Agent.findById(agentId));
+            return null;
+        });
+
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(String.valueOf(agentId))));
     }
 }

@@ -2,8 +2,18 @@
 /**
  * JF-357: the settings one agent's skill uses, inside its Secrets panel. A setting is a value that is not secret, such
  * as an address, a user name or a path, so its value is shown and can be edited. Only the operator writes one.
+ *
+ * JF-352: a value can come from a file an update kept; the server deletes that file once each name it assigns that the
+ * skill declares has a value.
  */
-const props = defineProps<{ base: string, settings: Setting[], expected: ExpectedSetting[] }>()
+import type { KeptSkillFile } from '~/types/api'
+
+const props = withDefaults(defineProps<{
+  base: string
+  settings: Setting[]
+  expected: ExpectedSetting[]
+  kept?: KeptSkillFile[]
+}>(), { kept: () => [] })
 /** After a setting is added, changed or deleted, so the panel reloads and the page redraws the skill's flag. */
 const emit = defineEmits<{ changed: [] }>()
 
@@ -21,11 +31,14 @@ const editing = ref<string | null>(null)
 const editName = ref('')
 const editValue = ref('')
 const freeForm = ref(false)
+/** The kept file whose NAME=value line becomes the value; '' for a typed value. */
+const editFromKept = ref('')
 
 const { mutate, loading: saving, errorDetails: writeError } = useApiMutation()
 const { confirm } = useConfirm()
 const nameId = useId()
 const valueId = useId()
+const sourceId = useId()
 
 interface Row { name: string, stored?: Setting, declared?: ExpectedSetting }
 
@@ -44,6 +57,7 @@ function open(row: Row) {
   editing.value = row.name
   editName.value = row.name
   editValue.value = row.stored?.value ?? ''
+  editFromKept.value = ''
   freeForm.value = false
 }
 
@@ -51,6 +65,7 @@ function openFreeForm() {
   editing.value = ''
   editName.value = ''
   editValue.value = ''
+  editFromKept.value = ''
   freeForm.value = true
 }
 
@@ -60,7 +75,8 @@ function close() {
 
 async function save() {
   const name = editName.value.trim()
-  if (await mutate(`${props.base}/${encodeURIComponent(name)}`, { method: 'PUT', body: { value: editValue.value } }) === null) return
+  const body = editFromKept.value ? { fromKept: editFromKept.value } : { value: editValue.value }
+  if (await mutate(`${props.base}/${encodeURIComponent(name)}`, { method: 'PUT', body }) === null) return
   editing.value = null
   emit('changed')
 }
@@ -210,6 +226,39 @@ function setAt(iso: string) {
         >
       </label>
       <label
+        v-if="kept.length"
+        :for="sourceId"
+        class="block"
+      >
+        <span class="block text-xs text-fg-muted">Value from</span>
+        <select
+          :id="sourceId"
+          v-model="editFromKept"
+          name="setting-source"
+          class="mt-1 w-full font-mono text-xs bg-surface border border-border px-2 py-1 text-fg-strong"
+        >
+          <option value="">
+            What I type below
+          </option>
+          <option
+            v-for="file in kept"
+            :key="file.id"
+            :value="file.id"
+          >
+            Kept file {{ file.path }}, kept {{ setAt(file.keptAt) }}
+          </option>
+        </select>
+      </label>
+      <p
+        v-if="editFromKept"
+        class="text-xs text-fg-muted"
+        data-testid="setting-form-kept-note"
+      >
+        JClaw takes the value from the file's plain assignment for {{ editName.trim() || 'this name' }}, a line such as
+        NAME=value. JClaw deletes the kept file once each name in it that this skill asks for has a value.
+      </p>
+      <label
+        v-else
         :for="valueId"
         class="block"
       >

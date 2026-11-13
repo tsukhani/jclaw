@@ -9,6 +9,8 @@ import services.AgentService;
 import services.CodingRunFolders;
 import services.ConfigService;
 import services.EventLogger;
+import services.KeptSkillFiles;
+import services.database.DatabaseService;
 import tools.ClaudeAdapter;
 import tools.GenericAdapter;
 import tools.HarnessSandbox;
@@ -841,13 +843,19 @@ class HarnessSandboxTest extends UnitTest {
      * otherwise be readable to it. Any other missing root is skipped, and a directory that
      * cannot be created is logged rather than thrown.
      */
+    /** The production argv creates each before hiding it, as the test below shows for one. */
+    @Test
+    void jclawsOwnSecretFoldersAreTheBackupsAndTheFilesSkillUpdatesKept() {
+        assertEquals(List.of(DatabaseService.backupsDir(), KeptSkillFiles.root()), HarnessSandbox.ownSecretFolders());
+    }
+
     @Test
     void linuxCreatesAMissingBackupDirectoryAndHidesIt() throws Exception {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
         var backups = root.resolve("backups");
         assertFalse(Files.exists(backups));
 
-        var hidden = HarnessSandbox.linuxHiddenRoots(backups, List.of(root.resolve("certs"), backups));
+        var hidden = HarnessSandbox.linuxHiddenRoots(List.of(backups), List.of(root.resolve("certs"), backups));
         assertTrue(Files.isDirectory(backups), "the backup directory must be created");
         assertEquals(List.of(backups), hidden, "a missing root that is not the backup directory gets no tmpfs");
         var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), "/home/operator", hidden, false);
@@ -855,7 +863,7 @@ class HarnessSandboxTest extends UnitTest {
 
         var blocked = Files.writeString(session.resolve("a-file"), "x").resolve("backups");
         var events = EventLogger.captureForTest(() ->
-                assertEquals(List.of(), HarnessSandbox.linuxHiddenRoots(blocked, List.of(blocked))));
+                assertEquals(List.of(), HarnessSandbox.linuxHiddenRoots(List.of(blocked), List.of(blocked))));
         assertTrue(events.stream().anyMatch(e -> "WARN".equals(e.level()) && e.message().contains(blocked.toString())),
                 "the failure must be logged, events=" + events);
     }
@@ -895,6 +903,8 @@ class HarnessSandboxTest extends UnitTest {
             assertTrue(indexOfPair(argv, "--tmpfs", SandboxHiddenRoots.canonical(path).toString()) >= 0,
                     dir + "/ must be hidden, argv=" + argv);
         }
+        assertTrue(indexOfPair(argv, "--tmpfs", SandboxHiddenRoots.canonical(KeptSkillFiles.root()).toString()) >= 0,
+                "the files skill updates kept, outside data/ here, must be created and hidden, argv=" + argv);
     }
 
     @Test
@@ -907,6 +917,16 @@ class HarnessSandboxTest extends UnitTest {
         var link = Files.createSymbolicLink(session.resolve("link"), Files.createDirectory(session.resolve("target")));
         assertEquals(session.toRealPath().resolve("target/data"), SandboxHiddenRoots.canonical(link.resolve("data")),
                 "Seatbelt matches resolved paths, so a root reached through a symlink must be denied at its target");
+    }
+
+    /** The test install keeps them under tmp/, outside data/, as an operator who moves them does. */
+    @Test
+    void theFilesSkillUpdatesKeptAreHiddenWhereverTheyAreConfigured() {
+        var kept = SandboxHiddenRoots.canonical(KeptSkillFiles.root());
+        var data = SandboxHiddenRoots.canonical(Play.applicationPath.toPath().resolve("data"));
+        assertFalse(kept.startsWith(data), kept + " must lie outside data/ for this test to measure anything");
+
+        assertTrue(SandboxHiddenRoots.current().contains(kept), kept + " in " + SandboxHiddenRoots.current());
     }
 
     /**

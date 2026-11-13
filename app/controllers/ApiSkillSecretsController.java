@@ -13,12 +13,14 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.KeptSkillFiles;
 import services.SkillSecrets;
 import services.SkillSettings;
 import services.WorkspaceFiles;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,8 +31,9 @@ import static utils.GsonHolder.GSON;
 
 /**
  * The Secrets panel of an agent's skill (JF-323): list, create or replace, and delete. A secret's value goes in and
- * never comes back out, to the operator included. A setting (JF-357) is not secret, so its value is listed. Every
- * route is the operator's alone.
+ * never comes back out, to the operator included. A setting (JF-357) is not secret, so its value is listed. A value
+ * can come from a file an update kept (JF-352). A kept file goes once each name it assigns that the skill declares
+ * has a value, however that value was stored. Every route is the operator's alone.
  */
 @With(AuthCheck.class)
 public class ApiSkillSecretsController extends Controller {
@@ -58,10 +61,18 @@ public class ApiSkillSecretsController extends Controller {
     public record SecretsResponse(List<SecretView> secrets, List<ExpectedView> expected, List<SettingView> settings,
                                   List<ExpectedSettingView> expectedSettings, List<String> missing) {}
 
-    public record SettingWriteRequest(String value) {}
+    /**
+     * {@code fromKept}, in place of {@code value}, takes it from a kept file (JF-352): the setting's {@code NAME=value}
+     * line when the file holds such lines, else the whole file trimmed.
+     */
+    public record SettingWriteRequest(@Nullable String value, @Nullable String fromKept) {}
 
-    /** {@code value} may be left out to keep the stored one and change only {@code hosts}. */
-    public record SecretWriteRequest(@Nullable String value, List<String> hosts) {}
+    /**
+     * {@code value} may be left out to keep the stored one and change only {@code hosts}. {@code fromKept}, in place of
+     * {@code value}, takes it from a kept file (JF-352): the secret's {@code NAME=value} line when the file holds such
+     * lines, else the whole file trimmed.
+     */
+    public record SecretWriteRequest(@Nullable String value, @Nullable String fromKept, List<String> hosts) {}
 
     public record SecretDeletedResponse(boolean deleted) {}
 
@@ -97,7 +108,7 @@ public class ApiSkillSecretsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY, reason = "stores a credential a skill sends to the hosts named with it")
     public static void put(Long id, String name, String secret) {
         var owner = requireOwner(id);
-        requireSkill(owner, name);
+        var dir = requireSkill(owner, name);
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
@@ -105,14 +116,21 @@ public class ApiSkillSecretsController extends Controller {
             throw ApiResponses.unreachable();
         }
         var value = stringOrNull(body, "value");
+        var kept = keptFile(owner, name, body, value);
         var hosts = hosts(body);
         SkillSecrets.Listing saved;
         try {
-            saved = SkillSecrets.put(owner, name, secret, value, hosts);
+            saved = kept != null
+                    ? KeptSkillFiles.importSecret(owner, name, dir, kept, secret, hosts)
+                    : SkillSecrets.put(owner, name, secret, value, hosts);
         } catch (SkillSecrets.Refused e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.reason());
             throw ApiResponses.unreachable();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read the kept file: " + e.getMessage());
+            throw ApiResponses.unreachable();
         }
+        KeptSkillFiles.deleteUsedUp(owner, name, dir, kept);
         renderJSON(GSON.toJson(view(saved)));
     }
 
@@ -135,20 +153,29 @@ public class ApiSkillSecretsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY, reason = "sets where a skill's commands connect and as whom")
     public static void putSetting(Long id, String name, String setting) {
         var owner = requireOwner(id);
-        requireSkill(owner, name);
+        var dir = requireSkill(owner, name);
         var body = JsonBodyReader.readJsonBody();
         var value = body == null ? null : stringOrNull(body, "value");
-        if (value == null) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "The body must be a JSON object with 'value'.");
-            throw ApiResponses.unreachable();
-        }
+        var kept = body == null ? null : keptFile(owner, name, body, value);
         SkillSettings.Listing saved;
         try {
-            saved = SkillSettings.put(owner, name, setting, value);
+            if (kept != null) {
+                saved = KeptSkillFiles.importSetting(owner, name, dir, kept, setting);
+            } else if (value != null) {
+                saved = SkillSettings.put(owner, name, setting, value);
+            } else {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                        "The body must be a JSON object with 'value' or 'fromKept'.");
+                throw ApiResponses.unreachable();
+            }
         } catch (SkillSecrets.Refused e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.reason());
             throw ApiResponses.unreachable();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read the kept file: " + e.getMessage());
+            throw ApiResponses.unreachable();
         }
+        KeptSkillFiles.deleteUsedUp(owner, name, dir, kept);
         renderJSON(GSON.toJson(new SettingView(saved.name(), saved.value(), saved.setAt().toString())));
     }
 
@@ -191,6 +218,17 @@ public class ApiSkillSecretsController extends Controller {
             throw ApiResponses.unreachable();
         }
         return dir;
+    }
+
+    /** The kept file {@code fromKept} names, or null when the body sends none; it never comes with a typed value. */
+    private static @Nullable Path keptFile(Agent owner, String skill, JsonObject body, @Nullable String value) {
+        var id = stringOrNull(body, "fromKept");
+        if (id == null) return null;
+        if (value != null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Send 'value' or 'fromKept', not both.");
+            throw ApiResponses.unreachable();
+        }
+        return ApiSkillsController.requireKept(owner, skill, id);
     }
 
     private static @Nullable String stringOrNull(JsonObject body, String key) {

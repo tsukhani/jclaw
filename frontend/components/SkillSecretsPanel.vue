@@ -8,9 +8,14 @@
  * while a required one has no value the skill is not runnable, which the panel says at its top.
  *
  * JF-357: the same block declares settings, values that are not secret; they are listed and edited below the secrets.
+ *
+ * JF-352: the files an update took out of the skill's old copy are listed last, never with their content. A secret or a
+ * setting can take its value from one, and the server deletes that file once each name it assigns that the skill
+ * declares has a value.
  */
-import type { ApiErrorDetails } from '~/types/api'
+import type { ApiErrorDetails, KeptSkillFile } from '~/types/api'
 import type { ExpectedSetting, Setting } from '~/components/SkillSettingsSection.vue'
+import { formatSize } from '~/utils/format'
 
 const props = defineProps<{ agentId: number, skillName: string }>()
 /** After a secret is added, replaced or deleted, so the page can redraw the skill's not-runnable flag. */
@@ -31,8 +36,10 @@ const expected = ref<Expected[]>([])
 const settings = ref<Setting[]>([])
 const expectedSettings = ref<ExpectedSetting[]>([])
 const missing = ref<string[]>([])
+const kept = ref<KeptSkillFile[]>([])
 const loading = ref(false)
 const loadError = ref<ApiErrorDetails | null>(null)
+const keptError = ref<ApiErrorDetails | null>(null)
 
 const formMode = ref<'add' | 'replace' | null>(null)
 const formName = ref('')
@@ -40,24 +47,34 @@ const formValue = ref('')
 const formHosts = ref('')
 /** The declared secret being added, for its description and example host; null for a free-form add. */
 const formDeclared = ref<Expected | null>(null)
+/** The kept file whose content becomes the value; '' for a typed value. */
+const formFromKept = ref('')
 
 const { mutate, loading: saving, errorDetails: writeError } = useApiMutation()
+const { mutate: mutateKept, errorDetails: keptWriteError } = useApiMutation()
 const { confirm } = useConfirm()
 const nameId = useId()
 const valueId = useId()
 const hostsId = useId()
+const sourceId = useId()
 
 const base = computed(() =>
   `/api/agents/${props.agentId}/skills/${encodeURIComponent(props.skillName)}/secrets`)
 const settingsBase = computed(() =>
   `/api/agents/${props.agentId}/skills/${encodeURIComponent(props.skillName)}/settings`)
+const keptBase = computed(() =>
+  `/api/agents/${props.agentId}/skills/${encodeURIComponent(props.skillName)}/kept`)
 
 async function settingsChanged() {
   await load()
   emit('changed')
 }
 
-async function load() {
+function load() {
+  return Promise.all([loadSecrets(), loadKept()])
+}
+
+async function loadSecrets() {
   loading.value = true
   loadError.value = null
   try {
@@ -82,11 +99,23 @@ async function load() {
   }
 }
 
+async function loadKept() {
+  keptError.value = null
+  try {
+    kept.value = (await $fetch<{ kept?: KeptSkillFile[] }>(keptBase.value)).kept ?? []
+  }
+  catch (e) {
+    kept.value = []
+    keptError.value = apiErrorDetails(e)
+  }
+}
+
 function openAdd(declared: Expected | null = null) {
   formMode.value = 'add'
   formDeclared.value = declared
   formName.value = declared?.name ?? ''
   formValue.value = ''
+  formFromKept.value = ''
   formHosts.value = ''
 }
 
@@ -95,6 +124,7 @@ function openReplace(secret: Secret) {
   formDeclared.value = expected.value.find(e => e.name === secret.name) ?? null
   formName.value = secret.name
   formValue.value = ''
+  formFromKept.value = ''
   formHosts.value = secret.hosts.join(', ')
 }
 
@@ -108,8 +138,9 @@ function hostList(text: string): string[] {
 }
 
 async function save() {
-  const body: { value?: string, hosts: string[] } = { hosts: hostList(formHosts.value) }
-  if (formValue.value !== '') body.value = formValue.value
+  const body: { value?: string, fromKept?: string, hosts: string[] } = { hosts: hostList(formHosts.value) }
+  if (formFromKept.value) body.fromKept = formFromKept.value
+  else if (formValue.value !== '') body.value = formValue.value
   const saved = await mutate(`${base.value}/${encodeURIComponent(formName.value.trim())}`, { method: 'PUT', body })
   formValue.value = ''
   if (saved === null) return
@@ -130,6 +161,19 @@ async function remove(secret: Secret) {
     await load()
     emit('changed')
   }
+}
+
+async function removeKept(file: KeptSkillFile) {
+  const ok = await confirm({
+    title: 'Delete kept file',
+    message: `Delete ${file.path}? JClaw keeps no other copy of it.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  // Reloaded either way: a 404 means the file is already gone, and its row should go with it.
+  await mutateKept(`${keptBase.value}/${encodeURIComponent(file.id)}`, { method: 'DELETE' })
+  await loadKept()
 }
 
 /**
@@ -341,6 +385,40 @@ watch(() => [props.agentId, props.skillName], () => {
         >
       </label>
       <label
+        v-if="kept.length"
+        :for="sourceId"
+        class="block"
+      >
+        <span class="block text-xs text-fg-muted">Value from</span>
+        <select
+          :id="sourceId"
+          v-model="formFromKept"
+          name="secret-source"
+          class="mt-1 w-full font-mono text-xs bg-surface border border-border px-2 py-1 text-fg-strong"
+        >
+          <option value="">
+            What I type below
+          </option>
+          <option
+            v-for="file in kept"
+            :key="file.id"
+            :value="file.id"
+          >
+            Kept file {{ file.path }}, kept {{ setAt(file.keptAt) }}
+          </option>
+        </select>
+      </label>
+      <p
+        v-if="formFromKept"
+        class="text-xs text-fg-muted"
+        data-testid="secret-form-kept-note"
+      >
+        If the file has plain assignments such as NAME=value, JClaw takes the value from the line for
+        {{ formName.trim() || 'this name' }}. If it has none, the whole file is the value, without spaces or line breaks
+        at either end. JClaw deletes the kept file once each name in it that this skill asks for has a value.
+      </p>
+      <label
+        v-else
         :for="valueId"
         class="block"
       >
@@ -404,7 +482,62 @@ watch(() => [props.agentId, props.skillName], () => {
       :base="settingsBase"
       :settings="settings"
       :expected="expectedSettings"
+      :kept="kept"
       @changed="settingsChanged"
     />
+
+    <div
+      v-if="kept.length || keptError || keptWriteError"
+      class="border-t border-border"
+      data-testid="skill-kept"
+    >
+      <div class="px-4 py-2.5 flex items-center gap-2">
+        <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Kept files</span>
+        <span class="text-xs text-fg-muted">{{ kept.length }}</span>
+      </div>
+      <p class="px-4 pb-2 text-xs text-fg-muted">
+        Files an update took out of this skill's old copy, such as a key or a config file you edited. JClaw keeps them
+        outside the agent's workspace, so the skill and the agent cannot read them, and never shows what they hold. To
+        use one, choose it under Value from when you add or replace a secret or a setting. JClaw deletes the file once
+        each name in it that this skill asks for has a value.
+      </p>
+      <ApiErrorAlert
+        v-if="keptError"
+        :error="keptError"
+        class="px-4 pb-3"
+      />
+      <ApiErrorAlert
+        :error="keptWriteError"
+        class="px-4 pb-3"
+      />
+      <div
+        v-if="kept.length"
+        class="divide-y divide-border border-t border-border"
+      >
+        <div
+          v-for="file in kept"
+          :key="file.id"
+          class="px-4 py-2.5 flex items-center justify-between gap-3"
+          :data-testid="`kept-${file.path}`"
+        >
+          <div class="min-w-0">
+            <div class="font-mono text-xs text-fg-strong break-all">
+              {{ file.path }}
+            </div>
+            <div class="text-xs text-fg-muted">
+              {{ formatSize(file.size) }} · kept {{ setAt(file.keptAt) }}
+            </div>
+          </div>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 border border-border text-red-700 dark:text-red-400 hover:bg-muted shrink-0"
+            :aria-label="`Delete kept file ${file.path}, kept ${setAt(file.keptAt)}`"
+            @click="removeKept(file)"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

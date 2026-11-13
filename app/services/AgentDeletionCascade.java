@@ -8,6 +8,8 @@ import models.Agent;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,7 +40,7 @@ public final class AgentDeletionCascade {
      * channel bindings, skill/tool configs, tool-approval grants, and
      * notifications — in one statement whose delete order the database computes.
      *
-     * <p>Four resources live outside the FK graph and are still cleaned up by an
+     * <p>Five resources live outside the FK graph and are still cleaned up by an
      * explicit walk over the subtree, since {@code ON DELETE CASCADE} governs only
      * rows in FK-linked tables:
      * <ul>
@@ -48,7 +50,8 @@ public final class AgentDeletionCascade {
      *       cascade of the memory rows themselves cannot reach, so deletion is
      *       routed through {@link MemoryStoreFactory};</li>
      *   <li>{@link DangerousActionGate}'s in-process grant cache, which the gate ORs
-     *       against the cascaded {@code tool_approval_grant} rows.</li>
+     *       against the cascaded {@code tool_approval_grant} rows;</li>
+     *   <li>the files {@link KeptSkillFiles} kept from its skills' old copies, outside the workspace.</li>
      * </ul>
      *
      * <p>Workspace directories are removed last, after DB state is clean, so a
@@ -88,6 +91,7 @@ public final class AgentDeletionCascade {
             // in-process grant cache is not FK-linked and would outlive them.
             DangerousActionGate.revokeGrantsForAgent(node.id);
             GraphLifecycle.deleteAgentAfterCommit(node.id);
+            deleteKeptFilesAfterCommit(node.id, node.name);
         }
         ConfigService.clearCache();
         // JCLAW-673: evict the subtree's SUBAGENT_RUN + TASK full-text docs while
@@ -113,6 +117,17 @@ public final class AgentDeletionCascade {
             WorkspaceFiles.deleteWorkspaceDirectory(name);
             EventLogger.info(LOG_CATEGORY, name, null, "Agent deleted");
         }
+    }
+
+    /** A rolled-back delete keeps the agent, so its kept files wait for the commit, as its graph does. */
+    private static void deleteKeptFilesAfterCommit(long agentId, String name) {
+        Tx.afterCommit(() -> {
+            try {
+                KeptSkillFiles.deleteForAgent(agentId);
+            } catch (IOException | UncheckedIOException e) {
+                EventLogger.warn(LOG_CATEGORY, name, null, "Could not delete the agent's kept skill files: " + e.getMessage());
+            }
+        });
     }
 
     /**

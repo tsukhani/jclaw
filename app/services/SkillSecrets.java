@@ -35,7 +35,7 @@ public final class SkillSecrets {
     private static final String LOG_CATEGORY = "skill";
 
     /** An environment-variable name, since the shell receives each secret under its name. */
-    private static final Pattern NAME = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
+    static final Pattern NAME = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Pattern HOST_NAME = Pattern.compile(
             "(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
     private static final Pattern WITH_PORT = Pattern.compile("(.+):(\\d{1,5})");

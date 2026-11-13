@@ -18,6 +18,8 @@ import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.EventLogger;
+import services.KeptSkillFiles;
 import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
 import services.SkillExporter;
@@ -34,6 +36,7 @@ import utils.ApiResponses;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -116,6 +119,21 @@ public class ApiSkillsController extends Controller {
     public record SkillToggleResponse(String name, boolean enabled, String status) {}
 
     public record SkillCopyResponse(String name, String status, boolean replaced) {}
+
+    /**
+     * What updating an agent's copy from the registry would take (JF-352): {@code needs}, the required secrets and
+     * settings the new version declares that the agent cannot be given; {@code heldBySwitchedOff}, for each of those
+     * another skill of the agent holds, that skill, which is switched off; {@code keeps}, the old copy's files JClaw
+     * moves out of the skill before replacing it.
+     */
+    public record SkillUpdatePreview(List<String> needs, Map<String, String> heldBySwitchedOff, List<String> keeps) {}
+
+    /** A file kept from a skill's old copy: its path there, its size and when it was kept, never its content. */
+    public record KeptFileView(String id, String path, long size, String keptAt) {}
+
+    public record KeptFilesResponse(List<KeptFileView> kept) {}
+
+    public record KeptFileDeletedResponse(boolean deleted) {}
 
     public record SkillPromoteRequest(Long agentId, String skillName) {}
 
@@ -639,6 +657,102 @@ public class ApiSkillsController extends Controller {
         }
     }
 
+    /** GET /api/agents/{id}/skills/{name}/update-preview — What a copy from the registry would need and keep. */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillUpdatePreview.class)))
+    @Operation(summary = "Before an agent's skill is updated from the global registry: the required secrets and settings the new version declares that the agent lacks, and the files of the old copy JClaw keeps outside the skill")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "names the files the operator put in an agent's skill, credentials among them")
+    public static void updatePreview(Long id, String name) {
+        Agent agent = AgentService.findById(id);
+        if (agent == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent " + id + ".");
+            throw ApiResponses.unreachable();
+        }
+        var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
+        if (!Files.isDirectory(globalDir)) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Global skill '%s' not found".formatted(name));
+        }
+        var targetDir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
+        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_MD));
+        List<String> keeps;
+        try {
+            keeps = replacing ? KeptSkillFiles.select(targetDir, globalDir) : List.of();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read the agent's copy: " + e.getMessage());
+            throw ApiResponses.unreachable();
+        }
+        var provided = SkillSecrets.provided(WorkspaceFiles.workspaceOwner(agent));
+        var needs = provided.missing(globalDir);
+        var heldBySwitchedOff = new LinkedHashMap<String, String>();
+        for (var need : needs) {
+            var holder = provided.holder(need);
+            if (holder != null) heldBySwitchedOff.put(need, holder);
+        }
+        renderJSON(gson.toJson(new SkillUpdatePreview(needs, heldBySwitchedOff, keeps)));
+    }
+
+    /** GET /api/agents/{id}/skills/{name}/kept — The files kept from the skill's old copies. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KeptFilesResponse.class)))
+    @Operation(summary = "List the files JClaw kept from an agent's skill when an update replaced it: each one's path, size and when it was kept, never its content")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "names the files the operator put in an agent's skill, credentials among them")
+    public static void listKept(Long id, String name) {
+        var owner = requireKeptOwner(id, name);
+        var views = new ArrayList<KeptFileView>();
+        try {
+            for (var kept : KeptSkillFiles.list(owner, name)) {
+                views.add(new KeptFileView(kept.id(), kept.path(), kept.size(), kept.keptAt().toString()));
+            }
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to list the kept files: " + e.getMessage());
+        }
+        renderJSON(gson.toJson(new KeptFilesResponse(views)));
+    }
+
+    /** DELETE /api/agents/{id}/skills/{name}/kept/{kept} — Delete one kept file. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KeptFileDeletedResponse.class)))
+    @Operation(summary = "Delete a file JClaw kept from an agent's skill when an update replaced it")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "deletes a file the operator kept from a skill")
+    public static void deleteKept(Long id, String name, String kept) {
+        var owner = requireKeptOwner(id, name);
+        requireKept(owner, name, kept);
+        boolean deleted;
+        try {
+            deleted = KeptSkillFiles.delete(owner, name, kept);
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to delete the kept file: " + e.getMessage());
+            throw ApiResponses.unreachable();
+        }
+        if (!deleted) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No kept file '%s' on skill '%s'.".formatted(kept, name));
+        }
+        renderJSON(gson.toJson(new KeptFileDeletedResponse(true)));
+    }
+
+    /** The workspace owner of agent {@code id}, whose kept files a skills route reads; 404 or 400 ends the request. */
+    private static Agent requireKeptOwner(Long id, String name) {
+        Agent agent = AgentService.findById(id);
+        if (agent == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent " + id + ".");
+            throw ApiResponses.unreachable();
+        }
+        if (!WorkspacePathGuard.isOneSegment(name)) throw notASkillName(name);
+        return WorkspaceFiles.workspaceOwner(agent);
+    }
+
+    /** The kept file {@code id} names on {@code owner}'s {@code skill}: 400 for no kept file's id, 404 for a missing one. */
+    static Path requireKept(Agent owner, String skill, String id) {
+        if (!KeptSkillFiles.isId(id)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "'%s' is not a kept file's id.".formatted(id));
+            throw ApiResponses.unreachable();
+        }
+        var file = KeptSkillFiles.find(owner, skill, id);
+        if (file == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No kept file '%s' on skill '%s'.".formatted(id, skill));
+            throw ApiResponses.unreachable();
+        }
+        return file;
+    }
+
     /** GET /api/agents/{id}/skills/{name}/files — List files in an agent workspace skill folder. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
@@ -698,6 +812,17 @@ public class ApiSkillsController extends Controller {
         SkillPromotionService.revokeAgentAllowlist(agent, name);
         SkillSecrets.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
         SkillSettings.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
+        var owner = WorkspaceFiles.workspaceOwner(agent);
+        var agentName = agent.name;
+        // After the commit, as the secrets' delete: a removal that rolls back keeps the kept files with the secrets.
+        Tx.afterCommit(() -> {
+            try {
+                KeptSkillFiles.deleteForSkill(owner, name);
+            } catch (IOException | UncheckedIOException e) {
+                EventLogger.warn("skill", agentName, null,
+                        "Could not delete the kept files of skill %s: %s".formatted(name, e.getMessage()));
+            }
+        });
         deleteSavedState(AgentService.workspacePath(agent.name), name);
         deleteSkillDir(dir);
     }

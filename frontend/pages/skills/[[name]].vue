@@ -27,6 +27,7 @@ import type {
   SkillFileContent,
   SkillFilesResponse,
   SkillToolRef,
+  SkillUpdatePreview,
 } from '~/types/api'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -533,8 +534,62 @@ function rethrowPlainText(err: unknown, fallback: string): never {
 // Drag-and-drop writes; a failure is shown on the drag banner.
 const dragSave = useSaveAttempt()
 
+/**
+ * JF-352: an update replaces the agent's copy, so before it the page names what the new version needs and which of
+ * the old copy's files JClaw keeps outside the skill. Null when the preview failed; its error is on the drag banner.
+ */
+async function previewUpdate(agentId: number, skillName: string): Promise<SkillUpdatePreview | null> {
+  try {
+    return await $fetch<SkillUpdatePreview>(`/api/agents/${agentId}/skills/${encodeURIComponent(skillName)}/update-preview`)
+  }
+  catch (err) {
+    showDragError(apiErrorDetails(err).message)
+    return null
+  }
+}
+
+/** The warning an update's confirmation carries, or '' when it needs and keeps nothing. */
+function updateWarning(preview: SkillUpdatePreview): string {
+  const parts: string[] = []
+  const toAdd = preview.needs.filter(name => !preview.heldBySwitchedOff[name])
+  if (toAdd.length) {
+    const one = toAdd.length === 1
+    parts.push(`The new version needs ${one ? 'a value' : 'values'} this agent does not have yet: `
+      + `${toAdd.join(', ')}. Add ${one ? 'it' : 'them'} in the skill's Secrets panel.`)
+  }
+  // A name is used once on an agent, so a value another skill holds cannot be added here: that skill must be on.
+  const bySkill = new Map<string, string[]>()
+  for (const name of preview.needs) {
+    const holder = preview.heldBySwitchedOff[name]
+    if (holder) bySkill.set(holder, [...(bySkill.get(holder) ?? []), name])
+  }
+  for (const [holder, names] of bySkill) {
+    parts.push(`The new version needs ${names.join(', ')}, set in ${holder}, which is switched off. Switch ${holder} on `
+      + `so this skill can use ${names.length === 1 ? 'it' : 'them'}.`)
+  }
+  if (preview.keeps.length) {
+    const one = preview.keeps.length === 1
+    parts.push(`JClaw moves ${one ? 'this file' : 'these files'} of the old copy out of the skill, where the agent `
+      + `cannot read ${one ? 'it' : 'them'}, and lists ${one ? 'it' : 'them'} in the skill's Secrets panel: `
+      + `${preview.keeps.join(', ')}.`)
+  }
+  return parts.join('\n\n')
+}
+
 async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
   const skillName = (skill.folderName as string) || skill.name
+  const preview = await previewUpdate(agentId, skillName)
+  if (!preview) return
+  const warning = updateWarning(preview)
+  if (warning) {
+    const version = updateAvailable(skill)
+    const confirmed = await confirm({
+      title: 'Update skill',
+      message: `Update '${skillName}'${version ? ` to version ${version}` : ''}?\n\n${warning}`,
+      confirmText: 'Update',
+    })
+    if (!confirmed) return
+  }
   const ok = await dragSave.attempt(async () => {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}/copy`, { method: 'POST' })
       .catch(err => rethrowPlainText(err, 'Failed to update skill from global'))
@@ -593,7 +648,8 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
   const dragged = dragging.value
   const skillName = (dragged.folderName as string) || dragged.name
   const globalVersion = (dragged.version as string) || '0.0.0'
-  const existing = agentSkillsMap.value[agent.id]?.find(s => s.name === dragged.name)
+  const existing = agentSkillsMap.value[agent.id]
+    ?.find(s => s.name === dragged.name || ((s.folderName as string) || s.name) === skillName)
 
   // If the agent already has this skill at the same or newer version, just ensure it's
   // enabled and move on — no point overwriting identical content.
@@ -613,11 +669,18 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
       return
     }
     // Existing is older — confirm replacement
+    const preview = await previewUpdate(agent.id, skillName)
+    if (!preview) {
+      dragging.value = null
+      return
+    }
+    const warning = updateWarning(preview)
     const ok = await confirm({
       title: 'Replace skill',
       message:
         `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n`
-        + `Replace with global version ${globalVersion}?`,
+        + `Replace with global version ${globalVersion}?`
+        + (warning ? `\n\n${warning}` : ''),
       confirmText: 'Replace',
     })
     if (!ok) {

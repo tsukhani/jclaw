@@ -7,6 +7,7 @@ import play.Play;
 import services.ConfigService;
 import services.EventLogger;
 import services.ExecutableProbeSupport;
+import services.KeptSkillFiles;
 import services.database.DatabaseService;
 import services.secrets.SecretProxy;
 import utils.ChannelOriginTrust;
@@ -397,7 +398,7 @@ public final class HarnessSandbox {
             var resolvConf = realPath(RESOLV_CONF);
             var ownRuntime = linuxOwnRuntime(linuxRuntimeDirs(), resolvConf == null ? null : resolvConf.toString(), pathEnv);
             return new ConfinedShell(inOwnUserNamespace(linuxArgv(argv, writeRoot, withTrustFolder(extraReads), home,
-                    linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()),
+                    linuxHiddenRoots(ownSecretFolders(), SandboxHiddenRoots.current()),
                     deniesNetwork(SHELL_SANDBOX_KEY), RUNS_AS_ROOT, ownRuntime, customAgentPids())), Map.of());
         }
         if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
@@ -487,7 +488,7 @@ public final class HarnessSandbox {
         if (ready.mechanism().equals(BWRAP)) {
             // A tmpfs needs its mount point, so only the secret folders that exist are hidden.
             var present = new MainFence(fence.readOnly(), fence.writable(),
-                    linuxHiddenRoots(DatabaseService.backupsDir(), fence.hidden()), fence.readable(), fence.jvmPid());
+                    linuxHiddenRoots(ownSecretFolders(), fence.hidden()), fence.readable(), fence.jvmPid());
             return mainFenceLinuxArgv(argv, present, RUNS_AS_ROOT);
         }
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", mainFenceMacosProfile(fence)));
@@ -524,7 +525,7 @@ public final class HarnessSandbox {
         if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
         if (ready.mechanism().equals(BWRAP)) {
             return scriptLinuxArgv(argv, root, interpreterDir, home,
-                    linuxHiddenRoots(DatabaseService.backupsDir(), hidden), RUNS_AS_ROOT,
+                    linuxHiddenRoots(ownSecretFolders(), hidden), RUNS_AS_ROOT,
                     linuxOwnRuntime(linuxRuntimeDirs(), null, null), customAgentPids());
         }
         var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", scriptMacosProfile(root, interpreterDir, home, hidden)));
@@ -1083,20 +1084,28 @@ public final class HarnessSandbox {
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String configKey) {
         return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""),
-                linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()), deniesNetwork(configKey));
+                linuxHiddenRoots(ownSecretFolders(), SandboxHiddenRoots.current()), deniesNetwork(configKey));
+    }
+
+    /** JClaw's own secret folders, which may not exist yet: the backups and the files skill updates kept. */
+    public static List<Path> ownSecretFolders() {
+        return List.of(DatabaseService.backupsDir(), KeptSkillFiles.root());
     }
 
     /**
      * The {@code hidden} roots a tmpfs can cover. bwrap cannot create a mount point under the
-     * read-only root, so a missing root hides nothing; {@code backups} is JClaw's own and is
-     * created first, or a backup made after a long-running harness started would be readable to it.
+     * read-only root, so a missing root hides nothing; each of {@code own} is JClaw's own and is
+     * created first, or a backup or kept file written after a long-running harness started would
+     * be readable to it.
      */
-    public static List<Path> linuxHiddenRoots(Path backups, List<Path> hidden) {
-        try {
-            Files.createDirectories(backups);
-        } catch (IOException e) {
-            EventLogger.warn("tool", "Sandbox: could not create the backup directory " + backups
-                    + " to hide it from confined processes", e.toString());
+    public static List<Path> linuxHiddenRoots(List<Path> own, List<Path> hidden) {
+        for (var dir : own) {
+            try {
+                Files.createDirectories(dir);
+            } catch (IOException e) {
+                EventLogger.warn("tool", "Sandbox: could not create " + dir + " to hide it from confined processes",
+                        e.toString());
+            }
         }
         return hidden.stream().filter(Files::isDirectory).toList();
     }

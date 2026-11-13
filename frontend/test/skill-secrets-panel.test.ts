@@ -341,4 +341,206 @@ describe('SkillSecretsPanel', () => {
     await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
     expect(sent).toEqual({ value: 'operator' })
   })
+  // ===== JF-352: files an update kept from the skill's old copy =====
+
+  const keptFile = { id: 'k1', path: 'credentials/gamma-api-key.txt', size: 20, keptAt: '2026-11-13T10:00:00Z' }
+  const keptLabel = `Delete kept file credentials/gamma-api-key.txt, kept ${new Date('2026-11-13T10:00:00Z').toLocaleString()}`
+  const keptNote = (name: string) => `If the file has plain assignments such as NAME=value, JClaw takes the value from the`
+    + ` line for ${name}. If it has none, the whole file is the value, without spaces or line breaks at either end. JClaw`
+    + ' deletes the kept file once each name in it that this skill asks for has a value.'
+  const keptSettingNote = (name: string) => `JClaw takes the value from the file's plain assignment for ${name}, a line such`
+    + ' as NAME=value. JClaw deletes the kept file once each name in it that this skill asks for has a value.'
+
+  it('lists each kept file by path, size and when it was kept, and nothing of what it holds', async () => {
+    registerEndpoint('/api/agents/61/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/61/skills/demo/kept', () => ({ kept: [keptFile] }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 61, skillName: 'demo' } })
+    await settle()
+
+    const row = wrapper.find('[data-testid="kept-credentials/gamma-api-key.txt"]')
+    expect(row.findAll('.min-w-0 > div').map(d => d.text())).toEqual(
+      ['credentials/gamma-api-key.txt', `20 B · kept ${new Date('2026-11-13T10:00:00Z').toLocaleString()}`])
+    expect(row.find(`button[aria-label="${keptLabel}"]`).exists()).toBe(true)
+  })
+
+  it('names each Delete by its kept time, so two updates that kept one path read apart', async () => {
+    const later = { id: 'k9', path: keptFile.path, size: 21, keptAt: '2026-11-13T12:00:00Z' }
+    registerEndpoint('/api/agents/68/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/68/skills/demo/kept', () => ({ kept: [later, keptFile] }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 68, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.findAll('[data-testid="skill-kept"] button').map(b => b.attributes('aria-label'))).toEqual([
+      `Delete kept file credentials/gamma-api-key.txt, kept ${new Date('2026-11-13T12:00:00Z').toLocaleString()}`,
+      keptLabel,
+    ])
+  })
+
+  it('shows no kept files and no Value from choice when nothing is kept', async () => {
+    registerEndpoint('/api/agents/62/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/62/skills/demo/kept', () => ({ kept: [] }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 62, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.find('[data-testid="skill-kept"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    expect(wrapper.find('select[name="secret-source"]').exists()).toBe(false)
+    expect(wrapper.find('input[name="secret-value"]').exists()).toBe(true)
+  })
+
+  it('cancelling the confirmation deletes no kept file', async () => {
+    let deleted = false
+    registerEndpoint('/api/agents/63/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/63/skills/demo/kept', () => ({ kept: [keptFile] }))
+    registerEndpoint('/api/agents/63/skills/demo/kept/k1', {
+      method: 'DELETE',
+      handler: () => {
+        deleted = true
+        return { deleted: true }
+      },
+    })
+    const wrapper = await mountSuspended(harness(63))
+    await settle()
+
+    await wrapper.find(`button[aria-label="${keptLabel}"]`).trigger('click')
+    await settle()
+    expect(document.body.textContent).toContain('Delete credentials/gamma-api-key.txt? JClaw keeps no other copy of it.')
+    dialogButton('Cancel')!.click()
+    await settle()
+
+    expect(deleted).toBe(false)
+    expect(wrapper.find('[data-testid="kept-credentials/gamma-api-key.txt"]').exists()).toBe(true)
+  })
+
+  it('deletes a kept file once confirmed and re-reads the list', async () => {
+    let deleted = false
+    registerEndpoint('/api/agents/64/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/64/skills/demo/kept', () => ({ kept: deleted ? [] : [keptFile] }))
+    registerEndpoint('/api/agents/64/skills/demo/kept/k1', {
+      method: 'DELETE',
+      handler: () => {
+        deleted = true
+        return { deleted: true }
+      },
+    })
+    const wrapper = await mountSuspended(harness(64))
+    await settle()
+
+    await wrapper.find(`button[aria-label="${keptLabel}"]`).trigger('click')
+    await settle()
+    dialogButton('Delete')!.click()
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="skill-kept"]').exists()).toBe(false))
+    expect(deleted).toBe(true)
+  })
+
+  it('a kept delete that finds the file already gone still re-reads the list, and says so', async () => {
+    let gone = false
+    registerEndpoint('/api/agents/69/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/69/skills/demo/kept', () => ({ kept: gone ? [] : [keptFile] }))
+    registerEndpoint('/api/agents/69/skills/demo/kept/k1', {
+      method: 'DELETE',
+      handler: (event) => {
+        gone = true
+        setResponseStatus(event, 404)
+        return { type: 'error', code: 'not_found', message: 'No kept file \'k1\' on skill \'demo\'.' }
+      },
+    })
+    const wrapper = await mountSuspended(harness(69))
+    await settle()
+
+    await wrapper.find(`button[aria-label="${keptLabel}"]`).trigger('click')
+    await settle()
+    dialogButton('Delete')!.click()
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="kept-credentials/gamma-api-key.txt"]').exists()).toBe(false))
+    expect(wrapper.find('[data-testid="skill-kept"]').text()).toContain('No kept file \'k1\' on skill \'demo\'.')
+  })
+
+  it('a secret can take its value from a kept file: the request names the file and carries no value', async () => {
+    let sent: Record<string, unknown> | null = null
+    let imported = false
+    registerEndpoint('/api/agents/65/skills/demo/secrets', () => ({
+      secrets: imported ? [{ name: 'GAMMA_API_KEY', hosts: ['public-api.gamma.app'], setAt: '2026-11-13T11:00:00Z' }] : [],
+    }))
+    registerEndpoint('/api/agents/65/skills/demo/kept', () => ({ kept: imported ? [] : [keptFile] }))
+    registerEndpoint('/api/agents/65/skills/demo/secrets/GAMMA_API_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        imported = true
+        return { name: 'GAMMA_API_KEY', hosts: ['public-api.gamma.app'], setAt: '2026-11-13T11:00:00Z' }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 65, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    await wrapper.find('input[name="secret-name"]').setValue('GAMMA_API_KEY')
+    await wrapper.find('select[name="secret-source"]').setValue('k1')
+    expect(wrapper.find('input[name="secret-value"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="secret-form-kept-note"]').text().replace(/\s+/g, ' ')).toBe(keptNote('GAMMA_API_KEY'))
+    await wrapper.find('input[name="secret-hosts"]').setValue('public-api.gamma.app')
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="secret-GAMMA_API_KEY"]').exists()).toBe(true))
+    expect(sent).toEqual({ fromKept: 'k1', hosts: ['public-api.gamma.app'] })
+    expect(wrapper.find('[data-testid="skill-kept"]').exists()).toBe(false)
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+
+  it('choosing to type the value again sends the typed value, not the kept file', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/66/skills/demo/secrets', () => ({ secrets: [] }))
+    registerEndpoint('/api/agents/66/skills/demo/kept', () => ({ kept: [keptFile] }))
+    registerEndpoint('/api/agents/66/skills/demo/secrets/API_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'API_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T11:00:00Z' }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 66, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    await wrapper.find('input[name="secret-name"]').setValue('API_KEY')
+    await wrapper.find('select[name="secret-source"]').setValue('k1')
+    await wrapper.find('select[name="secret-source"]').setValue('')
+    await wrapper.find('input[name="secret-value"]').setValue('fake-typed-value')
+    await wrapper.find('input[name="secret-hosts"]').setValue('api.example.com')
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+
+    await vi.waitFor(() => expect(sent).not.toBeNull())
+    expect(sent).toEqual({ value: 'fake-typed-value', hosts: ['api.example.com'] })
+  })
+
+  it('a setting can take its value from a kept file\'s line: the request names the file and carries no value', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/67/skills/demo/secrets', () => withSettings)
+    registerEndpoint('/api/agents/67/skills/demo/kept', () => ({
+      kept: [{ id: 'k2', path: 'config.env', size: 31, keptAt: '2026-11-13T10:00:00Z' }],
+    }))
+    registerEndpoint('/api/agents/67/skills/demo/settings/SITE_USER', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'SITE_USER', value: 'operator', setAt: '2026-11-13T11:00:00Z' }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 67, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SITE_USER"]').trigger('click')
+    await wrapper.find('select[name="setting-source"]').setValue('k2')
+    expect(wrapper.find('input[name="setting-value"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="setting-form-kept-note"]').text().replace(/\s+/g, ' ')).toBe(keptSettingNote('SITE_USER'))
+    await wrapper.find('[data-testid="setting-form"]').trigger('submit')
+
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ fromKept: 'k2' })
+  })
 })

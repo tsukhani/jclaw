@@ -786,6 +786,26 @@ export interface AgentSkill {
   [key: string]: unknown
 }
 
+/** GET /api/agents/:id/skills/:name/update-preview (JF-352): what updating the agent's copy from the registry takes. */
+export interface SkillUpdatePreview {
+  /** Required secrets and settings the new version declares that the agent cannot be given. */
+  needs: string[]
+  /** For each of `needs` another skill of the agent holds, that skill, which is switched off. */
+  heldBySwitchedOff: Record<string, string>
+  /** Files of the agent's copy that JClaw keeps outside the skill before replacing it. */
+  keeps: string[]
+}
+
+/** One file kept from a skill's old copy, as GET /api/agents/:id/skills/:name/kept lists it: never its content. */
+export interface KeptSkillFile {
+  /** Names the file to the delete route and to a secret's or setting's `fromKept`. */
+  id: string
+  /** Its path in the old copy, such as `credentials/gamma-api-key.txt`. */
+  path: string
+  size: number
+  keptAt: string
+}
+
 /** Shape returned by GET /api/agents/:id/workspace/:file. */
 export interface WorkspaceFileContent {
   content: string

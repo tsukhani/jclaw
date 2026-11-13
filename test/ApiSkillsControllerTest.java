@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.AgentService;
+import services.KeptSkillFiles;
 import services.SkillPromotionService;
 
 import java.io.ByteArrayInputStream;
@@ -20,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Set;
 import java.util.zip.ZipInputStream;
 
@@ -39,6 +41,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
     private Path globalSkillsDir;
     private final java.util.List<String> seededAgentNames = new java.util.ArrayList<>();
+    private final java.util.List<Long> seededAgentIds = new java.util.ArrayList<>();
 
     @BeforeEach
     void setup() throws Exception {
@@ -68,6 +71,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 System.err.println("Workspace teardown failed for " + name + ": " + e.getMessage());
             }
         }
+        for (var id : seededAgentIds) KeptSkillFiles.deleteForAgent(id);
+        seededAgentIds.clear();
     }
 
     // ==================== Helpers ====================
@@ -87,7 +92,15 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 """.formatted(name);
         var resp = POST("/api/agents", "application/json", body);
         assertIsOk(resp);
-        return extractId(getContent(resp));
+        var id = extractId(getContent(resp));
+        seededAgentIds.add(Long.parseLong(id));
+        // The in-memory database numbers agents from 1 again in every run, and the kept root under tmp/ outlives it.
+        try {
+            KeptSkillFiles.deleteForAgent(Long.parseLong(id));
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return id;
     }
 
     private String extractId(String json) {
@@ -1847,5 +1860,269 @@ class ApiSkillsControllerTest extends FunctionalTest {
             }
         }
         return entries;
+    }
+
+    // ==================== an update keeps the operator's files (JF-352) ====================
+
+    private static final String KEY = "sk-gamma-fake-jf352";
+
+    /** Agent {@code agentName} holds v1 of {@code skill}; the registry now ships v2, declaring {@code secretsBlock}. */
+    private String agentWithOldCopy(String agentName, String skill, String secretsBlock) throws Exception {
+        var id = createAgent(agentName);
+        seedGlobalSkill(skill, skill, "A skill");
+        assertIsOk(POST("/api/agents/" + id + "/skills/" + skill + "/copy", "application/json", "{}"));
+        Files.writeString(globalSkillsDir.resolve(skill).resolve("SKILL.md"), "---\nname: " + skill
+                + "\ndescription: A skill\nversion: 2.0.0\n---\n# " + skill + "\n\n" + secretsBlock);
+        SkillLoader.clearCache();
+        return id;
+    }
+
+    private static Path copyOf(String agentName, String skill) {
+        return AgentService.workspacePath(agentName).resolve("skills").resolve(skill);
+    }
+
+    private static com.google.gson.JsonArray keptOf(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject().getAsJsonArray("kept");
+    }
+
+    @Test
+    void anUpdateNamesWhatItNeedsAndKeepsAndThenListsTheKeptFileWithoutItsContent() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-preview", "gamma",
+                "```secrets\nGAMMA_API_KEY=public-api.gamma.app   # The Gamma key\n```\n");
+        Files.createDirectories(copyOf("keep-preview", "gamma").resolve("credentials"));
+        Files.writeString(copyOf("keep-preview", "gamma").resolve("credentials/gamma-api-key.txt"), KEY + "\n");
+        var base = "/api/agents/" + id + "/skills/gamma";
+
+        var preview = GET(base + "/update-preview");
+        assertIsOk(preview);
+        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"keeps\":[\"credentials/gamma-api-key.txt\"]}", getContent(preview));
+        assertEquals(KEY + "\n", Files.readString(copyOf("keep-preview", "gamma").resolve("credentials/gamma-api-key.txt")),
+                "a preview changes nothing");
+        assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
+
+        var before = java.time.Instant.now().minusSeconds(1);
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+
+        var listing = GET(base + "/kept");
+        assertIsOk(listing);
+        var kept = keptOf(listing);
+        assertEquals(1, kept.size());
+        var entry = kept.get(0).getAsJsonObject();
+        assertEquals(List.of("id", "keptAt", "path", "size"), entry.keySet().stream().sorted().toList());
+        assertEquals("credentials/gamma-api-key.txt", entry.get("path").getAsString());
+        assertEquals(KEY.length() + 1, entry.get("size").getAsLong());
+        var keptAt = java.time.Instant.parse(entry.get("keptAt").getAsString());
+        assertFalse(keptAt.isBefore(before) || keptAt.isAfter(java.time.Instant.now().plusSeconds(1)), keptAt.toString());
+        assertFalse(getContent(listing).contains(KEY), getContent(listing));
+        assertEquals(List.of("SKILL.md"), filesOf(copyOf("keep-preview", "gamma")),
+                "the new copy holds only what the registry ships");
+    }
+
+    private static String statusAndMessage(play.mvc.Http.Response response) {
+        return response.status + " " + com.google.gson.JsonParser.parseString(getContent(response))
+                .getAsJsonObject().get("message").getAsString();
+    }
+
+    private static List<String> filesOf(Path dir) throws Exception {
+        try (var walk = Files.walk(dir)) {
+            return walk.filter(Files::isRegularFile).map(p -> dir.relativize(p).toString()).sorted().toList();
+        }
+    }
+
+    @Test
+    void anUpdatePreviewKeepsAnEditedConfigButNotItsExample() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-preview-config", "jira", "");
+        Files.writeString(copyOf("keep-preview-config", "jira").resolve("config.env"), "JIRA_URL=\"https://jira.example.org\"\n");
+        Files.writeString(copyOf("keep-preview-config", "jira").resolve("config.env.example"), "JIRA_URL=\n");
+
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[\"config.env\"]}",
+                getContent(GET("/api/agents/" + id + "/skills/jira/update-preview")));
+    }
+
+    @Test
+    void anUpdateOfAnUntouchedCopyNeedsAndKeepsNothing() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-preview-none", "plain", "");
+        var base = "/api/agents/" + id + "/skills/plain";
+
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET(base + "/update-preview")));
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+        assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
+    }
+
+    @Test
+    void aFirstInstallPreviewKeepsNothingAndAnUnknownSkillOrAgentIsNotFound() throws Exception {
+        login();
+        var id = createAgent("keep-preview-fresh");
+        seedGlobalSkill("gamma", "gamma", "Gamma");
+
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET("/api/agents/" + id + "/skills/gamma/update-preview")));
+        assertEquals("404 not_found Global skill 'absent' not found",
+                errorOf(GET("/api/agents/" + id + "/skills/absent/update-preview")));
+        assertEquals("404 not_found No agent 999999999.", errorOf(GET("/api/agents/999999999/skills/gamma/update-preview")));
+        assertEquals("404 not_found No agent 999999999.", errorOf(GET("/api/agents/999999999/skills/gamma/kept")));
+    }
+
+    /** An error answer's status, code and message, which together fix its whole body. */
+    private static String errorOf(play.mvc.Http.Response response) {
+        var body = com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals(List.of("code", "message", "template", "type"), body.keySet().stream().sorted().toList());
+        assertEquals("error", body.get("type").getAsString());
+        return response.status + " " + body.get("code").getAsString() + " " + body.get("message").getAsString();
+    }
+
+    @Test
+    void aKeptFileIsDeletedOnceAndThenNotFound() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-delete", "gamma", "");
+        Files.createDirectories(copyOf("keep-delete", "gamma").resolve("credentials"));
+        Files.writeString(copyOf("keep-delete", "gamma").resolve("credentials/gamma-api-key.txt"), KEY + "\n");
+        var base = "/api/agents/" + id + "/skills/gamma";
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+        var keptId = keptOf(GET(base + "/kept")).get(0).getAsJsonObject().get("id").getAsString();
+
+        var deleted = DELETE(base + "/kept/" + keptId);
+        assertIsOk(deleted);
+        assertEquals("{\"deleted\":true}", getContent(deleted));
+        assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
+        assertEquals("404 No kept file '" + keptId + "' on skill 'gamma'.", statusAndMessage(DELETE(base + "/kept/" + keptId)));
+    }
+
+    @Test
+    void aKeptFileIdThatLeadsOutOfTheKeptFolderIsRefused() throws Exception {
+        login();
+        var id = createAgent("keep-traversal");
+        var victim = AgentService.workspacePath("keep-traversal").resolve("notes.txt");
+        Files.createDirectories(victim.getParent());
+        Files.writeString(victim, "keep\n");
+        var encoder = java.util.Base64.getUrlEncoder().withoutPadding();
+        for (var path : List.of("../../../../workspace-test/keep-traversal/notes.txt",
+                "20261113T000000.000Z/../../../../../notes.txt", "20261113T000000.000Z", "20261113T000000.000Z//x",
+                "/etc/passwd", "not-a-time/x")) {
+            var keptId = encoder.encodeToString(path.getBytes(StandardCharsets.UTF_8));
+            assertEquals("400 '" + keptId + "' is not a kept file's id.",
+                    statusAndMessage(DELETE("/api/agents/" + id + "/skills/gamma/kept/" + keptId)), path);
+        }
+        assertEquals("400 'not*base64' is not a kept file's id.",
+                statusAndMessage(DELETE("/api/agents/" + id + "/skills/gamma/kept/not*base64")));
+        var wellFormed = encoder.encodeToString("20261113T000000.000Z/credentials/x.txt".getBytes(StandardCharsets.UTF_8));
+        assertEquals("404 No kept file '" + wellFormed + "' on skill 'gamma'.",
+                statusAndMessage(DELETE("/api/agents/" + id + "/skills/gamma/kept/" + wellFormed)));
+        assertEquals("400 '..' is not a skill name: pass the skill's folder name, not a path.",
+                statusAndMessage(GET("/api/agents/" + id + "/skills/../kept")));
+        assertEquals("keep\n", Files.readString(victim));
+    }
+
+    @Test
+    void removingTheSkillFromTheAgentDeletesItsKeptFiles() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-remove", "gamma", "");
+        Files.createDirectories(copyOf("keep-remove", "gamma").resolve("credentials"));
+        Files.writeString(copyOf("keep-remove", "gamma").resolve("credentials/gamma-api-key.txt"), KEY + "\n");
+        var base = "/api/agents/" + id + "/skills/gamma";
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+        assertEquals(1, keptOf(GET(base + "/kept")).size());
+
+        assertIsOk(DELETE(base + "/delete"));
+
+        assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(id)), "nothing is left for the agent");
+    }
+
+    /** A name is used once on an agent: one a switched-off skill holds is to switch on, not to add (JF-352). */
+    @Test
+    void anUpdatePreviewNamesTheSwitchedOffSkillThatHoldsANeededValue() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-preview-held", "gamma",
+                "```secrets\nNAS_PASS=nas.example.com   # The DSM password\nGAMMA_API_KEY=public-api.gamma.app   # The key\n```\n");
+        seedGlobalSkill("nas", "nas", "NAS");
+        assertIsOk(POST("/api/agents/" + id + "/skills/nas/copy", "application/json", "{}"));
+        assertIsOk(PUT("/api/agents/" + id + "/skills/nas/secrets/NAS_PASS", "application/json",
+                "{\"value\":\"fake-nas-pass-jf352\",\"hosts\":[\"nas.example.com\"]}"));
+        var base = "/api/agents/" + id + "/skills/gamma/update-preview";
+        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET(base)),
+                "a value a switched-on skill holds is given to every skill");
+
+        assertIsOk(PUT("/api/agents/" + id + "/skills/nas", "application/json", "{\"enabled\":false}"));
+        // The switch leaves SkillLoader's 30-second cache of switched-on folders as it was.
+        SkillLoader.clearCache();
+
+        assertEquals("{\"needs\":[\"NAS_PASS\",\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{\"NAS_PASS\":\"nas\"},\"keeps\":[]}",
+                getContent(GET(base)));
+    }
+
+    /** The skill's secrets are gone by then: stopping would leave it in place without them. */
+    @Test
+    void removingASkillWhoseKeptFilesCannotBeDeletedStillRemovesTheSkillAndWarns() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-remove-fails", "gamma", "");
+        Files.createDirectories(copyOf("keep-remove-fails", "gamma").resolve("credentials"));
+        Files.writeString(copyOf("keep-remove-fails", "gamma").resolve("credentials/gamma-api-key.txt"), KEY + "\n");
+        var base = "/api/agents/" + id + "/skills/gamma";
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+        List<Path> folders;
+        try (var entries = Files.list(KeptSkillFiles.root().resolve(id).resolve("gamma"))) {
+            folders = entries.toList();
+        }
+        var folder = folders.getFirst();
+        // An unreadable folder makes the walk under the delete throw UncheckedIOException, not IOException.
+        Files.setPosixFilePermissions(folder, PosixFilePermissions.fromString("---------"));
+        try {
+            var events = services.EventLogger.captureMatchingForTest(e -> "keep-remove-fails".equals(e.agentId()),
+                    seen -> assertIsOk(DELETE(base + "/delete")));
+
+            assertFalse(Files.exists(copyOf("keep-remove-fails", "gamma")), "the skill's folder is still removed");
+            var warnings = events.stream().filter(e -> "WARN".equals(e.level())).map(services.EventLogger.Captured::message).toList();
+            assertEquals(List.of("Could not delete the kept files of skill gamma: java.nio.file.AccessDeniedException: " + folder),
+                    warnings);
+        } finally {
+            Files.setPosixFilePermissions(folder, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void anAgentCannotPreviewAnUpdateOrReadOrDeleteKeptFiles() throws Exception {
+        for (var action : List.of("updatePreview", "listKept", "deleteKept")) {
+            var method = java.util.Arrays.stream(controllers.ApiSkillsController.class.getMethods())
+                    .filter(m -> m.getName().equals(action)).findFirst().orElseThrow();
+            assertEquals(controllers.AgentAccess.Level.OPERATOR_ONLY,
+                    method.getAnnotation(controllers.AgentAccess.class).value(), action);
+        }
+        login();
+        var id = agentWithOldCopy("keep-agent", "gamma", "");
+        Files.createDirectories(copyOf("keep-agent", "gamma").resolve("credentials"));
+        Files.writeString(copyOf("keep-agent", "gamma").resolve("credentials/gamma-api-key.txt"), KEY + "\n");
+        var base = "/api/agents/" + id + "/skills/gamma";
+        assertIsOk(POST(base + "/copy", "application/json", "{}"));
+        var keptId = keptOf(GET(base + "/kept")).get(0).getAsJsonObject().get("id").getAsString();
+
+        var codes = new java.util.ArrayList<String>();
+        for (var response : List.of(asAgent("GET", base + "/update-preview", Long.parseLong(id)),
+                asAgent("GET", base + "/kept", Long.parseLong(id)),
+                asAgent("DELETE", base + "/kept/" + keptId, Long.parseLong(id)))) {
+            codes.add(response.status + " " + com.google.gson.JsonParser.parseString(getContent(response))
+                    .getAsJsonObject().get("code").getAsString());
+            assertFalse(getContent(response).contains(KEY));
+        }
+        assertEquals(List.of("403 operator_only", "403 operator_only", "403 operator_only"), codes);
+        login();
+        assertEquals(1, keptOf(GET(base + "/kept")).size(), "the kept file is still there");
+    }
+
+    /** A bearer request stamped as {@code agentId}, as jclaw_api sends it. */
+    private play.mvc.Http.Response asAgent(String method, String url, Long agentId) {
+        clearCookies();
+        var request = newRequest();
+        request.headers.put("authorization",
+                new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        request.headers.put(controllers.RequestPrincipal.AGENT_ID_HEADER,
+                new play.mvc.Http.Header(controllers.RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        try {
+            return "DELETE".equals(method) ? DELETE(request, url) : GET(request, url);
+        } finally {
+            clearCookies();
+        }
     }
 }

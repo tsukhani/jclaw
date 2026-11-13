@@ -2,6 +2,7 @@ package utils;
 
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import services.KeptSkillFiles;
 import services.database.DatabaseService;
 
 import java.io.IOException;
@@ -28,8 +29,9 @@ public final class SandboxHiddenRoots {
     /**
      * {@code data/}, {@code certs/}, {@code conf/} and {@code logs/} under the application root
      * and under the working directory, which H2's {@code ./data/jclaw} resolves against, plus the
-     * backup directory, which an operator may move out of {@code data/}. Canonical, because
-     * Seatbelt matches after symlink resolution. A root nested in another is kept, so
+     * backup directory and the folder of {@link KeptSkillFiles}, the credentials skill updates kept,
+     * either of which an operator may move out of {@code data/}. Canonical, because Seatbelt matches
+     * after symlink resolution. A root nested in another is kept, so
      * {@link #beneath} sees the default {@code data/backups}.
      */
     public static List<Path> current() {
@@ -42,6 +44,7 @@ public final class SandboxHiddenRoots {
             for (var dir : STATE_DIRS) roots.add(canonical(base.resolve(dir)));
         }
         roots.add(canonical(DatabaseService.backupsDir()));
+        roots.add(canonical(KeptSkillFiles.root()));
         return List.copyOf(roots);
     }
 

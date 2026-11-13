@@ -17,6 +17,7 @@ import utils.AppClock;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -101,7 +102,9 @@ public class SkillPromotionService {
 
     /**
      * Copy a global skill into the agent's workspace using atomic staging.
-     * Assumes tool validation and malware scanning have already passed.
+     * Assumes tool validation and malware scanning have already passed. Replacing
+     * a copy first copies what {@link KeptSkillFiles#select} picks in it to the
+     * kept files, and the new copy holds only what the registry ships.
      */
     public static void copyToAgentWorkspace(Agent agent, String skillName) throws IOException {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);
@@ -112,7 +115,7 @@ public class SkillPromotionService {
         var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + AppClock.now().toEpochMilli());
         var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + AppClock.now().toEpochMilli());
 
-        AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, staging -> {
+        AtomicDirSwap.StagingPopulator copyRegistry = staging -> {
             try (var walk = Files.walk(globalDir)) {
                 walk.forEach(source -> {
                     var staged = staging.resolve(globalDir.relativize(source));
@@ -132,7 +135,18 @@ public class SkillPromotionService {
                     }
                 });
             }
-        });
+        };
+        // The swap deletes the old copy, with whatever the operator put in it (JF-352): take that out first.
+        var kept = replacing
+                ? KeptSkillFiles.copyOut(WorkspaceFiles.workspaceOwner(agent), skillName, targetDir, globalDir)
+                : null;
+        try {
+            AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, copyRegistry);
+        } catch (IOException | RuntimeException e) {
+            // A backup still on disk means the old copy had already left its place, so what was kept stays.
+            if (kept != null && !Files.exists(backupDir, LinkOption.NOFOLLOW_LINKS)) KeptSkillFiles.discard(kept);
+            throw e;
+        }
         // Refresh the skill cache now the swap is visible — stageAndSwap is generic,
         // so the orchestrator owns this policy.
         SkillLoader.clearCache();
