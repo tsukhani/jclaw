@@ -71,6 +71,10 @@ import java.util.Map;
  * them: {@link #customAgentMacosProfile}, {@link #inOwnUserNamespace}, {@link #linuxOwnRuntime}. Nor does a
  * signal from it reach a process outside the run (JF-303): a Seatbelt rule on macOS, a PID namespace and a
  * session of its own on Linux ({@link LinuxPids}).
+ *
+ * <p>JF-380: a script's interpreter runs through {@link #wrapScript}, for every agent and whatever any key
+ * says: no network, writes only to its scratch folder, and of JClaw's folders and {@code $HOME} it reads only
+ * the interpreter's own.
  */
 public final class HarnessSandbox {
 
@@ -492,6 +496,105 @@ public final class HarnessSandbox {
     }
 
     /**
+     * Wrap a script's interpreter run (JF-380). It is confined for every agent, the Main Agent's included, and
+     * whatever {@link #SHELL_SANDBOX_KEY} and {@link #SHELL_NETWORK_KEY} say, because a script reaches the world
+     * only through JClaw's tools: no network, writes only to {@code scratch}, and of {@code $HOME} and JClaw's
+     * hidden folders it reads only {@code scratch} and {@code interpreter}, the interpreter's own version folder.
+     * On macOS that is {@link #scriptMacosProfile}; on Linux {@link #scriptLinuxArgv}. The
+     * {@link #setCustomAgentOverrideForTest} override applies here as it does to a custom agent's run, once the
+     * folders have passed.
+     *
+     * @throws SandboxUnavailableException with the bare reason when no sandbox can start here, or when either
+     *         folder would open what the sandbox hides ({@link #scriptFolderRejection}); nothing may be started then
+     */
+    public static List<String> wrapScript(List<String> argv, Path scratch, Path interpreter) {
+        var home = System.getProperty("user.home", "");
+        if (home.isBlank()) throw new SandboxUnavailableException("the home folder (user.home) is not set");
+        var hidden = SandboxHiddenRoots.current();
+        var root = SandboxHiddenRoots.canonical(scratch);
+        var interpreterDir = SandboxHiddenRoots.canonical(interpreter);
+        for (var rejected : new String[] {scriptFolderRejection("scratch folder", root, home, hidden),
+                scriptFolderRejection("interpreter folder", interpreterDir, home, hidden)}) {
+            if (rejected != null) throw new SandboxUnavailableException(rejected);
+        }
+        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
+        if (override == CustomAgentOverride.PASSTHROUGH) return argv;
+        if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
+        var ready = availability();
+        if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
+        if (ready.mechanism().equals(BWRAP)) {
+            return scriptLinuxArgv(argv, root, interpreterDir, home,
+                    linuxHiddenRoots(DatabaseService.backupsDir(), hidden), RUNS_AS_ROOT,
+                    linuxOwnRuntime(linuxRuntimeDirs(), null, null), customAgentPids());
+        }
+        var out = new ArrayList<String>(List.of(SANDBOX_EXEC, "-p", scriptMacosProfile(root, interpreterDir, home, hidden)));
+        out.addAll(argv);
+        return List.copyOf(out);
+    }
+
+    /**
+     * Why {@code dir} cannot be a script's scratch or interpreter folder, or null when it can. Reopening a folder
+     * that holds {@code $HOME} or one of JClaw's {@code hidden} folders, or that holds or lies in a secret folder
+     * of {@code $HOME}, would show the script what the rest of its sandbox hides: on Linux a bind after the
+     * {@code $HOME} tmpfs brings the whole of it back.
+     */
+    public static @Nullable String scriptFolderRejection(String what, Path dir, String home, List<Path> hidden) {
+        if (!dir.isAbsolute()) return "the %s %s is not an absolute path".formatted(what, dir);
+        var homePath = SandboxHiddenRoots.canonical(home);
+        if (homePath.startsWith(dir)) return "the %s %s holds the home folder".formatted(what, dir);
+        for (var root : hidden) {
+            if (root.startsWith(dir)) return "the %s %s holds %s, which a script never reads".formatted(what, dir, root);
+        }
+        for (var s : DENY_READ_HOME) {
+            var secret = homePath.resolve(s);
+            if (dir.startsWith(secret) || secret.startsWith(dir)) {
+                return "the %s %s is or holds %s, which a script never reads".formatted(what, dir, secret);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A script's Seatbelt profile, public so a test can pin its text on any host. The last matching rule wins:
+     * the network and every write go, {@code scratch} gets its writes back, {@code $HOME} is hidden but for
+     * {@code scratch} and {@code interpreter}, JClaw's hidden folders go after that, either folder lying beneath
+     * one is reopened, {@code interpreter} for reading only, and the secret folders of {@code $HOME} come last.
+     * A custom agent's socket and JVM attach rules are left out: {@code (deny network*)} refuses every socket, and
+     * the run writes to no shared temp folder from which one could be moved.
+     */
+    public static String scriptMacosProfile(Path scratch, Path interpreter, String home, List<Path> hidden) {
+        var sb = new StringBuilder("(version 1)\n(allow default)\n(deny network*)\n(deny file-write* (subpath \"/\"))\n");
+        sb.append(writeAllow(scratch.toString()));
+        appendHiddenHome(sb, scratch.toString(), home, List.of(interpreter.toString()));
+        for (var root : hidden) {
+            sb.append(rule("deny", "file-read* file-write*", root.toString()));
+        }
+        var scratchBeneath = SandboxHiddenRoots.beneath(scratch.toString(), hidden);
+        if (scratchBeneath != null) sb.append(rule("allow", "file-read* file-write*", scratchBeneath.toString()));
+        var interpreterBeneath = SandboxHiddenRoots.beneath(interpreter.toString(), hidden);
+        if (interpreterBeneath != null) sb.append(rule("allow", "file-read*", interpreterBeneath.toString()));
+        for (var s : DENY_READ_HOME) {
+            sb.append(rule("deny", "file-read*", absHome(home, s)));
+        }
+        return sb.append(MAC_DENY_LAUNCH_SERVICES).append(MAC_DENY_SIGNALS_OUTSIDE).toString();
+    }
+
+    /**
+     * A script's bwrap argv, public so a test can pin it on any host: {@link #linuxArgv} with the network
+     * unshared, {@code scratch} the one read-write bind and {@code interpreter} bound read-only, after its hidden
+     * folder's tmpfs when it lies beneath one, in a user namespace of its own and the {@code pids} namespace and
+     * session a custom agent's run gets. Its {@code /tmp}, {@code $HOME} and the hidden folders are empty tmpfs
+     * mounts of the run's own, which nothing outside it sees and which go with it.
+     */
+    @SuppressWarnings("java:S107") // one sandbox's whole shape, each part resolved by the caller
+    public static List<String> scriptLinuxArgv(List<String> argv, Path scratch, Path interpreter, String home,
+                                               List<Path> hidden, boolean asRoot, List<String> ownRuntime,
+                                               LinuxPids pids) {
+        return inOwnUserNamespace(linuxArgv(argv, scratch.toFile(), List.of(interpreter.toString()), home, hidden,
+                true, asRoot, ownRuntime, pids));
+    }
+
+    /**
      * The Main Agent's Seatbelt profile, public so a test can pin its text. The last matching rule wins: the program
      * files lose their writes, the workspaces get them back, the secret folders lose everything after that, and a
      * readable folder inside one gets its reads back.
@@ -586,8 +689,9 @@ public final class HarnessSandbox {
     }
 
     /**
-     * What a test puts in place of the sandbox for {@link #wrapCustomAgentShell} alone: the binary
-     * ({@link #PASSTHROUGH}, the argv unwrapped) or the readiness probe ({@link #unavailable}).
+     * What a test puts in place of the sandbox for {@link #wrapCustomAgentShell}, {@link #wrapMainFence} and
+     * {@link #wrapScript} alone: the binary ({@link #PASSTHROUGH}, the argv unwrapped) or the readiness probe
+     * ({@link #unavailable}).
      */
     public record CustomAgentOverride(boolean passthrough, @Nullable String unavailableReason) {
         public static final CustomAgentOverride NONE = new CustomAgentOverride(false, null);

@@ -79,6 +79,34 @@ it shares `/tmp` and the PID namespace with the host. Another process's environm
 `ps -E` prints none for a same-user process (measured).
 `ShellExecSandboxTest` pins both platform forms and probes the real one on the host.
 
+**A script runs in a sandbox of its own (JF-380).** `tools.ScriptProcess.start` is the one place a script's
+interpreter is started, and it always goes through `HarnessSandbox.wrapScript`: for every agent, `main` included,
+whatever `shell.sandbox` and `shell.sandbox.network` say, because a script reaches the world only through JClaw's tools.
+Its environment is `HOME` and `TMPDIR`, both its scratch folder, and nothing of JClaw's.
+
+- **macOS** — `scriptMacosProfile`: `(deny network*)`; every write denied but the scratch folder's, the shared temp
+  folders and `/dev` included; the home folder hidden but for the scratch folder and the interpreter folder (the
+  interpreter's own version folder); JClaw's hidden folders denied after that, and the interpreter folder beneath
+  `data/` reopened for reading only, then the `$HOME` secrets; `(deny lsopen)` and the custom agent's signal rule
+  last. The custom agent's socket and JVM-attach rules are left out: the network deny refuses every socket, and the
+  run writes nowhere a socket could be moved from. `HarnessSandboxTest.scriptMacosProfileReadsOnlyItsInterpreterFolderUnderData`
+  pins the text.
+- **Linux** — `scriptLinuxArgv`: a custom agent's argv, with its user namespace, PID namespace, session and runtime
+  folders (no resolver file or `PATH` folder is bound back), plus `--unshare-net`; the scratch folder is the one
+  read-write bind and the interpreter folder a read-only bind after `data/`'s tmpfs. Its `/tmp`, `$HOME` and hidden
+  folders are empty tmpfs mounts of the run's own. No Linux run was measured:
+  `HarnessSandboxTest.scriptLinuxArgvHasNoNetworkAndBindsTheInterpreterFolderAfterDataIsHidden` pins the argv.
+- `HarnessSandbox.scriptFolderRejection` refuses a scratch or interpreter folder that holds the home folder, one of
+  JClaw's hidden folders or a `$HOME` secret folder, or lies in a secret folder: on Linux a bind after the `$HOME`
+  tmpfs brings back everything under it. A refused folder, like a host where no sandbox starts, makes `wrapScript`
+  throw `SandboxUnavailableException`, and nothing is started. There is no fallback.
+- Measured on macOS 27 (`ScriptSandboxTest`, with the pinned Node 24.22.1 copied into a version folder under
+  `data/`): the script reads its own interpreter and nothing beside it in `data/`, nor `certs/`, `logs/`, the home
+  folder or `~/.ssh` (EPERM); it writes to its scratch folder and not to the home folder, `/private/tmp`, the temp
+  folder beside its scratch folder or its interpreter folder (EPERM); a loopback connection fails with EPERM and the
+  Mac's own `.local` name with ENOTFOUND. `localhost` still resolves inside (measured by hand); the same network rule
+  refuses a connection to it.
+
 **Every sandbox takes the secrets proxy's trust folder read-only (JF-324).** A command holding a skill secret is
 pointed at two files in the temp folder, `SecretProxy.trustFolder()`. A Linux sandbox replaces `/tmp` with an empty
 one, where they would be missing and every HTTPS call would fail its certificate check, and a macOS sandbox may write
@@ -350,7 +378,8 @@ runs `exec`, must take `ShellSandboxSync.acquire()` / `release()`, the sibling o
 so a custom agent's run is not refused on a host without a working sandbox;
 `CustomAgentOverride.unavailable(reason)` stands in for a failed readiness probe, and `release()`
 resets it to `CustomAgentOverride.NONE`. The override is read only by
-`wrapCustomAgentShell`, never by `main`'s path or a coding harness's. A real confined run needs
+`wrapCustomAgentShell`, `wrapMainFence` and `wrapScript` (after its folder check), never by a run `shell.sandbox`
+confines or a coding harness's. A test that starts a script holds the same lock. A real confined run needs
 `@EnabledOnOs(OS.MAC)`, or Linux with `assumeTrue(HarnessSandbox.availability().available())`, and
 must target a genuinely-denied path under `$HOME` — **not** the temp tree, which the profile grants
 for `TMPDIR`. Tests that need `main` use an unsaved `Agent` named `main`, never a seeded row.

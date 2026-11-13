@@ -1102,6 +1102,200 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
+     * A script's profile: no network, writes to its scratch folder alone, $HOME hidden but for the scratch and the
+     * interpreter folder, JClaw's folders hidden after that, the interpreter folder beneath data/ reopened for
+     * reading only, the $HOME secrets last, then the LaunchServices and signal denies.
+     */
+    @Test
+    void scriptMacosProfileReadsOnlyItsInterpreterFolderUnderData() {
+        var hidden = List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs"), Path.of("/h/u/jc/logs"),
+                Path.of("/h/u/jc/data/backups"));
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny network*)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/private/var/folders/x/T/jclaw-script-1"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/private/var/folders/x/T/jclaw-script-1"))
+                (allow file-read* (subpath "/h/u/jc/data/playwright-node/24.22.1-darwin-arm64"))
+                (allow file-read-metadata (literal "/h/u"))
+                (allow file-read-metadata (literal "/h/u/jc"))
+                (allow file-read-metadata (literal "/h/u/jc/data"))
+                (allow file-read-metadata (literal "/h/u/jc/data/playwright-node"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data"))
+                (deny file-read* file-write* (subpath "/h/u/jc/certs"))
+                (deny file-read* file-write* (subpath "/h/u/jc/logs"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data/backups"))
+                (allow file-read* (subpath "/h/u/jc/data/playwright-node/24.22.1-darwin-arm64"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                (deny lsopen)
+                (deny signal (require-not (target same-sandbox)))
+                """, HarnessSandbox.scriptMacosProfile(Path.of("/private/var/folders/x/T/jclaw-script-1"),
+                Path.of("/h/u/jc/data/playwright-node/24.22.1-darwin-arm64"), "/h/u", hidden));
+    }
+
+    /** A scratch folder beneath data/ gets its reads and writes back after data/ is hidden; an interpreter outside it needs no reopen. */
+    @Test
+    void scriptMacosProfileReopensAScratchFolderBeneathData() {
+        var hidden = List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs"));
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny network*)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/h/u/jc/data/scripts/run-1"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/h/u/jc/data/scripts/run-1"))
+                (allow file-read* (subpath "/opt/node/24.22.1"))
+                (allow file-read-metadata (literal "/h/u"))
+                (allow file-read-metadata (literal "/h/u/jc"))
+                (allow file-read-metadata (literal "/h/u/jc/data"))
+                (allow file-read-metadata (literal "/h/u/jc/data/scripts"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data"))
+                (deny file-read* file-write* (subpath "/h/u/jc/certs"))
+                (allow file-read* file-write* (subpath "/h/u/jc/data/scripts/run-1"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                (deny lsopen)
+                (deny signal (require-not (target same-sandbox)))
+                """, HarnessSandbox.scriptMacosProfile(Path.of("/h/u/jc/data/scripts/run-1"), Path.of("/opt/node/24.22.1"),
+                "/h/u", hidden));
+    }
+
+    /**
+     * A script's bwrap argv is a custom agent's: its own user, PID and network namespaces and session, its own
+     * runtime folders before the $HOME tmpfs, the scratch folder its one read-write bind, and the interpreter folder
+     * bound read-only after data/'s tmpfs. As root it also drops its capabilities, and where no procfs mounts it
+     * keeps the outer /proc.
+     */
+    @Test
+    void scriptLinuxArgvHasNoNetworkAndBindsTheInterpreterFolderAfterDataIsHidden() {
+        var hidden = List.of(Path.of("/srv/jc/data"), Path.of("/srv/jc/certs"));
+        var scratch = Path.of("/srv/scripts/run-1");
+        var interpreter = Path.of("/srv/jc/data/playwright-node/24.22.1-linux-x64");
+        var node = List.of("/srv/jc/data/playwright-node/24.22.1-linux-x64/bin/node", "-");
+        assertEquals(List.of("bwrap", "--unshare-user", "--unshare-net", "--unshare-pid", "--new-session",
+                        "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--proc", "/proc", "--tmpfs", "/run",
+                        "--tmpfs", "/home/op", "--bind", "/srv/scripts/run-1", "/srv/scripts/run-1",
+                        "--tmpfs", "/srv/jc/data", "--tmpfs", "/srv/jc/certs",
+                        "--ro-bind-try", "/srv/jc/data/playwright-node/24.22.1-linux-x64",
+                        "/srv/jc/data/playwright-node/24.22.1-linux-x64",
+                        "/srv/jc/data/playwright-node/24.22.1-linux-x64/bin/node", "-"),
+                HarnessSandbox.scriptLinuxArgv(node, scratch, interpreter, "/home/op", hidden, false,
+                        List.of("--tmpfs", "/run"), HarnessSandbox.LinuxPids.OWN));
+        assertEquals(List.of("bwrap", "--unshare-user", "--cap-drop", "ALL", "--unshare-net", "--unshare-pid",
+                        "--new-session", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run",
+                        "--tmpfs", "/root", "--bind", "/srv/scripts/run-1", "/srv/scripts/run-1",
+                        "--ro-bind-try", "/opt/node/24.22.1", "/opt/node/24.22.1",
+                        "--tmpfs", "/srv/jc/data", "--tmpfs", "/srv/jc/certs", "/opt/node/24.22.1/bin/node", "-"),
+                HarnessSandbox.scriptLinuxArgv(List.of("/opt/node/24.22.1/bin/node", "-"), scratch,
+                        Path.of("/opt/node/24.22.1"), "/root", hidden, true, List.of("--tmpfs", "/run"),
+                        HarnessSandbox.LinuxPids.OWN_UNDER_OUTER_PROC));
+    }
+
+    /**
+     * A scratch or interpreter folder that holds the home folder, one of JClaw's hidden folders or a secret folder,
+     * or lies in a secret folder, would show a script what its sandbox hides, so it is refused.
+     */
+    @Test
+    void aScriptFolderThatWouldReopenWhatTheSandboxHidesIsRefused() {
+        var hidden = List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/certs"));
+        assertNull(HarnessSandbox.scriptFolderRejection("interpreter folder",
+                Path.of("/h/u/jc/data/playwright-node/24.22.1-darwin-arm64"), "/h/u", hidden));
+        assertNull(HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("/h/u/jc/workspace/a/run-1"), "/h/u", hidden));
+        assertNull(HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("/private/var/folders/x/T/run-1"), "/h/u", hidden));
+        assertEquals("the interpreter folder /h/u/jc/data holds /h/u/jc/data, which a script never reads",
+                HarnessSandbox.scriptFolderRejection("interpreter folder", Path.of("/h/u/jc/data"), "/h/u", hidden));
+        assertEquals("the interpreter folder /h/u/jc holds /h/u/jc/data, which a script never reads",
+                HarnessSandbox.scriptFolderRejection("interpreter folder", Path.of("/h/u/jc"), "/h/u", hidden));
+        assertEquals("the scratch folder /h/u holds the home folder",
+                HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("/h/u"), "/h/u", hidden));
+        assertEquals("the scratch folder / holds the home folder",
+                HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("/"), "/h/u", hidden));
+        assertEquals("the interpreter folder /h/u/.ssh/node is or holds /h/u/.ssh, which a script never reads",
+                HarnessSandbox.scriptFolderRejection("interpreter folder", Path.of("/h/u/.ssh/node"), "/h/u", hidden));
+        assertEquals("the scratch folder /h/u/.config is or holds /h/u/.config/gcloud, which a script never reads",
+                HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("/h/u/.config"), "/h/u", hidden));
+        assertEquals("the scratch folder run-1 is not an absolute path",
+                HarnessSandbox.scriptFolderRejection("scratch folder", Path.of("run-1"), "/h/u", hidden));
+    }
+
+    /** The folders are checked before the sandbox is: a refused folder is refused with the sandbox replaced too. */
+    @Test
+    void wrapScriptRefusesAFolderThatHoldsWhatItHidesEvenWithTheSandboxReplaced() throws Exception {
+        var interpreter = Files.createDirectory(session.resolve("node"));
+        ShellSandboxSync.acquireUnconfined();
+        try {
+            var home = SandboxHiddenRoots.canonical(System.getProperty("user.home"));
+            var e = assertThrows(HarnessSandbox.SandboxUnavailableException.class,
+                    () -> HarnessSandbox.wrapScript(List.of("node"), home, interpreter));
+            assertEquals("the scratch folder " + home + " holds the home folder", e.getMessage());
+            var data = SandboxHiddenRoots.canonical(Play.applicationPath.toPath().resolve("data"));
+            e = assertThrows(HarnessSandbox.SandboxUnavailableException.class,
+                    () -> HarnessSandbox.wrapScript(List.of("node"), session, data));
+            assertEquals("the interpreter folder " + data + " holds " + data + ", which a script never reads", e.getMessage());
+            assertEquals(List.of("node"), HarnessSandbox.wrapScript(List.of("node"), session, interpreter));
+        } finally {
+            ShellSandboxSync.release();
+        }
+    }
+
+    /**
+     * A script is confined the same for every value of shell.sandbox and shell.sandbox.network: on macOS by exactly
+     * scriptMacosProfile, on Linux with the network unshared, and where no sandbox starts it is refused with the
+     * readiness probe's reason.
+     */
+    @Test
+    void aScriptIsConfinedTheSameWhateverTheShellKeysSay() throws Exception {
+        var scratch = Files.createDirectory(session.resolve("scratch"));
+        var interpreter = Files.createDirectory(session.resolve("node"));
+        var argv = List.of("/usr/bin/true");
+        ShellSandboxSync.acquire();
+        try {
+            var ready = HarnessSandbox.availability();
+            List<String> first = null;
+            for (var shell : List.of("", "false", "true", "untrusted")) {
+                for (var network : List.of("", "allow", "deny")) {
+                    ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, shell);
+                    ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, network);
+                    var keys = "shell.sandbox=" + shell + ", network=" + network;
+                    if (!ready.available()) {
+                        var e = assertThrows(HarnessSandbox.SandboxUnavailableException.class,
+                                () -> HarnessSandbox.wrapScript(argv, scratch, interpreter), keys);
+                        assertEquals(ready.reason(), e.getMessage(), keys);
+                        continue;
+                    }
+                    var wrapped = HarnessSandbox.wrapScript(argv, scratch, interpreter);
+                    if (first == null) first = wrapped;
+                    assertEquals(first, wrapped, keys);
+                }
+            }
+            if (first == null) return;
+            if (ready.mechanism().equals("sandbox-exec")) {
+                assertEquals(List.of("sandbox-exec", "-p", HarnessSandbox.scriptMacosProfile(
+                        SandboxHiddenRoots.canonical(scratch), SandboxHiddenRoots.canonical(interpreter),
+                        System.getProperty("user.home"), SandboxHiddenRoots.current()), "/usr/bin/true"), first);
+            } else {
+                assertEquals(List.of("bwrap", "--unshare-user"), first.subList(0, 2), "argv=" + first);
+                assertTrue(first.contains("--unshare-net"), "argv=" + first);
+                assertEquals(argv, first.subList(first.size() - 1, first.size()), "argv=" + first);
+            }
+        } finally {
+            ShellSandboxSync.release();
+        }
+    }
+
+    /**
      * JF-324: the secrets proxy's trust folder lives in the temp folder, which a Linux sandbox replaces with an empty
      * one. It is passed as an allowance, so the allowance must be bound after that temp folder or it would be hidden.
      */
