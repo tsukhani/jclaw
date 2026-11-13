@@ -397,6 +397,21 @@ public final class McpConnectionManager {
     }
 
     /**
+     * The action names the server behind the handle {@code handle} lists now, or null when that is not known:
+     * no such handle, the server not connected, or no actions listed yet.
+     */
+    public static @Nullable Set<String> listedActions(String handle) {
+        var tool = ToolRegistry.lookupTool(handle);
+        var server = tool == null || !tool.isServerLevel() ? null : tool.group();
+        if (server == null) return null;
+        var defs = tools(server);
+        if (defs.isEmpty()) return null;
+        var names = new HashSet<String>();
+        for (var def : defs) names.add(def.name());
+        return names;
+    }
+
+    /**
      * {@link #tools(String)} for an agent turn: a stale list starts one refresh off this thread
      * and the previous list is returned at once. The admin UI, the allowlist and the service view
      * read {@link #tools(String)} instead, which never refreshes.

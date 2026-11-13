@@ -196,6 +196,56 @@ class TaskToolPolicyTest extends UnitTest {
         assertEquals(Set.of(), TaskToolPolicy.mcpActions(Set.of("exec", "mcp_other/search"), "mcp_gw"));
     }
 
+    // ==================== JF-378: a named action its server no longer offers ====================
+
+    private static java.util.function.Function<String, Set<String>> servers(Map<String, Set<String>> lists) {
+        return lists::get;
+    }
+
+    private static List<String> unofferedWarnings(Set<String> allowed, Map<String, Set<String>> lists) {
+        return EventLogger.captureForTest(() ->
+                        TaskToolPolicy.warnOfUnofferedActions(allowed, "labeler", "main", servers(lists)))
+                .stream().map(e -> e.level() + " " + e.category() + " " + e.message()).toList();
+    }
+
+    @Test
+    void oneWarningNamesEachMissingActionByServer() {
+        var warnings = unofferedWarnings(
+                Set.of("mcp_gw/search", "mcp_gw/old_search", "mcp_gw/older_label", "mcp_sx/web", "mcp_sx/gone", "exec"),
+                Map.of("mcp_gw", Set.of("search", "label"), "mcp_sx", Set.of("web")));
+        assertEquals(List.of("WARN TOOL_BLOCKED_BY_TASK_POLICY Task 'labeler' (agent 'main') names MCP actions their "
+                        + "servers do not offer, so its runs cannot use them: mcp_gw: old_search, older_label; mcp_sx: gone"),
+                warnings);
+    }
+
+    @Test
+    void everyNamedActionOfferedWarnsNothing() {
+        assertEquals(List.of(), unofferedWarnings(Set.of("mcp_gw/search", "exec"), Map.of("mcp_gw", Set.of("search"))));
+    }
+
+    @Test
+    void aServerWhoseActionsAreUnknownWarnsNothing() {
+        // Not connected, or not listed yet: no evidence the action is gone.
+        assertEquals(List.of(), unofferedWarnings(Set.of("mcp_gw/search"), Map.of()));
+    }
+
+    @Test
+    void noListWarnsNothing() {
+        assertEquals(List.of(), EventLogger.captureForTest(() ->
+                TaskToolPolicy.warnOfUnofferedActions(null, "labeler", "main", servers(Map.of("mcp_gw", Set.of()))))
+                .stream().map(EventLogger.Captured::message).toList());
+    }
+
+    @Test
+    void aServerNamedWithTheSeparatorIsJudgedByItsOwnList() {
+        // Server "a/b": the handle mcp_a answers nothing, so the entry is judged against mcp_a/b's list.
+        var lists = Map.of("mcp_a/b", Set.of("x"));
+        assertEquals(List.of(), unofferedWarnings(Set.of("mcp_a/b/x"), lists));
+        assertEquals(List.of("WARN TOOL_BLOCKED_BY_TASK_POLICY Task 'labeler' (agent 'main') names MCP actions their "
+                        + "servers do not offer, so its runs cannot use them: mcp_a/b: y"),
+                unofferedWarnings(Set.of("mcp_a/b/y"), lists));
+    }
+
     @Test
     void aSubagentsInheritedActionEntryOffersTheHandle() {
         var kept = TaskToolPolicy.restrictSubagent(defs("exec", "mcp_gw"), "[\"mcp_gw/search\"]", "helper");

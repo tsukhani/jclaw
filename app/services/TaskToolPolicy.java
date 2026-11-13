@@ -10,6 +10,9 @@ import org.jspecify.annotations.Nullable;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -114,6 +117,41 @@ public final class TaskToolPolicy {
             if (action != null) actions.add(action);
         }
         return actions;
+    }
+
+    /**
+     * JF-378: one WARN per fire naming each action {@code allowed} names that its server, connected and listing
+     * its actions, does not offer. A server update that renames or splits an action otherwise drops it from every
+     * task naming it, and the only trace is a refusal, if the model tries the old name at all.
+     *
+     * @param offered the action names an MCP handle's server lists now, or null when that is not known; an
+     *                unknown list is no evidence that an action is gone, so it reports nothing
+     */
+    public static void warnOfUnofferedActions(@Nullable Set<String> allowed, @Nullable String taskName, String agentName,
+                                              Function<String, @Nullable Set<String>> offered) {
+        if (allowed == null) return;
+        var missing = new TreeMap<String, TreeSet<String>>();
+        for (var entry : allowed) {
+            if (!entry.startsWith(McpServer.HANDLE_PREFIX)) continue;
+            // A server's name may hold the separator itself, so the handle is the prefix whose server answers.
+            for (int cut = entry.indexOf(ACTION_SEPARATOR); cut > 0; cut = entry.indexOf(ACTION_SEPARATOR, cut + 1)) {
+                var handle = entry.substring(0, cut);
+                var listed = offered.apply(handle);
+                if (listed == null) continue;
+                var action = entry.substring(cut + 1);
+                if (!action.isEmpty() && !listed.contains(action)) {
+                    missing.computeIfAbsent(handle, _ -> new TreeSet<>()).add(action);
+                }
+                break;
+            }
+        }
+        if (missing.isEmpty()) return;
+        var named = missing.entrySet().stream()
+                .map(e -> e.getKey() + ": " + String.join(", ", e.getValue()))
+                .collect(Collectors.joining("; "));
+        EventLogger.warn(EVENT_CATEGORY, agentName, null, truncate(
+                "Task '%s' (agent '%s') names MCP actions their servers do not offer, so its runs cannot use them: %s"
+                        .formatted(taskName, agentName, named)));
     }
 
     /** The action {@code entry} names on {@code handle}, or null when it names none of that server's. */

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
+import { clearNuxtData } from '#app'
 import TaskPermissions from '~/components/TaskPermissions.vue'
 
 /**
@@ -132,5 +135,42 @@ describe('TaskPermissions', () => {
   it('shows a bare model id when no provider is recorded', async () => {
     const c = await mount(null, 'web', null, 'kimi-k2.6')
     expect(c.find('[data-testid="task-model-pill"]').text()).toBe('kimi-k2.6')
+  })
+
+  // JF-378: a narrowed entry naming an action its connected server does not offer is marked.
+  describe('an action its server does not offer', () => {
+    beforeEach(() => clearNuxtData())
+
+    function marks(c: Awaited<ReturnType<typeof mount>>) {
+      return c.findAll('[data-testid="task-tool-pill"]').map(p => [p.text(), p.attributes('data-unoffered') ?? null, p.attributes('title') ?? null])
+    }
+
+    it('marks the missing action, and neither an offered action nor a native tool', async () => {
+      registerEndpoint('/api/tools/mcp_gw378', () => ({ name: 'mcp_gw378', actions: [{ name: 'search_gmail_messages', description: '' }] }))
+      const c = await mount('["mcp_gw378/search_gmail_messages","mcp_gw378/gmail_list_messages","web_search"]')
+      await flushPromises()
+      expect(marks(c)).toEqual([
+        ['mcp_gw378/search_gmail_messages', null, null],
+        ['mcp_gw378/gmail_list_messages', 'true', 'mcp_gw378 does not offer this action, so the task\'s runs cannot use it.'],
+        ['web_search', null, null],
+      ])
+    })
+
+    it('marks nothing when the server lists no actions, as a disconnected one does', async () => {
+      registerEndpoint('/api/tools/mcp_down378', () => ({ name: 'mcp_down378', actions: [] }))
+      const c = await mount('["mcp_down378/search_gmail_messages"]')
+      await flushPromises()
+      expect(marks(c)).toEqual([['mcp_down378/search_gmail_messages', null, null]])
+    })
+
+    it('marks nothing when the server cannot be read', async () => {
+      registerEndpoint('/api/tools/mcp_gone378', (event) => {
+        setResponseStatus(event, 404)
+        return { code: 'not_found' }
+      })
+      const c = await mount('["mcp_gone378/search_gmail_messages"]')
+      await flushPromises()
+      expect(marks(c)).toEqual([['mcp_gone378/search_gmail_messages', null, null]])
+    })
   })
 })

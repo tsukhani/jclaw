@@ -43,6 +43,44 @@ const tools = computed<string[] | null>(() => {
   }
 })
 
+/** The MCP handle an `mcp_<server>/<action>` entry names, or null for any other entry. */
+function handleOf(entry: string): string | null {
+  const cut = entry.indexOf('/')
+  return entry.startsWith('mcp_') && cut > 0 ? entry.slice(0, cut) : null
+}
+
+const narrowedHandles = computed(() =>
+  [...new Set((tools.value ?? []).map(handleOf).filter((h): h is string => h !== null))])
+
+/**
+ * JF-378: each narrowed server's actions now, by handle. A server that answers no list (not
+ * connected, or not shown) is left out, and marks nothing: that is no evidence an action is gone.
+ */
+const { data: offered } = useLazyAsyncData(
+  () => `task-mcp-actions:${narrowedHandles.value.join(',')}`,
+  async () => {
+    const lists: Record<string, string[]> = {}
+    await Promise.all(narrowedHandles.value.map(async (handle) => {
+      try {
+        const tool = await $fetch<{ actions?: { name: string }[] }>(`/api/tools/${encodeURIComponent(handle)}`)
+        const names = (tool.actions ?? []).map(a => a.name)
+        if (names.length) lists[handle] = names
+      }
+      catch {
+        // Unknown, as above.
+      }
+    }))
+    return lists
+  },
+  { default: (): Record<string, string[]> => ({}), server: false },
+)
+
+function unoffered(entry: string): boolean {
+  const handle = handleOf(entry)
+  const names = handle ? offered.value?.[handle] : undefined
+  return !!handle && !!names && !names.includes(entry.slice(handle.length + 1))
+}
+
 /** web and voice are the operator origins (utils.ChannelOriginTrust); absent reads as UNKNOWN and fails closed. */
 const OPERATOR_ORIGINS = new Set(['web', 'voice'])
 
@@ -133,7 +171,10 @@ const model = computed(() => {
         v-for="tool in tools"
         v-else
         :key="tool"
-        class="text-[11px] px-1.5 py-0.5 border border-border text-fg-strong font-mono"
+        class="text-[11px] px-1.5 py-0.5 border font-mono"
+        :class="unoffered(tool) ? 'border-amber-500/40 text-amber-700 dark:text-amber-400' : 'border-border text-fg-strong'"
+        :title="unoffered(tool) ? `${handleOf(tool)} does not offer this action, so the task's runs cannot use it.` : undefined"
+        :data-unoffered="unoffered(tool) || undefined"
         data-testid="task-tool-pill"
       >{{ tool }}</span>
     </div>

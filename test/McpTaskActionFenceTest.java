@@ -1,4 +1,6 @@
+import agents.AgentRunner;
 import agents.McpServerCatalog;
+import agents.TaskRunSink;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
@@ -82,8 +84,9 @@ class McpTaskActionFenceTest extends UnitTest {
         agent = Tx.run(() -> {
             var a = new Agent();
             a.name = "jf373-agent";
-            a.modelProvider = "openrouter";
-            a.modelId = "gpt-4.1";
+            // No such provider: a fire stops at "missing provider" before any model call or host.
+            a.modelProvider = "jf378-unconfigured";
+            a.modelId = "none";
             a.enabled = true;
             a.save();
             return a;
@@ -247,6 +250,56 @@ class McpTaskActionFenceTest extends UnitTest {
 
         assertEquals(Set.of(), slashEntries(disabled));
         assertEquals("4 actions", catalogCount(disabled));
+    }
+
+    // ==================== JF-378: a named action the server no longer offers ====================
+
+    @Test
+    void listedActionsAreTheConnectedServersActionsAndUnknownElsewhere() {
+        assertEquals(Set.of("search_messages", "label_message", "send_message", "history"),
+                McpConnectionManager.listedActions(HANDLE));
+        assertNull(McpConnectionManager.listedActions("mcp_jf378absent"));
+        assertNull(McpConnectionManager.listedActions("web_search"));
+    }
+
+    @Test
+    void aFireWarnsOnceOfANamedActionItsServerDoesNotOffer() throws Exception {
+        assertEquals(List.of("WARN " + TaskToolPolicy.EVENT_CATEGORY + " Task 'stale-fire' (agent 'jf373-agent') names "
+                        + "MCP actions their servers do not offer, so its runs cannot use them: " + HANDLE + ": removed_action"),
+                fireWarnings("stale-fire", "[\"" + HANDLE + "/search_messages\",\"" + HANDLE + "/removed_action\"]"));
+    }
+
+    @Test
+    void aFireWhoseNamedActionsAreAllOfferedWarnsNothing() throws Exception {
+        assertEquals(List.of(), fireWarnings("current-fire", NARROWED));
+    }
+
+    /** The unoffered-action warnings one fire of a task with {@code list} logs, run as TaskExecutor runs one. */
+    private List<String> fireWarnings(String taskName, String list) throws Exception {
+        var runId = seedTaskRun(taskName, list);
+        commit();
+        var failure = new Throwable[1];
+        var events = EventLogger.captureMatchingForTest(
+                e -> e.category().equals(TaskToolPolicy.EVENT_CATEGORY) && e.message().contains("do not offer"),
+                live -> {
+                    var fire = Thread.ofVirtual().start(() -> {
+                        try {
+                            var a = Tx.run(() -> (Agent) Agent.findById(agent.id));
+                            var r = Tx.run(() -> (TaskRun) TaskRun.findById(runId));
+                            AgentRunner.runForTask(a, "Label the inbox.", new TaskRunSink(r), TaskToolPolicy.parse(list),
+                                    taskName, null, null);
+                        } catch (Throwable t) {
+                            failure[0] = t;
+                        }
+                    });
+                    try {
+                        fire.join();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+        if (failure[0] != null) throw new AssertionError("the fire threw", failure[0]);
+        return events.stream().map(e -> e.level() + " " + e.category() + " " + e.message()).toList();
     }
 
     // ==================== helpers ====================

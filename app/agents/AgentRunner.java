@@ -8,6 +8,7 @@ import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
 import llm.routing.RoutedTurn;
+import mcp.McpConnectionManager;
 import memory.MemoryAutoCapture;
 import models.Agent;
 import models.ChannelType;
@@ -592,6 +593,8 @@ public class AgentRunner {
         Objects.requireNonNull(sink, "sink");
 
         Tx.run(() -> sink.appendUserMessage(userPrompt, null));
+        // Here, not in runTaskTurn: a fallback turn runs that again, and the warning is one per fire.
+        TaskToolPolicy.warnOfUnofferedActions(allowedTools, taskName, agent.name, McpConnectionManager::listedActions);
 
         var stubConv = new Conversation();
         stubConv.agent = agent;
