@@ -431,6 +431,10 @@ public class ConfigService {
             atLeast(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, 0, " must be a whole number of tokens; 0 sets no minimum."),
             atLeast(SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, 0,
                     " must be a whole number of tokens; 0 sets no minimum."),
+            atLeast(SessionCompactor.VERBATIM_USER_TOKENS_KEY, 0,
+                    " must be a whole number of tokens; 0 quotes none of the user's summarized messages."),
+            (key, value) -> key.equals(SessionCompactor.CHECK_SUMMARY_KEY) && !isTrueOrFalse(value)
+                    ? key + " must be true or false." : null,
             atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.

@@ -326,6 +326,18 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theQuoteOfTheUsersSummarizedWordsMustBeAWholeNumberOfZeroOrMoreAndTheCheckTrueOrFalse() {
+        var quote = SessionCompactor.VERBATIM_USER_TOKENS_KEY
+                + " must be a whole number of tokens; 0 quotes none of the user's summarized messages.";
+        for (var value : List.of("-1", "5k", "1.5", "")) assertRefused(quote, SessionCompactor.VERBATIM_USER_TOKENS_KEY, value);
+        for (var value : List.of("0", "5000")) assertAccepted(SessionCompactor.VERBATIM_USER_TOKENS_KEY, value);
+
+        var check = SessionCompactor.CHECK_SUMMARY_KEY + " must be true or false.";
+        for (var value : List.of("yes", "1", "")) assertRefused(check, SessionCompactor.CHECK_SUMMARY_KEY, value);
+        for (var value : List.of("true", "FALSE")) assertAccepted(SessionCompactor.CHECK_SUMMARY_KEY, value);
+    }
+
+    @Test
     void theShorteningStepMustBeAWholeNumberOfAtLeastOne() {
         var expected = "chat.pruneToolResultsEveryTurns must be a whole number of turns, at least 1.";
         assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "0");

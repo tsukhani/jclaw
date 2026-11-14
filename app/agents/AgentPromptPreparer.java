@@ -2,6 +2,7 @@ package agents;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
 import models.Agent;
@@ -308,8 +309,22 @@ final class AgentPromptPreparer {
      * context (JCLAW-268).
      */
     static String turnSystemPrompt(String assembled, Conversation conv) {
-        return SessionCompactor.appendParentContextToPrompt(
-                SessionCompactor.appendSummaryToPrompt(assembled, conv, offersConversationSearch(conv)), conv);
+        return SessionCompactor.appendParentContextToPrompt(SessionCompactor.appendSummaryToPrompt(assembled, conv,
+                offersConversationSearch(conv), quotedUserTokens(conv)), conv);
+    }
+
+    /**
+     * How much of the user's summarized words the prompt quotes. The quote sits in the system prompt, so a guest's
+     * words never reach it: none unless the owner alone reads the conversation. A small model keeps its room through
+     * {@link SessionCompactor#verbatimUserBudget}.
+     */
+    static int quotedUserTokens(Conversation conv) {
+        if (!DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId)) return 0;
+        var providerName = ModelResolver.effectiveModelProvider(conv.agent, conv);
+        var provider = providerName != null ? ProviderRegistry.get(providerName) : null;
+        int window = provider == null ? 0 : ModelResolver.resolveModelInfo(conv.agent, conv, provider)
+                .map(ModelInfo::contextWindow).orElse(0);
+        return SessionCompactor.verbatimUserBudget(window);
     }
 
     /**

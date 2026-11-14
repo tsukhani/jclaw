@@ -25,7 +25,8 @@ public final class CompactionTriggerSync {
             ConversationService.KEY_DM_LIMIT, ConversationService.KEY_GROUP_LIMIT, SessionCompactor.SUMMARY_BUDGET_KEY,
             SessionCompactor.TOOL_RESULT_CHARS_KEY, SessionCompactor.KEEP_PERCENT_KEY,
             SessionCompactor.MIN_SUMMARY_TOKENS_KEY, SessionCompactor.FORCED_KEEP_PERCENT_KEY,
-            SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY);
+            SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, SessionCompactor.VERBATIM_USER_TOKENS_KEY,
+            SessionCompactor.CHECK_SUMMARY_KEY);
 
     private CompactionTriggerSync() {}
 
