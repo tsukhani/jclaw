@@ -223,6 +223,25 @@ export interface Conversation {
   checklist?: ChecklistItem[]
 }
 
+/** One summary stored for a conversation's older messages (GET /api/conversations/{id}/compactions). */
+export interface ConversationCompaction {
+  id: number
+  /** How many messages it summarized. */
+  rows: number
+  summaryTokens: number
+  /** `provider/model` that wrote it. */
+  model: string
+  summary: string
+  compactedAt: string
+  /** When the first and last summarized messages were written; absent on summaries too old to have been dated. */
+  coversFrom?: string | null
+  coversTo?: string | null
+  /** The summary this one was merged into, once it was. */
+  mergedIntoId?: number | null
+  /** `live` while the agent reads it, `merged` once folded into another, `reset` once a `/reset` set it aside. */
+  status: 'live' | 'merged' | 'reset'
+}
+
 /** One step of the agent's `checklist` tool. */
 export interface ChecklistItem {
   content: string

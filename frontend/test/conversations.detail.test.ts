@@ -66,12 +66,29 @@ function msg(over: Record<string, unknown> = {}) {
   }
 }
 
-function setupApi(opts: { convo?: unknown, messages?: unknown[], missing?: boolean } = {}) {
+function setupApi(opts: { convo?: unknown, messages?: unknown[], missing?: boolean, compactions?: unknown[] } = {}) {
   registerEndpoint('/api/conversations/7', () => {
     if (opts.missing) throw new Error('no such conversation')
     return opts.convo ?? CONVO
   })
   registerEndpoint('/api/conversations/7/messages', () => opts.messages ?? [])
+  registerEndpoint('/api/conversations/7/compactions', () => opts.compactions ?? [])
+}
+
+function compaction(id: number, over: Record<string, unknown> = {}) {
+  return {
+    id, rows: 2, summaryTokens: 50, model: 'ollama-cloud/gpt-oss:120b', summary: `### Goals\nSUMMARY ${id}`,
+    compactedAt: '2026-08-01T10:10:00Z', coversFrom: '2026-08-01T10:00:00Z', coversTo: '2026-08-01T10:01:00Z',
+    mergedIntoId: null, status: 'live', ...over,
+  }
+}
+
+/** The page's rows in order: a message's role, or "summary N" for a marker. */
+function transcriptOrder(c: { findAll: (s: string) => Array<{ attributes: (n: string) => string | undefined, text: () => string }> }) {
+  return c.findAll('[data-testid="summary-marker"], span.text-xs.font-mono.text-fg-muted:first-child')
+    .map(el => el.attributes('data-testid') === 'summary-marker'
+      ? el.text().match(/Summary \d+/)![0]
+      : el.text())
 }
 
 async function mountPage() {
@@ -227,6 +244,95 @@ describe('Conversation detail page', () => {
     // Same weights, different host: the cost and latency change, so it is a real switch.
     const c = await mountPage()
     expect(c.text()).toContain('Switched to ollama-cloud/kimi-k2.5')
+  })
+
+  // ─────── summaries ────────────────────────────────────────────────────────
+
+  const FOUR_MESSAGES = [
+    msg({ id: 1, role: 'user', content: 'Plan day one', createdAt: '2026-08-01T10:00:00Z' }),
+    msg({ id: 2, role: 'assistant', content: 'Day one.', createdAt: '2026-08-01T10:01:00Z' }),
+    msg({ id: 3, role: 'user', content: 'Plan day two', createdAt: '2026-08-01T10:02:00Z' }),
+    msg({ id: 4, role: 'assistant', content: 'Day two.', createdAt: '2026-08-01T10:03:00Z' }),
+  ]
+
+  it('marks every stored summary after the last message it covers, merged ones included', async () => {
+    setupApi({
+      messages: FOUR_MESSAGES,
+      compactions: [
+        compaction(11, { status: 'merged', mergedIntoId: 13 }),
+        compaction(12, { coversFrom: '2026-08-01T10:02:00Z', coversTo: '2026-08-01T10:03:00Z', status: 'merged', mergedIntoId: 13 }),
+        compaction(13, { rows: 4, coversTo: '2026-08-01T10:03:00Z' }),
+      ],
+    })
+    const c = await mountPage()
+
+    expect(transcriptOrder(c)).toEqual(['user', 'assistant', 'Summary 1', 'user', 'assistant', 'Summary 2', 'Summary 3'])
+    const markers = c.findAll('[data-testid="summary-marker"]')
+    expect(markers.map(m => m.get('[data-testid="summary-marker-headline"]').text())).toEqual([
+      'Summary 1 · 2 earlier messages summarized',
+      'Summary 2 · 2 earlier messages summarized',
+      'Summary 3 · 4 earlier messages summarized',
+    ])
+    expect(markers.map(m => m.get('[data-testid="summary-marker-status"]').text()))
+      .toEqual(['Merged into summary 3', 'Merged into summary 3', 'In use'])
+  })
+
+  it('opens a marker to the summary the agent was given, who wrote it, and what it merged', async () => {
+    setupApi({
+      messages: FOUR_MESSAGES,
+      compactions: [compaction(11, { status: 'merged', mergedIntoId: 12 }), compaction(12, { rows: 4, coversTo: '2026-08-01T10:03:00Z' })],
+    })
+    const c = await mountPage()
+    const merge = c.findAll('[data-testid="summary-marker"]')[1]!
+    expect(merge.find('[data-testid="summary-marker-body"]').exists()).toBe(false)
+
+    await merge.get('button').trigger('click')
+
+    expect(merge.get('button').attributes('aria-expanded')).toBe('true')
+    expect(merge.get('[data-testid="summary-marker-meaning"]').text())
+      .toBe('The agent reads this summary in place of the messages it covers.')
+    expect(merge.get('[data-testid="summary-marker-body"]').text()).toContain('ollama-cloud/gpt-oss:120b')
+    expect(merge.get('[data-testid="summary-marker-body"]').text()).toContain('Summary 1')
+    expect(merge.get('[data-testid="summary-marker-text"]').html()).toContain('SUMMARY 12')
+    expect(merge.get('[data-testid="summary-marker-text"]').find('h3').text()).toBe('Goals')
+  })
+
+  it('shows the transcript with no markers when its summaries cannot be read', async () => {
+    setupApi({ messages: FOUR_MESSAGES })
+    registerEndpoint('/api/conversations/7/compactions', () => {
+      throw new Error('summaries unavailable')
+    })
+    const c = await mountPage()
+
+    expect(c.findAll('[data-testid="summary-marker"]')).toHaveLength(0)
+    expect(c.text()).toContain('Day two.')
+  })
+
+  it('exports each summary as a quoted block where it falls in the conversation', async () => {
+    setupApi({ messages: FOUR_MESSAGES, compactions: [compaction(11)] })
+    const c = await mountPage()
+    let captured: Blob | null = null
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn((b: Blob) => {
+        captured = b
+        return 'blob:mock'
+      }),
+      revokeObjectURL: vi.fn(),
+    })
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    await c.findAll('button').find(b => b.attributes('title') === 'Export conversation as Markdown')!.trigger('click')
+    await flushPromises()
+
+    const markdown = await captured!.text()
+    const marker = markdown.indexOf('> **Summary 1 · 2 earlier messages summarized** · In use')
+    expect(marker).toBeGreaterThan(markdown.indexOf('Day one.'))
+    expect(marker).toBeLessThan(markdown.indexOf('Plan day two'))
+    expect(markdown).toContain('> ### Goals\n> SUMMARY 11')
+
+    clickSpy.mockRestore()
+    vi.unstubAllGlobals()
   })
 
   // ─────── export ───────────────────────────────────────────────────────────

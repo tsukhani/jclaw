@@ -227,6 +227,78 @@ class ApiConversationsControllerBranchTest extends FunctionalTest {
         }
     }
 
+    @Test
+    void compactionsListEverySummaryInTheOrderWrittenWithWhetherThePromptStillCarriesIt() {
+        login();
+        var base = Instant.parse("2026-11-14T10:00:00Z");
+        var ids = commitInFreshTx(() -> {
+            var agent = newAgent("audit-agent");
+            var conv = ConversationService.create(agent, "web", "u-audit");
+            var beforeReset = segment(conv, base, base.minusSeconds(60), base.minusSeconds(30), 4, "SET ASIDE");
+            var first = segment(conv, base.plusSeconds(100), base, base.plusSeconds(50), 10, "FIRST");
+            var second = segment(conv, base.plusSeconds(200), base.plusSeconds(51), base.plusSeconds(150), 12, "SECOND");
+            var merged = segment(conv, base.plusSeconds(300), base, base.plusSeconds(150), 22, "MERGED");
+            first.mergedIntoId = merged.id;
+            first.save();
+            second.mergedIntoId = merged.id;
+            second.save();
+            // A /reset after the first summary and before the rest.
+            conv.contextSince = base.plusSeconds(10);
+            conv.save();
+            return new long[] {conv.id, beforeReset.id, first.id, second.id, merged.id};
+        });
+
+        var response = GET("/api/conversations/" + ids[0] + "/compactions");
+        assertIsOk(response);
+        var rows = com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonArray();
+
+        assertEquals(4, rows.size());
+        var order = new java.util.ArrayList<Long>();
+        for (var row : rows) order.add(row.getAsJsonObject().get("id").getAsLong());
+        assertEquals(java.util.List.of(ids[1], ids[2], ids[3], ids[4]), order, "oldest written first");
+        var setAside = rows.get(0).getAsJsonObject();
+        assertEquals("reset", setAside.get("status").getAsString());
+        assertEquals("SET ASIDE", setAside.get("summary").getAsString());
+        var first = rows.get(1).getAsJsonObject();
+        assertEquals("merged", first.get("status").getAsString());
+        assertEquals(ids[4], first.get("mergedIntoId").getAsLong());
+        assertEquals(10, first.get("rows").getAsInt());
+        assertEquals(base.toString(), first.get("coversFrom").getAsString());
+        assertEquals(base.plusSeconds(50).toString(), first.get("coversTo").getAsString());
+        assertEquals("openrouter/gpt-4.1", first.get("model").getAsString());
+        var merged = rows.get(3).getAsJsonObject();
+        assertEquals("live", merged.get("status").getAsString());
+        assertTrue(!merged.has("mergedIntoId") || merged.get("mergedIntoId").isJsonNull());
+        assertEquals("MERGED", merged.get("summary").getAsString());
+    }
+
+    @Test
+    void compactionsOfAConversationWithNoneIsAnEmptyListAndOfAMissingOneNotFound() {
+        login();
+        var id = commitInFreshTx(() -> ConversationService.create(newAgent("no-summary-agent"), "web", "u-none").id);
+
+        var none = GET("/api/conversations/" + id + "/compactions");
+        assertIsOk(none);
+        assertEquals("[]", getContent(none));
+        assertIsNotFound(GET("/api/conversations/999999/compactions"));
+    }
+
+    /** One summary written at {@code at} of the rows from {@code from} to {@code to}. */
+    private static SessionCompaction segment(Conversation conv, Instant at, Instant from, Instant to, int rows,
+                                             String text) {
+        var sc = new SessionCompaction();
+        sc.conversation = conv;
+        sc.turnCount = rows;
+        sc.summaryTokens = text.length() / 4;
+        sc.model = "openrouter/gpt-4.1";
+        sc.summary = text;
+        sc.compactedAt = at;
+        sc.coversFrom = from;
+        sc.coversTo = to;
+        sc.save();
+        return sc;
+    }
+
     /** Six alternating rows a second apart from {@code base}, the first a user row. */
     private static Conversation sixRows(Conversation conv, Instant base) {
         for (int i = 0; i < 6; i++) {

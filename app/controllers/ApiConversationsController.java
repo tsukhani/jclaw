@@ -670,6 +670,39 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
+     * One summary stored for a conversation's older rows, as the operator audits it.
+     *
+     * @param rows   how many rows it summarized
+     * @param status {@code live} while the prompt carries it, {@code merged} once folded into {@code mergedIntoId}, and
+     *               {@code reset} once a later {@code /reset} or {@code /new} set it aside, as
+     *               {@link SessionCompaction#findLive} decides
+     */
+    public record CompactionView(Long id, int rows, int summaryTokens, String model, String summary, String compactedAt,
+                                 @Nullable String coversFrom, @Nullable String coversTo, @Nullable Long mergedIntoId,
+                                 String status) {}
+
+    /** GET /api/conversations/{id}/compactions — every summary stored for the conversation, in the order written. */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = CompactionView.class))))
+    @Operation(summary = "List every summary stored for a conversation's older messages, merged and set-aside ones "
+            + "included, in the order they were written")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "the operator's audit of a conversation's summaries; an agent reads its live ones in its prompt")
+    public static void getCompactions(Long id) {
+        Conversation conversation = requireConversation(id);
+        List<SessionCompaction> rows = SessionCompaction.find(
+                "conversation = ?1 ORDER BY compactedAt ASC, id ASC", conversation).fetch();
+        renderJSON(gson.toJson(rows.stream().map(s -> compactionView(s, conversation)).toList()));
+    }
+
+    private static CompactionView compactionView(SessionCompaction s, Conversation conversation) {
+        var setAside = conversation.contextSince != null && !s.compactedAt.isAfter(conversation.contextSince);
+        var status = s.mergedIntoId != null ? "merged" : setAside ? "reset" : "live";
+        return new CompactionView(s.id, s.turnCount, s.summaryTokens, s.model, s.summary, s.compactedAt.toString(),
+                s.coversFrom != null ? s.coversFrom.toString() : null, s.coversTo != null ? s.coversTo.toString() : null,
+                s.mergedIntoId, status);
+    }
+
+    /**
      * JCLAW-806: one IN-clause query for every {@link MessageAttachment} on the
      * given page of messages, grouped into {@code messageId -> attachments}
      * (id-ascending, matching the entity's {@code @OrderBy}). Messages with no

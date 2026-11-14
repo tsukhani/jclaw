@@ -42,6 +42,8 @@ Click any row to open the conversation in [Chat](/chat). It is read-only if it c
 
 **View details** opens a read-only page for the thread: its channel, agent, peer, message count and dates, token totals (input, cached, output, average speed, cost, and cache savings), then every message. Assistant replies render as Markdown, math included, the same as in Chat, and name the model that answered. A routed reply adds `(auto: <class>)`. User and tool messages show as raw text. **Open in Chat** and **Export conversation as Markdown** sit in the page header.
 
+Every summary JClaw stored for the thread shows as a dashed marker after the last message it covers, for example **Summary 2 · 24 earlier messages summarized**, numbered in the order they were written. Its label says whether the agent still reads it: **In use**, **Merged into summary 3** when a later summary took its place, or **Set aside by /reset**. Click a marker to read the summary itself, which model wrote it and when, the messages it covers, and the summaries it merged. The Markdown export includes each summary as a quoted block in the same place.
+
 ### Naming, starring, and pinning
 
 Three per-row actions help you organize the archive as it grows:

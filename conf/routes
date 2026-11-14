@@ -298,6 +298,7 @@ GET     /api/conversations/channels             ApiConversationsController.listC
 GET     /api/conversations/{id}/messages        ApiConversationsController.getMessages
 GET     /api/conversations/{id}/messages/{messageId} ApiConversationsController.getMessage
 GET     /api/conversations/{id}/usage           ApiConversationsController.getUsage
+GET     /api/conversations/{id}/compactions     ApiConversationsController.getCompactions
 DELETE  /api/conversations/{id}/messages/{mid}  ApiConversationsController.deleteMessage
 GET     /api/conversations/{id}/queue           ApiConversationsController.getQueueStatus
 GET     /api/conversations/{id}/stream          ApiConversationsController.stream

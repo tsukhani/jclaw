@@ -3,8 +3,10 @@ import {
   ArrowDownTrayIcon,
   ChatBubbleOvalLeftEllipsisIcon,
 } from '@heroicons/vue/24/outline'
-import type { ConfigResponse, Conversation, Message } from '~/types/api'
+import type { ConfigResponse, Conversation, ConversationCompaction, Message } from '~/types/api'
 import { fetchConversationMessages } from '~/utils/conversation-messages'
+import { BEFORE_FIRST_MESSAGE, placeSummaryMarkers, summaryMarkdown } from '~/utils/summary-markers'
+import ConversationSummaryMarker from '~/components/ConversationSummaryMarker.vue'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription } from '~/utils/model-route'
 import { renderMarkdown } from '~/utils/chat-markdown'
@@ -21,6 +23,7 @@ watch(configData, syncVisualEnabled, { immediate: true })
 
 const conversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
+const compactions = ref<ConversationCompaction[]>([])
 
 try {
   // JCLAW-171: fetch the specific conversation by id. The previous
@@ -28,16 +31,21 @@ try {
   // parameter is silently ignored — the list returned the most-recent
   // conversation instead, so the metadata header pointed at the wrong
   // row even though the message body underneath was correct.
-  const [convo, msgs] = await Promise.all([
+  const [convo, msgs, summaries] = await Promise.all([
     $fetch<Conversation>(`/api/conversations/${id}`),
     fetchConversationMessages(id),
+    // A transcript without its summaries still reads; one that fails to load leaves the markers out.
+    $fetch<ConversationCompaction[]>(`/api/conversations/${id}/compactions`).catch(() => []),
   ])
   conversation.value = convo ?? null
   messages.value = msgs ?? []
+  compactions.value = summaries ?? []
 }
 catch {
   // handled by empty state below
 }
+
+const summaryMarkers = computed(() => placeSummaryMarkers(messages.value, compactions.value))
 
 const conversationStats = computed(() => {
   let inputTokens = 0
@@ -135,10 +143,14 @@ function exportConversation() {
     '',
   ].join('\n')
 
-  const body = messages.value.map((m) => {
-    const ts = new Date(m.createdAt).toLocaleString()
-    return `## ${m.role} — ${ts}\n\n${m.content || '(tool call)'}\n`
-  }).join('\n')
+  const markersAt = (idx: number) => (summaryMarkers.value.get(idx) ?? []).map(summaryMarkdown)
+  const body = [
+    ...markersAt(BEFORE_FIRST_MESSAGE),
+    ...messages.value.flatMap((m, idx) => {
+      const ts = new Date(m.createdAt).toLocaleString()
+      return [`## ${m.role} — ${ts}\n\n${m.content || '(tool call)'}\n`, ...markersAt(idx)]
+    }),
+  ].join('\n')
 
   const blob = new Blob([header + body], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
@@ -338,6 +350,12 @@ function exportConversation() {
       </div>
 
       <div class="space-y-3">
+        <ConversationSummaryMarker
+          v-for="marker in summaryMarkers.get(BEFORE_FIRST_MESSAGE) ?? []"
+          :key="`summary-${marker.compaction.id}`"
+          :marker="marker"
+          :agent-id="conversation?.agentId ?? null"
+        />
         <template
           v-for="(msg, msgIdx) in messages"
           :key="msg.id"
@@ -385,6 +403,12 @@ function exportConversation() {
               {{ msg.content || '(tool call)' }}
             </div>
           </div>
+          <ConversationSummaryMarker
+            v-for="marker in summaryMarkers.get(msgIdx) ?? []"
+            :key="`summary-${marker.compaction.id}`"
+            :marker="marker"
+            :agent-id="conversation?.agentId ?? null"
+          />
         </template>
       </div>
     </template>
