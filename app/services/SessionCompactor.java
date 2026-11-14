@@ -892,6 +892,10 @@ public final class SessionCompactor {
                         + "summaries stay as they are").formatted(plan.ids().size(), conversationId, read.problem()));
                 return new Merge(false, calls);
             }
+            if (!read.leftOut().isEmpty()) {
+                EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d left out what the "
+                        + "reply was not asked for: %s").formatted(plan.ids().size(), conversationId, read.leftOut()));
+            }
             Map<Integer, Integer> replaced = replacing
                     ? replacedPairs(carriedItems, condensed.getOrDefault(REPLACED_ITEMS, List.of())) : Map.of();
             var kept = without(carriedItems, replaced.keySet());
@@ -988,6 +992,7 @@ public final class SessionCompactor {
                     condensed.length()));
             return unchecked;
         }
+        logLeftOut(conversationId, read.leftOut());
         var restored = new HashSet<Integer>();
         for (var line : corrected.getOrDefault(RESTORED_ITEMS, List.of())) {
             var number = ITEM_NUMBER.matcher(line);
@@ -1019,17 +1024,25 @@ public final class SessionCompactor {
         var reply = mergeCheckReply(conversationId, plan, merged, checker, MERGE_CHECK_INSTRUCTIONS);
         if (reply == null) return merged;
         var read = replySections(reply, SECTION_NAMES, List.of());
-        var corrected = read.sections() == null ? null : fromFirstSection(reply);
-        if (corrected == null) {
+        var kept = read.sections() == null ? null : fromFirstSection(reply);
+        if (kept == null) {
             warnUnchecked(conversationId, read.problem());
             return merged;
         }
+        var corrected = kept.text();
         if (corrected.length() * 2L < merged.length()) {
             warnUnchecked(conversationId, "%d characters for a merge of %d".formatted(corrected.length(),
                     merged.length()));
             return merged;
         }
+        logLeftOut(conversationId, kept.leftOut());
         return corrected;
+    }
+
+    private static void logLeftOut(Long conversationId, String leftOut) {
+        if (leftOut.isEmpty()) return;
+        EventLogger.info("compaction", null, null, ("Checking the merge of conversation %d's summaries left out what "
+                + "the reply was not asked for: %s").formatted(conversationId, leftOut));
     }
 
     private static @Nullable String mergeCheckReply(Long conversationId, MergePlan plan, String merged,
@@ -1075,6 +1088,9 @@ public final class SessionCompactor {
     private static final String RESTORED_ITEMS = "Restored items";
     private static final List<String> CHECKED_SECTION_NAMES = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
             java.util.stream.Stream.of(RESTORED_ITEMS)).toList();
+    /** Every heading the summary, merge and check prompts name: one a call did not ask for is an echo of another's. */
+    private static final List<String> PROMPT_SECTIONS = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
+            java.util.stream.Stream.of(REPLACED_ITEMS, RESTORED_ITEMS)).toList();
 
     private static final Pattern ITEM_START = Pattern.compile("^(?:[-*\u2022]|\\d+[.)])\\s");
 
@@ -1103,69 +1119,145 @@ public final class SessionCompactor {
         return out.keySet().containsAll(required) ? out : null;
     }
 
-    /** A reply's sections, or null with what kept them from being read, for a warning; never the reply's own words. */
-    private record ReplySections(@Nullable Map<String, List<String>> sections, String problem) {}
+    /**
+     * A reply's sections, or null with what kept them from being read, for a warning; and what the reading left out,
+     * empty when nothing, for the log. Neither quotes the reply's own words.
+     */
+    private record ReplySections(@Nullable Map<String, List<String>> sections, String problem, String leftOut) {}
 
     /**
      * {@code reply}'s lines under each {@code ### } heading naming one of {@code asked}, by that name, read as models
-     * write a reply (JF-428): text before the first such heading is skipped, as are the lines under any other heading
-     * and those after a request label the reply echoes, up to the next heading; a name matches in any case, bold or
-     * with a colon. Unread when nothing names an asked section, a heading repeats, or one of {@code required} is
-     * missing.
+     * write a reply (JF-428); a name matches in any case, bold or with a colon. Left out, and named in
+     * {@code leftOut}: text before the first such heading, and the echoes of the request, a section the prompts name
+     * but this call did not ask for or a request label, with their lines up to the next heading. Any other heading is
+     * the model's own subheading, such as "### Venue" under Decisions: its lines stay in the section above, under a
+     * bold label, so nothing the model wrote is lost and a stored merge still parses ({@link #sectionsOf}). Unread
+     * when nothing names an asked section, a heading repeats, or one of {@code required} is missing.
      */
     private static ReplySections replySections(String reply, List<String> asked, List<String> required) {
-        if (reply.isBlank()) return new ReplySections(null, "an empty reply");
+        if (reply.isBlank()) return new ReplySections(null, "an empty reply", "");
         var out = new LinkedHashMap<String, List<String>>();
+        var leftOut = new ArrayList<String>();
         List<String> current = null;
+        List<String> last = null;
+        int preface = 0;
+        @Nullable Echo echo = null;
         for (var line : reply.strip().lines().toList()) {
             var name = sectionName(line, asked);
+            var echoed = name == null ? echoOf(line) : null;
+            boolean subheading = name == null && echoed == null && headingText(line) != null && last != null;
+            if (echo != null && (name != null || echoed != null || subheading)) {
+                leftOut.add(echo.described());
+                echo = null;
+            }
             if (name != null) {
-                if (out.containsKey(name)) return new ReplySections(null, "a reply with the " + name + " heading twice");
+                if (out.containsKey(name)) {
+                    return new ReplySections(null, "a reply with the " + name + " heading twice", "");
+                }
                 current = new ArrayList<>();
                 out.put(name, current);
-            } else if (line.strip().startsWith("### ") || isRequestLabel(line)) {
+                last = current;
+            } else if (echoed != null) {
                 current = null;
+                echo = echoed;
+            } else if (subheading && last != null) {
+                current = last;
+                current.add("**" + headingText(line) + "**");
             } else if (current != null) {
                 current.add(line);
+            } else if (!line.isBlank()) {
+                if (echo != null) echo.lines++;
+                else preface++;
             }
         }
-        if (out.isEmpty()) return new ReplySections(null, "a reply with none of the section headings");
+        if (echo != null) leftOut.add(echo.described());
+        if (out.isEmpty()) return new ReplySections(null, "a reply with none of the section headings", "");
         var missing = required.stream().filter(n -> !out.containsKey(n)).toList();
-        return missing.isEmpty() ? new ReplySections(out, "")
-                : new ReplySections(null, "a reply without " + joined(missing));
+        if (!missing.isEmpty()) return new ReplySections(null, "a reply without " + joined(missing), "");
+        if (preface > 0) leftOut.addFirst(lines(preface) + " before its first heading");
+        return new ReplySections(out, "", leftOut.isEmpty() ? "" : joined(leftOut));
+    }
+
+    /** An echo of the request a reply is being read past, and the non-blank lines under it so far. */
+    private static final class Echo {
+        private final String name;
+        private final boolean label;
+        private int lines;
+
+        private Echo(String name, boolean label) {
+            this.name = name;
+            this.label = label;
+        }
+
+        String described() {
+            return label ? "the " + name + " label it echoed" + (lines == 0 ? "" : ", with " + lines(lines) + " after it")
+                    : "a " + name + " section of " + lines(lines);
+        }
+    }
+
+    /** The echo {@code line} opens: a heading of {@link #PROMPT_SECTIONS} or a request label; null when neither. */
+    private static @Nullable Echo echoOf(String line) {
+        var section = sectionName(line, PROMPT_SECTIONS);
+        if (section != null) return new Echo(section, false);
+        var label = requestLabel(line);
+        return label == null ? null : new Echo(label, true);
+    }
+
+    private static String lines(int n) {
+        return n + (n == 1 ? " line" : " lines");
+    }
+
+    /** {@code line}'s heading text, bold and a trailing colon dropped, when it is a {@code ### } heading. */
+    private static @Nullable String headingText(String line) {
+        var heading = line.strip();
+        if (!heading.startsWith("### ")) return null;
+        var name = heading.substring(4).replace("**", "").strip();
+        return name.endsWith(":") ? name.substring(0, name.length() - 1).strip() : name;
     }
 
     /** The one of {@code asked} that {@code line} names as a {@code ### } heading, as {@link #replySections} matches it. */
     private static @Nullable String sectionName(String line, List<String> asked) {
-        var heading = line.strip();
-        if (!heading.startsWith("### ")) return null;
-        var name = heading.substring(4).replace("**", "").strip();
-        if (name.endsWith(":")) name = name.substring(0, name.length() - 1).strip();
+        var name = headingText(line);
+        if (name == null) return null;
         for (var section : asked) {
             if (section.equalsIgnoreCase(name)) return section;
         }
         return null;
     }
 
-    private static boolean isRequestLabel(String line) {
+    private static @Nullable String requestLabel(String line) {
         var text = line.strip();
         for (var label : REQUEST_LABELS) {
-            if (text.startsWith(label)) return true;
+            if (text.startsWith(label)) return label;
         }
-        return false;
+        return null;
     }
 
+    /** A whole merge's check reply as stored, and what was left out of it, empty when nothing. */
+    private record KeptText(String text, String leftOut) {}
+
     /** {@code reply} from its first {@code ### } heading naming a summary section up to a request label it echoes. */
-    private static @Nullable String fromFirstSection(String reply) {
+    private static @Nullable KeptText fromFirstSection(String reply) {
         var kept = new ArrayList<String>();
+        int preface = 0;
+        @Nullable Echo echo = null;
         for (var line : reply.strip().lines().toList()) {
-            if (kept.isEmpty() ? sectionName(line, SECTION_NAMES) != null : !isRequestLabel(line)) {
-                kept.add(line);
-            } else if (!kept.isEmpty()) {
-                break;
+            if (echo != null) {
+                if (!line.isBlank()) echo.lines++;
+            } else if (kept.isEmpty()) {
+                if (sectionName(line, SECTION_NAMES) != null) kept.add(line);
+                else if (!line.isBlank()) preface++;
+            } else {
+                var label = requestLabel(line);
+                if (label != null) echo = new Echo(label, true);
+                else kept.add(line);
             }
         }
-        return kept.isEmpty() ? null : String.join("\n", kept).strip();
+        if (kept.isEmpty()) return null;
+        var leftOut = new ArrayList<String>();
+        if (preface > 0) leftOut.add(lines(preface) + " before its first heading");
+        if (echo != null) leftOut.add(echo.described());
+        return new KeptText(String.join("\n", kept).strip(), leftOut.isEmpty() ? "" : joined(leftOut));
     }
 
     /** "A", "A and B", "A, B and C". */

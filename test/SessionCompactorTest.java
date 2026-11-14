@@ -1666,9 +1666,45 @@ class SessionCompactorTest extends UnitTest {
                         + "\n\n### Replaced items\nNone."
                 : sectioned(written.getAndIncrement());
 
-        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
 
         assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
+        assertEquals(List.of(("Merging 3 summaries of conversation %d left out what the reply was not asked for: 1 line "
+                + "before its first heading and a Replaced items section of 1 line").formatted(conv.id)), mergeLines(events));
+    }
+
+    @Test
+    void aMergeReplysOwnSubheadingsKeepTheirLinesUnderBoldLabelsAndTheNextMergeStillReadsItsSections() {
+        // Before, the lines under "### Venue" and "### Caveats:" were left out of the merge the agent reads.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.add(msgs);
+                return "### Decisions\n- Merged decisions\n### Venue\n- The gala moved to Pier 9.\n\n"
+                        + "### Open questions and errors\nNone.\n\n### Next steps\n- Merged next step\n### Caveats:\n"
+                        + "- Confirm the caterer.";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 6; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(2, merges.size());
+        for (var merge : merges) {
+            assertEquals(CONDENSED_HEADINGS, headings(merge.getFirst().content()),
+                    "the second merge carries the first one's sections, so the first still parses");
+        }
+        assertEquals(mergeOf(2).replace("- Merged decisions", "- Merged decisions\n**Venue**\n- The gala moved to Pier 9.")
+                .replace("- Merged next step", "- Merged next step\n**Caveats**\n- Confirm the caterer."),
+                storedSegments(conv.id).get(3).summary);
+        assertEquals(List.of(), mergeLines(events), "nothing the model wrote was left out");
     }
 
     // ─── A merge past the facts share drops what a later item replaces (JF-425) ───
@@ -1769,8 +1805,10 @@ class SessionCompactorTest extends UnitTest {
             for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
         });
 
-        assertEquals(List.of("Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1"
-                .formatted(conv.id)), mergeLines(events));
+        assertEquals(List.of(("Checking the merge of conversation %d's summaries left out what the reply was not asked "
+                + "for: 1 line before its first heading").formatted(conv.id),
+                "Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1".formatted(conv.id)),
+                mergeLines(events));
         assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary);
     }
 
@@ -1790,9 +1828,39 @@ class SessionCompactorTest extends UnitTest {
             for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
         });
 
-        assertEquals(List.of("Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1"
-                .formatted(conv.id)), mergeLines(events));
+        assertEquals(List.of(("Checking the merge of conversation %d's summaries left out what the reply was not asked "
+                + "for: the [The merge's sections] label it echoed, a Replaced items section of 2 lines and the [The "
+                + "identifiers and facts dropped as replaced] label it echoed, with 2 lines after it").formatted(conv.id),
+                "Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1".formatted(conv.id)),
+                mergeLines(events));
         assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aMergeCheckReplysOwnSubheadingStaysInItsSectionAndOneAfterAnEchoJoinsTheLastSection() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            var user = (String) msgs.get(1).content();
+            if (user.startsWith("[The summaries being merged]")) {
+                return CONDENSED + "\n### Caveat\n- Step 1, which the merge left out\n\n### Replaced items\n- 1 by 2"
+                        + "\n### Notes\n- Keep the 19:00 slot.";
+            }
+            if (user.startsWith("[Turns ")) return CONDENSED;
+            if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+            return sectioned(written.getAndIncrement());
+        };
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(mergeOf(2).replace("- Merged next step", "- Merged next step\n**Caveat**\n- Step 1, which the merge "
+                + "left out\n\n**Notes**\n- Keep the 19:00 slot."), storedSegments(conv.id).getLast().summary);
+        assertEquals(List.of(("Checking the merge of conversation %d's summaries left out what the reply was not asked "
+                + "for: a Replaced items section of 1 line").formatted(conv.id)), mergeLines(events));
     }
 
     @Test
@@ -1850,13 +1918,18 @@ class SessionCompactorTest extends UnitTest {
             });
 
             var stored = storedSegments(conv.id).getLast().summary;
+            var mergeLeftOut = ("Merging 3 summaries of conversation %d left out what the reply was not asked for: a "
+                    + "Replaced items section of 2 lines").formatted(conv.id);
             if (reply.equals(half)) {
-                assertEquals(List.of(), mergeLines(events));
+                assertEquals(List.of(mergeLeftOut, ("Checking the merge of conversation %d's summaries left out what the "
+                        + "reply was not asked for: 1 line before its first heading and a Replaced items section of 1 "
+                        + "line").formatted(conv.id)), mergeLines(events));
                 assertEquals(mergeOf(2).replace("- Merged decisions", "- Kept").replace("- Merged next step", "- Kept"),
                         stored);
             } else {
-                assertEquals(List.of(("Checking the merge of conversation %d's summaries returned 79 characters of "
-                        + "sections for a merge of 160; it is stored unchecked").formatted(conv.id)), mergeLines(events));
+                assertEquals(List.of(mergeLeftOut, ("Checking the merge of conversation %d's summaries returned 79 "
+                        + "characters of sections for a merge of 160; it is stored unchecked").formatted(conv.id)),
+                        mergeLines(events));
                 assertEquals(mergeOf(2).replace("- Merged decisions", "- Merged decisions " + "m".repeat(55)), stored);
             }
         }
@@ -1898,7 +1971,9 @@ class SessionCompactorTest extends UnitTest {
             assertEquals(reply.getValue(), storedSegments(conv.id).getLast().summary);
             assertEquals(reply.getValue().equals(whole) ? List.of(("Checking the merge of conversation %d's summaries "
                     + "returned a reply with none of the section headings; it is stored unchecked").formatted(conv.id))
-                    : List.of(), mergeLines(events));
+                    : List.of(("Checking the merge of conversation %d's summaries left out what the reply was not asked "
+                    + "for: 1 line before its first heading and the [The summaries being merged] label it echoed, with 1 "
+                    + "line after it").formatted(conv.id)), mergeLines(events));
         }
     }
 
