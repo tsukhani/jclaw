@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -825,11 +826,11 @@ public final class SessionCompactor {
      * One merge of {@code plan}'s segments, stored over them, in at most {@code callsLeft} calls. When every one holds
      * the five {@link #SECTIONS}, their {@link #CARRIED_SECTIONS} are carried across item for item, oldest first, an
      * exact duplicate once, and the model writes only the other three (JF-423); a merge that does not return those
-     * three is not stored, so the segments stay as they are. Items past {@code cap} are shown to the model numbered,
-     * and an item it names as replaced by a later item of its section is dropped ({@link #withoutReplaced}, JF-425);
-     * items still past {@code ceiling} have the model rewrite the merge whole, in one more call. A segment without
-     * the sections is rewritten whole as well (JF-161). With {@code check}, what the model wrote is checked against
-     * the segments ({@link #checkedMerge}) when a call is left for it.
+     * three is not stored, so the segments stay as they are. Past {@code cap}, the {@link #DROPPABLE_SECTION} items
+     * are shown to the model numbered, and one it names as replaced by a later one is dropped ({@link #replacedPairs},
+     * JF-425); items still past {@code ceiling} have the model rewrite the merge whole, in one more call. A segment
+     * without the sections is rewritten whole as well (JF-161). With {@code check}, what the model wrote, and each
+     * drop, is checked against the segments ({@link #checkedMerge}) when a call is left for it.
      */
     private static Merge mergeAndStore(Long conversationId, Supplier<String> modelLabel, MergePlan plan,
                                        Summarizer merger, boolean check, int callsLeft, long cap, long ceiling) {
@@ -867,8 +868,9 @@ public final class SessionCompactor {
                         .formatted(plan.ids().size(), conversationId));
                 return new Merge(false, calls);
             }
-            var kept = replacing ? withoutReplaced(carriedItems, condensed.getOrDefault(REPLACED_ITEMS, List.of()))
-                    : carriedItems;
+            Map<Integer, Integer> replaced = replacing
+                    ? replacedPairs(carriedItems, condensed.getOrDefault(REPLACED_ITEMS, List.of())) : Map.of();
+            var kept = without(carriedItems, replaced.keySet());
             @Nullable String whole = null;
             if (carriedTokens(kept) > ceiling && callsLeft > calls) {
                 calls++;
@@ -881,11 +883,22 @@ public final class SessionCompactor {
                 text = whole;
             } else {
                 var sections = condensed;
+                Set<Integer> dropped = replaced.keySet();
                 if (check && callsLeft > calls) {
                     calls++;
-                    sections = checkedMerge(conversationId, plan, sections, merger);
+                    var checked = checkedMerge(conversationId, plan, sections, carriedItems, replaced, merger);
+                    sections = checked.sections();
+                    if (!checked.restored().isEmpty()) {
+                        dropped = new HashSet<>(dropped);
+                        dropped.removeAll(checked.restored());
+                    }
                 }
-                text = assembled(kept, sections);
+                if (!replaced.isEmpty()) {
+                    EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d dropped %d "
+                            + "replaced item(s); the check restored %d").formatted(plan.ids().size(), conversationId,
+                            dropped.size(), replaced.size() - dropped.size()));
+                }
+                text = assembled(without(carriedItems, dropped), sections);
                 checkText = false;
             }
         }
@@ -920,26 +933,54 @@ public final class SessionCompactor {
         return new Merge(stored, calls);
     }
 
+    /** The model's three sections as a check left them, and the dropped items it restores. */
+    private record CheckedMerge(Map<String, List<String>> sections, Set<Integer> restored) {}
+
     /**
-     * The model's three sections as the check call corrects them against the segments they merge; {@code sections}
-     * themselves when the call fails, or returns less than half of them or without those sections.
+     * The model's three sections as the check call corrects them against the segments they merge, and of the items
+     * {@code replaced} drops (N by M, numbered as {@link #numbered} shows them) those the check finds their
+     * replacement does not replace; {@code sections} and none restored when the call fails, or returns less than half
+     * of them or without those sections.
      */
-    private static Map<String, List<String>> checkedMerge(Long conversationId, MergePlan plan,
-                                                          Map<String, List<String>> sections, Summarizer checker) {
+    private static CheckedMerge checkedMerge(Long conversationId, MergePlan plan, Map<String, List<String>> sections,
+                                             Map<String, List<String>> carried, Map<Integer, Integer> replaced,
+                                             Summarizer checker) {
         var condensed = render(sections, CONDENSED_SECTIONS);
-        var reply = mergeCheckReply(conversationId, plan, condensed, checker);
-        if (reply == null) return sections;
-        var corrected = sectionsOf(reply, SECTION_NAMES, CONDENSED_SECTIONS);
+        var unchecked = new CheckedMerge(sections, Set.of());
+        var reply = mergeCheckReply(conversationId, plan, replaced.isEmpty() ? condensed
+                : condensed + "\n\n" + DROPPED_ITEMS_LABEL + "\n\n" + drops(carried, replaced), checker,
+                replaced.isEmpty() ? MERGE_CHECK_INSTRUCTIONS : MERGE_CHECK_DROPS_INSTRUCTIONS);
+        if (reply == null) return unchecked;
+        var corrected = sectionsOf(reply, CHECKED_SECTION_NAMES, CONDENSED_SECTIONS);
         if (corrected == null || reply.length() * 2L < condensed.length()) {
             warnUnchecked(conversationId, reply.length(), condensed.length());
-            return sections;
+            return unchecked;
         }
-        return corrected;
+        var restored = new HashSet<Integer>();
+        for (var line : corrected.getOrDefault(RESTORED_ITEMS, List.of())) {
+            var number = ITEM_NUMBER.matcher(line);
+            while (number.find()) {
+                int n = Integer.parseInt(number.group(1));
+                if (replaced.containsKey(n)) restored.add(n);
+            }
+        }
+        return new CheckedMerge(corrected, restored);
+    }
+
+    /** Each dropped item and the one said to replace it, as the check reads them: "[N] old, replaced by [M] new". */
+    private static String drops(Map<String, List<String>> carried, Map<Integer, Integer> replaced) {
+        var items = carried.getOrDefault(DROPPABLE_SECTION, List.of());
+        var lines = new ArrayList<String>(replaced.size());
+        for (var drop : new java.util.TreeMap<>(replaced).entrySet()) {
+            lines.add("[" + drop.getKey() + "] " + itemKey(items.get(drop.getKey() - 1)) + " — replaced by ["
+                    + drop.getValue() + "] " + itemKey(items.get(drop.getValue() - 1)));
+        }
+        return String.join("\n", lines);
     }
 
     /** {@code merged}, a merge the model wrote whole, as the check call corrects it, under the same rules. */
     private static String checkedMerge(Long conversationId, MergePlan plan, String merged, Summarizer checker) {
-        var reply = mergeCheckReply(conversationId, plan, merged, checker);
+        var reply = mergeCheckReply(conversationId, plan, merged, checker, MERGE_CHECK_INSTRUCTIONS);
         if (reply == null || reply.length() * 2L < merged.length()) {
             if (reply != null) warnUnchecked(conversationId, reply.length(), merged.length());
             return merged;
@@ -948,9 +989,9 @@ public final class SessionCompactor {
     }
 
     private static @Nullable String mergeCheckReply(Long conversationId, MergePlan plan, String merged,
-                                                    Summarizer checker) {
+                                                    Summarizer checker, String instructions) {
         try {
-            var reply = checker.summarize(List.of(ChatMessage.system(MERGE_CHECK_INSTRUCTIONS),
+            var reply = checker.summarize(List.of(ChatMessage.system(instructions),
                     ChatMessage.user(MERGED_SUMMARIES_LABEL + "\n\n" + plan.segments() + "\n\n" + MERGE_LABEL + "\n\n"
                             + merged)));
             return reply == null ? "" : reply.strip();
@@ -981,6 +1022,12 @@ public final class SessionCompactor {
     private static final String REPLACED_ITEMS = "Replaced items";
     private static final List<String> REPLACING_SECTION_NAMES = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
             java.util.stream.Stream.of(REPLACED_ITEMS)).toList();
+    /** The one carried section an item may be dropped from as replaced: goals and facts about people never are. */
+    private static final String DROPPABLE_SECTION = "Identifiers and facts";
+    /** Where a merge's check names the dropped items whose replacement does not replace them. */
+    private static final String RESTORED_ITEMS = "Restored items";
+    private static final List<String> CHECKED_SECTION_NAMES = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
+            java.util.stream.Stream.of(RESTORED_ITEMS)).toList();
 
     private static final Pattern ITEM_START = Pattern.compile("^(?:[-*\u2022]|\\d+[.)])\\s");
 
@@ -1034,51 +1081,50 @@ public final class SessionCompactor {
         return tokens;
     }
 
-    /** {@code carried}'s items under their headings, numbered across both sections from 1, as a merge call reads them. */
+    /**
+     * {@code carried}'s {@link #DROPPABLE_SECTION} items numbered from 1 under its heading, as a merge call reads them:
+     * goals, constraints and facts about people are never offered for dropping.
+     */
     private static String numbered(Map<String, List<String>> carried) {
-        var parts = new ArrayList<String>(CARRIED_SECTIONS.size());
+        var lines = new ArrayList<String>();
         int n = 0;
-        for (var name : CARRIED_SECTIONS) {
-            var lines = new ArrayList<String>();
-            for (var item : carried.getOrDefault(name, List.of())) lines.add("[" + ++n + "] " + itemKey(item));
-            parts.add("### " + name + "\n" + (lines.isEmpty() ? "None." : String.join("\n", lines)));
-        }
-        return String.join("\n\n", parts);
+        for (var item : carried.getOrDefault(DROPPABLE_SECTION, List.of())) lines.add("[" + ++n + "] " + itemKey(item));
+        return "### " + DROPPABLE_SECTION + "\n" + (lines.isEmpty() ? "None." : String.join("\n", lines));
     }
 
     private static final Pattern REPLACED_PAIR = Pattern.compile("\\[?(\\d{1,6})]?\\s+by\\s+\\[?(\\d{1,6})",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern ITEM_NUMBER = Pattern.compile("\\[?(\\d{1,6})]?");
 
     /**
-     * {@code carried} less each item N a {@code replaced} line names as "N by M", numbered as {@link #numbered} shows
-     * them, where M is a later item of the same section: the model only points, so an item it names out of order,
-     * across sections or by a number that is not there is kept.
+     * Each item N a {@code replaced} line names as "N by M", numbered as {@link #numbered} shows them, with the M a
+     * later item that replaces it: the model only points, so an item it names out of order or by a number that is not
+     * there is kept.
      */
-    private static Map<String, List<String>> withoutReplaced(Map<String, List<String>> carried, List<String> replaced) {
-        var sectionOf = new ArrayList<String>();
-        for (var name : CARRIED_SECTIONS) {
-            for (int i = 0; i < carried.getOrDefault(name, List.of()).size(); i++) sectionOf.add(name);
-        }
-        var dropped = new HashSet<Integer>();
+    private static Map<Integer, Integer> replacedPairs(Map<String, List<String>> carried, List<String> replaced) {
+        int count = carried.getOrDefault(DROPPABLE_SECTION, List.of()).size();
+        var pairs = new LinkedHashMap<Integer, Integer>();
         for (var line : replaced) {
             var pair = REPLACED_PAIR.matcher(line);
             while (pair.find()) {
                 int n = Integer.parseInt(pair.group(1));
                 int m = Integer.parseInt(pair.group(2));
-                if (n >= 1 && n < m && m <= sectionOf.size() && sectionOf.get(n - 1).equals(sectionOf.get(m - 1))) {
-                    dropped.add(n);
-                }
+                if (n >= 1 && n < m && m <= count) pairs.putIfAbsent(n, m);
             }
         }
-        var out = new LinkedHashMap<String, List<String>>();
+        return pairs;
+    }
+
+    /** {@code carried} less the {@link #DROPPABLE_SECTION} items numbered in {@code dropped}. */
+    private static Map<String, List<String>> without(Map<String, List<String>> carried, Set<Integer> dropped) {
+        if (dropped.isEmpty()) return carried;
+        var out = new LinkedHashMap<>(carried);
+        var kept = new ArrayList<String>();
         int n = 0;
-        for (var name : CARRIED_SECTIONS) {
-            var kept = new ArrayList<String>();
-            for (var item : carried.getOrDefault(name, List.of())) {
-                if (!dropped.contains(++n)) kept.add(item);
-            }
-            out.put(name, kept);
+        for (var item : carried.getOrDefault(DROPPABLE_SECTION, List.of())) {
+            if (!dropped.contains(++n)) kept.add(item);
         }
+        out.put(DROPPABLE_SECTION, kept);
         return out;
     }
 
@@ -1853,10 +1899,10 @@ public final class SessionCompactor {
     private static final String MERGE_REPLACING_INSTRUCTIONS = mergeIntro("those three sections and the fourth below")
             + sectionsPrompt("three", CONDENSED_SECTIONS) + """
 
-            The goals, constraints and facts carried into the merge are listed after the summaries, each with a number, and they have grown past the room they may fill. So after the three sections write a fourth:
+            The identifiers and facts carried into the merge are listed after the summaries, each with a number, and the carried items have grown past the room they may fill. So after the three sections write a fourth:
 
             ### Replaced items
-            One line "N by M" for each carried item N that a later carried item M replaces or makes untrue: an old file path by its new one, a plan the user changed, a preference the user revised. Name an item only when a later one replaces it; an item that is merely old, or that no later item contradicts, stays. Write "None." when no item is replaced.
+            One line "N by M" for each listed item N that a later listed item M replaces or makes untrue: an old file path by its new one, an id or a number that changed. Name an item only when a later one replaces it; an item that is merely old, or that no later item contradicts, stays. Write "None." when no item is replaced.
             """ + MERGE_CONDENSED_RULES;
 
     private static final String MERGE_CHECK_INSTRUCTIONS = """
@@ -1867,9 +1913,19 @@ public final class SessionCompactor {
             Reply with the merge's sections whole, corrected, or unchanged when nothing is missing. No preface and no sign-off.
             """;
 
+    // JF-425: a drop rests on the merge model's word alone, so the check reviews each one.
+    private static final String MERGE_CHECK_DROPS_INSTRUCTIONS = MERGE_CHECK_INSTRUCTIONS + """
+
+            The identifiers and facts listed after the merge's sections were dropped from it, each because the item after it was said to replace it. After the corrected sections, write:
+
+            ### Restored items
+            The number of each dropped item that the item said to replace it does not really replace or make untrue, one per line, or "None." when every drop holds.
+            """;
+
     private static final String MERGED_SUMMARIES_LABEL = "[The summaries being merged]";
     private static final String MERGE_LABEL = "[The merge's sections]";
-    private static final String CARRIED_ITEMS_LABEL = "[The carried goals and facts, numbered]";
+    private static final String CARRIED_ITEMS_LABEL = "[The carried identifiers and facts, numbered]";
+    private static final String DROPPED_ITEMS_LABEL = "[The identifiers and facts dropped as replaced]";
 
     private static final String CHECK_INSTRUCTIONS = """
             A summary of part of a conversation is being checked before it replaces the turns it covers. Below are the summary and every message the user wrote in those turns, oldest first. Do not answer the user and do not call a tool.

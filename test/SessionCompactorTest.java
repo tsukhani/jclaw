@@ -1565,8 +1565,8 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void pastTheFactsShareAMergeDropsOnlyTheItemsALaterItemOfTheirSectionReplaces() {
-        // 3% of a 1,000-token budget is 30 tokens: the three segments carry 34, and 27 once two are dropped, far
+    void pastTheFactsShareAMergeDropsOnlyTheIdentifiersALaterOneReplacesAndOffersNoGoalToDrop() {
+        // 3% of a 1,000-token budget is 30 tokens: the three segments carry 34, and 29 once one is dropped, far
         // under the default ceiling of the whole budget.
         ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
         ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
@@ -1576,8 +1576,8 @@ class SessionCompactorTest extends UnitTest {
         SessionCompactor.Summarizer summarizer = msgs -> {
             if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
                 merges.add(msgs);
-                // 1 by 3 and 5 by 7 hold; 3 by 2 points back, 2 by 5 across sections, 6 by 99 and 7 by 7 nowhere.
-                return CONDENSED + "\n\n### Replaced items\n- 1 by 3\n- 5 by 7\n- 3 by 2\n- 2 by 5\n- 6 by 99\n- 7 by 7";
+                // 2 by 4 holds; 4 by 2 points back, 1 by 9 and 3 by 3 nowhere.
+                return CONDENSED + "\n\n### Replaced items\n- 2 by 4\n- 4 by 2\n- 1 by 9\n- 3 by 3";
             }
             return sectioned(written.getAndIncrement());
         };
@@ -1591,13 +1591,44 @@ class SessionCompactorTest extends UnitTest {
         var segments = storedSegments(conv.id);
         var rendered = new ArrayList<String>();
         for (var s : segments.subList(0, 3)) rendered.add(label(s.coversFrom, s.coversTo) + "\n\n" + s.summary);
-        assertEquals(ChatMessage.user(String.join("\n\n", rendered) + "\n\n[The carried goals and facts, numbered]"
-                + "\n\n### Goals and constraints\n[1] Goal 0\n[2] Goal 1\n[3] Goal 2\n\n### Identifiers and facts\n[4] "
-                + FACT + "\n[5] The repo is jclaw.\n[6] Fact 1\n[7] Fact 2"), merge.get(1));
-        assertEquals("### Goals and constraints\n- Goal 1\n- Goal 2\n\n### Decisions\n- Merged decisions"
+        assertEquals(ChatMessage.user(String.join("\n\n", rendered) + "\n\n[The carried identifiers and facts, "
+                + "numbered]\n\n### Identifiers and facts\n[1] " + FACT + "\n[2] The repo is jclaw.\n[3] Fact 1\n[4] Fact 2"),
+                merge.get(1));
+        assertEquals("### Goals and constraints\n- Goal 0\n- Goal 1\n- Goal 2\n\n### Decisions\n- Merged decisions"
                 + "\n\n### Identifiers and facts\n- " + FACT + "\n- Fact 1\n- Fact 2"
                 + "\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Merged next step",
                 segments.getLast().summary);
+    }
+
+    @Test
+    void withTheCheckOnEachDropIsReviewedAndOneItsReplacementDoesNotReplaceIsRestored() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var checks = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            var user = (String) msgs.get(1).content();
+            if (user.startsWith("[The summaries being merged]")) {
+                checks.add(msgs);
+                // 3 was never dropped, so naming it restores nothing.
+                return CONDENSED + "\n\n### Restored items\n- 1\n- 3";
+            }
+            if (user.startsWith("[Turns ")) return CONDENSED + "\n\n### Replaced items\n- 1 by 2\n- 2 by 4";
+            if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, checks.size());
+        assertEquals(List.of("Restored items"), headings(checks.getFirst().getFirst().content()));
+        assertTrue(((String) checks.getFirst().get(1).content()).endsWith("\n\n[The merge's sections]\n\n" + CONDENSED
+                + "\n\n[The identifiers and facts dropped as replaced]\n\n[1] " + FACT + " — replaced by [2] The repo is "
+                + "jclaw.\n[2] The repo is jclaw. — replaced by [4] Fact 2"), checks.getFirst().get(1).content().toString());
+        assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary,
+                "the ticket fact is restored; the repo, which the check let go, is dropped");
     }
 
     @Test
@@ -1624,7 +1655,7 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(SECTIONS, headings(merges.get(1).getFirst().content()));
         assertTrue(((String) merges.get(1).getFirst().content()).lines().toList().contains(CARRY_FORWARD));
         assertEquals(merges.get(0).get(1).content().toString().substring(0,
-                merges.get(0).get(1).content().toString().indexOf("\n\n[The carried goals")), merges.get(1).get(1).content());
+                merges.get(0).get(1).content().toString().indexOf("\n\n[The carried identifiers")), merges.get(1).get(1).content());
         var segments = storedSegments(conv.id);
         assertEquals("WHOLE MERGE", segments.getLast().summary);
         var result = segments.getLast().id;
@@ -1673,7 +1704,7 @@ class SessionCompactorTest extends UnitTest {
 
         assertEquals(1, merges.size());
         assertEquals(CONDENSED_HEADINGS, headings(merges.getFirst().getFirst().content()));
-        assertFalse(((String) merges.getFirst().get(1).content()).contains("[The carried goals and facts, numbered]"));
+        assertFalse(((String) merges.getFirst().get(1).content()).contains("[The carried identifiers and facts, numbered]"));
         assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
     }
 

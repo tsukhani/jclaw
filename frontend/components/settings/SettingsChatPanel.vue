@@ -222,7 +222,7 @@ async function saveChatField(configKey: string, value: string) {
           :min="0"
           :max="100"
           label-width="w-80"
-          tip="A merge keeps every goal, constraint and fact word for word. Once they fill more than this percent of the merge budget, a merge drops the ones a later one replaces, such as an old file path or a plan you changed. 0 never drops any. 0 to 100. Default: 50."
+          tip="A merge keeps every goal, constraint and fact word for word. Once they fill more than this percent of the merge budget, a merge drops the identifiers and facts a later one replaces, such as an old file path. Goals, constraints and what you said about people are never dropped, and with compaction.checkSummary on each drop is checked first. 0 never drops any. 0 to 100. Default: 50."
         />
         <SettingsConfigField
           config-key="chat.compaction.factsCeilingPercent"
