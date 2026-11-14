@@ -282,12 +282,14 @@ public final class KeptSkillFiles {
     /**
      * Store secret {@code name} of {@code skill} from kept {@code file}, as {@link #reading} reads it, and delete the
      * file once that commits if each name it assigns that the skill in {@code skillDir} declares then has a value.
+     * {@code setCapture} and {@code capture} change its capture rule as {@link SkillSecrets#put} does (JF-374).
      */
     public static SkillSecrets.Listing importSecret(Agent owner, String skill, Path skillDir, Path file, String name,
-                                                    List<String> hosts) throws IOException {
+                                                    List<String> hosts, boolean setCapture,
+                                                    SkillSecrets.@Nullable Capture capture) throws IOException {
         var text = text(file);
         var reading = reading(text, name, pathOf(file));
-        var saved = SkillSecrets.put(owner, skill, name, reading.value(), hosts);
+        var saved = SkillSecrets.put(owner, skill, name, reading.value(), hosts, setCapture, capture);
         afterImport(owner, skill, skillDir, file, reading.whole() ? null : text, name, "secret " + name);
         return saved;
     }
@@ -459,7 +461,10 @@ public final class KeptSkillFiles {
         return List.copyOf(out);
     }
 
-    /** The declared names {@code text} assigns that the agent holds no value for, in order. */
+    /**
+     * The declared names {@code text} assigns that the agent holds no value for, in order: a renewed secret saved with
+     * its capture rule alone has none until the proxy or the operator stores one (JF-374).
+     */
     private static List<String> waiting(Agent owner, Map<String, String> declared, String text) {
         var assigned = declaredIn(text, declared);
         if (assigned.isEmpty()) return List.of();

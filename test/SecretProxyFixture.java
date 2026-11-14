@@ -18,14 +18,18 @@ import utils.HttpFactories;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
@@ -34,11 +38,14 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
@@ -68,9 +75,23 @@ public final class SecretProxyFixture implements AutoCloseable {
         }
     }
 
+    /** A whole answer: its status, its headers, its body, and each header {@code repeated} sends once per value. */
+    public record Reply(int status, Map<String, String> headers, byte[] body, Map<String, List<String>> repeated) {
+        public Reply(int status, Map<String, String> headers, byte[] body) {
+            this(status, headers, body, Map.of());
+        }
+
+        public static Reply json(int status, String body) {
+            return new Reply(status, Map.of("Content-Type", "application/json"), body.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
     public final List<Received> received = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, Function<Received, byte[]>> routes = new ConcurrentHashMap<>();
+    private volatile Function<Received, Reply> everyOtherPath;
     private final HttpsServer server;
+    /** A thread per exchange, so two requests can be in flight at once, as two commands' sign-ins can. */
+    private final ExecutorService handlers = Executors.newCachedThreadPool();
     private final SSLContext stubContext;
     private final SSLContext trustingStub;
     private final X509TrustManager stubTrust;
@@ -107,6 +128,7 @@ public final class SecretProxyFixture implements AutoCloseable {
 
         server = HttpsServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.setHttpsConfigurator(new HttpsConfigurator(stubContext));
+        server.setExecutor(handlers);
         server.createContext("/", this::handle);
         server.start();
         routes.put("/echo", r -> ("method=" + r.method() + "\ntarget=" + r.target() + "\nx-api-key=" + r.header("X-Api-Key")
@@ -120,6 +142,11 @@ public final class SecretProxyFixture implements AutoCloseable {
     /** Answer {@code path} with what {@code respond} returns for the request. */
     public void route(String path, Function<Received, byte[]> respond) {
         routes.put(path, respond);
+    }
+
+    /** Answer every path no route names, the path as the stub decodes it, with what {@code respond} returns. */
+    public void replyToEveryOtherPath(Function<Received, Reply> respond) {
+        everyOtherPath = respond;
     }
 
     private void handle(HttpExchange exchange) throws IOException {
@@ -138,6 +165,17 @@ public final class SecretProxyFixture implements AutoCloseable {
             return;
         }
         var respond = routes.get(path);
+        var fallback = everyOtherPath;
+        if (respond == null && fallback != null) {
+            var reply = fallback.apply(request);
+            reply.headers().forEach((name, value) -> exchange.getResponseHeaders().add(name, value));
+            reply.repeated().forEach((name, values) -> values.forEach(v -> exchange.getResponseHeaders().add(name, v)));
+            exchange.sendResponseHeaders(reply.status(), reply.body().length == 0 ? -1 : reply.body().length);
+            try (var os = exchange.getResponseBody()) {
+                os.write(reply.body());
+            }
+            return;
+        }
         var out = respond == null ? "no route".getBytes(StandardCharsets.UTF_8) : respond.apply(request);
         exchange.sendResponseHeaders(respond == null ? 404 : 200, out.length == 0 ? -1 : out.length);
         try (var os = exchange.getResponseBody()) {
@@ -172,6 +210,46 @@ public final class SecretProxyFixture implements AutoCloseable {
         }
     }
 
+    /**
+     * The whole reply, head and body, to {@code head} sent as written inside a tunnel to {@link #BOUND} opened with
+     * {@code grant}'s login: for a request line no client would send, such as one with dot segments.
+     */
+    public String raw(SecretGrant grant, String head) throws Exception {
+        var proxyUrl = URI.create(grant.environment().get("HTTPS_PROXY"));
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), SecretProxy.portForTest())) {
+            socket.setSoTimeout(30_000);
+            socket.getOutputStream().write(("CONNECT " + BOUND + ":" + port() + " HTTP/1.1\r\nProxy-Authorization: Basic "
+                    + Base64.getEncoder().encodeToString(proxyUrl.getUserInfo().getBytes(StandardCharsets.UTF_8))
+                    + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            var established = line(socket.getInputStream());
+            if (!established.equals("HTTP/1.1 200 Connection established")) return established;
+            line(socket.getInputStream());
+            var tls = (SSLSocket) jclawTrust().getSocketFactory().createSocket(socket, BOUND, port(), true);
+            tls.startHandshake();
+            tls.getOutputStream().write(head.getBytes(StandardCharsets.US_ASCII));
+            return new String(tls.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static String line(InputStream in) throws IOException {
+        var out = new ByteArrayOutputStream();
+        int c;
+        while ((c = in.read()) >= 0 && c != '\n') out.write(c);
+        var line = out.toString(StandardCharsets.ISO_8859_1);
+        return line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+    }
+
+    private static SSLContext jclawTrust() throws Exception {
+        var trustStore = KeyStore.getInstance("PKCS12");
+        trustStore.load(null, null);
+        trustStore.setCertificateEntry("jclaw", SecretProxy.caForTest());
+        var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trustStore);
+        var context = SSLContext.getInstance("TLS");
+        context.init(null, tmf.getTrustManagers(), null);
+        return context;
+    }
+
     public static OkHttpClient through(String user, String token) throws Exception {
         var trustStore = KeyStore.getInstance("PKCS12");
         trustStore.load(null, null);
@@ -194,5 +272,6 @@ public final class SecretProxyFixture implements AutoCloseable {
     @Override
     public void close() {
         server.stop(0);
+        handlers.shutdown();
     }
 }

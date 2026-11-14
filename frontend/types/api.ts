@@ -789,6 +789,8 @@ export interface AgentSkill {
   heldBySwitchedOff?: Record<string, string>
   /** For each of `needsValues` another skill of the agent holds that is on but not offered (a tool it needs is off), that skill. */
   heldByNotOffered?: Record<string, string>
+  /** For each of `needsValues` another skill holds as a renewed secret with no value yet, that skill, whose sign-in fills it. */
+  filledBySignIn?: Record<string, SignInHolder>
   /** Whether the agent is not offered this skill for `needsValues` alone, as each turn it starts is told. */
   withheld?: boolean
   [key: string]: unknown
@@ -800,8 +802,39 @@ export interface SkillUpdatePreview {
   needs: string[]
   /** For each of `needs` another skill of the agent holds, that skill, which is switched off. */
   heldBySwitchedOff: Record<string, string>
+  /** For each of `needs` another skill holds as a renewed secret with no value yet, that skill, whose sign-in fills it. */
+  filledBySignIn?: Record<string, SignInHolder>
   /** Files of the agent's copy that JClaw keeps outside the skill before replacing it. */
   keeps: string[]
+}
+
+/**
+ * Where a skill that holds a value another skill needs stands (JF-374): `offered` (for a sign-in holder, its sign-in has
+ * not run yet), `switchedOff`, `notOffered` (switched on, but a tool it needs is off or it is withheld for a value of
+ * its own), or, in a skill's Secrets panel, `notInstalled` (its folder is gone, so no other skill can add the name).
+ */
+export type HolderState = 'offered' | 'switchedOff' | 'notOffered' | 'notInstalled'
+
+/** The skill whose renewed secret, still empty, holds a name another skill needs, and where that skill stands. */
+export interface SignInHolder {
+  skill: string
+  state: HolderState
+}
+
+/**
+ * A renewed secret's capture rule (JF-374): the secrets proxy takes the secret's new value from `field`, a JSON field or
+ * a response header, of a success or redirect from one of its hosts answering `method` on `path`, to a sign-in that sent
+ * `credential`'s stand-in once in `credentialIn`.
+ */
+export interface SkillSecretCapture {
+  method: string
+  path: string
+  from: 'json' | 'header'
+  field: string
+  /** One of the skill's secrets, the renewed one itself included, which the sign-in sends. */
+  credential: string
+  /** Where the sign-in sends it: `json <field>`, `form <field>`, `header <name>`, or `basic` (the Basic auth password). */
+  credentialIn: string
 }
 
 /** One file kept from a skill's old copy, as GET /api/agents/:id/skills/:name/kept lists it: never its content. */

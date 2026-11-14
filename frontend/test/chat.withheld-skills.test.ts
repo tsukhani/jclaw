@@ -94,6 +94,31 @@ describe('Chat page: skills withheld for a missing value', () => {
     expect(page.find('[data-testid="withheld-skill-link-lidarr"]').exists()).toBe(false)
   })
 
+  it('names a value another skill\'s sign-in fills with that skill, and says when it is switched off or not offered', async () => {
+    setupChatApi({ 3: () => [
+      skill('reports', { needsValues: ['REPORTS_KEY', 'SESSION_KEY'], withheld: true,
+        filledBySignIn: { SESSION_KEY: { skill: 'backoffice', state: 'offered' } } }),
+      skill('ledger', { needsValues: ['SESSION_KEY', 'REFRESH_KEY'], withheld: true,
+        filledBySignIn: { SESSION_KEY: { skill: 'backoffice', state: 'switchedOff' }, REFRESH_KEY: { skill: 'backoffice', state: 'switchedOff' } } }),
+      skill('audit', { needsValues: ['SESSION_KEY'], withheld: true,
+        filledBySignIn: { SESSION_KEY: { skill: 'backoffice', state: 'notOffered' } } }),
+    ] })
+    const page = await mountSuspended(Chat)
+    await flushPromises()
+
+    expect(['reports', 'ledger', 'audit'].map(f => text(page.find(`[data-testid="withheld-skill-${f}"]`).text()))).toEqual([
+      'reports isn\'t offered to this agent until it has REPORTS_KEY. Open Secrets panel of reports'
+      + ' It needs SESSION_KEY, filled by backoffice\'s sign-in, which has not run yet: once it has, this skill can use it.'
+      + ' Open backoffice for reports',
+      'ledger isn\'t offered to this agent. It needs SESSION_KEY, REFRESH_KEY, filled by backoffice\'s sign-in, and'
+      + ' backoffice is switched off: switch backoffice on so its sign-in can fill them. Open backoffice for ledger',
+      'audit isn\'t offered to this agent. It needs SESSION_KEY, filled by backoffice\'s sign-in, and backoffice is not'
+      + ' offered right now: once it is, its sign-in can fill it. Open backoffice for audit',
+    ])
+    expect(page.find('[data-testid="withheld-signin-link-reports-backoffice"]').attributes('href'))
+      .toBe('/skills?agent=3&skill=backoffice')
+  })
+
   it('shows no notice when no skill is withheld for a value', async () => {
     setupChatApi({ 3: () => [skill('plain'), skill('notes', { needsValues: ['NOTES_KEY'] })] })
     const page = await mountSuspended(Chat)

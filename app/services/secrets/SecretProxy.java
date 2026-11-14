@@ -6,9 +6,11 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.Response;
 import okio.BufferedSink;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.SkillSecrets;
 import utils.HttpFactories;
 
 import javax.net.ssl.SSLSocket;
@@ -37,8 +39,9 @@ import java.util.regex.Pattern;
  * The loopback HTTPS proxy a command with skill secrets is pointed at (JF-324). Only a command holding a live grant's
  * login gets through. Every HTTPS request it sends is opened here, so the proxy sees each one whole: it writes a
  * secret's value where its placeholder stands only when the request goes to one of that secret's hosts, refuses a
- * request carrying any other placeholder, and turns a value a server sends back into its placeholder. It forwards one
- * request per tunnel, follows no redirect, and carries nothing but HTTPS.
+ * request carrying any other placeholder, and turns a value a server sends back into its placeholder. A renewed
+ * secret's new value, in the answer its capture rule names, it stores and replaces likewise ({@link SecretCapture},
+ * JF-374). It forwards one request per tunnel, follows no redirect, and carries nothing but HTTPS.
  *
  * <p>Unlike {@link tools.BrowserScreenProxy}, which screens destinations and copies bytes, this proxy must read each
  * request line and header, so it terminates TLS with a certificate {@link SecretsCa} issues for the host. A request
@@ -213,7 +216,9 @@ public final class SecretProxy {
 
     private void forward(SecretGrant grant, String host, int port, Head head, InputStream in, OutputStream out)
             throws IOException, PlaceholderRewriter.Refused {
-        var target = PlaceholderRewriter.substitute(head.target(), grant, host, port, PlaceholderRewriter.Encoding.PERCENT);
+        var replaced = new PlaceholderRewriter.Replaced();
+        var target = PlaceholderRewriter.substitute(head.target(), grant, host, port, PlaceholderRewriter.Encoding.PERCENT,
+                replaced);
         var headers = new Headers.Builder();
         String contentType = null;
         for (var h : head.headers()) {
@@ -221,8 +226,10 @@ public final class SecretProxy {
             var lower = name.toLowerCase(Locale.ROOT);
             if (NOT_FORWARDED.contains(lower)) continue;
             var value = h[1];
-            if (lower.equals("authorization")) value = PlaceholderRewriter.substituteBasic(value, grant, host, port);
-            value = PlaceholderRewriter.substitute(value, grant, host, port, PlaceholderRewriter.Encoding.HEADER);
+            if (lower.equals("authorization")) {
+                value = PlaceholderRewriter.substituteBasic(value, grant, host, port, replaced);
+            }
+            value = PlaceholderRewriter.substitute(value, grant, host, port, PlaceholderRewriter.Encoding.HEADER, replaced);
             if (lower.equals("content-type")) contentType = value;
             headers.addUnsafeNonAscii(name, text(value));
         }
@@ -230,50 +237,91 @@ public final class SecretProxy {
             out.write("HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
         }
-        var body = body(grant, host, port, head, in, contentType);
+        var body = body(grant, host, port, head, in, contentType, replaced);
         var url = upstreamUrl(host, port, text(target));
         if (url == null) throw new PlaceholderRewriter.Refused(NOT_A_PATH);
-        var request = new Request.Builder().url(url).headers(headers.build()).method(head.method(), body).build();
+        var request = new Request.Builder().url(url).headers(headers.build()).method(head.method(), body.body()).build();
+        SecretCapture capture;
+        try {
+            capture = SecretCapture.forRequest(grant, host, port, request,
+                    new SecretCapture.Sent(head.headers(), body.sent(), contentType));
+        } catch (RuntimeException e) {
+            // Without the rules, the answer could hold a key the proxy should have taken: send nothing.
+            EventLogger.warn(SkillSecrets.LOG_CATEGORY, grant.ownerName(), null, ("Secrets proxy: could not read the"
+                    + " capture rules for a request to %s, so it was not sent: %s").formatted(host,
+                    e.getClass().getSimpleName()));
+            reply(out, 502, "Bad Gateway", SecretCapture.UNCHECKED);
+            return;
+        }
         var bound = grant.upstream();
         var client = bound != null ? bound : upstreamClient();
         try (var response = client.newCall(request).execute()) {
-            var masker = new PlaceholderRewriter.Masker(grant.bindings());
-            var status = new StringBuilder("HTTP/1.1 ").append(response.code()).append(' ')
-                    .append(response.message().isBlank() ? "Response" : response.message()).append("\r\n");
             boolean noBody = head.method().equals("HEAD") || response.code() == 204 || response.code() == 304
                     || response.code() < 200;
-            for (var i = 0; i < response.headers().size(); i++) {
-                var name = response.headers().name(i);
-                var lower = name.toLowerCase(Locale.ROOT);
-                if (NOT_RETURNED.contains(lower) && !(noBody && lower.equals("content-length"))) continue;
-                status.append(name).append(": ").append(masker.mask(response.headers().value(i))).append("\r\n");
-            }
-            status.append("Connection: close\r\n\r\n");
-            out.write(status.toString().getBytes(StandardCharsets.UTF_8));
-            if (!noBody) {
-                var source = response.body().byteStream();
-                var buf = new byte[COPY_BUFFER + 4096];
-                int carried = 0;
-                int n;
-                while ((n = source.read(buf, carried, buf.length - carried)) >= 0) {
-                    int len = carried + n;
-                    int used = masker.feed(buf, len, false, out);
-                    carried = len - used;
-                    System.arraycopy(buf, used, buf, 0, carried);
-                    if (carried == buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+            byte[] read = null;
+            // Judged only now: a streamed body's stand-ins are replaced, and counted, as it is sent.
+            var judged = capture != null && SecretCapture.answers(response) ? capture.judge(replaced) : null;
+            if (judged != null) {
+                var taken = judged.take(response, noBody);
+                if (taken == null) {
+                    reply(out, 502, "Bad Gateway", SecretCapture.WITHHELD);
+                    return;
                 }
-                masker.feed(buf, carried, true, out);
+                read = taken.body();
             }
-            out.flush();
+            respond(response, noBody, read, grant, out);
         } catch (IOException e) {
             if (e.getCause() instanceof PlaceholderRewriter.Refused refused) throw refused;
             reply(out, 502, "Bad Gateway", "JClaw could not reach %s: %s".formatted(host, e.getClass().getSimpleName()));
         }
     }
 
-    /** The request body, rewritten: whole when it is small, streamed when it is long. */
-    private static @Nullable RequestBody body(SecretGrant grant, String host, int port, Head head, InputStream in,
-                                              @Nullable String contentType) throws IOException, PlaceholderRewriter.Refused {
+    /**
+     * Send {@code response} to the command with every value {@code grant} holds masked: its body, or {@code read} in
+     * its place when a capture read and rewrote it. Read after the capture, which gives the grant the value it stored.
+     */
+    private static void respond(Response response, boolean noBody, byte @Nullable [] read, SecretGrant grant,
+                                OutputStream out) throws IOException {
+        var masker = new PlaceholderRewriter.Masker(grant.bindings());
+        var status = new StringBuilder("HTTP/1.1 ").append(response.code()).append(' ')
+                .append(response.message().isBlank() ? "Response" : response.message()).append("\r\n");
+        for (var i = 0; i < response.headers().size(); i++) {
+            var name = response.headers().name(i);
+            var lower = name.toLowerCase(Locale.ROOT);
+            if (NOT_RETURNED.contains(lower) && !(noBody && lower.equals("content-length"))) continue;
+            status.append(name).append(": ").append(masker.mask(response.headers().value(i))).append("\r\n");
+        }
+        status.append("Connection: close\r\n\r\n");
+        out.write(status.toString().getBytes(StandardCharsets.UTF_8));
+        if (read != null) {
+            masker.feed(read, read.length, true, out);
+        } else if (!noBody) {
+            var source = response.body().byteStream();
+            var buf = new byte[COPY_BUFFER + 4096];
+            int carried = 0;
+            int n;
+            while ((n = source.read(buf, carried, buf.length - carried)) >= 0) {
+                int len = carried + n;
+                int used = masker.feed(buf, len, false, out);
+                carried = len - used;
+                System.arraycopy(buf, used, buf, 0, carried);
+                if (carried == buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+            }
+            masker.feed(buf, carried, true, out);
+        }
+        out.flush();
+    }
+
+    /**
+     * A request body as it goes upstream, and {@code sent}, the body as the command wrote it, or null when it streams,
+     * too long to read whole.
+     */
+    private record Body(@Nullable RequestBody body, byte @Nullable [] sent) {}
+
+    /** The request body, rewritten, each stand-in counted in {@code replaced}: whole when it is small, streamed when it is long. */
+    private static Body body(SecretGrant grant, String host, int port, Head head, InputStream in,
+                             @Nullable String contentType, PlaceholderRewriter.Replaced replaced)
+            throws IOException, PlaceholderRewriter.Refused {
         var transfer = head.header("transfer-encoding");
         boolean chunked = transfer != null && transfer.toLowerCase(Locale.ROOT).contains("chunked");
         var lengthHeader = head.header("content-length");
@@ -288,16 +336,25 @@ public final class SecretProxy {
         var media = contentType == null ? null : MediaType.parse(contentType);
         var encoding = contentType == null ? PlaceholderRewriter.Encoding.RAW : PlaceholderRewriter.bodyEncoding(contentType);
         if (!chunked && length == 0) {
-            return needsBody(head.method()) ? RequestBody.create(new byte[0], media) : null;
+            return new Body(needsBody(head.method()) ? RequestBody.create(new byte[0], media) : null, new byte[0]);
         }
         BodySource source = chunked ? new ChunkedIn(in) : new LimitedIn(in, length);
         var first = readUpTo(source, BUFFERED_BODY_LIMIT + 1);
         if (first.length <= BUFFERED_BODY_LIMIT) {
             var out = new ByteArrayOutputStream(first.length + 64);
-            new PlaceholderRewriter.Substituter(grant, host, port, encoding).feed(first, first.length, true, out);
-            return RequestBody.create(out.toByteArray(), media);
+            new PlaceholderRewriter.Substituter(grant, host, port, encoding, replaced).feed(first, first.length, true, out);
+            return new Body(RequestBody.create(out.toByteArray(), media), first);
         }
-        return new StreamingBody(media, first, source, new PlaceholderRewriter.Substituter(grant, host, port, encoding));
+        return new Body(new StreamingBody(media, first, source,
+                new PlaceholderRewriter.Substituter(grant, host, port, encoding, replaced)), null);
+    }
+
+    /**
+     * Whether the proxy forwards a request header so named: a capture rule's credential may sit only in one the
+     * service receives (JF-374).
+     */
+    public static boolean forwardsHeader(String name) {
+        return !NOT_FORWARDED.contains(name.toLowerCase(Locale.ROOT));
     }
 
     /**

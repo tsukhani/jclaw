@@ -29,6 +29,7 @@ import type {
   SkillToolRef,
   SkillUpdatePreview,
 } from '~/types/api'
+import { signInClause, signInGroups } from '~/utils/sign-in-holders'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -551,7 +552,8 @@ async function previewUpdate(agentId: number, skillName: string): Promise<SkillU
 /** The warning an update's confirmation carries, or '' when it needs and keeps nothing. */
 function updateWarning(preview: SkillUpdatePreview): string {
   const parts: string[] = []
-  const toAdd = preview.needs.filter(name => !preview.heldBySwitchedOff[name])
+  const filledBySignIn = preview.filledBySignIn ?? {}
+  const toAdd = preview.needs.filter(name => !preview.heldBySwitchedOff[name] && !filledBySignIn[name])
   if (toAdd.length) {
     const one = toAdd.length === 1
     parts.push(`The new version needs ${one ? 'a value' : 'values'} this agent does not have yet: `
@@ -566,6 +568,10 @@ function updateWarning(preview: SkillUpdatePreview): string {
   for (const [holder, names] of bySkill) {
     parts.push(`The new version needs ${names.join(', ')}, set in ${holder}, which is switched off. Switch ${holder} on `
       + `so this skill can use ${names.length === 1 ? 'it' : 'them'}.`)
+  }
+  // A renewed secret with no value yet is its own skill's to fill, at that skill's next sign-in.
+  for (const group of signInGroups(preview.needs, filledBySignIn)) {
+    parts.push(`The new version needs ${group.names.join(', ')}, ${signInClause(group)}.`)
   }
   if (preview.keeps.length) {
     const one = preview.keeps.length === 1

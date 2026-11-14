@@ -1028,6 +1028,42 @@ describe('Skills page — an update names what it needs and keeps (JF-352)', () 
       + ' set in nas, which is switched off. Switch nas on so this skill can use them.')
   })
 
+  it('a value another skill\'s sign-in fills is named with that skill and its state, not as one to add', async () => {
+    copyEndpoint()
+    const previews = [
+      { SESSION_KEY: { skill: 'backoffice', state: 'offered' } },
+      { SESSION_KEY: { skill: 'backoffice', state: 'switchedOff' }, REFRESH_KEY: { skill: 'backoffice', state: 'switchedOff' } },
+      { SESSION_KEY: { skill: 'backoffice', state: 'notOffered' } },
+    ]
+    let shown = 0
+    registerEndpoint('/api/agents/1/skills/web-search/update-preview', () => {
+      const filledBySignIn = previews[shown++]!
+      return { needs: ['SEARCH_API_KEY', ...Object.keys(filledBySignIn)], heldBySwitchedOff: {}, filledBySignIn, keeps: [] }
+    })
+    olderCopy()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+
+    const messages: string[] = []
+    for (let i = 0; i < previews.length; i++) {
+      await clickUpdate(component)
+      messages.push(dialogMessage())
+      dialogButton('Cancel')!.click()
+      await flushPromises()
+      await flushPromises()
+    }
+    const lead = 'Update \'web-search\' to version 2.0.0?\n\nThe new version needs a value this agent does not have yet:'
+      + ' SEARCH_API_KEY. Add it in the skill\'s Secrets panel.\n\n'
+    expect(messages).toEqual([
+      lead + 'The new version needs SESSION_KEY, filled by backoffice\'s sign-in, which has not run yet: once it has, this'
+      + ' skill can use it.',
+      lead + 'The new version needs SESSION_KEY, REFRESH_KEY, filled by backoffice\'s sign-in, and backoffice is switched'
+      + ' off: switch backoffice on so its sign-in can fill them.',
+      lead + 'The new version needs SESSION_KEY, filled by backoffice\'s sign-in, and backoffice is not offered right now:'
+      + ' once it is, its sign-in can fill it.',
+    ])
+  })
+
   it('a preview that fails on the drop path replaces nothing and says why', async () => {
     const calls = copyEndpoint()
     registerEndpoint('/api/agents/1/skills/web-search/update-preview', (event) => {

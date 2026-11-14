@@ -99,6 +99,11 @@ public class Tx {
      *
      * <p>Fires only on {@link Status#STATUS_COMMITTED} — a rolled-back write invalidated
      * nothing, so evicting for it would discard a live entry for no reason.
+     *
+     * <p>The action runs with the transaction's connection already back in the pool: Hibernate
+     * releases it inside the JDBC commit, before it calls the synchronization (JF-397, pinned in
+     * {@code TxTest}). So an action that waits on a lock holds no connection the lock's holder
+     * may need.
      */
     public static void afterCommit(Runnable action) {
         if (!JPA.isInsideTransaction()) {

@@ -169,6 +169,11 @@ public class SkillLoader {
         GENERATION.incrementAndGet();
     }
 
+    /** How many times {@link #clearCache} has run, so a cache kept beside this one can tell it was cleared. */
+    public static long generation() {
+        return GENERATION.get();
+    }
+
     /**
      * Run {@code body} with {@code afterRead} run by each scan it starts, once the scan has read the config and before
      * its result is stored, so a test can change and clear what a running scan read.
@@ -550,6 +555,20 @@ public class SkillLoader {
             var skill = printable(held.getKey().skill());
             var names = String.join(", ", held.getValue());
             var them = held.getValue().size() == 1 ? "it" : "them";
+            if (held.getKey().filledBySignIn()) {
+                if (held.getKey().switchedOff()) {
+                    out.append((" %s needs %s, filled by %s's sign-in, and %s is switched off: switch %s on so its"
+                            + " sign-in can fill %s.").formatted(folder, names, skill, skill, skill, them));
+                } else if (!held.getKey().offered()) {
+                    // Not offered for a tool that is off or for a value of its own: either way its sign-in cannot run.
+                    out.append((" %s needs %s, filled by %s's sign-in, and %s is not offered right now: once it is,"
+                            + " its sign-in can fill %s.").formatted(folder, names, skill, skill, them));
+                } else {
+                    out.append(" %s needs %s, filled by %s's sign-in, which has not run yet: once it has, %s can use %s."
+                            .formatted(folder, names, skill, folder, them));
+                }
+                continue;
+            }
             out.append(held.getKey().switchedOff()
                     ? " %s needs %s, set in %s, which is switched off: switch %s on so %s can use %s."
                             .formatted(folder, names, skill, skill, folder, them)

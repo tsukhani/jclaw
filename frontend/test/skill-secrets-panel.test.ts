@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
@@ -542,5 +542,435 @@ describe('SkillSecretsPanel', () => {
 
     await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
     expect(sent).toEqual({ fromKept: 'k2' })
+  })
+
+  // ===== JF-374: a renewed secret and its capture rule =====
+
+  const rule = {
+    method: 'POST', path: '/v1/sessions/current', from: 'json', field: 'session',
+    credential: 'BACKOFFICE_PASSWORD', credentialIn: 'json password',
+  }
+  const inputValue = (wrapper: VueWrapper, name: string) =>
+    (wrapper.find(`[name="${name}"]`).element as HTMLInputElement | HTMLSelectElement).value
+
+  it('shows a renewed secret\'s rule and when the proxy last renewed it, or that it has no value yet', async () => {
+    registerEndpoint('/api/agents/71/skills/demo/secrets', () => ({
+      secrets: [
+        { name: 'A_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: rule, renewedAt: '2026-11-13T09:00:00Z' },
+        { name: 'B_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: false, capture: { ...rule, from: 'header', field: 'X-Session', credential: 'B_SESSION', credentialIn: 'header api-key' }, renewedAt: null },
+        { name: 'C_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null },
+      ],
+      expected: [
+        { name: 'D_SESSION', description: 'The session key', exampleHosts: [], optional: false, set: false, setIn: null, renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 71, skillName: 'demo' } })
+    await settle()
+
+    expect(wrapper.find('[data-testid="secret-A_SESSION-renewal"]').text().replace(/\s+/g, ' ')).toBe(
+      'Taken from the answer to POST /v1/sessions/current, JSON field session, signed in with BACKOFFICE_PASSWORD in'
+      + ` JSON field password · renewed ${new Date('2026-11-13T09:00:00Z').toLocaleString()}`)
+    expect(wrapper.find('[data-testid="secret-B_SESSION-renewal"]').text().replace(/\s+/g, ' ')).toBe(
+      'Taken from the answer to POST /v1/sessions/current, header X-Session, signed in with B_SESSION in header api-key'
+      + ' · no value yet: JClaw stores one at the skill\'s next sign-in')
+    expect(wrapper.find('[data-testid="secret-C_KEY-renewal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="declared-D_SESSION"]').text()).toContain('Renewed at sign-in, not set')
+  })
+
+  it('adding a declared renewed secret starts with Renewed ticked and its suggested rule filled, flagged', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/72/skills/demo/secrets', () => ({
+      secrets: [{ name: 'BACKOFFICE_PASSWORD', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null }],
+      expected: [
+        { name: 'SESSION_KEY', description: 'The session key', exampleHosts: ['api.example.com'], optional: false, set: false, setIn: null, renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    registerEndpoint('/api/agents/72/skills/demo/secrets/SESSION_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'SESSION_KEY', hosts: ['api.internal.example'], setAt: '2026-11-13T09:00:00Z', hasValue: false, capture: rule, renewedAt: null }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 72, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SESSION_KEY"]').trigger('click')
+    expect((wrapper.find('input[name="secret-renew"]').element as HTMLInputElement).checked).toBe(true)
+    expect(['secret-capture-method', 'secret-capture-path', 'secret-capture-from', 'secret-capture-field',
+      'secret-capture-credential', 'secret-capture-credential-in', 'secret-capture-credential-field']
+      .map(name => inputValue(wrapper, name)))
+      .toEqual(['POST', '/v1/sessions/current', 'json', 'session', 'BACKOFFICE_PASSWORD', 'json', 'password'])
+    expect(wrapper.find('[data-testid="secret-form-rule-caution"]').text().replace(/\s+/g, ' ')).toBe(
+      'This rule comes from the skill\'s own files, which the agent can change. Check the method, the path, the'
+      + ' field and the secret its sign-in sends against the service before you save.')
+    expect(wrapper.find('input[name="secret-value"]').attributes('placeholder'))
+      .toBe('Leave empty: JClaw takes it from the next sign-in')
+
+    await wrapper.find('input[name="secret-hosts"]').setValue('api.internal.example')
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ hosts: ['api.internal.example'], capture: rule })
+  })
+
+  it('a suggested rule\'s caution stays while any rule field still holds the suggestion, and goes once none does', async () => {
+    registerEndpoint('/api/agents/81/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SESSION_KEY', description: '', exampleHosts: [], optional: false, set: false, setIn: null, renewed: true, suggested: { ...rule, credentialIn: 'header X-Password' } },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 81, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SESSION_KEY"]').trigger('click')
+    const shown: string[] = []
+    for (const [name, value] of [['secret-capture-method', 'PUT'], ['secret-capture-path', '/v2/sessions'],
+      ['secret-capture-from', 'header'], ['secret-capture-field', 'token'], ['secret-capture-credential', 'SESSION_KEY'],
+      ['secret-capture-credential-in', 'form'], ['secret-capture-credential-field', 'pass']] as const) {
+      await wrapper.find(`[name="${name}"]`).setValue(value)
+      if (wrapper.find('[data-testid="secret-form-rule-caution"]').exists()) shown.push(name)
+    }
+    expect(shown).toEqual(['secret-capture-method', 'secret-capture-path', 'secret-capture-from', 'secret-capture-field',
+      'secret-capture-credential', 'secret-capture-credential-in'])
+  })
+
+  it('a suggested rule\'s caution goes once every typed field differs, though both choices still match', async () => {
+    registerEndpoint('/api/agents/85/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SESSION_KEY', description: '', exampleHosts: [], optional: false, set: false, setIn: null, renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 85, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SESSION_KEY"]').trigger('click')
+    for (const [name, value] of [['secret-capture-method', 'PUT'], ['secret-capture-path', '/v2/sessions'],
+      ['secret-capture-field', 'token'], ['secret-capture-credential', 'SESSION_KEY'],
+      ['secret-capture-credential-field', 'pass']] as const) {
+      await wrapper.find(`[name="${name}"]`).setValue(value)
+    }
+    expect([inputValue(wrapper, 'secret-capture-from'), inputValue(wrapper, 'secret-capture-credential-in')])
+      .toEqual(['json', 'json'])
+    expect(wrapper.find('[data-testid="secret-form-rule-caution"]').exists()).toBe(false)
+  })
+
+  it('after Replace, ticking Renewed fills the whole rule from the suggestion and flags it', async () => {
+    registerEndpoint('/api/agents/86/skills/demo/secrets', () => ({
+      secrets: [{ name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null }],
+      expected: [
+        { name: 'SESSION_KEY', description: '', exampleHosts: [], optional: false, set: true, setIn: 'demo', setInState: 'offered', renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 86, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Replace SESSION_KEY"]').trigger('click')
+    expect(wrapper.find('[data-testid="secret-form-rule"]').exists()).toBe(false)
+    await wrapper.find('input[name="secret-renew"]').setValue(true)
+    expect(['secret-capture-method', 'secret-capture-path', 'secret-capture-from', 'secret-capture-field',
+      'secret-capture-credential', 'secret-capture-credential-in', 'secret-capture-credential-field']
+      .map(name => inputValue(wrapper, name)))
+      .toEqual(['POST', '/v1/sessions/current', 'json', 'session', 'BACKOFFICE_PASSWORD', 'json', 'password'])
+    expect(wrapper.find('[data-testid="secret-form-rule-caution"]').exists()).toBe(true)
+  })
+
+  it('sends the secret the sign-in sends and the place it sends it, and hides the field name for Basic auth', async () => {
+    const sent: Record<string, unknown>[] = []
+    registerEndpoint('/api/agents/82/skills/demo/secrets', () => ({
+      secrets: [{ name: 'BACKOFFICE_PASSWORD', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null }],
+      expected: [],
+      missing: [],
+    }))
+    registerEndpoint('/api/agents/82/skills/demo/secrets/SESSION_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent.push(await readBody(event) as Record<string, unknown>)
+        return { name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T09:00:00Z', hasValue: false, capture: rule, renewedAt: null }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 82, skillName: 'demo' } })
+    await settle()
+
+    const fieldShown: boolean[] = []
+    for (const [place, field] of [['json', ' password '], ['form', 'password'], ['header', 'X-Password'], ['basic', '']]) {
+      await wrapper.find('[data-testid="secret-add"]').trigger('click')
+      await wrapper.find('input[name="secret-name"]').setValue('SESSION_KEY')
+      await wrapper.find('input[name="secret-hosts"]').setValue('api.example.com')
+      await wrapper.find('input[name="secret-renew"]').setValue(true)
+      expect(wrapper.findAll('[data-testid="secret-capture-credential-choices"] option').map(o => o.attributes('value')))
+        .toEqual(['BACKOFFICE_PASSWORD', 'SESSION_KEY'])
+      await wrapper.find('input[name="secret-capture-method"]').setValue('POST')
+      await wrapper.find('input[name="secret-capture-path"]').setValue('/v1/sessions')
+      await wrapper.find('input[name="secret-capture-field"]').setValue('session')
+      await wrapper.find('input[name="secret-capture-credential"]').setValue(' BACKOFFICE_PASSWORD ')
+      await wrapper.find('select[name="secret-capture-credential-in"]').setValue(place)
+      fieldShown.push(wrapper.find('input[name="secret-capture-credential-field"]').exists())
+      if (field) await wrapper.find('input[name="secret-capture-credential-field"]').setValue(field)
+      await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+      await vi.waitFor(() => expect(wrapper.find('[data-testid="secret-form"]').exists()).toBe(false))
+    }
+    expect(fieldShown).toEqual([true, true, true, false])
+    expect(sent.map(b => (b.capture as Record<string, string>).credentialIn))
+      .toEqual(['json password', 'form password', 'header X-Password', 'basic'])
+    expect(sent[0]).toEqual({
+      hosts: ['api.example.com'],
+      capture: { method: 'POST', path: '/v1/sessions', from: 'json', field: 'session', credential: 'BACKOFFICE_PASSWORD', credentialIn: 'json password' },
+    })
+  })
+
+  it('the rule\'s help says what makes a sign-in the skill\'s, that a JSON field is top-level, and that no cookie is taken', async () => {
+    registerEndpoint('/api/agents/83/skills/demo/secrets', () => ({ secrets: [], expected: [], missing: [] }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 83, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    await wrapper.find('input[name="secret-renew"]').setValue(true)
+    expect(wrapper.findAll('[data-testid="secret-form-rule-help"]').map(p => p.text().replace(/\s+/g, ' '))).toEqual([
+      'When a success or a redirect from one of the hosts above answers this method and path, and the sign-in sent the'
+      + ' secret named below by its stand-in, once, in the place named, JClaw stores the value it finds in the answer,'
+      + ' and the command gets its stand-in instead. Such an answer that does not hold the value is withheld, and so is'
+      + ' one to a sign-in that sent the secret more than once or anywhere else. A sign-in that never sent it passes as'
+      + ' before.',
+      'A JSON field, in the answer or in the sign-in, is one at the top level, not inside another object. A form field'
+      + ' may name a nested one, such as user[password]. A cookie cannot be taken.',
+    ])
+  })
+
+  it('a rule taken from a stored secret is not flagged, and unticking Renewed sends its removal', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/73/skills/demo/secrets', () => ({
+      secrets: [{ name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: { ...rule, from: 'header', field: 'X-Session', credential: 'SESSION_KEY', credentialIn: 'basic' }, renewedAt: null }],
+      expected: [
+        { name: 'SESSION_KEY', description: 'The session key', exampleHosts: [], optional: false, set: true, setIn: 'demo', renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    registerEndpoint('/api/agents/73/skills/demo/secrets/SESSION_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T09:00:00Z', hasValue: true, capture: null, renewedAt: null }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 73, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Replace SESSION_KEY"]').trigger('click')
+    expect(['secret-capture-from', 'secret-capture-field', 'secret-capture-credential', 'secret-capture-credential-in']
+      .map(name => inputValue(wrapper, name))).toEqual(['header', 'X-Session', 'SESSION_KEY', 'basic'])
+    expect(wrapper.find('input[name="secret-capture-credential-field"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="secret-form-rule-caution"]').exists()).toBe(false)
+
+    await wrapper.find('input[name="secret-renew"]').setValue(false)
+    expect(wrapper.find('[data-testid="secret-form-rule"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ hosts: ['api.example.com'], capture: null })
+  })
+
+  it('Replace on a secret without a rule leaves Renewed unticked, though its line is renewed', async () => {
+    let sent: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/74/skills/demo/secrets', () => ({
+      secrets: [{ name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null }],
+      expected: [
+        { name: 'SESSION_KEY', description: 'The session key', exampleHosts: [], optional: false, set: true, setIn: 'demo', renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    registerEndpoint('/api/agents/74/skills/demo/secrets/SESSION_KEY', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event) as Record<string, unknown>
+        return { name: 'SESSION_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T09:00:00Z', hasValue: true, capture: null, renewedAt: null }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 74, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Replace SESSION_KEY"]').trigger('click')
+    expect((wrapper.find('input[name="secret-renew"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="secret-form-rule"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.emitted('changed')).toHaveLength(1))
+    expect(sent).toEqual({ hosts: ['api.example.com'] })
+  })
+
+  it('a renewed secret set in a switched-off skill is not marked as needed', async () => {
+    registerEndpoint('/api/agents/75/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SESSION_KEY', description: '', exampleHosts: [], optional: false, set: false, setIn: 'other', renewed: true, suggested: null },
+        { name: 'API_KEY', description: '', exampleHosts: [], optional: false, set: false, setIn: 'other', renewed: false, suggested: null },
+      ],
+      missing: ['API_KEY'],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 75, skillName: 'demo' } })
+    await settle()
+
+    const badge = (name: string) => wrapper.find(`[data-testid="declared-${name}"] span.border`)
+    expect(badge('SESSION_KEY').text()).toBe('Set in other, which is switched off')
+    expect(badge('SESSION_KEY').classes()).not.toContain('text-amber-800')
+    expect(badge('API_KEY').classes()).toContain('text-amber-800')
+  })
+
+  it('shows a suggestion the server could not read as text, and fills nothing from it', async () => {
+    registerEndpoint('/api/agents/76/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SESSION_KEY', description: '', exampleHosts: [], optional: false, set: false, setIn: null, renewed: true, suggested: null, unreadableSuggestion: 'POST /v1/sessions xml session' },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 76, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Add SESSION_KEY"]').trigger('click')
+    expect((wrapper.find('input[name="secret-renew"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('[data-testid="secret-form-rule-unreadable"]').text().replace(/\s+/g, ' ')).toBe(
+      'The skill\'s files suggest a rule JClaw cannot read: POST /v1/sessions xml session. Fill in the method, the path,'
+      + ' the field and the secret its sign-in sends yourself.')
+    expect((wrapper.find('input[name="secret-capture-path"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('[data-testid="secret-form-rule-caution"]').exists()).toBe(false)
+  })
+
+  it('shows a refused rule in the server\'s words and keeps the form open', async () => {
+    registerEndpoint('/api/agents/77/skills/demo/secrets', () => ({ secrets: [], expected: [], missing: [] }))
+    registerEndpoint('/api/agents/77/skills/demo/secrets/SESSION_KEY', {
+      method: 'PUT',
+      handler: (event) => {
+        setResponseStatus(event, 400)
+        return {
+          type: 'error',
+          code: 'invalid_request',
+          message: '\'Set-Cookie\' is a cookie header: a rule cannot take a cookie, which the skill keeps in its own cookie jar.',
+        }
+      },
+    })
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 77, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('[data-testid="secret-add"]').trigger('click')
+    await wrapper.find('input[name="secret-name"]').setValue('SESSION_KEY')
+    await wrapper.find('input[name="secret-hosts"]').setValue('api.example.com')
+    await wrapper.find('input[name="secret-renew"]').setValue(true)
+    await wrapper.find('input[name="secret-capture-method"]').setValue('POST')
+    await wrapper.find('input[name="secret-capture-path"]').setValue('/v1/sessions')
+    await wrapper.find('select[name="secret-capture-from"]').setValue('header')
+    await wrapper.find('input[name="secret-capture-field"]').setValue('Set-Cookie')
+    await wrapper.find('[data-testid="secret-form"]').trigger('submit')
+    await settle()
+
+    expect(wrapper.find('[data-testid="secret-form"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('\'Set-Cookie\' is a cookie header: a rule cannot take a cookie')
+    expect(wrapper.emitted('changed')).toBeUndefined()
+  })
+
+  it('names a value another skill\'s sign-in has yet to fill as filled by it, with no Add the server would refuse', async () => {
+    registerEndpoint('/api/agents/78/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        { name: 'SESSION_KEY', description: 'The session key', exampleHosts: [], optional: false, set: false, setIn: 'backoffice', filledBySignIn: true, renewed: false, suggested: null },
+      ],
+      missing: ['SESSION_KEY'],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 78, skillName: 'demo' } })
+    await settle()
+
+    const badge = wrapper.find('[data-testid="declared-SESSION_KEY"] span.border')
+    expect(badge.text()).toBe('Filled by backoffice\'s sign-in')
+    expect(badge.classes()).toContain('text-amber-800')
+    expect(wrapper.find('button[aria-label="Add SESSION_KEY"]').exists()).toBe(false)
+  })
+
+  it('names whether the skill holding a declared secret is switched off, not offered, not installed, or yet to sign in', async () => {
+    const row = (name: string, setIn: string, filledBySignIn: boolean, setInState: string | null) =>
+      ({ name, description: '', exampleHosts: [], optional: false, set: false, setIn, filledBySignIn, setInState, renewed: false, suggested: null })
+    registerEndpoint('/api/agents/84/skills/demo/secrets', () => ({
+      secrets: [],
+      expected: [
+        row('A_PASS', 'nas', false, 'switchedOff'),
+        row('B_PASS', 'nas', false, 'notOffered'),
+        row('C_SESSION', 'backoffice', true, 'offered'),
+        row('D_SESSION', 'backoffice', true, 'switchedOff'),
+        row('E_SESSION', 'backoffice', true, 'notOffered'),
+        { ...row('F_SESSION', 'demo', true, 'offered'), set: true },
+        row('G_PASS', 'gone', false, 'notInstalled'),
+      ],
+      missing: ['A_PASS', 'B_PASS', 'C_SESSION', 'D_SESSION', 'E_SESSION', 'G_PASS'],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 84, skillName: 'demo' } })
+    await settle()
+
+    expect(['A_PASS', 'B_PASS', 'C_SESSION', 'D_SESSION', 'E_SESSION', 'F_SESSION', 'G_PASS']
+      .map(name => wrapper.find(`[data-testid="declared-${name}"] span.border`).text())).toEqual([
+      'Set in nas, which is switched off',
+      'Set in nas, which is not offered right now',
+      'Filled by backoffice\'s sign-in',
+      'Filled by backoffice\'s sign-in, which is switched off',
+      'Filled by backoffice\'s sign-in, which is not offered right now',
+      'Renewed at sign-in, not set',
+      'Set in gone, which is no longer installed',
+    ])
+    expect(wrapper.findAll('button').filter(b => (b.attributes('aria-label') ?? '').startsWith('Add '))).toEqual([])
+  })
+
+  it('says a declared renewed secret without a rule lets its sign-in\'s key reach commands, until a rule is saved', async () => {
+    const note = 'No capture rule yet: until you save one, the key this skill\'s sign-in returns reaches its commands as'
+      + ' plain text.'
+    registerEndpoint('/api/agents/79/skills/demo/secrets', () => ({
+      secrets: [
+        { name: 'A_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null },
+        { name: 'B_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: false, capture: rule, renewedAt: null },
+        { name: 'C_KEY', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: null, renewedAt: null },
+      ],
+      expected: [
+        { name: 'A_SESSION', description: '', exampleHosts: [], optional: false, set: true, setIn: 'demo', renewed: true, suggested: rule },
+        { name: 'B_SESSION', description: '', exampleHosts: [], optional: false, set: true, setIn: 'demo', renewed: true, suggested: rule },
+        { name: 'C_KEY', description: '', exampleHosts: [], optional: false, set: true, setIn: 'demo', renewed: false, suggested: null },
+        { name: 'D_SESSION', description: '', exampleHosts: [], optional: false, set: false, setIn: null, renewed: true, suggested: rule },
+        { name: 'E_SESSION', description: '', exampleHosts: [], optional: false, set: true, setIn: 'other', renewed: true, suggested: rule },
+      ],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 79, skillName: 'demo' } })
+    await settle()
+
+    const noted = wrapper.findAll('[data-testid$="-no-rule"]').map(n => n.attributes('data-testid'))
+    expect(noted).toEqual(['declared-D_SESSION-no-rule', 'secret-A_SESSION-no-rule'])
+    expect(wrapper.find('[data-testid="secret-A_SESSION-no-rule"]').text().replace(/\s+/g, ' ')).toBe(note)
+    expect(wrapper.find('[data-testid="declared-D_SESSION-no-rule"]').text().replace(/\s+/g, ' ')).toBe(note)
+  })
+
+  it('Replace on a renewed secret with no value yet does not say a value is kept', async () => {
+    registerEndpoint('/api/agents/80/skills/demo/secrets', () => ({
+      secrets: [
+        { name: 'A_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: false, capture: rule, renewedAt: null },
+        { name: 'B_SESSION', hosts: ['api.example.com'], setAt: '2026-11-13T08:00:00Z', hasValue: true, capture: rule, renewedAt: null },
+      ],
+      expected: [],
+      missing: [],
+    }))
+    const wrapper = await mountSuspended(SkillSecretsPanel, { props: { agentId: 80, skillName: 'demo' } })
+    await settle()
+
+    await wrapper.find('button[aria-label="Replace A_SESSION"]').trigger('click')
+    expect(wrapper.find('input[name="secret-value"]').attributes('placeholder'))
+      .toBe('Leave empty: JClaw takes it from the next sign-in')
+    await wrapper.find('input[name="secret-renew"]').setValue(false)
+    expect(wrapper.find('input[name="secret-value"]').attributes('placeholder')).toBe('')
+
+    await wrapper.find('button[aria-label="Replace B_SESSION"]').trigger('click')
+    expect(wrapper.find('input[name="secret-value"]').attributes('placeholder')).toBe('Leave empty to keep the current value')
   })
 })

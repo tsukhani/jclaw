@@ -1896,7 +1896,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
         var preview = GET(base + "/update-preview");
         assertIsOk(preview);
-        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"keeps\":[\"credentials/gamma-api-key.txt\"]}", getContent(preview));
+        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"filledBySignIn\":{},\"keeps\":[\"credentials/gamma-api-key.txt\"]}", getContent(preview));
         assertEquals(KEY + "\n", Files.readString(copyOf("keep-preview", "gamma").resolve("credentials/gamma-api-key.txt")),
                 "a preview changes nothing");
         assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
@@ -1937,7 +1937,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         Files.writeString(copyOf("keep-preview-config", "jira").resolve("config.env"), "JIRA_URL=\"https://jira.example.org\"\n");
         Files.writeString(copyOf("keep-preview-config", "jira").resolve("config.env.example"), "JIRA_URL=\n");
 
-        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[\"config.env\"]}",
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"filledBySignIn\":{},\"keeps\":[\"config.env\"]}",
                 getContent(GET("/api/agents/" + id + "/skills/jira/update-preview")));
     }
 
@@ -2018,7 +2018,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         var id = agentWithOldCopy("keep-preview-none", "plain", "");
         var base = "/api/agents/" + id + "/skills/plain";
 
-        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET(base + "/update-preview")));
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"filledBySignIn\":{},\"keeps\":[]}", getContent(GET(base + "/update-preview")));
         assertIsOk(POST(base + "/copy", "application/json", "{}"));
         assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
     }
@@ -2029,7 +2029,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         var id = createAgent("keep-preview-fresh");
         seedGlobalSkill("gamma", "gamma", "Gamma");
 
-        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET("/api/agents/" + id + "/skills/gamma/update-preview")));
+        assertEquals("{\"needs\":[],\"heldBySwitchedOff\":{},\"filledBySignIn\":{},\"keeps\":[]}", getContent(GET("/api/agents/" + id + "/skills/gamma/update-preview")));
         assertEquals("404 not_found Global skill 'absent' not found",
                 errorOf(GET("/api/agents/" + id + "/skills/absent/update-preview")));
         assertEquals("404 not_found No agent 999999999.", errorOf(GET("/api/agents/999999999/skills/gamma/update-preview")));
@@ -2113,13 +2113,53 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertIsOk(PUT("/api/agents/" + id + "/skills/nas/secrets/NAS_PASS", "application/json",
                 "{\"value\":\"fake-nas-pass-jf352\",\"hosts\":[\"nas.example.com\"]}"));
         var base = "/api/agents/" + id + "/skills/gamma/update-preview";
-        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"keeps\":[]}", getContent(GET(base)),
+        assertEquals("{\"needs\":[\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{},\"filledBySignIn\":{},\"keeps\":[]}", getContent(GET(base)),
                 "a value a switched-on skill holds is given to every skill");
 
         assertIsOk(PUT("/api/agents/" + id + "/skills/nas", "application/json", "{\"enabled\":false}"));
 
-        assertEquals("{\"needs\":[\"NAS_PASS\",\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{\"NAS_PASS\":\"nas\"},\"keeps\":[]}",
+        assertEquals("{\"needs\":[\"NAS_PASS\",\"GAMMA_API_KEY\"],\"heldBySwitchedOff\":{\"NAS_PASS\":\"nas\"},\"filledBySignIn\":{},\"keeps\":[]}",
                 getContent(GET(base)));
+    }
+
+    /**
+     * JF-374: a name another skill holds as a renewed secret its sign-in has not filled yet is that skill's sign-in's to
+     * fill, not one to add: the preview names the skill and whether it is switched off.
+     */
+    @Test
+    void anUpdatePreviewNamesTheSkillWhoseSignInFillsANeededValue() throws Exception {
+        login();
+        var id = agentWithOldCopy("keep-preview-signin", "gamma",
+                "```secrets\nSESSION_KEY=api.example.com   # The session key\n```\n");
+        seedGlobalSkill("backoffice", "backoffice", "Backoffice");
+        assertIsOk(POST("/api/agents/" + id + "/skills/backoffice/copy", "application/json", "{}"));
+        var secrets = "/api/agents/" + id + "/skills/backoffice/secrets/";
+        assertIsOk(PUT(secrets + "BACKOFFICE_PASS", "application/json",
+                "{\"value\":\"fake-backoffice-pass-jf374\",\"hosts\":[\"api.example.com\"]}"));
+        assertIsOk(PUT(secrets + "SESSION_KEY", "application/json",
+                "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\",\"path\":\"/v1/sessions\","
+                        + "\"field\":\"session\",\"credential\":\"BACKOFFICE_PASS\",\"credentialIn\":\"form password\"}}"));
+        var base = "/api/agents/" + id + "/skills/gamma/update-preview";
+        assertEquals("{\"needs\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},"
+                + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"backoffice\",\"state\":\"offered\"}},\"keeps\":[]}",
+                getContent(GET(base)));
+
+        // Withheld for a value of its own, backoffice is not offered, so its sign-in cannot run either.
+        var backofficeMd = copyOf("keep-preview-signin", "backoffice").resolve("SKILL.md");
+        var shipped = Files.readString(backofficeMd);
+        Files.writeString(backofficeMd, shipped + "\n```secrets\nBACKOFFICE_OTP=api.example.com   # Its second factor\n```\n");
+        SkillLoader.clearCache();
+        assertEquals("{\"needs\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},"
+                + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"backoffice\",\"state\":\"notOffered\"}},"
+                + "\"keeps\":[]}", getContent(GET(base)));
+        Files.writeString(backofficeMd, shipped);
+        SkillLoader.clearCache();
+
+        assertIsOk(PUT("/api/agents/" + id + "/skills/backoffice", "application/json", "{\"enabled\":false}"));
+
+        assertEquals("{\"needs\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},"
+                + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"backoffice\",\"state\":\"switchedOff\"}},"
+                + "\"keeps\":[]}", getContent(GET(base)));
     }
 
     /** The skill's secrets are gone by then: stopping would leave it in place without them. */

@@ -6,7 +6,10 @@ import models.AgentSkillConfig;
 import models.SkillSecret;
 import models.SkillSetting;
 import org.jspecify.annotations.Nullable;
+import services.secrets.SecretProxy;
+import utils.AppClock;
 import utils.SecretRedactor;
+import utils.UrlPaths;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -15,12 +18,15 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -33,7 +39,7 @@ public final class SkillSecrets {
     public static final int MAX_VALUE_CHARS = 65_536;
     public static final int MAX_HOSTS = 16;
     private static final int MAX_HOST_CHARS = 253;
-    private static final String LOG_CATEGORY = "skill";
+    public static final String LOG_CATEGORY = "skill";
 
     /** An environment-variable name, since the shell receives each secret under its name. */
     static final Pattern NAME = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
@@ -47,15 +53,166 @@ public final class SkillSecrets {
             "LANG", "TERM", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "GIT_SSL_CAINFO");
 
-    /** One secret as the panel shows it: never its value. */
-    public record Listing(String name, List<String> hosts, Instant setAt) {}
+    /**
+     * One secret as the panel shows it: never its value, only whether it has one. {@code capture} is a renewed
+     * secret's rule, and {@code renewedAt} when the secrets proxy last stored a value under it (JF-374).
+     */
+    public record Listing(String name, List<String> hosts, Instant setAt, boolean hasValue, @Nullable Capture capture,
+                          @Nullable Instant renewedAt) {}
 
     /**
      * A secret a skill says it needs (JF-348), from the {@value #DECLARATION_BLOCK} block of its SKILL.md: what the
      * panel offers the operator to add. {@code exampleHosts} are the skill author's examples, never bound to
-     * anything. A secret is required unless its description starts with the word "optional".
+     * anything. A secret is required unless its description starts with the word "optional". A {@code renewed} one
+     * (JF-374) is never required, since it starts empty, and {@code suggested} is the capture rule its line suggests:
+     * a hint like the hosts, which binds nothing until the operator saves it. {@code unreadableSuggestion} is the text
+     * after {@code from} when it is no rule the store would take.
      */
-    public record Declared(String name, String description, List<String> exampleHosts, boolean optional) {}
+    public record Declared(String name, String description, List<String> exampleHosts, boolean optional, boolean renewed,
+                           @Nullable Capture suggested, @Nullable String unreadableSuggestion) {
+
+        public Declared(String name, String description, List<String> exampleHosts, boolean optional, boolean renewed,
+                        @Nullable Capture suggested) {
+            this(name, description, exampleHosts, optional, renewed, suggested, null);
+        }
+
+        public Declared(String name, String description, List<String> exampleHosts, boolean optional) {
+            this(name, description, exampleHosts, optional, false, null);
+        }
+    }
+
+    /**
+     * Where the secrets proxy takes a renewed secret's new value (JF-374): {@code field}, a top-level JSON field or a
+     * response header, of a success or redirect from one of the secret's hosts answering {@code method} on
+     * {@code path}, sent with the stand-in of {@code credential}, one of the skill's secrets, once in
+     * {@code credentialIn} and nowhere else: a sign-in made with other credentials is whoever supplied them, and the
+     * answer to one that sent the credential any other way is withheld. The method is kept in
+     * capitals and the path normalized ({@link UrlPaths#normalize}), so they compare as a server routes them.
+     */
+    public record Capture(String method, String path, From from, String field, String credential, Place credentialIn) {
+
+        /**
+         * Where a sign-in sends its credential: a top-level JSON field, a form field (multipart included), which may
+         * name a nested one as {@code user[password]} does, a header, whose value may follow one scheme word such as
+         * {@code Bearer}, or the password of Basic auth.
+         */
+        public record Place(Kind kind, @Nullable String name) {
+
+            public enum Kind { JSON, FORM, HEADER, BASIC }
+
+            /** How the API, a SKILL.md line and an event spell it, as in {@code json password} or {@code basic}. */
+            public String wire() {
+                var kind = kind().name().toLowerCase(Locale.ROOT);
+                return name == null ? kind : kind + " " + name;
+            }
+
+            /** {@code text} as the operator typed it, or null when it names no place. */
+            static @Nullable Place of(String text) {
+                var words = text.strip().split("\\s+");
+                Kind kind = null;
+                for (var k : Kind.values()) {
+                    if (k.name().equalsIgnoreCase(words[0])) kind = k;
+                }
+                if (kind == null) return null;
+                if (kind == Kind.BASIC) return words.length == 1 ? new Place(kind, null) : null;
+                var field = kind == Kind.FORM ? FORM_FIELD : FIELD;
+                if (words.length != 2 || !field.matcher(words[1]).matches()) return null;
+                return new Place(kind, words[1]);
+            }
+        }
+
+        /** Where the value sits in the answer. */
+        public enum From {
+            JSON, HEADER;
+
+            /** How the API and a SKILL.md line spell it. */
+            public String wire() {
+                return name().toLowerCase(Locale.ROOT);
+            }
+
+            static @Nullable From of(String wire) {
+                for (var from : values()) {
+                    if (from.wire().equalsIgnoreCase(wire.strip())) return from;
+                }
+                return null;
+            }
+        }
+
+        private static final Pattern METHOD = Pattern.compile("[A-Za-z]{1,16}");
+        private static final Pattern PATH = Pattern.compile("/[A-Za-z0-9\\-._~!$&'()*+,;=:@%/]{0,1023}");
+        private static final Pattern FIELD = Pattern.compile("[A-Za-z0-9_$-]{1,128}");
+        /** A form field may name a nested one, as in {@code user[password]} or {@code user.password}. */
+        private static final Pattern FORM_FIELD = Pattern.compile("[A-Za-z0-9_$.\\[\\]-]{1,128}");
+        private static final Set<String> COOKIE_HEADERS = Set.of("set-cookie", "set-cookie2", "cookie");
+
+        /**
+         * A rule from its parts as the operator typed them; {@code from} left out means {@code json}. Whether
+         * {@code credential} is a secret of the rule's skill is {@link SkillSecrets#put}'s to judge.
+         */
+        public static Capture of(@Nullable String method, @Nullable String path, @Nullable String from,
+                                 @Nullable String field, @Nullable String credential, @Nullable String credentialIn) {
+            if (method == null || method.isBlank() || path == null || path.isBlank() || field == null || field.isBlank()) {
+                throw new Refused("A capture rule needs a method, a path and a field.");
+            }
+            if (credential == null || credential.isBlank() || credentialIn == null || credentialIn.isBlank()) {
+                throw new Refused("A capture rule needs the secret its sign-in sends and where it sends it, such as"
+                        + " BACKOFFICE_PASSWORD in json password: JClaw takes a value only from a sign-in made with it.");
+            }
+            var m = method.strip();
+            if (!METHOD.matcher(m).matches()) {
+                throw new Refused("'%s' is not an HTTP method: give one such as POST.".formatted(m));
+            }
+            var p = path.strip();
+            var normalized = PATH.matcher(p).matches() ? UrlPaths.normalize(p) : null;
+            if (normalized == null) {
+                throw new Refused(("'%s' is not a path a rule can match: give it as the service receives it, starting"
+                        + " with /, such as /v1/sessions/current, with no host, query, space, encoded slash or backslash.")
+                        .formatted(p));
+            }
+            var where = From.JSON;
+            if (from != null && !from.isBlank()) {
+                var named = From.of(from);
+                if (named == null) {
+                    throw new Refused("'%s' is not where a value can be taken from: give json or header."
+                            .formatted(from.strip()));
+                }
+                where = named;
+            }
+            var f = field.strip();
+            if (!FIELD.matcher(f).matches()) {
+                throw new Refused(("'%s' is not a field name: give the JSON field or the header by its name alone, such"
+                        + " as session or X-Session.").formatted(f));
+            }
+            if (where == From.HEADER && COOKIE_HEADERS.contains(f.toLowerCase(Locale.ROOT))) {
+                throw new Refused(("'%s' is a cookie header: a rule cannot take a cookie, which the skill keeps in its own"
+                        + " cookie jar.").formatted(f));
+            }
+            var c = credential.strip();
+            if (!NAME.matcher(c).matches()) {
+                throw new Refused("'%s' is not a secret name: give the secret the sign-in sends, such as BACKOFFICE_PASSWORD."
+                        .formatted(c));
+            }
+            var place = Place.of(credentialIn);
+            var header = place == null || place.kind() != Place.Kind.HEADER ? null : place.name();
+            if (place == null || header != null && !SecretProxy.forwardsHeader(header)) {
+                throw new Refused(("'%s' is not where a sign-in sends a secret: give json, form or header and the field's"
+                        + " or header's name, such as json password, form user[password] or header api-key, or basic for"
+                        + " the password of Basic auth. A JSON field is one at the top level. A header the secrets proxy"
+                        + " does not forward, such as Host, cannot be one.")
+                        .formatted(credentialIn.strip()));
+            }
+            return new Capture(m.toUpperCase(Locale.ROOT), normalized, where, f, c, place);
+        }
+
+        /** The rule as a SKILL.md line writes it after {@code from}, and as an event names it. */
+        public String describe() {
+            return method + " " + path + " " + from.wire() + " " + field + " using " + credential + " in "
+                    + credentialIn.wire();
+        }
+    }
+
+    /** A renewed secret's rule with the hosts it is bound to, for the secrets proxy: never its value. */
+    public record Renewable(String skill, String name, List<String> hosts, Capture capture) {}
 
     /**
      * A setting a skill says it needs (JF-357), from a {@code setting NAME=example   # what it is} line of the same
@@ -65,9 +222,45 @@ public final class SkillSecrets {
 
     /**
      * The skill of an agent that holds a value another of its skills lacks (JF-327): {@code switchedOff} when its switch
-     * is off, otherwise it is on but not offered, as when a tool it needs is off.
+     * is off, {@code offered} when the agent is offered it: on, with every tool it needs and no value of its own
+     * missing. {@code filledBySignIn} when it holds the name as a renewed secret with no value yet, which its sign-in
+     * fills (JF-374). Not {@code installed} when its folder is gone: it still holds the name, which no other skill can
+     * then add.
      */
-    public record Holder(String skill, boolean switchedOff) {}
+    public record Holder(String skill, boolean switchedOff, boolean filledBySignIn, boolean offered, boolean installed) {
+
+        /** {@code offered}, {@code switchedOff}, {@code notOffered} or {@code notInstalled}, as the API names it. */
+        public String state() {
+            return !installed ? "notInstalled" : switchedOff ? "switchedOff" : offered ? "offered" : "notOffered";
+        }
+
+        /** Of {@code holders}, as {@link Provided#holdersOf} returns them, each holder of a value whose switch is off. */
+        public static Map<String, String> switchedOff(Map<String, Holder> holders) {
+            var out = new LinkedHashMap<String, String>();
+            holders.forEach((name, held) -> {
+                if (held.switchedOff() && !held.filledBySignIn()) out.put(name, held.skill());
+            });
+            return out;
+        }
+
+        /** Of {@code holders}, each holder of a value that is switched on but not offered. */
+        public static Map<String, String> notOffered(Map<String, Holder> holders) {
+            var out = new LinkedHashMap<String, String>();
+            holders.forEach((name, held) -> {
+                if (!held.switchedOff() && !held.filledBySignIn()) out.put(name, held.skill());
+            });
+            return out;
+        }
+
+        /** Of {@code holders}, each whose sign-in fills the name. */
+        public static Map<String, Holder> signIn(Map<String, Holder> holders) {
+            var out = new LinkedHashMap<String, Holder>();
+            holders.forEach((name, held) -> {
+                if (held.filledBySignIn()) out.put(name, held);
+            });
+            return out;
+        }
+    }
 
     /** What a block declares: its secrets and its settings, each in the block's order. */
     public record Declarations(List<Declared> secrets, List<DeclaredSetting> settings) {}
@@ -91,12 +284,34 @@ public final class SkillSecrets {
     private static final Pattern CREDENTIAL_PART = Pattern.compile(
             "[A-Z0-9]*KEY|PASS[A-Z0-9]*|PWD|TOKEN[A-Z0-9]*|SECRET[A-Z0-9]*|CREDENTIALS?|COOKIES?|AUTH[A-Z0-9]*|SESSION[A-Z0-9]*|PIN");
 
-    /** {@code [setting] [export] NAME=example   # description}: groups 1 the keyword, 2 the name, 3 the example, 4 the description. */
+    /**
+     * {@code [setting|renewed] [export] NAME=example   # description}: groups 1 the keyword, 2 the name, 3 the
+     * example, 4 the description.
+     */
     private static final Pattern DECLARATION = Pattern.compile(
-            "\\s*(?:(setting)\\s+)?(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
+            "\\s*(?:(setting|renewed)\\s+)?(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
+    private static final String RENEWED = "renewed";
+    /** Stored rules already warned about, by row id and when it was saved. */
+    private static final Set<String> UNREADABLE_RULES_WARNED = ConcurrentHashMap.newKeySet();
+    /**
+     * What opens a renewed secret's suggested rule (JF-374), in
+     * {@code example-hosts from METHOD /path json|header FIELD using NAME in json|form|header FIELD} or {@code in basic}:
+     * the first {@code from} standing alone, so a host such as {@code api.from.example.com} opens none, and a field
+     * named {@code from} stays in the rule.
+     */
+    private static final Pattern SUGGESTED_RULE = Pattern.compile("(?:^|\\s)from(?=\\s|$)");
 
-    /** A secret with its value, for the proxy's grants alone: no route or tool ever returns one (JF-324). */
-    public record Usable(String skill, String name, String value, List<String> hosts) {}
+    /**
+     * A secret with its value, for the proxy's grants alone: no route or tool ever returns one (JF-324). {@code renewed}
+     * when its value is one the secrets proxy took under its capture rule (JF-374), so a running command takes it
+     * rather than losing the secret; a value the operator typed stops it, as any secret's change does (JF-390).
+     */
+    public record Usable(String skill, String name, String value, List<String> hosts, boolean renewed) {
+
+        public Usable(String skill, String name, String value, List<String> hosts) {
+            this(skill, name, value, hosts, false);
+        }
+    }
 
     /** A write the store refuses, with the message the operator reads. */
     public static final class Refused extends RuntimeException {
@@ -122,10 +337,20 @@ public final class SkillSecrets {
     }
 
     /**
-     * Create or replace {@code name}. A null {@code value} keeps the stored one and changes only the hosts, so
-     * replacing the hosts never needs the value typed again; a new secret needs one.
+     * Create or replace {@code name}, keeping its capture rule. A null {@code value} keeps the stored one and changes
+     * only the hosts, so replacing the hosts never needs the value typed again; a new secret needs one.
      */
     public static Listing put(Agent owner, String skill, String name, @Nullable String value, List<String> hosts) {
+        return put(owner, skill, name, value, hosts, false, null);
+    }
+
+    /**
+     * As {@link #put(Agent, String, String, String, List)}; when {@code setCapture}, the secret's capture rule becomes
+     * {@code capture}, and a null one removes it (JF-374). A secret with a rule needs no value: the secrets proxy
+     * stores one from the next sign-in.
+     */
+    public static Listing put(Agent owner, String skill, String name, @Nullable String value, List<String> hosts,
+                              boolean setCapture, @Nullable Capture capture) {
         var rejection = nameRejection(name);
         if (rejection != null) throw new Refused(rejection);
         if (value != null && value.isEmpty()) throw new Refused("The value is empty.");
@@ -144,32 +369,182 @@ public final class SkillSecrets {
                     + " name, so each name is used once on an agent; that skill's commands can use it too.")
                     .formatted(elsewhere.skillName, name));
         }
+        if (setCapture && capture != null && !capture.credential().equals(name)
+                && SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, capture.credential())
+                        .first() == null) {
+            throw new Refused(("%s is not a secret of skill '%s': the rule names the secret its sign-in sends, so add"
+                    + " that secret to this skill first, or name %s itself for a sign-in that sends the renewed key.")
+                    .formatted(capture.credential(), skill, name));
+        }
+        if (setCapture && capture != null && !capture.credential().equals(name)) {
+            SkillSecret credential = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill,
+                    capture.credential()).first();
+            if (credential != null) refuseUnsendable(capture.credential(), credential, name, normalized);
+        }
         SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, name).first();
+        if (setCapture && capture != null && capture.credential().equals(name) && value == null
+                && (row == null || row.value == null || row.value.isEmpty())) {
+            throw new Refused(("A rule whose sign-in sends %s itself needs a value for %s to send: enter its current"
+                    + " value too, or name the secret the sign-in sends, such as its password.").formatted(name, name));
+        }
         boolean created = row == null;
         if (row == null) {
-            if (value == null) throw new Refused("A new secret needs a value.");
+            if (value == null && (!setCapture || capture == null)) throw new Refused("A new secret needs a value.");
             row = new SkillSecret();
             row.agent = owner;
             row.skillName = skill;
             row.name = name;
+            row.value = "";
         }
-        if (value != null) row.value = value;
+        var previous = captureOf(row);
+        var rule = setCapture ? capture : previous;
+        boolean hostsChanged = !created
+                && !Set.copyOf(normalized).equals(Set.copyOf(Arrays.asList(row.hosts.split("\n"))));
+        if (value != null) {
+            row.value = value;
+            row.renewedAt = null;
+        } else if (rule == null && row.value != null && row.value.isEmpty()) {
+            throw new Refused("A secret with no capture rule needs a value.");
+        }
         row.hosts = String.join("\n", normalized);
+        if (setCapture) setCapture(row, capture);
+        // A value taken under another rule is no longer one this rule renewed.
+        if (!Objects.equals(previous, rule)) row.renewedAt = null;
         row.save();
         if (created) SkillLoader.clearCache();
-        Tx.afterCommit(CredentialMask::invalidate);
-        EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s %s for skill %s, sent only to %s".formatted(
-                name, created ? "added" : value != null ? "replaced" : "kept, hosts changed", skill,
-                String.join(", ", normalized)));
+        afterWrite();
+        var renewal = Objects.equals(previous, rule) ? ""
+                : rule == null ? ", no longer renewed" : ", renewed from the answer to " + rule.describe();
+        EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s %s for skill %s, sent only to %s%s".formatted(
+                name, created ? "added" : value != null ? "replaced" : hostsChanged ? "kept, hosts changed" : "kept", skill,
+                String.join(", ", normalized), renewal));
         return listing(row);
     }
 
+    /** Whether {@code value} can go in a header, where the proxy refuses a CR, an LF or a NUL. */
+    public static boolean headerSafe(String value) {
+        return value.indexOf('\r') < 0 && value.indexOf('\n') < 0 && value.indexOf('\0') < 0;
+    }
+
+    /**
+     * Refuse a rule for {@code name}, sent to {@code hosts}, whose sign-in sends {@code credential}, held in
+     * {@code row}, when the rule could never take a value: the credential has none to send, or is sent to none of the
+     * hosts the sign-in goes to, so the proxy would refuse the sign-in.
+     */
+    private static void refuseUnsendable(String credential, SkillSecret row, String name, List<String> hosts) {
+        if (row.value == null || row.value.isEmpty()) {
+            throw new Refused(("%s has no value yet, so a sign-in that sends it sends nothing, and the rule could never"
+                    + " take a value for %s: give %s a value first.").formatted(credential, name, credential));
+        }
+        var theirs = new HashSet<String>();
+        for (var host : row.hosts.split("\n")) theirs.add(onDefaultPort(host));
+        if (hosts.stream().map(SkillSecrets::onDefaultPort).noneMatch(theirs::contains)) {
+            throw new Refused(("%s is sent only to %s, none of the hosts %s's sign-in goes to, so the rule could never"
+                    + " take a value: give the two secrets a host in common.").formatted(credential,
+                    String.join(", ", row.hosts.split("\n")), name));
+        }
+    }
+
+    /** A stored host as a request reaches it: a name without a port is the same as on port 443. */
+    private static String onDefaultPort(String host) {
+        return host.endsWith(":443") ? host.substring(0, host.length() - 4) : host;
+    }
+
+    /**
+     * Store {@code value}, which the secrets proxy took under {@code rule} from a sign-in answer, as renewed secret
+     * {@code name} of {@code skill} (JF-374): the one write of a value that is not the operator's, so no route, tool
+     * or command reaches it. The hosts stay as they are, and so does when the operator last set it. False, storing
+     * nothing, when the secret is gone, its rule is no longer {@code rule}, or the value is empty, longer than
+     * {@value #MAX_VALUE_CHARS} characters or holds what no header can carry ({@link #headerSafe}).
+     */
+    public static boolean storeCaptured(Agent owner, String skill, String name, Capture rule, String value) {
+        if (value.isEmpty() || value.length() > MAX_VALUE_CHARS || !headerSafe(value)) return false;
+        SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, name).first();
+        if (row == null || !rule.equals(captureOf(row))) return false;
+        row.value = value;
+        row.markRenewed(AppClock.now());
+        row.save();
+        afterWrite();
+        var ownerName = owner.name;
+        Tx.afterCommit(() -> EventLogger.info(LOG_CATEGORY, ownerName, null,
+                "Secret %s of skill %s renewed from the answer to %s %s".formatted(name, skill, rule.method(), rule.path())));
+        return true;
+    }
+
+    /**
+     * The agent's renewed secrets with a capture rule, for the secrets proxy to match each answer against: only those
+     * of a switched-on skill, as a command gets a secret from no other (JF-326).
+     */
+    public static List<Renewable> renewable(Agent owner) {
+        List<SkillSecret> rows = SkillSecret.find("agent = ?1 AND captureMethod IS NOT NULL ORDER BY skillName, name",
+                owner).fetch();
+        if (rows.isEmpty()) return List.of();
+        var enabled = SkillLoader.enabledSkillFolders(owner.name);
+        var out = new ArrayList<Renewable>();
+        for (var row : rows) {
+            var rule = captureOf(row);
+            if (rule != null && enabled.contains(row.skillName)) {
+                out.add(new Renewable(row.skillName, row.name, List.of(row.hosts.split("\n")), rule));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Once a secret's write commits, the mask learns its value, and every cache of what the agent holds rereads it:
+     * the loader's, and the secrets proxy's capture rules, which it keeps until the loader's next clear.
+     */
+    private static void afterWrite() {
+        Tx.afterCommit(() -> {
+            CredentialMask.invalidate();
+            SkillLoader.clearCache();
+        });
+    }
+
+    private static @Nullable Capture captureOf(SkillSecret row) {
+        var columns = Arrays.asList(row.captureMethod, row.capturePath, row.captureFrom, row.captureField,
+                row.captureCredential, row.captureCredentialIn);
+        if (columns.stream().allMatch(Objects::isNull)) return null;
+        var from = row.captureFrom == null ? null : Capture.From.of(row.captureFrom);
+        var place = row.captureCredentialIn == null ? null : Capture.Place.of(row.captureCredentialIn);
+        if (columns.contains(null) || from == null || place == null) {
+            // Every read of the rules meets the row; one warning per saved version of it is enough.
+            if (UNREADABLE_RULES_WARNED.add(row.id + "@" + row.updatedAt)) {
+                EventLogger.warn(LOG_CATEGORY, row.agent.name, null, ("Secret %s of skill %s has a stored capture rule"
+                        + " JClaw cannot read%s, so nothing is taken under it: save its rule again in the Secrets panel.")
+                        .formatted(row.name, row.skillName, columns.contains(null) ? ", saved only in part" : ""));
+            }
+            return null;
+        }
+        return new Capture(Objects.requireNonNull(row.captureMethod), Objects.requireNonNull(row.capturePath), from,
+                Objects.requireNonNull(row.captureField), Objects.requireNonNull(row.captureCredential), place);
+    }
+
+    private static void setCapture(SkillSecret row, @Nullable Capture capture) {
+        row.captureMethod = capture == null ? null : capture.method();
+        row.capturePath = capture == null ? null : capture.path();
+        row.captureFrom = capture == null ? null : capture.from().wire();
+        row.captureField = capture == null ? null : capture.field();
+        row.captureCredential = capture == null ? null : capture.credential();
+        row.captureCredentialIn = capture == null ? null : capture.credentialIn().wire();
+    }
+
+    /**
+     * Delete {@code name}; false when there is none. Refused while another secret's capture rule names it as the
+     * secret its sign-in sends, since that rule could then never take a value.
+     */
     public static boolean delete(Agent owner, String skill, String name) {
         SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, name).first();
         if (row == null) return false;
+        SkillSecret ruled = SkillSecret.find("agent = ?1 AND skillName = ?2 AND captureCredential = ?3 AND name <> ?3",
+                owner, skill, name).first();
+        if (ruled != null) {
+            throw new Refused(("%s is the secret the capture rule of %s says its sign-in sends: change or remove that"
+                    + " rule first.").formatted(name, ruled.name));
+        }
         row.delete();
         SkillLoader.clearCache();
-        Tx.afterCommit(CredentialMask::invalidate);
+        afterWrite();
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s deleted from skill %s".formatted(name, skill));
         return true;
     }
@@ -201,6 +576,24 @@ public final class SkillSecrets {
     }
 
     /**
+     * Secret {@code name} as {@code skillMd}'s declaration block declares it, read as a renewed line whether or not the
+     * line still says {@code renewed}, or null when the block has no line for it. A reviewer that drops the word and
+     * keeps the rule leaves a line whose rule a plain read would take as example hosts.
+     */
+    public static @Nullable Declared declaredAsRenewed(String skillMd, String name) {
+        var block = splitDeclaration(skillMd).block();
+        if (block == null) return null;
+        for (var line : block.split("\\R")) {
+            var m = DECLARATION.matcher(line);
+            if (!m.matches() || !m.group(2).equals(name)) continue;
+            var found = parse(RENEWED + " " + name + "=" + m.group(3) + (m.group(4) == null ? "" : "   # " + m.group(4)))
+                    .secrets();
+            return found.isEmpty() ? null : found.getFirst();
+        }
+        return null;
+    }
+
+    /**
      * A declaration block, fences included, written from parsed declarations alone: no comment line, no text that
      * did not parse, nothing after the fence. What it holds is only what {@link #declaredIn} and {@link #settingsIn}
      * would read back.
@@ -208,7 +601,10 @@ public final class SkillSecrets {
     public static String declarationBlock(List<Declared> declared, List<DeclaredSetting> settings) {
         var out = new StringBuilder("```").append(DECLARATION_BLOCK).append('\n');
         for (var d : declared) {
+            if (d.renewed()) out.append(RENEWED).append(' ');
             out.append(d.name()).append('=').append(String.join(", ", d.exampleHosts()));
+            var suggested = d.suggested();
+            if (d.renewed() && suggested != null) out.append(" from ").append(suggested.describe());
             if (!d.description().isEmpty()) out.append("   # ").append(d.description());
             out.append('\n');
         }
@@ -320,11 +716,13 @@ public final class SkillSecrets {
             if (nameRejection(name) != null || !seen.add(name)) continue;
             var description = m.group(4) == null ? "" : m.group(4).strip();
             boolean optional = OPTIONAL.matcher(description).matches();
-            if (m.group(1) != null && !looksLikeCredential(name)) {
+            if ("setting".equals(m.group(1)) && !looksLikeCredential(name)) {
                 settings.add(new DeclaredSetting(name, description, m.group(3).strip(), optional));
             } else {
+                boolean renewed = RENEWED.equals(m.group(1));
+                var parts = renewed ? renewedParts(m.group(3)) : new RenewedParts(m.group(3), null);
                 var examples = new ArrayList<String>();
-                for (var example : m.group(3).split("[,\\s]+")) {
+                for (var example : parts.hosts().split("[,\\s]+")) {
                     if (example.isBlank()) continue;
                     try {
                         examples.addAll(normalizeHosts(List.of(example)));
@@ -332,22 +730,60 @@ public final class SkillSecrets {
                         // An example that is no host is left out; the secret is still declared.
                     }
                 }
-                secrets.add(new Declared(name, description, List.copyOf(examples), optional));
+                var rule = parts.rule();
+                var suggested = suggestion(rule);
+                var unreadable = suggested != null || rule == null || rule.isBlank() ? null : rule.strip();
+                secrets.add(new Declared(name, description, List.copyOf(examples), optional, renewed, suggested,
+                        unreadable));
             }
             if (secrets.size() + settings.size() == MAX_DECLARED) break;
         }
         return new Declarations(List.copyOf(secrets), List.copyOf(settings));
     }
 
+    /** A renewed secret's example apart: its hosts, and the text of the rule after {@code from}, or null. */
+    private record RenewedParts(String hosts, @Nullable String rule) {}
+
+    private static RenewedParts renewedParts(String example) {
+        var m = SUGGESTED_RULE.matcher(example);
+        if (!m.find()) return new RenewedParts(example, null);
+        return new RenewedParts(example.substring(0, m.start()).strip(), example.substring(m.end()).strip());
+    }
+
+    /**
+     * The rule a renewed line suggests, as {@code METHOD /path [json|header] FIELD using NAME in PLACE}, its words
+     * {@code using} and {@code in} in any case and a left-out kind meaning {@code json}, as {@link Capture#of} reads
+     * one; or null when it suggests none or one the store would refuse.
+     */
+    private static @Nullable Capture suggestion(@Nullable String rule) {
+        if (rule == null) return null;
+        var words = rule.strip().split("\\s+");
+        int using = words.length > 4 && words[4].equalsIgnoreCase("using") ? 4
+                : words.length > 3 && words[3].equalsIgnoreCase("using") ? 3 : -1;
+        if (using < 0 || words.length < using + 4 || words.length > using + 5
+                || !words[using + 2].equalsIgnoreCase("in")) {
+            return null;
+        }
+        try {
+            return Capture.of(words[0], words[1], using == 4 ? words[2] : null, words[using - 1], words[using + 1],
+                    String.join(" ", Arrays.asList(words).subList(using + 3, words.length)));
+        } catch (Refused _) {
+            return null;
+        }
+    }
+
     /**
      * Which of an agent's secrets a skill can be given (JF-348), read once and only when a skill declares one. A
      * command gets a secret only from a skill that is switched on (JF-326), so a secret counts for a skill when the
-     * skill holds it itself or a switched-on skill of the agent does. A name is used once on an agent.
+     * skill holds it itself or a switched-on skill of the agent does. A name is used once on an agent. A renewed
+     * secret the proxy has not filled yet (JF-374) counts for its own skill alone, whose sign-in fills it: another
+     * skill that declares the name needs a value it can send.
      */
     public static final class Provided {
         private final Agent owner;
         private final Supplier<Set<String>> enabledFolders;
         private @Nullable Map<String, String> holders;
+        private @Nullable Map<String, String> unfilled;
         private @Nullable Set<String> enabled;
 
         private Provided(Agent owner, Supplier<Set<String>> enabledFolders) {
@@ -359,12 +795,21 @@ public final class SkillSecrets {
             var known = holders;
             if (known == null) {
                 known = new LinkedHashMap<>();
-                for (var secret : usable(owner)) known.put(secret.name(), secret.skill());
+                var empty = new LinkedHashMap<String, String>();
+                for (var secret : usable(owner)) {
+                    (secret.value().isEmpty() ? empty : known).put(secret.name(), secret.skill());
+                }
                 // A name is used once on an agent, so a setting never shares one with a secret (JF-357).
                 for (var setting : SkillSettings.usable(owner)) known.put(setting.name(), setting.skill());
                 holders = known;
+                unfilled = empty;
             }
             return known;
+        }
+
+        private Map<String, String> unfilled() {
+            holders();
+            return Objects.requireNonNull(unfilled);
         }
 
         private Set<String> enabled() {
@@ -376,15 +821,33 @@ public final class SkillSecrets {
             return known;
         }
 
-        /** The skill that holds {@code name} on the agent, switched on or not, or null when none does. */
+        /**
+         * The skill that holds a value for {@code name} on the agent, switched on or not, or null when none does: a
+         * renewed secret not yet filled holds none.
+         */
         public @Nullable String holder(String name) {
             return holders().get(name);
+        }
+
+        /**
+         * The skill {@code name} is set in on the agent: the {@link #holder}, or the skill whose renewed secret holds
+         * the name with no value yet. A name is used once on an agent, so no other skill can add it.
+         */
+        public @Nullable String setIn(String name) {
+            var holder = holder(name);
+            return holder != null ? holder : unfilled().get(name);
+        }
+
+        /** Whether {@code name} is set only as a renewed secret with no value yet, which its skill's sign-in fills. */
+        public boolean filledBySignIn(String name) {
+            return holder(name) == null && unfilled().containsKey(name);
         }
 
         /** Whether the skill in folder {@code skill} can be given {@code name}. */
         public boolean to(String skill, String name) {
             var holder = holder(name);
-            return holder != null && (holder.equals(skill) || enabled().contains(holder));
+            if (holder != null) return holder.equals(skill) || enabled().contains(holder);
+            return skill.equals(unfilled().get(name));
         }
 
         /**
@@ -399,7 +862,7 @@ public final class SkillSecrets {
             var declarations = parse(block);
             var out = new ArrayList<String>();
             for (var d : declarations.secrets()) {
-                if (!d.optional() && !to(folder.toString(), d.name())) out.add(d.name());
+                if (!d.optional() && !d.renewed() && !to(folder.toString(), d.name())) out.add(d.name());
             }
             for (var d : declarations.settings()) {
                 if (!d.optional() && !to(folder.toString(), d.name())) out.add(d.name());
@@ -408,39 +871,31 @@ public final class SkillSecrets {
         }
 
         /**
-         * For each of {@code missing} that another installed skill of the agent holds, that skill (JF-352, JF-327). A
-         * name {@link #missing} lists is never held by a skill that is offered, and one held by a skill no longer
-         * installed has no holder.
+         * For each of {@code missing} that another installed skill of the agent sets, that skill (JF-352, JF-327,
+         * JF-374). A name {@link #missing} lists is never held with a value by a skill that is offered, and one set in
+         * a skill no longer installed has no holder.
          */
         public Map<String, Holder> holdersOf(List<String> missing) {
             var out = new LinkedHashMap<String, Holder>();
-            var skills = AgentService.workspacePath(owner.name).resolve("skills");
             for (var name : missing) {
-                var holder = holder(name);
-                var dir = holder == null ? null : WorkspaceFiles.resolveContained(skills, holder);
-                if (holder == null || dir == null || !Files.isRegularFile(dir.resolve(SKILL_FILE))) continue;
-                var config = AgentSkillConfig.findByAgentAndSkill(owner, holder);
-                out.put(name, new Holder(holder, config != null && !config.enabled));
+                var held = holderOf(name);
+                if (held != null && held.installed()) out.put(name, held);
             }
             return out;
         }
 
-        /** {@link #holdersOf}, keeping only the holders whose switch is off. */
-        public Map<String, String> heldBySwitchedOff(List<String> missing) {
-            var out = new LinkedHashMap<String, String>();
-            holdersOf(missing).forEach((name, held) -> {
-                if (held.switchedOff()) out.put(name, held.skill());
-            });
-            return out;
-        }
-
-        /** {@link #holdersOf}, keeping only the holders that are switched on but not offered. */
-        public Map<String, String> heldByNotOffered(List<String> missing) {
-            var out = new LinkedHashMap<String, String>();
-            holdersOf(missing).forEach((name, held) -> {
-                if (!held.switchedOff()) out.put(name, held.skill());
-            });
-            return out;
+        /** The skill {@code name} is {@link #setIn}, or null when none is; one whose folder is gone is not installed. */
+        public @Nullable Holder holderOf(String name) {
+            var holder = setIn(name);
+            if (holder == null) return null;
+            var skills = AgentService.workspacePath(owner.name).resolve("skills");
+            var dir = WorkspaceFiles.resolveContained(skills, holder);
+            if (dir == null || !Files.isRegularFile(dir.resolve(SKILL_FILE))) {
+                return new Holder(holder, false, filledBySignIn(name), false, false);
+            }
+            var config = AgentSkillConfig.findByAgentAndSkill(owner, holder);
+            boolean offered = enabled().contains(holder) && missing(dir).isEmpty();
+            return new Holder(holder, config != null && !config.enabled, filledBySignIn(name), offered, true);
         }
     }
 
@@ -470,11 +925,15 @@ public final class SkillSecrets {
                 continue;
             }
             if (masked(m.group(2)) || looksRandom(m.group(2).split("_"))) return true;
-            if (m.group(1) != null) {
+            if ("setting".equals(m.group(1))) {
                 // A setting's example is free text, such as an address with a path; it may hold no key.
                 if (masked(m.group(3)) || looksRandom(m.group(3).split("[^A-Za-z0-9]+"))) return true;
             } else {
-                for (var example : m.group(3).split("[,\\s]+")) {
+                var parts = RENEWED.equals(m.group(1)) ? renewedParts(m.group(3)) : new RenewedParts(m.group(3), null);
+                var rule = parts.rule();
+                // A suggested rule is a method, a path and a field name: none of them random, none of them a key.
+                if (rule != null && (masked(rule) || looksRandom(rule.split("[^A-Za-z0-9]+")))) return true;
+                for (var example : parts.hosts().split("[,\\s]+")) {
                     if (example.isBlank()) continue;
                     if (!isPlausibleExampleHost(example) || masked(example)) return true;
                 }
@@ -533,12 +992,18 @@ public final class SkillSecrets {
         return null;
     }
 
-    /** The agent's secrets whose values open, for a command's grant (JF-324). One that will not open is left out. */
+    /**
+     * The agent's secrets whose values open, for a command's grant (JF-324). One that will not open is left out; a
+     * renewed one not yet filled is in, empty, so the command's stand-in can take the value its sign-in brings (JF-374).
+     */
     public static List<Usable> usable(Agent owner) {
         List<SkillSecret> rows = SkillSecret.find("agent = ?1 ORDER BY skillName, name", owner).fetch();
         var out = new ArrayList<Usable>();
         for (var row : rows) {
-            if (row.value != null) out.add(new Usable(row.skillName, row.name, row.value, List.of(row.hosts.split("\n"))));
+            if (row.value != null) {
+                out.add(new Usable(row.skillName, row.name, row.value, List.of(row.hosts.split("\n")),
+                        row.renewedAt != null && captureOf(row) != null));
+            }
         }
         return out;
     }
@@ -548,7 +1013,7 @@ public final class SkillSecrets {
         int deleted = SkillSecret.delete("agent = ?1 AND skillName = ?2", owner, skill);
         if (deleted > 0) {
             SkillLoader.clearCache();
-            Tx.afterCommit(CredentialMask::invalidate);
+            afterWrite();
         }
         return deleted;
     }
@@ -585,6 +1050,7 @@ public final class SkillSecrets {
     }
 
     private static Listing listing(SkillSecret row) {
-        return new Listing(row.name, List.of(row.hosts.split("\n")), row.updatedAt);
+        return new Listing(row.name, List.of(row.hosts.split("\n")), row.updatedAt,
+                row.value != null && !row.value.isEmpty(), captureOf(row), row.renewedAt);
     }
 }

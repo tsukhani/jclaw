@@ -600,6 +600,98 @@ class SkillLlmMockedPipelineTest extends UnitTest {
                 SkillSecrets.declaredSettings(promotedGlobal.resolve("weather")));
     }
 
+    /** JF-374: a renewed line keeps its keyword and the rule it suggests; a rule the reviewer masked is dropped. */
+    @Test
+    void aRenewedLineKeepsItsKeywordAndARuleTheReviewerMaskedIsDropped() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                renewed WEATHER_TOKEN=api.example-weather.com from POST /v1/tokens/acme json token using WEATHER_TOKEN in basic   # The token
+                ```
+                """, """
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                renewed WEATHER_TOKEN=api.example-weather.com from POST /v1/tokens/[COMPANY] json token using WEATHER_TOKEN in basic   # The token
+                ```
+                """);
+
+        assertEquals("""
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                renewed WEATHER_TOKEN=api.example-weather.com   # The token
+                ```""", body);
+        var rule = new SkillSecrets.Capture("POST", "/v1/sessions", SkillSecrets.Capture.From.JSON, "session",
+                "WEATHER_SESSION_KEY", new SkillSecrets.Capture.Place(SkillSecrets.Capture.Place.Kind.HEADER, "api-key"));
+        assertEquals(List.of(
+                new SkillSecrets.Declared("WEATHER_SESSION_KEY", "The session key", List.of("api.example-weather.com"),
+                        false, true, rule),
+                new SkillSecrets.Declared("WEATHER_TOKEN", "The token", List.of("api.example-weather.com"), false, true,
+                        null)),
+                promotedDeclarations());
+    }
+
+    /**
+     * A reviewer that drops a renewed line's keyword leaves it renewed: a renewed secret is never required, so the
+     * promoted skill does not come to need a value its sign-in fills.
+     */
+    @Test
+    void aRenewedLineWhoseKeywordTheReviewerDroppedStaysRenewed() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                ```
+                """, """
+                ```secrets
+                WEATHER_SESSION_KEY=api.example-weather.com   # The session key
+                ```
+                """);
+
+        assertEquals("""
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com   # The session key
+                ```""", body);
+        assertEquals(List.of(new SkillSecrets.Declared("WEATHER_SESSION_KEY", "The session key",
+                List.of("api.example-weather.com"), false, true, null)), promotedDeclarations());
+    }
+
+    /**
+     * A reviewer that drops the keyword but keeps the rule leaves a line a plain read takes the rule's words from as
+     * example hosts: it is read as the renewed line it was, so its hosts are its own and its rule is kept.
+     */
+    @Test
+    void aRenewedLineWhoseKeywordTheReviewerDroppedKeepsItsRuleAndNoRuleWordBecomesAHost() throws Exception {
+        var body = promotedBody("""
+                ---
+                name: weather
+                description: Tells the weather.
+                ---
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                ```
+                """, """
+                ```secrets
+                WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                ```
+                """);
+
+        assertEquals("""
+                ```secrets
+                renewed WEATHER_SESSION_KEY=api.example-weather.com from POST /v1/sessions json session using WEATHER_SESSION_KEY in header api-key   # The session key
+                ```""", body);
+        var rule = new SkillSecrets.Capture("POST", "/v1/sessions", SkillSecrets.Capture.From.JSON, "session",
+                "WEATHER_SESSION_KEY", new SkillSecrets.Capture.Place(SkillSecrets.Capture.Place.Kind.HEADER, "api-key"));
+        assertEquals(List.of(new SkillSecrets.Declared("WEATHER_SESSION_KEY", "The session key",
+                List.of("api.example-weather.com"), false, true, rule)), promotedDeclarations());
+    }
+
     /** A block that holds a pasted key is not restored: the reviewer masks it like any other. */
     @Test
     void aSecretsBlockHoldingAKeyIsLeftToTheReviewer() throws Exception {

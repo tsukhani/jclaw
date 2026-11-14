@@ -109,7 +109,9 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         var saved = put("NAS_PASSWORD", "{\"value\":\"" + VALUE + "\",\"hosts\":[\"nas.example.com\"]}");
         assertIsOk(saved);
         var body = json(saved);
-        assertEquals(List.of("hosts", "name", "setAt"), body.keySet().stream().sorted().toList());
+        assertEquals(List.of("capture", "hasValue", "hosts", "name", "renewedAt", "setAt"),
+                body.keySet().stream().sorted().toList());
+        assertEquals("true null null", body.get("hasValue") + " " + body.get("capture") + " " + body.get("renewedAt"));
         assertEquals("NAS_PASSWORD", body.get("name").getAsString());
         assertEquals("[\"nas.example.com\"]", body.get("hosts").toString());
 
@@ -256,16 +258,296 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
 
         var body = json(GET(base()));
         assertEquals(JsonParser.parseString("""
-                [{"name":"API_KEY","description":"The service's API key","exampleHosts":["api.example.com"],"optional":false,"set":false,"setIn":null},
-                 {"name":"NAS_PASS","description":"The password itself","exampleHosts":["nas.example.com:5001","backup.example.com"],"optional":false,"set":true,"setIn":"demo"},
-                 {"name":"PROXY_PASS","description":"Optional. The reverse proxy's password","exampleHosts":["nas.example.com"],"optional":true,"set":false,"setIn":null},
-                 {"name":"BARE","description":"","exampleHosts":[],"optional":false,"set":false,"setIn":null},
-                 {"name":"BAD_HOST","description":"its example is no host","exampleHosts":[],"optional":false,"set":false,"setIn":null}]
+                [{"name":"API_KEY","description":"The service's API key","exampleHosts":["api.example.com"],"optional":false,"set":false,"setIn":null,"setInState":null,"filledBySignIn":false,"renewed":false,"suggested":null,"unreadableSuggestion":null},
+                 {"name":"NAS_PASS","description":"The password itself","exampleHosts":["nas.example.com:5001","backup.example.com"],"optional":false,"set":true,"setIn":"demo","setInState":null,"filledBySignIn":false,"renewed":false,"suggested":null,"unreadableSuggestion":null},
+                 {"name":"PROXY_PASS","description":"Optional. The reverse proxy's password","exampleHosts":["nas.example.com"],"optional":true,"set":false,"setIn":null,"setInState":null,"filledBySignIn":false,"renewed":false,"suggested":null,"unreadableSuggestion":null},
+                 {"name":"BARE","description":"","exampleHosts":[],"optional":false,"set":false,"setIn":null,"setInState":null,"filledBySignIn":false,"renewed":false,"suggested":null,"unreadableSuggestion":null},
+                 {"name":"BAD_HOST","description":"its example is no host","exampleHosts":[],"optional":false,"set":false,"setIn":null,"setInState":null,"filledBySignIn":false,"renewed":false,"suggested":null,"unreadableSuggestion":null}]
                 """), body.get("expected"));
         assertEquals("[\"API_KEY\",\"BARE\",\"BAD_HOST\"]", body.get("missing").toString());
         var stored = new ArrayList<String>();
         for (var e : body.getAsJsonArray("secrets")) stored.add(e.getAsJsonObject().get("name").getAsString());
         assertEquals(List.of("NAS_PASS", "UNDECLARED"), stored, "a stored secret the file does not declare is still listed");
+    }
+
+    // ==================== a renewed secret's capture rule (JF-374) ====================
+
+    /** The sign-in sends {@link #seedPassword}'s secret as a form field; spelled as an operator might type it. */
+    private static final String RULE = "{\"method\":\"post\",\"path\":\"/v1//sessions/current/\",\"from\":\"json\","
+            + "\"field\":\"session\",\"credential\":\"DEMO_PASSWORD\",\"credentialIn\":\"Form password\"}";
+    private static final String CREDENTIAL = ",\"credential\":\"DEMO_PASSWORD\",\"credentialIn\":\"form password\"";
+
+    /** The secret {@link #RULE}'s sign-in sends: a rule may name only a secret its skill holds. */
+    private void seedPassword() {
+        assertIsOk(put("DEMO_PASSWORD", "{\"value\":\"fake-demo-password-jf374\",\"hosts\":[\"api.example.com\"]}"));
+    }
+
+    /** The operator's rule is stored normalized, listed with the secret, and changed or removed only by a save. */
+    @Test
+    void aRenewedSecretTakesTheOperatorsRuleWithoutAValueAndListsIt() {
+        seedPassword();
+        var saved = put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}");
+        assertIsOk(saved);
+        assertEquals(JsonParser.parseString("""
+                {"method":"POST","path":"/v1/sessions/current","from":"json","field":"session","credential":"DEMO_PASSWORD",
+                 "credentialIn":"form password"}"""), json(saved).get("capture"));
+        assertEquals("false null", json(saved).get("hasValue") + " " + json(saved).get("renewedAt"));
+        assertEquals("", stored("SESSION_KEY"), "a renewed secret starts empty, and nothing seals an empty value");
+
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\",\"b.example.com\"]}"));
+        var listed = listedSecret("SESSION_KEY");
+        assertEquals("POST /v1/sessions/current json session using DEMO_PASSWORD in form password", ruleOf(listed),
+                "a save without 'capture' keeps the rule");
+
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"GET\","
+                + "\"path\":\"/v2/token\",\"from\":\"header\",\"field\":\"X-Session\",\"credential\":\"DEMO_PASSWORD\","
+                + "\"credentialIn\":\"basic\"}}"));
+        assertEquals("GET /v2/token header X-Session using DEMO_PASSWORD in basic", ruleOf(listedSecret("SESSION_KEY")));
+
+        assertEquals("400 invalid_request A secret with no capture rule needs a value.",
+                errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":null}")));
+        assertIsOk(put("SESSION_KEY", "{\"value\":\"fake-typed-session-jf374\",\"hosts\":[\"api.example.com\"],"
+                + "\"capture\":null}"));
+        var plain = listedSecret("SESSION_KEY");
+        assertEquals("true null", plain.get("hasValue") + " " + plain.get("capture"));
+    }
+
+    private static String ruleOf(JsonObject listed) {
+        var rule = listed.getAsJsonObject("capture");
+        return rule.get("method").getAsString() + " " + rule.get("path").getAsString() + " " + rule.get("from").getAsString()
+                + " " + rule.get("field").getAsString() + " using " + rule.get("credential").getAsString() + " in "
+                + rule.get("credentialIn").getAsString();
+    }
+
+    @Test
+    void aRuleThatIsIncompleteOrMalformedIsRefusedAndStoresNothing() {
+        var refused = new ArrayList<String>();
+        for (var rule : List.of(
+                "{\"path\":\"/v1/s\",\"field\":\"session\"}",
+                "{\"method\":\"POST\",\"field\":\"session\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\" \"}",
+                "{\"method\":\"PO ST\",\"path\":\"/v1/s\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"v1/s\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"https://api.example.com/v1/s\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s?x=1\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1%2Fs\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"from\":\"xml\",\"field\":\"session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"data.session\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"" + "f".repeat(129) + "\"" + CREDENTIAL + "}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credentialIn\":\"json password\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"session_key\","
+                        + "\"credentialIn\":\"json password\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"xml password\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"json\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"basic password\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"form pass(word)\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"header Host\"}",
+                "{\"method\":\"POST\",\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                        + "\"credentialIn\":\"header proxy-authorization\"}",
+                "\"POST /v1/s json session\"")) {
+            refused.add(errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + rule + "}")));
+        }
+        assertEquals(List.of(
+                "400 invalid_request A capture rule needs a method, a path and a field.",
+                "400 invalid_request A capture rule needs a method, a path and a field.",
+                "400 invalid_request A capture rule needs a method, a path and a field.",
+                "400 invalid_request 'PO ST' is not an HTTP method: give one such as POST.",
+                "400 invalid_request 'v1/s' is not a path a rule can match: give it as the service receives it, starting"
+                        + " with /, such as /v1/sessions/current, with no host, query, space, encoded slash or backslash.",
+                "400 invalid_request 'https://api.example.com/v1/s' is not a path a rule can match: give it as the service"
+                        + " receives it, starting with /, such as /v1/sessions/current, with no host, query, space, encoded"
+                        + " slash or backslash.",
+                "400 invalid_request '/v1/s?x=1' is not a path a rule can match: give it as the service receives it,"
+                        + " starting with /, such as /v1/sessions/current, with no host, query, space, encoded slash or"
+                        + " backslash.",
+                "400 invalid_request '/v1%2Fs' is not a path a rule can match: give it as the service receives it, starting"
+                        + " with /, such as /v1/sessions/current, with no host, query, space, encoded slash or backslash.",
+                "400 invalid_request 'xml' is not where a value can be taken from: give json or header.",
+                "400 invalid_request 'data.session' is not a field name: give the JSON field or the header by its name"
+                        + " alone, such as session or X-Session.",
+                "400 invalid_request '" + "f".repeat(129) + "' is not a field name: give the JSON field or the header by"
+                        + " its name alone, such as session or X-Session.",
+                "400 invalid_request A capture rule needs the secret its sign-in sends and where it sends it, such as"
+                        + " BACKOFFICE_PASSWORD in json password: JClaw takes a value only from a sign-in made with it.",
+                "400 invalid_request A capture rule needs the secret its sign-in sends and where it sends it, such as"
+                        + " BACKOFFICE_PASSWORD in json password: JClaw takes a value only from a sign-in made with it.",
+                "400 invalid_request 'session_key' is not a secret name: give the secret the sign-in sends, such as"
+                        + " BACKOFFICE_PASSWORD.",
+                "400 invalid_request 'xml password' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'json' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'basic password' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'form pass(word)' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'header Host' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'header proxy-authorization' is not where a sign-in sends a secret: give json, form or header and the"
+                        + " field's or header's name, such as json password, form user[password] or header api-key, or"
+                        + " basic for the password of Basic auth. A JSON field is one at the top level. A header the"
+                        + " secrets proxy does not forward, such as Host, cannot be one.",
+                "400 invalid_request 'capture' must be an object with 'method', 'path', 'from', 'field', 'credential' and"
+                        + " 'credentialIn', or null."),
+                refused);
+        assertEquals(0L, rows());
+        assertEquals("400 invalid_request A new secret needs a value.",
+                errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"]}")), "no rule, no value");
+        seedPassword();
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                + "\"path\":\"/" + "p".repeat(1023) + "\",\"field\":\"" + "f".repeat(128) + "\"" + CREDENTIAL + "}}"));
+        assertEquals("400 invalid_request '/" + "p".repeat(1024) + "' is not a path a rule can match: give it as the service"
+                + " receives it, starting with /, such as /v1/sessions/current, with no host, query, space, encoded slash or"
+                + " backslash.", errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":"
+                + "{\"method\":\"POST\",\"path\":\"/" + "p".repeat(1024) + "\",\"field\":\"session\"" + CREDENTIAL
+                + "}}")));
+    }
+
+    /** A cookie is no session key a rule can take: the jar that holds it is the skill's own. */
+    @Test
+    void aRuleOnACookieHeaderIsRefused() {
+        var refused = new ArrayList<String>();
+        for (var field : List.of("Set-Cookie", "set-cookie", "Cookie", "SET-COOKIE2")) {
+            refused.add(errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                    + "\"path\":\"/v1/s\",\"from\":\"header\",\"field\":\"" + field + "\"" + CREDENTIAL + "}}")));
+        }
+        assertEquals(List.of(
+                "400 invalid_request 'Set-Cookie' is a cookie header: a rule cannot take a cookie, which the skill keeps in"
+                        + " its own cookie jar.",
+                "400 invalid_request 'set-cookie' is a cookie header: a rule cannot take a cookie, which the skill keeps in"
+                        + " its own cookie jar.",
+                "400 invalid_request 'Cookie' is a cookie header: a rule cannot take a cookie, which the skill keeps in"
+                        + " its own cookie jar.",
+                "400 invalid_request 'SET-COOKIE2' is a cookie header: a rule cannot take a cookie, which the skill keeps in"
+                        + " its own cookie jar."), refused);
+        assertEquals(0L, rows());
+        seedPassword();
+        assertEquals(200, (int) put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                + "\"path\":\"/v1/s\",\"from\":\"json\",\"field\":\"Set-Cookie\"" + CREDENTIAL + "}}").status,
+                "a JSON field of that name is no cookie");
+    }
+
+    /** A line whose suggested rule the store would refuse still declares the secret, and says what it suggested. */
+    @Test
+    void aSuggestionThatCannotBeReadIsListedAsText() throws Exception {
+        declare("demo", """
+                renewed SESSION_KEY=api.example.com from POST /v1/sessions xml session using SESSION_KEY in header api-key   # The session key
+                renewed COOKIE_KEY=api.example.com from POST /v1/sessions header Set-Cookie using COOKIE_KEY in basic
+                renewed OLD_KEY=api.example.com from POST /v1/sessions json session   # No credential
+                renewed BARE_KEY=api.example.com   # No rule
+                """);
+        var expected = json(GET(base())).getAsJsonArray("expected");
+        var got = new ArrayList<String>();
+        for (var e : expected) {
+            var o = e.getAsJsonObject();
+            got.add(o.get("name").getAsString() + " " + o.get("suggested") + " " + o.get("unreadableSuggestion"));
+        }
+        assertEquals(List.of("SESSION_KEY null \"POST /v1/sessions xml session using SESSION_KEY in header api-key\"",
+                "COOKIE_KEY null \"POST /v1/sessions header Set-Cookie using COOKIE_KEY in basic\"",
+                "OLD_KEY null \"POST /v1/sessions json session\"", "BARE_KEY null null"), got);
+    }
+
+    /**
+     * A renewed secret with no value yet is its own skill's alone: another skill declaring the same name as a plain
+     * secret still needs it until a value is stored, and is told the first skill's sign-in fills it.
+     */
+    @Test
+    void anEmptyRenewedSecretIsNotProvidedToAnotherSkillUntilItHasAValue() throws Exception {
+        declare("demo", "renewed SESSION_KEY=api.example.com from POST /v1/sessions json session   # The session key\n");
+        declare("other", "SESSION_KEY=api.example.com   # The session key\n");
+        seedPassword();
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+
+        assertEquals("[]", missingOf("demo"));
+        assertEquals("[\"SESSION_KEY\"]", missingOf("other"));
+        var otherView = json(GET("/api/agents/" + agentId + "/skills/other/secrets"));
+        var row = otherView.getAsJsonArray("expected").get(0).getAsJsonObject();
+        assertEquals("false \"demo\" \"offered\" true", row.get("set") + " " + row.get("setIn") + " "
+                        + row.get("setInState") + " " + row.get("filledBySignIn"),
+                "named as filled by demo's sign-in, so the panel offers no Add the store would refuse");
+        assertEquals(List.of("demo"), offeredSkills());
+        assertEquals("{\"needsValues\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},"
+                + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"demo\",\"state\":\"offered\"}},\"withheld\":true}",
+                needsOf("other"), "the Chat notice names demo's sign-in, not a value to add");
+
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":false}"));
+        assertEquals("{\"needsValues\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},"
+                + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"demo\",\"state\":\"switchedOff\"}},\"withheld\":true}",
+                needsOf("other"));
+        assertEquals("\"switchedOff\"", json(GET("/api/agents/" + agentId + "/skills/other/secrets"))
+                .getAsJsonArray("expected").get(0).getAsJsonObject().get("setInState").toString());
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/demo", "application/json", "{\"enabled\":true}"));
+
+        var own = json(GET(base())).getAsJsonArray("expected").get(0).getAsJsonObject();
+        assertEquals("true \"demo\" null true", own.get("set") + " " + own.get("setIn") + " " + own.get("setInState")
+                        + " " + own.get("filledBySignIn"), "demo's own empty renewed secret is demo's to fill, with no state");
+        declare("demo", "SESSION_KEY=api.example.com   # The session key, declared plain\n");
+        assertEquals("[]", missingOf("demo"), "a plain line for its own empty renewed secret leaves demo runnable");
+        assertEquals(List.of("demo"), offeredSkills());
+
+        assertIsOk(put("SESSION_KEY", "{\"value\":\"fake-typed-session-jf374\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals("[]", missingOf("other"));
+        assertEquals(List.of("demo", "other"), offeredSkills());
+    }
+
+    /** A renewed secret starts empty, so the skill is runnable without it, and its line's rule is offered as a hint. */
+    @Test
+    void aDeclaredRenewedSecretIsNeverMissingAndItsSuggestedRuleIsListed() throws Exception {
+        declare("demo", """
+                API_KEY=api.example.com   # The service's API key
+                renewed SESSION_KEY=api.example.com from POST /v1/sessions/current json session using API_KEY in form key   # The session key
+                """);
+        assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        var body = json(GET(base()));
+        assertEquals(JsonParser.parseString("""
+                {"name":"SESSION_KEY","description":"The session key","exampleHosts":["api.example.com"],"optional":false,
+                 "set":false,"setIn":null,"setInState":null,"filledBySignIn":false,"renewed":true,
+                 "suggested":{"method":"POST","path":"/v1/sessions/current","from":"json","field":"session",
+                              "credential":"API_KEY","credentialIn":"form key"},
+                 "unreadableSuggestion":null}"""),
+                body.getAsJsonArray("expected").get(1));
+        assertEquals("[]", body.get("missing").toString());
+        assertEquals(List.of("demo"), offeredSkills());
+        assertEquals(0L, (long) commitInFreshTx(() -> SkillSecret.count("agent.id = ?1 AND name = 'SESSION_KEY'", agentId)),
+                "a suggestion stores nothing");
+    }
+
+    /** A save is logged with its rule and never a value, and says the hosts changed only when the set of them did. */
+    @Test
+    void savingARuleIsLoggedWithTheRuleAndNoValue() {
+        seedPassword();
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+            assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+            assertIsOk(put("SESSION_KEY", "{\"value\":\"" + VALUE + "\",\"hosts\":[\"api.example.com\"]}"));
+            assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":null}"));
+            assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\",\"b.example.com\"],\"capture\":" + RULE + "}"));
+            assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"b.example.com\",\"api.example.com\"]}"));
+        });
+        assertEquals(List.of(
+                "Secret SESSION_KEY added for skill demo, sent only to api.example.com, renewed from the answer to POST"
+                        + " /v1/sessions/current json session using DEMO_PASSWORD in form password",
+                "Secret SESSION_KEY replaced for skill demo, sent only to api.example.com",
+                "Secret SESSION_KEY kept for skill demo, sent only to api.example.com, no longer renewed",
+                "Secret SESSION_KEY kept, hosts changed for skill demo, sent only to api.example.com, b.example.com, renewed"
+                        + " from the answer to POST /v1/sessions/current json session using DEMO_PASSWORD in form password",
+                "Secret SESSION_KEY kept for skill demo, sent only to b.example.com, api.example.com"),
+                events.stream().map(EventLogger.Captured::message).toList());
     }
 
     @Test
@@ -314,7 +596,8 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
                 "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
         var expected = json(GET(base())).getAsJsonArray("expected").get(0).getAsJsonObject();
         assertEquals("{\"name\":\"SHARED_PASS\",\"description\":\"The shared password\",\"exampleHosts\":[\"api.example.com\"],"
-                + "\"optional\":false,\"set\":true,\"setIn\":\"other\"}", expected.toString());
+                + "\"optional\":false,\"set\":true,\"setIn\":\"other\",\"setInState\":\"offered\",\"filledBySignIn\":false,\"renewed\":false,\"suggested\":null,\"unreadableSuggestion\":null}",
+                expected.toString());
         assertEquals("[]", missingOf("demo"));
         assertEquals(List.of("demo", "other"), offeredSkills());
     }
@@ -335,11 +618,181 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         assertEquals("[\"SHARED_PASS\"]", missingOf("demo"));
         var body = json(GET(base()));
         assertEquals("{\"name\":\"SHARED_PASS\",\"description\":\"The shared password\",\"exampleHosts\":[\"api.example.com\"],"
-                + "\"optional\":false,\"set\":false,\"setIn\":\"other\"}",
+                + "\"optional\":false,\"set\":false,\"setIn\":\"other\",\"setInState\":\"switchedOff\",\"filledBySignIn\":false,\"renewed\":false,\"suggested\":null,\"unreadableSuggestion\":null}",
                 body.getAsJsonArray("expected").get(0).getAsJsonObject().toString());
         assertEquals("[\"SHARED_PASS\"]", body.get("missing").toString());
         assertEquals(List.of(), offeredSkills());
         assertEquals("[]", missingOf("other"), "the skill that holds the secret needs nothing, switched off or not");
+    }
+
+    /** The secret a rule says the sign-in sends must be one of the skill's own: another skill's, or none, is refused. */
+    @Test
+    void aRuleNamingASecretTheSkillDoesNotHoldIsRefused() throws Exception {
+        declare("other", "OTHER_PASS=api.example.com   # Another skill's password\n");
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/OTHER_PASS", "application/json",
+                "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        var refused = new ArrayList<String>();
+        for (var credential : List.of("OTHER_PASS", "NO_SUCH_PASS")) {
+            refused.add(errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                    + "\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"" + credential + "\","
+                    + "\"credentialIn\":\"json password\"}}")));
+        }
+        assertEquals(List.of(
+                "400 invalid_request OTHER_PASS is not a secret of skill 'demo': the rule names the secret its sign-in"
+                        + " sends, so add that secret to this skill first, or name SESSION_KEY itself for a sign-in that"
+                        + " sends the renewed key.",
+                "400 invalid_request NO_SUCH_PASS is not a secret of skill 'demo': the rule names the secret its sign-in"
+                        + " sends, so add that secret to this skill first, or name SESSION_KEY itself for a sign-in that"
+                        + " sends the renewed key."), refused);
+        assertEquals(1L, rows(), "only the other skill's secret is stored");
+
+        assertIsOk(put("DEMO_PASS", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
+        var saved = put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                + "\"path\":\"/v1/s\",\"field\":\"session\",\"credential\":\"DEMO_PASS\",\"credentialIn\":\"FORM pass\"}}");
+        assertIsOk(saved);
+        assertEquals("POST /v1/s json session using DEMO_PASS in form pass", ruleOf(json(saved)));
+    }
+
+    /** When the proxy last renewed the value is cleared by a new rule, which took no value yet, and kept by the same one. */
+    @Test
+    void aChangedRuleClearsWhenTheValueWasLastRenewed() {
+        seedPassword();
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+        assertTrue(commitInFreshTx(() -> services.SkillSecrets.storeCaptured(Agent.findById(agentId), "demo",
+                "SESSION_KEY", services.SkillSecrets.Capture.of("POST", "/v1/sessions/current", "json", "session",
+                        "DEMO_PASSWORD", "form password"), "fake-captured-session-jf374")));
+        assertFalse(listedSecret("SESSION_KEY").get("renewedAt").isJsonNull());
+
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+        assertFalse(listedSecret("SESSION_KEY").get("renewedAt").isJsonNull(), "the same rule saved again");
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":{\"method\":\"POST\","
+                + "\"path\":\"/v1/sessions/current\",\"field\":\"token\"" + CREDENTIAL + "}}"));
+        var changed = listedSecret("SESSION_KEY");
+        assertEquals("true null", changed.get("hasValue") + " " + changed.get("renewedAt"),
+                "the value stays, no longer one this rule renewed");
+    }
+
+    /**
+     * A captured value and then a typed one saved in the same session: the typed one is the operator's save, so the
+     * secret's set-at moves, which a mark left over from the capture would stop.
+     */
+    @Test
+    void aValueTypedAfterACaptureInOneSessionMovesWhenItWasSet() {
+        seedPassword();
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+        var captured = java.time.Instant.parse("2026-11-13T09:00:00Z");
+        var typed = java.time.Instant.parse("2026-11-13T10:00:00Z");
+        commitInFreshTx(() -> {
+            Agent owner = Agent.findById(agentId);
+            var rule = services.SkillSecrets.Capture.of("POST", "/v1/sessions/current", "json", "session", "DEMO_PASSWORD",
+                    "form password");
+            utils.AppClock.runWith(java.time.Clock.fixed(captured, java.time.ZoneOffset.UTC), () -> {
+                services.SkillSecrets.storeCaptured(owner, "demo", "SESSION_KEY", rule, "fake-captured-session-jf374");
+                JPA.em().flush();
+            });
+            utils.AppClock.runWith(java.time.Clock.fixed(typed, java.time.ZoneOffset.UTC), () -> {
+                services.SkillSecrets.put(owner, "demo", "SESSION_KEY", "fake-typed-session-jf374",
+                        List.of("api.example.com"));
+                JPA.em().flush();
+            });
+            return null;
+        });
+        var listed = listedSecret("SESSION_KEY");
+        assertEquals(typed + " null", listed.get("setAt").getAsString() + " " + listed.get("renewedAt"));
+    }
+
+    private JsonObject listedSecret(String name) {
+        for (var e : json(GET(base())).getAsJsonArray("secrets")) {
+            if (e.getAsJsonObject().get("name").getAsString().equals(name)) return e.getAsJsonObject();
+        }
+        throw new AssertionError("not listed: " + name);
+    }
+
+    /** A sign-in that sends the renewed key itself can renew only a key the secret already holds. */
+    @Test
+    void aRuleWhoseSignInSendsTheRenewedSecretItselfNeedsAValue() {
+        var self = "{\"method\":\"POST\",\"path\":\"/v1/refresh\",\"field\":\"session\",\"credential\":\"SESSION_KEY\","
+                + "\"credentialIn\":\"header api-key\"}";
+        assertEquals("400 invalid_request A rule whose sign-in sends SESSION_KEY itself needs a value for SESSION_KEY to"
+                + " send: enter its current value too, or name the secret the sign-in sends, such as its password.",
+                errorOf(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + self + "}")));
+        assertEquals(0L, rows());
+
+        var saved = put("SESSION_KEY", "{\"value\":\"fake-typed-session-jf374\",\"hosts\":[\"api.example.com\"],"
+                + "\"capture\":" + self + "}");
+        assertIsOk(saved);
+        assertEquals("true POST /v1/refresh json session using SESSION_KEY in header api-key",
+                json(saved).get("hasValue") + " " + ruleOf(json(saved)));
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"b.example.com\"],\"capture\":" + self + "}"));
+        assertEquals("[\"b.example.com\"] true", listedSecret("SESSION_KEY").get("hosts") + " "
+                + listedSecret("SESSION_KEY").get("hasValue"), "a save keeping the value it holds needs none typed");
+    }
+
+    /** The secret a rule's sign-in sends cannot be deleted while the rule names it: the rule could never take a value. */
+    @Test
+    void deletingTheSecretARulesSignInSendsIsRefusedUntilTheRuleGoes() {
+        seedPassword();
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+
+        assertEquals("400 invalid_request DEMO_PASSWORD is the secret the capture rule of SESSION_KEY says its sign-in"
+                + " sends: change or remove that rule first.", errorOf(DELETE(base() + "/DEMO_PASSWORD")));
+        assertEquals(2L, rows());
+        assertEquals("POST /v1/sessions/current json session using DEMO_PASSWORD in form password",
+                ruleOf(listedSecret("SESSION_KEY")));
+
+        assertIsOk(DELETE(base() + "/SESSION_KEY"));
+        assertIsOk(DELETE(base() + "/DEMO_PASSWORD"));
+        assertEquals(0L, rows());
+    }
+
+    /**
+     * A name set in a skill whose folder is gone still belongs to it, so another skill cannot add it: the panel names
+     * that skill as no longer installed, and offers no Add the store would refuse.
+     */
+    @Test
+    void aNameSetInASkillNoLongerInstalledIsNamedSoAndCannotBeAdded() throws Exception {
+        declare("demo", "SHARED_KEY=api.example.com   # The shared key\n");
+        declare("other", "SHARED_KEY=api.example.com   # The shared key\n");
+        assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_KEY", "application/json",
+                "{\"value\":\"fake-shared-key-jf374\",\"hosts\":[\"api.example.com\"]}"));
+        services.SkillPromotionService.deleteRecursive(AgentService.workspacePath(agentName).resolve("skills/other"));
+        agents.SkillLoader.clearCache();
+
+        var row = json(GET(base())).getAsJsonArray("expected").get(0).getAsJsonObject();
+        assertEquals("false \"other\" \"notInstalled\" false", row.get("set") + " " + row.get("setIn") + " "
+                + row.get("setInState") + " " + row.get("filledBySignIn"));
+        assertEquals("400 invalid_request Skill 'other' on this agent already has a secret named SHARED_KEY. A command"
+                + " finds a secret by its name, so each name is used once on an agent; that skill's commands can use it"
+                + " too.", errorOf(put("SHARED_KEY", "{\"value\":\"fake-own-key-jf374\",\"hosts\":[\"api.example.com\"]}")),
+                "the Add the panel no longer offers");
+    }
+
+    /**
+     * A holder whose sign-in fills a name is not offered while a tool it needs is off: the Secrets panel and the skill
+     * list say so, rather than that its sign-in has yet to run.
+     */
+    @Test
+    void aSignInHolderWhoseToolIsOffIsNamedNotOffered() throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        try {
+            declareWithTool("demo", "filesystem",
+                    "renewed SESSION_KEY=api.example.com   # The session key\n");
+            declare("other", "SESSION_KEY=api.example.com   # The session key\n");
+            seedPassword();
+            assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+            assertEquals("\"offered\"", json(GET("/api/agents/" + agentId + "/skills/other/secrets"))
+                    .getAsJsonArray("expected").get(0).getAsJsonObject().get("setInState").toString());
+
+            switchToolOff("filesystem");
+
+            assertEquals("\"notOffered\"", json(GET("/api/agents/" + agentId + "/skills/other/secrets"))
+                    .getAsJsonArray("expected").get(0).getAsJsonObject().get("setInState").toString());
+            assertEquals("{\"needsValues\":[\"SESSION_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},"
+                    + "\"filledBySignIn\":{\"SESSION_KEY\":{\"skill\":\"demo\",\"state\":\"notOffered\"}},\"withheld\":true}",
+                    needsOf("other"));
+        } finally {
+            ToolRegistrySync.release();
+        }
     }
 
     /** What the agent's skill list says the skill needs, who holds each value, and whether it is withheld for them. */
@@ -348,7 +801,9 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             var o = e.getAsJsonObject();
             if (!o.get("name").getAsString().equals(skill)) continue;
             var out = new JsonObject();
-            for (var key : List.of("needsValues", "heldBySwitchedOff", "heldByNotOffered", "withheld")) out.add(key, o.get(key));
+            for (var key : List.of("needsValues", "heldBySwitchedOff", "heldByNotOffered", "filledBySignIn", "withheld")) {
+                out.add(key, o.get(key));
+            }
             return out.toString();
         }
         return "not listed";
@@ -388,14 +843,14 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             declareWithTool("tooled", "filesystem", "TOOL_KEY=tool.example.com   # The key\n");
             assertIsOk(PUT("/api/agents/" + agentId + "/skills/other/secrets/SHARED_PASS", "application/json",
                     "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
-            assertEquals("{\"needsValues\":[\"API_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":true}",
+            assertEquals("{\"needsValues\":[\"API_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"filledBySignIn\":{},\"withheld\":true}",
                     needsOf("demo"), "a value a switched-on skill holds is given to every skill");
 
             assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":false}"));
 
             assertEquals("{\"needsValues\":[\"SHARED_PASS\",\"API_KEY\"],\"heldBySwitchedOff\":{\"SHARED_PASS\":\"other\"},"
-                    + "\"heldByNotOffered\":{},\"withheld\":true}", needsOf("demo"));
-            assertEquals("{\"needsValues\":[],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":false}",
+                    + "\"heldByNotOffered\":{},\"filledBySignIn\":{},\"withheld\":true}", needsOf("demo"));
+            assertEquals("{\"needsValues\":[],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"filledBySignIn\":{},\"withheld\":false}",
                     needsOf("other"));
 
             assertIsOk(PUT("/api/agents/" + agentId + "/skills/other", "application/json", "{\"enabled\":true}"));
@@ -403,8 +858,8 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             switchToolOff("filesystem");
 
             assertEquals("{\"needsValues\":[\"SHARED_PASS\",\"API_KEY\"],\"heldBySwitchedOff\":{},"
-                    + "\"heldByNotOffered\":{\"SHARED_PASS\":\"other\"},\"withheld\":true}", needsOf("demo"));
-            assertEquals("{\"needsValues\":[\"TOOL_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"withheld\":false}",
+                    + "\"heldByNotOffered\":{\"SHARED_PASS\":\"other\"},\"filledBySignIn\":{},\"withheld\":true}", needsOf("demo"));
+            assertEquals("{\"needsValues\":[\"TOOL_KEY\"],\"heldBySwitchedOff\":{},\"heldByNotOffered\":{},\"filledBySignIn\":{},\"withheld\":false}",
                     needsOf("tooled"), "a skill that also lacks a tool is not withheld for its value alone");
         } finally {
             ToolRegistrySync.release();
@@ -1110,9 +1565,40 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         var saved = put("GAMMA_API_KEY", "{" + keptJson(id) + ",\"hosts\":[\"public-api.gamma.app\"]}");
 
         assertIsOk(saved);
-        assertEquals(List.of("hosts", "name", "setAt"), json(saved).keySet().stream().sorted().toList());
+        assertEquals(List.of("capture", "hasValue", "hosts", "name", "renewedAt", "setAt"),
+                json(saved).keySet().stream().sorted().toList());
         assertEquals(VALUE, CredentialCipher.current().open(SkillSecret.VALUE_FIELD, stored("GAMMA_API_KEY")).plaintext());
         assertEquals("[]", kept().toString(), "the kept file is deleted once its value is stored");
+    }
+
+    /** JF-374: a value from a kept file comes with the capture rule saved beside it. */
+    @Test
+    void aKeptFileCanFillARenewedSecretSavedWithItsRule() throws Exception {
+        declare("demo", "renewed SESSION_KEY=api.example.com from POST /v1/sessions json session   # The session key\n");
+        var id = keep("credentials/session-key.txt", VALUE + "\n");
+        seedPassword();
+
+        var saved = put("SESSION_KEY", "{" + keptJson(id) + ",\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}");
+
+        assertIsOk(saved);
+        assertEquals("true POST /v1/sessions/current json session using DEMO_PASSWORD in form password",
+                json(saved).get("hasValue") + " " + ruleOf(json(saved)));
+        assertEquals(VALUE, plaintext(stored("SESSION_KEY")));
+        assertEquals("[]", kept().toString(), "the kept file is deleted once its value is stored");
+    }
+
+    /** Saving a renewed secret's rule stores no value, so a kept file assigning it stays until one is stored. */
+    @Test
+    void savingOnlyARuleKeepsTheKeptFileThatAssignsTheSecret() throws Exception {
+        declare("demo", "renewed SESSION_KEY=api.example.com from POST /v1/sessions json session   # The session key\n");
+        keep("config.env", "SESSION_KEY=" + VALUE + "\n");
+        seedPassword();
+
+        assertIsOk(put("SESSION_KEY", "{\"hosts\":[\"api.example.com\"],\"capture\":" + RULE + "}"));
+        assertEquals(List.of("config.env"), keptPaths(), "the secret still has no value");
+
+        assertIsOk(put("SESSION_KEY", "{\"value\":\"fake-typed-session-jf374\",\"hosts\":[\"api.example.com\"]}"));
+        assertEquals(List.of(), keptPaths());
     }
 
     @Test
@@ -1414,7 +1900,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             Agent owner = Agent.findById(agentId);
             try {
                 KeptSkillFiles.importSecret(owner, "demo", skillDir, KeptSkillFiles.find(owner, "demo", id),
-                        "GAMMA_API_KEY", List.of("public-api.gamma.app"));
+                        "GAMMA_API_KEY", List.of("public-api.gamma.app"), false, null);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }

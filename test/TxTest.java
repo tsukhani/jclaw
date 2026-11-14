@@ -1,6 +1,7 @@
 import jakarta.persistence.EntityManager;
 import models.EventLog;
 import org.hibernate.Session;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
@@ -12,6 +13,7 @@ import services.Tx;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Tests for {@link Tx} — the transaction helper that adapts between Play's
@@ -147,6 +149,74 @@ class TxTest extends UnitTest {
             if (em.isOpen()) em.close();
         }
         assertFalse(ran.get(), "a rolled-back transaction must not fire the after-commit action");
+    }
+
+    // --- JF-397: an after-commit action holds no pooled connection ---
+
+    /**
+     * Hibernate hands the connection back to the pool inside the JDBC commit, before it calls the synchronizations
+     * {@link Tx#afterCommit} registers, so an action that waits on a lock cannot starve the pool for the lock's holder.
+     * A release mode that kept the connection until the session closed would turn every such waiter into a held
+     * connection.
+     */
+    @Test
+    void anAfterCommitActionRunsOnceTheTransactionsConnectionIsBackInThePool() {
+        var connectedBefore = new AtomicReference<Boolean>();
+        var connectedDuring = new AtomicReference<Boolean>();
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            em.persist(eventLog("jf397-raw"));
+            em.flush();
+            var session = em.unwrap(Session.class);
+            connectedBefore.set(physicallyConnected(session));
+            Tx.afterCommit(session, () -> connectedDuring.set(physicallyConnected(session)));
+            em.getTransaction().commit();
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+        assertEquals(true, connectedBefore.get(), "precondition: the write holds a connection");
+        assertEquals(false, connectedDuring.get(), "the after-commit action ran with the connection still checked out");
+    }
+
+    /** As above, through {@link Tx#run} on a thread with no transaction: Play's {@code JPA.withTransaction}, as production commits. */
+    @Test
+    void anAfterCommitActionOfATxRunHoldsNoConnection() throws Exception {
+        var connectedBefore = new AtomicReference<Boolean>();
+        var connectedDuring = new AtomicReference<Boolean>();
+        var failure = new AtomicReference<Throwable>();
+        var probe = new Thread(() -> {
+            try {
+                Tx.run(() -> {
+                    eventLog("jf397-tx-run").save();
+                    JPA.em().flush();
+                    var session = JPA.em().unwrap(Session.class);
+                    connectedBefore.set(physicallyConnected(session));
+                    Tx.afterCommit(() -> connectedDuring.set(physicallyConnected(session)));
+                });
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        });
+        probe.start();
+        probe.join();
+        assertNull(failure.get());
+        assertEquals(true, connectedBefore.get(), "precondition: the write holds a connection");
+        assertEquals(false, connectedDuring.get(), "the after-commit action ran with the connection still checked out");
+    }
+
+    private static boolean physicallyConnected(Session session) {
+        return session.unwrap(SharedSessionContractImplementor.class).getJdbcCoordinator().getLogicalConnection()
+                .isPhysicallyConnected();
+    }
+
+    private static EventLog eventLog(String category) {
+        var log = new EventLog();
+        log.level = "INFO";
+        log.category = category;
+        log.message = "persisted";
+        log.timestamp = Instant.now();
+        return log;
     }
 
     @Test

@@ -282,6 +282,29 @@ class CapabilityRulesTest extends UnitTest {
                     && "permittedOrigin".equals(access.getTarget().getName()));
 
     /**
+     * JF-374: {@code SkillSecrets.storeCaptured} is the one write of a secret's value that is not the operator's, and
+     * it is public only because the store lives in another package than the secrets proxy that takes the value from a
+     * sign-in answer. A route, tool or command that reached it would write a value.
+     */
+    @Test
+    void onlyTheSecretsProxyStoresACapturedValue() {
+        var callers = new TreeSet<String>();
+        for (JavaClass javaClass : APP_CLASSES) {
+            if (javaClass.getAccessesFromSelf().stream().anyMatch(CAPTURED_VALUE_STORE)) callers.add(javaClass.getName());
+        }
+        assertFalse(callers.isEmpty(), "no class calls SkillSecrets.storeCaptured, so this rule guards nothing: point "
+                + "CAPTURED_VALUE_STORE at the method's new name, or delete the rule with the method");
+        assertEquals(List.of(), callers.stream().filter(c -> !c.startsWith("services.secrets.")).toList(),
+                "only the secrets proxy may store a value it took from a sign-in answer: store an operator's value "
+                        + "through SkillSecrets.put instead");
+    }
+
+    private static final DescribedPredicate<JavaAccess<?>> CAPTURED_VALUE_STORE = DescribedPredicate.describe(
+            "a call or method reference to SkillSecrets.storeCaptured",
+            access -> "services.SkillSecrets".equals(access.getTargetOwner().getName())
+                    && "storeCaptured".equals(access.getTarget().getName()));
+
+    /**
      * Outbound HTTP in app/ is OkHttp-only; the JDK {@code java.net.http.HttpClient}
      * stack was removed in the OkHttp migration (JCLAW-185..188) to avoid the LM Studio
      * h2c-upgrade hang and to keep a single virtual-thread-clean client. This guards
@@ -650,7 +673,9 @@ class CapabilityRulesTest extends UnitTest {
             Map.entry("services.EventLogger", Set.of("captureForTest", "captureMatchingForTest")),
             Map.entry("services.OperatorAlerts",
                     Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest")),
-            Map.entry("services.secrets.SecretGrants", Set.of("callWithUpstreamForTest", "openForTest")),
+            Map.entry("services.secrets.SecretGrants",
+                    Set.of("callWithUpstreamForTest", "callWithChosenHookForTest", "callWithCaptureFaultsForTest",
+                            "openForTest")),
             Map.entry("agents.SkillLoader", Set.of("callWithScanHookForTest")),
             Map.entry("services.secrets.SecretProxy", Set.of("portForTest", "caForTest")));
 

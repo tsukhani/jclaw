@@ -440,9 +440,9 @@ public class SkillPromotionService {
 
     /**
      * Rewrite the sanitized SKILL.md's secrets block in the form the panel reads, from what the sanitizer returned:
-     * each declaration it kept by name, with its hosts and description, and nothing else. Nothing the sanitizer
-     * masked comes back, name or host; only whether the original marked a secret optional does. A declaration whose
-     * name the sanitizer changed is gone, and a block it dropped stays dropped.
+     * each declaration it kept by name, with its hosts, description and suggested capture rule, and nothing else.
+     * Nothing the sanitizer masked comes back, name, host or rule; only whether the original marked a secret optional
+     * or renewed does. A declaration whose name the sanitizer changed is gone, and a block it dropped stays dropped.
      */
     private static void restoreDeclaration(SkillSecrets.@Nullable Declarations declared,
                                            LinkedHashMap<String, String> sanitized) {
@@ -454,8 +454,12 @@ public class SkillPromotionService {
         for (var d : declared.secrets()) {
             var kept = reviewed.get(d.name());
             if (kept == null) continue;
+            if (d.renewed() && !kept.renewed()) {
+                var asRenewed = SkillSecrets.declaredAsRenewed(body, d.name());
+                if (asRenewed != null) kept = asRenewed;
+            }
             rebuilt.add(new SkillSecrets.Declared(kept.name(), SkillSecrets.keepOptional(kept.description(), d.optional()),
-                    kept.exampleHosts(), d.optional()));
+                    kept.exampleHosts(), d.optional(), d.renewed(), d.renewed() ? kept.suggested() : null));
         }
         var reviewedSettings = new HashMap<String, SkillSecrets.DeclaredSetting>();
         for (var d : SkillSecrets.settingsIn(body)) reviewedSettings.put(d.name(), d);

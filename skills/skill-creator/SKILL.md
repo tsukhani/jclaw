@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.5"
+  version: "1.3.7"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -48,10 +48,10 @@ A SKILL.md MUST stay under 20,000 characters (about 5,000 tokens, or 500 lines).
 
 Only the operator gives a skill what it needs to reach a service, in the skill's Secrets panel. A skill that needs an API key, token or password, or a per-install value such as an address, a user name or a path, MUST have a `## Secrets` section in its SKILL.md that:
 
-1. Declares each one in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is` for a secret, `setting NAME=example-value   # what it is` for a value that is not secret. When in doubt, it is a secret. No agent is offered the skill until every required one has a value.
+1. Declares each one in a fenced code block whose language is `secrets`, one line each: `NAME=example-host   # what it is` for a secret, `setting NAME=example-value   # what it is` for a value that is not secret, `renewed NAME=example-host from POST /path json field using PASSWORD_NAME in json field   # what it is` for a session key a sign-in returns. When in doubt, it is a secret. No agent is offered the skill until every required one has a value.
 2. Tells the agent to use `$NAME` in its commands. A secret arrives as a stand-in JClaw swaps for the value on requests to its hosts; a setting, as its value.
 
-Never write a value into a file or ask for one in chat. Write defaults (a city, a unit) in SKILL.md. A secret the skill saves between runs (a session key, a cookie jar) goes in `skill-state/{skill-name}/` in the workspace, never in the skill's folder; anything else it keeps goes in `skill-data/{skill-name}/`. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
+Never write a value into a file or ask for one in chat. Write defaults (a city, a unit) in SKILL.md. A session key a sign-in returns is a renewed secret, which JClaw stores itself. Another secret the skill saves between runs (a cookie jar) goes in `skill-state/{skill-name}/` in the workspace, never in the skill's folder; anything else it keeps goes in `skill-data/{skill-name}/`. First read `skills/skill-creator/references/secrets.md` with the filesystem tool's readFile.
 
 ## Frontmatter layout
 

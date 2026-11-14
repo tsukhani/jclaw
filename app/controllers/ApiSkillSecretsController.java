@@ -36,20 +36,47 @@ import static utils.GsonHolder.GSON;
  * The Secrets panel of an agent's skill (JF-323): list, create or replace, and delete. A secret's value goes in and
  * never comes back out, to the operator included. A setting (JF-357) is not secret, so its value is listed. A value
  * can come from a file an update kept (JF-352). A kept file goes once each name it assigns that the skill declares
- * has a value, however that value was stored. Every route is the operator's alone.
+ * has a value, however that value was stored. A renewed secret (JF-374) carries the operator's capture rule, under
+ * which the secrets proxy also stores its value from a sign-in answer; the operator may still type one here. Every
+ * route is the operator's alone.
  */
 @With(AuthCheck.class)
 public class ApiSkillSecretsController extends Controller {
 
-    public record SecretView(String name, List<String> hosts, String setAt) {}
+    /**
+     * {@code hasValue} is false for a renewed secret the proxy has not filled yet; {@code renewedAt} is when it last
+     * stored a value under {@code capture} (JF-374).
+     */
+    public record SecretView(String name, List<String> hosts, String setAt, boolean hasValue,
+                             @Nullable CaptureView capture, @Nullable String renewedAt) {}
 
     /**
-     * A secret the skill's SKILL.md declares in its {@code secrets} block (JF-348). {@code setIn} is the skill of the agent that
-     * holds it, since a name is used once on an agent; {@code set} says this skill can be given it, which it cannot
-     * when the holder is another skill that is switched off.
+     * A capture rule (JF-374): {@code from} is {@code json} or {@code header}; {@code credential} is the skill's secret
+     * the sign-in sends, and {@code credentialIn} where: {@code json FIELD}, {@code form FIELD}, {@code header NAME} or
+     * {@code basic}.
+     */
+    public record CaptureView(String method, String path, String from, String field, String credential,
+                              String credentialIn) {
+        static @Nullable CaptureView of(SkillSecrets.@Nullable Capture capture) {
+            return capture == null ? null
+                    : new CaptureView(capture.method(), capture.path(), capture.from().wire(), capture.field(),
+                            capture.credential(), capture.credentialIn().wire());
+        }
+    }
+
+    /**
+     * A secret the skill's SKILL.md declares in its {@code secrets} block (JF-348). {@code setIn} is the skill of
+     * the agent that holds it, since a name is used once on an agent; {@code set} says this skill can be given it, which it cannot
+     * when the holder is another skill that is switched off, or when {@code filledBySignIn}, the holder's renewed
+     * secret has no value yet, which its sign-in fills (JF-374); {@code setInState} is another holder's
+     * {@code offered}, {@code switchedOff}, {@code notOffered} or {@code notInstalled}, whose folder is gone, and null
+     * when this skill holds it. A {@code renewed} one is never required, and
+     * {@code suggested} is the capture rule its line suggests, text from a file the agent can change;
+     * {@code unreadableSuggestion} is that text when it is no rule this store would take.
      */
     public record ExpectedView(String name, String description, List<String> exampleHosts, boolean optional,
-                               boolean set, @Nullable String setIn) {}
+                               boolean set, @Nullable String setIn, @Nullable String setInState, boolean filledBySignIn,
+                               boolean renewed, @Nullable CaptureView suggested, @Nullable String unreadableSuggestion) {}
 
     public record SettingView(String name, String value, String setAt) {}
 
@@ -73,9 +100,11 @@ public class ApiSkillSecretsController extends Controller {
     /**
      * {@code value} may be left out to keep the stored one and change only {@code hosts}. {@code fromKept}, in place of
      * {@code value}, takes it from a kept file (JF-352): the secret's {@code NAME=value} line when the file holds such
-     * lines, else the whole file trimmed.
+     * lines, else the whole file trimmed. {@code capture} sets the secret's capture rule (JF-374), null removes it, and
+     * leaving it out keeps it; a secret with a rule needs no value.
      */
-    public record SecretWriteRequest(@Nullable String value, @Nullable String fromKept, List<String> hosts) {}
+    public record SecretWriteRequest(@Nullable String value, @Nullable String fromKept, List<String> hosts,
+                                     @Nullable CaptureView capture) {}
 
     public record SecretDeletedResponse(boolean deleted) {}
 
@@ -90,8 +119,12 @@ public class ApiSkillSecretsController extends Controller {
         var provided = SkillSecrets.provided(owner);
         var expected = new ArrayList<ExpectedView>();
         for (var d : SkillSecrets.declared(dir)) {
+            var held = provided.holderOf(d.name());
             expected.add(new ExpectedView(d.name(), d.description(), d.exampleHosts(), d.optional(),
-                    provided.to(name, d.name()), provided.holder(d.name())));
+                    provided.to(name, d.name()), held == null ? null : held.skill(),
+                    held == null || held.skill().equals(name) ? null : held.state(),
+                    held != null && held.filledBySignIn(), d.renewed(), CaptureView.of(d.suggested()),
+                    d.unreadableSuggestion()));
         }
         var settings = new ArrayList<SettingView>();
         for (var listing : SkillSettings.list(owner, name)) {
@@ -107,7 +140,7 @@ public class ApiSkillSecretsController extends Controller {
 
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SecretWriteRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SecretView.class)))
-    @Operation(summary = "Create or replace a skill's secret on an agent, with the exact hosts it may be sent to")
+    @Operation(summary = "Create or replace a skill's secret on an agent, with the exact hosts it may be sent to and, for a renewed secret, the rule the secrets proxy takes its value under")
     @AgentAccess(value = OPERATOR_ONLY, reason = "stores a credential a skill sends to the hosts named with it")
     public static void put(Long id, String name, String secret) {
         var owner = requireOwner(id);
@@ -121,11 +154,13 @@ public class ApiSkillSecretsController extends Controller {
         var value = stringOrNull(body, "value");
         var kept = keptFile(owner, name, body, value);
         var hosts = hosts(body);
+        boolean setCapture = body.has("capture");
         SkillSecrets.Listing saved;
         try {
+            var capture = setCapture ? capture(body.get("capture")) : null;
             saved = kept != null
-                    ? KeptSkillFiles.importSecret(owner, name, dir, kept, secret, hosts)
-                    : SkillSecrets.put(owner, name, secret, value, hosts);
+                    ? KeptSkillFiles.importSecret(owner, name, dir, kept, secret, hosts, setCapture, capture)
+                    : SkillSecrets.put(owner, name, secret, value, hosts, setCapture, capture);
         } catch (SkillSecrets.Refused e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.reason());
             throw ApiResponses.unreachable();
@@ -144,7 +179,14 @@ public class ApiSkillSecretsController extends Controller {
     public static void delete(Long id, String name, String secret) {
         var owner = requireOwner(id);
         requireSkill(owner, name);
-        if (!SkillSecrets.delete(owner, name, secret)) {
+        boolean deleted;
+        try {
+            deleted = SkillSecrets.delete(owner, name, secret);
+        } catch (SkillSecrets.Refused e) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.reason());
+            throw ApiResponses.unreachable();
+        }
+        if (!deleted) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No secret '%s' on skill '%s'.".formatted(secret, name));
             throw ApiResponses.unreachable();
         }
@@ -201,7 +243,23 @@ public class ApiSkillSecretsController extends Controller {
     }
 
     private static SecretView view(SkillSecrets.Listing listing) {
-        return new SecretView(listing.name(), listing.hosts(), listing.setAt().toString());
+        var renewedAt = listing.renewedAt();
+        return new SecretView(listing.name(), listing.hosts(), listing.setAt().toString(), listing.hasValue(),
+                CaptureView.of(listing.capture()), renewedAt == null ? null : renewedAt.toString());
+    }
+
+    /** The rule {@code element} sends, or null for a JSON null; the store refuses one it cannot match. */
+    private static SkillSecrets.@Nullable Capture capture(JsonElement element) {
+        if (element.isJsonNull()) return null;
+        if (!(element instanceof JsonObject rule)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'capture' must be an object with 'method', 'path', 'from', 'field', 'credential' and"
+                            + " 'credentialIn', or null.");
+            throw ApiResponses.unreachable();
+        }
+        return SkillSecrets.Capture.of(stringOrNull(rule, "method"), stringOrNull(rule, "path"),
+                stringOrNull(rule, "from"), stringOrNull(rule, "field"), stringOrNull(rule, "credential"),
+                stringOrNull(rule, "credentialIn"));
     }
 
     private static Agent requireOwner(Long id) {

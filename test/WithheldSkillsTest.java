@@ -190,6 +190,59 @@ class WithheldSkillsTest extends UnitTest {
                 + " needs is off): switch that tool on so sonarr can use it.\n", withheldLine(agent));
     }
 
+    /**
+     * JF-374: a renewed secret with no value yet gives another skill nothing, and there is nothing to add, as the name
+     * is that skill's: the line says its sign-in fills it, and that a holder not offered or switched off must be offered
+     * first.
+     */
+    @Test
+    void aRenewedSecretWithNoValueYetIsNoValueForAnotherSkill() throws Exception {
+        skill("backoffice", "metadata:\n  jclaw-tools: filesystem\n", "renewed SESSION_KEY=backoffice.example.com from POST"
+                + " /v1/sessions json session using BACKOFFICE_PASS in form password   # The key\n");
+        skill("reports", "", "SESSION_KEY=backoffice.example.com   # The session key\n");
+        Tx.run(() -> {
+            Agent owner = Agent.findById(agent.id);
+            SkillSecrets.put(owner, "backoffice", "BACKOFFICE_PASS", "fake-backoffice-pass-jf374",
+                    List.of("backoffice.example.com"));
+            SkillSecrets.put(owner, "backoffice", "SESSION_KEY", null, List.of("backoffice.example.com"), true,
+                    SkillSecrets.Capture.of("POST", "/v1/sessions", "json", "session", "BACKOFFICE_PASS", "form password"));
+        });
+        SkillLoader.clearCache();
+
+        assertEquals(List.of("backoffice"), offered(agent), "its own skill runs without a value");
+        assertEquals(LEAD + " reports needs SESSION_KEY, filled by backoffice's sign-in, which has not run yet: once it"
+                + " has, reports can use it.\n", withheldLine(agent));
+
+        switchToolOff("filesystem");
+        assertEquals(LEAD + " reports needs SESSION_KEY, filled by backoffice's sign-in, and backoffice is not offered"
+                + " right now: once it is, its sign-in can fill it.\n", withheldLine(agent));
+
+        switchOff(agent, "backoffice");
+        assertEquals(LEAD + " reports needs SESSION_KEY, filled by backoffice's sign-in, and backoffice is switched off:"
+                + " switch backoffice on so its sign-in can fill it.\n", withheldLine(agent));
+    }
+
+    /** A holder switched on with its tools but withheld for a value of its own is not offered, so its sign-in cannot run. */
+    @Test
+    void aSignInHolderWithheldForAValueOfItsOwnIsNotOffered() throws Exception {
+        skill("backoffice", "", "BACKOFFICE_OTP=backoffice.example.com   # Its own second factor\nrenewed"
+                + " SESSION_KEY=backoffice.example.com   # The key\n");
+        skill("reports", "", "SESSION_KEY=backoffice.example.com   # The session key\n");
+        Tx.run(() -> {
+            Agent owner = Agent.findById(agent.id);
+            SkillSecrets.put(owner, "backoffice", "BACKOFFICE_PASS", "fake-backoffice-pass-jf374",
+                    List.of("backoffice.example.com"));
+            SkillSecrets.put(owner, "backoffice", "SESSION_KEY", null, List.of("backoffice.example.com"), true,
+                    SkillSecrets.Capture.of("POST", "/v1/sessions", "json", "session", "BACKOFFICE_PASS", "form password"));
+        });
+        SkillLoader.clearCache();
+
+        assertEquals(List.of(), offered(agent));
+        assertEquals(LEAD + " backoffice needs BACKOFFICE_OTP: add it in the skill's Secrets panel on the Skills page."
+                + " reports needs SESSION_KEY, filled by backoffice's sign-in, and backoffice is not offered right now:"
+                + " once it is, its sign-in can fill it.\n", withheldLine(agent));
+    }
+
     /** The value of a skill no longer installed reaches no command, so the name is one to add. */
     @Test
     void aValueSetInASkillNoLongerInstalledHasNoHolder() throws Exception {

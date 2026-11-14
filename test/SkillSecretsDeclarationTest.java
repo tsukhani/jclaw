@@ -199,6 +199,161 @@ class SkillSecretsDeclarationTest extends UnitTest {
         assertEquals(settings, SkillSecrets.settingsIn(block + "\n"));
     }
 
+    /** JF-374: a renewed line declares a secret that starts empty, with the capture rule it suggests to the operator. */
+    @Test
+    void aRenewedLineDeclaresASecretThatIsNeverRequiredAndSuggestsItsRule() {
+        var skillMd = """
+                ```secrets
+                BACKOFFICE_PASSWORD=backoffice.example.com   # The sign-in password
+                renewed BACKOFFICE_SESSION_KEY=backoffice.example.com from post /v1//sessions/current/ json session using BACKOFFICE_PASSWORD in form password   # The session key
+                renewed HEADER_KEY= from GET /v1/token header X-Session using HEADER_KEY in Header api-key
+                renewed BASIC_KEY= from POST /v1/token json token using BACKOFFICE_PASSWORD in basic
+                renewed BARE_KEY=api.example.com   # No rule suggested
+                renewed BAD_RULE=api.example.com from POST /v1/x xml session using BAD_RULE in basic   # A rule the store would refuse
+                renewed SHORT_RULE=api.example.com from POST /v1/x   # Too few words
+                renewed NO_CREDENTIAL=api.example.com from POST /v1/x json session   # No credential
+                renewed BAD_PLACE=api.example.com from POST /v1/x json session using BAD_PLACE in body password   # No such place
+                renewed FROM_FIELD=api.example.com from POST /v1/x json from using FROM_FIELD in json from   # A field named from
+                renewed COOKIE_RULE=api.example.com from POST /v1/x header Set-Cookie using COOKIE_RULE in basic   # A cookie
+                ```
+                """;
+        assertEquals(java.util.List.of(
+                new SkillSecrets.Declared("BACKOFFICE_PASSWORD", "The sign-in password",
+                        java.util.List.of("backoffice.example.com"), false),
+                new SkillSecrets.Declared("BACKOFFICE_SESSION_KEY", "The session key",
+                        java.util.List.of("backoffice.example.com"), false, true, new SkillSecrets.Capture("POST",
+                        "/v1/sessions/current", SkillSecrets.Capture.From.JSON, "session", "BACKOFFICE_PASSWORD",
+                        place(SkillSecrets.Capture.Place.Kind.FORM, "password"))),
+                new SkillSecrets.Declared("HEADER_KEY", "", java.util.List.of(), false, true,
+                        new SkillSecrets.Capture("GET", "/v1/token", SkillSecrets.Capture.From.HEADER, "X-Session",
+                                "HEADER_KEY", place(SkillSecrets.Capture.Place.Kind.HEADER, "api-key"))),
+                new SkillSecrets.Declared("BASIC_KEY", "", java.util.List.of(), false, true,
+                        new SkillSecrets.Capture("POST", "/v1/token", SkillSecrets.Capture.From.JSON, "token",
+                                "BACKOFFICE_PASSWORD", place(SkillSecrets.Capture.Place.Kind.BASIC, null))),
+                new SkillSecrets.Declared("BARE_KEY", "No rule suggested", java.util.List.of("api.example.com"), false,
+                        true, null),
+                new SkillSecrets.Declared("BAD_RULE", "A rule the store would refuse", java.util.List.of("api.example.com"),
+                        false, true, null, "POST /v1/x xml session using BAD_RULE in basic"),
+                new SkillSecrets.Declared("SHORT_RULE", "Too few words", java.util.List.of("api.example.com"), false,
+                        true, null, "POST /v1/x"),
+                new SkillSecrets.Declared("NO_CREDENTIAL", "No credential", java.util.List.of("api.example.com"), false,
+                        true, null, "POST /v1/x json session"),
+                new SkillSecrets.Declared("BAD_PLACE", "No such place", java.util.List.of("api.example.com"), false,
+                        true, null, "POST /v1/x json session using BAD_PLACE in body password"),
+                new SkillSecrets.Declared("FROM_FIELD", "A field named from", java.util.List.of("api.example.com"), false,
+                        true, new SkillSecrets.Capture("POST", "/v1/x", SkillSecrets.Capture.From.JSON, "from",
+                                "FROM_FIELD", place(SkillSecrets.Capture.Place.Kind.JSON, "from"))),
+                new SkillSecrets.Declared("COOKIE_RULE", "A cookie", java.util.List.of("api.example.com"), false, true,
+                        null, "POST /v1/x header Set-Cookie using COOKIE_RULE in basic")),
+                SkillSecrets.declaredIn(skillMd));
+        assertEquals(false, found(SkillSecrets.splitDeclaration(skillMd).block()));
+    }
+
+    private static SkillSecrets.Capture.Place place(SkillSecrets.Capture.Place.Kind kind, String name) {
+        return new SkillSecrets.Capture.Place(kind, name);
+    }
+
+    /** The word "from" opens a rule only on a renewed line and only standing alone, so no host is read as one. */
+    @Test
+    void fromOpensARuleOnlyOnARenewedLineAndOnlyAsAWord() {
+        var skillMd = """
+                ```secrets
+                renewed A_KEY=api.from.example.com, fromage.example.com   # hosts with "from" in them
+                PLAIN_KEY=api.example.com from POST /v1/x json session    # not renewed: no rule
+                ```
+                """;
+        var declared = SkillSecrets.declaredIn(skillMd);
+        assertEquals(java.util.List.of("api.from.example.com", "fromage.example.com"), declared.get(0).exampleHosts());
+        assertEquals(null, declared.get(0).suggested());
+        assertEquals(false, declared.get(1).renewed());
+        assertEquals(null, declared.get(1).suggested());
+    }
+
+    /** A suggested rule's {@code using} and {@code in} are read in any case, and a left-out kind means {@code json}. */
+    @Test
+    void aSuggestedRuleIsReadInAnyCaseAndWithItsKindLeftOut() {
+        var skillMd = """
+                ```secrets
+                renewed A_KEY=api.example.com from POST /v1/sessions json session USING API_PASSWORD In json password
+                renewed B_KEY=api.example.com from POST /v1/sessions session using API_PASSWORD in json password
+                renewed C_KEY=api.example.com from POST /v1/sessions session Using API_PASSWORD IN basic
+                renewed D_KEY=api.example.com from POST /v1/sessions json session using API_PASSWORD at json password
+                ```
+                """;
+        var described = new java.util.ArrayList<String>();
+        for (var d : SkillSecrets.declaredIn(skillMd)) {
+            described.add(d.name() + " " + (d.suggested() == null ? "unreadable: " + d.unreadableSuggestion()
+                    : d.suggested().describe()));
+        }
+        assertEquals(java.util.List.of(
+                "A_KEY POST /v1/sessions json session using API_PASSWORD in json password",
+                "B_KEY POST /v1/sessions json session using API_PASSWORD in json password",
+                "C_KEY POST /v1/sessions json session using API_PASSWORD in basic",
+                "D_KEY unreadable: POST /v1/sessions json session using API_PASSWORD at json password"), described);
+    }
+
+    /** A form field the sign-in sends may name a nested one; a JSON field and a header may not. */
+    @Test
+    void aFormCredentialPlaceMayNameANestedFieldButAJsonOneMayNot() {
+        assertEquals("form user[password]", SkillSecrets.Capture.of("POST", "/v1/s", "json", "session", "API_PASSWORD",
+                "form user[password]").credentialIn().wire());
+        assertEquals("form user.password", SkillSecrets.Capture.of("POST", "/v1/s", "json", "session", "API_PASSWORD",
+                "form user.password").credentialIn().wire());
+        var refused = new java.util.ArrayList<String>();
+        for (var place : java.util.List.of("json user[password]", "json user.password", "header X[1]")) {
+            try {
+                SkillSecrets.Capture.of("POST", "/v1/s", "json", "session", "API_PASSWORD", place);
+            } catch (SkillSecrets.Refused e) {
+                refused.add(place);
+            }
+        }
+        assertEquals(java.util.List.of("json user[password]", "json user.password", "header X[1]"), refused);
+        var refusedField = new java.util.ArrayList<String>();
+        for (var field : java.util.List.of("user[session]", "user.session")) {
+            try {
+                SkillSecrets.Capture.of("POST", "/v1/s", "json", field, "API_PASSWORD", "form password");
+            } catch (SkillSecrets.Refused e) {
+                refusedField.add(field);
+            }
+        }
+        assertEquals(java.util.List.of("user[session]", "user.session"), refusedField, "the answer's field is top-level");
+    }
+
+    @Test
+    void aKeyWrittenIntoASuggestedRuleIsFound() {
+        assertEquals(true, found("renewed S_KEY=api.example.com from POST /v1/x json a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6\n"));
+        assertEquals(true, found("renewed S_KEY=api.example.com from POST /v1/sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 json s\n"));
+        assertEquals(true, found("renewed S_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4.example.com from POST /v1/x json s\n"),
+                "the hosts before the rule are judged as any secret's");
+        assertEquals(true, found("renewed S_KEY=api.example.com from POST /v1/x json s using S_KEY in header"
+                + " a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6\n"), "the credential's place is judged as the rest of the rule");
+        assertEquals(false, found("renewed S_KEY=api.example.com from POST /v1/sessions/current header X-Session using"
+                + " BACKOFFICE_PASSWORD in json password\n"));
+        assertEquals(false, found("renewed S_KEY=api.example.com from POST /v1/sessions/current json session using"
+                + " S_KEY in header api-key\n"));
+    }
+
+    @Test
+    void aRenderedRenewedLineReadsBackAsTheSameDeclaration() {
+        var rule = new SkillSecrets.Capture("POST", "/v1/sessions/current", SkillSecrets.Capture.From.JSON, "session",
+                "API_PASSWORD", place(SkillSecrets.Capture.Place.Kind.JSON, "password"));
+        var basic = new SkillSecrets.Capture("POST", "/v1/token", SkillSecrets.Capture.From.HEADER, "X-Session",
+                "API_PASSWORD", place(SkillSecrets.Capture.Place.Kind.BASIC, null));
+        var declared = java.util.List.of(
+                new SkillSecrets.Declared("SESSION_KEY", "The session key", java.util.List.of("api.example.com"), false,
+                        true, rule),
+                new SkillSecrets.Declared("NO_HOST_KEY", "", java.util.List.of(), false, true, basic),
+                new SkillSecrets.Declared("NO_RULE_KEY", "", java.util.List.of("api.example.com"), false, true, null));
+        var block = SkillSecrets.declarationBlock(declared, java.util.List.of());
+        assertEquals("""
+                ```secrets
+                renewed SESSION_KEY=api.example.com from POST /v1/sessions/current json session using API_PASSWORD in json password   # The session key
+                renewed NO_HOST_KEY= from POST /v1/token header X-Session using API_PASSWORD in basic
+                renewed NO_RULE_KEY=api.example.com
+                ```""", block);
+        assertEquals(declared, SkillSecrets.declaredIn(block + "\n"));
+    }
+
     /**
      * The block's language lives in code and in the guide an agent follows: renamed in one alone, no panel fills.
      * The guide's own SKILL.md must hold no top-level block, or skill-creator itself would need secrets.
@@ -214,6 +369,14 @@ class SkillSecretsDeclarationTest extends UnitTest {
         assertEquals(java.util.List.of(), SkillSecrets.declaredSettings(skill));
         var reference = Files.readString(skill.resolve("references/secrets.md"));
         assertTrue(reference.contains("setting WEATHER_BASE_URL="), "the reference shows a setting line");
+        var example = new java.util.ArrayList<String>();
+        for (var d : SkillSecrets.declaredIn(reference.substring(reference.indexOf("## 4.")))) {
+            var rule = d.suggested();
+            example.add(d.name() + (rule == null ? "" : " from " + rule.describe()));
+        }
+        assertEquals(java.util.List.of("SHOP_PASSWORD",
+                "SHOP_SESSION_KEY from POST /v1/sessions json session using SHOP_PASSWORD in json password"), example,
+                "the renewed example suggests a rule the store takes, and its user name is a setting, not a secret");
         assertTrue(reference.contains("`" + utils.WorkspacePathGuard.SKILL_STATE_DIR + "/{skill-name}/`"),
                 "the reference names the folder the tools fence");
     }

@@ -703,6 +703,7 @@ const withheldSkills = computed<WithheldSkill[]>(() => {
       needs: s.needsValues ?? [],
       heldBySwitchedOff: s.heldBySwitchedOff ?? {},
       heldByNotOffered: s.heldByNotOffered ?? {},
+      filledBySignIn: s.filledBySignIn ?? {},
     }))
 })
 

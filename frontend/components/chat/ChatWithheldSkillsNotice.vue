@@ -3,10 +3,14 @@
  * JF-327: the agent's skills it is not offered because a secret or setting they need has no value, each with a link
  * to that skill's Secrets panel on the Skills page. The agent is told the same names in each turn the operator starts,
  * so it can say why it cannot do what one of them does; this lets the operator act on it in one click. A value another
- * skill holds is fixed on that skill, so its link opens the holder instead.
+ * skill holds is fixed on that skill, so its link opens the holder instead, and so does a name another skill's renewed
+ * secret holds with no value yet, which that skill's sign-in fills (JF-374).
  *
  * Every link is built here from the agent id and a skill folder, never from anything the model wrote.
  */
+import type { SignInHolder } from '~/types/api'
+import { signInClause, signInGroups } from '~/utils/sign-in-holders'
+
 export interface WithheldSkill {
   folder: string
   needs: string[]
@@ -14,6 +18,8 @@ export interface WithheldSkill {
   heldBySwitchedOff: Record<string, string>
   /** For each of `needs` another skill of the agent holds that is on but not offered, that skill. */
   heldByNotOffered: Record<string, string>
+  /** For each of `needs` another skill's sign-in fills, that skill and where it stands. */
+  filledBySignIn: Record<string, SignInHolder>
 }
 
 const props = defineProps<{
@@ -25,6 +31,7 @@ const items = computed(() => props.skills.map((skill) => {
   const toAdd: string[] = []
   const held = new Map<string, { names: string[], switchedOff: boolean }>()
   for (const name of skill.needs) {
+    if (skill.filledBySignIn[name]) continue
     const off = skill.heldBySwitchedOff[name]
     const holder = off ?? skill.heldByNotOffered[name]
     if (!holder) {
@@ -39,6 +46,8 @@ const items = computed(() => props.skills.map((skill) => {
     folder: skill.folder,
     toAdd: toAdd.join(', '),
     held: [...held].map(([holder, group]) => ({ holder, names: group.names.join(', '), switchedOff: group.switchedOff })),
+    signIn: signInGroups(skill.needs, skill.filledBySignIn)
+      .map(group => ({ holder: group.holder, names: group.names.join(', '), clause: signInClause(group) })),
   }
 }))
 
@@ -89,6 +98,19 @@ function linkTo(folder: string) {
               :to="linkTo(group.holder)"
               class="underline hover:no-underline"
               :data-testid="`withheld-holder-link-${item.folder}-${group.holder}`"
+            >
+              Open {{ group.holder }}<span class="sr-only"> for {{ item.folder }}</span>
+            </NuxtLink>
+          </template>
+          <template
+            v-for="group in item.signIn"
+            :key="`sign-in-${group.holder}`"
+          >
+            It needs <span class="font-mono break-all">{{ group.names }}</span>, {{ group.clause }}.
+            <NuxtLink
+              :to="linkTo(group.holder)"
+              class="underline hover:no-underline"
+              :data-testid="`withheld-signin-link-${item.folder}-${group.holder}`"
             >
               Open {{ group.holder }}<span class="sr-only"> for {{ item.folder }}</span>
             </NuxtLink>

@@ -102,14 +102,30 @@ public class ApiSkillsController extends Controller {
     /**
      * One of an agent's skills. {@code needsValues}, the required secrets and settings it declares that the agent
      * cannot be given (JF-348); for each of those another skill of the agent holds, that skill, in
-     * {@code heldBySwitchedOff} when its switch is off and in {@code heldByNotOffered} when it is on but not offered;
+     * {@code heldBySwitchedOff} when its switch is off and in {@code heldByNotOffered} when it is on but not offered,
+     * or in {@code filledBySignIn} when it holds the name as a renewed secret its sign-in has not filled yet (JF-374);
      * {@code withheld}, whether the agent is not offered this skill for those values alone (JF-327).
      */
     public record AgentSkillView(String name, String description, boolean isGlobal, String location,
                                  List<String> tools, List<String> commands, String author, String icon,
                                  String version, String folderName, boolean enabled, List<String> needsValues,
                                  Map<String, String> heldBySwitchedOff, Map<String, String> heldByNotOffered,
-                                 boolean withheld) {}
+                                 Map<String, SignInHolder> filledBySignIn, boolean withheld) {}
+
+    /**
+     * The skill whose sign-in fills a name another skill needs (JF-374), and its {@code state}: {@code offered} when
+     * the sign-in has not run yet, {@code switchedOff}, or {@code notOffered} when a tool it needs is off or it is
+     * withheld for a value of its own.
+     */
+    public record SignInHolder(String skill, String state) {
+
+        static Map<String, SignInHolder> of(Map<String, SkillSecrets.Holder> holders) {
+            var out = new LinkedHashMap<String, SignInHolder>();
+            SkillSecrets.Holder.signIn(holders).forEach((name, held) -> out.put(name, new SignInHolder(held.skill(),
+                    held.state())));
+            return out;
+        }
+    }
 
     public record SkillToolRef(String name, String description) {}
 
@@ -132,10 +148,12 @@ public class ApiSkillsController extends Controller {
     /**
      * What updating an agent's copy from the registry would take (JF-352): {@code needs}, the required secrets and
      * settings the new version declares that the agent cannot be given; {@code heldBySwitchedOff}, for each of those
-     * another skill of the agent holds, that skill, which is switched off; {@code keeps}, the old copy's files JClaw
-     * moves out of the skill before replacing it.
+     * another skill of the agent holds, that skill, which is switched off; {@code filledBySignIn}, for each another
+     * skill's sign-in fills, that skill (JF-374); {@code keeps}, the old copy's files JClaw moves out of the skill
+     * before replacing it.
      */
-    public record SkillUpdatePreview(List<String> needs, Map<String, String> heldBySwitchedOff, List<String> keeps) {}
+    public record SkillUpdatePreview(List<String> needs, Map<String, String> heldBySwitchedOff,
+                                     Map<String, SignInHolder> filledBySignIn, List<String> keeps) {}
 
     /** A file kept from a skill's old copy: its path there, its size and when it was kept, never its content. */
     public record KeptFileView(String id, String path, long size, String keptAt) {}
@@ -544,9 +562,11 @@ public class ApiSkillsController extends Controller {
             map.put(KEY_ENABLED, configMap.getOrDefault(s.name(), true));
             var folder = s.location() == null ? null : s.location().getParent();
             var missing = folder == null ? List.<String>of() : provided.missing(folder);
+            var holders = provided.holdersOf(missing);
             map.put("needsValues", missing);
-            map.put("heldBySwitchedOff", provided.heldBySwitchedOff(missing));
-            map.put("heldByNotOffered", provided.heldByNotOffered(missing));
+            map.put("heldBySwitchedOff", SkillSecrets.Holder.switchedOff(holders));
+            map.put("heldByNotOffered", SkillSecrets.Holder.notOffered(holders));
+            map.put("filledBySignIn", SignInHolder.of(holders));
             map.put("withheld", folder != null && folder.getFileName() != null
                     && withheld.contains(folder.getFileName().toString()));
             return map;
@@ -705,7 +725,9 @@ public class ApiSkillsController extends Controller {
         }
         var provided = SkillSecrets.provided(WorkspaceFiles.workspaceOwner(agent));
         var needs = provided.missing(globalDir);
-        renderJSON(gson.toJson(new SkillUpdatePreview(needs, provided.heldBySwitchedOff(needs), keeps)));
+        var holders = provided.holdersOf(needs);
+        renderJSON(gson.toJson(new SkillUpdatePreview(needs, SkillSecrets.Holder.switchedOff(holders),
+                SignInHolder.of(holders), keeps)));
     }
 
     /** GET /api/agents/{id}/skills/{name}/kept — The files kept from the skill's old copies. */

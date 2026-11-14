@@ -1,5 +1,6 @@
 package services.secrets;
 
+import org.jspecify.annotations.Nullable;
 import utils.HttpKeys;
 
 import java.io.IOException;
@@ -7,13 +8,16 @@ import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The two rewrites the secrets proxy makes (JF-324), each over a stream so a body of any size passes: a placeholder
  * becomes its value on the way to a host the secret is bound to, encoded for where it sits, and a value a server
- * sends back becomes its placeholder again, so the command never holds one either way.
+ * sends back becomes its placeholder again, so the command never holds one either way. A renewed secret's value taken
+ * from a sign-in answer is replaced the same way, in the JSON strings that hold it too (JF-374).
  */
 final class PlaceholderRewriter {
 
@@ -44,21 +48,52 @@ final class PlaceholderRewriter {
         return Encoding.RAW;
     }
 
-    /** {@code text} with each placeholder replaced; the request goes to {@code host}:{@code port}. */
-    static String substitute(String text, SecretGrant grant, String host, int port, Encoding encoding) throws Refused {
+    /**
+     * How often one request carried each secret (JF-374): every stand-in the proxy replaced, wherever it stood, and
+     * which stand-in it was. A stand-in written escaped is not replaced, so it is not counted, and nor is one whose
+     * value is empty, which sends nothing.
+     */
+    static final class Replaced {
+        private record Key(String skill, String name) {}
+
+        private record Count(String placeholder, int times) {}
+
+        private final ConcurrentHashMap<Key, Count> counts = new ConcurrentHashMap<>();
+
+        void add(SecretGrant.Binding binding) {
+            if (binding.value().isEmpty()) return;
+            counts.merge(new Key(binding.skill(), binding.name()), new Count(binding.placeholder(), 1),
+                    (was, one) -> new Count(was.placeholder(), was.times() + 1));
+        }
+
+        int times(String skill, String name) {
+            var count = counts.get(new Key(skill, name));
+            return count == null ? 0 : count.times();
+        }
+
+        @Nullable String placeholder(String skill, String name) {
+            var count = counts.get(new Key(skill, name));
+            return count == null ? null : count.placeholder();
+        }
+    }
+
+    /** {@code text} with each placeholder replaced and counted in {@code replaced}; the request goes to {@code host}:{@code port}. */
+    static String substitute(String text, SecretGrant grant, String host, int port, Encoding encoding, Replaced replaced)
+            throws Refused {
         if (!text.contains(SecretGrants.PLACEHOLDER_PREFIX)) return text;
         var in = text.getBytes(StandardCharsets.ISO_8859_1);
         var out = new java.io.ByteArrayOutputStream(in.length + 64);
         try {
-            new Substituter(grant, host, port, encoding).feed(in, in.length, true, out);
+            new Substituter(grant, host, port, encoding, replaced).feed(in, in.length, true, out);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
         return out.toString(StandardCharsets.ISO_8859_1);
     }
 
-    /** An {@code Authorization: Basic} value with placeholders inside its encoded credentials replaced. */
-    static String substituteBasic(String headerValue, SecretGrant grant, String host, int port) throws Refused {
+    /** An {@code Authorization: Basic} value with placeholders inside its encoded credentials replaced and counted. */
+    static String substituteBasic(String headerValue, SecretGrant grant, String host, int port, Replaced replaced)
+            throws Refused {
         var trimmed = headerValue.strip();
         if (!trimmed.regionMatches(true, 0, "Basic ", 0, 6)) return headerValue;
         byte[] decoded;
@@ -72,7 +107,7 @@ final class PlaceholderRewriter {
         var out = new java.io.ByteArrayOutputStream();
         try {
             var bytes = credentials.getBytes(StandardCharsets.UTF_8);
-            new Substituter(grant, host, port, Encoding.RAW).feed(bytes, bytes.length, true, out);
+            new Substituter(grant, host, port, Encoding.RAW, replaced).feed(bytes, bytes.length, true, out);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -88,12 +123,14 @@ final class PlaceholderRewriter {
         private final String host;
         private final int port;
         private final Encoding encoding;
+        private final Replaced replaced;
 
-        Substituter(SecretGrant grant, String host, int port, Encoding encoding) {
+        Substituter(SecretGrant grant, String host, int port, Encoding encoding, Replaced replaced) {
             this.grant = grant;
             this.host = host;
             this.port = port;
             this.encoding = encoding;
+            this.replaced = replaced;
         }
 
         int feed(byte[] buf, int len, boolean last, OutputStream out) throws IOException, Refused {
@@ -142,7 +179,7 @@ final class PlaceholderRewriter {
                         String.join(", ", binding.hosts()), port == 443 ? host : host + ":" + port));
             }
             var value = binding.value();
-            return switch (encoding) {
+            var bytes = switch (encoding) {
                 case RAW -> value.getBytes(StandardCharsets.UTF_8);
                 case HEADER -> {
                     if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0 || value.indexOf('\0') >= 0) {
@@ -155,6 +192,8 @@ final class PlaceholderRewriter {
                 case FORM -> URLEncoder.encode(value, StandardCharsets.UTF_8).getBytes(StandardCharsets.US_ASCII);
                 case JSON -> json(value).getBytes(StandardCharsets.UTF_8);
             };
+            replaced.add(binding);
+            return bytes;
         }
     }
 
@@ -165,7 +204,9 @@ final class PlaceholderRewriter {
         private final int longest;
 
         Masker(List<SecretGrant.Binding> bindings) {
-            var usable = bindings.stream().filter(b -> !b.value().isEmpty()).toList();
+            // Longest first: where two values start at one place, the longer is masked whole.
+            var usable = bindings.stream().filter(b -> !b.value().isEmpty())
+                    .sorted(Comparator.comparingInt((SecretGrant.Binding b) -> b.value().length()).reversed()).toList();
             values = new byte[usable.size()][];
             placeholders = new byte[usable.size()][];
             int max = 1;
@@ -239,6 +280,59 @@ final class PlaceholderRewriter {
             } else {
                 out.append('%').append(HEX.charAt(c >> 4)).append(HEX.charAt(c & 0xf));
             }
+        }
+        return out.toString();
+    }
+
+    /**
+     * {@code json}, a document a strict parser accepted, with each string that holds one of the {@code replaced}
+     * values written again with that value replaced by the binding's placeholder (JF-374). Only those strings change:
+     * matching their decoded text finds a value however the service escaped it, as in {@code a\/b} or <code>&#92;u0061</code>.
+     */
+    static String replaceInJsonStrings(String json, List<SecretGrant.Binding> replaced) {
+        var longestFirst = replaced.stream().filter(b -> !b.value().isEmpty())
+                .sorted(Comparator.comparingInt((SecretGrant.Binding b) -> b.value().length()).reversed())
+                .toList();
+        var out = new StringBuilder(json.length());
+        int i = 0;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if (c != '"') {
+                out.append(c);
+                i++;
+                continue;
+            }
+            var decoded = new StringBuilder();
+            int end = i + 1;
+            while (json.charAt(end) != '"') {
+                char d = json.charAt(end);
+                if (d != '\\') {
+                    decoded.append(d);
+                    end++;
+                    continue;
+                }
+                char e = json.charAt(end + 1);
+                if (e == 'u') {
+                    decoded.append((char) Integer.parseInt(json.substring(end + 2, end + 6), 16));
+                    end += 6;
+                    continue;
+                }
+                decoded.append(switch (e) {
+                    case 'b' -> '\b';
+                    case 'f' -> '\f';
+                    case 'n' -> '\n';
+                    case 'r' -> '\r';
+                    case 't' -> '\t';
+                    default -> e;
+                });
+                end += 2;
+            }
+            var text = decoded.toString();
+            var rewritten = text;
+            for (var b : longestFirst) rewritten = rewritten.replace(b.value(), b.placeholder());
+            if (rewritten.equals(text)) out.append(json, i, end + 1);
+            else out.append('"').append(json(rewritten)).append('"');
+            i = end + 1;
         }
         return out.toString();
     }
