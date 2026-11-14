@@ -449,6 +449,19 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         assertFalse(kept.startsWith(AgentService.workspaceRoot().toAbsolutePath()), kept.toString());
     }
 
+    /** JF-412: the library copy of a promoted skill holds its credentials/ files blanked. */
+    @Test
+    void anUpdatePutsTheOperatorsCredentialsFileBackOverTheLibrarysBlankedOne() throws Exception {
+        var agent = agentWithOldCopy("keep-over-blank", "gamma");
+        write(globalSkillsDir.resolve("gamma/credentials/api.json"), "{\"key\":\"\"}");
+        write(agentCopy(agent, "gamma").resolve("credentials/api.json"), "{\"key\":\"sk-gamma-fake-jf412\"}");
+
+        SkillPromotionService.copyToAgentWorkspace(agent, "gamma");
+
+        assertEquals("{\"key\":\"sk-gamma-fake-jf412\"}", Files.readString(agentCopy(agent, "gamma").resolve("credentials/api.json")));
+        assertEquals(Map.of("credentials/api.json", "{\"key\":\"sk-gamma-fake-jf412\"}"), keptFiles(agent, "gamma"));
+    }
+
     @Test
     void anEditedConfigBesideItsExampleIsKeptAndTheExampleIsNot() throws Exception {
         var agent = agentWithOldCopy("keep-config", "jira");
@@ -502,7 +515,9 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         SkillPromotionService.copyToAgentWorkspace(agent, "plain");
 
         assertEquals(Map.of("credentials/token.txt", "fake-token-jf352\n"), keptFiles(agent, "plain"));
-        assertEquals("replace me\n", Files.readString(agentCopy(agent, "plain").resolve("credentials/token.txt")));
+        assertEquals("fake-token-jf352\n", Files.readString(agentCopy(agent, "plain").resolve("credentials/token.txt")),
+                "under credentials/ the library's file is a placeholder, so the operator's goes back over it (JF-412)");
+        assertEquals("Put your key here.\n", Files.readString(agentCopy(agent, "plain").resolve("credentials/README.md")));
     }
 
     @Test

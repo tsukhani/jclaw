@@ -497,7 +497,8 @@ watch(() => [props.agentId, props.skillName], () => {
       </div>
       <p class="px-4 pb-2 text-xs text-fg-muted">
         Copies of the files this skill's old copy held when it was updated, such as a key or a config file you edited.
-        The update put the files themselves back in the new copy, unless the new version ships its own file there. JClaw
+        The update put the files themselves back in the new copy, unless the new version ships its own file there outside
+        credentials/. JClaw
         keeps these copies outside the agent's workspace, so the skill and the agent cannot read them, and never shows
         what they hold. To use one, choose it under Value from when you add or replace a secret or a setting. JClaw
         deletes a copy once each name in it that this skill asks for has a value, and the skill's own file with it while

@@ -55,17 +55,44 @@ class KeptSkillFilesCarryOverTest extends UnitTest {
         assertEquals("v2", Files.readString(staging.resolve("SKILL.md")), "nothing else in the old copy comes over");
     }
 
+    /** JF-412: promotion leaves only blanked placeholders under credentials/, so the operator's file replaces one. */
     @Test
-    void aPathTheNewVersionShipsKeepsTheLibrarysContent() throws IOException {
+    void aBlankedCredentialsFileTheNewVersionShipsGivesWayToTheOperatorsFile() throws IOException {
         Files.createDirectories(oldCopy.resolve("credentials"));
-        Files.writeString(oldCopy.resolve("credentials/token"), "old-token-jf405");
-        Files.createDirectories(staging.resolve("credentials"));
-        Files.writeString(staging.resolve("credentials/token"), "shipped");
-        Files.createDirectories(newVersion.resolve("credentials"));
-        Files.writeString(newVersion.resolve("credentials/token"), "shipped");
+        Files.writeString(oldCopy.resolve("credentials/api.json"), "{\"key\":\"fake-key-jf412\"}");
+        Files.setPosixFilePermissions(oldCopy.resolve("credentials/api.json"), PosixFilePermissions.fromString("rw-------"));
+        for (var copy : List.of(newVersion, staging)) {
+            Files.createDirectories(copy.resolve("credentials"));
+            Files.writeString(copy.resolve("credentials/api.json"), "{\"key\":\"\"}");
+        }
+
+        assertEquals(List.of("credentials/api.json"), KeptSkillFiles.carryOver(oldCopy, newVersion, staging));
+        assertEquals("{\"key\":\"fake-key-jf412\"}", Files.readString(staging.resolve("credentials/api.json")));
+        assertEquals("rw-------", PosixFilePermissions.toString(
+                Files.getPosixFilePermissions(staging.resolve("credentials/api.json"))));
+    }
+
+    @Test
+    void aConfigTheNewVersionShipsBesideItsExampleKeepsTheLibrarysContent() throws IOException {
+        Files.writeString(oldCopy.resolve("config.env"), "NAS_URL=https://nas.example.org\n");
+        Files.writeString(newVersion.resolve("config.env.example"), "NAS_URL=\n");
+        Files.writeString(newVersion.resolve("config.env"), "NAS_URL=https://default.example.org\n");
+        Files.writeString(staging.resolve("config.env"), "NAS_URL=https://default.example.org\n");
 
         assertEquals(List.of(), KeptSkillFiles.carryOver(oldCopy, newVersion, staging));
-        assertEquals("shipped", Files.readString(staging.resolve("credentials/token")));
+        assertEquals("NAS_URL=https://default.example.org\n", Files.readString(staging.resolve("config.env")));
+    }
+
+    @Test
+    void aStagedCredentialsFileThatIsALinkIsNotWrittenThrough() throws IOException {
+        var outside = Files.writeString(root.resolve("outside.json"), "outside-jf412");
+        Files.createDirectories(oldCopy.resolve("credentials"));
+        Files.writeString(oldCopy.resolve("credentials/api.json"), "{\"key\":\"fake-key-jf412\"}");
+        Files.createDirectories(staging.resolve("credentials"));
+        Files.createSymbolicLink(staging.resolve("credentials/api.json"), outside);
+
+        assertEquals(List.of(), KeptSkillFiles.carryOver(oldCopy, newVersion, staging));
+        assertEquals("outside-jf412", Files.readString(outside));
     }
 
     @Test

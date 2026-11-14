@@ -570,7 +570,7 @@ function updateWarning(preview: SkillUpdatePreview): string {
   if (preview.keeps.length) {
     const one = preview.keeps.length === 1
     parts.push(`The new copy keeps ${one ? 'this file' : 'these files'} of the old copy, unless the new version ships `
-      + `its own file there, and the skill's Secrets panel lists a copy of ${one ? 'it' : 'each'}: `
+      + `its own file there outside credentials/, and the skill's Secrets panel lists a copy of ${one ? 'it' : 'each'}: `
       + `${preview.keeps.join(', ')}.`)
   }
   return parts.join('\n\n')
