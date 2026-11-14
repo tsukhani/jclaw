@@ -1723,8 +1723,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
         /**
          * The remedy this failure needs, with the provider and model of the call that produced it
-         * (JCLAW-1134), or null for a failure that never reached a provider call. Orthogonal to
-         * the subclass: the subclass says whose fault it was, this says what to do about it.
+         * (JCLAW-1134), or null for a failure with no remedy of its own. A breaker's refusal never
+         * reaches the provider and still carries one (JF-426). Orthogonal to the subclass: the
+         * subclass says whose fault it was, this says what to do about it.
          */
         public LlmErrorTemplates.@Nullable Failure failure() { return failure; }
 
@@ -1767,6 +1768,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
          */
         public static class BreakerOpen extends ServerError {
             public BreakerOpen(String message) { super(message); }
+            public BreakerOpen(String message, LlmErrorTemplates.@Nullable Failure failure) {
+                super(message, null, failure);
+            }
         }
 
         /**
@@ -1776,6 +1780,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
          */
         public static final class ManuallyIsolated extends BreakerOpen {
             public ManuallyIsolated(String message) { super(message); }
+            public ManuallyIsolated(String message, LlmErrorTemplates.@Nullable Failure failure) {
+                super(message, failure);
+            }
         }
 
         /** A retryable 429 — over the rate, not out of credit. */

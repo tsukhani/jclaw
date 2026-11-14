@@ -7,6 +7,7 @@ import services.BreakerAlarms;
 import services.ConfigService;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
+import utils.LlmErrorTemplates;
 
 import java.time.Duration;
 import java.util.Map;
@@ -195,10 +196,14 @@ public final class LlmResilience {
     public static LlmException.BreakerOpen openBreakerFailure(String providerName) {
         if (breakerFor(providerName).stats().reason() == CircuitBreaker.Reason.MANUAL_TRIP) {
             return new LlmException.ManuallyIsolated("Circuit breaker for " + providerName
-                    + " was opened by the operator: not calling it until it is restored");
+                    + " was opened by the operator: not calling it until it is restored",
+                    new LlmErrorTemplates.Failure(LlmErrorTemplates.Remedy.PROVIDER_ISOLATED, providerName, null,
+                            null, null));
         }
         return new LlmException.BreakerOpen(
-                "Circuit breaker open for " + providerName + ": not calling it until it recovers");
+                "Circuit breaker open for " + providerName + ": not calling it until it recovers",
+                new LlmErrorTemplates.Failure(LlmErrorTemplates.Remedy.PROVIDER_PAUSED, providerName, null, null,
+                        null));
     }
 
     /**

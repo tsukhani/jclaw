@@ -45,6 +45,10 @@ public final class LlmErrorTemplates {
         MODEL_NOT_FOUND("llm_model_not_found"),
         CONTEXT_WINDOW_EXCEEDED("llm_context_window_exceeded"),
         RATE_LIMITED("llm_rate_limited"),
+        /** JF-426: the provider's breaker opened on its own failures and refused the call before the wire. */
+        PROVIDER_PAUSED("llm_provider_paused"),
+        /** JF-426: the operator isolated the provider by hand (JCLAW-1170), so the call was refused. */
+        PROVIDER_ISOLATED("llm_provider_isolated"),
         /** A failure with no remedy of its own — the generic template, naming the call. */
         UNCLASSIFIED("llm_call_failed");
 
@@ -124,6 +128,19 @@ public final class LlmErrorTemplates {
                     rateLimitDetail(failure.retryAfterSeconds()),
                     ("Wait, then send again. If it keeps happening, check the rate limits on the "
                             + "plan behind the %s key.").formatted(provider));
+            case PROVIDER_PAUSED -> new ErrorTemplate(Remedy.PROVIDER_PAUSED.code(),
+                    "%s was not called: after it failed several calls in a row, JClaw paused calls to it for a while."
+                            .formatted(provider),
+                    ("Its earlier failures are the cause, not this turn: Logs shows them with the provider's own "
+                            + "reply, such as an outage, a spent plan or a rejected key. JClaw tries %s again by "
+                            + "itself once the pause is over.").formatted(provider),
+                    "Wait a minute and send again, or switch this conversation to a model on another provider.");
+            case PROVIDER_ISOLATED -> new ErrorTemplate(Remedy.PROVIDER_ISOLATED.code(),
+                    "%s was not called: it is isolated by hand.".formatted(provider),
+                    "Settings → LLM Providers shows its breaker as isolated by you, and JClaw keeps calls away from "
+                            + "it until it is restored there.",
+                    ("Restore %s under Settings → LLM Providers, or switch this conversation to a model on another "
+                            + "provider.").formatted(provider));
             case UNCLASSIFIED -> new ErrorTemplate(Remedy.UNCLASSIFIED.code(),
                     "The call to %s%s failed.".formatted(provider, forModel(model)),
                     CHECK_LOGS,

@@ -1,9 +1,11 @@
 import channels.WhatsAppChannel;
 import llm.LlmProvider;
+import llm.LlmResilience;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.EventLogger;
 import utils.ChannelErrorTemplates;
+import utils.CircuitBreakers;
 import utils.ErrorRendering;
 import utils.ErrorTemplate;
 import utils.LlmErrorTemplates;
@@ -40,6 +42,47 @@ class ChannelErrorTemplatesTest extends UnitTest {
         var wrapped = new RuntimeException("turn failed",
                 new LlmProvider.LlmException.ClientError("HTTP 429", failure));
         assertTrue(ChannelErrorTemplates.forTurnFailure(wrapped).whatBroke().contains("together"));
+    }
+
+    /** JF-426: a breaker the provider's own failures opened refuses the call, and the turn says whose failure it was. */
+    @Test
+    void aTurnAProviderPausedByItsFailuresRefusedSaysSoAndNotThatJClawFailed() {
+        var provider = "jf426-paused-" + System.nanoTime();
+        try {
+            var breaker = LlmResilience.breakerFor(provider);
+            for (var i = 0; i < 20; i++) breaker.recordFailure();
+            var refused = new RuntimeException("turn failed", LlmResilience.openBreakerFailure(provider));
+
+            var expected = new ErrorTemplate("llm_provider_paused",
+                    provider + " was not called: after it failed several calls in a row, JClaw paused calls to it "
+                            + "for a while.",
+                    "Its earlier failures are the cause, not this turn: Logs shows them with the provider's own "
+                            + "reply, such as an outage, a spent plan or a rejected key. JClaw tries " + provider
+                            + " again by itself once the pause is over.",
+                    "Wait a minute and send again, or switch this conversation to a model on another provider.");
+            assertEquals(expected, ChannelErrorTemplates.forTurnFailure(refused));
+            assertEquals(ErrorRendering.PLAIN.render(expected), ChannelErrorTemplates.operatorDetail(refused));
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    @Test
+    void aTurnRefusedByAProviderIsolatedByHandSaysWhereToRestoreIt() {
+        var provider = "jf426-isolated-" + System.nanoTime();
+        try {
+            LlmResilience.breakerFor(provider).trip();
+
+            assertEquals(new ErrorTemplate("llm_provider_isolated",
+                    provider + " was not called: it is isolated by hand.",
+                    "Settings → LLM Providers shows its breaker as isolated by you, and JClaw keeps calls away "
+                            + "from it until it is restored there.",
+                    "Restore " + provider + " under Settings → LLM Providers, or switch this conversation to a "
+                            + "model on another provider."),
+                    ChannelErrorTemplates.forTurnFailure(LlmResilience.openBreakerFailure(provider)));
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
     }
 
     @Test
