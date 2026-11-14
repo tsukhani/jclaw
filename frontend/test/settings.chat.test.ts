@@ -327,6 +327,94 @@ describe('Settings page — Chat advanced compaction', () => {
     expect([KEEP, MIN, FORCED_KEEP, FORCED_MIN].map(key => shown(component, key))).toEqual(['40', '0', '5', '50'])
   })
 
+  const QUOTE = 'chat.compaction.verbatimUserTokens'
+  const CHECK = 'chat.compaction.checkSummary'
+  const PREVIEW = 'chat.userMessagePreviewPercent'
+
+  function switchedOn(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
+    return row(component, key).find('button[aria-pressed]').attributes('aria-pressed')
+  }
+
+  async function saveTyped(component: Awaited<ReturnType<typeof mountChat>>, key: string, typed: string) {
+    const field = row(component, key)
+    await field.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    const input = field.find('input')
+    const start = { value: (input.element as HTMLInputElement).value, min: input.attributes('min'), max: input.attributes('max') }
+    await input.setValue(typed)
+    await field.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    return start
+  }
+
+  it('shows the quote, check and preview rows at the backend defaults when their keys are unset', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+
+    expect([QUOTE, CHECK, PREVIEW].map(key => row(component, key).find('span').text()))
+      .toEqual(['compaction.verbatimUserTokens', 'compaction.checkSummary', 'userMessagePreviewPercent'])
+    expect(shown(component, QUOTE)).toBe('5000')
+    expect(switchedOn(component, CHECK)).toBe('false')
+    expect(shown(component, PREVIEW)).toBe('10')
+  })
+
+  it('shows the stored quote, check and preview values when the keys are set', async () => {
+    baseEndpoints([
+      { key: QUOTE, value: '0' },
+      { key: CHECK, value: 'true' },
+      { key: PREVIEW, value: '25' },
+    ])
+    const component = await mountAdvanced()
+
+    expect(shown(component, QUOTE)).toBe('0')
+    expect(switchedOn(component, CHECK)).toBe('true')
+    expect(shown(component, PREVIEW)).toBe('25')
+  })
+
+  it('saves the quote budget typed into its editor, which starts from 5000 and goes no lower than 0', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+
+    expect(await saveTyped(component, QUOTE, '0')).toEqual({ value: '5000', min: '0', max: undefined })
+    expect(posted).toEqual([{ key: QUOTE, value: '0' }])
+  })
+
+  it('switching the summary check on saves true, and off again saves false', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+    await row(component, CHECK).find('button[aria-pressed]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: CHECK, value: 'true' }])
+
+    clearNuxtData()
+    baseEndpoints([{ key: CHECK, value: 'true' }])
+    const on = await mountAdvanced()
+    await row(on, CHECK).find('button[aria-pressed]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: CHECK, value: 'false' }])
+  })
+
+  it('saves the preview share typed into its editor, which starts from 10 and stays within 0 to 100', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+
+    expect(await saveTyped(component, PREVIEW, '100')).toEqual({ value: '10', min: '0', max: '100' })
+    expect(posted).toEqual([{ key: PREVIEW, value: '100' }])
+  })
+
+  it('shows why a preview share above 100 or a negative quote budget is refused and stores nothing', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+    refusal = 'chat.userMessagePreviewPercent must be a whole number from 0 to 100; 0 sends every earlier message whole.'
+    await saveTyped(component, PREVIEW, '101')
+    expect(row(component, PREVIEW).find('[role="alert"]').text()).toContain(refusal)
+
+    refusal = 'chat.compaction.verbatimUserTokens must be a whole number of tokens; 0 quotes none of the user\'s summarized messages.'
+    await saveTyped(component, QUOTE, '-1')
+    expect(row(component, QUOTE).find('[role="alert"]').text()).toContain(refusal)
+    expect(posted).toEqual([])
+  })
+
   it('saves the kept share typed into its editor, which starts from 30 and stays within 0 to 100', async () => {
     baseEndpoints()
     const component = await mountAdvanced()
