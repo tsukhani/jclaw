@@ -107,6 +107,12 @@ function handleMouseLeave() {
   open.value = false
   triggerButton.value?.blur()
 }
+
+// Closed by the pointer leaving, the primitive focuses the trigger, whose focus handler reopens the card: it stuck
+// open, having taken focus from the message box.
+function keepFocusWhereItIs(event: Event) {
+  event.preventDefault()
+}
 </script>
 
 <template>
@@ -154,6 +160,7 @@ function handleMouseLeave() {
       @mouseleave="open = false"
       @focusin="open = true"
       @focusout="open = false"
+      @close-auto-focus="keepFocusWhereItIs"
     >
       <div class="grid gap-2 text-xs">
         <div class="flex items-baseline justify-between gap-4">

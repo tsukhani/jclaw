@@ -211,6 +211,56 @@ describe('ChatContextMeter — trigger button interactions', () => {
     await trigger.trigger('blur')
   })
 
+  it('closes when the pointer leaves and leaves focus in the message box it was in', async () => {
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    composer.focus()
+    const component = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 100, completionTokens: 50, contextWindow: 50_000 },
+      attachTo: document.body,
+    })
+    const trigger = component.find('button')
+    try {
+      await trigger.trigger('mouseenter')
+      expect(text('context-summary')).toBeDefined()
+
+      await trigger.trigger('mouseleave')
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      expect(document.activeElement).toBe(composer)
+      expect(text('context-summary')).toBeUndefined()
+    }
+    finally {
+      component.unmount()
+      composer.remove()
+    }
+  })
+
+  it('opens on keyboard focus and lets focus move on, closing behind it', async () => {
+    const next = document.createElement('button')
+    const component = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 100, completionTokens: 50, contextWindow: 50_000 },
+      attachTo: document.body,
+    })
+    document.body.appendChild(next)
+    const trigger = component.find('button')
+    try {
+      ;(trigger.element as HTMLButtonElement).focus()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(text('context-summary')).toBeDefined()
+
+      next.focus()
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      expect(document.activeElement).toBe(next)
+      expect(text('context-summary')).toBeUndefined()
+    }
+    finally {
+      component.unmount()
+      next.remove()
+    }
+  })
+
   it('renders the trigger right-side raw when small and kFormatted from 1000', async () => {
     const c1 = await mountSuspended(ChatContextMeter, {
       props: { promptTokens: 0, completionTokens: 0, contextWindow: 100 },
