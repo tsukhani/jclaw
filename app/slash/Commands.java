@@ -860,14 +860,11 @@ public final class Commands {
     private static String buildCompactResponseText(SessionCompactor.CompactionResult result, @Nullable String args) {
         if (!result.compacted()) {
             var reason = result.skipReason();
-            if ("no safe boundary or below min-turns".equals(reason)) {
-                return "> Nothing to compact\n\nThis conversation doesn't have enough earlier turns to summarize yet.";
+            if (SessionCompactor.NO_CUT_REASON.equals(reason)) {
+                return "> Nothing to compact\n\nThis conversation doesn't have enough earlier messages to summarize yet.";
             }
-            if ("llm error".equals(reason)) {
-                return "> Compaction failed\n\nThe summarization LLM call errored out. Older turns remain in the active context.";
-            }
-            if ("empty summary".equals(reason)) {
-                return "> Compaction failed\n\nThe summarization model returned an empty response. Older turns remain in the active context.";
+            if (reason != null && reason.startsWith(SessionCompactor.FAILED_REASON_PREFIX)) {
+                return "> Compaction failed\n\n" + reason;
             }
             return "> Compaction skipped\n\n" + (reason != null ? reason : "unknown reason");
         }

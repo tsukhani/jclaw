@@ -50,6 +50,9 @@ class CompactionCardTokensTest extends UnitTest {
 
     /** Not an OpenAI model, so counted on the cl100k_base fallback and scaled by the provider's multiplier. */
     private static final String MODEL = "card-model";
+    /** What a summary model that only ever answers with nothing leaves: every try, then giving up. */
+    private static final String EMPTY_REPLIES_REASON =
+            "The summary failed on 4 tries (last: an empty reply). The older messages are kept as they are.";
     private static final String SUMMARY_MODEL = "card-summary";
     private static final Instant T0 = Instant.parse("2026-11-01T10:00:00Z");
     private static final String REPLY = "Here is the plan for the week.";
@@ -176,7 +179,7 @@ class CompactionCardTokensTest extends UnitTest {
                 CompactionGate.maybeCompactAndRebuild(agent, conv.id, Set.of(), ProviderRegistry.get(provider), current));
 
         assertEquals("start", phase(frames.getFirst()), frames.toString());
-        assertEquals("{\"compaction\":{\"phase\":\"skipped\",\"reason\":\"empty summary\"}}", frames.getLast());
+        assertEquals("{\"compaction\":{\"phase\":\"skipped\",\"reason\":\"" + EMPTY_REPLIES_REASON + "\"}}", frames.getLast());
     }
 
     // ─── /compact ────────────────────────────────────────────────────────
@@ -245,7 +248,7 @@ class CompactionCardTokensTest extends UnitTest {
 
         assertNull(result.compaction());
         assertEquals("start", phase(frames.getFirst()), frames.toString());
-        assertEquals("{\"compaction\":{\"phase\":\"skipped\",\"reason\":\"empty summary\"}}", frames.getLast());
+        assertEquals("{\"compaction\":{\"phase\":\"skipped\",\"reason\":\"" + EMPTY_REPLIES_REASON + "\"}}", frames.getLast());
     }
 
     // ─── the skipped frame ───────────────────────────────────────────────
@@ -272,7 +275,7 @@ class CompactionCardTokensTest extends UnitTest {
         var progress = ScopedValue.where(CompactionProgress.SINK, (Consumer<String>) frames::add)
                 .call(() -> CompactionProgress.open(1200));
 
-        progress.skipped("no safe boundary or below min-turns");
+        progress.skipped(services.SessionCompactor.NO_CUT_REASON);
 
         assertEquals(List.of(), frames);
     }

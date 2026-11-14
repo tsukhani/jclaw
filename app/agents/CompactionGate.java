@@ -89,7 +89,8 @@ public final class CompactionGate {
     /** The compaction running for each conversation. */
     private static final Map<Long, CompletableFuture<CompactionResult>> RUNNING = new ConcurrentHashMap<>();
 
-    private static final CompactionResult FAILED = CompactionResult.skipped("failed");
+    private static final CompactionResult FAILED = CompactionResult.skipped(SessionCompactor.FAILED_REASON_PREFIX
+            + " unexpectedly. The older messages are kept as they are.");
     private static final CompactionResult NOT_NEAR = CompactionResult.skipped("not near the trigger");
 
     /**

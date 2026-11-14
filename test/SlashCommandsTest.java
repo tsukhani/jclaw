@@ -155,7 +155,7 @@ class SlashCommandsTest extends UnitTest {
 
         var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", convo);
         assertEquals(Commands.Command.COMPACT, result.command());
-        assertEquals("> Nothing to compact\n\nThis conversation doesn't have enough earlier turns to summarize yet.",
+        assertEquals("> Nothing to compact\n\nThis conversation doesn't have enough earlier messages to summarize yet.",
                 result.responseText());
         // No SessionCompaction row should be written.
         assertEquals(0L, models.SessionCompaction.count());
@@ -1713,40 +1713,26 @@ class SlashCommandsTest extends UnitTest {
         return (String) m.invoke(null, result, args);
     }
 
-    /**
-     * Three skip-reason branches of buildCompactResponseText that share the
-     * single-contains shape: no-safe-boundary → "Nothing to compact",
-     * empty-summary → "empty response", null-reason → "unknown reason".
-     * The two-assertion branches (LlmError, GenericSkipReason) stay separate
-     * so the "Compaction failed" + "LLM call" / "Compaction skipped" +
-     * "some other reason" pairings remain explicit.
-     */
-    @ParameterizedTest(name = "skip reason [{0}] surfaces [{1}]")
-    @CsvSource(nullValues = "NULL", value = {
-            "no safe boundary or below min-turns, Nothing to compact",
-            "empty summary,                       empty response",
-            "NULL,                                unknown reason"
-    })
-    void buildCompactResponseTextSkipReasonRenders(String skipReason, String expectedSnippet) throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped(skipReason);
-        var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains(expectedSnippet), "got: " + text);
+    @Test
+    void aCompactWithNoPlaceToCutSaysThereIsNothingToCompact() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped(services.SessionCompactor.NO_CUT_REASON);
+        assertEquals("> Nothing to compact\n\nThis conversation doesn't have enough earlier messages to summarize yet.",
+                callBuildCompactResponseText(result, null));
     }
 
     @Test
-    void buildCompactResponseTextLlmError() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped("llm error");
-        var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("Compaction failed"), "got: " + text);
-        assertTrue(text.contains("LLM call"), "got: " + text);
+    void aCompactWhoseSummaryFailedSaysSoWithTheReasonTheCompactorGave() throws Exception {
+        var reason = "The summary failed on 4 tries (last: an empty reply). The older messages are kept as they are.";
+        assertEquals("> Compaction failed\n\n" + reason,
+                callBuildCompactResponseText(services.SessionCompactor.CompactionResult.skipped(reason), null));
     }
 
     @Test
-    void buildCompactResponseTextGenericSkipReason() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped("some other reason");
-        var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("Compaction skipped"), "got: " + text);
-        assertTrue(text.contains("some other reason"), "got: " + text);
+    void anyOtherSkippedCompactShowsItsReasonOrSaysItIsUnknown() throws Exception {
+        assertEquals("> Compaction skipped\n\nsome other reason", callBuildCompactResponseText(
+                services.SessionCompactor.CompactionResult.skipped("some other reason"), null));
+        assertEquals("> Compaction skipped\n\nunknown reason", callBuildCompactResponseText(
+                services.SessionCompactor.CompactionResult.skipped(null), null));
     }
 
     private static final String SHIPPED_NOTE = " Older messages remain in history and will stop being shipped to the "

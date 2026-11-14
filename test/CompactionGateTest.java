@@ -537,10 +537,10 @@ class CompactionGateTest extends UnitTest {
             });
 
             assertEquals(1, triggerOnly.size());
-            assertTrue(triggerOnly.getFirst().startsWith("Compaction skipped (no safe boundary or "
-                    + "below min-turns) at an estimated "), triggerOnly.toString());
+            assertTrue(triggerOnly.getFirst().startsWith("Compaction skipped (" + SessionCompactor.NO_CUT_REASON
+                    + ") at an estimated "), triggerOnly.toString());
             assertEquals(List.of(), triggerAgain, "the same floor is not logged a second time");
-            assertEquals(List.of("Compaction skipped (no safe boundary or below min-turns); "
+            assertEquals(List.of("Compaction skipped (" + SessionCompactor.NO_CUT_REASON + "); "
                     + "the context-window trim is left to fit the prompt"), pastTheWindow);
         } finally {
             removeProvider(provider);

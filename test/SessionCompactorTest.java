@@ -985,7 +985,7 @@ class SessionCompactorTest extends UnitTest {
                         "too large for the summary model"),
                 new FailureCase(new LlmProvider.LlmException.ServerError("HTTP 503 from p: overloaded"), 4, "HTTP 503"),
                 new FailureCase(new LlmProvider.LlmException.Transport("Transport failure calling p: timed out", null),
-                        4, "no answer from the provider"),
+                        1, "no answer from the provider"),
                 new FailureCase(new IllegalStateException(), 4, "an error"),
                 new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 401 from p: bad key",
                         failure(Remedy.INVALID_KEY), 401, "{}"), 1, "HTTP 401"),
@@ -1053,7 +1053,7 @@ class SessionCompactorTest extends UnitTest {
             return "would summarize";
         });
         assertFalse(result.compacted());
-        assertEquals("no safe boundary or below min-turns", result.skipReason());
+        assertEquals(SessionCompactor.NO_CUT_REASON, result.skipReason());
         assertEquals(0, calls.get());
     }
 

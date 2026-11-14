@@ -148,7 +148,9 @@ public final class SessionCompactor {
 
     /** The skip reason when no cut leaves the kept tail and at least the summary minimum before it. */
     // Commands.buildCompactResponseText matches this text, so it stays as it is.
-    public static final String NO_CUT_REASON = "no safe boundary or below min-turns";
+    public static final String NO_CUT_REASON = "There are not enough earlier messages to summarize yet.";
+    /** How every reason a summary that failed gives starts, so {@code /compact} can say it failed. */
+    public static final String FAILED_REASON_PREFIX = "The summary failed";
 
     /** JF-154: the token trigger's cap; 0 or less turns this half off. */
     public static final String TRIGGER_TOKENS_KEY = "chat.compaction.triggerTokens";
@@ -515,7 +517,8 @@ public final class SessionCompactor {
         static TryFailure of(Exception e) {
             var detail = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
             if (e instanceof LlmException.BreakerOpen) return new TryFailure("the provider is paused", detail, false);
-            if (e instanceof LlmException.Transport) return new TryFailure("no answer from the provider", detail, true);
+            // A refused connection, a timeout or a TLS failure: retried on less input it only costs the user another wait.
+            if (e instanceof LlmException.Transport) return new TryFailure("no answer from the provider", detail, false);
             var failure = e instanceof LlmException llm ? llm.failure() : null;
             var remedy = failure != null ? failure.remedy() : Remedy.UNCLASSIFIED;
             if (remedy == Remedy.CONTEXT_WINDOW_EXCEEDED) return new TryFailure(TOO_LARGE, detail, true);
@@ -607,8 +610,8 @@ public final class SessionCompactor {
         EventLogger.warn("compaction", null, null, ("Compaction for conversation %d gave up after %d %s and keeps the "
                 + "older messages as they are: %s").formatted(conversationId, failed.size(),
                 failed.size() == 1 ? "try" : "tries", String.join("; ", failed)));
-        var reason = failed.size() == 1 ? "The summary failed (%s).".formatted(last.brief())
-                : "The summary failed on %d tries (last: %s).".formatted(failed.size(), last.brief());
+        var reason = failed.size() == 1 ? FAILED_REASON_PREFIX + " (%s).".formatted(last.brief())
+                : FAILED_REASON_PREFIX + " on %d tries (last: %s).".formatted(failed.size(), last.brief());
         return new Outcome(null, calls, reason + " The older messages are kept as they are.");
     }
 
