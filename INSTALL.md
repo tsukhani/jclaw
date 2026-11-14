@@ -114,6 +114,7 @@ You can change what the installer does with these environment variables. All of 
 | `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install with a new one. **This deletes its database, workspace and credentials.** Without it, the installer upgrades an existing install in place. |
 | `JCLAW_BIN_DIR` | `~/.local/bin` | Where the installer puts the `jclaw` command (`install.sh` only). |
 | `JCLAW_BUNDLE_URL` | — | Install from this bundle URL (`file://` works too) instead of GitHub Releases. This skips the release-signature check (`install.sh` only). |
+| `JCLAW_ASSUME_YES` | — | Set to `1` to answer yes to every question, such as installing `bubblewrap` and adding the AppArmor profile (`install.sh` only). |
 
 For example, this command installs version v0.14.7 and does not start it:
 
@@ -203,9 +204,9 @@ off to `jclaw upgrade`.
 Other kinds of install update in other ways:
 
 - With Docker, run `install-docker.sh` again (see [Verifying the image](#verifying-the-image)). A new
-  image does not change your `docker-compose.yml` or `seccomp-bwrap.json`, and a release can need both
-  changed; the command updates them. `docker compose pull && docker compose up -d` updates the image
-  only.
+  image does not change your `seccomp-bwrap.json` or the AppArmor line in `docker-compose.yml`, and a
+  release can need both; the command updates them. `docker compose pull && docker compose up -d`
+  updates the image only.
 - With a git clone, use `git pull`.
 
 The [Releases page](https://github.com/tsukhani/jclaw/releases) has the release notes for every

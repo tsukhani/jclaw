@@ -125,7 +125,7 @@ Alerts are sent through the `main` agent's channel connections, so the channel y
 
 - **An LLM provider, MCP server or decision provider stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
 - **It recovers**, but only if you were told it went down.
-- **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](/guide#tasks)).
+- **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task keeps its schedule unless it is paused for failing too often (see [Tasks](/guide#tasks)).
 - **JClaw moves an MCP server to the Handshake protocol**, because it failed MCP v2 while MCP v1 still worked. It stays on Handshake until you set its Protocol back to Automatic on the MCP Servers page.
 - **An agent's workspace file has a change that waits for your approval.** The agent, or something outside JClaw, changed `SOUL.md`, `IDENTITY.md`, `USER.md`, `BOOTSTRAP.md` or `AGENT.md`, and the change did not apply on its own. The message names the file and the agent, and the prompt-injection rule the change matches, if any. Approve or reject it on the agent's page. You are told once for each version of the file.
 - **Stored credentials do not decrypt at startup.** The message says how many. Put back the `certs/.env` they were saved under and restart, or enter them again in Settings.
@@ -146,7 +146,7 @@ The top of the panel is one line: the **verdict**, the **size** of the data file
 | **Attention** | The trace file has logged read failures (`File corrupted`, `Unable to read the page`) in the last day or week. Pages are going bad. Back up now, then consider Repair. |
 | **Critical** | The probe query failed: the database is closed or unreadable and every request is failing with it. Repair or Restore. |
 
-Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file, so the warning arrives before the outage does.
+Attention is the state worth knowing about. The verdict reads that file, so the warning arrives before the outage does.
 
 ### Backups
 
@@ -170,7 +170,7 @@ Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to 
 
 ### Repair
 
-Repair is the procedure from the September incident, run for you rather than by hand. H2's recovery tool reads the damaged file into a script; the file and its trace are moved aside; a fresh database is rebuilt from the script in the app's mode, with each ENUM column cast back from the ordinals the recovery tool writes; every table's row count is checked against what the damaged file reported before the repair and against what the script staged; the result is compacted; and `data/repair-<stamp>.json` records what was created. The instance restarts around it, and when the page reconnects the panel shows the per-table result.
+Repair runs H2's recovery for you rather than by hand. H2's recovery tool reads the damaged file into a script; the file and its trace are moved aside; a fresh database is rebuilt from the script in the app's mode, with each ENUM column cast back from the ordinals the recovery tool writes; every table's row count is checked against what the damaged file reported before the repair and against what the script staged; the result is compacted; and `data/repair-<stamp>.json` records what was created. The instance restarts around it, and when the page reconnects the panel shows the per-table result.
 
 Two limits are worth knowing:
 
@@ -276,7 +276,7 @@ jclaw upgrade                            # install the newest release
 jclaw upgrade --version v0.17.48 --yes   # pin a release (also how you step back)
 ```
 
-Re-running the one-line installer over an existing install now delegates here too, so it upgrades rather than replacing your data.
+Re-running the one-line installer over an existing install delegates here too, so it upgrades rather than replacing your data.
 
 ### Java runtime
 
@@ -416,7 +416,7 @@ There are four, in this order: **JEV (TypeSafe AI)**, **Laya**, **Ollama** and *
 |-----------------------|-----------|--------------------------------------------------------------------------------------------------|
 | `decision.jev.apiKey` | *(unset)* | Your TypeSafe AI key. Masked like every other secret, and refused if it contains spaces or characters outside printable ASCII. |
 
-Saving the key editor without typing anything leaves the stored key as it was. A key saved in the Browser section before this version moves here when JClaw starts, so it does not need entering again.
+Saving the key editor without typing anything leaves the stored key as it was.
 
 **used by** lists the two features that call JEV, each marked **in use** when it has chosen JEV:
 
@@ -726,7 +726,7 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | Key                    | Default | Meaning                                                                                          |
 |------------------------|---------|--------------------------------------------------------------------------------------------------|
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
-| `maxContextMessages`   | 1000    | How many recent messages get sent with each LLM request. Each tool call and each tool result counts as one message. When a chat has more, its oldest messages are summarized (see **Summarize instead of dropping messages** below), so a low limit summarizes often. An upgrade from an earlier version raises a saved limit below 1000, and a saved `dmHistoryLimit` or `groupChat.historyLimit` below 1000, to 1000 once. A lower value you set after that stays. |
+| `maxContextMessages`   | 1000    | How many recent messages get sent with each LLM request. Each tool call and each tool result counts as one message. When a chat has more, its oldest messages are summarized (see **Summarize instead of dropping messages** below), so a low limit summarizes often. |
 
 The **Context savings** box holds ways to make each request smaller. The first three are on at first:
 
@@ -744,7 +744,7 @@ The **Context savings** box holds ways to make each request smaller. The first t
 
 Auto-compaction writes the summary while you read a reply, so your next message does not wait for it. It starts right after a reply that brings the chat within a tenth of the first limit it would reach. A message that arrives while the summary is still being written is sent without it. Only a message that would not fit the model's context window waits for the summary.
 
-If the model cannot write a summary, because the call fails, the reply is empty or the messages are too large for it, JClaw tries again with less: first without the tool results, then with only the oldest half of the messages, then the oldest quarter. A shorter summary covers only its own messages, and the next one starts after them. Each try that is sent counts as one summary call. JClaw stops early when a smaller request cannot help, for example when the provider refuses the API key or the balance is used up. If every try fails, nothing is summarized: the messages stay as they are, and what went wrong with each try is recorded as a warning under `compaction` in the event log.
+If the model cannot write a summary, because the call fails, the reply is empty or is not a summary, or the messages are too large for it, JClaw tries again with less: first without the tool results, then with only the oldest half of the messages, then the oldest quarter. A shorter summary covers only its own messages, and the next one starts after them. Each try that is sent counts as one summary call. JClaw stops early when a smaller request cannot help, for example when the provider refuses the API key or the balance is used up. If every try fails, nothing is summarized: the messages stay as they are, and what went wrong with each try is recorded as a warning under `compaction` in the event log.
 
 The model that writes the summaries is not set here: each agent has its own **Compaction model** on the [Agents](/agents) page, the agent's own model unless you pick another.
 
@@ -760,7 +760,7 @@ An **Advanced — context window & compaction** collapsible reveals nine lower-l
 | `compaction.forcedKeepPercent` | 10    | `compaction.keepPercent` for `/compact`. |
 | `compaction.forcedMinSummaryTokens` | 200 | `compaction.minSummaryTokens` for `/compact`. |
 | `compaction.verbatimUserTokens` | 5000 | Beside the summary, the agent also reads your newest messages from the summarized part of the chat, quoted word for word, up to this many tokens, and at most a twentieth of the model's context window. A summary can get a fact wrong, such as who it applies to; your own words cannot. Only chats that you alone read get this: Chat, voice, and your own Telegram or Slack direct messages. A WhatsApp chat, a group, or anyone else's messages never do. The newest come first, and the message that does not fit is shortened in the middle. A message larger than `userMessagePreviewPercent` allows is quoted as the same shortened copy the agent reads in later turns. Messages from before a `/reset` are left out. A message counts as its characters divided by four. 0 turns this off. |
-| `compaction.checkSummary` | false | On, each new summary is sent back to the model with your messages it covers, and the model adds anything you said that the summary left out or put on the wrong person. This costs one more model call for each summary. If that call fails, the summary is kept as first written. |
+| `compaction.checkSummary` | false | On, each new summary, and each merge of summaries, is sent back to the model with what it covers, and the model adds anything you said that the summary left out or put on the wrong person. This costs one more model call for each summary and each merge. If that call fails, the summary is kept as first written. |
 | `pruneToolResults`           | true    | Replace tool results from *earlier* turns that exceed `pruneToolResultsMinChars` with a one-line stub carrying a `ccr_retrieve` handle, regardless of how full the context window is. The agent can fetch the full text back with that handle; stored history is untouched. |
 | `pruneToolResultsMinChars`   | 4000    | Only tool results at least this long are stubbed. |
 | `pruneToolResultsProtectRecent` | 12   | The newest messages are never stubbed, in addition to the whole current turn. |
@@ -835,7 +835,7 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 ## Software Factory
 
-The optional AFK factory builds Jira stories labelled `afk` unattended in sandboxes on this Mac and returns each as a local `agent/<KEY>` branch. **Setup** stays open until the factory is installed, every prerequisite passes and the model and Jira credentials are set; after that it sits behind a **Setup** button.
+The optional AFK factory builds Jira stories and GitHub issues labelled `afk` unattended in sandboxes on this Mac and returns each as a local `agent/<KEY>` branch. **Setup** stays open until the factory is installed, every prerequisite passes and the model and Jira credentials are set; after that it sits behind a **Setup** button.
 
 - **Prerequisites**: macOS, Docker Desktop running, Node 24 or newer, pnpm 12 or newer, and this JClaw checkout. Each shows ok, missing (with the fix) or unknown when its check could not run.
 - **Credentials**: a Claude OAuth token or an Anthropic API key (saving one removes the other: only one is used, and the factory takes the OAuth token when both are present), the Jira URL and personal token, and an optional GitHub token. JClaw writes them owner-only to `.env`, `jira.env` and `github.env` in the factory home. A saved value is never shown again; enter a new one to replace it.
@@ -946,7 +946,7 @@ Pressing a key, dragging, and clicking at a point count as clicks for approval, 
 
 **Sites each agent may open.** Each agent has a box with one site per line. `example.com` allows that site only. `*.example.com` allows its subdomains, but not `example.com` itself. An empty box opens nothing. Only you can change these lists; an agent cannot change its own.
 
-**Main agent only.** Two options belong to the main agent and cannot be set for any other agent:
+**Main agent only.** Three options belong to the main agent and cannot be set for any other agent:
 
 - **Allow any site** skips the list. Loopback and private-network addresses, including this JClaw instance, stay blocked, because your browser is signed in to JClaw.
 - **Click without asking** lets the main agent click without any approval step. For every other agent, a click on anything except a plain link is **refused**, whatever [Tool Approvals](#settings-tool-approvals) is set to, unless that setting is `ask`: then JClaw sends a confirmation to the agent's bound Telegram DM and the click waits for your answer. A button, a form control and a styled box with a click handler are all treated alike. The model is told the action was not approved.
@@ -1144,7 +1144,7 @@ A confined `exec` keeps package caches in the agent's workspace, in its `.cache`
 With `shell.sandbox.network` set to `deny`, a confined process also has no network. On macOS, `sandbox-exec` refuses every connection it tries to open. On Linux, `bwrap` gives it a network of its own with nothing else in it.
 
 :::gotcha
-The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements; the `rm` now fails on every path outside the workspace. It also fails closed. On a host that cannot start a sandbox (native Windows, a machine missing `sandbox-exec` or `bwrap`, or a Linux machine where `bwrap` cannot create its namespaces), a custom agent's command is refused with a message that names the cause, and nothing runs. With `shell.sandbox` on, the Main Agent's commands are refused there too; with it off, they run as usual. On Linux, JClaw checks by starting `bwrap` for real, so an installed `bwrap` that cannot work counts as no sandbox.
+The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements; the `rm` now fails on every path outside the workspace. It also fails closed. On a host that cannot start a sandbox (native Windows, a machine missing `sandbox-exec` or `bwrap`, or a Linux machine where `bwrap` cannot create its namespaces), a custom agent's command is refused with a message that names the cause, and nothing runs. The Main Agent's commands are refused there too, whatever `shell.sandbox` says. On Linux, JClaw checks by starting `bwrap` for real, so an installed `bwrap` that cannot work counts as no sandbox.
 :::
 
 ## Malware and Virus Scanners
@@ -1157,7 +1157,7 @@ Off by default; turn on for environments where users can upload arbitrary skill 
 
 ## Source-only controls
 
-Two operator controls have no panel on this page. They are set and read through the API rather than the UI, so they are listed here to keep them findable.
+These operator controls have no panel on this page. They are set and read through the API rather than the UI, so they are listed here to keep them findable.
 
 | Key / endpoint            | Default        | Meaning                                                                                       |
 |---------------------------|----------------|-----------------------------------------------------------------------------------------------|

@@ -59,8 +59,9 @@ then are not comparable with later ones; the strata, which the gate checks, did 
 
 ## Strata
 
-Six, 25 each. Stratified on what changes the **fix**, with vendor carried as metadata so the
-per-vendor breakdown falls out of the same run.
+Six, drawn 25 each (`realised_strata` records the counts after re-classification). Stratified on
+what changes the **fix**, with vendor carried as metadata so the per-vendor breakdown falls out of
+the same run.
 
 | Stratum | Meaning | Rung that addresses it |
 |---|---|---|

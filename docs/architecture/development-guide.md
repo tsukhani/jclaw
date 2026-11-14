@@ -76,7 +76,7 @@ Test DB: `%test.db.url=jdbc:h2:mem:play;MODE=MYSQL;LOCK_MODE=0` (set in `conf/ap
 
 `./jclaw.sh setup` wires `core.hooksPath=.githooks`:
 - **`pre-commit`** — `lint-staged` (ESLint + Stylelint `--fix`) on staged `frontend/**` files only; short-circuits for backend-only commits. Also refuses a pnpm `packageManager` pin when `frontend/pnpm-lock.yaml` has no `packageManagerDependencies` block.
-- **`pre-push`** — runs the full backend + frontend suite (`./jclaw.sh test`), cached per-HEAD so the two-remote deploy flow pays the cost once. Bypass a single push with `JCLAW_SKIP_TESTS=1` (sparingly).
+- **`pre-push`** — runs the backend classes `bin/select-tests.mjs` picks (frontend checks only on a frontend change), cached per commit so the two-remote deploy flow pays the cost once. Bypass a single push with `JCLAW_SKIP_TESTS=1` (sparingly).
 
 Never use `--no-verify`.
 
@@ -85,7 +85,7 @@ Never use `--no-verify`.
 Every code change goes through this order — do not skip steps:
 
 1. **Write tests first** (see AGENTS.md & feedback memory).
-2. `play autotest` — backend green.
+2. `./gradlew playAutotest -Ptests=<classes the change touches>` — backend green.
 3. `cd frontend && pnpm test` — frontend green (required if any file under `frontend/` was touched).
 4. **Stop at the local commit.** The `pre-commit` hook runs here; fix every issue it surfaces and re-commit (never `--no-verify`).
 

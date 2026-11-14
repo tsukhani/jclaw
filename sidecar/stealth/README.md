@@ -221,7 +221,7 @@ no browser download is triggered by the JVM, `serve.py`, `jclaw.sh`, `install.sh
 Dockerfile. The Chromium JClaw downloads is Playwright Java's (`PlaywrightBrowserTool`, on the first
 `browser` call or Settings → Browser), into `PLAYWRIGHT_BROWSERS_PATH` or the per-OS `ms-playwright`
 cache; on a dev checkout `./jclaw.sh e2e` also installs the frontend's Playwright Chromium there. The sidecar inherits the JVM's environment and so looks in the same place, but that build serves it only
-when Patchright pins the same revision as Playwright Java `1.63.0` (`pyproject.toml` asks for
+when Patchright pins the same revision as Playwright Java `1.64.0` (`pyproject.toml` asks for
 `patchright>=1.52`), which nothing checks. Otherwise run `uv run patchright install chromium` in `sidecar/stealth`.
 Without the full build a render falls back to the headless shell and logs that command; without either,
 `/render` answers 502. `browser_ready` on `/health` means only that Patchright imported.

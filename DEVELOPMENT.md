@@ -3,7 +3,7 @@
 This guide is for the Abundent team that builds JClaw. It covers how to set up a
 development machine, run JClaw from source, test it, and find your way around the code.
 
-- JClaw does not accept outside contributions. [CONTRIBUTING.md](CONTRIBUTING.md) explains why,
+- JClaw welcomes outside contributions. [CONTRIBUTING.md](CONTRIBUTING.md) explains how,
   and holds the team's working standards.
 - Coding agents read [AGENTS.md](https://github.com/tsukhani/jclaw/blob/main/AGENTS.md), which holds the project's conventions with their reasons.
 - To install and run a released JClaw, read [INSTALL.md](INSTALL.md).
@@ -73,7 +73,7 @@ After cloning, open the project in your IDE and trigger the "Reopen in Container
 |---|---|
 | **Cursor** | <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → `Dev Containers: Reopen in Container` |
 | **VS Code** | Click the blue corner icon (bottom-left) → `Reopen in Container`, or <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → same command |
-| **GitHub Codespaces** | Push your branch to GitHub → click `Code` → `Codespaces` tab → `Create codespace on main` |
+| **GitHub Codespaces** | On GitHub, click `Code` → `Codespaces` tab → `Create codespace on main` |
 | **JetBrains Gateway** | New Connection → Dev Containers → point at the local `jclaw` folder |
 
 What happens automatically once you click:
@@ -201,7 +201,7 @@ A few more developer commands sit beside it:
 
 ### Git hooks
 
-`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` skips by itself when the push only deletes refs or tags commits the remote already has (as `/deploy` does once a release's build passes), or changes only documentation (`docs/`, `*.md`, `.github/`) or only the `application.version` line; otherwise it runs `./jclaw.sh check --backend-only` (the wildcard-import check, `spotlessCheck` and `compileJava`) and `compileTestJava`, then `./jclaw.sh test` narrowed to the push: the backend test classes `bin/select-tests.mjs` picks (none, a list, or the whole suite) and the four frontend checks only when `frontend/`, `docs/user-guide/` or `bin/llms-full.mjs` changed. When a `bin/` file changed it also runs the `bin/` scripts' own tests (`node --test bin/*.test.mjs`), which nothing else runs. Jenkins runs the full Java suite on every push. It does this before a push reaches the remote, and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
+`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` skips by itself when the push only deletes refs or tags commits the remote already has (as `/deploy` does once a release's build passes), or changes only documentation (`docs/`, `*.md`, `.github/`) or only the `application.version` line; otherwise it runs `./jclaw.sh check --backend-only` (the wildcard-import check, `spotlessCheck` and `compileJava`) and `compileTestJava`, then `./jclaw.sh test` narrowed to the push: the backend test classes `bin/select-tests.mjs` picks (none, a list, or the whole suite) and the four frontend checks only when `frontend/`, `docs/user-guide/` or `bin/llms-full.mjs` changed. When a `bin/` file changed it also runs the `bin/` scripts' own tests (`node --test bin/*.test.mjs`), which nothing else runs. Jenkins runs the full Java suite on every push. The hook does this before a push reaches the remote, and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
 
 ```bash
 git config core.hooksPath .githooks
@@ -216,13 +216,14 @@ git config core.hooksPath .githooks
 Evals measure how well JClaw's agents behave. Tests check that the code works; evals check that an
 agent, on a real model, does the right thing. The datasets live in [`evals/`](https://github.com/tsukhani/jclaw/blob/main/evals/README.md).
 
-Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
+Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, grounding and parallel calls, each a set of cases with deterministic pass criteria:
 
 | Suite | What it checks |
 | --- | --- |
 | `tool-selection` | The agent picks the right tool, and only the tools the job needs. |
 | `structured-output` | Asked for JSON, the agent returns JSON that validates: no prose around it, no invented fields, no numbers as strings. |
 | `grounding` | The agent answers from the supplied source only, cites the right part of it, and says so when the source does not hold the answer. |
+| `parallel-calls` | The agent sends tool calls that do not depend on each other in one response, and waits when one needs another's result. |
 
 ```bash
 ./jclaw.sh evals                                              # validate the dataset
@@ -294,14 +295,14 @@ jclaw/
 │   ├── jobs/                     # Play @Every jobs + db-scheduler handlers
 │   ├── views/                    # Groovy server templates
 │   └── utils/                    # Utility classes
-├── bin/                          # Dev tooling: diagnostics.mjs (+ tests), coverage-blend.mjs, JaCoCo jars, sign-release.sh, verify-debug-stripped.sh
+├── bin/                          # Dev tooling: node scripts (+ tests), JaCoCo jars, sign-release.sh, verify-debug-stripped.sh; see bin/README.md
 ├── certs/                        # Generated .env secret + optional TLS cert (gitignored)
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
 │   ├── play.plugins              # Play plugin registration
 │   └── log4j2.xml                # Logging configuration
-├── docs/                         # User guide + generated architecture docs (other subdirectories are gitignored, local to each clone)
+├── docs/                         # User guide, architecture snapshot, agents' topic guides (other subdirectories are gitignored)
 ├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
@@ -353,7 +354,7 @@ The implementation is entirely original — no code is shared with any of them. 
 - 🎙️ **Voice, Image & Video** — Real-time voice mode, local ASR/TTS and image/video generation through the optional Python sidecars
 - 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page and installable as desktop PWAs
 - 📁 **Workspace Manager** — Browse each agent's workspace with sizes from the Agents page, download a file or a folder as a zip, back up the whole workspace, and delete entries, with Standing Orders files protected
-- 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, an MCP server is moved to the Handshake protocol, stored credentials do not decrypt at boot, or a recurring task's occurrence fails for good
+- 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, an MCP server is moved to the Handshake protocol, stored credentials do not decrypt at boot, a recurring task's occurrence fails for good or pauses the task, or a persona file's change waits for your approval
 - 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; custom agents' shell commands always run in the OS sandbox, and opt-in OS sandboxing (`shell.sandbox` for the main agent, `subagent.acp.sandbox`) confines what the other processes can write and read
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 

@@ -22,13 +22,13 @@ behaviour so the boundary is a tested fact rather than a comment. The same bound
 `HttpFactories.runWith` ([outbound-http.md](outbound-http.md)) and any future `ScopedValue` seam.
 
 `InheritableThreadLocal` has the *opposite* boundary, and that asymmetry has bitten once.
-`DangerousActionGate`'s `OWNER_INITIATED` and the task-fire origin are the only two in `app/`, and
-both are deliberately inheritable so a subagent fork inherits the turn's trust as a floor. But
-`Thread.ofVirtual()` inherits them by default, so a fork that starts work for a *different* sender
-must opt out: `QueueDrainOrchestrator.startDrainThread` builds the `agent-drain` thread with
-`inheritInheritableThreadLocals(false)`, because a guest message queued behind an owner's turn
-would otherwise be drained carrying the owner's identity (JCLAW-1226). A new fork that crosses a
-sender boundary needs the same flag.
+`DangerousActionGate`'s `OWNER_INITIATED`, `SENDER_ID` and the task-fire origin are the only three
+in `app/`, and all are deliberately inheritable so a subagent fork inherits the turn's trust as a
+floor. But `Thread.ofVirtual()` inherits them by default, so a fork that starts work for a
+*different* sender must opt out: `QueueDrainOrchestrator.startDrainThread` builds the `agent-drain`
+thread with `inheritInheritableThreadLocals(false)`, because a guest message queued behind an
+owner's turn would otherwise be drained carrying the owner's identity (JCLAW-1226). A new fork that
+crosses a sender boundary needs the same flag.
 
 **The gate.** `test/WallClockDisciplineTest` is an ArchUnit rule banning `Instant.now()`,
 `LocalDate.now()`, `LocalDateTime.now()`, `OffsetDateTime.now()`, `ZonedDateTime.now()` and

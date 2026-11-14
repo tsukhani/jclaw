@@ -10,7 +10,7 @@ jclaw/
 │   │   ├── Webhook*Controller.java  # Inbound webhooks — exempted from auth, verified per-channel.
 │   │   ├── AuthCheck.java        # Play @Before interceptor — session cookie + Bearer ApiToken.
 │   │   └── Application.java      # SPA fallback (serves public/spa/index.html for unknown routes).
-│   ├── models/                   # JPA entities extending play.db.jpa.Model (~38 entities).
+│   ├── models/                   # JPA entities extending play.db.jpa.Model (~42 entities).
 │   │   ├── Agent, AgentBinding   # Agent config + channel→agent routing bindings.
 │   │   ├── Conversation, Message, MessageAttachment, SessionCompaction  # Chat history + media + summaries.
 │   │   ├── Task, TaskRun, TaskRunMessage  # Scheduling + run history + transcripts.
@@ -21,7 +21,7 @@ jclaw/
 │   │   ├── Notification, SubagentRun, VideoGenerationJob, ToolApprovalGrant  # Reminders, subagents, async jobs, grants.
 │   │   ├── EventLog, LatencyMetric, CompressionMetric  # Audit log + metrics.
 │   │   └── MessageRole, ChannelType, …  # String-backed enums.
-│   ├── agents/                   # Agent orchestration layer (~43 classes).
+│   ├── agents/                   # Agent orchestration layer (~51 classes).
 │   │   ├── AgentRouter.java      # 3-tier routing: peer → channel → main.
 │   │   ├── AgentRunner.java      # Prompt assembly + LLM call + tool loop (cap via chat.maxToolRounds).
 │   │   ├── SystemPromptAssembler.java  # Builds the final system prompt.
@@ -43,7 +43,7 @@ jclaw/
 │   │   ├── MemoryStore.java (iface), JpaMemoryStore.java, MemoryStoreFactory.java
 │   │   ├── PgVectorProvisioner.java, ReciprocalRankFusion.java   # hybrid vector recall (pgvector / Lucene-HNSW)
 │   │   └── MemoryAutoCapture.java, MemoryReranker.java, MemoryDecay.java, MemoryAttentionGate.java, MemoryCategory.java, MemorySafety.java
-│   ├── tools/                    # Tool implementations exposed to agents (~28).
+│   ├── tools/                    # Tool implementations exposed to agents (~33).
 │   │   ├── ShellExecTool.java    # Shell exec (consults AgentSkillAllowedTool at call time).
 │   │   ├── FileSystemTools, WebFetchTool (SSRF-guarded), WebSearchTool
 │   │   ├── PlaywrightBrowserTool, DocumentsTool (Tika), GenerateImageTool, GenerateVideoTool
@@ -70,7 +70,7 @@ jclaw/
 │   │   ├── TaskSchedulingService, TaskExecutionHandler, ReminderDispatcher  # db-scheduler integration.
 │   │   ├── NotificationBus (SSE fan-out), EventLogger, LatencyMetricRecorder
 │   │   └── LoadTestRunner, LoadTestHarness
-│   ├── utils/                    # Cross-cutting utilities (~55).
+│   ├── utils/                    # Cross-cutting utilities (~62).
 │   │   ├── HttpFactories         # Single OkHttp 5 provisioning (llmStreaming/llmSingleShot/general).
 │   │   ├── SsrfGuard, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace
 │   │   └── VirtualThreads, WebhookUtil, TokenCoalescer
@@ -80,7 +80,7 @@ jclaw/
 │
 ├── conf/                         # Play configuration.
 │   ├── application.conf          # The only config file. %prod. / %test. prefixes; secrets via ${VARNAME}.
-│   ├── routes                    # URL table — ~300 /api/* endpoints + SPA catch-all.
+│   ├── routes                    # URL table — ~340 /api/* endpoints + SPA catch-all.
 │   ├── log4j2.xml / log4j2-prod.xml / log4j2-test.xml  # Logging per mode.
 │   └── messages                  # i18n (default locale).
 │
@@ -90,13 +90,13 @@ jclaw/
 │   ├── pages/                    # File-routed pages (26, incl. conversations/ + channels/).
 │   ├── components/
 │   │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives.
-│   │   └── *.vue, guide/         # 31 feature components (DataTable, ChatContextMeter, GuideRenderer, …).
-│   ├── composables/              # ~50 (useAuth, useEventBus, useApiParsed, useApiMutation, useTheme, …).
+│   │   └── *.vue, guide/         # 36 feature components (DataTable, ChatContextMeter, GuideRenderer, …).
+│   ├── composables/              # ~55 (useAuth, useEventBus, useApiParsed, useApiMutation, useTheme, …).
 │   ├── plugins/                  # theme.client.ts (pre-paint theme), axe.client.ts (dev a11y).
 │   ├── middleware/auth.global.ts # Routes to /login or /setup-password based on auth state.
 │   ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts.
 │   ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …).
-│   ├── test/                     # Vitest unit tests (~212 files).
+│   ├── test/                     # Vitest unit tests (~237 files).
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
@@ -117,7 +117,7 @@ jclaw/
 ├── skills/                       # File-system skill definitions (global, promoted-skill source of truth).
 ├── workspace/                    # Per-agent workspace (filesystem-tool scoped; main/ holds Standing Orders).
 ├── data/                         # H2 DB file + jclaw-lucene/ index (dev default).
-├── .githooks/                    # pre-commit (lint-staged) + pre-push (full suite) hooks.
+├── .githooks/                    # pre-commit (lint-staged) + pre-push (selected classes) hooks.
 ├── .devcontainer/                # Dev Container (Ubuntu 26.04, Zulu 25, Node 26, Play fork).
 ├── docs/                         # <-- this documentation suite (architecture/ + user-guide/).
 ├── _bmad/, _bmad-output/         # BMAD/BMM workflow artifacts.

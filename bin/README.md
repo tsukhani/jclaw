@@ -18,6 +18,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
+| `sign-release.sh` | Signs `SHA256SUMS` and `IMAGE_DIGEST` in the Release stage |
+| `verify-debug-stripped.sh` | Fails the Package stage when a shipped zip's classes keep a LocalVariableTable |
 
 ## diagnostics.mjs
 
@@ -33,7 +35,7 @@ without the toolchain checks. Both emit one JSON document: an array of records.
 
 The command parses, it does not add builds. It runs `./gradlew compileTestJava` — with
 `--tests`, `play autotest` as well — and reads javac's output plus the xunit reports in
-`test-result/`. Parsing ~750 reports costs a few milliseconds against a compile measured
+`test-result/`. Parsing ~870 reports costs a few milliseconds against a compile measured
 in seconds and a suite measured in minutes.
 
 ### Record schema

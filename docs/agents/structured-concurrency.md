@@ -26,8 +26,7 @@ spiked it and the answer was no, for a reason specific to this repo's two-compil
   65535) — a marking the JVM then enforces at load time.
 - `playRun`, `playStart` and `playAutotest` all `dependsOn("compileJava")`, so every `app/` class
   passes through Gradle's `javac` before Play starts. Neither the play1 Gradle plugin nor
-  `conf/application.conf` passes `--enable-preview` to the app JVM (`jvm.memory` is the only
-  injection point, and the plugin adds just `--enable-native-access=ALL-UNNAMED`).
+  `conf/application.conf` passes `--enable-preview` to the app JVM.
 - The play1 fork's dev-mode compiler is ECJ, configured by `ApplicationCompiler`'s fixed settings
   map. That map has no preview option and no config knob — `java.source` only selects
   source/target/compliance. ECJ 3.46 refuses `--enable-preview` at source 25 outright

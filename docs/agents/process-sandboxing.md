@@ -9,8 +9,8 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
   then grant back the write root, any caller-passed allowances, `/private/tmp`,
   `/private/var/folders` and `/dev`;
   deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`, and
-  reads and writes of JClaw's `data/`, `certs/`, `conf/`, `logs/` and backup directory
-  (`utils.SandboxHiddenRoots`), reopening a write root or allowance beneath one.
+  reads and writes of JClaw's `data/`, `certs/`, `conf/`, `logs/`, backup and kept-skill-files
+  directories (`utils.SandboxHiddenRoots`), reopening a write root or allowance beneath one.
 - **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`, then a tmpfs
   over each of those JClaw directories: the visible
   filesystem is built from nothing, so secrets are *absent* rather than merely denied. Mount
@@ -132,10 +132,10 @@ Its environment is `HOME` and `TMPDIR`, both its scratch folder, and nothing of 
   Mac's own `.local` name with ENOTFOUND. `localhost` still resolves inside (measured by hand); the same network rule
   refuses a connection to it.
 
-**Every sandbox takes the secrets proxy's trust folder read-only (JF-324).** A command holding a skill secret is
-pointed at two files in the temp folder, `SecretProxy.trustFolder()`. A Linux sandbox replaces `/tmp` with an empty
-one, where they would be missing and every HTTPS call would fail its certificate check, and a macOS sandbox may write
-the shared temp folders, where a command could remove or replace what other commands trust. So
+**Every sandbox but a script's takes the secrets proxy's trust folder read-only (JF-324).** A command holding a
+skill secret is pointed at two files in the temp folder, `SecretProxy.trustFolder()`. A Linux sandbox replaces
+`/tmp` with an empty one, where they would be missing and every HTTPS call would fail its certificate check, and a
+macOS sandbox may write the shared temp folders, where a command could remove or replace what other commands trust. So
 `HarnessSandbox.withTrustFolder` adds the folder to the allowances, which Linux binds read-only after its temp folder
 (`HarnessSandboxTest.aLinuxSandboxBindsAnAllowanceAfterItsOwnTempFolder`), `macTrustFolderReadOnly` ends a macOS
 profile with a write deny, and `MainFence.current` lists it with the program files. Measured in the dev image
@@ -355,8 +355,8 @@ and reports bwrap's first output line, trimmed to 200 characters, plus a pointer
 the compose seccomp and AppArmor settings under `JCLAW_CONTAINER=1`, or to INSTALL.md's Ubuntu
 profile when bwrap stops at `setting up uid map` (JF-413); a success is cached for the JVM's life, a
 failure is probed again on the next call. On macOS it is still the `sandbox-exec` lookup. Where it
-fails, a custom agent's `exec` returns `ToolErrorTemplates.shellSandboxUnavailable`
-(`shell_sandbox_unavailable`) and starts nothing; `main`'s keeps the `SandboxUnavailableException` abort.
+fails, a custom agent's `exec` returns `ToolErrorTemplates.shellSandboxUnavailable` (`shell_sandbox_unavailable`)
+and starts nothing; `main`'s under `shell.sandbox` keeps the `SandboxUnavailableException` abort.
 On Linux a custom agent's run needs one launch more, `customAgentPids` (above), which picks its PID
 namespace and refuses the run the same way where none starts; `GET /api/sandbox` does not report it.
 

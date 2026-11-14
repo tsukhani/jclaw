@@ -16,7 +16,7 @@ bin/diagnostics.test.mjs` its parser tests.
 
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
-disk. Parsing the ~754 reports costs milliseconds against a compile measured in seconds
+disk. Parsing the ~870 reports costs milliseconds against a compile measured in seconds
 and a suite measured in minutes. `--select BASE` narrows `--tests` to the classes
 `bin/select-tests.mjs` picks for `BASE...HEAD`, as the factory's gate does: a change no
 backend test reaches runs none, and a selection that fails runs the whole suite.

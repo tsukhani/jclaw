@@ -345,8 +345,8 @@ So the agent you point capture at is a safety boundary, not just a label.
 `__loadtest__`. Capture provisions it on first use, copying provider and model
 from `main` as a starting point.
 
-**Every tool is opt-in for it.** An ordinary agent starts with the full tool set
-and the operator switches things off; `__evaltest__` starts with nothing and
+**Every tool is opt-in for it.** An ordinary agent starts with most tools on and
+the operator switches things off; `__evaltest__` starts with nothing and
 capture switches on what each suite declares. That inversion
 lives in `ToolRegistry.computeDisabledTools` alongside the same rule that makes
 `generate_image` and `generate_video` opt-in, and it holds for tools added to the

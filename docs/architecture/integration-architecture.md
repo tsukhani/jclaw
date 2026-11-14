@@ -10,7 +10,7 @@ Two transports, one origin.
 
 - **Dev:** Nuxt's Nitro `devProxy` forwards `/api/**` from `:3000` to `http://localhost:${JCLAW_BACKEND_PORT||9000}/api` (see `frontend/nuxt.config.ts`). No CORS — same-origin from the browser's perspective.
 - **Prod:** The SPA is built with `nuxi generate` and its `.output/public/` is staged into `public/spa/` (by `jclaw.sh` on bare metal, or baked at image-build time by the Dockerfile). Play maps `/_nuxt/*` → `Application.nuxtAsset` (serves `public/spa/_nuxt`) and a catch-all `GET /{path}` → `Application.spa` (serves `public/spa/index.html`). Backend + frontend share origin `:9000` / `:9443`.
-- **Auth:** Session cookie (`PLAY_SESSION`), set by `POST /api/auth/login`, consulted by `AuthCheck @Before`, surfaced client-side by `useAuth` (which probes the auth-status endpoint). The in-process `jclaw_api` tool authenticates separately with a Bearer `ApiToken`.
+- **Auth:** Session cookie (`PLAY_SESSION`), set by `POST /api/auth/login`, consulted by `AuthCheck @Before`, surfaced client-side by `useAuth` (whose `checkAuth` probes `/api/config`). The in-process `jclaw_api` tool authenticates separately with a Bearer `ApiToken`.
 - **Validation:** high-risk reads go through `fetchParsed` (Zod schemas in `types/schemas.ts`); mismatches throw a distinct `SchemaParseError`.
 - **Unauthenticated:** Backend returns **HTTP 401**; authenticated-but-forbidden actions return **403**. Client middleware treats any non-2xx from the auth check as an invalid session.
 

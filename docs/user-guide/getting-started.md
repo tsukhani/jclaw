@@ -40,7 +40,7 @@ That is the minimum loop. Everything else in this guide shows how to do more wit
 
 Your session lasts an hour of **inactivity**, not an hour in total. Every request pushes the window out. So a tab you keep working in never signs you out. Leave it alone for an hour, and you must log in again.
 
-Changing or resetting the admin password signs out every other session immediately. That is deliberate. It is what makes a password change a way to revoke access you did not intend to give, not only a way to change what you type. Upgrading to v0.17.80 or later also asks everyone to sign in once more. This is because sessions issued before that release predate the check.
+Changing or resetting the admin password signs out every other session immediately. That is deliberate. It is what makes a password change a way to revoke access you did not intend to give, not only a way to change what you type.
 
 ## The sidebar at a glance
 
@@ -75,6 +75,6 @@ The natural next step is [Chat](/guide#chat), the base loop everything else buil
 Every page title in the top breadcrumb takes you back to that page. The **JClaw** crumb is always home (the [Dashboard](/)).
 :::
 
-:::note Beta software
-JClaw is still pre-1.0. UI labels and behaviors may shift between releases. If something you see does not match what this guide says, the **Feedback** link in the sidebar is the fastest way to report it.
+:::note
+UI labels and behaviors may shift between releases. If something you see does not match what this guide says, the **Feedback** link in the sidebar is the fastest way to report it.
 :::

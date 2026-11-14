@@ -77,8 +77,9 @@ puts in front of the AI model at each step:
 A smaller prompt is faster to read, costs less and gives the model less to get wrong.
 
 To measure JClaw's agents yourself, use the test sets in [`evals/`](https://github.com/tsukhani/jclaw/blob/main/evals/README.md). They check
-that an agent picks the right tools, returns valid structured answers and answers only from its
-sources. [DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md#running-evals) shows you how to run them.
+that an agent picks the right tools, returns valid structured answers, answers only from its
+sources and sends tool calls that do not depend on each other together.
+[DEVELOPMENT.md](https://github.com/tsukhani/jclaw/blob/main/DEVELOPMENT.md#running-evals) shows you how to run them.
 
 ## Easy to set up and run
 
@@ -199,7 +200,7 @@ You may use, change and share it, for any purpose, commercial use included.
   [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists each one.
 - The JClaw name and logo are trademarks of Abundent Sdn Bhd.
   [TRADEMARK.md](TRADEMARK.md) explains how you may use them.
-- Contributions are welcome under the same license; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Contributions are welcome under the same license; see [CONTRIBUTING.md](https://github.com/tsukhani/jclaw/blob/main/CONTRIBUTING.md).
 
 ---
 

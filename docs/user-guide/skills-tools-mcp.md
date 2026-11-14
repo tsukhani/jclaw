@@ -44,7 +44,7 @@ Skills are not written on this page. Ways to get one:
 
 - **Browse catalog**: the button at the top of the page opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
 - **Import zip**: the button beside **Browse catalog** takes a skill zip, either one exported from JClaw or a skill built for Claude. It runs the same checks as a catalog import, and the skill keeps its files where they are. If **Global Skills** already has a skill of that name, the page asks before replacing it. An upload older than the version in the library is refused.
-- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). If the skill needs a key or a password, the agent does not ask you for it in chat. It lists each secret in the skill's own guide, and the skill shows **Needs secrets** until you add them in its Secrets panel. Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
+- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). If the skill needs a key or a password, the agent does not ask you for it in chat. It lists each secret in the skill's own guide, and the skill shows **Needs values** until you add them in its Secrets panel. Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
@@ -368,7 +368,7 @@ Once a server has been called, a bolt in the **Actions** column of its row on th
 With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when a server's breaker opens and again when it recovers; isolating one yourself sends nothing.
 
 :::gotcha STDIO servers run with your user's permissions
-A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Register only servers you trust to run code on your behalf, the same care you would take installing a CLI from npm. For the same reason, only you and the `main` agent can add a STDIO server or change its command, arguments or environment; any other agent calling the API is refused and can configure HTTP servers only.
+A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Register only servers you trust to run code on your behalf, the same care you would take installing a CLI from npm. For the same reason, only you and the `main` agent can add a STDIO server or change its command, arguments or environment; any other agent calling the API is refused.
 :::
 
 :::tip Start with the official servers
@@ -379,7 +379,7 @@ The MCP project's GitHub org publishes a growing list of well-tested servers (fi
 
 ## Where to go next
 
-You have covered the full layered model: base chat, the agents behind it, where conversations live, three flavors of "outside-the-turn" work, and three ways to extend what agents can do. The last two sections of the guide are about operating the platform:
+You have covered the full layered model: base chat, the agents behind it, where conversations live, three flavors of "outside-the-turn" work, and three ways to extend what agents can do. The sections after this one cover operating the platform:
 
 - [Settings](/guide#settings): the platform control panel where API keys and per-feature knobs live.
 - [Logs & Dashboard](/guide#logs-and-dashboard): operator visibility into what JClaw is doing.

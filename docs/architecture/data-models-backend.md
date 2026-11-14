@@ -1,6 +1,6 @@
 # Data Models — Backend
 
-JPA classes under `app/models/` — **38 concrete `@Entity` types plus 3 `@MappedSuperclass` bases** — all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
+JPA classes under `app/models/` — **42 concrete `@Entity` types plus 3 `@MappedSuperclass` bases** — all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
 
 **Dev DB:** H2 file at `./data/jclaw` (`MODE=MYSQL;AUTO_SERVER=TRUE`). **Prod DB:** PostgreSQL (commented template). **L2 cache:** read-mostly entities carry Hibernate `@Cache(READ_WRITE)` backed by Caffeine-JCache (JCLAW-205); a query cache is enabled globally (only `ApiToken` opts in today). **Enums** are string-backed (`@Enumerated(STRING)` or manual conversion) to survive Play 1.x hot-reload classloader identity.
 

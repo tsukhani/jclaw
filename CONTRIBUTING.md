@@ -92,8 +92,8 @@ channel.
 
 - Pure Java on the server: no Python or Node.js server-side runtimes, no Spring, no framework bloat. JPA entities in
   `models/`, business logic in `services/`, agents in `agents/`.
-- `./jclaw.sh test` must pass before push (the `.githooks/pre-push` hook enforces this; enable it with
-  `git config core.hooksPath .githooks`).
+- `./jclaw.sh test` must pass before push (the `.githooks/pre-push` hook runs the part of it the push reaches; enable
+  it with `git config core.hooksPath .githooks`).
 - No new dependencies without prior discussion.
 
 ### Third-party content

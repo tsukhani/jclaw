@@ -29,9 +29,9 @@ Key steps:
 - **Test.Frontend** — `(cd frontend && pnpm test --coverage)` (Vitest + lcov).
 - **Sonar** — `./gradlew sonar -Dsonar.projectVersion=v${appVersion}` (project key `abundent:jclaw`), with the quality-gate binding.
 - **Package** — `./gradlew playDist playBundle` writes `dist/jclaw.zip` and `dist/jclaw-bundle.zip`, archived as Jenkins artifacts. The SPA **is** baked into the bundle — `nuxi generate` output is copied into `public/spa/` before packaging.
-- **Release** (param `RELEASE=true`): refresh the GitHub Release `v<application.version>` with both zips, the one-line installers (`install.sh`, `install.ps1`, `install-docker.sh`, also published as `docker-pull-verified.sh`) and `release-signing.pub`, plus `SHA256SUMS` listing all six and `SHA256SUMS.sig`, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
+- **Release** (param `RELEASE=true`): refresh the GitHub Release `v<application.version>` with both zips, the one-line installers (`install.sh`, `install.ps1`, `install-docker.sh`, also published as `docker-pull-verified.sh`) and `release-signing.pub`, plus `SHA256SUMS` listing all seven and `SHA256SUMS.sig`, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
 - **Publish Dev Container** (param `PUBLISH_DEVCONTAINER=true`): buildx push `ghcr.io/tsukhani/jclaw-devcontainer:latest`.
-- **Cleanup** (on release): keep the 5 most recent GitHub Releases + 5 most recent GHCR versions (never deleting whatever `:latest` points to); prune BuildKit cache older than 30 days.
+- **Cleanup** (on release): keep the 5 most recent GitHub Releases and only the GHCR images they and `:latest` reference (`bin/ghcr-prune.mjs`); prune BuildKit cache older than 30 days.
 
 ## Bare-metal deploy (no Docker)
 
@@ -109,7 +109,7 @@ On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./
 All environment-specific config lives in the single `conf/application.conf` via Play's `%prod.` / `%test.` line prefixes — there is no separate `application.prod.conf`. The only operator-managed value outside the file is `application.secret`, which resolves from the `PLAY_SECRET` env var (`./jclaw.sh secret` / the container entrypoint writes it).
 
 - The shipped `application.conf` keeps DB on H2 file even in prod — PostgreSQL is a commented-in template (`%prod.db.url=jdbc:postgresql://…`). Switch and provide `DB_PASSWORD` before promoting.
-- `jpa.ddl=update` in prod (`%prod.jpa.ddl=update`). Explicit pre-1.0 tradeoff — additive schema only; renames/type changes need manual intervention.
+- `jpa.ddl=update` in prod (`%prod.jpa.ddl=update`). Explicit tradeoff — additive schema only; renames/type changes need manual intervention.
 - Pool: `%prod.db.pool.maxSize=64`, `%prod.db.pool.timeout=5000` (raised for SSE chat streams that hold a JPA connection).
 - Logging: `%prod.application.log.path=/log4j2-prod.xml`.
 - HTTPS: off by default; `./jclaw.sh https` + a valid cert enables the 9443 listener (HTTP/2 + HTTP/3) at runtime via `-Dhttps.port=9443`. `conf/application.conf` is never modified by the toggle.
@@ -123,6 +123,6 @@ If fronting with nginx:
 
 ## Release cadence
 
-- `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`v0.X.Y`), and pushes to both remotes.
+- `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`vX.Y.Z`), and pushes to both remotes.
 - Jenkins triggers on push; release builds (tag + GitHub Release + GHCR) are gated by the `RELEASE` parameter.
 - Current release version is `application.version` in `conf/application.conf`; the matching tag is `v<application.version>`.

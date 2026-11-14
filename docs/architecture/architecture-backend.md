@@ -85,7 +85,7 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 ### Tool system (`app/tools/`)
 
-28 built-in tool classes: shell exec, filesystem (Read/Write/List/Delete), web fetch (SSRF-guarded) + web search, Playwright browser, documents (Tika), image/video generation, conversation history/list/send, tasks, subagent spawn/yield, message/reminder dispatch, checklist, datetime, the internal `jclaw_api` tool, plus a load-test sleep tool. Per-agent enablement is controlled by `AgentToolConfig`. `ShellExecTool` consults `AgentSkillAllowedTool` at call time — not the skill's `SKILL.md` file — to prevent allowlist expansion via filesystem-write.
+33 built-in tool classes: shell exec, filesystem (Read/Write/List/Delete), web fetch (SSRF-guarded) + web search, Playwright browser, documents (Tika), image/video generation, conversation history/list/send, tasks, subagent spawn/yield, message/reminder dispatch, checklist, datetime, the internal `jclaw_api` tool, plus a load-test sleep tool. Per-agent enablement is controlled by `AgentToolConfig`. `ShellExecTool` consults `AgentSkillAllowedTool` at call time — not the skill's `SKILL.md` file — to prevent allowlist expansion via filesystem-write.
 
 **`ShellExecTool` security posture (JCLAW-146):** the allowlist validates only the first token of the command string; the rest is handed to `/bin/sh -c`, which means shell composition (`;`, `&&`, `||`, `|`, `$(...)`, redirects) is fully available. This is intentional — the agent runs with the same OS privileges as the Play process, so per-token metacharacter-level gating would only move the goalposts while breaking legitimate composition (`cd build && make`, `git log | head`). Sandboxing lives at the `resolveWorkdir` containment check, the env-variable filter and the opt-in `shell.sandbox` OS sandbox (`HarnessSandbox`), not at the shell-syntax layer. Operators who need hard isolation wrap the Play process itself (firejail, Docker).
 
@@ -119,7 +119,7 @@ Single server-push pipe multiplexed over `/api/events`. Controllers publish type
 
 ### Per-conversation queue (`services.ConversationQueue`)
 
-Serializes message processing per conversation to prevent state corruption under concurrent inbound messages, with eviction of stale entries (`ConversationQueueEvictionJob`). Modes: FIFO `queue` (default), `collect` (batch pending into the next prompt), and `interrupt` (cancel in-flight generation, queue the new message for drain).
+Serializes message processing per conversation to prevent state corruption under concurrent inbound messages, with eviction of stale entries (`ConversationQueueEvictionJob`). A message arriving mid-turn waits; on Telegram, Slack and WhatsApp a sender's waiting messages then run as one turn, elsewhere each runs alone.
 
 ### Local ML sidecars (`app/services/{transcription,tts,imagegen,videogen}/`)
 Seven on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528), stealth (9532), fetch (9533). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for every sidecar manager; ASR, diarize and TTS add dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
@@ -128,7 +128,7 @@ Seven on-demand Python daemons on loopback provide capability the JVM cannot: AS
 Every uploaded audio attachment gets a text transcript before it reaches the LLM, so text-only models see the content (audio-capable models still receive native audio). Speaker attribution runs through the `diarize_audio` tool on either of two paths: an audio-capable **cloud** chat model, or the fully **on-device** pyannote sidecar whose speaker turns `DiarizationFusion` fuses with the ASR transcript by time. The local path adds optional per-turn emotion from a separate SER pass.
 
 ### Speech & voice (`app/services/tts/`, `VoiceController`)
-Text-to-speech has two engines: an **in-JVM sherpa-onnx** path (fastest, ~0.9 s first chunk) and the **TTS sidecar** for higher-quality/voice-cloning models. Voice mode is a duplex **WebSocket** at `/api/voice` (`VoiceController.socket`) — the only WS route in the app; everything else is REST or SSE.
+Text-to-speech has two engines: an **in-JVM sherpa-onnx** path (fastest, ~0.9 s first chunk) and the **TTS sidecar** for higher-quality/voice-cloning models. Voice mode is a duplex **WebSocket** at `/api/voice` (`VoiceController.socket`) — one of two WS routes, beside `/api/chrome-bridge/socket`; everything else is REST or SSE.
 
 ### Printing (`app/tools/PrinterTool.java`)
 JVM-native end to end via `jipp` (IPP) and `jmdns` (mDNS discovery) — no CUPS, no `lp`, no OS print stack, so behaviour is identical on macOS, Linux and Windows and works in a container with no print subsystem. Job options are read from the target device rather than a built-in list. Off by default for every agent: paper comes out of a device in someone's room and there is no undo.
@@ -161,7 +161,7 @@ Agent-behaviour datasets in `evals/suites/<id>.json` with deterministic pass cri
 
 ## Known constraints & caveats
 
-- `jpa.ddl=update` is used in production (explicit tradeoff — pre-1.0, H2 file storage). Column-type changes and renames still need manual intervention.
+- `jpa.ddl=update` is used in production (explicit tradeoff — H2 file storage). Column-type changes and renames still need manual intervention.
 - The Lucene index is derived from DB rows (re-backfilled on boot); a hard crash can lose at most one commit-interval (`jclaw.search.commitIntervalSeconds`, default 30s) of unsynced segments.
 - `ConversationQueue` state is in-process only — multi-instance deployment would need external coordination.
 - In-memory latency metrics reset on JVM restart — intentional; not a Prometheus backend.

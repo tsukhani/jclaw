@@ -15,4 +15,4 @@ Read this before touching `ChromeBridge*`, `ChromeControlTool`, `ChromeBridgePol
 - **The pairing token is a separate credential from `ApiToken`** and is stored as a hash. It travels in the first `hello` frame, never the URL, and the socket closes at 5 s if none arrives. The socket checks that `Origin` starts with `chrome-extension://`, which a web page cannot forge.
 - **One extension at a time.** A second connection replaces the first and fails what was waiting on it. A request waits on an untimed `get()` while a `RetryScheduler` task supplies the deadline, because a timed park on many virtual threads is JDK-8373224.
 - **Tests that attach a fake extension hold `ChromeBridgeSync`**, since the connection is a process-global. `ChromeBridgeSocketTest` is the only test that opens a real WebSocket to the app.
-- **Not built:** screenshots through the tool (the extension supports them), and a check that the extension's id matches the one that paired.
+- **Not built:** a check that the extension's id matches the one that paired.

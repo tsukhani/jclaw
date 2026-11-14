@@ -39,8 +39,8 @@ frontend/
 ├── pages/                    # File-routed; see list below (incl. conversations/, channels/)
 ├── components/
 │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives (auto-imported)
-│   └── *.vue, guide/         # 31 feature components (DataTable, ChatContextMeter, …)
-├── composables/              # Cross-page state & data layer (~50)
+│   └── *.vue, guide/         # 36 feature components (DataTable, ChatContextMeter, …)
+├── composables/              # Cross-page state & data layer (~55)
 ├── plugins/                  # theme.client.ts, axe.client.ts
 ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …)
 ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts
@@ -84,7 +84,7 @@ Login/logout/setup/reset are `POST /api/auth/{login,logout,setup,reset-password}
 
 ## Shared state (no Pinia)
 
-~50 composables form the state + data layer, all `useState`-backed singletons:
+~55 composables form the state + data layer, all `useState`-backed singletons:
 
 - `useAuth()` — `authenticated`, `username`, `login`/`logout`/`checkAuth`/`checkPasswordSet`/`setupPassword`/`resetPassword`. Module-level lock prevents racing `checkAuth` calls.
 - `useEventBus()` — singleton `EventSource` to `/api/events`; reconnect with exponential backoff; survives navigation.
@@ -116,7 +116,7 @@ Compile-time wire shapes live in `frontend/types/api.ts`; runtime-validated shap
 
 ## Testing strategy
 
-- **Vitest** under `frontend/test/` (~212 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
+- **Vitest** under `frontend/test/` (~237 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
 - **Playwright** E2E under `frontend/tests/e2e/` with `playwright.config.ts`. `pnpm test:e2e`, UI mode `test:e2e:ui`, headed-slow `test:e2e:headed`.
 - Any edit under `frontend/` must be validated with `cd frontend && pnpm test` (per user feedback — `play autotest` does NOT cover Vue/Vitest).
 - `plugins/axe.client.ts` runs a vue-axe/axe-core a11y scan in dev only (tree-shaken from production).

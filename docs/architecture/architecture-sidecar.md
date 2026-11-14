@@ -57,7 +57,7 @@ Every daemon exposes `GET /health`. Beyond that:
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments:[{startMs,endMs,text}]}`; `model` selects the engine |
 | GET | `/asr/models?ids=a,b` | per-model cached / bytesOnDisk / engine status for Settings |
 | POST | `/asr/prefetch` | `{model}` → downloads the host engine's weights ahead of use |
-| POST | `/shutdown` | graceful exit (JVM shutdown hook) |
+| POST | `/shutdown` | exit; evicts an adopted orphan |
 
 **Two engines, routed on model id** via the `MERALION_HF` map — anything not in it is Whisper.
 

@@ -8,7 +8,7 @@ method. Anything else fails the build.
 
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
-`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `BrowserScreenProxy`,
+`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `BrowserScreenProxy`, `SecretGrant`,
 `LatencyTrace.bind`, `TurnCancellation.register`, `SubagentRegistry.waitingOn`, the three
 delegating telemetry leaves `DelegatingSampler`, `DelegatingSpanExporter` and
 `DelegatingMetricExporter` (OTel's `Sampler` and both exporter interfaces extend `Closeable`),
@@ -39,7 +39,7 @@ acquire whose `release()` is not in an `@AfterEach`/`@AfterAll` hook or a `final
 release at the end of a test body never runs once an assertion above it fails. **Prefer the
 lease** for any new Lucene test whose window fits in one method.
 
-**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — eleven
+**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — thirteen
 sites today. `McpConnectionManager.newClient` and `McpServerService.testClient` build a
 transport that a longer-lived owner closes, and
 `PlaywrightBrowserTool.launchSession` is the same shape with the owner written down: the

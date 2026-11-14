@@ -40,14 +40,14 @@ and the eval suites.
 | Area | Spec | Notes |
 | --- | --- | --- |
 | UAT-1 Authentication | `auth.uat.spec.ts` | Runs unauthenticated; session gate, bad password, sign-out |
-| UAT-2 Read-side API contract | `api-contract.uat.spec.ts` | 39 endpoints + 404 shape + SPA fallback |
+| UAT-2 Read-side API contract | `api-contract.uat.spec.ts` | 40 endpoints + 404 shape + SPA fallback |
 | UAT-3 Navigation | `navigation.uat.spec.ts` | Sidebar routing, deep links, command palette |
 | UAT-4 Agent lifecycle | `agents.uat.spec.ts` | Create/read/update/delete + 409 conflict paths; agent type: a service agent has no USER.md or BOOTSTRAP.md, and the editor's switch asks before deleting them |
 | UAT-5 Prompts library | `prompts.uat.spec.ts` | Create via API, UI for search/filter/edit/delete |
 | UAT-6 Tasks & reminders | `tasks.uat.spec.ts` | Read-only over the live schedule |
 | UAT-7 Memories | `memories.uat.spec.ts` | Importance save answered by a stub; writes nothing |
 | UAT-8 Conversations | `conversations.uat.spec.ts` | List, filter, transcript, subagent runs |
-| UAT-9 Settings | `settings.uat.spec.ts` | All 36 panels mount |
+| UAT-9 Settings | `settings.uat.spec.ts` | All 37 panels mount |
 | UAT-10 Capability surface | `skills-tools.uat.spec.ts` | Skills, tools, per-agent grant round-trip |
 | UAT-11 Channels | `channels.uat.spec.ts` | Bindings; webhooks stay un-gated |
 | UAT-12 Dashboard | `dashboard.uat.spec.ts` | Four panels, metrics endpoints, logs |
@@ -63,6 +63,8 @@ and the eval suites.
 | UAT-23 Decision Providers | `decision-providers.uat.spec.ts` | JEV portrait and clip served as media (not the SPA fallback), clip fetched only on click and played, badge on hover, keyboard focus and no-hover screens; writes blocked |
 | UAT-24 WhatsApp cards | `whatsapp.uat.spec.ts` | Stubbed bindings: Meta subscription warning and Subscribe, this month's replies bar, delivery-failure line; writes blocked. The two routes' 401 and 404 run live |
 | UAT-25 Chat visuals | `visuals.uat.spec.ts` | A staged transcript on a conversation id no install has: chart, diagram and explorer draw with their JSON hidden, a slider move makes no request, diagram stepping, a malformed spec keeps its JSON and names the fault, reduced motion, twenty figures never more than four drawn, `visual.enabled` off leaves plain JSON, a reply's lists show their numbers and bullets (nested, beside a two-digit gutter) while task items and a visual's legend and steps show none; writes blocked |
+| Scrapes | `scrapes.uat.spec.ts` | The Scrapes page leads to the New scrape form; writes blocked, no job started |
+| Tasks Trust | `task-trust.uat.spec.ts` | Trust action on a task with no recorded origin; read-only, writes blocked |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 
