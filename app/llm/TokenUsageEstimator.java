@@ -10,6 +10,7 @@ import com.knuddels.jtokkit.api.EncodingType;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
+import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -64,8 +65,18 @@ public final class TokenUsageEstimator {
         }
     }
 
+    /**
+     * @param fixedTokens the reply primer, the leading system messages and the tools: the part of the request no
+     *                    summary shrinks, measured as {@code CompactionGate} measures it
+     */
     public record ChatRequestTokens(int messageTokens, int toolTokens, int promptTokens,
-                                    String encodingName, boolean modelMatched) {}
+                                    String encodingName, boolean modelMatched, int fixedTokens) {
+        /** An estimate given no messages to split counts only its tools as fixed. */
+        public ChatRequestTokens(int messageTokens, int toolTokens, int promptTokens, String encodingName,
+                                 boolean modelMatched) {
+            this(messageTokens, toolTokens, promptTokens, encodingName, modelMatched, toolTokens);
+        }
+    }
 
     private record ResolvedEncoding(Encoding encoding, String name, boolean modelMatched) {}
 
@@ -83,9 +94,14 @@ public final class TokenUsageEstimator {
                                                          @Nullable List<ToolDef> tools) {
         var resolved = resolveEncoding(model);
         int messageTokens = ASSISTANT_REPLY_PRIMER;
+        int leadingSystemTokens = 0;
+        boolean leading = true;
         if (messages != null) {
             for (var message : messages) {
-                messageTokens += estimateMessage(resolved.encoding(), message);
+                int tokens = estimateMessage(resolved.encoding(), message);
+                messageTokens += tokens;
+                leading = leading && MessageRole.SYSTEM.value.equals(message.role());
+                if (leading) leadingSystemTokens += tokens;
             }
         }
         int toolTokens = estimateTools(resolved.encoding(), tools);
@@ -94,7 +110,8 @@ public final class TokenUsageEstimator {
                 toolTokens,
                 messageTokens + toolTokens,
                 resolved.name(),
-                resolved.modelMatched());
+                resolved.modelMatched(),
+                ASSISTANT_REPLY_PRIMER + leadingSystemTokens + toolTokens);
     }
 
     /** Estimate one chat message without the assistant reply primer. */

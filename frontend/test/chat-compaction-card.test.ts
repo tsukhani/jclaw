@@ -37,6 +37,16 @@ describe('ChatCompactionCard', () => {
     expect(w.get('[data-testid="compaction-bar-kept"]').attributes('aria-valuenow')).toBe('22')
   })
 
+  it('says how many messages a compaction after a reply summarized, having no token count to show', async () => {
+    const ten = await mountCard({ phase: 'done', tokensBefore: null, ms: 3200, done: 10, total: 10 })
+    expect(ten.get('[data-testid="compaction-title"]').text()).toBe('Conversation compacted')
+    expect(ten.get('[data-testid="compaction-result"]').text()).toBe('10 earlier messages summarized')
+    expect(ten.get('[data-testid="compaction-time"]').text()).toBe('3.2 s')
+
+    const one = await mountCard({ phase: 'done', tokensBefore: null, ms: 900, done: 1, total: 1 })
+    expect(one.get('[data-testid="compaction-result"]').text()).toBe('1 earlier message summarized')
+  })
+
   it('shows a short compaction\'s time to a tenth of a second', async () => {
     const w = await mountCard({ phase: 'done', tokensBefore: 900, tokensAfter: 400, ms: 1250 })
     expect(w.get('[data-testid="compaction-time"]').text()).toBe('1.3 s')

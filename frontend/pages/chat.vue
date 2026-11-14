@@ -386,8 +386,10 @@ const meterCompactAt = computed(() => {
   return u.compactAt != null && u.measuredWindow === window ? u.compactAt : null
 })
 
-// The meter's counts come from the open conversation's row, fetched when the sidebar's 50 do not include it.
-const meterConversation = useOpenConversationRow(selectedConvoId, currentConversation, streaming)
+// The meter's counts come from the open conversation's row, fetched when the sidebar's 50 do not include it, and
+// again when useChatStream, set up below, hears that a compaction outside a turn changed it.
+const meterRowRevision = ref(0)
+const meterConversation = useOpenConversationRow(selectedConvoId, currentConversation, streaming, meterRowRevision)
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
@@ -581,6 +583,8 @@ const {
   streamContent,
   streamStatus,
   compaction,
+  summarizedSinceReply,
+  compactedTick,
   streamingMessageKey,
   streamContentHtml,
   streamReasoningHtml,
@@ -623,6 +627,9 @@ const {
   applyPick,
   quote: pendingQuote,
   liveChecklist,
+})
+watch(compactedTick, (tick) => {
+  meterRowRevision.value = tick
 })
 // An agent change clears the conversation; a send still unanswered places nothing in the next one.
 watch(selectedAgentId, () => leaveView())
@@ -927,6 +934,10 @@ function exportConversation() {
             :completion-tokens="contextUsage.completion"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :compact-at="meterCompactAt"
+            :rows-since-summary="meterConversation?.rowsSinceSummary ?? null"
+            :rows-to-summarize="meterConversation?.rowsToSummarize ?? null"
+            :rows-to-compact="meterConversation?.rowsToCompact ?? null"
+            :summarized-since-reply="summarizedSinceReply"
             :cumulative-tokens="conversationCumulativeTokens"
             :message-count="meterConversation?.messageRowCount ?? null"
             :user-prompt-count="meterConversation?.userPromptCount ?? null"

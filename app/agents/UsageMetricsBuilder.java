@@ -156,8 +156,8 @@ public final class UsageMetricsBuilder {
         addProviderMetrics(usageMap, turnUsage);
 
         addModelInfoFields(usageMap, modelInfo);
-        // CompactionGate.afterReply measures lastPrompt + lastCompletion with nothing fixed, so the meter does too.
-        int compactAt = SessionCompactor.compactionPoint(modelInfo, 0);
+        int compactAt = compactAt(turnUsage, modelInfo, ModelResolver.effectiveModelProvider(agent, conversation),
+                ModelResolver.effectiveModelId(agent, conversation));
         if (compactAt < Integer.MAX_VALUE) usageMap.addProperty("compactAt", compactAt);
         addResolvedModelIdentity(usageMap, agent, conversation);
         addDiscardedCall(usageMap, turnUsage.discarded());
@@ -262,6 +262,25 @@ public final class UsageMetricsBuilder {
         // JCLAW-1222: a routed turn also records why this model answered; the next turn reads it back.
         var route = ModelResolver.routeJson(agent, conversation);
         if (route != null) usageMap.add("route", route);
+    }
+
+    /**
+     * The size, in the reply's own counts, at which the conversation is due a summary. {@link CompactionGate} compares
+     * its adjusted local estimate, the fixed part included, with {@link SessionCompactor#compactionPoint}, and that
+     * estimate runs above or below the provider's count by model (22% above for gpt-oss:120b), so the point is scaled
+     * by how the final call's count compared with the estimate of the same request. {@link Integer#MAX_VALUE} when no
+     * summary can fire.
+     */
+    static int compactAt(LlmProvider.TurnUsage turnUsage, @Nullable ModelInfo modelInfo,
+                         @Nullable String providerName, @Nullable String modelId) {
+        var estimate = turnUsage.lastPromptEstimate();
+        if (estimate == null) return SessionCompactor.compactionPoint(modelInfo, 0);
+        int point = SessionCompactor.compactionPoint(modelInfo, ContextWindowManager.adjustedMessageTokens(
+                estimate.fixedTokens(), estimate.modelMatched(), providerName, modelId));
+        int gateCount = ContextWindowManager.adjustedPromptTokens(providerName, modelId, estimate);
+        int count = turnUsage.hasProviderUsage() ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens();
+        if (point == Integer.MAX_VALUE || gateCount <= 0 || count <= 0) return point;
+        return (int) Math.min(Integer.MAX_VALUE - 1L, Math.round((double) point * count / gateCount));
     }
 
     /** The turn's last call, prompt and completion: about the size of the request the next turn starts from. */

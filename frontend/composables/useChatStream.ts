@@ -144,6 +144,10 @@ export interface UseChatStream {
   streamStatus: Ref<string>
   /** The compaction card above the composer, or null when none is under way or just done. */
   compaction: Ref<CompactionCard | null>
+  /** True once a summary stored after the latest reply lands, until the next reply, which is the first to read it. */
+  summarizedSinceReply: Ref<boolean>
+  /** Counts the summaries stored outside a turn for the open conversation, so its row is read again after each. */
+  compactedTick: Ref<number>
   streamingMessageKey: Ref<string | null>
   streamContentHtml: Ref<string>
   streamReasoningHtml: Ref<string>
@@ -236,6 +240,21 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       }, COMPACTION_DONE_MS)
     }
   }
+  const summarizedSinceReply = ref(false)
+  const compactedTick = ref(0)
+  // A compaction after a reply runs outside any turn, so no frame carries its card: the bus says when it is stored.
+  const { onEvent } = useEventBus()
+  onEvent('conversation.compacted', (data) => {
+    const event = data as { conversationId?: unknown, rows?: unknown, ms?: unknown } | null
+    if (event?.conversationId == null || event.conversationId !== selectedConvoId.value) return
+    compactedTick.value++
+    void refreshConversations()
+    // One finishing while a reply streams may have been read by it, so neither the card nor the note can say.
+    if (streaming.value) return
+    summarizedSinceReply.value = true
+    const rows = Number(event.rows)
+    setCompaction({ phase: 'done', tokensBefore: null, ms: Number(event.ms), done: rows, total: rows })
+  })
   // _key of the open turn's bubble. The template routes that bubble to streamContentHtml / streamReasoningHtml
   // (throttled markdown render) instead of running the full renderMarkdown pipeline on every token mutation.
   const streamingMessageKey = ref<string | null>(null)
@@ -313,6 +332,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   // Switching conversations, New Chat or an agent change closes the stream; the page reopens it once rows load.
   watch(followedConvoId, (id) => {
     setCompaction(null)
+    summarizedSinceReply.value = false
     closeView()
     stream.close()
     if (id != null) stream.open(id)
@@ -644,6 +664,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   /** End the open turn: the bubble keeps its final text, and the saved rows, its reply committed first, are merged. */
   function endTurn() {
     if (!turn) return
+    summarizedSinceReply.value = false
     finalizeThinkingOnTransition(turn.bubble)
     dropTurn()
     flushStreamRender()
@@ -977,6 +998,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamContent,
     streamStatus,
     compaction,
+    summarizedSinceReply,
+    compactedTick,
     streamingMessageKey,
     streamContentHtml,
     streamReasoningHtml,

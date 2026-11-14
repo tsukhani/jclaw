@@ -10,11 +10,11 @@ import llm.TokenUsageEstimator;
 import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
-import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.CompactionProgress;
 import services.ConversationService;
 import services.EventLogger;
+import services.NotificationBus;
 import services.SessionCompactor;
 import services.SessionCompactor.CompactionResult;
 import services.Tx;
@@ -221,10 +221,9 @@ public final class CompactionGate {
     private static Measure measure(String providerName, String modelId, List<ChatMessage> messages,
                                    List<ToolDef> tools) {
         var estimate = TokenUsageEstimator.estimateChatRequest(modelId, messages, tools);
-        var system = messages.stream().takeWhile(m -> MessageRole.SYSTEM.value.equals(m.role())).toList();
         return new Measure(ContextWindowManager.adjustedPromptTokens(providerName, modelId, estimate),
-                ContextWindowManager.adjustedPromptTokens(providerName, modelId,
-                        TokenUsageEstimator.estimateChatRequest(modelId, system, tools)));
+                ContextWindowManager.adjustedMessageTokens(estimate.fixedTokens(), estimate.modelMatched(),
+                        providerName, modelId));
     }
 
     /** One automatic compaction on {@code turn}, logged; {@code pastTrigger} when the request reached the trigger rather than its margin. */
@@ -281,8 +280,15 @@ public final class CompactionGate {
         if (RUNNING.putIfAbsent(conversationId, mine) != null) return;
         Thread.ofVirtual().name("compaction").start(Context.current().wrap(() -> {
             var result = FAILED;
+            long startNs = System.nanoTime();
             try {
                 result = body.get();
+                // No turn carries a card for this one, so the open chat hears of it on the bus.
+                if (result.compacted()) {
+                    NotificationBus.publishDetachedAfterCommit(NotificationBus.BUS_CONVERSATION_COMPACTED,
+                            Map.of("conversationId", conversationId, "rows", result.turnsCompacted(),
+                                    "ms", (System.nanoTime() - startNs) / 1_000_000L));
+                }
             } catch (RuntimeException e) {
                 EventLogger.warn("compaction", null, null, "Compaction of conversation %d in the background failed: %s"
                         .formatted(conversationId, e.getMessage()));

@@ -22,6 +22,30 @@ class TokenUsageEstimatorTest extends UnitTest {
     }
 
     @Test
+    void theFixedPartIsTheLeadingSystemMessagesAndTheToolsAsIfSentAlone() {
+        var system = ChatMessage.system("You are a careful travel planner. Answer in plain English.");
+        var tool = ToolDef.of("web_search", "Search the web",
+                Map.of("type", "object", "properties", Map.of("query", Map.of("type", "string"))));
+        var alone = TokenUsageEstimator.estimateChatRequest("gpt-4o", List.of(system), List.of(tool));
+
+        var request = TokenUsageEstimator.estimateChatRequest("gpt-4o", List.of(system, ChatMessage.user("Plan day one."),
+                ChatMessage.assistant("Day one: Asakusa."), ChatMessage.system("A later system note is history.")),
+                List.of(tool));
+
+        assertEquals(alone.promptTokens(), request.fixedTokens(), "a later system row is not part of the fixed prefix");
+        assertTrue(request.promptTokens() > request.fixedTokens());
+    }
+
+    @Test
+    void aRequestWithNoLeadingSystemMessageHasOnlyThePrimerAndToolsFixed() {
+        var alone = TokenUsageEstimator.estimateChatRequest("gpt-4o", List.of(), List.of());
+        var request = TokenUsageEstimator.estimateChatRequest("gpt-4o",
+                List.of(ChatMessage.user("hi"), ChatMessage.system("late")), List.of());
+
+        assertEquals(alone.promptTokens(), request.fixedTokens());
+    }
+
+    @Test
     void toolSchemasContributeToPromptEstimate() {
         var messages = List.of(ChatMessage.user("search for this"));
         var withoutTools = TokenUsageEstimator.estimateChatRequest("gpt-4o", messages, List.of());

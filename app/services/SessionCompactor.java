@@ -911,6 +911,14 @@ public final class SessionCompactor {
         return latestCut(messages, minCompactable, messages.size() - keepMin);
     }
 
+    /**
+     * The fewest rows since the floor a summary can be made from, automatic or, with {@code force}, {@code /compact}'s:
+     * the kept tail and the least it summarizes.
+     */
+    public static int rowsNeededToSummarize(boolean force) {
+        return keepMessages(force) + minTurns(force);
+    }
+
     private static int keepMessages(boolean force) {
         return force ? Math.max(1, ConfigService.getInt("chat.compactionForcedKeepMessages", 4))
                 : Math.max(1, ConfigService.getInt("chat.compactionKeepMessages", 10));

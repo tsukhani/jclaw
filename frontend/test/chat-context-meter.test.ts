@@ -119,6 +119,54 @@ describe('ChatContextMeter — filling toward the summary point', () => {
     await trigger.trigger('mouseleave')
   })
 
+  it('says a short chat past 80% needs more messages before a summary, and offers /compact once it can', async () => {
+    const short = { promptTokens: 55_589, completionTokens: 0, contextWindow: 131_072, compactAt: 65_536, rowsToSummarize: 20, rowsToCompact: 6 }
+    const at = 'The agent rereads this conversation every time it answers: 55,589 tokens right now. '
+      + 'At about 65,536, JClaw summarizes the oldest messages to make room.'
+
+    const twelve = await openCard({ ...short, rowsSinceSummary: 12, compactionCount: 0 })
+    expect(text('context-summary')).toBe(`${at} A summary needs at least 20 messages, and this conversation has 12, `
+      + 'so the meter can pass 100% first. Type /compact to summarize it now.')
+    await twelve.trigger.trigger('mouseleave')
+
+    const four = await openCard({ ...short, rowsSinceSummary: 4, compactionCount: 1 })
+    expect(text('context-summary')).toBe(`${at} A summary needs at least 20 messages, and this conversation has 4 since `
+      + 'its last summary, so the meter can pass 100% first.')
+    await four.trigger.trigger('mouseleave')
+
+    const enough = await openCard({ ...short, rowsSinceSummary: 20 })
+    expect(text('context-summary')).toBe(at)
+    await enough.trigger.trigger('mouseleave')
+  })
+
+  it('says nothing about messages while the meter is under 80%', async () => {
+    const { trigger } = await openCard({
+      promptTokens: 52_428, completionTokens: 0, contextWindow: 131_072, compactAt: 65_536, rowsSinceSummary: 4, rowsToSummarize: 20,
+    })
+
+    expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 52,428 tokens right now. '
+      + 'At about 65,536, JClaw summarizes the oldest messages to make room.')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('says the last reply\'s reading is out of date once its oldest messages were summarized after it', async () => {
+    const { trigger } = await openCard({
+      promptTokens: 68_000, completionTokens: 316, contextWindow: 131_072, compactAt: 65_536, summarizedSinceReply: true,
+    })
+
+    expect(text('context-summary')).toBe('The agent\'s last reply reread 68,316 tokens of this conversation. Its oldest '
+      + 'messages have since been summarized, so the next reply starts from a shorter conversation.')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('says the oldest messages are left out when the chat comes near the model\'s own limit', async () => {
+    const { trigger } = await openCard({ promptTokens: 90_000, completionTokens: 0, contextWindow: 100_000 })
+
+    expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 90,000 tokens right now. '
+      + 'This model can take 100,000 at most. This close to the model\'s limit, the oldest messages are left out of what it reads.')
+    await trigger.trigger('mouseleave')
+  })
+
   it('says there is nothing to measure before the first reply', async () => {
     const { trigger } = await openCard({ promptTokens: 0, completionTokens: 0, contextWindow: 100_000, compactAt: 50_000 })
 

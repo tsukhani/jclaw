@@ -17,6 +17,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.NotificationBus;
 import services.SessionCompactor;
 import services.Tx;
 import slash.Commands;
@@ -26,6 +27,7 @@ import utils.LatencyStats;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -255,6 +257,67 @@ class BackgroundCompactionTest extends UnitTest {
         run(agent, convo, "After that?");
         assertTrue(systemPrompt(turns.getLast()).endsWith("SUMMARY 1"), "the turn after it carries the summary");
         assertEquals(1, summaries.size());
+    }
+
+    @Test
+    void aSummaryStoredAfterAReplyIsAnnouncedToTheOpenChatWithTheRowsItSummarized() throws Exception {
+        var agent = createAgent();
+        var convo = conversation(agent);
+        seed(convo, 26, 1200);
+        commit();
+        int trigger = nextTurnTokens(agent, convo.id) * 100 / 95;
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, String.valueOf(trigger));
+        reportedPrompt.set(trigger);
+        summaryGate = new CountDownLatch(1);
+        var announced = compactedEvents(convo.id);
+        try {
+            run(agent, convo, "Next?");
+            assertEquals(List.of(), announced.events(), "nothing is announced before the summary is stored");
+            var result = openGateAndAwait(convo.id);
+
+            assertTrue(result.compacted());
+            assertEquals(1, announced.events().size(), "one announcement per stored summary: " + announced.events());
+            var data = announced.events().getFirst();
+            assertEquals(convo.id, data.get("conversationId"));
+            assertEquals(result.turnsCompacted(), data.get("rows"));
+            assertTrue(((Long) data.get("ms")) >= 0L);
+        } finally {
+            announced.unsubscribe().run();
+        }
+    }
+
+    @Test
+    void aFailedBackgroundSummaryAnnouncesNothing() throws Exception {
+        var agent = createAgent();
+        var convo = conversation(agent);
+        seed(convo, 26, 1200);
+        commit();
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, String.valueOf(nextTurnTokens(agent, convo.id) / 2));
+        failSummaries.set(true);
+        summaryGate = new CountDownLatch(1);
+        var announced = compactedEvents(convo.id);
+        try {
+            run(agent, convo, "Next?");
+
+            assertFalse(openGateAndAwait(convo.id).compacted());
+            assertEquals(List.of(), announced.events());
+        } finally {
+            announced.unsubscribe().run();
+        }
+    }
+
+    /** The {@code conversation.compacted} events published for {@code conversationId}, scoped so another class's don't count. */
+    private record Announcements(List<Map<String, Object>> events, Runnable unsubscribe) {}
+
+    private static Announcements compactedEvents(Long conversationId) {
+        var events = new CopyOnWriteArrayList<Map<String, Object>>();
+        var unsubscribe = NotificationBus.subscribeEvents((type, data) -> {
+            if (NotificationBus.BUS_CONVERSATION_COMPACTED.equals(type)
+                    && conversationId.equals(data.get("conversationId"))) {
+                events.add(data);
+            }
+        });
+        return new Announcements(events, unsubscribe);
     }
 
     @Test

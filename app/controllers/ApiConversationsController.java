@@ -31,6 +31,7 @@ import services.ConversationService;
 import services.ConversationTurnStream;
 import services.EventLogger;
 import services.ModelOverrideResolver;
+import services.SessionCompactor;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
@@ -88,6 +89,9 @@ public class ApiConversationsController extends Controller {
                                    long compactionCount,
                                    long messageRowCount,
                                    long userPromptCount,
+                                   long rowsSinceSummary,
+                                   int rowsToSummarize,
+                                   int rowsToCompact,
                                    JsonArray checklist) {}
 
     /**
@@ -321,17 +325,22 @@ public class ApiConversationsController extends Controller {
                 m.put((Long) row[0], (Long) row[1]);
             }
             compactionCounts = m;
+            // The last sum is ConversationService.countSinceFloor for the page: rows at or after both floors.
             @SuppressWarnings("unchecked")
             var rowCounts = (List<Object[]>) JPA.em().createQuery(
                     "SELECT m.conversation.id, COUNT(m), "
-                            + "SUM(CASE WHEN m.role = :role THEN 1L ELSE 0L END) FROM Message m "
+                            + "SUM(CASE WHEN m.role = :role THEN 1L ELSE 0L END), "
+                            + "SUM(CASE WHEN (m.conversation.contextSince IS NULL OR m.createdAt >= m.conversation.contextSince) "
+                            + "AND (m.conversation.compactionSince IS NULL OR m.createdAt >= m.conversation.compactionSince) "
+                            + "THEN 1L ELSE 0L END) FROM Message m "
                             + "WHERE m.conversation.id IN :ids GROUP BY m.conversation.id")
                     .setParameter("ids", convIds)
                     .setParameter("role", MessageRole.USER.value)
                     .getResultList();
             var perConversation = HashMap.<Long, long[]>newHashMap(rowCounts.size());
             for (var row : rowCounts) {
-                perConversation.put((Long) row[0], new long[] {(Long) row[1], ((Number) row[2]).longValue()});
+                perConversation.put((Long) row[0], new long[] {(Long) row[1], ((Number) row[2]).longValue(),
+                        ((Number) row[3]).longValue()});
             }
             messageRows = perConversation;
         }
@@ -339,8 +348,8 @@ public class ApiConversationsController extends Controller {
         final var rowsByConversation = messageRows;
         var result = convos.stream()
                 .map(c -> {
-                    var perRow = rowsByConversation.getOrDefault(c.id, new long[] {0L, 0L});
-                    return conversationToMap(c, counts.getOrDefault(c.id, 0L), perRow[0], perRow[1]);
+                    var perRow = rowsByConversation.getOrDefault(c.id, new long[] {0L, 0L, 0L});
+                    return conversationToMap(c, counts.getOrDefault(c.id, 0L), perRow[0], perRow[1], perRow[2]);
                 })
                 .toList();
 
@@ -416,7 +425,8 @@ public class ApiConversationsController extends Controller {
         renderJSON(gson.toJson(conversationToMap(conversation,
                 SessionCompaction.count("conversation = ?1", conversation),
                 Message.count("conversation = ?1", conversation),
-                Message.count("conversation = ?1 AND role = ?2", conversation, MessageRole.USER.value))));
+                Message.count("conversation = ?1 AND role = ?2", conversation, MessageRole.USER.value),
+                ConversationService.countSinceFloor(conversation))));
     }
 
     /**
@@ -1263,7 +1273,7 @@ public class ApiConversationsController extends Controller {
      * for elsewhere.
      */
     private static Map<String, Object> conversationToMap(Conversation c, long compactionCount, long messageRowCount,
-                                                         long userPromptCount) {
+                                                         long userPromptCount, long rowsSinceSummary) {
         var map = new HashMap<String, Object>();
         map.put("id", c.id);
         map.put(AGENT_ID, c.agent.id);
@@ -1303,6 +1313,10 @@ public class ApiConversationsController extends Controller {
         // (one conversation read 30 against 386 rows). A prompt is one USER row.
         map.put("messageRowCount", messageRowCount);
         map.put("userPromptCount", userPromptCount);
+        // A summary can be due by size long before a short chat has the rows to make one, so the meter says when.
+        map.put("rowsSinceSummary", rowsSinceSummary);
+        map.put("rowsToSummarize", SessionCompactor.rowsNeededToSummarize(false));
+        map.put("rowsToCompact", SessionCompactor.rowsNeededToSummarize(true));
         var checklist = CheckListTool.storedItems(c.checklist);
         if (checklist != null) map.put("checklist", checklist);
         return map;

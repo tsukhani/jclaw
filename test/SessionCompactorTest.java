@@ -11,6 +11,7 @@ import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -308,13 +309,50 @@ class SessionCompactorTest extends UnitTest {
         assertFalse(SessionCompactor.nearCompaction(point - point / 10 - 1, 0, large));
     }
 
+    @Test
+    void theMeterPointIsTheTriggerOnTheFixedPartInTheProvidersOwnCount() {
+        var mi = new ModelInfo("m", "M", 200_000, 8192, false);
+
+        // On 20,000 fixed the trigger is 20,000 + half of the 180,000 left = 110,000 by the local estimate, which
+        // counted 1,000 where the provider counted 800 (an estimate above the provider), or 1,100 (one below it).
+        assertEquals(88_000, compactAtOf(measuredTurn(800, 1_000, 20_000), mi));
+        assertEquals(121_000, compactAtOf(measuredTurn(1_100, 1_000, 20_000), mi));
+    }
+
+    @Test
+    void aFinalCallTheEstimatorDidNotMeasureFallsBackToTheUnscaledTriggerWithNothingFixed() {
+        var mi = new ModelInfo("m", "M", 200_000, 8192, false);
+        var turn = measuredTurn(800, 1_000, 20_000);
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(900, 10, 910, 0, 0, 0)).build());
+
+        assertEquals(100_000, compactAtOf(turn, mi), "an earlier call's estimate is not the final call's");
+    }
+
+    /** One call the provider counted {@code providerPrompt} and the matched-encoding estimator {@code estimate}. */
+    private static LlmProvider.TurnUsage measuredTurn(int providerPrompt, int estimate, int fixed) {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(providerPrompt, 10, providerPrompt + 10, 0, 0, 0))
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(estimate - 100, 100, estimate, "o200k_base",
+                        true, fixed))
+                .build());
+        return turn;
+    }
+
     private static int compactAtOf(ModelInfo mi) {
         return usageJsonOf(mi).get("compactAt").getAsInt();
+    }
+
+    private static int compactAtOf(LlmProvider.TurnUsage turn, ModelInfo mi) {
+        return usageJsonOf(turn, mi).get("compactAt").getAsInt();
     }
 
     private static JsonObject usageJsonOf(ModelInfo mi) {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(100, 10, 110, 0, 0, 0)).build());
+        return usageJsonOf(turn, mi);
+    }
+
+    private static JsonObject usageJsonOf(LlmProvider.TurnUsage turn, ModelInfo mi) {
         return JsonParser.parseString(UsageMetricsBuilder.buildUsageJson(turn, mi, System.currentTimeMillis(), null, null))
                 .getAsJsonObject();
     }

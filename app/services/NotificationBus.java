@@ -65,6 +65,9 @@ public class NotificationBus {
      *  carries {@code conversationId} and {@code busy}; two threads' transitions can arrive out of order, so a
      *  reader re-reads the queue. */
     public static final String BUS_CONVERSATION_BUSY = "conversation.busy";
+    /** A compaction running outside any turn stored a summary of a conversation's older rows. Payload carries
+     *  {@code conversationId}, {@code rows} (how many it summarized) and {@code ms}. */
+    public static final String BUS_CONVERSATION_COMPACTED = "conversation.compacted";
 
     private static final Gson gson = GSON;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();

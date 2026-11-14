@@ -326,6 +326,8 @@ interface LlmStreamCarriers {
         /** Model calls folded into the turn, and the last one's {@link StreamAccumulator#writeMs}. */
         int calls;
         long lastWriteMs;
+        /** The final call's request as the local tokenizer measured it; null when that call was not measured. */
+        TokenUsageEstimator.@Nullable ChatRequestTokens lastPromptEstimate;
         private boolean anyRoundFolded;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
@@ -382,6 +384,7 @@ interface LlmStreamCarriers {
             if (acc == null) return;
             calls++;
             lastWriteMs = acc.writeMs();
+            lastPromptEstimate = acc.promptTokenEstimate;
             var u = acc.usage;
             // A first round that reported nothing stays 0: the second round reads what the first just cached.
             if (!anyRoundFolded) {
@@ -487,6 +490,7 @@ interface LlmStreamCarriers {
         public int firstCachedTokens() { return firstCachedTokens; }
         public int calls() { return calls; }
         public long lastWriteMs() { return lastWriteMs; }
+        public TokenUsageEstimator.@Nullable ChatRequestTokens lastPromptEstimate() { return lastPromptEstimate; }
         public int completionTokens() { return completionTokens; }
         public int totalTokens() { return totalTokens; }
         public int reasoningTokens() { return reasoningTokens; }

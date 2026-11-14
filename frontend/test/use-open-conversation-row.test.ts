@@ -18,14 +18,15 @@ function setup(opts: { id: number | null, listed: Conversation | null, streaming
   const selected = ref<number | null>(opts.id)
   const listed = ref<Conversation | null>(opts.listed)
   const streaming = ref(opts.streaming ?? false)
+  const revision = ref(0)
   let open!: ReturnType<typeof useOpenConversationRow>
   mount(defineComponent({
     setup() {
-      open = useOpenConversationRow(selected, computed(() => listed.value), streaming)
+      open = useOpenConversationRow(selected, computed(() => listed.value), streaming, revision)
       return () => h('div')
     },
   }))
-  return { selected, listed, streaming, open: () => open.value }
+  return { selected, listed, streaming, revision, open: () => open.value }
 }
 
 function serve(id: number, body: Conversation, hits: number[]) {
@@ -74,6 +75,23 @@ describe('useOpenConversationRow', () => {
     expect(hits).toEqual([])
     streaming.value = false
     await vi.waitFor(() => expect(hits).toEqual([10]))
+  })
+
+  it('reads again when the row changed outside a turn, as a compaction after a reply changes it', async () => {
+    const hits: number[] = []
+    let compactions = 0
+    unregister.push(registerEndpoint('/api/conversations/11', () => {
+      hits.push(11)
+      return row(11, { compactionCount: compactions })
+    }))
+    const { open, revision } = setup({ id: 11, listed: null })
+    await vi.waitFor(() => expect(open()?.compactionCount).toBe(0))
+
+    compactions = 1
+    revision.value++
+
+    await vi.waitFor(() => expect(open()?.compactionCount).toBe(1))
+    expect(hits).toEqual([11, 11])
   })
 
   it('stays empty when nothing is selected', async () => {

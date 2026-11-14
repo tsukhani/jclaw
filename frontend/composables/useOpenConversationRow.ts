@@ -10,6 +10,8 @@ export function useOpenConversationRow(
   selectedConvoId: Ref<number | null>,
   listed: ComputedRef<Conversation | null>,
   streaming: Ref<boolean>,
+  /** Bumped when the row changed outside a turn, as a compaction after a reply changes it. */
+  revision: Ref<number> = ref(0),
 ) {
   const fetched = ref<Conversation | null>(null)
 
@@ -23,7 +25,7 @@ export function useOpenConversationRow(
     catch { fetched.value = null }
   }
 
-  watch([selectedConvoId, streaming, () => listed.value != null], load, { immediate: true })
+  watch([selectedConvoId, streaming, () => listed.value != null, revision], load, { immediate: true })
 
   return computed<Conversation | null>(() => {
     if (listed.value) return listed.value

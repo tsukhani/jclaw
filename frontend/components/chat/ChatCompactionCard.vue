@@ -115,6 +115,13 @@ const summary = computed(() => {
               · {{ freed }}% freed
             </template>
           </p>
+          <p
+            v-else-if="card.total"
+            class="text-xs text-fg-muted"
+            data-testid="compaction-result"
+          >
+            {{ card.total }} earlier message{{ card.total === 1 ? '' : 's' }} summarized
+          </p>
         </div>
       </div>
 

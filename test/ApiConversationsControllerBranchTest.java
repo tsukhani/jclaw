@@ -6,6 +6,7 @@ import models.MessageRole;
 import models.SessionCompaction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.ConversationService;
@@ -188,6 +189,54 @@ class ApiConversationsControllerBranchTest extends FunctionalTest {
                 .getAsJsonObject();
         assertEquals(2, single.get("userPromptCount").getAsInt());
         assertEquals(4, single.get("messageRowCount").getAsInt());
+    }
+
+    @Test
+    void listAndSingleGetCountTheRowsSinceTheLaterFloorAndTheRowsASummaryNeeds() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var agent = newAgent("since-summary-agent");
+            var base = Instant.parse("2026-11-14T10:00:00Z");
+            var summarized = sixRows(ConversationService.create(agent, "web", "u-summarized"), base);
+            summarized.compactionSince = base.plusSeconds(2);
+            summarized.save();
+            // A /reset after the summary moves the floor past it.
+            var reset = sixRows(ConversationService.create(agent, "web", "u-reset"), base);
+            reset.compactionSince = base.plusSeconds(2);
+            reset.contextSince = base.plusSeconds(4);
+            reset.save();
+            var fresh = ConversationService.create(agent, "web", "u-fresh");
+            ConversationService.appendUserMessage(fresh, "hello");
+            return new long[] {summarized.id, reset.id, fresh.id};
+        });
+
+        var rows = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations"))).getAsJsonArray();
+        var byId = new java.util.HashMap<Long, com.google.gson.JsonObject>();
+        for (var row : rows) byId.put(row.getAsJsonObject().get("id").getAsLong(), row.getAsJsonObject());
+        assertEquals(4, byId.get(ids[0]).get("rowsSinceSummary").getAsInt(), "the row at the floor counts");
+        assertEquals(2, byId.get(ids[1]).get("rowsSinceSummary").getAsInt());
+        assertEquals(1, byId.get(ids[2]).get("rowsSinceSummary").getAsInt(), "no floor counts every row");
+        assertEquals(20, byId.get(ids[0]).get("rowsToSummarize").getAsInt());
+        assertEquals(6, byId.get(ids[0]).get("rowsToCompact").getAsInt());
+
+        for (int i = 0; i < 3; i++) {
+            var single = com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations/" + ids[i])))
+                    .getAsJsonObject();
+            assertEquals(byId.get(ids[i]).get("rowsSinceSummary").getAsInt(), single.get("rowsSinceSummary").getAsInt(),
+                    "the single get counts as the list does, conversation " + i);
+        }
+    }
+
+    /** Six alternating rows a second apart from {@code base}, the first a user row. */
+    private static Conversation sixRows(Conversation conv, Instant base) {
+        for (int i = 0; i < 6; i++) {
+            var m = i % 2 == 0 ? ConversationService.appendUserMessage(conv, "q" + i)
+                    : ConversationService.appendAssistantMessage(conv, "a" + i, null);
+            // createdAt is updatable = false, so only a bulk update can date the row.
+            JPA.em().createQuery("UPDATE Message m SET m.createdAt = :at WHERE m.id = :id")
+                    .setParameter("at", base.plusSeconds(i)).setParameter("id", m.id).executeUpdate();
+        }
+        return conv;
     }
 
     @Test
