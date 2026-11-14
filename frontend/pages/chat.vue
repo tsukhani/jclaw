@@ -639,6 +639,20 @@ watch(compactedTick, (tick) => {
 // One divider per summary the agent reads, numbered as the conversation page numbers them, after the last message it
 // covers; one whose messages all precede the rows shown waits for Load earlier messages to bring its place in.
 const conversationSummaries = useConversationSummaries(selectedConvoId, compactedTick, compaction)
+// The bus says live that a summary followed the reply the meter reads; after a reload only the summaries' times can.
+// While a reply streams it may have read the summary, so only the bus decides then.
+const meterSummarizedSinceReply = computed(() => {
+  if (summarizedSinceReply.value || streaming.value) return summarizedSinceReply.value
+  const msgs = displayMessages.value
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m?.role !== 'assistant' || !m.usage) continue
+    const replyAt = m.createdAt ? Date.parse(m.createdAt) : Number.NaN
+    return Number.isFinite(replyAt)
+      && conversationSummaries.value.some(c => c.status === 'live' && Date.parse(c.compactedAt) > replyAt)
+  }
+  return false
+})
 const summaryDividers = computed(() => {
   const placed = new Map<number, SummaryMarker[]>()
   if (selectedConvoId.value == null) return placed
@@ -951,7 +965,7 @@ function exportConversation() {
             :completion-tokens="contextUsage.completion"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :compact-at="meterCompactAt"
-            :summarized-since-reply="summarizedSinceReply"
+            :summarized-since-reply="meterSummarizedSinceReply"
             :cumulative-tokens="conversationCumulativeTokens"
             :message-count="meterConversation?.messageRowCount ?? null"
             :user-prompt-count="meterConversation?.userPromptCount ?? null"

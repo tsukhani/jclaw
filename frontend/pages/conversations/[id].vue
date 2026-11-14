@@ -54,7 +54,8 @@ onMounted(() => {
   if (Number.isNaN(targetedSummary)) return
   void nextTick(() => {
     const marker = document.getElementById(`summary-${targetedSummary}`)
-    marker?.scrollIntoView?.({ block: 'center' })
+    // Centred, a summary taller than the window opened with its heading above the top edge.
+    marker?.scrollIntoView?.({ block: 'start' })
     marker?.querySelector('button')?.focus({ preventScroll: true })
   })
 })

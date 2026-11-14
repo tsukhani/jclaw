@@ -313,22 +313,26 @@ describe('Conversation detail page', () => {
       route.hash = hash
       setupApi({ messages: FOUR_MESSAGES, compactions: THREE })
       const scrolled: Element[] = []
+      const scrolledWith: unknown[] = []
       const original = Element.prototype.scrollIntoView
-      Element.prototype.scrollIntoView = function (this: Element) {
+      Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
         scrolled.push(this)
+        scrolledWith.push(options)
       }
       const c = await mountSuspended(ConversationDetail, { attachTo: document.body })
       await flushPromises()
       Element.prototype.scrollIntoView = original
       const expanded = c.findAll('[data-testid="summary-marker"]').map(m => m.get('button').attributes('aria-expanded'))
-      return { c, scrolled, expanded }
+      return { c, scrolled, scrolledWith, expanded }
     }
 
-    it('scrolls to that marker, opens it and moves focus to it, leaving the others closed', async () => {
-      const { c, scrolled, expanded } = await mountAt('#summary-2')
+    it('scrolls that marker\'s top into view, opens it and moves focus to it, leaving the others closed', async () => {
+      const { c, scrolled, scrolledWith, expanded } = await mountAt('#summary-2')
       try {
         expect(expanded).toEqual(['false', 'true', 'false'])
         expect(scrolled.map(el => el.id)).toEqual(['summary-2'])
+        // Centred, a summary taller than the window opened with its heading above the top edge.
+        expect(scrolledWith).toEqual([{ block: 'start' }])
         expect(document.activeElement).toBe(c.findAll('[data-testid="summary-marker"]')[1]!.get('button').element)
         expect(c.findAll('[data-testid="summary-marker"]')[1]!.get('[data-testid="summary-marker-text"]').html())
           .toContain('SUMMARY 12')

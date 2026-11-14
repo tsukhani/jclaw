@@ -101,3 +101,30 @@ describe('a compaction stored after a reply', () => {
     expect(listReads).toBe(readsBefore)
   })
 })
+
+describe('a summary stored after the reply the meter reads, on a load', () => {
+  const REPLY_AT = '2026-11-14T10:00:02Z'
+
+  async function meterAfter(summaries: Array<{ compactedAt: string, status: string }>) {
+    serveConversation(5, [
+      { id: 1, role: 'user', content: 'plan the trip', createdAt: '2026-11-14T10:00:01Z' },
+      { id: 2, role: 'assistant', content: 'Here is the plan.', createdAt: REPLY_AT,
+        usage: { prompt: 83465, completion: 120, lastPrompt: 83345, lastCompletion: 120 } },
+    ])
+    registerEndpoint('/api/conversations/5/compactions', () => summaries.map((s, i) => ({
+      id: 40 + i, rows: 17, summaryTokens: 500, model: 'openrouter/m', summary: 'S', coversFrom: null,
+      coversTo: '2026-11-14T10:00:01Z', mergedIntoId: null, ...s })))
+    const component = await openConversation(5)
+    return component.findComponent({ name: 'ChatContextMeter' }).props('summarizedSinceReply')
+  }
+
+  it('tells the meter its count was taken before a live summary written after that reply', async () => {
+    expect(await meterAfter([{ compactedAt: '2026-11-14T10:00:40Z', status: 'live' }])).toBe(true)
+  })
+
+  it('leaves the meter as it is for a summary written before the reply, or one a /reset set aside', async () => {
+    expect(await meterAfter([{ compactedAt: '2026-11-14T10:00:01Z', status: 'live' }])).toBe(false)
+    clearNuxtData()
+    expect(await meterAfter([{ compactedAt: '2026-11-14T10:00:40Z', status: 'reset' }])).toBe(false)
+  })
+})
