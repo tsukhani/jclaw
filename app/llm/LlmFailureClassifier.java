@@ -68,6 +68,17 @@ public final class LlmFailureClassifier {
             "try pulling it first");
 
     /**
+     * A model the provider has retired (JF-430). Ollama Cloud answers a 410 that names no model
+     * position or code, {@code {"error":"minimax-m2.7 was retired on November 9, 2026. Try
+     * glm-5.3-flash:cloud."}}. Only models are said to be retired, so these count on any 4xx;
+     * "deprecated" is said of request parameters as well, so it counts only on a 410 Gone.
+     */
+    private static final List<String> RETIRED_PHRASES = List.of("was retired", "has been retired",
+            "is retired");
+
+    private static final List<String> DEPRECATED_PHRASES = List.of("deprecated");
+
+    /**
      * The remedy for a non-200 answer.
      *
      * <p>A 429 is settled before anything else and yields only {@link Remedy#QUOTA_EXHAUSTED} or
@@ -87,7 +98,8 @@ public final class LlmFailureClassifier {
         if (signals.hasCode(MODEL_CODES)) return Remedy.MODEL_NOT_FOUND;
         if (status >= 400 && status < 500) {
             if (signals.mentions(CONTEXT_PHRASES)) return Remedy.CONTEXT_WINDOW_EXCEEDED;
-            if (signals.mentions(MODEL_PHRASES)) return Remedy.MODEL_NOT_FOUND;
+            if (signals.mentions(MODEL_PHRASES) || signals.mentions(RETIRED_PHRASES)) return Remedy.MODEL_NOT_FOUND;
+            if (status == 410 && signals.mentions(DEPRECATED_PHRASES)) return Remedy.MODEL_NOT_FOUND;
         }
         return Remedy.UNCLASSIFIED;
     }

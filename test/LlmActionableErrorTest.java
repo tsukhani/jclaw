@@ -92,6 +92,29 @@ class LlmActionableErrorTest extends UnitTest {
                 "{\"error\":\"model 'qwen3.5' not found, try pulling it first\"}"));
     }
 
+    /** The body Ollama Cloud answered on 2026-11-14 for a model it had retired (JF-430). */
+    private static final String RETIRED_BODY =
+            "{\"error\":\"minimax-m2.7 was retired on November 9, 2026. Try glm-5.3-flash:cloud.\"}";
+
+    @Test
+    void aModelTheProviderRetiredIsAnUnservedModelWhereverA4xxSaysSo() {
+        assertEquals(Remedy.MODEL_NOT_FOUND, LlmFailureClassifier.classify(410, RETIRED_BODY));
+        assertEquals(Remedy.MODEL_NOT_FOUND, LlmFailureClassifier.classify(404,
+                "{\"error\":{\"message\":\"This model has been retired.\",\"type\":\"invalid_request_error\"}}"));
+        assertEquals(Remedy.MODEL_NOT_FOUND, LlmFailureClassifier.classify(410,
+                "{\"error\":{\"message\":\"glm-4 is deprecated and no longer served\"}}"));
+    }
+
+    @Test
+    void a410OrA4xxThatSaysNothingOfARetiredModelKeepsItsClass() {
+        assertEquals(Remedy.UNCLASSIFIED, LlmFailureClassifier.classify(410, "{\"error\":\"upstream gone\"}"));
+        assertEquals(Remedy.UNCLASSIFIED, LlmFailureClassifier.classify(410, null));
+        // A request parameter is deprecated too, and its 400 is no unserved model.
+        assertEquals(Remedy.UNCLASSIFIED, LlmFailureClassifier.classify(400,
+                "{\"error\":{\"message\":\"The 'functions' parameter is deprecated; use 'tools'.\"}}"));
+        assertEquals(Remedy.UNCLASSIFIED, LlmFailureClassifier.classify(503, RETIRED_BODY));
+    }
+
     @Test
     void anOverlongPromptIsDetectedFromTheCodeAndFromTheProviderProse() {
         assertEquals(Remedy.CONTEXT_WINDOW_EXCEEDED, LlmFailureClassifier.classify(400,
@@ -208,6 +231,18 @@ class LlmActionableErrorTest extends UnitTest {
         assertTrue(rendered.contains(PINNED_MODEL), rendered);
         assertFalse(rendered.contains(CATALOG_MODEL),
                 "the catalog's only entry is not the model that was rejected: " + rendered);
+    }
+
+    @Test
+    void aRetiredModelsCallTellsTheOperatorTheProviderNoLongerServesItAndIsNotRetried() {
+        var attempted = chat(410, RETIRED_BODY);
+        var failure = remedyOf(attempted);
+
+        assertInstanceOf(LlmException.ClientError.class, attempted.failure());
+        assertEquals(1, attempted.attempts(), "a retired model stays retired, so the call is not retried");
+        assertEquals(Remedy.MODEL_NOT_FOUND, failure.remedy());
+        assertEquals("jclaw1134-remedy does not serve a model called task-pinned-model.",
+                LlmErrorTemplates.forFailure(failure).whatBroke());
     }
 
     @Test
