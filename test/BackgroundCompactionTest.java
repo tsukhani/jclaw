@@ -1,10 +1,12 @@
 import agents.AgentRunner;
 import agents.CompactionGate;
 import agents.ContextWindowManager;
+import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 import llm.LlmResilience;
+import llm.LlmTypes.ChatMessage;
 import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
@@ -26,6 +28,7 @@ import utils.LatencyStats;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,12 +47,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * written after it, so the next turn starts compacted; a turn past the trigger whose request the window still takes is
  * sent as it is beside the summary call; a conversation runs one compaction at a time, and a failed one leaves it as it
  * was. The provider stub answers turns at once and holds summary calls until {@link #summaryGate} opens, on a 1,000,000
- * token window whose trigger each test sets with {@link SessionCompactor#TRIGGER_TOKENS_KEY}.
+ * token window whose trigger each test sets with {@link SessionCompactor#TRIGGER_TOKENS_KEY}. It counts each prompt as the
+ * client's own estimate unless a test sets {@link #reportedPrompt}: the trigger counts on from that count (JF-420).
  */
 class BackgroundCompactionTest extends UnitTest {
 
     private static final String MODEL = "jf367-model";
     private static final String SECTION = "### Goals and constraints";
+    private static final String LEDGER_TOOL = "jf420_ledger";
+    /** {@link #reportedPrompt}'s value for a provider that counts a prompt as the client estimated it. */
+    private static final int AS_ESTIMATED = -1;
 
     private HttpServer llmServer;
     private ExecutorService serverThreads;
@@ -58,7 +65,7 @@ class BackgroundCompactionTest extends UnitTest {
     private final List<JsonObject> turns = new CopyOnWriteArrayList<>();
     private final List<JsonObject> summaries = new CopyOnWriteArrayList<>();
     private final List<Long> conversations = new CopyOnWriteArrayList<>();
-    private final AtomicInteger reportedPrompt = new AtomicInteger(10);
+    private final AtomicInteger reportedPrompt = new AtomicInteger(AS_ESTIMATED);
     private final AtomicBoolean failSummaries = new AtomicBoolean();
     private final AtomicInteger summariesInFlight = new AtomicInteger();
     private final AtomicInteger mostSummariesAtOnce = new AtomicInteger();
@@ -81,7 +88,9 @@ class BackgroundCompactionTest extends UnitTest {
             var request = JsonParser.parseString(body).getAsJsonObject();
             if (!body.contains(SECTION)) {
                 turns.add(request);
-                LlmReplyFixture.send(exchange, reply("Reply " + turns.size(), reportedPrompt.get()));
+                LlmReplyFixture.send(exchange, readsTheLedger(request) ? ledgerCall(asEstimated(request))
+                        : reply("Reply " + turns.size(), reportedPrompt.get() == AS_ESTIMATED ? asEstimated(request)
+                                : reportedPrompt.get()));
                 return;
             }
             summaries.add(request);
@@ -211,20 +220,53 @@ class BackgroundCompactionTest extends UnitTest {
 
     @Test
     void aLargeLastCallWhoseNextTurnIsFarFromTheTriggerStoresNoSummary() throws Exception {
-        // A final call past the trigger, as big tool results make one, while the next request, its history pruned, is not.
+        // A final call past the trigger, as a big tool result makes one, while the next request, that result compressed
+        // once read, is not: the count the provider gave that call loses what the compression took off.
         var agent = createAgent();
+        agent.compressionEnabled = true;
+        agent.save();
         var convo = conversation(agent);
-        seed(convo, 26, 1200);
+        seed(convo, 26, 400);
         commit();
-        int trigger = nextTurnTokens(agent, convo.id) * 2;
+        var ledger = ledgerJson(4_500);
+        ToolRegistry.publish(List.of(ledgerTool(ledger)));
+        int trigger = nextTurnTokens(agent, convo.id) + 3_500;
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, String.valueOf(trigger));
         reportedPrompt.set(trigger);
 
         run(agent, convo, "Next?");
-        awaitCompaction(convo.id);
+        var measured = awaitCompaction(convo.id);
 
+        assertEquals(2, turns.size(), "the ledger call, then the reply on its result");
+        assertNotNull(measured, "the reply came near the trigger, so the next request was measured");
+        assertEquals("not near the trigger", measured.skipReason());
         assertEquals(0, summaries.size());
         assertEquals(0L, compactionCount(convo.id));
+        var next = CompactionGate.nextTurnRequest(agent, convo.id);
+        assertNotNull(next);
+        var result = next.messages().stream().filter(m -> "tool".equals(m.role())).findFirst().orElseThrow();
+        assertTrue(((String) result.content()).length() < ledger.length() / 4, "the next request carries it compressed");
+    }
+
+    @Test
+    void aReplyTheProviderCountedPastTheTriggerHasItsSummaryStoredThoughTheLocalEstimateIsShortOfIt() throws Exception {
+        var agent = createAgent();
+        var convo = conversation(agent);
+        seed(convo, 26, 1200);
+        commit();
+        // The local estimate puts this chat at 80% of the trigger, the provider's count at 104%.
+        int estimated = nextTurnTokens(agent, convo.id);
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, String.valueOf(estimated * 100 / 80));
+        reportedPrompt.set(estimated * 130 / 100);
+        summaryGate = new CountDownLatch(1);
+
+        run(agent, convo, "Next?");
+
+        assertTrue(openGateAndAwait(convo.id).compacted());
+        assertEquals(1, turns.size());
+        assertFalse(systemPrompt(turns.getFirst()).contains(SessionCompactor.PRIOR_SUMMARY_HEADER),
+                "the turn went as it was: its start had no provider count to go by");
+        assertEquals(1, summaries.size(), "the summary was written after the reply");
     }
 
     // ─── A turn past the trigger ────────────────────────────────────────
@@ -493,6 +535,57 @@ class BackgroundCompactionTest extends UnitTest {
         assertTrue(done.await(60, TimeUnit.SECONDS), "the streamed turn must end within 60 s");
         if (failed.get() != null) throw failed.get();
         return completed.get();
+    }
+
+    /** A turn offered the ledger tool and not yet answered by it. */
+    private static boolean readsTheLedger(JsonObject request) {
+        if (!request.has("tools") || !request.get("tools").toString().contains(LEDGER_TOOL)) return false;
+        var messages = request.getAsJsonArray("messages");
+        return !"tool".equals(messages.get(messages.size() - 1).getAsJsonObject().get("role").getAsString());
+    }
+
+    private static String ledgerCall(int promptTokens) {
+        return """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[
+                  {"id":"call_1","type":"function","function":{"name":"%s","arguments":"{}"}}]},
+                  "finish_reason":"tool_calls"}],"usage":{"prompt_tokens":%d,"completion_tokens":5}}"""
+                .formatted(LEDGER_TOOL, promptTokens);
+    }
+
+    private static ToolRegistry.Tool ledgerTool(String result) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return LEDGER_TOOL; }
+            @Override public String description() { return "Reads the ledger"; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) { return result; }
+        };
+    }
+
+    /** A JSON array of ledger entries of at least {@code tokens} tokens, which the JSON compressor cuts to a few. */
+    private static String ledgerJson(int tokens) {
+        var entries = new ArrayList<String>();
+        while (TokenUsageEstimator.estimateText(MODEL, "[" + String.join(",", entries) + "]").tokens() < tokens) {
+            for (int i = 0; i < 20; i++) {
+                int n = entries.size();
+                entries.add("{\"id\":%d,\"account\":%d,\"memo\":\"Invoice %d settled against the March statement\"}"
+                        .formatted(n, 40_000 + n, n));
+            }
+        }
+        return "[" + String.join(",", entries) + "]";
+    }
+
+    /** The request's messages as the client's local tokenizer counts them, tools aside. */
+    private static int asEstimated(JsonObject request) {
+        var messages = new ArrayList<ChatMessage>();
+        for (var element : request.getAsJsonArray("messages")) {
+            var message = element.getAsJsonObject();
+            var content = message.get("content");
+            messages.add(new ChatMessage(message.get("role").getAsString(),
+                    content != null && content.isJsonPrimitive() ? content.getAsString() : "", null, null, null));
+        }
+        return TokenUsageEstimator.estimateChatRequest(MODEL, messages, List.of()).promptTokens();
     }
 
     private static String reply(String content, int promptTokens) {

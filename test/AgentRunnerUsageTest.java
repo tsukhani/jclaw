@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.PromptAnchor;
 import agents.UsageMetricsBuilder;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
@@ -700,6 +701,38 @@ class AgentRunnerUsageTest extends UnitTest {
         UsageMetricsBuilder.addRoundAndReport(new LlmProvider.TurnUsage(), roundWithUsage(null), statusSink(statuses));
 
         assertTrue(statuses.isEmpty(), "a zero reading would empty the meter mid-turn: " + statuses);
+    }
+
+    @Test
+    void theUsageRecordKeepsTheFinalCallsOwnEstimateOfItsRequest() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(900, 30, 930, 0, 0, 0))
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(1_000, 100, 1_100, "cl100k_base", false,
+                        300)).build());
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(1_500, 40, 1_540, 0, 0, 0))
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(1_600, 100, 1_700, "cl100k_base", false,
+                        300)).build());
+
+        var recorded = usageOf(turn).getAsJsonObject(PromptAnchor.ESTIMATE_FIELD);
+
+        assertEquals(1_700, recorded.get("prompt").getAsInt(), "the final call's, beside its lastPrompt of 1,500");
+        assertEquals(300, recorded.get("fixed").getAsInt());
+        assertFalse(recorded.get("modelMatched").getAsBoolean());
+    }
+
+    @Test
+    void aFinalCallThatWasNotMeasuredRecordsNoEstimateEvenWhenAnEarlierCallWas() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(900, 30, 930, 0, 0, 0))
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(1_000, 100, 1_100, "cl100k_base", false,
+                        300)).build());
+        turn.addRound(roundWithUsage(new Usage(1_500, 40, 1_540, 0, 0, 0)));
+
+        var usage = usageOf(turn);
+
+        assertFalse(usage.has(PromptAnchor.ESTIMATE_FIELD), "an earlier call's estimate is not the final call's: "
+                + usage);
+        assertEquals(1_500, usage.get("lastPrompt").getAsInt());
     }
 
     // --- Helpers ---

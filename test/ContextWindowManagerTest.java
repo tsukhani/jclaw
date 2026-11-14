@@ -1,10 +1,14 @@
+import agents.CompactionGate;
 import agents.ContextWindowManager;
+import agents.PromptAnchor;
+import agents.UsageMetricsBuilder;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionDef;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolDef;
+import llm.LlmTypes.Usage;
 import llm.OpenAiProvider;
 import llm.TokenUsageEstimator;
 import models.Agent;
@@ -13,10 +17,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.ConversationService;
+import services.SessionCompactor;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Branch coverage for {@link ContextWindowManager}'s context-window
@@ -61,13 +68,18 @@ class ContextWindowManagerTest extends UnitTest {
         return (Integer) m.invoke(null, agent, null, provider, messages, List.of());
     }
 
-    @SuppressWarnings("unchecked")
     private static List<ChatMessage> trim(List<ChatMessage> messages, Agent agent,
+                                          LlmProvider provider) throws Exception {
+        return trim(messages, agent, null, provider);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<ChatMessage> trim(List<ChatMessage> messages, Agent agent, Conversation conv,
                                           LlmProvider provider) throws Exception {
         var m = ContextWindowManager.class.getDeclaredMethod("trimToContextWindow",
                 List.class, Agent.class, Conversation.class, LlmProvider.class);
         m.setAccessible(true);
-        return (List<ChatMessage>) m.invoke(null, messages, agent, null, provider);
+        return (List<ChatMessage>) m.invoke(null, messages, agent, conv, provider);
     }
 
     private static int intConst(String name) throws Exception {
@@ -244,5 +256,46 @@ class ContextWindowManagerTest extends UnitTest {
         var trimmedTool = (String) out.get(1).content();
         assertTrue(trimmedTool.length() < big.length(), "oversized tool result must shrink");
         assertTrue(trimmedTool.contains("JClaw elided"), "elision marker must be present");
+    }
+
+    @Test
+    void aPromptAnchorThatCountsTheRequestSmallLeavesTheTrimItsOwnEstimate() throws Exception {
+        ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + PROV + "." + MODEL, "1.4");
+        var provider = new OpenAiProvider(new ProviderConfig(PROV, "http://test", "key",
+                List.of(new ModelInfo(MODEL, MODEL, 4000, 8000, false))));
+        var agent = agentUsing(MODEL);
+        agent.name = "cwm-anchor-" + UUID.randomUUID().toString().substring(0, 8);
+        agent.modelProvider = PROV;
+        agent.enabled = true;
+        agent.save();
+        var conv = ConversationService.create(agent, "web", "u-cwm-anchor");
+        var asked = new ArrayList<ChatMessage>();
+        asked.add(ChatMessage.system("System prompt."));
+        for (int i = 0; i < 30; i++) {
+            asked.add(ChatMessage.user("Question " + i + ": what did the ledger for account " + (4_000 + i)
+                    + " show about invoices, refunds and adjustments over the quarter, line by line?"));
+            asked.add(ChatMessage.assistant("Answer " + i + ": invoices, refunds and adjustments for account "
+                    + (4_000 + i) + " balanced each month, with two late payments noted in the second month."));
+        }
+        // The provider counted the request this reply answered at 100 tokens.
+        var call = LlmProvider.StreamAccumulator.builder().usage(new Usage(100, 5, 105, 0, 0, 0))
+                .promptTokenEstimate(TokenUsageEstimator.estimateChatRequest(MODEL, asked, List.of())).build();
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(call);
+        ConversationService.appendAssistantMessage(conv, "Done.", null,
+                UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), agent, conv), null);
+        var next = new ArrayList<>(asked);
+        next.add(ChatMessage.assistant("Done."));
+        next.add(ChatMessage.user("And the next quarter?"));
+        var anchor = PromptAnchor.find(conv, PROV, MODEL);
+        assertNotNull(anchor);
+        int anchored = CompactionGate.measure(anchor, PROV, MODEL, new SessionCompactor.TurnRequest(next, List.of()))
+                .estimatedTokens();
+        assertTrue(anchored < 2000, "the anchor counts the request well inside the 2,000 the trim targets: " + anchored);
+
+        var trimmed = trim(next, agent, conv, provider);
+
+        assertTrue(trimmed.size() < next.size(), "the trim still cuts by the whole estimate");
+        assertEquals(trim(next, agent, null, provider), trimmed, "the same cut as with no conversation to anchor on");
     }
 }

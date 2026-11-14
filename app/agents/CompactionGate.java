@@ -43,6 +43,14 @@ import java.util.function.Supplier;
  * transaction because it is LLM-bound and may take tens of seconds; holding a JDBC connection through it would
  * starve the connection pool.
  *
+ * <p>The token trigger counts in the provider's units (JF-420): a request measures as the conversation's
+ * {@link PromptAnchor}, its last reply's provider-reported prompt and completion, plus the adjusted estimate of what
+ * the request changes beside them, and as the adjusted estimate of the whole request only with no anchor, another
+ * model, or a summary stored since. The usage record's {@code compactAt}, which the chat's meter fills toward, is the
+ * same point in the same units. The window rule takes the larger of that measure and the whole adjusted estimate,
+ * since the context-window trim cuts by the latter: a request the trim would cut compacts inline rather than losing
+ * its oldest rows unsummarized.
+ *
  * <p>Even on success the caller should pass the rebuilt message list
  * through {@link ContextWindowManager#trimToContextWindow} as a
  * final safety net — if the summary plus retained tail somehow
@@ -56,11 +64,26 @@ public final class CompactionGate {
 
     private record CompactionDecision(Conversation conversation, @Nullable ModelInfo modelInfo,
                                       @Nullable String modelId, @Nullable String channelType,
-                                      boolean pastHistoryLimit) {
+                                      boolean pastHistoryLimit, @Nullable PromptAnchor anchor) {
     }
 
-    /** A request's prompt as the trigger counts it, and the system prompt and tools within it no summary shrinks. */
-    private record Measure(int estimatedTokens, int fixedTokens) {
+    /**
+     * A request's prompt as the trigger counts it, the system prompt and tools within it no summary shrinks, and the
+     * size the window rule takes.
+     *
+     * @param estimatedTokens the anchored measure, else the adjusted estimate of the whole request
+     * @param windowTokens    the larger of {@code estimatedTokens} and the whole adjusted estimate
+     * @param anchor          what {@code estimatedTokens} was counted from; null when it is the whole estimate
+     */
+    public record Measure(int estimatedTokens, int fixedTokens, int windowTokens, @Nullable PromptAnchor anchor) {
+        Measure plus(int tokens) {
+            return new Measure(estimatedTokens + tokens, fixedTokens, windowTokens + tokens, anchor);
+        }
+
+        /** An adjusted local estimate in {@link #estimatedTokens}'s units. */
+        public int toTriggerUnits(int adjustedTokens) {
+            return anchor != null ? anchor.toProviderUnits(adjustedTokens) : adjustedTokens;
+        }
     }
 
     /** The compaction running for each conversation. */
@@ -129,29 +152,26 @@ public final class CompactionGate {
         if (primary == null || primary.config() == null) return current;
         final var providerName = primary.config().name();
         final var modelId = snapshot.modelId();
-        var measure = measure(providerName, modelId, current.messages(), tools);
-        final int estimatedTokens = measure.estimatedTokens() + reservedTokens;
-        if (!snapshot.pastHistoryLimit()
-                && !SessionCompactor.shouldCompact(estimatedTokens, measure.fixedTokens(), snapshot.modelInfo())) {
-            return current;
-        }
+        final var measure = measure(snapshot.anchor(), providerName, modelId, current.messages(), tools)
+                .plus(reservedTokens);
+        if (!snapshot.pastHistoryLimit() && !reachesTrigger(measure, snapshot.modelInfo())) return current;
 
         // Copied: the turn goes on with its own list while the summary call reads this one.
         var turn = new SessionCompactor.TurnRequest(List.copyOf(current.messages()), List.copyOf(tools));
-        if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
+        if (!reachesWindow(measure, snapshot.modelInfo())) {
             startInBackground(conversationId, onTheTurnsModel(agent, snapshot.conversation(),
-                    () -> compactAndLog(agent, snapshot, modelId, primary, turn, estimatedTokens, true)));
+                    () -> compactAndLog(agent, snapshot, modelId, primary, turn, measure, true)));
             return current;
         }
 
         RouteSpeculation.yieldBeforeInlineCompaction(conversationId);
         long startNs = System.nanoTime();
-        var progress = CompactionProgress.open(estimatedTokens);
+        var progress = CompactionProgress.open(measure.estimatedTokens());
         var running = RUNNING.get(conversationId);
         var result = running != null ? running.join() : FAILED;
         if (!result.compacted()) {
             result = progress.around(() -> runExclusive(conversationId,
-                    () -> compactAndLog(agent, snapshot, modelId, primary, turn, estimatedTokens, true)));
+                    () -> compactAndLog(agent, snapshot, modelId, primary, turn, measure, true)));
         }
         if (!result.compacted()) {
             progress.skipped();
@@ -169,24 +189,28 @@ public final class CompactionGate {
             var assembled = SystemPromptAssembler.assemble(agent, null, promptDisabled, conv.channelType, null, conv);
             return MessageHydrator.buildMessages(AgentPromptPreparer.turnSystemPrompt(assembled.systemPrompt(), conv), conv);
         });
-        progress.done(ContextWindowManager.adjustedPromptTokens(providerName, modelId,
-                TokenUsageEstimator.estimateChatRequest(modelId, rebuilt.messages(), tools)) + reservedTokens,
+        progress.done(measure.toTriggerUnits(ContextWindowManager.adjustedPromptTokens(providerName, modelId,
+                TokenUsageEstimator.estimateChatRequest(modelId, rebuilt.messages(), tools)) + reservedTokens),
                 (System.nanoTime() - startNs) / 1_000_000L);
         return rebuilt;
     }
 
     /**
-     * After a reply is stored (JF-367): when {@code lastRequestTokens}, its last call's prompt and completion, comes
-     * within {@link SessionCompactor#BACKGROUND_MARGIN_PERCENT} of the trigger, measures the request the next turn
-     * starts from on another thread and compacts it there when that comes near too, so the next turn finds the summary
-     * stored. The reply's own size overstates the next request, whose earlier tool results are pruned and compressed,
-     * so only the measurement decides. Nothing starts while a compaction of the conversation runs.
+     * After a reply is stored (JF-367): when its last call's prompt and completion come within
+     * {@link SessionCompactor#BACKGROUND_MARGIN_PERCENT} of the trigger on that call's fixed part, measures the request
+     * the next turn starts from on another thread and compacts it there when that comes near too, so the next turn
+     * finds the summary stored. The reply's own size overstates the next request, whose earlier tool results are
+     * pruned and compressed, so only the measurement decides. Nothing starts while a compaction of the conversation runs.
      */
-    public static void afterReply(Agent agent, Conversation conversation, LlmProvider primary, int lastRequestTokens) {
+    public static void afterReply(Agent agent, Conversation conversation, LlmProvider primary,
+                                  LlmProvider.TurnUsage turnUsage) {
         var conversationId = conversation.id;
+        int lastRequestTokens = UsageMetricsBuilder.lastRequestTokens(turnUsage);
         if (conversationId == null || lastRequestTokens <= 0) return;
         var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
-        if (!SessionCompactor.nearCompaction(lastRequestTokens, 0, modelInfo)) return;
+        int fixedTokens = UsageMetricsBuilder.fixedTokens(turnUsage,
+                primary.config() != null ? primary.config().name() : null, ModelResolver.effectiveModelId(agent, conversation));
+        if (!SessionCompactor.nearCompaction(lastRequestTokens, fixedTokens, modelInfo)) return;
         startInBackground(conversationId, onTheTurnsModel(agent, conversation,
                 () -> compactNextTurnIfNear(agent, conversationId, primary)));
     }
@@ -196,40 +220,71 @@ public final class CompactionGate {
         var snapshot = snapshot(agent, conversationId, primary);
         if (turn == null || snapshot == null || snapshot.modelId() == null || primary.config() == null) return NOT_NEAR;
         var modelId = snapshot.modelId();
-        var measure = measure(primary.config().name(), modelId, turn.messages(), turn.tools());
+        var measure = measure(snapshot.anchor(), primary.config().name(), modelId, turn);
+        var modelInfo = snapshot.modelInfo();
         if (!snapshot.pastHistoryLimit()
-                && !SessionCompactor.nearCompaction(measure.estimatedTokens(), measure.fixedTokens(), snapshot.modelInfo())) {
+                && !SessionCompactor.nearCompaction(measure.estimatedTokens(), measure.fixedTokens(), modelInfo)
+                && !nearWindow(measure, modelInfo)) {
             return NOT_NEAR;
         }
-        boolean pastTrigger = snapshot.pastHistoryLimit()
-                || SessionCompactor.shouldCompact(measure.estimatedTokens(), measure.fixedTokens(), snapshot.modelInfo());
-        return compactAndLog(agent, snapshot, modelId, primary, turn, measure.estimatedTokens(), pastTrigger);
+        boolean pastTrigger = snapshot.pastHistoryLimit() || reachesTrigger(measure, modelInfo);
+        return compactAndLog(agent, snapshot, modelId, primary, turn, measure, pastTrigger);
     }
 
-    // Cheap snapshot: model info + effective model id + channel type, and one COUNT of the rows since the floor.
-    // resolveModelInfo reads only in-memory provider config.
+    // Cheap snapshot: model info + effective model id + channel type, one COUNT of the rows since the floor, and the
+    // prompt anchor's two reads. resolveModelInfo reads only in-memory provider config.
     private static @Nullable CompactionDecision snapshot(Agent agent, Long conversationId, LlmProvider primary) {
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return null;
             var mi = ModelResolver.resolveModelInfo(agent, conv, primary).orElse(null);
             var modelId = ModelResolver.effectiveModelId(agent, conv);
-            return new CompactionDecision(conv, mi, modelId, conv.channelType, SessionCompactor.pastHistoryLimit(conv));
+            var providerName = primary != null && primary.config() != null ? primary.config().name() : null;
+            return new CompactionDecision(conv, mi, modelId, conv.channelType, SessionCompactor.pastHistoryLimit(conv),
+                    PromptAnchor.find(conv, providerName, modelId));
         });
     }
 
-    private static Measure measure(String providerName, String modelId, List<ChatMessage> messages,
-                                   List<ToolDef> tools) {
+    /**
+     * {@code turn} as the trigger counts it on {@code providerName}/{@code modelId}, from {@code anchor} when it counts
+     * this request's encoding (see {@link PromptAnchor#find}), else from the adjusted estimate of the whole request.
+     */
+    public static Measure measure(@Nullable PromptAnchor anchor, String providerName, String modelId,
+                                  SessionCompactor.TurnRequest turn) {
+        return measure(anchor, providerName, modelId, turn.messages(), turn.tools());
+    }
+
+    private static Measure measure(@Nullable PromptAnchor anchor, String providerName, String modelId,
+                                   List<ChatMessage> messages, List<ToolDef> tools) {
         var estimate = TokenUsageEstimator.estimateChatRequest(modelId, messages, tools);
-        return new Measure(ContextWindowManager.adjustedPromptTokens(providerName, modelId, estimate),
-                ContextWindowManager.adjustedMessageTokens(estimate.fixedTokens(), estimate.modelMatched(),
-                        providerName, modelId));
+        int whole = ContextWindowManager.adjustedPromptTokens(providerName, modelId, estimate);
+        int fixed = ContextWindowManager.adjustedMessageTokens(estimate.fixedTokens(), estimate.modelMatched(),
+                providerName, modelId);
+        var counted = anchor != null && anchor.measures(estimate) ? anchor : null;
+        int measured = counted != null ? counted.measure(estimate) : whole;
+        return new Measure(measured, fixed, Math.max(measured, whole), counted);
+    }
+
+    private static boolean reachesTrigger(Measure measure, @Nullable ModelInfo modelInfo) {
+        return SessionCompactor.shouldCompact(measure.estimatedTokens(), measure.fixedTokens(), modelInfo)
+                || reachesWindow(measure, modelInfo);
+    }
+
+    private static boolean reachesWindow(Measure measure, @Nullable ModelInfo modelInfo) {
+        return SessionCompactor.shouldCompact(measure.windowTokens(), modelInfo, 0, 0);
+    }
+
+    /** {@link SessionCompactor#nearCompaction}'s margin, taken on the window rule alone. */
+    private static boolean nearWindow(Measure measure, @Nullable ModelInfo modelInfo) {
+        long fires = (long) SessionCompactor.windowBudget(modelInfo) + 1;
+        return fires < Integer.MAX_VALUE
+                && measure.windowTokens() >= fires - fires * SessionCompactor.BACKGROUND_MARGIN_PERCENT / 100;
     }
 
     /** One automatic compaction on {@code turn}, logged; {@code pastTrigger} when the request reached the trigger rather than its margin. */
     private static CompactionResult compactAndLog(Agent agent, CompactionDecision snapshot, String modelId,
                                                   LlmProvider primary, SessionCompactor.TurnRequest turn,
-                                                  int estimatedTokens, boolean pastTrigger) {
+                                                  Measure measure, boolean pastTrigger) {
         var conversationId = snapshot.conversation().id;
         // The trigger measures the turn's model; a router agent's summary goes to its summarize class (JF-160).
         var turnModel = new SummaryModels.Choice(primary, modelId);
@@ -239,7 +294,7 @@ public final class CompactionGate {
                 summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
         if (result.compacted()) {
             logCompacted(agent.name, snapshot.channelType(), summary, result, (System.nanoTime() - startNs) / 1_000_000L);
-        } else if (SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo(), 0, 0)) {
+        } else if (reachesWindow(measure, snapshot.modelInfo())) {
             EventLogger.info("compaction", agent.name, snapshot.channelType(),
                     "Compaction skipped (%s); the context-window trim is left to fit the prompt"
                             .formatted(result.skipReason()));
@@ -248,7 +303,7 @@ public final class CompactionGate {
             // Under the token trigger or the row limit alone the window is far off, and this would repeat every turn.
             EventLogger.info("compaction", agent.name, snapshot.channelType(),
                     "Compaction skipped (%s) at an estimated %d tokens, past the token trigger; logged once until the next compaction"
-                            .formatted(result.skipReason(), estimatedTokens));
+                            .formatted(result.skipReason(), measure.estimatedTokens()));
         }
         return result;
     }

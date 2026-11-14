@@ -976,7 +976,7 @@ final class StreamingAgentRunner {
         trace.recordPersist((System.nanoTime() - persistStartNs) / 1_000_000L);
         // Ahead of the completion, so a turn sent on it finds the compaction this reply starts already running.
         if (committed) {
-            CompactionGate.afterReply(agent, conversation, primary, UsageMetricsBuilder.lastRequestTokens(turnUsage));
+            CompactionGate.afterReply(agent, conversation, primary, turnUsage);
         }
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
         return committed;

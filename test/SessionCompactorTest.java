@@ -310,13 +310,13 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void theMeterPointIsTheTriggerOnTheFixedPartInTheProvidersOwnCount() {
+    void theMeterPointIsTheTriggerOnTheFixedPartWhateverTheProviderCountedTheCallAt() {
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
 
-        // On 20,000 fixed the trigger is 20,000 + half of the 180,000 left = 110,000 by the local estimate, which
-        // counted 1,000 where the provider counted 800 (an estimate above the provider), or 1,100 (one below it).
-        assertEquals(88_000, compactAtOf(measuredTurn(800, 1_000, 20_000), mi));
-        assertEquals(121_000, compactAtOf(measuredTurn(1_100, 1_000, 20_000), mi));
+        // On 20,000 fixed the trigger is 20,000 + half of the 180,000 left = 110,000; the gate counts from the
+        // provider's own count (JF-420), so an estimate above it (800 against 1,000) or below it (1,100) moves nothing.
+        assertEquals(110_000, compactAtOf(measuredTurn(800, 1_000, 20_000), mi));
+        assertEquals(110_000, compactAtOf(measuredTurn(1_100, 1_000, 20_000), mi));
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -134,6 +135,7 @@ public final class UsageMetricsBuilder {
         usageMap.addProperty("lastCompletion", providerUsage ? turnUsage.lastCompletionTokens() : turnUsage.lastJtokkitCompletionTokens());
         usageMap.addProperty("lastReasoning", lastReasoningTokens(turnUsage));
         usageMap.addProperty("lastCached", providerUsage ? turnUsage.lastCachedTokens() : 0);
+        addLastPromptEstimate(usageMap, turnUsage.lastPromptEstimate());
         // JF-151: only the first call can read what the previous turn left in the provider's cache.
         usageMap.addProperty("firstPrompt", providerUsage ? turnUsage.firstPromptTokens() : turnUsage.firstJtokkitPromptTokens());
         usageMap.addProperty("firstCached", providerUsage ? turnUsage.firstCachedTokens() : 0);
@@ -264,23 +266,38 @@ public final class UsageMetricsBuilder {
         if (route != null) usageMap.add("route", route);
     }
 
+    /** The final call's request as the local tokenizer counted it, unadjusted: what {@link PromptAnchor} counts on from. */
+    private static void addLastPromptEstimate(JsonObject usageMap, TokenUsageEstimator.@Nullable ChatRequestTokens estimate) {
+        if (estimate == null) return;
+        var json = new JsonObject();
+        json.addProperty("prompt", estimate.promptTokens());
+        json.addProperty("fixed", estimate.fixedTokens());
+        json.addProperty("modelMatched", estimate.modelMatched());
+        usageMap.add(PromptAnchor.ESTIMATE_FIELD, json);
+    }
+
     /**
-     * The size, in the reply's own counts, at which the conversation is due a summary. {@link CompactionGate} compares
-     * its adjusted local estimate, the fixed part included, with {@link SessionCompactor#compactionPoint}, and that
-     * estimate runs above or below the provider's count by model (22% above for gpt-oss:120b), so the point is scaled
-     * by how the final call's count compared with the estimate of the same request. {@link Integer#MAX_VALUE} when no
-     * summary can fire.
+     * The size, in the reply's own counts, at which the conversation is due a summary: {@link CompactionGate} measures
+     * the next request from this reply's provider counts ({@link PromptAnchor}), so the point is
+     * {@link SessionCompactor#compactionPoint} on the fixed part as the gate counts it. A reply the provider did not count
+     * leaves the gate the adjusted estimate of the whole request, so the point is moved into the meter's raw estimate by
+     * the safety multiplier. {@link Integer#MAX_VALUE} when no summary can fire.
      */
     static int compactAt(LlmProvider.TurnUsage turnUsage, @Nullable ModelInfo modelInfo,
                          @Nullable String providerName, @Nullable String modelId) {
+        int point = SessionCompactor.compactionPoint(modelInfo, fixedTokens(turnUsage, providerName, modelId));
         var estimate = turnUsage.lastPromptEstimate();
-        if (estimate == null) return SessionCompactor.compactionPoint(modelInfo, 0);
-        int point = SessionCompactor.compactionPoint(modelInfo, ContextWindowManager.adjustedMessageTokens(
-                estimate.fixedTokens(), estimate.modelMatched(), providerName, modelId));
-        int gateCount = ContextWindowManager.adjustedPromptTokens(providerName, modelId, estimate);
-        int count = turnUsage.hasProviderUsage() ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens();
-        if (point == Integer.MAX_VALUE || gateCount <= 0 || count <= 0) return point;
-        return (int) Math.min(Integer.MAX_VALUE - 1L, Math.round((double) point * count / gateCount));
+        if (turnUsage.hasProviderUsage() || estimate == null || estimate.modelMatched() || point == Integer.MAX_VALUE) {
+            return point;
+        }
+        return (int) Math.round(point / ContextWindowManager.resolveSafetyMultiplier(providerName, modelId));
+    }
+
+    /** The final call's system prompt, tools and reply primer as the compaction trigger counts them; 0 when unmeasured. */
+    static int fixedTokens(LlmProvider.TurnUsage turnUsage, @Nullable String providerName, @Nullable String modelId) {
+        var estimate = turnUsage.lastPromptEstimate();
+        return estimate == null ? 0 : ContextWindowManager.adjustedMessageTokens(estimate.fixedTokens(),
+                estimate.modelMatched(), providerName, modelId);
     }
 
     /** The turn's last call, prompt and completion: about the size of the request the next turn starts from. */
