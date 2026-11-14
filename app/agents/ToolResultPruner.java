@@ -11,6 +11,7 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.compression.ContentHash;
+import utils.Strings;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -224,9 +225,14 @@ public final class ToolResultPruner {
      * of the window resolved for {@code agent} on {@code conversation}, read at most 100, or 0 when off.
      */
     static int userPreviewChars(Agent agent, @Nullable Conversation conversation) {
-        int percent = ConfigService.getInt(USER_PREVIEW_PERCENT_KEY, DEFAULT_USER_PREVIEW_PERCENT);
-        if (percent <= 0) return 0;
-        return previewThresholdChars(percent, conversation != null ? contextWindow(agent, conversation) : 0);
+        if (ConfigService.getInt(USER_PREVIEW_PERCENT_KEY, DEFAULT_USER_PREVIEW_PERCENT) <= 0) return 0;
+        return userPreviewChars(conversation != null ? contextWindow(agent, conversation) : 0);
+    }
+
+    /** {@link #USER_PREVIEW_PERCENT_KEY} as {@link #previewThresholdChars} reads it, for a known window. */
+    public static int userPreviewChars(int contextWindow) {
+        return previewThresholdChars(ConfigService.getInt(USER_PREVIEW_PERCENT_KEY, DEFAULT_USER_PREVIEW_PERCENT),
+                contextWindow);
     }
 
     private static int contextWindow(Agent agent, Conversation conversation) {
@@ -314,16 +320,12 @@ public final class ToolResultPruner {
      * {@code ccr_retrieve} handle, never between a surrogate pair; what follows the stored text stays. Null when the
      * stored text is at most {@code thresholdChars}, or too short for a preview to be shorter.
      */
-    static @Nullable String preview(String body, int stored, int thresholdChars) {
+    public static @Nullable String preview(String body, int stored, int thresholdChars) {
         if (stored <= Math.max(thresholdChars, USER_PREVIEW_HEAD_CHARS + USER_PREVIEW_TAIL_CHARS)) return null;
-        int headEnd = Character.isHighSurrogate(body.charAt(USER_PREVIEW_HEAD_CHARS - 1))
-                ? USER_PREVIEW_HEAD_CHARS - 1 : USER_PREVIEW_HEAD_CHARS;
-        int tailStart = stored - USER_PREVIEW_TAIL_CHARS;
-        if (Character.isLowSurrogate(body.charAt(tailStart))) tailStart++;
-        var message = stored == body.length() ? body : body.substring(0, stored);
-        return body.substring(0, headEnd) + String.format(Locale.ROOT,
-                "\n[message shortened: %,d characters, the middle left out; call ccr_retrieve(\"%s\") for the full text]\n",
-                stored, ContentHash.handle(message)) + body.substring(tailStart);
+        var handle = ContentHash.handle(stored == body.length() ? body : body.substring(0, stored));
+        return Strings.cutMiddle(body, USER_PREVIEW_HEAD_CHARS, stored - USER_PREVIEW_TAIL_CHARS, left ->
+                String.format(Locale.ROOT, "\n[message shortened: %,d characters, the middle left out; "
+                        + "call ccr_retrieve(\"%s\") for the full text]\n", stored, handle));
     }
 
     private static boolean isUser(ChatMessage m) {

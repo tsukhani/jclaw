@@ -1,5 +1,6 @@
 package services;
 
+import agents.ToolResultPruner;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -16,6 +17,7 @@ import models.SessionCompaction;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import utils.LlmErrorTemplates.Remedy;
+import utils.Strings;
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -857,10 +859,23 @@ public final class SessionCompactor {
      * Append the conversation's live summary segments to {@code basePrompt} as a labeled section, oldest first, each
      * under the dates it covers (JF-161). Returns {@code basePrompt} unchanged when there is none: never compacted, or
      * {@code /reset} since the last compaction. Call this inside the prep Tx where {@code Conversation} is already
-     * managed. {@link #appendSummaryToPrompt(String, Conversation, boolean, int)} with no search note and no quote.
+     * managed. {@link #appendSummaryToPrompt(String, Conversation, boolean, UserQuote)} with no search note and no
+     * quote.
      */
     public static String appendSummaryToPrompt(String basePrompt, Conversation conversation) {
-        return appendSummaryToPrompt(basePrompt, conversation, false, 0);
+        return appendSummaryToPrompt(basePrompt, conversation, false, UserQuote.NONE);
+    }
+
+    /**
+     * How much of the user's summarized words a prompt quotes.
+     *
+     * @param tokens       the budget, 0 for no quote. The quote sits in the system prompt, so a caller gives one only
+     *                     when the owner alone reads the conversation
+     * @param previewChars the longest message quoted whole; a longer one is quoted as the preview a turn sends of it
+     *                     ({@link agents.ToolResultPruner#preview}), 0 for none
+     */
+    public record UserQuote(int tokens, int previewChars) {
+        public static final UserQuote NONE = new UserQuote(0, 0);
     }
 
     /**
@@ -869,18 +884,17 @@ public final class SessionCompactor {
      * and the segments under {@link #PRIOR_SUMMARY_HEADER}, which end the prompt. All of it is read from behind the
      * floor, so the prompt a provider caches stays the same between compactions.
      *
-     * @param searchable       whether the turn offers {@code conversation_search}, which finds the summarized messages
-     * @param quotedUserTokens how many tokens of those messages to quote, 0 for none. The quote sits in the system
-     *                         prompt, so a caller passes more only when the owner alone reads the conversation
+     * @param searchable whether the turn offers {@code conversation_search}, which finds the summarized messages
+     * @param quote      how much of those messages to quote
      */
     public static String appendSummaryToPrompt(String basePrompt, Conversation conversation, boolean searchable,
-                                               int quotedUserTokens) {
+                                               UserQuote quote) {
         if (conversation == null) return basePrompt;
         var segments = renderSegments(SessionCompaction.findLive(conversation));
         if (segments.isEmpty()) return basePrompt;
         var prompt = new StringBuilder(basePrompt);
         if (searchable) prompt.append("\n\n").append(SEARCHABLE_NOTE);
-        var verbatim = verbatimUserMessages(conversation, quotedUserTokens);
+        var verbatim = verbatimUserMessages(conversation, quote);
         if (!verbatim.isEmpty()) prompt.append("\n\n").append(verbatim);
         return prompt.append("\n\n").append(PRIOR_SUMMARY_HEADER).append("\n\n").append(segments).toString();
     }
@@ -898,13 +912,13 @@ public final class SessionCompactor {
 
     /**
      * The user's newest messages among the summarized rows, those before the compaction floor and from a
-     * {@code /reset} on: newest first while they fit {@code budget} tokens at four characters a token, the first that
-     * passes what is left cut to it, head and tail; rendered oldest first under {@link #VERBATIM_USER_HEADER}, every
-     * line of the user's behind "> ", so none can pass for one of the prompt's own bracketed headers. Empty when
-     * {@code budget} is 0 or less or no such message exists.
+     * {@code /reset} on: newest first, each longer than the quote's preview size as its preview, while they fit its
+     * budget at four characters a token, the first that passes what is left cut to it, head and tail; rendered oldest
+     * first under {@link #VERBATIM_USER_HEADER}, every line of the user's behind "> ", so none can pass for one of
+     * the prompt's own bracketed headers. Empty when the budget is 0 or less or no such message exists.
      */
-    private static String verbatimUserMessages(Conversation conv, int budget) {
-        long room = Math.max(0, budget);
+    private static String verbatimUserMessages(Conversation conv, UserQuote quote) {
+        long room = Math.max(0, quote.tokens());
         if (room == 0 || conv.compactionSince == null) return "";
         var query = conv.contextSince == null
                 ? Message.find("conversation = ?1 AND role = ?2 AND createdAt < ?3 ORDER BY createdAt DESC, id DESC",
@@ -919,7 +933,9 @@ public final class SessionCompactor {
             for (int i = 0; i < page.size() && room > 0; i++) {
                 var m = (Message) page.get(i);
                 if (!usersOwnWords(m)) continue;
-                var text = m.content.strip();
+                var preview = quote.previewChars() > 0
+                        ? ToolResultPruner.preview(m.content, m.content.length(), quote.previewChars()) : null;
+                var text = (preview != null ? preview : m.content).strip();
                 long tokens = Math.max(1, text.length() / 4);
                 if (tokens > room) {
                     text = cutMiddle(text, (int) Math.min(Integer.MAX_VALUE, room * 4));
@@ -950,12 +966,8 @@ public final class SessionCompactor {
     /** {@code text} cut to {@code keep} characters, its first and last halves, with what was left out noted between. */
     private static String cutMiddle(String text, int keep) {
         if (text.length() <= keep) return text;
-        int head = keep / 2;
-        if (head > 0 && Character.isHighSurrogate(text.charAt(head - 1))) head--;
-        int tailStart = text.length() - (keep - keep / 2);
-        if (tailStart < text.length() && Character.isLowSurrogate(text.charAt(tailStart))) tailStart++;
-        return text.substring(0, head) + "\n[… " + (tailStart - head) + " of " + text.length()
-                + " characters left out …]\n" + text.substring(tailStart);
+        return Strings.cutMiddle(text, keep / 2, text.length() - (keep - keep / 2),
+                left -> "\n[… " + left + " of " + text.length() + " characters left out …]\n");
     }
 
     /** Each segment under its {@link #segmentLabel}, in the order given: the prompt's section and a merge's input. */
@@ -1143,15 +1155,37 @@ public final class SessionCompactor {
     /**
      * The turn's list is its system prompt, the {@link #LEADING_USER_NOTE} when the history after the
      * floor opens on an assistant row, then the loaded rows, so the slot after the summarized rows holds the first
-     * kept row.
+     * kept row. A summarized user message the turn sends as its preview (JF-417) does not align: a summary of the
+     * preview would never see the middle of the paste.
      */
     private static boolean alignsWith(CompactionPlan plan, List<ChatMessage> turn) {
-        int firstKept = plan.toSummarize().size() + 1 + leadingNotes(turn);
+        int offset = 1 + leadingNotes(turn);
+        int firstKept = plan.toSummarize().size() + offset;
         if (turn.size() <= firstKept) return false;
         var kept = turn.get(firstKept);
-        return Objects.equals(kept.role(), plan.firstKept().role())
-                && (!(kept.content() instanceof String text)
-                || text.equals(Objects.requireNonNullElse(plan.firstKept().content(), "")));
+        if (!Objects.equals(kept.role(), plan.firstKept().role())
+                || kept.content() instanceof String text
+                && !text.equals(Objects.requireNonNullElse(plan.firstKept().content(), ""))) {
+            return false;
+        }
+        for (int i = 0; i < plan.toSummarize().size(); i++) {
+            var row = plan.toSummarize().get(i);
+            if (MessageRole.USER.value.equals(row.role()) && !carriesWhole(turn.get(offset + i), row.content())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A String body is the stored text itself; with attachments, the first text part opens with it. */
+    private static boolean carriesWhole(ChatMessage sent, @Nullable String stored) {
+        var text = Objects.requireNonNullElse(stored, "");
+        if (sent.content() instanceof String body) return body.equals(text);
+        if (!(sent.content() instanceof List<?> parts)) return text.isEmpty();
+        for (var part : parts) {
+            if (isTextPart(part) && ((Map<?, ?>) part).get("text") instanceof String t) return t.startsWith(text);
+        }
+        return text.isEmpty();
     }
 
     private static int leadingNotes(List<ChatMessage> turn) {

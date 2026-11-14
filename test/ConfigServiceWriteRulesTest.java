@@ -255,6 +255,18 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theEarlierMessagePreviewShareMustBeAWholePercentFromZeroToAHundred() {
+        var expected = "chat.userMessagePreviewPercent must be a whole number from 0 to 100; 0 sends every earlier "
+                + "message whole.";
+        for (var value : List.of("-1", "101", "10.5", "ten", "")) {
+            assertRefused(expected, ToolResultPruner.USER_PREVIEW_PERCENT_KEY, value);
+        }
+        for (var value : List.of("0", "10", "100")) {
+            assertAccepted(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, value);
+        }
+    }
+
+    @Test
     void theSummarizeAtTheRowLimitSwitchMustBeTrueOrFalse() {
         var expected = "chat.compaction.onRowLimit must be 'true' or 'false'.";
         for (var value : List.of("yes", "1", "")) {

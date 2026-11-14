@@ -310,21 +310,24 @@ final class AgentPromptPreparer {
      */
     static String turnSystemPrompt(String assembled, Conversation conv) {
         return SessionCompactor.appendParentContextToPrompt(SessionCompactor.appendSummaryToPrompt(assembled, conv,
-                offersConversationSearch(conv), quotedUserTokens(conv)), conv);
+                offersConversationSearch(conv), userQuote(conv)), conv);
     }
 
     /**
      * How much of the user's summarized words the prompt quotes. The quote sits in the system prompt, so a guest's
      * words never reach it: none unless the owner alone reads the conversation. A small model keeps its room through
-     * {@link SessionCompactor#verbatimUserBudget}.
+     * {@link SessionCompactor#verbatimUserBudget}, and a paste is quoted as the preview every later turn sends of it.
      */
-    static int quotedUserTokens(Conversation conv) {
-        if (!DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId)) return 0;
+    static SessionCompactor.UserQuote userQuote(Conversation conv) {
+        if (!DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId)) {
+            return SessionCompactor.UserQuote.NONE;
+        }
         var providerName = ModelResolver.effectiveModelProvider(conv.agent, conv);
         var provider = providerName != null ? ProviderRegistry.get(providerName) : null;
         int window = provider == null ? 0 : ModelResolver.resolveModelInfo(conv.agent, conv, provider)
                 .map(ModelInfo::contextWindow).orElse(0);
-        return SessionCompactor.verbatimUserBudget(window);
+        return new SessionCompactor.UserQuote(SessionCompactor.verbatimUserBudget(window),
+                ToolResultPruner.userPreviewChars(window));
     }
 
     /**

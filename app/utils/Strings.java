@@ -3,6 +3,8 @@ package utils;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import java.util.function.IntFunction;
+
 /**
  * Small string helpers shared across services and channel code.
  *
@@ -69,6 +71,19 @@ public final class Strings {
     public static @NonNull String firstNonBlankOr(@NonNull String fallback, @Nullable String... values) {
         var found = firstNonBlank(values);
         return found != null ? found : fallback;
+    }
+
+    /**
+     * {@code text}'s first {@code head} characters and those from {@code tailStart} on, with {@code marker}, given the
+     * number of characters left out, between them. Neither cut splits a surrogate pair: the head gives up a high
+     * surrogate and the tail a low one. The caller keeps {@code 0 <= head <= tailStart <= text.length()}.
+     */
+    public static @NonNull String cutMiddle(@NonNull String text, int head, int tailStart,
+                                            @NonNull IntFunction<String> marker) {
+        int headEnd = head > 0 && Character.isHighSurrogate(text.charAt(head - 1)) ? head - 1 : head;
+        int tail = tailStart < text.length() && Character.isLowSurrogate(text.charAt(tailStart))
+                ? tailStart + 1 : tailStart;
+        return text.substring(0, headEnd) + marker.apply(tail - headEnd) + text.substring(tail);
     }
 
     /** Strip a single trailing '/', if present. Assumes non-null input. */

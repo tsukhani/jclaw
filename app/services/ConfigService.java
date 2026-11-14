@@ -436,6 +436,8 @@ public class ConfigService {
             (key, value) -> key.equals(SessionCompactor.CHECK_SUMMARY_KEY) && !isTrueOrFalse(value)
                     ? key + " must be true or false." : null,
             atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
+            (key, value) -> key.equals(ToolResultPruner.USER_PREVIEW_PERCENT_KEY) && !isIntBetween(value, 0, 100)
+                    ? key + " must be a whole number from 0 to 100; 0 sends every earlier message whole." : null,
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
             under(LlmResilience.BREAKER_KEY_PREFIX, LlmResilience::rejectionFor),
