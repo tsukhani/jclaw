@@ -284,4 +284,15 @@ describe('ChatMessage usage card', () => {
     expect(c.text()).toContain('25.0 tok/s avg')
     c.unmount()
   })
+
+  it('opens from the keyboard as it does on hover: focus asks for the card, leaving lets it go', async () => {
+    const c = await mountSuspended(ChatMessage, { props: props(msg({ id: 34, usage: twoCalls })) })
+    const trigger = c.findAll('span').find(s => s.text() === '193.5 tok/s')!
+
+    expect(trigger.attributes('tabindex')).toBe('0')
+    await trigger.trigger('focus')
+    await trigger.trigger('blur')
+    expect(c.emitted('set-tok-stats-hover-key')).toEqual([[34], [null]])
+    c.unmount()
+  })
 })

@@ -46,11 +46,11 @@ const statusClass = computed(() => ({
         aria-hidden="true"
       />
       <span
-        class="whitespace-nowrap"
+        class="min-w-0 whitespace-nowrap max-sm:whitespace-normal"
         data-testid="summary-marker-headline"
       >{{ summaryHeadline(marker) }}</span>
       <span
-        class="rounded px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+        class="rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
         :class="statusClass"
         data-testid="summary-marker-status"
       >{{ summaryStatusLabel(marker) }}</span>

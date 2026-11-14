@@ -145,7 +145,7 @@ function onFaviconError(ev: Event) {
   <div class="mb-3 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden bg-surface-elevated">
     <button
       type="button"
-      class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none"
+      class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       :title="collapsed ? 'Expand tool calls' : 'Collapse tool calls'"
       @click="emit('toggle-collapse')"
     >
@@ -173,7 +173,7 @@ function onFaviconError(ev: Event) {
       >
         <button
           type="button"
-          class="w-full flex items-center gap-2 px-3 py-3 text-left text-sm text-fg-muted hover:text-fg-strong focus:outline-none disabled:cursor-default disabled:hover:text-fg-muted"
+          class="w-full flex items-center gap-2 px-3 py-3 text-left text-sm text-fg-muted hover:text-fg-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:hover:text-fg-muted"
           :disabled="!toolCallHasExpandableBody(tc)"
           :title="toolCallHasExpandableBody(tc) ? (tc._expanded ? 'Collapse this call' : 'Expand this call') : ''"
           @click="emit('toggle-call', tc)"

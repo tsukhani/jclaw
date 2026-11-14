@@ -24,10 +24,11 @@
  * an `h2 "Tips"` in subagents.md generates `#subagents-tips`, distinct
  * from an `h2 "Tips"` in any other section.
  */
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked, Renderer, type Token, type Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import { useRouter } from '#imports'
+import { markScrollRegion } from '~/utils/scroll-region'
 
 interface Props {
   /** Stable section id used as the prefix for every heading anchor in this body. */
@@ -243,6 +244,20 @@ const renderedHtml = computed(() => {
  * router rather than a full page reload. External links and in-page
  * fragment links fall through untouched.
  */
+const article = ref<HTMLElement | null>(null)
+
+/** A table wider than the column scrolls inside its wrapper (WCAG 1.4.10). */
+function markScrollingTables() {
+  for (const wrap of article.value?.querySelectorAll<HTMLElement>('.guide-table') ?? []) markScrollRegion(wrap, 'Wide table, scrolls sideways')
+}
+
+onMounted(() => {
+  markScrollingTables()
+  globalThis.addEventListener('resize', markScrollingTables)
+})
+onBeforeUnmount(() => globalThis.removeEventListener('resize', markScrollingTables))
+watch(renderedHtml, () => nextTick(markScrollingTables))
+
 function onClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
   if (!target) return
@@ -273,6 +288,7 @@ function onClick(event: MouseEvent) {
        is DOMPurify-sanitized in the script above. -->
   <!-- eslint-disable vue/no-v-html, vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
   <article
+    ref="article"
     class="text-fg-primary guide-section"
     @click="onClick"
     v-html="renderedHtml"
@@ -414,6 +430,12 @@ html.dark .guide-section blockquote {
 
   container-type: inline-size;
   margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.guide-section .guide-table:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* Two prose columns need more room and cannot spare a share: 45cqi of a 430px table pushed them out. */

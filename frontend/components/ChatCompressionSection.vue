@@ -537,14 +537,14 @@ function fmt(n: number) {
               :key="t.tool"
               class="flex items-center gap-3"
             >
-              <span class="text-xs font-medium text-fg-strong w-32 shrink-0 truncate">{{ t.tool }}</span>
+              <span class="text-xs font-medium text-fg-strong w-20 sm:w-32 shrink-0 truncate">{{ t.tool }}</span>
               <div class="flex-1 h-2 bg-surface rounded-full overflow-hidden">
                 <div
                   class="h-full bg-violet-500 rounded-full transition-[width] duration-500"
                   :style="{ width: (t.rate * 100) + '%' }"
                 />
               </div>
-              <span class="text-xs text-fg-muted tabular-nums w-32 text-right shrink-0">{{ t.fetched }} of {{ t.compressed }} · {{ pct(t.rate) }}%</span>
+              <span class="text-xs text-fg-muted tabular-nums w-auto sm:w-32 text-right shrink-0">{{ t.fetched }} of {{ t.compressed }} · {{ pct(t.rate) }}%</span>
             </div>
           </div>
           <div

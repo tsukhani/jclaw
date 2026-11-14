@@ -5,6 +5,7 @@
  */
 import { computed, onBeforeUnmount, reactive, ref, useId, watch } from 'vue'
 import VisualAxes from '~/components/chat/VisualAxes.vue'
+import { useScrollRegion } from '~/composables/useScrollRegion'
 import { interpolateFrames, snapParam } from '~/utils/visual/explore'
 import { linePath, linearScale } from '~/utils/visual/layout'
 import { prefersReducedMotion } from '~/utils/visual/motion'
@@ -13,6 +14,9 @@ import { MARKERS, axisHeader, formatNumber, markerPath, seriesColor } from '~/ut
 
 const props = defineProps<{ spec: ExploreSpec, initial: VisualState }>()
 const emit = defineEmits<{ change: [state: VisualState] }>()
+
+const scroller = ref<HTMLElement | null>(null)
+useScrollRegion(scroller, 'Wide figure, scrolls sideways')
 
 const W = 560
 const H = 300
@@ -74,33 +78,39 @@ function onInput(id: string, event: Event) {
 
 <template>
   <div class="visual-explore">
-    <svg
-      :viewBox="`0 0 ${W} ${H}`"
-      role="img"
-      :aria-label="spec.title"
+    <div
+      ref="scroller"
+      class="visual-scroll"
     >
-      <VisualAxes
-        :x="x"
-        :y="y"
-        :x-ticks="xTicks"
-        :box="box"
-        :x-title="axisHeader(spec.x, '')"
-        :y-title="axisHeader(spec.y, '')"
-      />
-      <path
-        class="visual-line"
-        :d="path"
-        :stroke="seriesColor(0)"
-        fill="none"
-      />
-      <path
-        v-if="markers"
-        class="visual-marker"
-        :d="markers"
-        :stroke="seriesColor(0)"
-        :fill="seriesColor(0)"
-      />
-    </svg>
+      <svg
+        :viewBox="`0 0 ${W} ${H}`"
+        :style="{ minWidth: `${W}px` }"
+        role="img"
+        :aria-label="spec.title"
+      >
+        <VisualAxes
+          :x="x"
+          :y="y"
+          :x-ticks="xTicks"
+          :box="box"
+          :x-title="axisHeader(spec.x, '')"
+          :y-title="axisHeader(spec.y, '')"
+        />
+        <path
+          class="visual-line"
+          :d="path"
+          :stroke="seriesColor(0)"
+          fill="none"
+        />
+        <path
+          v-if="markers"
+          class="visual-marker"
+          :d="markers"
+          :stroke="seriesColor(0)"
+          :fill="seriesColor(0)"
+        />
+      </svg>
+    </div>
     <div class="visual-params">
       <div
         v-for="p in spec.params"

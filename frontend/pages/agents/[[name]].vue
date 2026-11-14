@@ -3128,7 +3128,7 @@ const agentKinds = [
         class="bg-surface-elevated border border-border"
       >
         <div class="flex items-center justify-between border-b border-border">
-          <div class="flex min-w-0 overflow-x-auto">
+          <div class="relative flex min-w-0 overflow-x-auto">
             <button
               v-for="file in workspaceFiles"
               :key="file"
@@ -3138,7 +3138,7 @@ const agentKinds = [
             >
               {{ file }}<span
                 v-if="scanFindings(file).length"
-                class="ml-1.5 px-1 rounded-sm bg-danger/15 text-danger"
+                class="ml-1.5 px-1 rounded-sm bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
               >{{ scanFindings(file).length }}<span class="sr-only">{{ scanFindings(file).length === 1 ? ' prompt-injection match' : ' prompt-injection matches' }}</span></span><span
                 v-if="isPending(file)"
                 class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-warning align-middle"
@@ -3149,7 +3149,7 @@ const agentKinds = [
           <!-- MacDown-style pane toggles: editor, preview, or both (split). At
                least one stays on, so a pressed-looking button can't be un-toggled
                into an empty panel. -->
-          <div class="flex items-center gap-1 pr-2 shrink-0">
+          <div class="relative flex items-center gap-1 pr-2 shrink-0">
             <button
               type="button"
               class="flex items-center gap-1 px-2 py-1 rounded text-xs text-fg-muted hover:text-fg-strong

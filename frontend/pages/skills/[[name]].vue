@@ -1333,9 +1333,9 @@ function totalSkillCount(agentId: number) {
                     <span v-if="skill.commands?.length">{{ skill.commands.length }} cmd{{ skill.commands.length !== 1 ? 's' : '' }}</span>
                   </div>
                 </div>
-                <div class="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                   <button
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    class="p-[5px] text-fg-muted hover:text-fg-strong transition-colors"
                     title="View skill"
                     @click.stop="openSkill(skill)"
                   >
@@ -1345,7 +1345,7 @@ function totalSkillCount(agentId: number) {
                     />
                   </button>
                   <button
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    class="p-[5px] text-fg-muted hover:text-fg-strong transition-colors"
                     title="Export for Claude"
                     :aria-label="`Export skill ${skill.name} for Claude`"
                     @click.stop="exportSkill(skill)"
@@ -1357,7 +1357,7 @@ function totalSkillCount(agentId: number) {
                   </button>
                   <button
                     v-if="!isStructuralSkill(skill)"
-                    class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
+                    class="p-[5px] text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     title="Delete skill"
                     @click.stop="deleteSkill(skill)"
                   >
@@ -1547,7 +1547,7 @@ function totalSkillCount(agentId: number) {
                     <div class="flex items-center gap-1 shrink-0">
                       <span class="text-xs text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
                       <button
-                        class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover/skill:opacity-100"
+                        class="p-[5px] text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover/skill:opacity-100 focus-visible:opacity-100"
                         title="View skill"
                         @click.stop="editAgentSkill(agent.id, skill)"
                       >
@@ -1557,7 +1557,7 @@ function totalSkillCount(agentId: number) {
                         />
                       </button>
                       <button
-                        class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors opacity-0 group-hover/skill:opacity-100"
+                        class="p-[5px] text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors opacity-0 group-hover/skill:opacity-100 focus-visible:opacity-100"
                         title="Delete skill"
                         @click.stop="deleteAgentSkill(agent.id, skill)"
                       >
@@ -1766,41 +1766,48 @@ function totalSkillCount(agentId: number) {
             what each file adds to a conversation once the agent reads it
           </span>
         </div>
-        <table class="text-xs">
-          <thead>
-            <tr class="text-fg-muted">
-              <th class="text-left font-medium pr-6 pb-1">
-                File
-              </th>
-              <th class="text-right font-medium pr-6 pb-1">
-                Characters
-              </th>
-              <th class="text-right font-medium pb-1">
-                Est. tokens
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="f in contextFiles"
-              :key="f.path"
-            >
-              <td class="font-mono text-fg-strong pr-6 py-0.5">
-                {{ f.path }}
-                <span
-                  v-if="f.path === 'SKILL.md' && f.chars! > SKILL_MD_LIMIT_CHARS"
-                  class="ml-2 font-sans text-amber-700 dark:text-amber-400"
-                >over the {{ SKILL_MD_LIMIT_CHARS.toLocaleString('en-US') }}-character limit</span>
-              </td>
-              <td class="text-right tabular-nums pr-6 py-0.5">
-                {{ f.chars!.toLocaleString('en-US') }}
-              </td>
-              <td class="text-right tabular-nums py-0.5">
-                ~{{ (f.estimatedTokens ?? 0).toLocaleString('en-US') }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div
+          class="overflow-x-auto"
+          tabindex="0"
+          role="region"
+          aria-label="Context size by file"
+        >
+          <table class="text-xs">
+            <thead>
+              <tr class="text-fg-muted">
+                <th class="text-left font-medium pr-6 pb-1">
+                  File
+                </th>
+                <th class="text-right font-medium pr-6 pb-1">
+                  Characters
+                </th>
+                <th class="text-right font-medium pb-1">
+                  Est. tokens
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="f in contextFiles"
+                :key="f.path"
+              >
+                <td class="font-mono text-fg-strong pr-6 py-0.5">
+                  {{ f.path }}
+                  <span
+                    v-if="f.path === 'SKILL.md' && f.chars! > SKILL_MD_LIMIT_CHARS"
+                    class="ml-2 font-sans text-amber-700 dark:text-amber-400"
+                  >over the {{ SKILL_MD_LIMIT_CHARS.toLocaleString('en-US') }}-character limit</span>
+                </td>
+                <td class="text-right tabular-nums pr-6 py-0.5">
+                  {{ f.chars!.toLocaleString('en-US') }}
+                </td>
+                <td class="text-right tabular-nums py-0.5">
+                  ~{{ (f.estimatedTokens ?? 0).toLocaleString('en-US') }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div

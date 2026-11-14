@@ -662,7 +662,7 @@ watch(() => [props.agentId, props.skillName], () => {
       </label>
       <fieldset
         v-if="formRenew"
-        class="space-y-2 border-l-2 border-border pl-3"
+        class="min-w-0 space-y-2 border-l-2 border-border pl-3"
         data-testid="secret-form-rule"
       >
         <legend class="sr-only">

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /** A ```visual diagram (JF-195): nodes and edges in a flow, tree or cycle layout, with an optional step strip. */
 import { computed, onBeforeUnmount, ref, useId } from 'vue'
+import { useScrollRegion } from '~/composables/useScrollRegion'
 import { layoutDiagram } from '~/utils/visual/layout'
 import { prefersReducedMotion } from '~/utils/visual/motion'
 import type { DiagramSpec, VisualState } from '~/utils/visual/spec'
 
 const props = defineProps<{ spec: DiagramSpec, initial: VisualState }>()
 const emit = defineEmits<{ change: [state: VisualState] }>()
+
+const scroller = ref<HTMLElement | null>(null)
+useScrollRegion(scroller, 'Wide figure, scrolls sideways')
 
 const STEP_MS = 2500
 const uid = useId()
@@ -69,78 +73,83 @@ onBeforeUnmount(stopPlaying)
 
 <template>
   <div class="visual-diagram">
-    <svg
-      :viewBox="`0 0 ${layout.width} ${layout.height}`"
-      :style="{ maxWidth: `${layout.width}px` }"
-      role="img"
-      :aria-label="spec.title"
+    <div
+      ref="scroller"
+      class="visual-scroll"
     >
-      <defs>
-        <marker
-          :id="arrowId"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto-start-reverse"
+      <svg
+        :viewBox="`0 0 ${layout.width} ${layout.height}`"
+        :style="{ minWidth: `${layout.width}px`, maxWidth: `${layout.width}px` }"
+        role="img"
+        :aria-label="spec.title"
+      >
+        <defs>
+          <marker
+            :id="arrowId"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path
+              d="M0,0 L10,5 L0,10 Z"
+              class="visual-arrow"
+            />
+          </marker>
+        </defs>
+        <g
+          v-for="(e, i) in layout.edges"
+          :key="`e${i}`"
+          class="visual-edge"
+          :class="{ 'visual-back': e.back, 'visual-dim': current && !(focus.has(e.from) && focus.has(e.to)) }"
         >
           <path
-            d="M0,0 L10,5 L0,10 Z"
-            class="visual-arrow"
+            :d="e.path"
+            fill="none"
+            :marker-end="`url(#${arrowId})`"
           />
-        </marker>
-      </defs>
-      <g
-        v-for="(e, i) in layout.edges"
-        :key="`e${i}`"
-        class="visual-edge"
-        :class="{ 'visual-back': e.back, 'visual-dim': current && !(focus.has(e.from) && focus.has(e.to)) }"
-      >
-        <path
-          :d="e.path"
-          fill="none"
-          :marker-end="`url(#${arrowId})`"
-        />
-        <text
-          v-if="e.label"
-          class="visual-edge-label"
-          :x="e.labelX"
-          :y="e.labelY"
-          text-anchor="middle"
-        >{{ e.label }}</text>
-      </g>
-      <g
-        v-for="n in layout.nodes"
-        :key="n.id"
-        class="visual-node"
-        :class="nodeClass(n.id)"
-        :data-node="n.id"
-      >
-        <!-- The browser shows the title on hover, so a node's detail is a hover away without a script handler. -->
-        <title>{{ n.lines.join(' ') }}{{ n.detail ? `: ${n.detail}` : '' }}</title>
-        <rect
-          :x="n.x"
-          :y="n.y"
-          :width="n.w"
-          :height="n.h"
-          rx="6"
-        />
-        <text
-          :x="n.x + n.w / 2"
-          :y="n.y + n.h / 2 - ((n.lines.length - 1) * 15) / 2"
-          text-anchor="middle"
-          dominant-baseline="middle"
+          <text
+            v-if="e.label"
+            class="visual-edge-label"
+            :x="e.labelX"
+            :y="e.labelY"
+            text-anchor="middle"
+          >{{ e.label }}</text>
+        </g>
+        <g
+          v-for="n in layout.nodes"
+          :key="n.id"
+          class="visual-node"
+          :class="nodeClass(n.id)"
+          :data-node="n.id"
         >
-          <tspan
-            v-for="(line, j) in n.lines"
-            :key="j"
+          <!-- The browser shows the title on hover, so a node's detail is a hover away without a script handler. -->
+          <title>{{ n.lines.join(' ') }}{{ n.detail ? `: ${n.detail}` : '' }}</title>
+          <rect
+            :x="n.x"
+            :y="n.y"
+            :width="n.w"
+            :height="n.h"
+            rx="6"
+          />
+          <text
             :x="n.x + n.w / 2"
-            :dy="j ? 15 : 0"
-          >{{ line }}</tspan>
-        </text>
-      </g>
-    </svg>
+            :y="n.y + n.h / 2 - ((n.lines.length - 1) * 15) / 2"
+            text-anchor="middle"
+            dominant-baseline="middle"
+          >
+            <tspan
+              v-for="(line, j) in n.lines"
+              :key="j"
+              :x="n.x + n.w / 2"
+              :dy="j ? 15 : 0"
+            >{{ line }}</tspan>
+          </text>
+        </g>
+      </svg>
+    </div>
     <div
       v-if="steps.length"
       class="visual-steps"

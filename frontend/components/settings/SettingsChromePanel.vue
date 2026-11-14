@@ -272,7 +272,7 @@ async function unpair() {
           :model-value="findValue"
           :options="findOptions"
           placeholder="Word match (no model call)"
-          label="Model that finds elements by meaning"
+          label="find model: the model that finds elements by meaning"
           :disabled="saving"
           search-label="Type to filter models"
           empty-text="No matching models."

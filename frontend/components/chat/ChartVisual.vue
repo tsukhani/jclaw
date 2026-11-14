@@ -1,13 +1,17 @@
 <script setup lang="ts">
 /** A ```visual chart (JF-195): line, bar or scatter, drawn as SVG from the validated spec. */
-import { computed, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
 import VisualAxes from '~/components/chat/VisualAxes.vue'
+import { useScrollRegion } from '~/composables/useScrollRegion'
 import { linePath, linearScale } from '~/utils/visual/layout'
 import { prefersReducedMotion } from '~/utils/visual/motion'
 import type { ChartSpec } from '~/utils/visual/spec'
 import { DASHES, MARKERS, axisHeader, isHollow, markerPath, seriesColor } from '~/utils/visual/style'
 
 const props = defineProps<{ spec: ChartSpec }>()
+
+const scroller = ref<HTMLElement | null>(null)
+useScrollRegion(scroller, 'Wide figure, scrolls sideways')
 
 const W = 560
 const H = 300
@@ -80,97 +84,103 @@ const marks = computed(() => (props.spec.marks ?? []).map(m => ({ x: x.value(m.x
 
 <template>
   <div class="visual-chart">
-    <svg
-      :viewBox="`0 0 ${W} ${H}`"
-      role="img"
-      :aria-label="spec.title"
-      :class="{ 'visual-draw-in': drawIn }"
+    <div
+      ref="scroller"
+      class="visual-scroll"
     >
-      <defs>
-        <clipPath :id="clipId">
-          <rect
-            class="visual-clip-rect"
-            :x="box.left - 8"
-            :y="0"
-            :width="box.right - box.left + 16"
-            :height="H"
-          />
-        </clipPath>
-      </defs>
-      <VisualAxes
-        :x="x"
-        :y="y"
-        :x-ticks="xTicks"
-        :box="box"
-        :x-title="axisHeader(spec.x, '')"
-        :y-title="axisHeader(spec.y, '')"
-      />
-      <g v-if="isBar">
-        <rect
-          v-for="b in bars"
-          :key="b.key"
-          class="visual-bar"
-          :x="b.x"
-          :y="b.y"
-          :width="b.w"
-          :height="b.h"
-          :fill="series[b.series]!.color"
-          :stroke="series[b.series]!.color"
-          fill-opacity="0.8"
-        />
-        <!-- The series marker caps each bar, so bars are told apart without their color. -->
-        <path
-          v-for="b in bars"
-          :key="`m${b.key}`"
-          class="visual-marker"
-          :d="markerPath(series[b.series]!.shape, b.x + b.w / 2, b.y - 6)"
-          :stroke="series[b.series]!.color"
-          :fill="series[b.series]!.hollow ? 'none' : series[b.series]!.color"
-        />
-      </g>
-      <g
-        v-else
-        :clip-path="`url(#${clipId})`"
+      <svg
+        :viewBox="`0 0 ${W} ${H}`"
+        :style="{ minWidth: `${W}px` }"
+        role="img"
+        :aria-label="spec.title"
+        :class="{ 'visual-draw-in': drawIn }"
       >
-        <g
-          v-for="(s, i) in series"
-          :key="i"
-          class="visual-series"
-        >
-          <path
-            v-if="spec.chartType === 'line'"
-            class="visual-line"
-            :d="s.path"
-            :stroke="s.color"
-            :stroke-dasharray="s.dash"
-            fill="none"
+        <defs>
+          <clipPath :id="clipId">
+            <rect
+              class="visual-clip-rect"
+              :x="box.left - 8"
+              :y="0"
+              :width="box.right - box.left + 16"
+              :height="H"
+            />
+          </clipPath>
+        </defs>
+        <VisualAxes
+          :x="x"
+          :y="y"
+          :x-ticks="xTicks"
+          :box="box"
+          :x-title="axisHeader(spec.x, '')"
+          :y-title="axisHeader(spec.y, '')"
+        />
+        <g v-if="isBar">
+          <rect
+            v-for="b in bars"
+            :key="b.key"
+            class="visual-bar"
+            :x="b.x"
+            :y="b.y"
+            :width="b.w"
+            :height="b.h"
+            :fill="series[b.series]!.color"
+            :stroke="series[b.series]!.color"
+            fill-opacity="0.8"
           />
+          <!-- The series marker caps each bar, so bars are told apart without their color. -->
           <path
-            v-if="s.markers"
+            v-for="b in bars"
+            :key="`m${b.key}`"
             class="visual-marker"
-            :d="s.markers"
-            :stroke="s.color"
-            :fill="s.hollow ? 'none' : s.color"
+            :d="markerPath(series[b.series]!.shape, b.x + b.w / 2, b.y - 6)"
+            :stroke="series[b.series]!.color"
+            :fill="series[b.series]!.hollow ? 'none' : series[b.series]!.color"
           />
         </g>
-      </g>
-      <g
-        v-for="(m, i) in marks"
-        :key="`mark${i}`"
-        class="visual-mark"
-      >
-        <line
-          :x1="m.x"
-          :x2="m.x"
-          :y1="box.top"
-          :y2="box.bottom"
-        />
-        <text
-          :x="m.x + 4"
-          :y="box.top + 10"
-        >{{ m.label }}</text>
-      </g>
-    </svg>
+        <g
+          v-else
+          :clip-path="`url(#${clipId})`"
+        >
+          <g
+            v-for="(s, i) in series"
+            :key="i"
+            class="visual-series"
+          >
+            <path
+              v-if="spec.chartType === 'line'"
+              class="visual-line"
+              :d="s.path"
+              :stroke="s.color"
+              :stroke-dasharray="s.dash"
+              fill="none"
+            />
+            <path
+              v-if="s.markers"
+              class="visual-marker"
+              :d="s.markers"
+              :stroke="s.color"
+              :fill="s.hollow ? 'none' : s.color"
+            />
+          </g>
+        </g>
+        <g
+          v-for="(m, i) in marks"
+          :key="`mark${i}`"
+          class="visual-mark"
+        >
+          <line
+            :x1="m.x"
+            :x2="m.x"
+            :y1="box.top"
+            :y2="box.bottom"
+          />
+          <text
+            :x="m.x + 4"
+            :y="box.top + 10"
+          >{{ m.label }}</text>
+        </g>
+      </svg>
+    </div>
     <ul class="visual-legend">
       <li
         v-for="(s, i) in series"

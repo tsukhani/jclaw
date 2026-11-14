@@ -259,7 +259,7 @@ async function setCaptionModel(value: string) {
             :model-value="captionModelSelectValue"
             :options="captionModelPickerOptions"
             placeholder="(select a model)"
-            :label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
+            :label="captionProvider === 'ollama-local' ? 'Vision model (Ollama)' : 'Vision model (cloud)'"
             search-label="Type to filter models"
             empty-text="No matching models."
             class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"

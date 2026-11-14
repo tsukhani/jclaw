@@ -508,7 +508,7 @@ async function deleteApp(app: AppEntry) {
           v-model="search"
           type="search"
           placeholder="Search apps"
-          class="w-full bg-transparent text-sm text-fg-strong placeholder:text-fg-muted focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+          class="w-full h-6 bg-transparent text-sm text-fg-strong placeholder:text-fg-muted focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
           @keydown.escape="search = ''"
         >
       </label>

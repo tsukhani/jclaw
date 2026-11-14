@@ -127,7 +127,7 @@ const passwordId = useId()
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               class="w-full h-9 pl-4 pr-10 rounded-[26px] text-sm text-fg-strong
-                     bg-[#dfe7e3]/30 border border-[#dfe7e3]
+                     bg-[#dfe7e3]/30 border border-input
                      dark:bg-fg-muted/10 dark:border-border
                      focus:outline-hidden focus:ring-2 focus:ring-emerald-600
                      transition-colors"

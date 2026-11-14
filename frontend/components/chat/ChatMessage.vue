@@ -667,24 +667,18 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             @update:open="(v) => { if (!v) emit('set-tok-stats-hover-key', null) }"
           >
             <PopoverTrigger as-child>
-              <!-- JCLAW-175: tok/s is informational only — supplementary
-                   observability, not actionable. Rendered as a
-                   non-interactive span (no button semantics, no focus
-                   ring, no aria-label). The detailed breakdown opens
-                   on hover via the controlled :open binding; the
-                   summary number itself is always visible inline so
-                   the data is not hover-locked.
-
-                   Mouse-only handlers below intentionally lack focus
-                   siblings: the speed breakdown is supplementary
-                   metric data, not essential UI, and adding focus
-                   would re-introduce the visual "this is clickable"
-                   affordance the user explicitly removed. -->
+              <!-- JCLAW-175: tok/s is informational, so it keeps no clickable look: no
+                   button styling, and nothing a mouse user sees changes. The breakdown opens
+                   on hover through the controlled :open binding, and on keyboard focus too
+                   (WCAG 2.1.1), with a ring drawn only for keyboard focus. -->
               <!-- eslint-disable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
               <span
-                class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none"
+                tabindex="0"
+                class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
                 @mouseleave="emit('set-tok-stats-hover-key', null)"
+                @focus="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
+                @blur="emit('set-tok-stats-hover-key', null)"
               >
                 {{ formatTokensPerSec(msg.usage) }}
               </span>
@@ -777,7 +771,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                 <p
                   v-for="note in usageReadNotes(msg.usage)"
                   :key="note"
-                  class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground"
+                  class="w-0 min-w-full text-xs leading-relaxed text-muted-foreground"
                 >
                   {{ note }}
                 </p>
@@ -796,7 +790,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                       </dd>
                     </div>
                   </dl>
-                  <p class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground">
+                  <p class="w-0 min-w-full text-xs leading-relaxed text-muted-foreground">
                     The meter at the top shows this for the latest reply.
                   </p>
                 </template>
@@ -842,7 +836,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                 </dl>
                 <p
                   v-if="writingSpeed(msg.usage) == null && averageSpeed(msg.usage) != null"
-                  class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground"
+                  class="w-0 min-w-full text-xs leading-relaxed text-muted-foreground"
                 >
                   Output over the whole reply's time, the wait for the first word included.
                 </p>

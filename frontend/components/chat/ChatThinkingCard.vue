@@ -29,7 +29,7 @@ const emit = defineEmits<{
     <div class="flex items-center gap-2 px-3 py-2">
       <button
         type="button"
-        class="flex-1 flex items-center gap-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none"
+        class="flex-1 flex items-center gap-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         :title="collapsed ? 'Expand reasoning' : 'Collapse reasoning'"
         @click="emit('toggle')"
       >

@@ -693,7 +693,7 @@ const navGroups: NavGroup[] = [
       <!-- Top bar -->
       <header class="h-14 max-sm:h-auto max-sm:py-2 flex max-sm:flex-wrap items-center justify-between max-sm:gap-y-2 px-4 bg-surface-elevated border-b border-fg-muted/40 shrink-0">
         <!-- Left: hamburger + breadcrumb -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
           <button
             v-if="!sidebarOpen"
             class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
@@ -706,7 +706,7 @@ const navGroups: NavGroup[] = [
             />
           </button>
           <nav
-            class="text-sm max-sm:[overflow-wrap:anywhere]"
+            class="text-sm min-w-0 sm:truncate max-sm:[overflow-wrap:anywhere]"
             aria-label="Breadcrumb"
           >
             <NuxtLink
@@ -735,7 +735,7 @@ const navGroups: NavGroup[] = [
         </div>
 
         <!-- Right: search + theme toggle + GitHub stars -->
-        <div class="flex items-center gap-3 min-w-0 max-sm:w-full">
+        <div class="flex items-center gap-3 min-w-0 sm:shrink-0 max-sm:w-full">
           <button
             class="w-64 max-sm:w-auto max-sm:flex-1 min-w-0 flex items-center justify-between pl-3 pr-2.5 py-1.5
                    bg-transparent border border-fg-muted/40 rounded-lg text-sm

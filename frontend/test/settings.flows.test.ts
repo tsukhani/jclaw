@@ -1750,7 +1750,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     // picker populated from the fixed serOptions.
     expect(picker(component, 'Diarization audio model').exists()).toBe(false)
     expect(component.find('#diarization-emotion-model').exists()).toBe(true)
-    await pickValue(component, 'On-device emotion (SER) model', 'superb/wav2vec2-base-superb-er')
+    await pickValue(component, 'Emotion model (on-device SER)', 'superb/wav2vec2-base-superb-er')
     await flushPromises()
     expect(captured.find(b => b.key === 'transcription.diarization.emotionModel')?.value)
       .toBe('superb/wav2vec2-base-superb-er')
@@ -2042,7 +2042,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    const optionValues = pickerOptionValues(await openPicker(component, 'Caption cloud model'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Vision model (cloud)'))
     expect(optionValues).toContain('gpt-4o') // vision model offered
     expect(optionValues).not.toContain('gpt-3.5-turbo') // non-vision filtered out
     expect(optionValues).toContain('') // "(provider default)" escape hatch
@@ -2069,10 +2069,10 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    const optionValues = pickerOptionValues(await openPicker(component, 'Caption cloud model'))
+    const optionValues = pickerOptionValues(await openPicker(component, 'Vision model (cloud)'))
     expect(optionValues).toContain('gpt-4o') // vision model shown
     expect(optionValues).not.toContain('gpt-3.5-turbo') // saved non-vision model is NOT shown
-    expect(pickerValue(component, 'Caption cloud model')).toBe('') // escape hatch, not a phantom selection
+    expect(pickerValue(component, 'Vision model (cloud)')).toBe('') // escape hatch, not a phantom selection
     expect(component.text()).toContain('not marked vision-capable') // orphan warning surfaced
   })
 
@@ -2097,13 +2097,13 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const component = await mountSettingsSection('image-caption')
 
-    expect(picker(component, 'Ollama vision model').exists()).toBe(true) // a picker, not free text
-    expect(component.find('input[aria-label="Ollama vision model"]').exists()).toBe(false)
-    const optionValues = pickerOptionValues(await openPicker(component, 'Ollama vision model'))
+    expect(picker(component, 'Vision model (Ollama)').exists()).toBe(true) // a picker, not free text
+    expect(component.find('input[aria-label="Vision model (Ollama)"]').exists()).toBe(false)
+    const optionValues = pickerOptionValues(await openPicker(component, 'Vision model (Ollama)'))
     expect(optionValues).toContain('moondream:latest') // vision model listed
     expect(optionValues).not.toContain('deepseek-r1:8b') // non-vision filtered out
     expect(optionValues).toContain('') // "(default: llava)" escape hatch
-    await pickValue(component, 'Ollama vision model', 'moondream:latest')
+    await pickValue(component, 'Vision model (Ollama)', 'moondream:latest')
     await flushPromises()
     expect(captured.find(b => b.key === 'caption.model')?.value).toBe('moondream:latest')
   })

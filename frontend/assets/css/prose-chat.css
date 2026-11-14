@@ -153,15 +153,20 @@ figure.visual-view > [hidden] { display: none; }
 figure.visual-view figcaption, .visual-note, .visual-error { font-size: 0.875em; color: var(--fg-muted); margin-top: 0.35em; }
 .visual-title { font-weight: 600; margin: 0 0 0.35em; }
 .visual-figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+/* A figure is never drawn below its designed size, so in a narrow reply the drawing scrolls instead of shrinking its labels. */
+.visual-scroll { overflow-x: auto; }
+.visual-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .visual-figure text { fill: currentcolor; font-size: 11px; }
 .visual-grid { stroke: currentcolor; stroke-opacity: 0.08; }
 .visual-axis { stroke: currentcolor; stroke-opacity: 0.45; }
-.visual-tick { fill-opacity: 0.7; }
+.visual-tick { fill-opacity: 0.8; }
+.dark .visual-tick { fill-opacity: 0.7; }
 .visual-figure .visual-axis-title { font-size: 12px; }
 .visual-line { stroke-width: 2; stroke-linejoin: round; }
 .visual-marker { stroke-width: 1.5; }
 .visual-mark line { stroke: currentcolor; stroke-opacity: 0.5; stroke-dasharray: 3 3; }
-.visual-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; padding: 0; margin: 0.35em 0 0; font-size: 0.8em; }
+.visual-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; padding: 0; margin: 0.35em 0 0; font-size: max(0.8em, 0.75rem); }
 .visual-legend li { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; }
 .visual-legend svg { width: 34px; display: inline; }
 .visual-node rect { fill: var(--surface); stroke: currentcolor; stroke-opacity: 0.5; stroke-width: 1.25; }

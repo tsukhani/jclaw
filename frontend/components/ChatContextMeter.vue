@@ -131,8 +131,8 @@ function keepFocusWhereItIs(event: Event) {
         ref="triggerButton"
         type="button"
         class="inline-flex items-center gap-2.5 px-2.5 py-1 rounded-md hover:bg-muted
-               focus:outline-hidden focus-visible:bg-muted transition-colors"
-        :aria-label="target ? `Conversation memory: ${percentLabel} full` : 'Conversation memory'"
+               focus:outline-hidden focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+        :aria-label="target ? `${total.toLocaleString()} / ${triggerRight}, conversation memory ${percentLabel} full` : 'Conversation memory'"
         @mouseenter="open = true"
         @mouseleave="handleMouseLeave"
         @focus="open = true"
@@ -263,7 +263,7 @@ function keepFocusWhereItIs(event: Event) {
               <dd class="font-mono tabular-nums text-right">
                 {{ cumulative.toLocaleString() }}
               </dd>
-              <dd class="col-span-2 text-[11px] text-muted-foreground">
+              <dd class="col-span-2 text-xs text-muted-foreground">
                 Every reread counts, as providers bill it.
               </dd>
             </div>
@@ -281,7 +281,7 @@ function keepFocusWhereItIs(event: Event) {
             </div>
           </dl>
         </template>
-        <p class="text-[11px] text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           Tokens are word pieces: 100 tokens is about 75 English words.
         </p>
       </div>

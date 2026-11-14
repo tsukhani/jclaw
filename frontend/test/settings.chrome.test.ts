@@ -15,7 +15,7 @@ import { pickValue, pickerValue } from './searchable-select-driver'
 const HELPER_KEY = 'agent.helper.chromeBridge.allowedSites'
 const FIND_PROVIDER = 'chromeBridge.find.provider'
 const FIND_MODEL = 'chromeBridge.find.model'
-const FIND_LABEL = 'Model that finds elements by meaning'
+const FIND_LABEL = 'find model: the model that finds elements by meaning'
 
 let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>

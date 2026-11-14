@@ -106,7 +106,7 @@ describe('Settings — a select or input whose save fails shows the saved value 
   })
 
   it.each<{ name: string, section: string, control?: string, picker?: string, choose: string, saved: string, entries: Record<string, string> }>([
-    { name: 'image captioning model', section: 'image-caption', picker: 'Caption cloud model', choose: 'gpt-4.1', saved: 'gpt-4o',
+    { name: 'image captioning model', section: 'image-caption', picker: 'Vision model (cloud)', choose: 'gpt-4.1', saved: 'gpt-4o',
       entries: { 'caption.provider': 'openai', 'caption.model': 'gpt-4o', 'provider.openai.apiKey': 'sk-****', 'provider.openai.models': openaiModels } },
     { name: 'search recency filter', section: 'search', control: 'select[aria-label="Recency filter"]', choose: 'week', saved: 'month',
       entries: { 'search.perplexity.enabled': 'true', 'search.perplexity.apiKey': 'pplx-****', 'search.perplexity.recencyFilter': 'month' } },
@@ -118,7 +118,7 @@ describe('Settings — a select or input whose save fails shows the saved value 
       entries: { 'transcription.provider': 'openai', 'transcription.model': 'whisper-1', 'provider.openai.apiKey': 'sk-****' } },
     { name: 'diarization audio model', section: 'transcription', picker: 'Diarization audio model', choose: 'audio/two', saved: 'audio/one',
       entries: { 'transcription.diarization.provider': 'openrouter', 'transcription.diarization.model': 'audio/one', 'provider.openrouter.apiKey': 'sk-or-****', 'provider.openrouter.models': openrouterAudioModels } },
-    { name: 'emotion (SER) model', section: 'transcription', picker: 'On-device emotion (SER) model', choose: 'ser/two', saved: 'ser/one',
+    { name: 'emotion (SER) model', section: 'transcription', picker: 'Emotion model (on-device SER)', choose: 'ser/two', saved: 'ser/one',
       entries: { 'transcription.diarization.provider': 'pyannote-local', 'transcription.diarization.emotionModel': 'ser/one' } },
     { name: 'speech model (JVM engine)', section: 'speech', picker: 'Text-to-speech model', choose: 'kokoro-multi-lang-v1_0', saved: 'piper-en_US-amy-low',
       entries: { 'tts.engine': 'jvm', 'tts.jvm.model': 'piper-en_US-amy-low' } },

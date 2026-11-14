@@ -86,7 +86,7 @@ function pick(option: SearchableOption) {
         :aria-label="label"
         :data-value="modelValue"
         :disabled="disabled"
-        class="flex items-center justify-between gap-2 text-left disabled:opacity-50"
+        class="flex items-center justify-between gap-2 text-left disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
       >
         <!-- A stored value no option holds shows as itself: a blank, as a native select shows, hides what is stored. -->
         <span class="min-w-0 truncate">{{ selected?.label ?? (modelValue || placeholder) }}</span>

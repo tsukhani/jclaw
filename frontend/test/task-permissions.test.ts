@@ -166,9 +166,11 @@ describe('TaskPermissions', () => {
       await flushPromises()
       expect(marks(c)).toEqual([
         ['mcp_gw378/search_gmail_messages', null, null],
-        ['mcp_gw378/gmail_list_messages', 'true', 'mcp_gw378 does not offer this action, so the task\'s runs cannot use it.'],
+        ['mcp_gw378/gmail_list_messages not offered', 'true', 'mcp_gw378 does not offer this action, so the task\'s runs cannot use it.'],
         ['web_search', null, null],
       ])
+      // 1.4.1: the missing action says so in words, not by its amber colour alone.
+      expect(c.findAll('[data-testid="task-tool-unoffered"]').map(s => s.text())).toEqual(['not offered'])
     })
 
     it('marks nothing when the server lists no actions, as a disconnected one does', async () => {

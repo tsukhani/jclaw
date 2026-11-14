@@ -197,6 +197,10 @@ const model = computed(() => {
         :data-subagents-only="subagentsOnly(tool) || undefined"
         data-testid="task-tool-pill"
       >{{ unmarked(tool) }}<span
+        v-if="unoffered(tool)"
+        class="font-sans"
+        data-testid="task-tool-unoffered"
+      > not offered</span><span
         v-if="subagentsOnly(tool)"
         class="ml-1 font-sans text-fg-muted"
         data-testid="task-tool-subagents-only"
