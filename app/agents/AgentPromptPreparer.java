@@ -14,6 +14,7 @@ import services.SessionCompactor;
 import services.TaskToolPolicy;
 import services.Tx;
 import tools.CheckListTool;
+import tools.ConversationSearchTool;
 import utils.LatencyTrace;
 
 import java.util.List;
@@ -307,7 +308,20 @@ final class AgentPromptPreparer {
      * context (JCLAW-268).
      */
     static String turnSystemPrompt(String assembled, Conversation conv) {
-        return SessionCompactor.appendParentContextToPrompt(SessionCompactor.appendSummaryToPrompt(assembled, conv), conv);
+        return SessionCompactor.appendParentContextToPrompt(
+                SessionCompactor.appendSummaryToPrompt(assembled, conv, offersConversationSearch(conv)), conv);
+    }
+
+    /**
+     * Whether a turn on {@code conv} offers {@code conversation_search}: registered, and outside the disabled set its
+     * prompt is assembled with ({@link #turnDisabled}), which carries the conversation's fence and the agent's own.
+     */
+    static boolean offersConversationSearch(Conversation conv) {
+        if (ToolRegistry.lookupTool(ConversationSearchTool.TOOL_NAME) == null) return false;
+        var disabled = turnDisabled(conv.agent, conv,
+                DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId));
+        return !(disabled != null ? disabled : ToolRegistry.loadDisabledTools(conv.agent))
+                .contains(ConversationSearchTool.TOOL_NAME);
     }
 
     /**

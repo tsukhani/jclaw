@@ -89,6 +89,8 @@ class CompactionSummaryRequestTest extends UnitTest {
     @Test
     void theSummaryCallSendsTheAgentsOwnPrefixAndToolsWithTheInstructionLast() throws Exception {
         startProviderBy(request -> text(isSummary(request) ? "SUMMARY-JF154" : "Reply"));
+        // SessionCompactorTest pins the user's messages carried ahead of the summary; here the prompt ends on it alone.
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "0");
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-prefix");
         seed(convo, 4, 40);

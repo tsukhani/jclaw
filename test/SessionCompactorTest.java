@@ -13,6 +13,7 @@ import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import llm.TokenUsageEstimator;
 import models.Agent;
+import models.AgentToolConfig;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
@@ -30,6 +31,7 @@ import services.SessionCompactor;
 import services.SessionCompactor.MessageSnapshot;
 import services.SessionCompactor.TurnRequest;
 import services.Tx;
+import tools.ConversationSearchTool;
 import utils.AppClock;
 
 import java.time.Clock;
@@ -74,6 +76,8 @@ class SessionCompactorTest extends UnitTest {
         agent.save();
         ConfigService.set(SessionCompactor.KEEP_PERCENT_KEY, "10");
         ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, String.valueOf(10 * ROW_TOKENS));
+        // The prompts this class compares carry no user messages ahead of the summary unless a test sets a budget.
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "0");
     }
 
     /** The shipped automatic rule: the keys {@link #setup} set, deleted. */
@@ -1346,6 +1350,348 @@ class SessionCompactorTest extends UnitTest {
         assertEquals("SYS", SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
     }
 
+    // ─── Facts about people, in the user's own words (JF-418) ───────────
+
+    private static final String PEOPLE_LINE = "Each fact the user stated about a person, and each person's needs and "
+            + "preferences, the user's own included, in the user's own words within quotation marks, naming whom it "
+            + "applies to: \"my partner is vegetarian\" applies to the partner alone, never to the user as well.";
+
+    private static final String MERGE_PEOPLE_LINE = "Where the summaries disagree, the later one wins. Keep each "
+            + "(unverified) mark. Keep each fact about a person in the words the summaries quote, with whom it applies "
+            + "to: never reword one or apply it to someone else. Write as much as the summaries need. No preface and no "
+            + "sign-off.";
+
+    @Test
+    void theSummaryAndMergePromptsAskForFactsAboutPeopleInTheUsersWordsWithWhomTheyApplyTo() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        saveSummary(conv, "x".repeat(2_400), Instant.now().minusSeconds(600));
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            requests.add(msgs);
+            return "y".repeat(2_400);
+        });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(2, requests.size(), "the summary, then the merge of the two segments past the budget");
+        var summaryLines = ((String) requests.get(0).getFirst().content()).lines().toList();
+        var mergeLines = ((String) requests.get(1).getFirst().content()).lines().toList();
+        assertEquals(1, summaryLines.stream().filter(PEOPLE_LINE::equals).count(), () -> "summary: " + summaryLines);
+        assertEquals("### Goals and constraints", summaryLines.get(summaryLines.indexOf(PEOPLE_LINE) - 2));
+        assertEquals(1, mergeLines.stream().filter(PEOPLE_LINE::equals).count(), () -> "merge: " + mergeLines);
+        assertEquals(1, mergeLines.stream().filter(MERGE_PEOPLE_LINE::equals).count(), () -> "merge: " + mergeLines);
+    }
+
+    // ─── The user's newest summarized messages, word for word (JF-418) ──
+
+    private static final String VERBATIM_HEADER_TEXT = "[The user's latest messages among the summarized turns, in "
+            + "their own words, oldest first. Where the summary below words a fact, need or preference differently, or "
+            + "applies it to someone else, these messages are right.]";
+
+    private static final String SEARCH_NOTE_TEXT = "[The messages the summary below stands for are still stored: "
+            + "conversation_search finds them by their words, for a detail the summary leaves out.]";
+
+    /** Where {@link #compactedOn} puts the floor, past every message it seeds before it. */
+    private static final Instant FLOOR = Instant.parse("2026-10-20T09:00:00Z");
+    private static final Instant SEGMENT_AT = FLOOR.plusSeconds(60);
+
+    @Test
+    void theUsersNewestSummarizedMessagesFillTheBudgetExactlyAndOneTokenLessCutsTheOldestHeadAndTail() {
+        var oldest = "a".repeat(200) + "b".repeat(200);
+        var conv = compactedOn(List.of(oldest, "B".repeat(200), "C".repeat(100)));
+
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "175");
+        assertEquals("SYS\n\n" + VERBATIM_HEADER_TEXT + "\n\n" + entry(0, oldest) + "\n\n" + entry(2, "B".repeat(200))
+                        + "\n\n" + entry(4, "C".repeat(100)) + "\n\n" + summaryEnd(),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "174");
+        assertEquals(withVerbatim(entry(0, "a".repeat(198) + "\n[… 4 of 400 characters left out …]\n" + "b".repeat(198)),
+                        entry(2, "B".repeat(200)), entry(4, "C".repeat(100))),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
+    @Test
+    void aNewestMessageOverTheWholeBudgetIsCutToItHeadAndTailAndNoOlderMessageFollows() {
+        var conv = compactedOn(List.of("My partner is vegetarian.", "x".repeat(200) + "y".repeat(200)));
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "50");
+
+        assertEquals(withVerbatim(entry(2, "x".repeat(100) + "\n[… 200 of 400 characters left out …]\n"
+                        + "y".repeat(100))),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
+    @Test
+    void withTheKeyAbsentTheBudgetIsFiveThousandTokensAndAMessageOfOneTokenMoreIsCut() {
+        ConfigService.delete(SessionCompactor.VERBATIM_USER_TOKENS_KEY);
+        var whole = "w".repeat(20_000);
+        var fits = compactedOn(List.of(whole));
+        assertEquals(withVerbatim(entry(0, whole)),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(fits.id)));
+
+        var over = compactedOn(List.of("p".repeat(10_002) + "q".repeat(10_002)));
+        assertEquals(withVerbatim(entry(0, "p".repeat(10_000) + "\n[… 4 of 20004 characters left out …]\n"
+                        + "q".repeat(10_000))),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(over.id)));
+    }
+
+    @Test
+    void aBudgetOfZeroOrLessOrNoUserMessageBeforeTheFloorCarriesNoMessages() {
+        var conv = compactedOn(List.of("My partner is vegetarian."));
+        assertEquals("SYS\n\n" + summaryEnd(), SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)),
+                "0, as setup stores it");
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "-5");
+        assertEquals("SYS\n\n" + summaryEnd(), SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+
+        ConfigService.delete(SessionCompactor.VERBATIM_USER_TOKENS_KEY);
+        var none = compactedOn(List.of());
+        seedAt(Conversation.findById(none.id), BASE, MessageRole.ASSISTANT, "Hello, how can I help?");
+        commitAndReopen();
+        assertEquals("SYS\n\n" + summaryEnd(), SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(none.id)),
+                "only the agent's replies come before the floor");
+    }
+
+    @Test
+    void onlyMessagesTheUserWroteBetweenAResetAndTheFloorAreCarried() {
+        ConfigService.delete(SessionCompactor.VERBATIM_USER_TOKENS_KEY);
+        var conv = compactedOn(List.of("Before the reset.", "My partner is vegetarian.", "A subagent's result.",
+                "An inline child's prompt.", "I eat fish."));
+        Conversation reloaded = Conversation.findById(conv.id);
+        reloaded.contextSince = BASE.plusSeconds(60);
+        reloaded.save();
+        List<?> rows = Message.find("conversation = ?1 AND role = ?2 ORDER BY createdAt", reloaded,
+                MessageRole.USER.value).fetch();
+        var announce = (Message) rows.get(2);
+        announce.messageKind = "subagent_announce";
+        announce.save();
+        var child = (Message) rows.get(3);
+        child.subagentRunId = 42L;
+        child.save();
+        commitAndReopen();
+
+        assertEquals(withVerbatim(entry(2, "My partner is vegetarian."), entry(8, "I eat fish.")),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)),
+                "the row before the reset, the tagged result, the child's row and the row after the floor are left out");
+    }
+
+    // ─── The search note ahead of the summary (JF-418) ──────────────────
+
+    @Test
+    void theSearchNoteComesFirstWhenTheTurnOffersConversationSearchAndNotOtherwise() {
+        var conv = compactedOn(List.of("My partner is vegetarian."));
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "100");
+
+        assertEquals("SYS\n\n" + SEARCH_NOTE_TEXT + "\n\n" + VERBATIM_HEADER_TEXT + "\n\n"
+                        + entry(0, "My partner is vegetarian.") + "\n\n" + summaryEnd(),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id), true));
+        assertEquals(withVerbatim(entry(0, "My partner is vegetarian.")),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id), false));
+        assertEquals("SYS", SessionCompactor.appendSummaryToPrompt("SYS",
+                Conversation.findById(ConversationService.create(agent, "web", "user2").id), true),
+                "no summary, no note");
+    }
+
+    @Test
+    void theTurnsPromptCarriesTheUsersWordsAndTheSearchNoteOnlyWhenTheAgentHasConversationSearchInsideItsFence() {
+        assertNotNull(agents.ToolRegistry.lookupTool(ConversationSearchTool.TOOL_NAME));
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "100");
+        var conv = compactedOn(List.of("My partner is vegetarian."));
+        var end = "\n\n" + VERBATIM_HEADER_TEXT + "\n\n" + entry(0, "My partner is vegetarian.") + "\n\n" + summaryEnd();
+        try {
+            var withoutTool = nextSystemPrompt(conv.id);
+            assertTrue(withoutTool.endsWith(end), withoutTool);
+            assertFalse(withoutTool.contains(SEARCH_NOTE_TEXT), "a custom agent is not granted conversation_search");
+
+            var grant = new AgentToolConfig();
+            grant.agent = Agent.findById(agent.id);
+            grant.toolName = ConversationSearchTool.TOOL_NAME;
+            grant.enabled = true;
+            grant.save();
+            agents.ToolRegistry.invalidateDisabledToolsCache(grant.agent);
+            var withTool = nextSystemPrompt(conv.id);
+            assertTrue(withTool.endsWith("\n\n" + SEARCH_NOTE_TEXT + end), withTool);
+
+            Conversation fenced = Conversation.findById(conv.id);
+            fenced.enabledToolNames = "[\"datetime\"]";
+            fenced.save();
+            var outsideFence = nextSystemPrompt(conv.id);
+            assertTrue(outsideFence.endsWith(end), outsideFence);
+            assertFalse(outsideFence.contains(SEARCH_NOTE_TEXT), "the conversation's tool list leaves it out");
+        } finally {
+            agents.ToolRegistry.invalidateDisabledToolsCache(agent);
+        }
+    }
+
+    // ─── The check pass (JF-418) ─────────────────────────────────────────
+
+    private static final String CHECK_TEXT = """
+            A summary of part of a conversation is being checked before it replaces the turns it covers. Below are the summary and every message the user wrote in those turns, oldest first. Do not answer the user and do not call a tool.
+
+            Compare the summary with the user's messages. Add each fact, need, preference, constraint and request the user stated that the summary leaves out, in the user's own words. Correct each one the summary words differently from the user or applies to the wrong person: "my partner is vegetarian" applies to the partner alone. Leave everything else as it is, its headings included.
+
+            Reply with the whole corrected summary, or with the summary unchanged when nothing is missing or misattributed. No preface and no sign-off.
+            """;
+
+    @Test
+    void withTheCheckOnTheSummaryGoesBackWithTheUsersMessagesItCoversAndTheReplyIsStored() {
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            requests.add(msgs);
+            return requests.size() == 1 ? "UNCHECKED SUMMARY" : "CHECKED SUMMARY, with what it missed";
+        });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(2, result.calls());
+        assertEquals(2, requests.size());
+        var covered = allRows(conv.id).subList(0, result.turnsCompacted());
+        var userRows = covered.stream().filter(r -> MessageRole.USER.value.equals(r.role())).toList();
+        assertEquals(8, userRows.size());
+        assertEquals(List.of(ChatMessage.system(CHECK_TEXT), ChatMessage.user("[Summary]\n\nUNCHECKED SUMMARY\n\n"
+                + "[The user's messages in the turns it covers]\n\n" + SessionCompactor.renderTurns(userRows).strip())),
+                requests.get(1));
+        commitAndReopen();
+        assertEquals(List.of("CHECKED SUMMARY, with what it missed"), storedSummaries(conv.id));
+        assertEquals("CHECKED SUMMARY, with what it missed".length(), result.summaryChars());
+    }
+
+    @Test
+    void withTheCheckOffAsShippedOneCallIsMadeAndTheSummaryStoredAsWritten() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            requests.add(msgs);
+            return "SUMMARY";
+        });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(1, result.calls());
+        assertEquals(1, requests.size());
+        commitAndReopen();
+        assertEquals(List.of("SUMMARY"), storedSummaries(conv.id));
+    }
+
+    @Test
+    void aCheckThatFailsOrReturnsNothingKeepsTheUncheckedSummary() {
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var failing = ConversationService.create(agent, "web", "user1");
+        seedMessages(failing, 25);
+        commitAndReopen();
+        var calls = new AtomicLong();
+        var failed = new AtomicReference<SessionCompactor.CompactionResult>();
+        var events = EventLogger.captureForTest(() -> failed.set(SessionCompactor.compact(failing.id,
+                "openrouter/test-model", msgs -> {
+                    if (calls.incrementAndGet() == 2) throw new java.io.IOException("connection reset");
+                    return "UNCHECKED SUMMARY";
+                })));
+
+        assertTrue(failed.get().compacted(), "reason=" + failed.get().skipReason());
+        assertEquals(2, failed.get().calls(), "the failed check still counts");
+        assertEquals(List.of("Checking the summary of conversation %d failed (connection reset); it is stored unchecked"
+                .formatted(failing.id)), compactionLines(events));
+        commitAndReopen();
+        assertEquals(List.of("UNCHECKED SUMMARY"), storedSummaries(failing.id));
+
+        for (var reply : java.util.Arrays.asList("", "   ", null)) {
+            var conv = ConversationService.create(agent, "web", "empty-" + reply);
+            seedMessages(conv, 25);
+            commitAndReopen();
+            var made = new AtomicLong();
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                    msgs -> made.incrementAndGet() == 1 ? "UNCHECKED SUMMARY" : reply);
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            commitAndReopen();
+            assertEquals(List.of("UNCHECKED SUMMARY"), storedSummaries(conv.id), "reply: [" + reply + "]");
+        }
+    }
+
+    @Test
+    void aCheckReplyOfHalfTheSummaryReplacesItAndOneCharacterLessIsTakenForAListOfChangesAndIgnored() {
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var summary = "s".repeat(20);
+        var half = compactWithCheckReply(summary, "h".repeat(10));
+        assertEquals(List.of("h".repeat(10)), storedSummaries(half));
+
+        var less = new AtomicReference<Long>();
+        var lines = compactionLines(EventLogger.captureForTest(
+                () -> less.set(compactWithCheckReply(summary, "h".repeat(9)))));
+        assertEquals(List.of(summary), storedSummaries(less.get()));
+        assertEquals(List.of(("Checking the summary of conversation %d returned 9 characters for a summary of 20; it is "
+                + "stored unchecked").formatted(less.get())), lines);
+    }
+
+    @Test
+    void theCheckCountsTowardTheCallCapAndIsLeftOutWhenNoCallRemains() {
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        for (int max : new int[] {1, 2}) {
+            var conv = ConversationService.create(agent, "web", "cap-" + max);
+            seedMessages(conv, 25);
+            commitAndReopen();
+            var requests = new ArrayList<List<ChatMessage>>();
+            var toolLists = new ArrayList<List<ToolDef>>();
+
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                    new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                        requests.add(msgs);
+                        toolLists.add(defs);
+                        return reply(requests.size() == 1 ? "UNCHECKED SUMMARY" : "CHECKED SUMMARY");
+                    }, false, null, Integer.MAX_VALUE, max);
+
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            assertEquals(max, result.calls());
+            assertEquals(max, requests.size());
+            commitAndReopen();
+            if (max == 1) {
+                assertEquals(List.of("UNCHECKED SUMMARY"), storedSummaries(conv.id), "no call is left for the check");
+            } else {
+                assertEquals(List.of(TOOLS, List.of()), toolLists, "the check is sent with no tools");
+                assertEquals(ChatMessage.system(CHECK_TEXT), requests.get(1).getFirst());
+                assertEquals(List.of("CHECKED SUMMARY"), storedSummaries(conv.id));
+            }
+        }
+    }
+
+    @Test
+    void aChunkWithNoMessageFromTheUserIsStoredWithoutACheck() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedOneLongTurn(conv, 31);
+        commitAndReopen();
+        var first = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> reply("FIRST"));
+        assertTrue(first.compacted(), "reason=" + first.skipReason());
+        commitAndReopen();
+        for (int r = 31; r < 61; r++) {
+            ConversationService.appendMessage(Conversation.<Conversation>findById(conv.id), MessageRole.ASSISTANT,
+                    "step " + r, utils.GsonHolder.GSON.toJson(new ToolCall("call-" + r, "function",
+                            new FunctionCall("datetime", "{}"))), null, null);
+            ConversationService.appendMessage(Conversation.<Conversation>findById(conv.id), MessageRole.TOOL,
+                    "result " + r, null, "call-" + r, null);
+        }
+        commitAndReopen();
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var second = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    requests.add(msgs);
+                    return reply("SECOND");
+                });
+
+        assertTrue(second.compacted(), "reason=" + second.skipReason());
+        assertEquals(1, second.calls());
+        assertEquals(1, requests.size(), "the tool rounds summarized hold no user message to check against");
+    }
+
     // ─── renderTurns ────────────────────────────────────────────────────
 
     @Test
@@ -1640,6 +1986,71 @@ class SessionCompactorTest extends UnitTest {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
             ConversationService.appendMessage(conv, role, sized(role, label + " " + i + " content"), null, null, null);
         }
+    }
+
+    /**
+     * A conversation whose {@code userTexts} were summarized: each a user row at minute {@code 2i} after {@link #BASE}
+     * with a reply a minute later, the floor at {@link #FLOOR} with a user row on it, and one undated segment, SEGMENT,
+     * written at {@link #SEGMENT_AT}.
+     */
+    private Conversation compactedOn(List<String> userTexts) {
+        var conv = ConversationService.create(agent, "web", "verbatim-" + System.nanoTime());
+        for (int i = 0; i < userTexts.size(); i++) {
+            seedAt(conv, BASE.plusSeconds(120L * i), MessageRole.USER, userTexts.get(i));
+            seedAt(conv, BASE.plusSeconds(120L * i + 60), MessageRole.ASSISTANT, "Noted.");
+        }
+        seedAt(conv, FLOOR, MessageRole.USER, "After the floor.");
+        Conversation managed = Conversation.findById(conv.id);
+        managed.compactionSince = FLOOR;
+        managed.save();
+        saveSummary(managed, "SEGMENT", SEGMENT_AT);
+        commitAndReopen();
+        return managed;
+    }
+
+    private static void seedAt(Conversation conv, Instant at, MessageRole role, String content) {
+        AppClock.runWith(Clock.fixed(at, ZoneOffset.UTC),
+                () -> ConversationService.appendMessage(conv, role, content, null, null, null));
+    }
+
+    /** A carried user message: the minute after {@link #BASE} it was written, in the operator's zone, then its text. */
+    private static String entry(int minute, String text) {
+        var zone = services.TimezoneResolver.appZone();
+        return "[" + LABEL_TIME.format(BASE.plusSeconds(60L * minute).atZone(zone)) + ", " + zone.getId() + "]\n" + text;
+    }
+
+    /** What ends the prompt of a conversation {@link #compactedOn} made. */
+    private static String summaryEnd() {
+        return SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + labelUpTo(SEGMENT_AT) + "\n\nSEGMENT";
+    }
+
+    private static String withVerbatim(String... entries) {
+        return "SYS\n\n" + VERBATIM_HEADER_TEXT + "\n\n" + String.join("\n\n", entries) + "\n\n" + summaryEnd();
+    }
+
+    /** The system prompt the conversation's next turn starts from. */
+    private String nextSystemPrompt(Long conversationId) {
+        commitAndReopen();
+        var next = agents.CompactionGate.nextTurnRequest(agent, conversationId);
+        assertNotNull(next);
+        return (String) next.messages().getFirst().content();
+    }
+
+    /** A conversation of 25 rows summarized to {@code summary}, which its check then answers with {@code checkReply}. */
+    private Long compactWithCheckReply(String summary, String checkReply) {
+        var conv = ConversationService.create(agent, "web", "check-" + System.nanoTime());
+        seedMessages(conv, 25);
+        commitAndReopen();
+        var made = new AtomicLong();
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                msgs -> made.incrementAndGet() == 1 ? summary : checkReply);
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        commitAndReopen();
+        return conv.id;
+    }
+
+    private static List<String> compactionLines(List<EventLogger.Captured> events) {
+        return events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList();
     }
 
     /** A summary as the code before JF-161 stored it: no dates for the rows it covers. */

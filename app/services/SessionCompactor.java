@@ -57,7 +57,8 @@ import java.util.function.Supplier;
  * result, which providers reject.
  *
  * <p>Re-injection: the segments are appended to the system prompt as a
- * "[Prior conversation summary]" section by the caller (not here). That
+ * "[Prior conversation summary]" section by the caller (not here), after the
+ * user's newest summarized messages in their own words (JF-418). That
  * keeps SessionCompactor free of ChatMessage-list manipulation and
  * stays provider-agnostic.
  */
@@ -173,6 +174,11 @@ public final class SessionCompactor {
     /** JF-416: {@code /compact}'s {@value #MIN_SUMMARY_TOKENS_KEY}. */
     public static final String FORCED_MIN_SUMMARY_TOKENS_KEY = "chat.compaction.forcedMinSummaryTokens";
     public static final int DEFAULT_FORCED_MIN_SUMMARY_TOKENS = 200;
+    /** JF-418: the most tokens of the user's newest summarized messages the prompt carries in their own words; 0 or less is off. */
+    public static final String VERBATIM_USER_TOKENS_KEY = "chat.compaction.verbatimUserTokens";
+    public static final int DEFAULT_VERBATIM_USER_TOKENS = 5_000;
+    /** JF-418: true sends each summary back with the user's messages it covers, to add what it missed, before storing it. */
+    public static final String CHECK_SUMMARY_KEY = "chat.compaction.checkSummary";
 
     /**
      * True when the current message list reaches the token trigger ({@link #triggerThreshold}) or exceeds the
@@ -402,15 +408,17 @@ public final class SessionCompactor {
     /**
      * One summary call after another, oldest rows first, each storing its own segment, until a plan reaches the kept
      * tail or {@code maxCalls} are made (JF-159); then the oldest segments are merged while the live ones pass the
-     * budget (JF-161).
+     * budget (JF-161). With {@value #CHECK_SUMMARY_KEY} on, each summary is checked with one more call before it is
+     * stored ({@link #checked}), when a call is left for it. {@code plainCall} makes the merges and the checks.
      */
     private static CompactionResult compact(Long conversationId, Supplier<String> modelLabel, boolean force,
-                                            int callTokens, int maxCalls, SummaryStep step, Summarizer merger) {
+                                            int callTokens, int maxCalls, SummaryStep step, Summarizer plainCall) {
         int turnsCompacted = 0;
         int rowsSkipped = 0;
         int calls = 0;
         int rowsTotal = 0;
         boolean reachedTail = false;
+        boolean check = ConfigService.getBoolean(CHECK_SUMMARY_KEY, false);
         @Nullable Instant floor = null;
         while (calls < maxCalls) {
             final boolean first = calls == 0;
@@ -432,13 +440,15 @@ public final class SessionCompactor {
                         + "share the timestamp the last summary ended on").formatted(conversationId));
                 break;
             }
-            calls++;
-            var stored = summarizeAndStore(conversationId, modelLabel, plan, step);
+            var checker = check && calls + 1 < maxCalls && !plan.userRows().isEmpty() ? plainCall : null;
+            var stored = summarizeAndStore(conversationId, modelLabel, plan, step, checker);
             // A later call that fails keeps the segments already stored, and the next compaction starts after them.
             if (!stored.compacted()) {
                 if (first) return stored;
+                calls++;
                 break;
             }
+            calls += stored.calls();
             turnsCompacted += stored.turnsCompacted();
             rowsSkipped += plan.skipped();
             CompactionProgress.advanced(Math.min(turnsCompacted, rowsTotal), rowsTotal);
@@ -453,14 +463,16 @@ public final class SessionCompactor {
                     "Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
                             .formatted(conversationId, maxCalls));
         }
-        calls += mergeOverBudget(conversationId, modelLabel, merger, maxCalls - calls);
+        calls += mergeOverBudget(conversationId, modelLabel, plainCall, maxCalls - calls);
         int rowsLeft = reachedTail ? 0 : Tx.run(() -> rowsBeforeTail(conversationId, force, callTokens));
         int summaryChars = Tx.run(() -> liveChars(conversationId));
         return CompactionResult.success(turnsCompacted, summaryChars, calls, rowsLeft, rowsSkipped);
     }
 
+    /** The plan's summary call, then its check by {@code checker} when one is given. */
     private static CompactionResult summarizeAndStore(Long conversationId, Supplier<String> modelLabel,
-                                                      CompactionPlan plan, SummaryStep step) {
+                                                      CompactionPlan plan, SummaryStep step,
+                                                      @Nullable Summarizer checker) {
         String summary;
         try {
             summary = step.summarize(plan);
@@ -476,7 +488,8 @@ public final class SessionCompactor {
             return CompactionResult.skipped("empty summary");
         }
 
-        final var finalSummary = summary.strip();
+        final var finalSummary = checker != null ? checked(conversationId, summary.strip(), plan, checker)
+                : summary.strip();
         final var turnsCompacted = plan.toSummarize().size();
         final var label = modelLabel.get();
 
@@ -489,7 +502,33 @@ public final class SessionCompactor {
             conv.save();
         });
 
-        return CompactionResult.success(turnsCompacted, finalSummary.length(), 1, 0, 0);
+        return CompactionResult.success(turnsCompacted, finalSummary.length(), checker != null ? 2 : 1, 0, 0);
+    }
+
+    /**
+     * {@code summary} as the check call corrects it against the user's messages it covers (JF-418); {@code summary}
+     * itself when the call fails, returns nothing, or returns less than half of it, which is a list of changes rather
+     * than the whole summary. A check never stops the summary being stored.
+     */
+    private static String checked(Long conversationId, String summary, CompactionPlan plan, Summarizer checker) {
+        String reply;
+        try {
+            reply = checker.summarize(List.of(ChatMessage.system(CHECK_INSTRUCTIONS),
+                    ChatMessage.user(CHECKED_SUMMARY_LABEL + "\n\n" + summary + "\n\n" + CHECKED_MESSAGES_LABEL + "\n\n"
+                            + renderTurns(plan.userRows()).strip())));
+        } catch (Exception e) {
+            EventLogger.warn("compaction", null, null, ("Checking the summary of conversation %d failed (%s); it is "
+                    + "stored unchecked").formatted(conversationId, e.getMessage()));
+            return summary;
+        }
+        var text = reply == null ? "" : reply.strip();
+        if (text.length() * 2L < summary.length()) {
+            EventLogger.warn("compaction", null, null, ("Checking the summary of conversation %d returned %d characters "
+                    + "for a summary of %d; it is stored unchecked").formatted(conversationId, text.length(),
+                    summary.length()));
+            return summary;
+        }
+        return text;
     }
 
     private static SessionCompaction segment(Conversation conv, String summary, @Nullable String label, int turnCount,
@@ -685,13 +724,88 @@ public final class SessionCompactor {
      * Append the conversation's live summary segments to {@code basePrompt} as a labeled section, oldest first, each
      * under the dates it covers (JF-161). Returns {@code basePrompt} unchanged when there is none: never compacted, or
      * {@code /reset} since the last compaction. Call this inside the prep Tx where {@code Conversation} is already
-     * managed.
+     * managed. {@link #appendSummaryToPrompt(String, Conversation, boolean)} with no search note.
      */
     public static String appendSummaryToPrompt(String basePrompt, Conversation conversation) {
+        return appendSummaryToPrompt(basePrompt, conversation, false);
+    }
+
+    /**
+     * {@code basePrompt}, then, when the conversation has live summary segments, the {@link #SEARCHABLE_NOTE} when
+     * {@code searchable}, the user's newest summarized messages in their own words ({@link #verbatimUserMessages}) and
+     * the segments under {@link #PRIOR_SUMMARY_HEADER}, which end the prompt. All of it is read from behind the floor,
+     * so the prompt a provider caches stays the same between compactions.
+     *
+     * @param searchable whether the turn offers {@code conversation_search}, which finds the summarized messages
+     */
+    public static String appendSummaryToPrompt(String basePrompt, Conversation conversation, boolean searchable) {
         if (conversation == null) return basePrompt;
         var segments = renderSegments(SessionCompaction.findLive(conversation));
         if (segments.isEmpty()) return basePrompt;
-        return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + segments;
+        var prompt = new StringBuilder(basePrompt);
+        if (searchable) prompt.append("\n\n").append(SEARCHABLE_NOTE);
+        var verbatim = verbatimUserMessages(conversation);
+        if (!verbatim.isEmpty()) prompt.append("\n\n").append(verbatim);
+        return prompt.append("\n\n").append(PRIOR_SUMMARY_HEADER).append("\n\n").append(segments).toString();
+    }
+
+    private static final int VERBATIM_PAGE = 100;
+
+    /**
+     * The user's newest messages among the summarized rows, those before the compaction floor and from a
+     * {@code /reset} on: newest first while they fit {@value #VERBATIM_USER_TOKENS_KEY} tokens at four characters a
+     * token, the first that passes what is left cut to it, head and tail; rendered oldest first under
+     * {@link #VERBATIM_USER_HEADER}. Empty when the budget is off or no such message exists.
+     */
+    private static String verbatimUserMessages(Conversation conv) {
+        long room = Math.max(0, ConfigService.getInt(VERBATIM_USER_TOKENS_KEY, DEFAULT_VERBATIM_USER_TOKENS));
+        if (room == 0 || conv.compactionSince == null) return "";
+        var query = conv.contextSince == null
+                ? Message.find("conversation = ?1 AND role = ?2 AND createdAt < ?3 ORDER BY createdAt DESC, id DESC",
+                        conv, MessageRole.USER.value, conv.compactionSince)
+                : Message.find("conversation = ?1 AND role = ?2 AND createdAt < ?3 AND createdAt >= ?4"
+                        + " ORDER BY createdAt DESC, id DESC", conv, MessageRole.USER.value, conv.compactionSince,
+                        conv.contextSince);
+        var zone = TimezoneResolver.appZone();
+        var picked = new ArrayList<String>();
+        for (int offset = 0; room > 0; offset += VERBATIM_PAGE) {
+            List<?> page = query.from(offset).fetch(VERBATIM_PAGE);
+            for (int i = 0; i < page.size() && room > 0; i++) {
+                var m = (Message) page.get(i);
+                if (!usersOwnWords(m)) continue;
+                var text = m.content.strip();
+                long tokens = Math.max(1, text.length() / 4);
+                if (tokens > room) {
+                    text = cutMiddle(text, (int) Math.min(Integer.MAX_VALUE, room * 4));
+                    tokens = room;
+                }
+                room -= tokens;
+                picked.add("[" + LABEL_TIME.format(m.createdAt.atZone(zone)) + ", " + zone.getId() + "]\n" + text);
+            }
+            if (page.size() < VERBATIM_PAGE) break;
+        }
+        if (picked.isEmpty()) return "";
+        return VERBATIM_USER_HEADER + "\n\n" + String.join("\n\n", picked.reversed());
+    }
+
+    /**
+     * A message the user wrote: a subagent's result wakes its parent as a user row with a kind, and an inline child's
+     * rows carry its run id, so neither counts.
+     */
+    private static boolean usersOwnWords(Message m) {
+        return MessageRole.USER.value.equals(m.role) && m.messageKind == null && m.subagentRunId == null
+                && m.content != null && !m.content.isBlank();
+    }
+
+    /** {@code text} cut to {@code keep} characters, its first and last halves, with what was left out noted between. */
+    private static String cutMiddle(String text, int keep) {
+        if (text.length() <= keep) return text;
+        int head = keep / 2;
+        if (head > 0 && Character.isHighSurrogate(text.charAt(head - 1))) head--;
+        int tailStart = text.length() - (keep - keep / 2);
+        if (tailStart < text.length() && Character.isLowSurrogate(text.charAt(tailStart))) tailStart++;
+        return text.substring(0, head) + "\n[… " + (tailStart - head) + " of " + text.length()
+                + " characters left out …]\n" + text.substring(tailStart);
     }
 
     /** Each segment under its {@link #segmentLabel}, in the order given: the prompt's section and a merge's input. */
@@ -749,10 +863,11 @@ public final class SessionCompactor {
     /**
      * One summary call's rows. {@code turnsOwnHistory} when they are the head of the history the turn loaded, so the
      * turn's own request can carry them; {@code last} when {@code firstKept} starts the conversation's kept tail
-     * rather than the next chunk; {@code skipped}, the rows the newest-rows fallback leaves behind it unsummarized.
+     * rather than the next chunk; {@code skipped}, the rows the newest-rows fallback leaves behind it unsummarized;
+     * {@code userRows}, those of {@code toSummarize} the user wrote, which a summary's check reads.
      */
     record CompactionPlan(List<MessageSnapshot> toSummarize, MessageSnapshot firstKept, boolean turnsOwnHistory,
-                          boolean last, int skipped) {}
+                          boolean last, int skipped, List<MessageSnapshot> userRows) {}
 
     /**
      * The next summary call's rows (JF-159): within the history limit, every row before the kept tail
@@ -795,10 +910,14 @@ public final class SessionCompactor {
                                                    boolean last, int skipped) {
         if (boundary <= 0) return Optional.empty();
         var snaps = new ArrayList<MessageSnapshot>(boundary);
+        var userRows = new ArrayList<MessageSnapshot>();
         for (int i = 0; i < boundary; i++) {
-            snaps.add(snapshot(rows.get(i)));
+            var snap = snapshot(rows.get(i));
+            snaps.add(snap);
+            if (usersOwnWords(rows.get(i))) userRows.add(snap);
         }
-        return Optional.of(new CompactionPlan(snaps, snapshot(rows.get(boundary)), turnsOwnHistory, last, skipped));
+        return Optional.of(new CompactionPlan(snaps, snapshot(rows.get(boundary)), turnsOwnHistory, last, skipped,
+                userRows));
     }
 
     /** How many of {@code rows}, from the first, fit in {@code tokens} at four characters a token as a transcript renders them. */
@@ -1109,6 +1228,7 @@ public final class SessionCompactor {
 
             ### Goals and constraints
             What the user wants, and every constraint, preference and requirement they set.
+            Each fact the user stated about a person, and each person's needs and preferences, the user's own included, in the user's own words within quotation marks, naming whom it applies to: "my partner is vegetarian" applies to the partner alone, never to the user as well.
 
             ### Decisions
             What the user or the agent decided, with the reason when one was given.
@@ -1141,14 +1261,34 @@ public final class SessionCompactor {
 
             """ + SECTIONS + """
 
-            Where the summaries disagree, the later one wins. Keep each (unverified) mark. Write as much as the summaries need. No preface and no sign-off.
+            Where the summaries disagree, the later one wins. Keep each (unverified) mark. Keep each fact about a person in the words the summaries quote, with whom it applies to: never reword one or apply it to someone else. Write as much as the summaries need. No preface and no sign-off.
             """;
+
+    private static final String CHECK_INSTRUCTIONS = """
+            A summary of part of a conversation is being checked before it replaces the turns it covers. Below are the summary and every message the user wrote in those turns, oldest first. Do not answer the user and do not call a tool.
+
+            Compare the summary with the user's messages. Add each fact, need, preference, constraint and request the user stated that the summary leaves out, in the user's own words. Correct each one the summary words differently from the user or applies to the wrong person: "my partner is vegetarian" applies to the partner alone. Leave everything else as it is, its headings included.
+
+            Reply with the whole corrected summary, or with the summary unchanged when nothing is missing or misattributed. No preface and no sign-off.
+            """;
+
+    private static final String CHECKED_SUMMARY_LABEL = "[Summary]";
+    private static final String CHECKED_MESSAGES_LABEL = "[The user's messages in the turns it covers]";
 
     // Segments are never rewritten, so an earlier one still lists the next steps of its own time.
     public static final String PRIOR_SUMMARY_HEADER =
             "[Prior conversation summary — earlier turns were compacted to fit the context window. Segments run oldest "
                     + "first; where they differ, a later segment wins, and the messages after the summary win over all of "
                     + "them: an open item or next step in an earlier segment may already be settled.]";
+
+    /** Ahead of the summary when the turn offers {@code conversation_search}, which finds the summarized messages. */
+    public static final String SEARCHABLE_NOTE = "[The messages the summary below stands for are still stored: "
+            + "conversation_search finds them by their words, for a detail the summary leaves out.]";
+
+    /** Heads the user's newest summarized messages, which the prompt carries ahead of the summary (JF-418). */
+    public static final String VERBATIM_USER_HEADER = "[The user's latest messages among the summarized turns, in "
+            + "their own words, oldest first. Where the summary below words a fact, need or preference differently, or "
+            + "applies it to someone else, these messages are right.]";
 
     /**
      * Header used by {@link #appendParentContextToPrompt} when a subagent was

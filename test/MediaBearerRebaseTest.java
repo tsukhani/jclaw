@@ -96,6 +96,8 @@ class MediaBearerRebaseTest extends UnitTest {
         configureProvider(20000);
         ConfigService.set("chat.compactionReserveTokens", "18000");
         ConfigService.set("chat.compactionReserveTokensFloor", "18000");
+        // The system prompt and tools sit near the trim's target; the bulk carried word for word would pass it.
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "0");
 
         var agent = createAgent("bearer-compaction-agent");
         var convo = ConversationService.create(agent, "web", "u-bearer-compact");
