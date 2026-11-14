@@ -352,7 +352,8 @@ root and as uid 1000, with throwaway servers in place of every real service.
 argv overload; `--unshare-user --cap-drop ALL` goes after `bwrap` when the process runs as root, which is how the container
 runs — a root bwrap makes no user namespace of its own and needs CAP_SYS_ADMIN, which Docker drops; `linuxArgv` adds it too)
 and reports bwrap's first output line, trimmed to 200 characters, plus a pointer to
-the compose seccomp profile under `JCLAW_CONTAINER=1`; a success is cached for the JVM's life, a
+the compose seccomp and AppArmor settings under `JCLAW_CONTAINER=1`, or to INSTALL.md's Ubuntu
+profile when bwrap stops at `setting up uid map` (JF-413); a success is cached for the JVM's life, a
 failure is probed again on the next call. On macOS it is still the `sandbox-exec` lookup. Where it
 fails, a custom agent's `exec` returns `ToolErrorTemplates.shellSandboxUnavailable`
 (`shell_sandbox_unavailable`) and starts nothing; `main`'s keeps the `SandboxUnavailableException` abort.
@@ -364,8 +365,15 @@ namespace and refuses the run the same way where none starts; `GET /api/sandbox`
 `seccomp/default.json`, pinned by the SHA the compose comment names) plus one appended rule allowing
 `clone`, `unshare`, `mount`, `umount2` and `pivot_root`. `clone3` keeps its ENOSYS so glibc falls back to
 `clone`; `setns` is absent because bwrap calls it only for `--userns`/`--pidns`, which JClaw never
-passes. Never `seccomp=unconfined`, `privileged` or `cap_add: SYS_ADMIN`; `DockerSandboxConfigTest`
-pins the three files. The file ships in the dist beside the compose file, which `jclaw.sh` reads.
+passes. On a host with AppArmor, Docker's `docker-default` profile denies bwrap's mounts even so
+(`Failed to make / slave: Permission denied`, unlogged, since an explicit deny is not audited), so compose
+also sets `apparmor=unconfined`, which lifts that profile alone; on an Ubuntu 23.10+ host the container then
+needs the host's bwrap AppArmor profile too, or the user-namespace restriction stops bwrap at its uid map.
+Measured on Ubuntu 24.04 with the container check (JF-413): both agent kinds confined exactly as on Docker
+Desktop. There a bwrap Docker starts itself, as the entrypoint or by `docker exec`, stays refused at its uid
+map under the host profile while one a process in the container starts passes, so every container check
+(INSTALL.md's, `install-docker.sh`'s) starts bwrap from `sh`, as JClaw's JVM does. A profile of JClaw's own in place of `unconfined` is JF-414. Never `seccomp=unconfined`,
+`privileged` or `cap_add: SYS_ADMIN`; `DockerSandboxConfigTest` pins the three files. The file ships in the dist beside the compose file, which `jclaw.sh` reads.
 
 **Both fail closed.** With a key on and no working mechanism (native Windows; a host missing
 `sandbox-exec`/`bwrap`; a `bwrap` that cannot create its namespaces, such as a WSL2 kernel with

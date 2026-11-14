@@ -58,8 +58,8 @@ class ReleaseSigningConformanceTest extends UnitTest {
         assertEquals(pinned, read("release-signing.pub").strip(),
                 "release-signing.pub is not the key jclaw.sh pins, so a signed IMAGE_DIGEST would not verify under it: "
                         + "write jclaw.sh's UPGRADE_RELEASE_PUBKEY to release-signing.pub");
-        assertEquals(pinned, pinned("docker-pull-verified.sh", INSTALLER_KEY),
-                "docker-pull-verified.sh pins a different key, so it would refuse every release's IMAGE_DIGEST: set its "
+        assertEquals(pinned, pinned("install-docker.sh", INSTALLER_KEY),
+                "install-docker.sh pins a different key, so it would refuse every release's IMAGE_DIGEST: set its "
                         + "RELEASE_PUBKEY to jclaw.sh's UPGRADE_RELEASE_PUBKEY");
     }
 

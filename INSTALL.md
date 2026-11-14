@@ -14,6 +14,7 @@ keep it running and keep it up to date. It also lists the optional extras you ca
 - [Quick install (one line)](#quick-install-one-line)
 - [Managing JClaw](#managing-jclaw)
 - [Updating](#updating)
+- [The agent sandbox on Linux](#the-agent-sandbox-on-linux)
 - [Running JClaw with Docker](#running-jclaw-with-docker)
 - [Optional extras](#optional-extras)
 - [HTTPS without browser warnings](#https-without-browser-warnings)
@@ -32,6 +33,10 @@ To run JClaw, you need:
 - **bash.** macOS and most Linux systems include it. On Alpine Linux, run `apk add bash`.
 - **On Windows only: Git Bash or WSL** (the Windows Subsystem for Linux). JClaw's launcher is a
   bash script, so it runs inside one of them.
+- **On Linux: bubblewrap (`bwrap`).** Agents run their shell commands inside it, and without it every
+  agent's shell command is refused. On Ubuntu 23.10 and later it also needs a small AppArmor profile.
+  [The agent sandbox on Linux](#the-agent-sandbox-on-linux) has the steps. The Docker image already
+  includes `bwrap`.
 
 You need nothing else. The JClaw bundle holds the
 [Abundent Play 1.x fork](https://github.com/tsukhani/play1) and the app's dependencies.
@@ -197,11 +202,83 @@ off to `jclaw upgrade`.
 
 Other kinds of install update in other ways:
 
-- With Docker, update the image: `docker compose pull && docker compose up -d`.
+- With Docker, run `install-docker.sh` again (see [Verifying the image](#verifying-the-image)). A new
+  image does not change your `docker-compose.yml` or `seccomp-bwrap.json`, and a release can need both
+  changed; the command updates them. `docker compose pull && docker compose up -d` updates the image
+  only.
 - With a git clone, use `git pull`.
 
 The [Releases page](https://github.com/tsukhani/jclaw/releases) has the release notes for every
 version. The upgrade panel also shows the notes for the newest release.
+
+---
+
+## The agent sandbox on Linux
+
+Every agent's shell command runs inside a sandbox. The Main Agent's commands are fenced off from JClaw's
+own files, such as the key in `certs/.env` that opens every stored secret. A custom agent's commands see
+only its own workspace. On macOS the sandbox is `sandbox-exec`, which is built in. On Linux it is
+`bwrap` (bubblewrap), which you install.
+
+Where no sandbox can start, JClaw refuses every agent's shell command, the Main Agent's included,
+whatever `shell.sandbox` says. It never runs one outside the sandbox. **Settings → Shell Execution**
+then says "This host has no sandbox mechanism (…)", with the cause in the brackets.
+
+The one-line installer does the steps below for you on Linux, on a new install and when you run it
+again over an existing one. It offers to install `bubblewrap`, offers the AppArmor profile on Ubuntu
+23.10 and later, and runs the check. It asks before each change, and without a terminal to ask on it
+changes nothing and says what is missing.
+
+### Install bwrap
+
+```bash
+# Debian / Ubuntu
+sudo apt install bubblewrap
+
+# Fedora
+sudo dnf install bubblewrap
+
+# Arch
+sudo pacman -S bubblewrap
+```
+
+### Check the sandbox on Linux
+
+Run this as the account JClaw runs as. It is the check JClaw makes before it runs a command:
+
+```bash
+bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok
+```
+
+### Ubuntu 23.10 and later
+
+Ubuntu 23.10 and later, 24.04 LTS included, let a program create the user namespace `bwrap` needs only
+when an AppArmor profile allows it. Without one, the check fails with
+`bwrap: setting up uid map: Permission denied`, and `sudo dmesg | grep apparmor` shows an
+`apparmor="DENIED"` line naming `profile="unprivileged_userns"`.
+
+To allow `bwrap`, and no other program, add a profile for it. It has the same shape as the profiles
+Ubuntu ships for other programs that need a user namespace:
+
+```bash
+sudo tee /etc/apparmor.d/bwrap >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+```
+
+Run the check again: it prints `sandbox ok`. JClaw needs no restart, since it checks again before its
+next command. The profile lets any account on the host start `bwrap` with a user namespace, which
+Ubuntu otherwise restricts. To remove it, run
+`sudo apparmor_parser -R /etc/apparmor.d/bwrap && sudo rm /etc/apparmor.d/bwrap`.
+
+A Docker host that runs Ubuntu 23.10 or later needs this profile too, as
+[Running JClaw with Docker](#running-jclaw-with-docker) says.
 
 ---
 
@@ -219,10 +296,20 @@ Docker Compose is the simplest way to run JClaw on a server for everyday use. Th
 - It starts the container with the seccomp profile `seccomp-bwrap.json`. This is Docker's default
   profile with one rule added: it allows the five system calls (`clone`, `unshare`, `mount`,
   `umount2` and `pivot_root`) that the sandbox tool `bwrap` needs to create its namespaces, for the
-  container's processes, and nothing else beyond Docker's default. So agents' shell commands run
-  inside the sandbox: custom agents' confined to their workspace, the main agent's fenced off from
-  JClaw's own files. The file has to sit beside `docker-compose.yml`; the release download
-  already puts it there. A plain `docker run` needs `--security-opt seccomp=seccomp-bwrap.json` as well.
+  container's processes, and nothing else beyond Docker's default. The file has to sit beside
+  `docker-compose.yml`; the release download already puts it there. A plain `docker run` needs
+  `--security-opt seccomp=seccomp-bwrap.json` as well.
+- It starts the container with `apparmor=unconfined`. On a host that uses AppArmor, such as Ubuntu,
+  Docker's own AppArmor profile for containers refuses the mounts `bwrap` needs, even with the seccomp
+  profile above. The seccomp profile, the dropped capabilities and the container's namespaces still
+  apply. Where Docker uses no AppArmor, as Docker Desktop on macOS, the setting changes nothing. A plain
+  `docker run` needs `--security-opt apparmor=unconfined` as well.
+
+So agents' shell commands run inside the sandbox: custom agents' confined to their workspace, the main
+agent's fenced off from JClaw's own files. On a host that runs Ubuntu 23.10 or later, the host also needs
+the `bwrap` AppArmor profile from [Ubuntu 23.10 and later](#ubuntu-2310-and-later), or the sandbox still
+cannot start in the container. Docker Desktop on macOS needs nothing more. `install-docker.sh` (see
+[Verifying the image](#verifying-the-image)) puts all of these in place and checks the sandbox.
 
 ```bash
 # Start in the background
@@ -253,8 +340,11 @@ Custom agents always run their shell commands inside the sandbox. To check that 
 in your container, run:
 
 ```bash
-docker compose exec jclaw bwrap --unshare-user --cap-drop ALL --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok
+docker compose exec jclaw sh -c 'bwrap --unshare-user --cap-drop ALL --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true && echo sandbox ok'
 ```
+
+The check starts `bwrap` from a shell, as JClaw does. On an Ubuntu host, a `bwrap` that Docker starts
+directly stays refused even where the sandbox works for JClaw.
 
 You can also open **Settings → Shell Execution**. When the sandbox cannot start, the panel says
 "This host has no sandbox mechanism (…)", with the cause in the brackets.
@@ -266,10 +356,20 @@ adds the same flags whenever it runs as root.
 If the check fails, every agent's shell commands are refused, the main agent's included, whatever
 `shell.sandbox` says, and the refusal names the cause. JClaw never runs them outside the sandbox.
 
-On Ubuntu and Debian hosts, AppArmor may also block the `mount` calls the sandbox needs. To see
-whether it does, run the check above, then run `sudo dmesg | grep apparmor` on the host. A line
-with `apparmor="DENIED"` and `operation="mount"` means AppArmor is the cause. Agents'
-commands then stay refused; JClaw does not fall back to running them outside the sandbox.
+The first line the check prints names the layer that refused it:
+
+- `No permissions to create a new namespace`: the container runs under Docker's default seccomp
+  profile. Start it with `seccomp-bwrap.json`, as `docker-compose.yml` does.
+- `Failed to make / slave: Permission denied`: Docker's own AppArmor profile refused the mount. Start
+  the container with `apparmor=unconfined`, as `docker-compose.yml` does. This refusal leaves no line in
+  the host's kernel log.
+- `setting up uid map: Permission denied`: the host restricts user namespaces, as Ubuntu 23.10 and
+  later do. Add the host profile from [Ubuntu 23.10 and later](#ubuntu-2310-and-later).
+  `sudo dmesg | grep apparmor` on the host then shows `apparmor="DENIED"` with
+  `profile="unprivileged_userns"`.
+
+Until the check passes, agents' commands stay refused; JClaw does not fall back to running them outside
+the sandbox.
 
 ### Keep the secret with your data
 
@@ -312,19 +412,37 @@ digest returns only the image that matches it. So every release after v0.19.28 a
 `IMAGE_DIGEST` file. It holds the digest of the image that the release built. It is signed with the
 same key that signs the installer downloads.
 
-One command checks that signature, pulls exactly that image and pins it. Run it in the folder that
-holds `docker-compose.yml`:
+One command, `install-docker.sh`, checks that signature, pulls exactly that image and pins it. Then it
+puts in place what the agent sandbox needs, checks the sandbox, and starts JClaw. Run it in the folder
+that holds `docker-compose.yml`:
 
 ```bash
-curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/docker-pull-verified.sh | sh
-docker compose up -d
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install-docker.sh | sh
 
 # A specific release rather than the latest:
-curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/docker-pull-verified.sh | JCLAW_VERSION=vX.Y.Z sh
+curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install-docker.sh | JCLAW_VERSION=vX.Y.Z sh
 ```
 
 The command writes `JCLAW_IMAGE=ghcr.io/tsukhani/jclaw@sha256:…` to `.env`, where
-`docker-compose.yml` reads it. It pulls nothing in these cases:
+`docker-compose.yml` reads it. Then it does these things:
+
+- It writes `seccomp-bwrap.json` beside `docker-compose.yml`, copied from the image it just verified.
+- If `docker-compose.yml` has the shipped `- seccomp=./seccomp-bwrap.json` line but no
+  `- apparmor=unconfined` line, it adds that line beneath it and keeps your old file as
+  `docker-compose.yml.bak`. A compose file laid out differently is left alone, and the command says
+  which two lines to add.
+- On a host that restricts user namespaces, such as Ubuntu 23.10 or later, it offers to add the
+  `bwrap` AppArmor profile from [Ubuntu 23.10 and later](#ubuntu-2310-and-later). It asks first,
+  because the profile changes the host's security settings. Without a terminal to ask on, it adds
+  nothing and says so.
+- It runs the sandbox check in a throwaway container. When the check passes, it asks whether to start
+  JClaw, or to restart it if it is running, and then runs `docker compose up -d`. When the check
+  fails, it starts nothing and names what to fix.
+
+Set `JCLAW_NO_START=1` to do everything but start JClaw, and `JCLAW_ASSUME_YES=1` to answer yes to
+every question. Releases also publish the command under its earlier name, `docker-pull-verified.sh`.
+
+It pulls nothing in these cases:
 
 - The signature is missing or wrong.
 - The file names a different release.

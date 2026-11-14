@@ -17,7 +17,8 @@ import java.util.Map;
 /**
  * JF-165: the container can start the sandbox custom agents' exec runs in. The image installs bwrap, and
  * compose replaces Docker's default seccomp profile, which refuses bwrap's namespaces, with that profile
- * plus one narrow rule, never with {@code unconfined}.
+ * plus one narrow rule, never with {@code unconfined}. JF-413: on an AppArmor host, Docker's docker-default
+ * profile refuses bwrap's mounts, so compose lifts AppArmor, and only AppArmor, for the container.
  */
 class DockerSandboxConfigTest extends UnitTest {
 
@@ -40,13 +41,13 @@ class DockerSandboxConfigTest extends UnitTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void composeShipsOnlyTheNarrowSeccompProfile() throws Exception {
+    void composeShipsTheNarrowSeccompProfileAndLiftsOnlyAppArmor() throws Exception {
         var text = Files.readString(root().resolve("docker-compose.yml"));
         Map<String, Object> compose = new Yaml().load(text);
         var services = (Map<String, Object>) compose.get("services");
         var jclaw = (Map<String, Object>) services.get("jclaw");
-        assertEquals(List.of("seccomp=./seccomp-bwrap.json"), jclaw.get("security_opt"));
-        assertFalse(text.toLowerCase(Locale.ROOT).contains("unconfined"), "compose must never disable a profile");
+        assertEquals(List.of("seccomp=./seccomp-bwrap.json", "apparmor=unconfined"), jclaw.get("security_opt"));
+        assertFalse(text.toLowerCase(Locale.ROOT).contains("seccomp=unconfined"), "compose must never disable seccomp");
         assertFalse(jclaw.containsKey("privileged"));
         assertFalse(jclaw.containsKey("cap_add"));
     }
@@ -77,8 +78,16 @@ class DockerSandboxConfigTest extends UnitTest {
     @Test
     void installsSandboxCheckIsTheReadinessProbe() throws Exception {
         var install = Files.readString(root().resolve("INSTALL.md"));
-        var checks = install.lines().filter(l -> l.startsWith("docker compose exec jclaw bwrap")).toList();
-        assertEquals(List.of("docker compose exec jclaw " + String.join(" ", HarnessSandbox.BWRAP_PROBE_AS_ROOT)
-                + " && echo sandbox ok"), checks);
+        var checks = install.lines().filter(l -> l.startsWith("docker compose exec jclaw")).toList();
+        assertEquals(List.of("docker compose exec jclaw sh -c '" + String.join(" ", HarnessSandbox.BWRAP_PROBE_AS_ROOT)
+                + " && echo sandbox ok'"), checks);
+    }
+
+    /** JF-413: the Linux host check is JClaw's own probe too, run as the account JClaw runs as. */
+    @Test
+    void installsLinuxSandboxCheckIsTheProbe() throws Exception {
+        var install = Files.readString(root().resolve("INSTALL.md"));
+        var checks = install.lines().filter(l -> l.startsWith("bwrap ")).toList();
+        assertEquals(List.of(String.join(" ", HarnessSandbox.BWRAP_PROBE) + " && echo sandbox ok"), checks);
     }
 }

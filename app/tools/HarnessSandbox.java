@@ -789,8 +789,11 @@ public final class HarnessSandbox {
         }
         var reason = failureLine(probe);
         if ("1".equals(System.getenv("JCLAW_CONTAINER"))) {
-            reason += "; in Docker, start the container with the seccomp profile docker-compose.yml names"
-                    + " (seccomp-bwrap.json), as INSTALL.md describes";
+            reason += "; in Docker, start the container with the seccomp profile and apparmor=unconfined that docker-compose.yml names,"
+                    + " and on an Ubuntu 23.10+ host add the bwrap AppArmor profile, as INSTALL.md describes";
+        } else if (reason.contains("setting up uid map")) {
+            // Ubuntu 23.10+ refuses a user namespace to a program no AppArmor profile grants one (JF-413).
+            reason += "; on Ubuntu 23.10 or later, add the bwrap AppArmor profile INSTALL.md describes";
         }
         return reason;
     }

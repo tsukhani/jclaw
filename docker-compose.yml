@@ -47,8 +47,13 @@ services:
     # system calls bwrap creates its namespaces with. seccomp-bwrap.json is that default profile
     # (moby/profiles seccomp/default.json at 4b8214fc4971e06172938a1f1554ccff6647ee80) plus one rule
     # allowing clone, unshare, mount, umount2 and pivot_root; it must sit beside this file.
+    # On a host with AppArmor (Ubuntu), Docker's docker-default profile refuses bwrap's mounts even
+    # so ("Failed to make / slave"), and silently: apparmor=unconfined lifts only that profile, while
+    # seccomp, the dropped capabilities and the namespaces stay (measured on Ubuntu 24.04, JF-413).
+    # An Ubuntu 23.10+ host also needs the bwrap AppArmor profile INSTALL.md gives.
     security_opt:
       - seccomp=./seccomp-bwrap.json
+      - apparmor=unconfined
     # Readiness probe via curl against ApiController.status. curl is already
     # in the runtime image (the Dockerfile's runtime RUN block installs it to
     # fetch Azul's apt key), so this adds nothing to the image

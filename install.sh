@@ -18,6 +18,7 @@
 #   JCLAW_PORT      port to report on launch    (default: 9000)
 #   JCLAW_BIN_DIR   where the `jclaw` shim goes (default: $HOME/.local/bin)
 #   JCLAW_NO_START  set to 1 to install only, not start
+#   JCLAW_ASSUME_YES  set to 1 to answer yes to every question (bubblewrap, the AppArmor profile)
 #   JCLAW_NO_JRE    set to 1 to never auto-install a JRE (just print instructions)
 #   JCLAW_INSTALL_JRE  set to 1 to auto-install the JRE without prompting
 #   JCLAW_NO_RC_EDIT   set to 1 to generate completion scripts but not edit your shell rc
@@ -121,6 +122,94 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+
+# ─── The agent sandbox (Linux) ───────────────────────────────────────────────
+# >>> agent sandbox (JF-413) — definitions only. install.sh and install-docker.sh carry this block
+# word for word; SandboxSetupScriptsTest runs it and holds the profile equal to INSTALL.md's.
+# Ubuntu 23.10+ lets a program make the user namespace bwrap needs only under an AppArmor profile granting one.
+BWRAP_PROFILE='abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}'
+# The JCLAW_* names below are test seams; an operator never needs them.
+USERNS_RESTRICT="${JCLAW_USERNS_RESTRICT:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
+BWRAP_PROFILE_PATH="${JCLAW_BWRAP_PROFILE_PATH:-/etc/apparmor.d/bwrap}"
+TTY="${JCLAW_TTY:-/dev/tty}"
+if [ "$(id -u)" = 0 ]; then SUDO=''; else SUDO='sudo'; fi
+SUDO="${JCLAW_SUDO-$SUDO}"
+
+# A yes or no from the terminal, since through `| sh` stdin is this script. With no terminal the answer is
+# no, so nothing changes unasked; an empty answer takes the default, $2.
+ask() {
+    [ "${JCLAW_ASSUME_YES:-}" = 1 ] && return 0
+    ( true <"$TTY" ) 2>/dev/null || return 1
+    printf '    %s ' "$1" >>"$TTY"
+    read -r reply <"$TTY" || reply=''
+    case "${reply:-$2}" in [Yy]*) return 0 ;; *) return 1 ;; esac
+}
+
+needs_bwrap_profile() {
+    [ "$(cat "$USERNS_RESTRICT" 2>/dev/null)" = 1 ] && [ ! -e "$BWRAP_PROFILE_PATH" ]
+}
+
+ensure_bwrap_profile() {
+    needs_bwrap_profile || return 0
+    substep "this host restricts user namespaces (Ubuntu 23.10 or later), so bwrap needs an AppArmor profile"
+    if ask "Add $BWRAP_PROFILE_PATH with sudo? [y/N]" n \
+        && printf '%s\n' "$BWRAP_PROFILE" | $SUDO tee "$BWRAP_PROFILE_PATH" >/dev/null \
+        && $SUDO "${JCLAW_APPARMOR_PARSER:-apparmor_parser}" -r "$BWRAP_PROFILE_PATH"; then
+        substep "added $BWRAP_PROFILE_PATH"
+        return 0
+    fi
+    substep "not added. INSTALL.md (Ubuntu 23.10 and later) gives the two commands that add it."
+    return 1
+}
+# <<< agent sandbox
+
+# >>> native sandbox (JF-413) — definitions only.
+# HarnessSandbox.BWRAP_PROBE, after `bwrap`.
+PROBE='--ro-bind / / --dev /dev --proc /proc --tmpfs /tmp true'
+
+# Agents' shell commands run inside bwrap on Linux, and are refused where it cannot start. Never fails the install.
+setup_sandbox() {
+    [ "$OS" = linux ] || return 0
+    step "Checking the agent sandbox"
+    if ! command -v bwrap >/dev/null 2>&1; then
+        install=''
+        for pm in apt-get dnf zypper pacman apk; do
+            command -v "$pm" >/dev/null 2>&1 || continue
+            case "$pm" in
+                pacman) install="pacman -S --noconfirm bubblewrap" ;;
+                apk) install="apk add bubblewrap" ;;
+                *) install="$pm install -y bubblewrap" ;;
+            esac
+            break
+        done
+        # shellcheck disable=SC2086 # the command's words split on purpose
+        if [ -n "$install" ] && ask "Agents run shell commands inside bubblewrap. Install it (${SUDO:+$SUDO }$install)? [Y/n]" y \
+            && $SUDO $install; then
+            substep "installed bubblewrap"
+        else
+            warn "bubblewrap is not installed, so every agent's shell command will be refused. Install it, then see INSTALL.md (The agent sandbox on Linux)."
+            return 0
+        fi
+    fi
+    ensure_bwrap_profile || true
+    # shellcheck disable=SC2086 # the probe's words split on purpose
+    if out=$(bwrap $PROBE 2>&1); then
+        substep "sandbox ok"
+        return 0
+    fi
+    first=$(printf '%s\n' "$out" | head -n 1)
+    warn "the agent sandbox cannot start, so every agent's shell command will be refused: $first"
+    case "$first" in
+        *'uid map'*) substep "this host restricts user namespaces: add the bwrap AppArmor profile (INSTALL.md, Ubuntu 23.10 and later)" ;;
+    esac
+    return 0
+}
+# <<< native sandbox
 
 # ─── Platform guard ──────────────────────────────────────────────────────────
 # A musl system (Alpine) cannot run a glibc JRE. ldd names the C library; without ldd, the musl loader's presence does.
@@ -451,6 +540,8 @@ step "Checking prerequisites"
 # jclaw.sh, which manages the install from here on, is a bash script; Alpine and other minimal systems ship without bash.
 command -v bash >/dev/null 2>&1 || die "JClaw needs bash, which this system lacks — install it (on Alpine: apk add bash) and re-run."
 check_java
+# Before the upgrade handoff below, which execs jclaw.sh: an install made before the sandbox needed bwrap gets it too.
+setup_sandbox
 
 # Re-running the installer over an existing install is the obvious way to
 # update, so it has to be the safe one. The install path below replaces $APP_DIR

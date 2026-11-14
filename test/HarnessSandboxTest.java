@@ -159,9 +159,11 @@ class HarnessSandboxTest extends UnitTest {
         org.junit.jupiter.api.Assumptions.assumeFalse(first.isEmpty(), "bwrap printed nothing");
         var expected = first.length() > 200 ? first.substring(0, 200) : first;
         var suffix = "1".equals(System.getenv("JCLAW_CONTAINER"))
-                ? "; in Docker, start the container with the seccomp profile docker-compose.yml names"
-                        + " (seccomp-bwrap.json), as INSTALL.md describes"
-                : "";
+                ? "; in Docker, start the container with the seccomp profile and apparmor=unconfined that docker-compose.yml"
+                        + " names, and on an Ubuntu 23.10+ host add the bwrap AppArmor profile, as INSTALL.md describes"
+                : expected.contains("setting up uid map")
+                        ? "; on Ubuntu 23.10 or later, add the bwrap AppArmor profile INSTALL.md describes"
+                        : "";
         assertEquals(new HarnessSandbox.Availability(false, "bwrap", "'bwrap' is not available: " + expected + suffix),
                 HarnessSandbox.availability());
     }
