@@ -288,7 +288,7 @@ async function saveChatField(configKey: string, value: string) {
       >
         <!-- chat.compactionReserveTokens -->
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
+          <span class="text-xs font-mono text-fg-muted w-72 max-sm:w-full shrink-0 flex items-center gap-1.5">
             compactionReserveTokens
             <InfoTip
               label="About compactionReserveTokens"
@@ -349,7 +349,7 @@ async function saveChatField(configKey: string, value: string) {
           fallback="30"
           :min="0"
           :max="100"
-          label-width="w-60"
+          label-width="w-72"
           tip="When a summary is made, the newest messages stay as they are, up to this percent of the size at which a summary is due, and always your latest message. 0 keeps only your latest message and what follows it. Default: 30."
         />
         <SettingsConfigField
@@ -358,7 +358,7 @@ async function saveChatField(configKey: string, value: string) {
           kind="number"
           fallback="2000"
           :min="0"
-          label-width="w-60"
+          label-width="w-72"
           tip="A summary is made only when the messages before the ones kept come to at least this many tokens. Default: 2000."
         />
         <SettingsConfigField
@@ -368,7 +368,7 @@ async function saveChatField(configKey: string, value: string) {
           fallback="10"
           :min="0"
           :max="100"
-          label-width="w-60"
+          label-width="w-72"
           tip="As compaction.keepPercent, for /compact. Default: 10."
         />
         <SettingsConfigField
@@ -377,7 +377,7 @@ async function saveChatField(configKey: string, value: string) {
           kind="number"
           fallback="200"
           :min="0"
-          label-width="w-60"
+          label-width="w-72"
           tip="As compaction.minSummaryTokens, for /compact. Default: 200."
         />
         <SettingsConfigField
@@ -386,7 +386,7 @@ async function saveChatField(configKey: string, value: string) {
           kind="number"
           fallback="5000"
           :min="0"
-          label-width="w-60"
+          label-width="w-72"
           tip="Beside the summary, the agent also reads your newest summarized messages word for word, up to this many tokens and at most a twentieth of the model's context window. Only chats you alone read get this: Chat, voice, and your own Telegram or Slack direct messages. 0 turns it off. Default: 5000."
         />
         <SettingsConfigField
@@ -394,7 +394,7 @@ async function saveChatField(configKey: string, value: string) {
           label="compaction.checkSummary"
           kind="boolean"
           fallback="false"
-          label-width="w-60"
+          label-width="w-72"
           tip="On, each new summary, and each merge of summaries, is sent back to the model with what it covers, and anything it left out or applied to the wrong person is added before it is stored. One more model call each, in every chat. Default: off."
         />
         <SettingsConfigField
@@ -404,12 +404,12 @@ async function saveChatField(configKey: string, value: string) {
           fallback="10"
           :min="0"
           :max="100"
-          label-width="w-60"
+          label-width="w-72"
           tip="A message you sent in an earlier turn that is larger than this percent of the model's context window, never less than 2,000 tokens, reaches the model as its first 2,000 and last 1,000 characters, with a handle the agent can use to read it whole. The stored message is not changed. 0 sends every message whole. Default: 10."
         />
         <!-- jtokkit.safetyMultiplier.unmatched -->
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
+          <span class="text-xs font-mono text-fg-muted w-72 max-sm:w-full shrink-0 flex items-center gap-1.5">
             jtokkit safety multiplier
             <InfoTip
               label="About jtokkit safety multiplier"
