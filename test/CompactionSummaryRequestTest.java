@@ -90,7 +90,7 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     @Test
     void theSummaryCallSendsTheAgentsOwnPrefixAndToolsWithTheInstructionLast() throws Exception {
-        startProviderBy(request -> text(isSummary(request) ? "SUMMARY-JF154" : "Reply"));
+        startProviderBy(request -> text(isSummary(request) ? SummaryFixture.asSummaryInJson("SUMMARY-JF154") : "Reply"));
         // SessionCompactorTest pins the user's messages carried ahead of the summary; here the prompt ends on it alone.
         ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "0");
         var agent = createAgent();
@@ -140,8 +140,8 @@ class CompactionSummaryRequestTest extends UnitTest {
 
         var stored = latestCompaction(convo.id);
         assertEquals(content(summary.get(0)) + "\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
-                + SessionCompactor.segmentLabel(stored) + "\n\nSUMMARY-JF154", content(turnThree.get(0)));
-        assertEquals("SUMMARY-JF154", stored.summary);
+                + SessionCompactor.segmentLabel(stored) + "\n\n" + SummaryFixture.asSummary("SUMMARY-JF154"), content(turnThree.get(0)));
+        assertEquals(SummaryFixture.asSummary("SUMMARY-JF154"), stored.summary);
         assertEquals(summarized.size(), stored.turnCount);
     }
 
@@ -149,7 +149,7 @@ class CompactionSummaryRequestTest extends UnitTest {
     void aToolCallReplyIsRetriedOnceWithoutToolsAndItsToolNeverRuns() throws Exception {
         var summaryCalls = new AtomicInteger();
         startProviderBy(request -> !isSummary(request) ? text("Reply.")
-                : summaryCalls.incrementAndGet() == 1 ? toolCall() : text("SUMMARY-AFTER-RETRY"));
+                : summaryCalls.incrementAndGet() == 1 ? toolCall() : text(SummaryFixture.asSummaryInJson("SUMMARY-AFTER-RETRY")));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-retry");
         seed(convo, 24, 32_000);
@@ -171,7 +171,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertEquals(List.of("system", "user"), roles(retryMessages));
         assertEquals(SECTIONS, headings(content(retryMessages.get(0))));
         assertEquals(0, toolRuns.get());
-        assertEquals("SUMMARY-AFTER-RETRY", latestCompaction(convo.id).summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY-AFTER-RETRY"), latestCompaction(convo.id).summary);
         assertEquals("Reply.", result.get().response());
         assertEquals(0L, (long) Tx.run(() -> Message.count("conversation.id = ?1 AND role = ?2",
                 convo.id, MessageRole.TOOL.value)));
@@ -200,7 +200,7 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     @Test
     void slashCompactSendsTheRequestATurnSendsWithTheInstructionLast() throws Exception {
-        startProvider(n -> text(n == 2 ? "SUMMARY-SLASH" : "Reply " + n));
+        startProvider(n -> text(n == 2 ? SummaryFixture.asSummaryInJson("SUMMARY-SLASH") : "Reply " + n));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-slash");
         seed(convo, 12, 400);
@@ -223,13 +223,13 @@ class CompactionSummaryRequestTest extends UnitTest {
         var instruction = summary.get(shared).getAsJsonObject();
         assertEquals("user", instruction.get("role").getAsString());
         assertEquals(SECTIONS, headings(instruction.get("content").getAsString()));
-        assertEquals("SUMMARY-SLASH", latestCompaction(convo.id).summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY-SLASH"), latestCompaction(convo.id).summary);
         assertTrue(result.get().responseText().startsWith("> Conversation Compacted"), result.get().responseText());
     }
 
     @Test
     void aSlashCompactHintFollowsTheInstruction() throws Exception {
-        startProvider(n -> text("SUMMARY-HINTED"));
+        startProvider(n -> text(SummaryFixture.asSummaryInJson("SUMMARY-HINTED")));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-hint");
         seed(convo, 12, 400);
@@ -247,7 +247,7 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     @Test
     void aToolCallReplyToSlashCompactIsRetriedWithoutToolsAndItsToolNeverRuns() throws Exception {
-        startProvider(n -> n == 1 ? toolCall() : text("SUMMARY-SLASH-RETRY"));
+        startProvider(n -> n == 1 ? toolCall() : text(SummaryFixture.asSummaryInJson("SUMMARY-SLASH-RETRY")));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf154-slash-retry");
         seed(convo, 12, 400);
@@ -264,13 +264,13 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertEquals(List.of("system", "user"), roles(retryMessages));
         assertEquals(SECTIONS, headings(content(retryMessages.get(0))));
         assertEquals(0, toolRuns.get());
-        assertEquals("SUMMARY-SLASH-RETRY", latestCompaction(convo.id).summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY-SLASH-RETRY"), latestCompaction(convo.id).summary);
         assertTrue(result.get().responseText().startsWith("> Conversation Compacted"), result.get().responseText());
     }
 
     @Test
     void slashCompactOnAChatPastTheHistoryLimitSummarizesItsOldestRowsFirstInChunks() throws Exception {
-        startProvider(n -> text("SUMMARY " + n));
+        startProvider(n -> text(SummaryFixture.asSummaryInJson("SUMMARY " + n)));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf159-slash");
         // A millisecond apart, so no chunk's floor can share a timestamp with the row before it.
@@ -303,13 +303,13 @@ class CompactionSummaryRequestTest extends UnitTest {
                 > Conversation Compacted
 
                 Summarized 18 earlier messages in 2 summary calls; the summaries the agent reads in their place \
-                come to ~4 tokens. Older messages remain in history and will stop being shipped to the model \
+                come to ~74 tokens. Older messages remain in history and will stop being shipped to the model \
                 starting next turn.""", result.get().responseText());
     }
 
     @Test
     void slashCompactOnAChatNeedingMoreThanEightCallsFinishesAndSaysHowManyItMade() throws Exception {
-        startProvider(n -> text("SUMMARY " + n));
+        startProvider(n -> text(SummaryFixture.asSummaryInJson("SUMMARY " + n)));
         var agent = createAgent();
         var convo = ConversationService.create(agent, "web", "u-jf161-slash");
         var tick = new AtomicLong(Instant.now().minusSeconds(60).toEpochMilli());
@@ -330,12 +330,12 @@ class CompactionSummaryRequestTest extends UnitTest {
         var last = content(requests.getLast().getAsJsonArray("messages").get(1));
         assertTrue(last.startsWith("[USER] " + rows.get(96)), last);
         assertEquals(9L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
-        // "SUMMARY 1" to "SUMMARY 9": 81 characters, 20 tokens at four a token.
+        // Nine summaries of 148 characters, "SUMMARY 1" to "SUMMARY 9" under the five sections: 333 tokens at four a token.
         assertEquals("""
                 > Conversation Compacted
 
                 Summarized 108 earlier messages in 9 summary calls; the summaries the agent reads in their place \
-                come to ~20 tokens. Older messages remain in history and will stop being shipped to the model \
+                come to ~333 tokens. Older messages remain in history and will stop being shipped to the model \
                 starting next turn.""", result.get().responseText());
     }
 
@@ -363,12 +363,12 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertEquals(20, result.get().turnsCompacted());
         assertEquals(4, result.get().calls(), "the turn's request and its transcript, without tool output, the half, the rest");
         assertEquals(5, requests.size());
-        assertEquals(SessionCompactor.renderTurns(rows.subList(0, 10), 0),
+        assertEquals(SessionCompactor.renderTurns(rows.subList(0, 10), 0) + "\n\n" + SessionCompactor.TRANSCRIPT_END,
                 content(requests.get(3).getAsJsonArray("messages").get(1)));
-        assertEquals(SessionCompactor.renderTurns(rows.subList(10, 20), 600),
+        assertEquals(SessionCompactor.renderTurns(rows.subList(10, 20), 600) + "\n\n" + SessionCompactor.TRANSCRIPT_END,
                 content(requests.get(4).getAsJsonArray("messages").get(1)));
         JPA.em().clear();
-        assertEquals(List.of("SUMMARY 1", "SUMMARY 2"), Tx.run(() -> {
+        assertEquals(List.of(SummaryFixture.asSummary("SUMMARY 1"), SummaryFixture.asSummary("SUMMARY 2")), Tx.run(() -> {
             var out = new ArrayList<String>();
             for (Object o : SessionCompaction.find("conversation.id = ?1 ORDER BY id", convo.id).fetch()) {
                 out.add(((SessionCompaction) o).summary);
@@ -444,7 +444,7 @@ class CompactionSummaryRequestTest extends UnitTest {
                 exchange.close();
                 return;
             }
-            LlmReplyFixture.send(exchange, text("SUMMARY " + answered.incrementAndGet()));
+            LlmReplyFixture.send(exchange, text(SummaryFixture.asSummaryInJson("SUMMARY " + answered.incrementAndGet())));
         });
     }
 
@@ -576,7 +576,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var messages = request.getAsJsonArray("messages");
         for (var m : List.of(messages.get(0), messages.get(messages.size() - 1))) {
             var content = m.getAsJsonObject().get("content");
-            if (content != null && content.isJsonPrimitive() && headings(content.getAsString()).equals(SECTIONS)) {
+            if (content != null && content.isJsonPrimitive() && content.getAsString().contains(SummaryFixture.SUMMARY_REQUEST_MARK)) {
                 return true;
             }
         }

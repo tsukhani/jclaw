@@ -89,7 +89,7 @@ class CompactionSummaryModelTest extends UnitTest {
                 requests.get(provider).add(JsonParser.parseString(body).getAsJsonObject());
                 int status = statuses.getOrDefault(provider, 200);
                 if (status == 200) {
-                    LlmReplyFixture.send(exchange, text("SUMMARY FROM " + provider));
+                    LlmReplyFixture.send(exchange, text(SummaryFixture.asSummaryInJson("SUMMARY FROM " + provider)));
                     return;
                 }
                 var error = "{\"error\":{\"message\":\"bad request\"}}".getBytes(StandardCharsets.UTF_8);
@@ -359,6 +359,8 @@ class CompactionSummaryModelTest extends UnitTest {
     @Test
     void slashCompactLogsTheDurationAndReportsTheTokensBeforeAndAfter() {
         configure(1_000_000);
+        // The one message summarized is the user's, which the JF-418 quote would carry back beside the summary.
+        ConfigService.set(SessionCompactor.VERBATIM_USER_TOKENS_KEY, "0");
         var agent = fixedAgentOnA("jf-slash-log");
         var conv = ConversationService.create(agent, "web", "u-slash-log");
         seed(conv, 12, i -> "turn " + i + " " + "padding ".repeat(200));

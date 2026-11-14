@@ -322,7 +322,7 @@ class CompactionGateTest extends UnitTest {
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
 
-        startLlmServer(simpleResponse("This is the canned compaction summary."));
+        startLlmServer(simpleResponse(SummaryFixture.asSummaryInJson("This is the canned compaction summary.")));
         configureProviderWithModel("test-model", 2000, 1024);
         var primary = llm.ProviderRegistry.get("test-provider");
 
@@ -374,7 +374,7 @@ class CompactionGateTest extends UnitTest {
     void theCompactionLineSaysHowLongItTookAndHowManySummaryCalls() throws Exception {
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
-        startLlmServer(simpleResponse("This is the canned compaction summary."));
+        startLlmServer(simpleResponse(SummaryFixture.asSummaryInJson("This is the canned compaction summary.")));
         configureProviderWithModel("test-model", 2000, 1024);
         var primary = llm.ProviderRegistry.get("test-provider");
         var conv = ConversationService.create(agent, "whatsapp", "447911111111");
@@ -403,7 +403,7 @@ class CompactionGateTest extends UnitTest {
     void aCompactionReportsStartProgressAndTheTokensBeforeAndAfter() throws Exception {
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
-        startLlmServer(simpleResponse("This is the canned compaction summary."));
+        startLlmServer(simpleResponse(SummaryFixture.asSummaryInJson("This is the canned compaction summary.")));
         configureProviderWithModel("test-model", 2000, 1024);
         var primary = llm.ProviderRegistry.get("test-provider");
         var conv = ConversationService.create(agent, "web", "frames-user");
@@ -479,7 +479,7 @@ class CompactionGateTest extends UnitTest {
         // The 150,000-token cap fires here, not the window rule: no reserve another class sets brings it near on a
         // 1,000,000-token window.
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
-        startLlmServer(simpleResponse("RESERVE SUMMARY"));
+        startLlmServer(simpleResponse(SummaryFixture.asSummaryInJson("RESERVE SUMMARY")));
         var provider = ownProvider(1_000_000);
         var conv = ConversationService.create(agent, "web", "user1");
         try {
@@ -503,7 +503,7 @@ class CompactionGateTest extends UnitTest {
                     List.of(), below), "the window takes the request, so it goes as it is");
             awaitCompaction(conv.id);
             assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
-                            + latestLabel(conv.id) + "\n\nRESERVE SUMMARY"),
+                            + latestLabel(conv.id) + "\n\n" + SummaryFixture.asSummary("RESERVE SUMMARY")),
                     "the reserve reached the trigger, so the next turn's prompt carries the summary");
         } finally {
             awaitCompaction(conv.id);
@@ -553,7 +553,7 @@ class CompactionGateTest extends UnitTest {
         // turn, since a summary cannot shrink the prompt below 40,000; the share of the room after it fires at ~70,000.
         ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "50");
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
-        startLlmServer(simpleResponse("ROOM SUMMARY"));
+        startLlmServer(simpleResponse(SummaryFixture.asSummaryInJson("ROOM SUMMARY")));
         var provider = ownProvider(100_000);
         var conv = ConversationService.create(agent, "web", "user1");
         try {
@@ -578,7 +578,7 @@ class CompactionGateTest extends UnitTest {
                     List.of(), threshold - sent));
             awaitCompaction(conv.id);
             assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
-                    + "\n\n" + latestLabel(conv.id) + "\n\nROOM SUMMARY"), "at the threshold it compacts");
+                    + "\n\n" + latestLabel(conv.id) + "\n\n" + SummaryFixture.asSummary("ROOM SUMMARY")), "at the threshold it compacts");
         } finally {
             awaitCompaction(conv.id);
             ConfigService.delete(SessionCompactor.TRIGGER_PERCENT_KEY);
@@ -593,7 +593,7 @@ class CompactionGateTest extends UnitTest {
     void theRowTriggerFiresOnceTheRowsPassTheHistoryLimitAndNotAtIt() throws Exception {
         ConfigService.set("chat.maxContextMessages", "40");
         var requests = new AtomicInteger();
-        var summary = simpleResponse("ROW SUMMARY");
+        var summary = simpleResponse(SummaryFixture.asSummaryInJson("ROW SUMMARY"));
         startLlmServer(exchange -> {
             requests.incrementAndGet();
             summary.handle(exchange);
@@ -627,7 +627,7 @@ class CompactionGateTest extends UnitTest {
 
             assertEquals(1, requests.get());
             assertTrue(nextSystemPrompt(conv.id).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER
-                    + "\n\n" + latestLabel(conv.id) + "\n\nROW SUMMARY"), "on by default past the limit");
+                    + "\n\n" + latestLabel(conv.id) + "\n\n" + SummaryFixture.asSummary("ROW SUMMARY")), "on by default past the limit");
         } finally {
             awaitCompaction(conv.id);
             removeProvider(provider);
@@ -641,7 +641,7 @@ class CompactionGateTest extends UnitTest {
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "150000");
         var requests = new AtomicInteger();
         var release = new java.util.concurrent.CountDownLatch(1);
-        var summary = simpleResponse("WAITED SUMMARY");
+        var summary = simpleResponse(SummaryFixture.asSummaryInJson("WAITED SUMMARY"));
         startLlmServer(exchange -> {
             requests.incrementAndGet();
             try {
@@ -678,7 +678,7 @@ class CompactionGateTest extends UnitTest {
             assertEquals(1, requests.get(), "it waited for that summary rather than writing a second");
             commitAndReopen();
             assertTrue(((String) rebuilt.get().messages().getFirst().content()).endsWith(
-                    SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + latestLabel(conv.id) + "\n\nWAITED SUMMARY"),
+                    SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + latestLabel(conv.id) + "\n\n" + SummaryFixture.asSummary("WAITED SUMMARY")),
                     "and is sent on it");
         } finally {
             release.countDown();

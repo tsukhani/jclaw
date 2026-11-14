@@ -73,8 +73,8 @@ class RecalledMemoryPlacementTest extends UnitTest {
                     StandardCharsets.UTF_8)).getAsJsonObject();
             var messages = body.getAsJsonArray("messages");
             var last = messages.get(messages.size() - 1).getAsJsonObject().get("content");
-            if (last.isJsonPrimitive() && last.getAsString().contains("### Goals and constraints")) {
-                LlmReplyFixture.send(exchange, REPLY.replace("\"done\"", "\"" + SUMMARY + "\""));
+            if (last.isJsonPrimitive() && last.getAsString().contains(SummaryFixture.SUMMARY_REQUEST_MARK)) {
+                LlmReplyFixture.send(exchange, REPLY.replace("\"done\"", "\"" + SummaryFixture.asSummaryInJson(SUMMARY) + "\""));
                 return;
             }
             chatRequests.add(messages);
@@ -202,7 +202,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
         var system = systemOf(messages);
         var segment = Tx.run(() -> models.SessionCompaction.findLatest(ConversationService.findById(conversationId)));
         assertTrue(system.contains(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n" + SessionCompactor.segmentLabel(segment)
-                        + "\n\n" + SUMMARY),
+                        + "\n\n" + SummaryFixture.asSummary(SUMMARY)),
                 "control: the call carries the rebuilt prompt: " + system.substring(Math.max(0, system.length() - 400)));
         assertFalse(system.contains(KAYAK), "the rebuilt system message carries no recalled memory");
         assertEquals(clock() + recalled("[fact] " + KAYAK), trailingOf(messages));

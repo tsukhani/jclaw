@@ -86,7 +86,7 @@ class MediaBearerRebaseTest extends UnitTest {
             var n = callCount.incrementAndGet();
             String response;
             if (n == 1) {
-                response = simpleResponse("SUMMARY-OF-OLDER-TURNS");
+                response = simpleResponse(SummaryFixture.asSummaryInJson("SUMMARY-OF-OLDER-TURNS"));
             } else {
                 chatBody.set(request);
                 response = simpleResponse("Reply after compaction.");

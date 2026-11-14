@@ -60,7 +60,7 @@ class CompactionCardTokensTest extends UnitTest {
             ChatMessage.user("Plan a week in Kyoto for two."));
 
     private HttpServer llmServer;
-    private final AtomicReference<String> summaryText = new AtomicReference<>("Canned summary of the earlier turns.");
+    private final AtomicReference<String> summaryText = new AtomicReference<>(SummaryFixture.asSummary("Canned summary of the earlier turns."));
     private final List<String> providers = new ArrayList<>();
 
     @BeforeEach

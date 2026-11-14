@@ -87,7 +87,7 @@ class AgentRunnerCompactionTest extends UnitTest {
             if (n == 1) {
                 firstCallBody.set(requestBody);
                 // Summarizer call — return the canned summary.
-                responseBody = simpleResponse("SUMMARY-OF-OLDER-TURNS");
+                responseBody = simpleResponse(SummaryFixture.asSummaryInJson("SUMMARY-OF-OLDER-TURNS"));
             } else {
                 secondCallBody.set(requestBody);
                 // Actual chat call after compaction.
@@ -143,7 +143,7 @@ class AgentRunnerCompactionTest extends UnitTest {
                 SessionCompaction.findLatest(Conversation.findById(convoId)));
         assertNotNull(latest,
                 "AgentRunner must persist a SessionCompaction row after the gate fires");
-        assertEquals("SUMMARY-OF-OLDER-TURNS", latest.summary,
+        assertEquals(SummaryFixture.asSummary("SUMMARY-OF-OLDER-TURNS"), latest.summary,
                 "persisted summary text must mirror the summarize-call response");
         assertTrue(latest.turnCount > 0,
                 "compaction must record how many turns were summarized");
@@ -283,12 +283,12 @@ class AgentRunnerCompactionTest extends UnitTest {
         var chatPrompts = new java.util.concurrent.CopyOnWriteArrayList<String>();
         startLlmServer(exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            var summarizing = body.contains("### Goals and constraints");
+            var summarizing = body.contains(SummaryFixture.SUMMARY_REQUEST_MARK);
             if (!summarizing) {
                 chatPrompts.add(com.google.gson.JsonParser.parseString(body).getAsJsonObject()
                         .getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString());
             }
-            LlmReplyFixture.send(exchange, simpleResponse(summarizing ? "SUMMARY-OF-OLDER-TURNS" : "Reply after compaction."));
+            LlmReplyFixture.send(exchange, simpleResponse(summarizing ? SummaryFixture.asSummaryInJson("SUMMARY-OF-OLDER-TURNS") : "Reply after compaction."));
         });
         configureTinyContextProvider();
         ConfigService.set("chat.compactionReserveTokens", "200");

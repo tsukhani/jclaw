@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
 class BackgroundCompactionTest extends UnitTest {
 
     private static final String MODEL = "jf367-model";
-    private static final String SECTION = "### Goals and constraints";
+    private static final String SECTION = SummaryFixture.SUMMARY_REQUEST_MARK;
     private static final String LEDGER_TOOL = "jf420_ledger";
     /** {@link #reportedPrompt}'s value for a provider that counts a prompt as the client estimated it. */
     private static final int AS_ESTIMATED = -1;
@@ -103,7 +103,7 @@ class BackgroundCompactionTest extends UnitTest {
                     exchange.getResponseBody().write(error);
                     exchange.close();
                 } else {
-                    LlmReplyFixture.send(exchange, reply("SUMMARY " + summaries.size(), 10));
+                    LlmReplyFixture.send(exchange, reply(SummaryFixture.asSummaryInJson("SUMMARY " + summaries.size()), 10));
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -163,7 +163,7 @@ class BackgroundCompactionTest extends UnitTest {
         assertFalse(systemPrompt(turns.getFirst()).contains(SessionCompactor.PRIOR_SUMMARY_HEADER),
                 "the turn itself went uncompacted: it was short of the trigger");
         var stored = latestCompaction(convo.id);
-        assertEquals("SUMMARY 1", stored.summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY 1"), stored.summary);
 
         long rewriteBefore = prologueRewrite("sum_ms");
         long countBefore = prologueRewrite("count");
@@ -172,7 +172,7 @@ class BackgroundCompactionTest extends UnitTest {
         assertEquals(2, turns.size());
         assertEquals(1, summaries.size(), "the next turn writes no summary of its own");
         assertTrue(systemPrompt(turns.get(1)).endsWith(SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
-                + SessionCompactor.segmentLabel(stored) + "\n\nSUMMARY 1"), "the next turn starts on the stored summary");
+                + SessionCompactor.segmentLabel(stored) + "\n\n" + SummaryFixture.asSummary("SUMMARY 1")), "the next turn starts on the stored summary");
         assertEquals(countBefore + 1, prologueRewrite("count"));
         long rewriteMs = prologueRewrite("sum_ms") - rewriteBefore;
         assertTrue(rewriteMs < 50, "the next turn's prologue_rewrite took " + rewriteMs + " ms");
@@ -197,7 +197,7 @@ class BackgroundCompactionTest extends UnitTest {
         assertTrue(started.get().get(30, TimeUnit.SECONDS).compacted());
 
         assertEquals(1, summaries.size());
-        assertEquals("SUMMARY 1", latestCompaction(convo.id).summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY 1"), latestCompaction(convo.id).summary);
     }
 
     @Test
@@ -391,7 +391,7 @@ class BackgroundCompactionTest extends UnitTest {
         assertTrue(retried.compacted(), "the next turn past the trigger started another");
         assertEquals(before + 1, summaries.size());
         assertEquals(1L, compactionCount(convo.id));
-        assertEquals("SUMMARY " + summaries.size(), latestCompaction(convo.id).summary);
+        assertEquals(SummaryFixture.asSummary("SUMMARY " + summaries.size()), latestCompaction(convo.id).summary);
     }
 
     @Test
