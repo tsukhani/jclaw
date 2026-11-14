@@ -1,5 +1,6 @@
 import agents.AgentRunner;
 import agents.CompactionGate;
+import agents.SummaryModels;
 import agents.ToolRegistry;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -20,6 +21,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
 import slash.Commands;
@@ -337,7 +339,114 @@ class CompactionSummaryRequestTest extends UnitTest {
                 starting next turn.""", result.get().responseText());
     }
 
+    // ─── A summary the provider refuses as too long (JF-421) ────────────
+
+    private static final String TOO_LONG = "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"This "
+            + "model's maximum context length is 8192 tokens.\"}}";
+
+    // 24 rows of 8,000 tokens: the tail's 45,000 tokens keep rows 20-23, so a summary plans rows 0-19, 640,000
+    // characters; its oldest half is rows 0-9.
+
+    @Test
+    void aSummaryTheProviderRefusesAsTooLongIsMadeFromTheOldestHalfAndTheRestFollows() throws Exception {
+        startProviderRefusingOver(400_000);
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf421-half");
+        seedTicking(convo, 24, 32_000);
+        commit();
+        var rows = Tx.run(() -> SessionCompactor.snapshotParentMessages(Conversation.findById(convo.id)));
+
+        var result = new AtomicReference<SessionCompactor.CompactionResult>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(compactAsTheGateDoes(agent, convo)));
+
+        assertTrue(result.get().compacted(), "reason=" + result.get().skipReason());
+        assertEquals(20, result.get().turnsCompacted());
+        assertEquals(4, result.get().calls(), "the turn's request and its transcript, without tool output, the half, the rest");
+        assertEquals(5, requests.size());
+        assertEquals(SessionCompactor.renderTurns(rows.subList(0, 10), 0),
+                content(requests.get(3).getAsJsonArray("messages").get(1)));
+        assertEquals(SessionCompactor.renderTurns(rows.subList(10, 20), 600),
+                content(requests.get(4).getAsJsonArray("messages").get(1)));
+        JPA.em().clear();
+        assertEquals(List.of("SUMMARY 1", "SUMMARY 2"), Tx.run(() -> {
+            var out = new ArrayList<String>();
+            for (Object o : SessionCompaction.find("conversation.id = ?1 ORDER BY id", convo.id).fetch()) {
+                out.add(((SessionCompaction) o).summary);
+            }
+            return out;
+        }));
+        assertEquals(rows.get(20).createdAt(), Tx.run(() -> ((Conversation) Conversation.findById(convo.id)).compactionSince));
+    }
+
+    @Test
+    void aSummaryRefusedOnEveryTryGivesAReasonWithoutTheProvidersMessageAndLogsIt() throws Exception {
+        startProviderRefusingOver(0);
+        var agent = createAgent();
+        var convo = ConversationService.create(agent, "web", "u-jf421-refused");
+        seedTicking(convo, 24, 32_000);
+        commit();
+
+        var result = new AtomicReference<SessionCompactor.CompactionResult>();
+        var events = new AtomicReference<List<EventLogger.Captured>>();
+        ToolRegistrySync.withTools(List.of(countingTool()), () -> events.set(EventLogger.captureForTest(
+                () -> result.set(compactAsTheGateDoes(agent, convo)))));
+
+        assertEquals(SessionCompactor.CompactionResult.skipped("The summary failed on 4 tries (last: too large for the "
+                + "summary model). The older messages are kept as they are."), result.get());
+        assertEquals(5, requests.size(), "the turn's request and its transcript, then three smaller tries");
+        var refusal = "HTTP 400 from " + PROVIDER + ": " + TOO_LONG;
+        assertEquals(List.of(("Compaction on the turn's request failed for conversation %d (%s); retrying on the "
+                + "transcript").formatted(convo.id, refusal), ("Compaction for conversation %d gave up after 4 tries and "
+                + "keeps the older messages as they are: all 20 messages (%s); all 20 messages without tool output "
+                + "(%<s); the oldest 10 of 20 messages without tool output (%<s); the oldest 4 of 20 messages without "
+                + "tool output (%<s)").formatted(convo.id, refusal)), events.get().stream()
+                .filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList());
+        JPA.em().clear();
+        assertEquals(0L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
+        assertNull(Tx.run(() -> ((Conversation) Conversation.findById(convo.id)).compactionSince));
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────
+
+    /** One compaction as the gate runs it after a reply: the agent's own model, on its next turn's request. */
+    private static SessionCompactor.CompactionResult compactAsTheGateDoes(Agent agent, Conversation convo) {
+        var fresh = Tx.run(() -> (Agent) Agent.findById(agent.id));
+        var conv = Tx.run(() -> (Conversation) Conversation.findById(convo.id));
+        var own = new SummaryModels.Choice(llm.ProviderRegistry.get(PROVIDER), MODEL);
+        var summary = SummaryModels.resolve(fresh, conv, () -> own, "web");
+        var turn = CompactionGate.nextTurnRequest(fresh, convo.id);
+        assertNotNull(turn);
+        return SessionCompactor.compact(convo.id, summary.first().label(), turn, summary, false, null,
+                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
+    }
+
+    /** {@link #seed} a millisecond apart, so no cut shares a timestamp with the row before it. */
+    private static void seedTicking(Conversation convo, int rows, int chars) {
+        var tick = new AtomicLong(Instant.now().minusSeconds(60).toEpochMilli());
+        AppClock.runWith(new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.incrementAndGet()); }
+        }, () -> seed(convo, rows, chars));
+    }
+
+    /** A provider that refuses each request longer than {@code maxChars} with a 400 naming the context length. */
+    private void startProviderRefusingOver(int maxChars) throws Exception {
+        var answered = new AtomicInteger();
+        serve(exchange -> {
+            var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(JsonParser.parseString(body).getAsJsonObject());
+            if (body.length() > maxChars) {
+                var error = TOO_LONG.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(400, error.length);
+                exchange.getResponseBody().write(error);
+                exchange.close();
+                return;
+            }
+            LlmReplyFixture.send(exchange, text("SUMMARY " + answered.incrementAndGet()));
+        });
+    }
 
     /** {@code /compact} as web chat runs it, on a thread with no transaction of its own. */
     private static Commands.Result slashCompact(Agent agent, Conversation convo, String hint) throws Exception {
@@ -375,13 +484,18 @@ class CompactionSummaryRequestTest extends UnitTest {
 
     /** A provider answering each request by what it asks, for a turn and a summary that run at the same time. */
     private void startProviderBy(java.util.function.Function<JsonObject, String> replyFor) throws Exception {
-        llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        llmServer.createContext("/chat/completions", exchange -> {
+        serve(exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             var request = JsonParser.parseString(body).getAsJsonObject();
             requests.add(request);
             LlmReplyFixture.send(exchange, replyFor.apply(request));
         });
+    }
+
+    /** {@code handler} as the provider's chat endpoint, the provider configured to call it. */
+    private void serve(com.sun.net.httpserver.HttpHandler handler) throws Exception {
+        llmServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", handler);
         llmServer.start();
         ConfigService.set("provider." + PROVIDER + ".baseUrl", "http://127.0.0.1:" + llmServer.getAddress().getPort());
         ConfigService.set("provider." + PROVIDER + ".apiKey", "sk-test");

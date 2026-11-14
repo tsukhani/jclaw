@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import llm.LlmProvider.LlmException;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.ModelInfo;
@@ -14,6 +15,7 @@ import models.MessageRole;
 import models.SessionCompaction;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
+import utils.LlmErrorTemplates.Remedy;
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -23,6 +25,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +59,9 @@ import java.util.stream.Collectors;
  * {@link #summaryMinimum} tokens before them; past the history limit every row before them is summarized, whatever
  * its size. The cut falls on a user row or straight after a tool result, so no tool call is separated from its
  * result, which providers reject.
+ *
+ * <p>A summary call that fails is tried again on less input, its tool output left out and then the oldest half and
+ * quarter of its rows, before the compaction gives up and leaves the rows as they are (JF-421).
  *
  * <p>Re-injection: the segments are appended to the system prompt as a
  * "[Prior conversation summary]" section by the caller (not here), after the
@@ -104,8 +110,9 @@ public final class SessionCompactor {
 
     @FunctionalInterface
     private interface SummaryStep {
+        /** @param retry a later try of {@link #summaryTries}: the transcript, its tool output left out */
         @SuppressWarnings("java:S112") // as Summarizer.summarize: keeps provider exception types out of the seam
-        @Nullable String summarize(CompactionPlan plan) throws Exception;
+        @Nullable String summarize(CompactionPlan plan, boolean retry) throws Exception;
     }
 
     /**
@@ -367,7 +374,8 @@ public final class SessionCompactor {
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, @Nullable String additionalInstructions) {
         return compact(conversationId, () -> modelLabel, force, Integer.MAX_VALUE, MAX_SUMMARY_CALLS,
-                plan -> summarizer.summarize(transcriptRequest(plan, additionalInstructions)), summarizer);
+                (plan, retry) -> summarizer.summarize(transcriptRequest(plan, additionalInstructions, retry)),
+                summarizer);
     }
 
     /**
@@ -380,7 +388,8 @@ public final class SessionCompactor {
      * call that fails, since the turn's prompt, tools and {@code max_tokens} can overflow a small window the
      * transcript fits; no tool is ever run. When the turn's list no longer lines up with the stored rows,
      * the transcript is sent instead, as it is for rows the turn did not load and for a request the summary
-     * model's window does not take ({@link ModelCall#fits}).
+     * model's window does not take ({@link ModelCall#fits}). A summary that still fails or comes back empty is tried
+     * on less input ({@link #summaryTries}); a smaller try the window does not take is skipped unsent.
      *
      * @param turn the request the turn is about to send
      * @param call the model call, made outside any transaction
@@ -402,15 +411,18 @@ public final class SessionCompactor {
                                            boolean force, @Nullable String additionalInstructions, int callTokens,
                                            int maxCalls) {
         return compact(conversationId, () -> Objects.requireNonNullElse(call.answeredBy(), modelLabel), force,
-                callTokens, maxCalls, plan -> summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions),
+                callTokens, maxCalls, (plan, retry) -> retry ? retryOnTranscript(plan, call, additionalInstructions)
+                        : summarizeOnTurn(conversationId, plan, turn, call, additionalInstructions),
                 messages -> firstChoiceText(call.call(messages, List.of())));
     }
 
     /**
      * One summary call after another, oldest rows first, each storing its own segment, until a plan reaches the kept
      * tail or {@code maxCalls} are made (JF-159); then the oldest segments are merged while the live ones pass the
-     * budget (JF-161). With {@value #CHECK_SUMMARY_KEY} on, each summary is checked with one more call before it is
-     * stored ({@link #checked}), when a call is left for it. {@code plainCall} makes the merges and the checks.
+     * budget (JF-161). A plan whose summary fails is tried on less input ({@link #summaryTries}), each try sent counting
+     * as a call; a shorter try that succeeds moves the floor only past its own rows. With {@value #CHECK_SUMMARY_KEY}
+     * on, each summary is checked with one more call before it is stored ({@link #checked}), when a call is left for
+     * it. {@code plainCall} makes the merges and the checks.
      */
     private static CompactionResult compact(Long conversationId, Supplier<String> modelLabel, boolean force,
                                             int callTokens, int maxCalls, SummaryStep step, Summarizer plainCall) {
@@ -441,20 +453,20 @@ public final class SessionCompactor {
                         + "share the timestamp the last summary ended on").formatted(conversationId));
                 break;
             }
-            var checker = check && calls + 1 < maxCalls && !plan.userRows().isEmpty() ? plainCall : null;
-            var stored = summarizeAndStore(conversationId, modelLabel, plan, step, checker);
-            // A later call that fails keeps the segments already stored, and the next compaction starts after them.
-            if (!stored.compacted()) {
-                if (first) return stored;
-                calls++;
+            var outcome = summarizeAndStore(conversationId, modelLabel, plan, step, check ? plainCall : null,
+                    maxCalls - calls);
+            calls += outcome.calls();
+            var done = outcome.stored();
+            // A later plan given up keeps the segments already stored, and the next compaction starts after them.
+            if (done == null) {
+                if (first) return CompactionResult.skipped(outcome.skipReason());
                 break;
             }
-            calls += stored.calls();
-            turnsCompacted += stored.turnsCompacted();
-            rowsSkipped += plan.skipped();
+            turnsCompacted += done.toSummarize().size();
+            rowsSkipped += done.skipped();
             CompactionProgress.advanced(Math.min(turnsCompacted, rowsTotal), rowsTotal);
-            floor = plan.firstKept().createdAt();
-            if (plan.last()) {
+            floor = done.firstKept().createdAt();
+            if (done.last()) {
                 reachedTail = true;
                 break;
             }
@@ -470,27 +482,145 @@ public final class SessionCompactor {
         return CompactionResult.success(turnsCompacted, summaryChars, calls, rowsLeft, rowsSkipped);
     }
 
-    /** The plan's summary call, then its check by {@code checker} when one is given. */
-    private static CompactionResult summarizeAndStore(Long conversationId, Supplier<String> modelLabel,
-                                                      CompactionPlan plan, SummaryStep step,
-                                                      @Nullable Summarizer checker) {
-        String summary;
-        try {
-            summary = step.summarize(plan);
-        } catch (Exception e) {
-            EventLogger.warn("compaction", null, null,
-                    "Compaction LLM call failed for conversation %d: %s"
-                            .formatted(conversationId, e.getMessage()));
-            return CompactionResult.skipped("llm error");
-        }
-        if (summary == null || summary.isBlank()) {
-            EventLogger.warn("compaction", null, null,
-                    "Compaction returned empty summary for conversation %d".formatted(conversationId));
-            return CompactionResult.skipped("empty summary");
-        }
+    // ─── One plan's summary, tried on less input until one succeeds (JF-421) ───
 
-        final var finalSummary = checker != null ? checked(conversationId, summary.strip(), plan, checker)
-                : summary.strip();
+    /** The shares, in percent, of a plan's rows its last tries summarize. */
+    private static final List<Integer> RETRY_SHARES = List.of(50, 25);
+
+    /**
+     * One plan's outcome: the plan whose summary was stored, shorter than the one given when a shorter try succeeded,
+     * or null when none was; the calls it made; and the operator's reason when none was stored, else empty.
+     */
+    private record Outcome(@Nullable CompactionPlan stored, int calls, String skipReason) {}
+
+    /** One try at a summary: its rows, whether it is a retry, and how the log names it. */
+    private record SummaryTry(CompactionPlan plan, boolean retry, String label) {}
+
+    /** A retry the summary model's window does not take ({@link ModelCall#fits}), so it is never sent. */
+    private static final class NotSent extends Exception {
+        NotSent() {
+            super(null, null, false, false);
+        }
+    }
+
+    private static final String TOO_LARGE = "too large for the summary model";
+
+    /**
+     * Why one try failed: {@code brief} for the operator, without the provider's message or a URL, and {@code detail}
+     * for the log. One not {@code retryable} no smaller input fixes, so the tries stop at it.
+     */
+    private record TryFailure(String brief, String detail, boolean retryable) {
+        private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d{3})\\b");
+
+        static TryFailure of(Exception e) {
+            var detail = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
+            if (e instanceof LlmException.BreakerOpen) return new TryFailure("the provider is paused", detail, false);
+            if (e instanceof LlmException.Transport) return new TryFailure("no answer from the provider", detail, true);
+            var failure = e instanceof LlmException llm ? llm.failure() : null;
+            var remedy = failure != null ? failure.remedy() : Remedy.UNCLASSIFIED;
+            if (remedy == Remedy.CONTEXT_WINDOW_EXCEEDED) return new TryFailure(TOO_LARGE, detail, true);
+            int status = e instanceof LlmException.ClientError client ? client.status() : 0;
+            var stated = HTTP_STATUS.matcher(detail);
+            if (status <= 0 && stated.lookingAt()) status = Integer.parseInt(stated.group(1));
+            boolean retryable = remedy != Remedy.INVALID_KEY && remedy != Remedy.QUOTA_EXHAUSTED
+                    && remedy != Remedy.MODEL_NOT_FOUND && remedy != Remedy.RATE_LIMITED;
+            return new TryFailure(status > 0 ? "HTTP " + status : "an error", detail, retryable);
+        }
+    }
+
+    private static final TryFailure EMPTY_REPLY = new TryFailure("an empty reply", "an empty reply", true);
+    private static final TryFailure NOT_SENT = new TryFailure(TOO_LARGE,
+            "too large for the summary model's window, not sent", true);
+
+    /**
+     * The tries at {@code plan}'s summary: the plan as {@code step} sends it, then its transcript with tool output left
+     * out, then that transcript of the oldest {@link #RETRY_SHARES} of its rows, each cut back to where a summary may
+     * end ({@link #latestCut}); a share whose cut is no shorter than the try before it is left out.
+     */
+    private static List<SummaryTry> summaryTries(CompactionPlan plan) {
+        int rows = plan.toSummarize().size();
+        var tries = new ArrayList<SummaryTry>(2 + RETRY_SHARES.size());
+        tries.add(new SummaryTry(plan, false, "all %d messages".formatted(rows)));
+        tries.add(new SummaryTry(plan, true, "all %d messages without tool output".formatted(rows)));
+        var roles = plan.toSummarize().stream().map(MessageSnapshot::role).toList();
+        int shortest = rows;
+        for (int share : RETRY_SHARES) {
+            int cut = latestCut(roles, 1, rows * share / 100);
+            if (cut <= 0 || cut >= shortest) continue;
+            shortest = cut;
+            tries.add(new SummaryTry(shortened(plan, cut), true,
+                    "the oldest %d of %d messages without tool output".formatted(cut, rows)));
+        }
+        return tries;
+    }
+
+    /** {@code plan} summarizing its rows before {@code cut}, which the next summary starts from. */
+    private static CompactionPlan shortened(CompactionPlan plan, int cut) {
+        var head = plan.toSummarize().subList(0, cut);
+        var userRows = new ArrayList<MessageSnapshot>();
+        int next = 0;
+        for (var row : head) {
+            if (next < plan.userRows().size() && plan.userRows().get(next).equals(row)) {
+                userRows.add(row);
+                next++;
+            }
+        }
+        return new CompactionPlan(List.copyOf(head), plan.toSummarize().get(cut), plan.turnsOwnHistory(), false,
+                plan.skipped(), userRows);
+    }
+
+    /**
+     * The first of {@link #summaryTries} that returns a summary, stored and checked by {@code checker} when one is
+     * given and a call is left for it, within {@code callsLeft} calls, at least 1. Giving up stores nothing and logs
+     * each try's failure in one warning.
+     */
+    private static Outcome summarizeAndStore(Long conversationId, Supplier<String> modelLabel, CompactionPlan plan,
+                                             SummaryStep step, @Nullable Summarizer checker, int callsLeft) {
+        var failed = new ArrayList<String>();
+        var last = EMPTY_REPLY;
+        int calls = 0;
+        for (var attempt : summaryTries(plan)) {
+            if (calls >= callsLeft) break;
+            @Nullable String summary = null;
+            var failure = EMPTY_REPLY;
+            try {
+                summary = step.summarize(attempt.plan(), attempt.retry());
+                calls++;
+            } catch (NotSent _) {
+                failure = NOT_SENT;
+            } catch (Exception e) {
+                calls++;
+                failure = TryFailure.of(e);
+            }
+            if (summary != null && !summary.isBlank()) {
+                if (!failed.isEmpty()) {
+                    EventLogger.info("compaction", null, null, "Compaction for conversation %d summarized %s on try %d, "
+                            .formatted(conversationId, attempt.label(), failed.size() + 1)
+                            + "after: " + String.join("; ", failed));
+                }
+                return store(conversationId, modelLabel, attempt.plan(), summary.strip(), checker, calls, callsLeft);
+            }
+            failed.add(attempt.label() + " (" + failure.detail() + ")");
+            last = failure;
+            if (!failure.retryable()) break;
+        }
+        EventLogger.warn("compaction", null, null, ("Compaction for conversation %d gave up after %d %s and keeps the "
+                + "older messages as they are: %s").formatted(conversationId, failed.size(),
+                failed.size() == 1 ? "try" : "tries", String.join("; ", failed)));
+        var reason = failed.size() == 1 ? "The summary failed (%s).".formatted(last.brief())
+                : "The summary failed on %d tries (last: %s).".formatted(failed.size(), last.brief());
+        return new Outcome(null, calls, reason + " The older messages are kept as they are.");
+    }
+
+    private static Outcome store(Long conversationId, Supplier<String> modelLabel, CompactionPlan plan, String summary,
+                                 @Nullable Summarizer checker, int calls, int callsLeft) {
+        var text = summary;
+        int made = calls;
+        if (checker != null && calls < callsLeft && !plan.userRows().isEmpty()) {
+            text = checked(conversationId, summary, plan, checker);
+            made++;
+        }
+        final var finalSummary = text;
         final var turnsCompacted = plan.toSummarize().size();
         final var label = modelLabel.get();
 
@@ -502,8 +632,7 @@ public final class SessionCompactor {
             conv.compactionSince = plan.firstKept().createdAt();
             conv.save();
         });
-
-        return CompactionResult.success(turnsCompacted, finalSummary.length(), checker != null ? 2 : 1, 0, 0);
+        return new Outcome(plan, made, "");
     }
 
     /**
@@ -912,7 +1041,7 @@ public final class SessionCompactor {
         int reach = (int) Math.min(limit, tail);
         int fit = rowsWithin(oldest, callTokens);
         if (inWindow >= 0 && tail > 0 && tail <= Math.min(reach, fit)) return planAt(oldest, reach, false, true, 0);
-        int boundary = latestCut(oldest, 1, Math.min(reach, fit));
+        int boundary = latestCut(oldest.stream().map(m -> m.role).toList(), 1, Math.min(reach, fit));
         if (boundary > 0) return planAt(oldest, boundary, false, false, 0);
         // One chunk over the budget beats none: the call may still fit, and one that fails only stops the catch-up.
         boundary = earliestCut(oldest, fit + 1, reach);
@@ -954,10 +1083,21 @@ public final class SessionCompactor {
         return new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt);
     }
 
-    /** The instruction as the system prompt and the turns as one transcript, tool output shortened (JF-161). */
-    private static List<ChatMessage> transcriptRequest(CompactionPlan plan, @Nullable String additionalInstructions) {
+    /**
+     * The instruction as the system prompt and the turns as one transcript, tool output shortened (JF-161), or with
+     * {@code withoutToolOutput} only its length noted.
+     */
+    private static List<ChatMessage> transcriptRequest(CompactionPlan plan, @Nullable String additionalInstructions,
+                                                       boolean withoutToolOutput) {
         return List.of(ChatMessage.system(instructions(additionalInstructions)),
-                ChatMessage.user(renderTurns(plan.toSummarize(), toolResultChars())));
+                ChatMessage.user(renderTurns(plan.toSummarize(), withoutToolOutput ? 0 : toolResultChars())));
+    }
+
+    private static @Nullable String retryOnTranscript(CompactionPlan plan, ModelCall call,
+                                                      @Nullable String additionalInstructions) throws Exception {
+        var request = transcriptRequest(plan, additionalInstructions, true);
+        if (!call.fits(request, List.of())) throw new NotSent();
+        return firstChoiceText(call.call(request, List.of()));
     }
 
     private static String instructions(@Nullable String additionalInstructions) {
@@ -969,18 +1109,18 @@ public final class SessionCompactor {
                                                     ModelCall call, @Nullable String additionalInstructions)
             throws Exception {
         if (!plan.turnsOwnHistory()) {
-            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions, false), List.of()));
         }
         if (!alignsWith(plan, turn.messages())) {
             EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
                     + "the turn's messages no longer match the stored rows").formatted(conversationId));
-            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions, false), List.of()));
         }
         var request = turnRequest(plan, turn.messages(), additionalInstructions);
         if (!call.fits(request, turn.tools())) {
             EventLogger.info("compaction", null, null, ("Compaction for conversation %d sent the transcript: "
                     + "the turn's request does not fit the summary model's window").formatted(conversationId));
-            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions, false), List.of()));
         }
         ChatResponse reply;
         try {
@@ -988,13 +1128,13 @@ public final class SessionCompactor {
         } catch (Exception e) {
             EventLogger.warn("compaction", null, null, ("Compaction on the turn's request failed for conversation %d "
                     + "(%s); retrying on the transcript").formatted(conversationId, e.getMessage()));
-            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+            return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions, false), List.of()));
         }
         if (!callsATool(reply)) return firstChoiceText(reply);
         EventLogger.info("compaction", null, null,
                 "Compaction reply for conversation %d called a tool; retrying without tools".formatted(conversationId));
         // The transcript, not this history minus tools: tool-call blocks sent with no tool definitions risk a refusal.
-        return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions), List.of()));
+        return firstChoiceText(call.call(transcriptRequest(plan, additionalInstructions, false), List.of()));
     }
 
     /**
@@ -1123,13 +1263,16 @@ public final class SessionCompactor {
     /**
      * The last row from {@code from} to {@code to} a summary may end on: a user row, else the row opening a tool
      * round (JF-236). A turn of many tool rounds under one prompt has no user row to cut at, so it was never
-     * summarized however far past the trigger it ran.
+     * summarized however far past the trigger it ran. Read from the rows' roles alone, so a plan's snapshots are cut
+     * by the same rule.
      */
-    private static int latestCut(List<Message> rows, int from, int to) {
-        int user = latestUserRow(rows, from, to);
-        if (user >= 0) return user;
-        for (int i = Math.min(to, rows.size() - 1); i >= Math.max(from, 1); i--) {
-            if (opensToolRound(rows, i)) return i;
+    private static int latestCut(List<String> roles, int from, int to) {
+        int last = Math.min(to, roles.size() - 1);
+        for (int i = last; i >= from; i--) {
+            if (MessageRole.USER.value.equals(roles.get(i))) return i;
+        }
+        for (int i = last; i >= Math.max(from, 1); i--) {
+            if (opensToolRound(roles.get(i), roles.get(i - 1))) return i;
         }
         return -1;
     }
@@ -1149,8 +1292,11 @@ public final class SessionCompactor {
      * separates a call from its result, which providers reject.
      */
     private static boolean opensToolRound(List<Message> rows, int i) {
-        return MessageRole.ASSISTANT.value.equals(rows.get(i).role)
-                && MessageRole.TOOL.value.equals(rows.get(i - 1).role);
+        return opensToolRound(rows.get(i).role, rows.get(i - 1).role);
+    }
+
+    private static boolean opensToolRound(String role, String previousRole) {
+        return MessageRole.ASSISTANT.value.equals(role) && MessageRole.TOOL.value.equals(previousRole);
     }
 
     /**

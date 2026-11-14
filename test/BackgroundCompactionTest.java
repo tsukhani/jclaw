@@ -376,7 +376,8 @@ class BackgroundCompactionTest extends UnitTest {
         var failed = openGateAndAwait(convo.id);
 
         assertFalse(failed.compacted());
-        assertEquals("llm error", failed.skipReason());
+        assertEquals("The summary failed on 4 tries (last: HTTP 400). The older messages are kept as they are.",
+                failed.skipReason());
         assertEquals(0L, compactionCount(convo.id));
         assertNull(Tx.run(() -> ((Conversation) Conversation.findById(convo.id)).compactionSince),
                 "the floor did not move");

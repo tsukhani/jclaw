@@ -33,6 +33,7 @@ import services.SessionCompactor.TurnRequest;
 import services.Tx;
 import tools.ConversationSearchTool;
 import utils.AppClock;
+import utils.LlmErrorTemplates.Remedy;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -555,7 +556,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void aReplyThatCallsAToolAgainAfterTheRetryStoresNoSummary() {
+    void aReplyThatCallsAToolOnEveryTryStoresNoSummary() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -567,9 +568,8 @@ class SessionCompactorTest extends UnitTest {
                     return toolCallReply();
                 });
 
-        assertEquals(2, calls.get());
-        assertFalse(result.compacted());
-        assertEquals("empty summary", result.skipReason());
+        assertEquals(5, calls.get(), "the turn's request and its transcript, then three smaller tries");
+        assertEquals(SessionCompactor.CompactionResult.skipped(gaveUp(4, "an empty reply")), result);
         commitAndReopen();
         assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
     }
@@ -648,7 +648,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void aTranscriptRetryThatFailsTooStoresNoSummary() {
+    void aSummaryThatFailsOnTheTurnsRequestAndOnEveryTryStoresNoSummary() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -660,9 +660,8 @@ class SessionCompactorTest extends UnitTest {
                     throw new IllegalStateException("provider down");
                 });
 
-        assertEquals(2, calls.get(), "the turn's request, then the transcript once");
-        assertFalse(result.compacted());
-        assertEquals("llm error", result.skipReason());
+        assertEquals(5, calls.get(), "the turn's request and its transcript, then three smaller tries");
+        assertEquals(SessionCompactor.CompactionResult.skipped(gaveUp(4, "an error")), result);
         commitAndReopen();
         assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
     }
@@ -750,8 +749,7 @@ class SessionCompactorTest extends UnitTest {
         commitAndReopen();
 
         var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "");
-        assertFalse(result.compacted());
-        assertEquals("empty summary", result.skipReason());
+        assertEquals(SessionCompactor.CompactionResult.skipped(gaveUp(4, "an empty reply")), result);
 
         commitAndReopen();
         assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
@@ -766,12 +764,255 @@ class SessionCompactorTest extends UnitTest {
 
         var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
                 msgs -> { throw new RuntimeException("boom"); });
-        assertFalse(result.compacted());
-        assertEquals("llm error", result.skipReason());
+        assertEquals(SessionCompactor.CompactionResult.skipped(gaveUp(4, "an error")), result);
 
         commitAndReopen();
         assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
         assertEquals(0L, SessionCompaction.count());
+    }
+
+    // ─── A failed summary tried on less (JF-421) ────────────────────────
+
+    // seedExchanges(conv, 7) plans rows 0-18: the tail's budget reaches back to row 18, call 4's result, so it opens on
+    // the reply after it. Half of the 19 rows cuts at user row 8, a quarter at user row 4.
+
+    @Test
+    void aFailedSummaryIsTriedWithoutToolOutputThenOnTheOldestHalfAndQuarterOfItsRows() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedExchanges(conv, 7);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            requests.add(msgs);
+            throw new IllegalStateException("provider down");
+        });
+
+        assertFalse(result.compacted());
+        assertTrue(transcript(rows, 0, 19, 0).content().toString().length()
+                < transcript(rows, 0, 19, 600).content().toString().length(), "the fixture's tool output is cut");
+        assertEquals(List.of(transcript(rows, 0, 19, 600), transcript(rows, 0, 19, 0), transcript(rows, 0, 8, 0),
+                transcript(rows, 0, 4, 0)), requests.stream().map(r -> r.get(1)).toList());
+        assertEquals(List.of(requests.getFirst().getFirst()), requests.stream().map(List::getFirst).distinct().toList(),
+                "every try carries the same instruction");
+    }
+
+    @Test
+    void aCompactionThatGivesUpStoresNothingKeepsTheFloorAndLogsEachTryInOneWarning() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedExchanges(conv, 7);
+        commitAndReopen();
+        var error = "HTTP 400 from openrouter: {\"error\":{\"message\":\"prompt rejected\"}}";
+        var result = new AtomicReference<SessionCompactor.CompactionResult>();
+
+        var events = EventLogger.captureForTest(() -> result.set(SessionCompactor.compact(conv.id,
+                "openrouter/test-model", msgs -> {
+                    throw new LlmProvider.LlmException.ClientError(error, null, 400, "{}");
+                })));
+
+        assertEquals(SessionCompactor.CompactionResult.skipped(
+                "The summary failed on 4 tries (last: HTTP 400). The older messages are kept as they are."), result.get());
+        assertEquals(List.of(("Compaction for conversation %d gave up after 4 tries and keeps the older messages as "
+                + "they are: all 19 messages (%s); all 19 messages without tool output (%<s); the oldest 8 of 19 "
+                + "messages without tool output (%<s); the oldest 4 of 19 messages without tool output (%<s)")
+                .formatted(conv.id, error)), compactionLines(events));
+        commitAndReopen();
+        assertEquals(List.of(), storedSummaries(conv.id));
+        assertNull(Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    @Test
+    void aSummaryThatSucceedsWithoutToolOutputCoversEveryPlannedRow() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedExchanges(conv, 7);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var requests = new ArrayList<List<ChatMessage>>();
+        var result = new AtomicReference<SessionCompactor.CompactionResult>();
+
+        var events = EventLogger.captureForTest(() -> result.set(SessionCompactor.compact(conv.id,
+                "openrouter/test-model", msgs -> {
+                    requests.add(msgs);
+                    if (requests.size() == 1) throw new IllegalStateException("provider down");
+                    return "WITHOUT TOOL OUTPUT";
+                })));
+
+        assertTrue(result.get().compacted(), "reason=" + result.get().skipReason());
+        assertEquals(19, result.get().turnsCompacted());
+        assertEquals(2, result.get().calls());
+        assertEquals(transcript(rows, 0, 19, 0), requests.get(1).get(1));
+        assertEquals(List.of(("Compaction for conversation %d summarized all 19 messages without tool output on try 2, "
+                + "after: all 19 messages (provider down)").formatted(conv.id)), compactionLines(events));
+        commitAndReopen();
+        assertEquals(List.of("WITHOUT TOOL OUTPUT"), storedSummaries(conv.id));
+        assertEquals(rows.get(19).createdAt(), Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    @Test
+    void aShorterSummaryMovesTheFloorOnlyPastItsOwnRowsAndTheNextCallSummarizesTheRest() {
+        for (int failures : new int[] {2, 3}) {
+            var conv = ConversationService.create(agent, "web", "shorter-" + failures);
+            seedExchanges(conv, 7);
+            commitAndReopen();
+            var rows = allRows(conv.id);
+            int shorter = failures == 2 ? 8 : 4;
+            var requests = new ArrayList<List<ChatMessage>>();
+
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+                requests.add(msgs);
+                if (requests.size() <= failures) throw new IllegalStateException("provider down");
+                return "SUMMARY " + requests.size();
+            });
+
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            assertEquals(19, result.turnsCompacted(), "the next call summarizes the rest up to the tail");
+            assertEquals(failures + 2, result.calls());
+            assertEquals(transcript(rows, 0, shorter, 0), requests.get(failures).get(1),
+                    "a shorter try needs no minimum: " + shorter + " rows are below the ten setup asks for");
+            assertEquals(transcript(rows, shorter, 19, 600), requests.get(failures + 1).get(1));
+            commitAndReopen();
+            var segments = storedSegments(conv.id);
+            assertEquals(List.of("SUMMARY " + (failures + 1), "SUMMARY " + (failures + 2)),
+                    segments.stream().map(s -> s.summary).toList());
+            assertEquals(List.of(shorter, 19 - shorter), segments.stream().map(s -> s.turnCount).toList());
+            assertEquals(List.of(rows.get(0).createdAt(), rows.get(shorter - 1).createdAt(),
+                    rows.get(shorter).createdAt(), rows.get(18).createdAt()), List.of(segments.get(0).coversFrom,
+                    segments.get(0).coversTo, segments.get(1).coversFrom, segments.get(1).coversTo));
+            assertEquals(rows.get(19).createdAt(), Conversation.<Conversation>findById(conv.id).compactionSince);
+        }
+    }
+
+    @Test
+    void aShorterSummaryIsCheckedAgainstOnlyTheUserMessagesItCovers() {
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedExchanges(conv, 7);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var requests = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            requests.add(msgs);
+            if (requests.size() <= 2) throw new IllegalStateException("provider down");
+            return requests.size() == 3 ? "HALF SUMMARY" : "HALF SUMMARY, checked";
+        });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(List.of(ChatMessage.system(CHECK_TEXT), ChatMessage.user("[Summary]\n\nHALF SUMMARY\n\n"
+                + "[The user's messages in the turns it covers]\n\n"
+                + SessionCompactor.renderTurns(List.of(rows.get(0), rows.get(4))).strip())), requests.get(3));
+        commitAndReopen();
+        assertEquals("HALF SUMMARY, checked", storedSummaries(conv.id).getFirst());
+    }
+
+    @Test
+    void theCallCapBoundsTheTries() {
+        for (int max = 1; max <= 5; max++) {
+            var conv = ConversationService.create(agent, "web", "cap-" + max);
+            seedExchanges(conv, 7);
+            commitAndReopen();
+            // Out of line with the rows, so the first try is the transcript alone.
+            var shifted = new ArrayList<>(turnMessages(conv.id));
+            shifted.remove(1);
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model", new TurnRequest(shifted, TOOLS),
+                    (msgs, defs) -> {
+                        calls.incrementAndGet();
+                        throw new IllegalStateException("provider down");
+                    }, false, null, Integer.MAX_VALUE, max);
+
+            int tries = Math.min(max, 4);
+            assertEquals(tries, calls.get(), "cap " + max);
+            assertEquals(SessionCompactor.CompactionResult.skipped(tries == 1
+                    ? "The summary failed (an error). The older messages are kept as they are."
+                    : gaveUp(tries, "an error")), result, "cap " + max);
+        }
+    }
+
+    @Test
+    void aRetryTheSummaryModelsWindowDoesNotTakeIsSkippedUnsentAndCostsNoCall() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedExchanges(conv, 7);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        // Room for the oldest eight rows without tool output and the instruction, not for all nineteen.
+        int window = transcript(rows, 0, 8, 0).content().toString().length() + 10_000;
+        assertTrue(transcript(rows, 0, 19, 0).content().toString().length() > window, "the fixture's full retry is too large");
+        var requests = new ArrayList<List<ChatMessage>>();
+        var call = new SessionCompactor.ModelCall() {
+            @Override
+            public ChatResponse call(List<ChatMessage> messages, List<ToolDef> tools) {
+                requests.add(messages);
+                if (requests.size() == 1) throw new IllegalStateException("provider down");
+                return reply("SUMMARY " + requests.size());
+            }
+
+            @Override
+            public boolean fits(List<ChatMessage> messages, List<ToolDef> tools) {
+                return messages.stream().mapToInt(m -> String.valueOf(m.content()).length()).sum() <= window;
+            }
+        };
+        var result = new AtomicReference<SessionCompactor.CompactionResult>();
+
+        var events = EventLogger.captureForTest(() -> result.set(SessionCompactor.compact(conv.id,
+                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call)));
+
+        assertTrue(result.get().compacted(), "reason=" + result.get().skipReason());
+        assertEquals(3, result.get().calls(), "the transcript, the oldest eight rows, then the rest");
+        assertEquals(List.of(transcript(rows, 0, 19, 600), transcript(rows, 0, 8, 0), transcript(rows, 8, 19, 600)),
+                requests.stream().map(r -> r.get(1)).toList());
+        assertEquals(List.of(("Compaction for conversation %d sent the transcript: the turn's request does not fit the "
+                + "summary model's window").formatted(conv.id), ("Compaction for conversation %d summarized the "
+                + "oldest 8 of 19 messages without tool output on try 3, after: all 19 messages (provider down); all 19 "
+                + "messages without tool output (too large for the summary model's window, not sent)")
+                .formatted(conv.id)), compactionLines(events));
+        commitAndReopen();
+        assertEquals(List.of("SUMMARY 2", "SUMMARY 3"), storedSummaries(conv.id));
+    }
+
+    /** A failure and how many tries it ends after, with the words the reason gives it. */
+    private record FailureCase(Exception error, int tries, String brief) {}
+
+    @Test
+    void theReasonNamesTheLastFailureInPlainWordsAndOneNoSmallerRequestFixesEndsTheTries() {
+        var cases = List.of(
+                new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 400 from p: {\"error\":"
+                        + "{\"message\":\"prompt rejected\"}}", failure(Remedy.UNCLASSIFIED), 400, "{}"), 4, "HTTP 400"),
+                new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 400 from p: maximum context length is "
+                        + "8192 tokens", failure(Remedy.CONTEXT_WINDOW_EXCEEDED), 400, "{}"), 4,
+                        "too large for the summary model"),
+                new FailureCase(new LlmProvider.LlmException.ServerError("HTTP 503 from p: overloaded"), 4, "HTTP 503"),
+                new FailureCase(new LlmProvider.LlmException.Transport("Transport failure calling p: timed out", null),
+                        4, "no answer from the provider"),
+                new FailureCase(new IllegalStateException(), 4, "an error"),
+                new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 401 from p: bad key",
+                        failure(Remedy.INVALID_KEY), 401, "{}"), 1, "HTTP 401"),
+                new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 402 from p: no credit",
+                        failure(Remedy.QUOTA_EXHAUSTED), 402, "{}"), 1, "HTTP 402"),
+                new FailureCase(new LlmProvider.LlmException.ClientError("HTTP 404 from p: model not found",
+                        failure(Remedy.MODEL_NOT_FOUND), 404, "{}"), 1, "HTTP 404"),
+                new FailureCase(new LlmProvider.LlmException.RateLimited("HTTP 429 from p: rate limited (retry-after "
+                        + "5s)", null, failure(Remedy.RATE_LIMITED)), 1, "HTTP 429"),
+                new FailureCase(new LlmProvider.LlmException.BreakerOpen("Circuit breaker open for p: not calling it "
+                        + "until it recovers"), 1, "the provider is paused"));
+        for (var c : cases) {
+            var conv = ConversationService.create(agent, "web", "reason-" + c.brief());
+            seedMessages(conv, 25);
+            commitAndReopen();
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+                calls.incrementAndGet();
+                throw c.error();
+            });
+
+            assertEquals(c.tries(), calls.get(), c.error().toString());
+            assertEquals(SessionCompactor.CompactionResult.skipped(c.tries() == 1
+                    ? "The summary failed (%s). The older messages are kept as they are.".formatted(c.brief())
+                    : gaveUp(c.tries(), c.brief())), result, c.error().toString());
+        }
     }
 
     @Test
@@ -2008,6 +2249,42 @@ class SessionCompactorTest extends UnitTest {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
             ConversationService.appendMessage(conv, role, sized(role, label + " " + i + " content"), null, null, null);
         }
+    }
+
+    /**
+     * {@code exchanges} of a user row, an assistant row calling a tool, its result and a reply, each
+     * {@link #ROW_TOKENS}, a millisecond apart.
+     */
+    private static void seedExchanges(Conversation conv, int exchanges) {
+        var tick = new AtomicLong(Instant.now().minusSeconds(3_600).toEpochMilli());
+        var ticking = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.ofEpochMilli(tick.incrementAndGet()); }
+        };
+        AppClock.runWith(ticking, () -> {
+            for (int e = 0; e < exchanges; e++) {
+                for (var m : List.of(row(MessageRole.USER, ROW_TOKENS), call("call-" + e), result("call-" + e),
+                        row(MessageRole.ASSISTANT, ROW_TOKENS))) {
+                    ConversationService.appendMessage(conv, MessageRole.fromValue(m.role), m.content, m.toolCalls,
+                            m.toolResults, null);
+                }
+            }
+        });
+    }
+
+    /** The transcript a summary call sends of {@code rows} {@code from} to {@code to}, tool output cut to {@code toolChars}. */
+    private static ChatMessage transcript(List<MessageSnapshot> rows, int from, int to, int toolChars) {
+        return ChatMessage.user(SessionCompactor.renderTurns(rows.subList(from, to), toolChars));
+    }
+
+    /** The reason a compaction gives after {@code tries} failed tries, the last for {@code brief}. */
+    private static String gaveUp(int tries, String brief) {
+        return "The summary failed on %d tries (last: %s). The older messages are kept as they are.".formatted(tries, brief);
+    }
+
+    private static utils.LlmErrorTemplates.Failure failure(Remedy remedy) {
+        return new utils.LlmErrorTemplates.Failure(remedy, "p", "m", null, null);
     }
 
     /**
