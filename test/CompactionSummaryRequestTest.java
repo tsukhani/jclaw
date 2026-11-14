@@ -417,7 +417,7 @@ class CompactionSummaryRequestTest extends UnitTest {
         var turn = CompactionGate.nextTurnRequest(fresh, convo.id);
         assertNotNull(turn);
         return SessionCompactor.compact(convo.id, summary.first().label(), turn, summary, false, null,
-                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
+                summary.callTokens(own.info()), SessionCompactor.MAX_SUMMARY_CALLS);
     }
 
     /** {@link #seed} a millisecond apart, so no cut shares a timestamp with the row before it. */

@@ -36,7 +36,7 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
             return provider.config().name() + "/" + modelId;
         }
 
-        @Nullable ModelInfo info() {
+        public @Nullable ModelInfo info() {
             return provider.config().models().stream().filter(m -> m.id().equals(modelId)).findFirst().orElse(null);
         }
     }
@@ -106,9 +106,14 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
         return choices.getFirst();
     }
 
-    /** The most tokens one summary call's rows may carry, by the first choice's window. */
-    public int callTokens() {
-        return SessionCompactor.summaryCallTokens(first().info());
+    /**
+     * The most tokens one summary call's rows may carry: the first choice's, never past the size {@code turnModel}
+     * fires its own trigger at. The kept tail is a share of this ({@link SessionCompactor#tailBudget}) and stays in
+     * the turn's prompt, so a router's summarizer with the larger window would leave that prompt near its next
+     * trigger, or past a small model's window.
+     */
+    public int callTokens(@Nullable ModelInfo turnModel) {
+        return Math.min(SessionCompactor.summaryCallTokens(first().info()), SessionCompactor.summaryCallTokens(turnModel));
     }
 
     @Override

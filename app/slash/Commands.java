@@ -821,7 +821,7 @@ public final class Commands {
         long startNs = System.nanoTime();
         var progress = CompactionProgress.open(tokensBefore);
         var result = progress.around(() -> CompactionGate.runExclusive(current.id, () -> SessionCompactor.compact(
-                current.id, summary.first().label(), turn, summary, /*force*/ true, args, summary.callTokens(),
+                current.id, summary.first().label(), turn, summary, /*force*/ true, args, summary.callTokens(counted.info()),
                 Integer.MAX_VALUE)));
         long tookMs = (System.nanoTime() - startNs) / 1_000_000L;
         int[] tokensAfter = {0};

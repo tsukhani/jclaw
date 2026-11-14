@@ -142,6 +142,31 @@ class CompactionSummaryModelTest extends UnitTest {
     }
 
     @Test
+    void aRouterAgentsSummaryKeepsTheShareOfTheAnsweringModelsTriggerNotTheLargerSummarizers() {
+        // a answers in a 40,000-token window and fires at 20,000; b summarizes in 1,000,000 and would fire at the
+        // 150,000 cap, whose 30% share holds every one of the 25,000 seeded tokens.
+        configure(40_000, 1_000_000);
+        var agent = routerAgent();
+        var conv = ConversationService.create(agent, "web", "u-jf416-router-tail");
+        seed(conv, 25, i -> "turn " + i + bigText(1_000));
+        commit();
+        var rows = Tx.run(() -> ConversationService.loadRecentMessages(Conversation.findById(conv.id)));
+        var answering = ProviderRegistry.get(a).config().models().getFirst();
+        long keep = SessionCompactor.tailBudget(false, SessionCompactor.summaryCallTokens(answering));
+        int kept = rows.size() - SessionCompactor.keptTailStart(rows, keep, SessionCompactor.summaryMinimum(false));
+        int keptOnTheSummarizersShare = rows.size() - SessionCompactor.keptTailStart(rows, SessionCompactor.tailBudget(
+                false, SessionCompactor.summaryCallTokens(ProviderRegistry.get(b).config().models().getFirst())),
+                SessionCompactor.summaryMinimum(false));
+        assertEquals(6_000, keep);
+        assertTrue(kept < keptOnTheSummarizersShare, kept + " rows on a's share, " + keptOnTheSummarizersShare + " on b's");
+
+        compactDuringACodingTurn(agent, conv, List.of(ChatMessage.system("SP"), ChatMessage.user("hi")));
+
+        assertEquals(List.of(b + "/" + b + "-model"), storedModels(conv.id));
+        assertEquals(kept, (long) Tx.run(() -> ConversationService.countSinceFloor(Conversation.findById(conv.id))));
+    }
+
+    @Test
     void aFixedModelAgentSummarizesWithItsOwnModelWhateverTheRouterOffers() {
         configure(1_000_000);
         var agent = new Agent();
@@ -447,9 +472,14 @@ class CompactionSummaryModelTest extends UnitTest {
 
     /** Providers a, b and c, one model each; {@code bWindow} is b's context window. a serves chat and coding, b then c summarize. */
     private void configure(int bWindow) {
+        configure(1_000_000, bWindow);
+    }
+
+    /** a, the turns' model, with a window of {@code aWindow}; b, the first summarizer, {@code bWindow}; c 1,000,000. */
+    private void configure(int aWindow, int bWindow) {
         var port = llmServer.getAddress().getPort();
         for (var provider : List.of(a, b, c)) {
-            int window = provider.equals(b) ? bWindow : 1_000_000;
+            int window = provider.equals(a) ? aWindow : provider.equals(b) ? bWindow : 1_000_000;
             ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:" + port + "/" + provider);
             ConfigService.set("provider." + provider + ".apiKey", "sk-test");
             ConfigService.set("provider." + provider + ".models", ("[{\"id\":\"%s-model\",\"name\":\"%s\","

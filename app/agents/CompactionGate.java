@@ -293,7 +293,7 @@ public final class CompactionGate {
         var summary = SummaryModels.resolve(agent, snapshot.conversation(), () -> turnModel, snapshot.channelType());
         long startNs = System.nanoTime();
         var result = SessionCompactor.compact(conversationId, summary.first().label(), turn, summary, false, null,
-                summary.callTokens(), SessionCompactor.MAX_SUMMARY_CALLS);
+                summary.callTokens(snapshot.modelInfo()), SessionCompactor.MAX_SUMMARY_CALLS);
         if (result.compacted()) {
             logCompacted(agent.name, snapshot.channelType(), summary, result, (System.nanoTime() - startNs) / 1_000_000L);
         } else if (reachesWindow(measure, snapshot.modelInfo())) {
