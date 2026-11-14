@@ -174,7 +174,7 @@ public final class CompactionGate {
                     () -> compactAndLog(agent, snapshot, modelId, primary, turn, measure, true)));
         }
         if (!result.compacted()) {
-            progress.skipped();
+            progress.skipped(result.skipReason());
             return current;
         }
 
@@ -189,8 +189,9 @@ public final class CompactionGate {
             var assembled = SystemPromptAssembler.assemble(agent, null, promptDisabled, conv.channelType, null, conv);
             return MessageHydrator.buildMessages(AgentPromptPreparer.turnSystemPrompt(assembled.systemPrompt(), conv), conv);
         });
+        // The reserve joins the measure unconverted, so it joins the after-count the same way.
         progress.done(measure.toTriggerUnits(ContextWindowManager.adjustedPromptTokens(providerName, modelId,
-                TokenUsageEstimator.estimateChatRequest(modelId, rebuilt.messages(), tools)) + reservedTokens),
+                TokenUsageEstimator.estimateChatRequest(modelId, rebuilt.messages(), tools))) + reservedTokens,
                 (System.nanoTime() - startNs) / 1_000_000L);
         return rebuilt;
     }

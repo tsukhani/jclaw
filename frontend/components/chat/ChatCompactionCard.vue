@@ -4,9 +4,10 @@
  *
  * Under way it shows the tokens being compressed and a bar of the rows summarized so far; a compaction that has not
  * said how many rows it has (a `/compact`, which only answers when it is done) shows a sliding bar instead. When it
- * ends it shows the prompt's token count before and after, as the estimator counts them.
+ * ends it shows the prompt's token count before and after in the provider's units, as the context meter counts them,
+ * or, when no summary was stored, why.
  */
-import { ArrowsPointingInIcon, CheckCircleIcon } from '@heroicons/vue/24/outline'
+import { ArrowsPointingInIcon, CheckCircleIcon, ExclamationTriangleIcon } from '@heroicons/vue/24/outline'
 import type { CompactionCard } from '~/composables/useChatStream'
 
 const props = defineProps<{ card: CompactionCard }>()
@@ -18,6 +19,17 @@ function tokens(n: number): string {
 }
 
 const running = computed(() => props.card.phase === 'start')
+const skipped = computed(() => props.card.phase === 'skipped')
+const title = computed(() => {
+  if (running.value) return 'Compacting conversation'
+  return skipped.value ? 'Summary not made' : 'Conversation compacted'
+})
+const badgeClass = computed(() => {
+  if (running.value) return 'bg-violet-100 text-violet-600 dark:bg-violet-400/15 dark:text-violet-300'
+  return skipped.value
+    ? 'bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300'
+    : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300'
+})
 const percentRows = computed(() => {
   const { done, total } = props.card
   return total && total > 0 && done != null ? Math.min(100, Math.round((done / total) * 100)) : null
@@ -73,12 +85,16 @@ const summary = computed(() => {
       <div class="flex items-center gap-2.5">
         <span
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-          :class="running ? 'bg-violet-100 text-violet-600 dark:bg-violet-400/15 dark:text-violet-300'
-            : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300'"
+          :class="badgeClass"
         >
           <ArrowsPointingInIcon
             v-if="running"
             class="h-4 w-4 animate-pulse motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <ExclamationTriangleIcon
+            v-else-if="skipped"
+            class="h-4 w-4"
             aria-hidden="true"
           />
           <CheckCircleIcon
@@ -92,7 +108,7 @@ const summary = computed(() => {
             <span
               class="text-sm font-medium text-fg-strong"
               data-testid="compaction-title"
-            >{{ running ? 'Compacting conversation' : 'Conversation compacted' }}</span>
+            >{{ title }}</span>
             <span
               class="shrink-0 font-mono text-xs tabular-nums text-fg-muted"
               data-testid="compaction-time"
@@ -104,6 +120,13 @@ const summary = computed(() => {
             data-testid="compaction-summary"
           >
             {{ summary }}
+          </p>
+          <p
+            v-else-if="skipped && card.reason"
+            class="text-xs text-fg-muted"
+            data-testid="compaction-skip-reason"
+          >
+            {{ card.reason }}
           </p>
           <p
             v-else-if="card.tokensBefore != null && card.tokensAfter != null"
@@ -126,6 +149,7 @@ const summary = computed(() => {
       </div>
 
       <div
+        v-if="!skipped"
         class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border"
         role="progressbar"
         aria-label="Compaction progress"

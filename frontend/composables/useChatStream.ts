@@ -53,20 +53,22 @@ interface TurnAnswer {
   saved?: boolean
   /** The pick a command typed in a fresh chat made, which that chat holds until its first message. */
   pick?: CommandPick
-  /** A `/compact` that stored a summary: the prompt's estimated tokens before and after, and how long it took. */
+  /** A `/compact` that stored a summary: the prompt's tokens before and after, as the meter counts them, and how long it took. */
   compaction?: { tokensBefore: number, tokensAfter: number, ms: number }
 }
 
-/** What the compaction card shows: a compaction under way, or one that just finished. */
+/** What the compaction card shows: a compaction under way, one that just finished, or one that stored no summary. */
 export interface CompactionCard {
-  phase: 'start' | 'done'
-  /** The prompt's estimated tokens when it began; null for a `/compact`, which only learns it when it ends. */
+  phase: 'start' | 'done' | 'skipped'
+  /** The prompt's tokens when it began, as the meter counts them; null for a `/compact`, which only says when it ends. */
   tokensBefore: number | null
   tokensAfter?: number
   /** Rows summarized so far and in all; absent until the first summary lands, and for a `/compact`. */
   done?: number
   total?: number
   ms?: number
+  /** Why a skipped compaction stored no summary, as the server words it. */
+  reason?: string
 }
 
 const COMPACT_COMMAND = /^\/compact(\s|$)/i
@@ -234,7 +236,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     if (compactionTimer) clearTimeout(compactionTimer)
     compactionTimer = null
     compaction.value = card
-    if (card?.phase === 'done') {
+    if (card?.phase === 'done' || card?.phase === 'skipped') {
       compactionTimer = setTimeout(() => {
         compaction.value = null
       }, COMPACTION_DONE_MS)
@@ -469,7 +471,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
-  /** A `{"compaction":{"phase":…}}` status frame: the card opens at its start, fills as rows are summarized, and ends with the token counts. */
+  /**
+   * A `{"compaction":{"phase":…}}` status frame: the card opens at its start, fills as rows are summarized, and ends
+   * with the token counts, or with why no summary was stored.
+   */
   function applyCompactionFrame(content: string) {
     try {
       const body = (JSON.parse(content) as { compaction?: Record<string, number | string> }).compaction
@@ -486,7 +491,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
           ms: Number(body.ms), done: current?.total, total: current?.total })
       }
       else if (body.phase === 'skipped') {
-        setCompaction(null)
+        setCompaction({ phase: 'skipped', tokensBefore: current?.tokensBefore ?? null,
+          ...(typeof body.reason === 'string' && body.reason ? { reason: body.reason } : {}) })
       }
     }
     catch {

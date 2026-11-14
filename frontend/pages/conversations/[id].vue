@@ -47,6 +47,18 @@ catch {
 
 const summaryMarkers = computed(() => placeSummaryMarkers(messages.value, compactions.value))
 
+// Chat's summary dividers link here as #summary-<n>. The layout scrolls <main>, not the window, so the router's own
+// hash scroll never reaches the marker: this page brings it into view, open.
+const targetedSummary = Number(/^#summary-(\d+)$/.exec(route.hash)?.[1] ?? Number.NaN)
+onMounted(() => {
+  if (Number.isNaN(targetedSummary)) return
+  void nextTick(() => {
+    const marker = document.getElementById(`summary-${targetedSummary}`)
+    marker?.scrollIntoView?.({ block: 'center' })
+    marker?.querySelector('button')?.focus({ preventScroll: true })
+  })
+})
+
 const conversationStats = computed(() => {
   let inputTokens = 0
   let outputTokens = 0
@@ -355,6 +367,7 @@ function exportConversation() {
           :key="`summary-${marker.compaction.id}`"
           :marker="marker"
           :agent-id="conversation?.agentId ?? null"
+          :targeted="marker.number === targetedSummary"
         />
         <template
           v-for="(msg, msgIdx) in messages"
@@ -408,6 +421,7 @@ function exportConversation() {
             :key="`summary-${marker.compaction.id}`"
             :marker="marker"
             :agent-id="conversation?.agentId ?? null"
+            :targeted="marker.number === targetedSummary"
           />
         </template>
       </div>

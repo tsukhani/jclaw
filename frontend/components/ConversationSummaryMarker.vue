@@ -13,9 +13,12 @@ import {
 const props = defineProps<{
   marker: SummaryMarker
   agentId: number | null
+  /** The page was opened at this marker, as a Chat divider's link opens it, so it starts open. */
+  targeted?: boolean
 }>()
 
-const open = ref(false)
+// Read once: the link opens it on arrival, and the toggle owns it after.
+const open = ref(props.targeted === true)
 const bodyId = computed(() => `summary-${props.marker.number}-body`)
 const covers = computed(() => summaryCoversLabel(props.marker.compaction))
 const statusClass = computed(() => ({

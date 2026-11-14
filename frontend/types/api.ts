@@ -215,10 +215,6 @@ export interface Conversation {
   messageRowCount?: number
   /** Rows the operator sent (role user), shown beside `messageCount` in the context meter. Absent → 0. */
   userPromptCount?: number
-  /** Rows since the last summary or `/reset`, and the fewest an automatic summary, or a `/compact`, can be made from. */
-  rowsSinceSummary?: number
-  rowsToSummarize?: number
-  rowsToCompact?: number
   /** JCLAW-1569: the agent's current list from its `checklist` tool; absent when it has set none. */
   checklist?: ChecklistItem[]
 }

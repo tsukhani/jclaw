@@ -47,6 +47,22 @@ describe('ChatCompactionCard', () => {
     expect(one.get('[data-testid="compaction-result"]').text()).toBe('1 earlier message summarized')
   })
 
+  it('says no summary was made, with the reason as the server gave it and no bar', async () => {
+    const w = await mountCard({ phase: 'skipped', tokensBefore: 182345, reason: 'The summary model did not answer.' })
+    expect(w.get('[data-testid="compaction-title"]').text()).toBe('Summary not made')
+    expect(w.get('[data-testid="compaction-skip-reason"]').text()).toBe('The summary model did not answer.')
+    expect(w.find('[data-testid="compaction-result"]').exists()).toBe(false)
+    expect(w.find('[role="progressbar"]').exists()).toBe(false)
+    expect(w.get('[data-testid="compaction-time"]').text()).toBe('')
+  })
+
+  it('says only that no summary was made when the server named no reason', async () => {
+    const w = await mountCard({ phase: 'skipped', tokensBefore: null })
+    expect(w.get('[data-testid="compaction-title"]').text()).toBe('Summary not made')
+    expect(w.find('[data-testid="compaction-skip-reason"]').exists()).toBe(false)
+    expect(w.find('[data-testid="compaction-result"]').exists()).toBe(false)
+  })
+
   it('shows a short compaction\'s time to a tenth of a second', async () => {
     const w = await mountCard({ phase: 'done', tokensBefore: 900, tokensAfter: 400, ms: 1250 })
     expect(w.get('[data-testid="compaction-time"]').text()).toBe('1.3 s')

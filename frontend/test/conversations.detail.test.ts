@@ -16,9 +16,11 @@ import { visualEnabled } from '~/utils/visual/spec'
  * there misreports what caching is worth, and nothing on screen would look wrong.
  */
 
+const route = vi.hoisted(() => ({ hash: '' }))
+
 mockNuxtImport('useRoute', () => () => ({
-  params: { id: '7' }, query: {}, path: '/conversations/7', fullPath: '/conversations/7',
-  hash: '', name: 'conversations-id', meta: {}, matched: [],
+  params: { id: '7' }, query: {}, path: '/conversations/7', fullPath: `/conversations/7${route.hash}`,
+  hash: route.hash, name: 'conversations-id', meta: {}, matched: [],
 }))
 
 const CONVO = {
@@ -98,7 +100,10 @@ async function mountPage() {
 }
 
 describe('Conversation detail page', () => {
-  beforeEach(() => clearNuxtData())
+  beforeEach(() => {
+    clearNuxtData()
+    route.hash = ''
+  })
 
   it('shows an empty state when the conversation cannot be loaded', async () => {
     setupApi({ missing: true })
@@ -295,6 +300,56 @@ describe('Conversation detail page', () => {
     expect(merge.get('[data-testid="summary-marker-body"]').text()).toContain('Summary 1')
     expect(merge.get('[data-testid="summary-marker-text"]').html()).toContain('SUMMARY 12')
     expect(merge.get('[data-testid="summary-marker-text"]').find('h3').text()).toBe('Goals')
+  })
+
+  describe('opened at a summary, as a Chat divider links to it', () => {
+    const THREE = [
+      compaction(11, { status: 'merged', mergedIntoId: 13 }),
+      compaction(12, { coversFrom: '2026-08-01T10:02:00Z', coversTo: '2026-08-01T10:03:00Z', status: 'merged', mergedIntoId: 13 }),
+      compaction(13, { rows: 4, coversTo: '2026-08-01T10:03:00Z' }),
+    ]
+
+    async function mountAt(hash: string) {
+      route.hash = hash
+      setupApi({ messages: FOUR_MESSAGES, compactions: THREE })
+      const scrolled: Element[] = []
+      const original = Element.prototype.scrollIntoView
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this)
+      }
+      const c = await mountSuspended(ConversationDetail, { attachTo: document.body })
+      await flushPromises()
+      Element.prototype.scrollIntoView = original
+      const expanded = c.findAll('[data-testid="summary-marker"]').map(m => m.get('button').attributes('aria-expanded'))
+      return { c, scrolled, expanded }
+    }
+
+    it('scrolls to that marker, opens it and moves focus to it, leaving the others closed', async () => {
+      const { c, scrolled, expanded } = await mountAt('#summary-2')
+      try {
+        expect(expanded).toEqual(['false', 'true', 'false'])
+        expect(scrolled.map(el => el.id)).toEqual(['summary-2'])
+        expect(document.activeElement).toBe(c.findAll('[data-testid="summary-marker"]')[1]!.get('button').element)
+        expect(c.findAll('[data-testid="summary-marker"]')[1]!.get('[data-testid="summary-marker-text"]').html())
+          .toContain('SUMMARY 12')
+      }
+      finally {
+        c.unmount()
+      }
+    })
+
+    it('opens nothing and scrolls nowhere for a summary the page does not have, or another hash', async () => {
+      for (const hash of ['#summary-4', '#summary-x', '#details', '']) {
+        const { c, scrolled, expanded } = await mountAt(hash)
+        try {
+          expect(expanded, hash).toEqual(['false', 'false', 'false'])
+          expect(scrolled, hash).toEqual([])
+        }
+        finally {
+          c.unmount()
+        }
+      }
+    })
   })
 
   it('shows the transcript with no markers when its summaries cannot be read', async () => {

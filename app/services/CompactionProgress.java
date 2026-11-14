@@ -1,5 +1,6 @@
 package services;
 
+import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
 
 import java.util.function.Consumer;
@@ -31,7 +32,10 @@ public final class CompactionProgress {
         this.tokensBefore = tokensBefore;
     }
 
-    /** A tracker for a compaction of a prompt estimated at {@code tokensBefore} tokens; silent with no {@link #SINK} bound. */
+    /**
+     * A tracker for a compaction of a prompt of {@code tokensBefore} tokens, in the provider's units as the chat's meter
+     * counts them; silent with no {@link #SINK} bound.
+     */
     public static CompactionProgress open(int tokensBefore) {
         return new CompactionProgress(SINK.isBound() ? SINK.get() : null, tokensBefore);
     }
@@ -62,17 +66,25 @@ public final class CompactionProgress {
         emit("{\"compaction\":{\"phase\":\"progress\",\"done\":%d,\"total\":%d}}".formatted(done, total));
     }
 
-    /** The compaction ended with the prompt at {@code tokensAfter} tokens after {@code ms} milliseconds. */
+    /** The compaction ended with the prompt at {@code tokensAfter} tokens, in {@link #open}'s units, after {@code ms} milliseconds. */
     public void done(int tokensAfter, long ms) {
         if (!announced) return;
         emit("{\"compaction\":{\"phase\":\"done\",\"tokensBefore\":%d,\"tokensAfter\":%d,\"ms\":%d}}"
                 .formatted(tokensBefore, tokensAfter, ms));
     }
 
-    /** The compaction ended without storing a summary; closes the card a start opened. */
-    public void skipped() {
+    /**
+     * The compaction ended without storing a summary, for {@code reason}, which the card a start opened shows as given;
+     * a null reason leaves it out of the frame.
+     */
+    public void skipped(@Nullable String reason) {
         if (!announced) return;
-        emit("{\"compaction\":{\"phase\":\"skipped\"}}");
+        var body = new JsonObject();
+        body.addProperty("phase", "skipped");
+        if (reason != null) body.addProperty("reason", reason);
+        var frame = new JsonObject();
+        frame.add("compaction", body);
+        emit(frame.toString());
     }
 
     private void emit(String frame) {

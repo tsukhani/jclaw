@@ -1,7 +1,9 @@
 package slash;
 
 import agents.CompactionGate;
+import agents.ContextWindowManager;
 import agents.DangerousActionGate;
+import agents.PromptAnchor;
 import agents.SummaryModels;
 import agents.SystemPromptAssembler;
 import channels.QuotedReply;
@@ -34,6 +36,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -209,7 +212,11 @@ public final class Commands {
         }
     }
 
-    /** What a {@code /compact} that stored a summary did to the prompt, for the web chat's card; token counts are estimates. */
+    /**
+     * What a {@code /compact} that stored a summary did to the prompt, for the web chat's card: its tokens before and
+     * after in the provider's units, as the chat's meter counts them, counted from the last reply's provider count
+     * when the compaction trigger can count from it and estimated otherwise.
+     */
     public record CompactionOutcome(int tokensBefore, int tokensAfter, long ms) {
     }
 
@@ -801,8 +808,16 @@ public final class Commands {
                     "/compact on conversation %d, which is gone".formatted(current.id));
             return new Result(null, "Nothing to compact: this conversation was deleted.", Command.COMPACT);
         }
-        var modelId = summary.first().modelId();
-        int tokensBefore = TokenUsageEstimator.estimateChatRequest(modelId, turn.messages(), turn.tools()).promptTokens();
+        // Counted as the meter counts the conversation, on the model its turns run on, not the summary's.
+        var counted = Objects.requireNonNullElse(ownModel(agent, configured), summary.first());
+        var providerName = counted.provider().config().name();
+        var modelId = counted.modelId();
+        var anchor = Tx.run(() -> {
+            var conv = ConversationService.findById(current.id);
+            return conv != null ? PromptAnchor.find(conv, providerName, modelId) : null;
+        });
+        var before = CompactionGate.measure(anchor, providerName, modelId, turn);
+        int tokensBefore = before.estimatedTokens();
         long startNs = System.nanoTime();
         var progress = CompactionProgress.open(tokensBefore);
         var result = progress.around(() -> CompactionGate.runExclusive(current.id, () -> SessionCompactor.compact(
@@ -813,11 +828,11 @@ public final class Commands {
         if (result.compacted()) {
             CompactionGate.logCompacted(Agent.nameOf(agent), channelType, summary, result, tookMs);
             var after = CompactionGate.nextTurnRequest(agent, current.id);
-            tokensAfter[0] = after == null ? 0 : TokenUsageEstimator.estimateChatRequest(modelId, after.messages(),
-                    after.tools()).promptTokens();
+            tokensAfter[0] = after == null ? 0 : before.toTriggerUnits(ContextWindowManager.adjustedPromptTokens(
+                    providerName, modelId, TokenUsageEstimator.estimateChatRequest(modelId, after.messages(), after.tools())));
             progress.done(tokensAfter[0], tookMs);
         } else {
-            progress.skipped();
+            progress.skipped(result.skipReason());
         }
         var responseText = buildCompactResponseText(result, args);
         boolean saved = persistCompactAckAndLog(agent, channelType, current, responseText,

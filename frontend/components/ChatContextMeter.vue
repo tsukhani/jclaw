@@ -27,10 +27,6 @@ const props = defineProps<{
   userPromptCount?: number | null
   /** SessionCompaction rows for this conversation: how many times its older messages were summarized. */
   compactionCount?: number | null
-  /** Rows since the last summary, and the fewest an automatic summary or a `/compact` is made from; null when unknown. */
-  rowsSinceSummary?: number | null
-  rowsToSummarize?: number | null
-  rowsToCompact?: number | null
   /** A summary was stored after the latest reply, whose reading the meter still shows. */
   summarizedSinceReply?: boolean
   /** Running conversation cost string (e.g. "$0.0041"); omitted when pricing is absent. */
@@ -81,18 +77,6 @@ function kFormat(n: number): string {
 
 const triggerRight = computed(() => target.value ? kFormat(target.value) : '—')
 
-// A summary is due by size long before a short chat has the rows to make one; past the trigger the meter fills on.
-const tooFewRows = computed(() => percent.value >= 80 && props.rowsSinceSummary != null && props.rowsToSummarize != null
-  && props.rowsSinceSummary < props.rowsToSummarize)
-
-const rowsNote = computed(() => {
-  const since = props.rowsSinceSummary ?? 0
-  const where = (props.compactionCount ?? 0) > 0 ? ' since its last summary' : ''
-  const note = `A summary needs at least ${props.rowsToSummarize} messages, and this conversation has ${since}${where}, `
-    + 'so the meter can pass 100% first.'
-  return props.rowsToCompact != null && since >= props.rowsToCompact ? `${note} Type /compact to summarize it now.` : note
-})
-
 const summary = computed(() => {
   const n = total.value.toLocaleString()
   if (!total.value) return 'Nothing to measure until the agent replies.'
@@ -105,8 +89,7 @@ const summary = computed(() => {
     ? ' This close to the model\'s limit, the oldest messages are left out of what it reads.'
     : ''
   if (compactAt.value) {
-    const at = `${holds} At about ${compactAt.value.toLocaleString()}, JClaw summarizes the oldest messages to make room.`
-    return `${at}${tooFewRows.value ? ` ${rowsNote.value}` : ''}${cut}`
+    return `${holds} At about ${compactAt.value.toLocaleString()}, JClaw summarizes the oldest messages to make room.${cut}`
   }
   if (capacity.value) return `${holds} This model can take ${capacity.value.toLocaleString()} at most.${cut}`
   return holds

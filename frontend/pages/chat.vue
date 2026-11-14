@@ -46,11 +46,14 @@ import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useChatSubagentChips } from '~/composables/useChatSubagentChips'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
+import { useConversationSummaries } from '~/composables/useConversationSummaries'
+import { BEFORE_FIRST_MESSAGE, placeSummaryMarkers, type SummaryMarker } from '~/utils/summary-markers'
 import { useChatReplyHandoff } from '~/composables/useChatReplyHandoff'
 import { QUOTE_KIND_LABELS, quoteFor, splitQuotedReply } from '~/utils/quoted-reply'
 import { useStreamProgress } from '~/composables/useStreamProgress'
 import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
+import ChatSummaryDivider from '~/components/chat/ChatSummaryDivider.vue'
 import ChatBrowserSetupBar from '~/components/chat/ChatBrowserSetupBar.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
@@ -631,6 +634,18 @@ const {
 watch(compactedTick, (tick) => {
   meterRowRevision.value = tick
 })
+// One divider per summary the agent reads, numbered as the conversation page numbers them, after the last message it
+// covers; one whose messages all precede the rows shown waits for Load earlier messages to bring its place in.
+const conversationSummaries = useConversationSummaries(selectedConvoId, compactedTick, compaction)
+const summaryDividers = computed(() => {
+  const placed = new Map<number, SummaryMarker[]>()
+  if (selectedConvoId.value == null) return placed
+  for (const [at, markers] of placeSummaryMarkers(displayMessages.value, conversationSummaries.value)) {
+    const live = markers.filter(m => m.compaction.status === 'live')
+    if (live.length && !(at === BEFORE_FIRST_MESSAGE && hasOlderMessages.value)) placed.set(at, live)
+  }
+  return placed
+})
 // An agent change clears the conversation; a send still unanswered places nothing in the next one.
 watch(selectedAgentId, () => leaveView())
 
@@ -934,9 +949,6 @@ function exportConversation() {
             :completion-tokens="contextUsage.completion"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :compact-at="meterCompactAt"
-            :rows-since-summary="meterConversation?.rowsSinceSummary ?? null"
-            :rows-to-summarize="meterConversation?.rowsToSummarize ?? null"
-            :rows-to-compact="meterConversation?.rowsToCompact ?? null"
             :summarized-since-reply="summarizedSinceReply"
             :cumulative-tokens="conversationCumulativeTokens"
             :message-count="meterConversation?.messageRowCount ?? null"
@@ -1117,41 +1129,56 @@ function exportConversation() {
                 {{ loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages' }}
               </button>
             </div>
-            <ChatMessage
+            <ChatSummaryDivider
+              v-for="marker in summaryDividers.get(BEFORE_FIRST_MESSAGE) ?? []"
+              :key="`summary-${marker.compaction.id}`"
+              :marker="marker"
+              :conversation-id="selectedConvoId!"
+            />
+            <template
               v-for="(msg, msgIdx) in displayMessages"
               :key="msg.id ?? msg._key"
-              :msg="msg"
-              :msg-idx="msgIdx"
-              :render-token="messageRenderToken(msg)"
-              :agent-id="effectiveDisplayAgentId"
-              :streaming="streaming"
-              :copied-message-id="copiedMessageId"
-              :streaming-message-key="streamingMessageKey"
-              :stream-content="streamContent"
-              :stream-content-html="streamContentHtml"
-              :stream-reasoning-html="streamReasoningHtml"
-              :video-job-status="videoJobStatus"
-              :image-gen-turn-key="imageGenTurnKey"
-              :image-gen-percent="imageGenPercent"
-              :tok-stats-hover-key="tokStatsHoverKey"
-              :run-slice="subagentRunSlices[msgIdx] ?? null"
-              :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
-              :run-status="subagentRunSlices[msgIdx] ? subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
-              :show-model-switch="shouldShowModelSwitchIndicator(msgIdx)"
-              :mcp-apps="!subagentTranscript"
-              @toggle-subagent-run="toggleSubagentRun"
-              @delete-attachment="deleteAttachment"
-              @toggle-tool-calls="toggleToolCalls"
-              @toggle-tool-call-expansion="toggleToolCallExpansion"
-              @toggle-thinking="toggleThinking"
-              @copy-reasoning="copyReasoning"
-              @copy-message="copyMessage"
-              @edit-user-message="editUserMessage"
-              @delete-message="deleteMessage"
-              @regenerate-message="regenerateMessage"
-              @reply-message="replyToMessage"
-              @set-tok-stats-hover-key="tokStatsHoverKey = $event"
-            />
+            >
+              <ChatMessage
+                :msg="msg"
+                :msg-idx="msgIdx"
+                :render-token="messageRenderToken(msg)"
+                :agent-id="effectiveDisplayAgentId"
+                :streaming="streaming"
+                :copied-message-id="copiedMessageId"
+                :streaming-message-key="streamingMessageKey"
+                :stream-content="streamContent"
+                :stream-content-html="streamContentHtml"
+                :stream-reasoning-html="streamReasoningHtml"
+                :video-job-status="videoJobStatus"
+                :image-gen-turn-key="imageGenTurnKey"
+                :image-gen-percent="imageGenPercent"
+                :tok-stats-hover-key="tokStatsHoverKey"
+                :run-slice="subagentRunSlices[msgIdx] ?? null"
+                :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
+                :run-status="subagentRunSlices[msgIdx] ? subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
+                :show-model-switch="shouldShowModelSwitchIndicator(msgIdx)"
+                :mcp-apps="!subagentTranscript"
+                @toggle-subagent-run="toggleSubagentRun"
+                @delete-attachment="deleteAttachment"
+                @toggle-tool-calls="toggleToolCalls"
+                @toggle-tool-call-expansion="toggleToolCallExpansion"
+                @toggle-thinking="toggleThinking"
+                @copy-reasoning="copyReasoning"
+                @copy-message="copyMessage"
+                @edit-user-message="editUserMessage"
+                @delete-message="deleteMessage"
+                @regenerate-message="regenerateMessage"
+                @reply-message="replyToMessage"
+                @set-tok-stats-hover-key="tokStatsHoverKey = $event"
+              />
+              <ChatSummaryDivider
+                v-for="marker in summaryDividers.get(msgIdx) ?? []"
+                :key="`summary-${marker.compaction.id}`"
+                :marker="marker"
+                :conversation-id="selectedConvoId!"
+              />
+            </template>
             <!--
               In-flight turn progress. Shown for the whole turn (its init to
               its terminal frame) with an elapsed timer counted from the

@@ -371,16 +371,41 @@ describe('useChatStream', () => {
       }
     })
 
-    it('closes the card when the compaction stored nothing, and shows nothing for a frame that is no compaction', async () => {
+    it('keeps a compaction that stored nothing on the card with its reason for ten seconds', async () => {
+      vi.useFakeTimers()
+      try {
+        const deps = onConversation(42)
+        const { api } = await mountStream(deps)
+        const stream = streamOn(42)
+        stream.send(frame({ phase: 'start', tokensBefore: 1000, rows: 4 }))
+        stream.send(frame({ phase: 'skipped', reason: 'The summary model did not answer.' }))
+        await flushPromises()
+        expect(api.compaction.value).toEqual({ phase: 'skipped', tokensBefore: 1000, reason: 'The summary model did not answer.' })
+
+        vi.advanceTimersByTime(9_999)
+        expect(api.compaction.value?.phase).toBe('skipped')
+        vi.advanceTimersByTime(1)
+        expect(api.compaction.value).toBeNull()
+      }
+      finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('keeps a skipped card with no reason when the frame names none', async () => {
       const deps = onConversation(42)
       const { api } = await mountStream(deps)
       const stream = streamOn(42)
       stream.send(frame({ phase: 'start', tokensBefore: 1000, rows: 4 }))
       stream.send(frame({ phase: 'skipped' }))
       await flushPromises()
-      expect(api.compaction.value).toBeNull()
+      expect(api.compaction.value).toEqual({ phase: 'skipped', tokensBefore: 1000 })
+    })
 
-      stream.send({ type: 'status', content: '{"contextTokens":5}' })
+    it('shows nothing for a status frame that is no compaction', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      streamOn(42).send({ type: 'status', content: '{"contextTokens":5}' })
       await flushPromises()
       expect(api.compaction.value).toBeNull()
     })
