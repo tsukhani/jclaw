@@ -215,6 +215,26 @@ async function saveChatField(configKey: string, value: string) {
           tip="Set, the summaries are merged past this many tokens whatever the model, in place of the percent above. Leave it empty to follow the percent. At least 1000."
         />
         <SettingsConfigField
+          config-key="chat.compaction.factsBudgetPercent"
+          label="Goals and facts may fill (% of that budget)"
+          kind="number"
+          fallback="50"
+          :min="0"
+          :max="100"
+          label-width="w-80"
+          tip="A merge keeps every goal, constraint and fact word for word. Once they fill more than this percent of the merge budget, a merge drops the ones a later one replaces, such as an old file path or a plan you changed. 0 never drops any. 0 to 100. Default: 50."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.factsCeilingPercent"
+          label="…rewrite the merge past (% of that budget)"
+          kind="number"
+          fallback="100"
+          :min="0"
+          :max="100"
+          label-width="w-80"
+          tip="If the goals and facts still fill more than this percent of the merge budget once the replaced ones are dropped, the merge is rewritten whole, no longer word for word, so the summary keeps a bounded size. The original messages stay searchable. 0 never rewrites: a very long chat's summary then keeps growing, and one larger than the model's context window stops the chat until /reset. 0 to 100. Default: 100."
+        />
+        <SettingsConfigField
           config-key="chat.compaction.toolResultChars"
           label="Tool results in a catch-up (characters)"
           kind="number"

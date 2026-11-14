@@ -427,6 +427,11 @@ public class ConfigService {
                     + ", or empty to follow the window." : null,
             (key, value) -> key.equals(SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY) && !isIntBetween(value, 1, 100)
                     ? key + " must be a whole number from 1 to 100." : null,
+            (key, value) -> key.equals(SessionCompactor.FACTS_BUDGET_PERCENT_KEY) && !isIntBetween(value, 0, 100)
+                    ? key + " must be a whole number from 0 to 100; 0 never caps the goals and facts a merge keeps."
+                    : null,
+            (key, value) -> key.equals(SessionCompactor.FACTS_CEILING_PERCENT_KEY) && !isIntBetween(value, 0, 100)
+                    ? key + " must be a whole number from 0 to 100; 0 never rewrites a merge." : null,
             atLeast(SessionCompactor.TOOL_RESULT_CHARS_KEY, 0,
                     " must be a whole number of characters; 0 keeps only the length."),
             (key, value) -> (key.equals(SessionCompactor.KEEP_PERCENT_KEY)

@@ -117,6 +117,8 @@ describe('Settings page — Chat context savings', () => {
   const STEP = 'chat.pruneToolResultsEveryTurns'
   const BUDGET = 'chat.compaction.summaryBudgetTokens'
   const BUDGET_PERCENT = 'chat.compaction.summaryBudgetPercent'
+  const FACTS = 'chat.compaction.factsBudgetPercent'
+  const CEILING = 'chat.compaction.factsCeilingPercent'
   const TOOL_CHARS = 'chat.compaction.toolResultChars'
 
   function row(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
@@ -163,6 +165,10 @@ describe('Settings page — Chat context savings', () => {
     expect(shown(component, BUDGET_PERCENT)).toBe('15')
     expect(label(component, BUDGET)).toBe('…or past a fixed size (tokens)')
     expect(shown(component, BUDGET)).toBe('')
+    expect(label(component, FACTS)).toBe('Goals and facts may fill (% of that budget)')
+    expect(shown(component, FACTS)).toBe('50')
+    expect(label(component, CEILING)).toBe('…rewrite the merge past (% of that budget)')
+    expect(shown(component, CEILING)).toBe('100')
     expect(label(component, TOOL_CHARS)).toBe('Tool results in a catch-up (characters)')
     expect(shown(component, TOOL_CHARS)).toBe('600')
   })
@@ -175,6 +181,8 @@ describe('Settings page — Chat context savings', () => {
       { key: STEP, value: '5' },
       { key: BUDGET, value: '40000' },
       { key: BUDGET_PERCENT, value: '20' },
+      { key: FACTS, value: '0' },
+      { key: CEILING, value: '0' },
       { key: TOOL_CHARS, value: '0' },
     ])
     const component = await mountChat()
@@ -185,6 +193,8 @@ describe('Settings page — Chat context savings', () => {
     expect(shown(component, STEP)).toBe('5')
     expect(shown(component, BUDGET)).toBe('40000')
     expect(shown(component, BUDGET_PERCENT)).toBe('20')
+    expect(shown(component, FACTS)).toBe('0')
+    expect(shown(component, CEILING)).toBe('0')
     expect(shown(component, TOOL_CHARS)).toBe('0')
   })
 
@@ -241,6 +251,22 @@ describe('Settings page — Chat context savings', () => {
 
     expect(await saveTyped(component, BUDGET, '30000')).toEqual({ value: '', min: '1000', max: undefined })
     expect(posted).toEqual([{ key: BUDGET, value: '30000' }])
+  })
+
+  it('saves the goals and facts share typed into its editor, which starts from 50 and stays within 0 to 100', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+
+    expect(await saveTyped(component, FACTS, '0')).toEqual({ value: '50', min: '0', max: '100' })
+    expect(posted).toEqual([{ key: FACTS, value: '0' }])
+  })
+
+  it('saves the rewrite ceiling typed into its editor, which starts from 100 and stays within 0 to 100', async () => {
+    baseEndpoints()
+    const component = await mountChat()
+
+    expect(await saveTyped(component, CEILING, '80')).toEqual({ value: '100', min: '0', max: '100' })
+    expect(posted).toEqual([{ key: CEILING, value: '80' }])
   })
 
   it('emptying a set summary budget saves it empty, so the budget follows the window again', async () => {

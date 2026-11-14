@@ -301,6 +301,29 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theGoalsAndFactsShareOfTheMergeBudgetMustBeAWholePercentFromZeroToAHundred() {
+        var expected = "chat.compaction.factsBudgetPercent must be a whole number from 0 to 100; 0 never caps the goals "
+                + "and facts a merge keeps.";
+        for (var value : List.of("-1", "101", "50.5", "half", "")) {
+            assertRefused(expected, SessionCompactor.FACTS_BUDGET_PERCENT_KEY, value);
+        }
+        for (var value : List.of("0", "1", "50", "100")) {
+            assertAccepted(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, value);
+        }
+    }
+
+    @Test
+    void theRewriteCeilingOfTheMergeBudgetMustBeAWholePercentFromZeroToAHundred() {
+        var expected = "chat.compaction.factsCeilingPercent must be a whole number from 0 to 100; 0 never rewrites a merge.";
+        for (var value : List.of("-1", "101", "99.5", "all", "")) {
+            assertRefused(expected, SessionCompactor.FACTS_CEILING_PERCENT_KEY, value);
+        }
+        for (var value : List.of("0", "1", "100")) {
+            assertAccepted(SessionCompactor.FACTS_CEILING_PERCENT_KEY, value);
+        }
+    }
+
+    @Test
     void theSummaryBudgetShareOfASummaryCallMustBeAWholePercentFromOneToAHundred() {
         var expected = "chat.compaction.summaryBudgetPercent must be a whole number from 1 to 100.";
         for (var value : List.of("0", "101", "-1", "15.5", "fifteen", "")) {

@@ -1548,6 +1548,135 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(java.util.Arrays.asList(null, null, null), segments.stream().map(sc -> sc.mergedIntoId).toList());
     }
 
+    // ─── A merge past the facts share drops what a later item replaces (JF-425) ───
+
+    @Test
+    void theFactsShareAndTheRewriteCeilingAreTheirPercentOfTheMergeBudgetAndZeroIsNone() {
+        assertEquals(500, SessionCompactor.factsCap(1_000));
+        assertEquals(1_000, SessionCompactor.factsCeiling(1_000));
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        ConfigService.set(SessionCompactor.FACTS_CEILING_PERCENT_KEY, "1");
+        assertEquals(30, SessionCompactor.factsCap(1_000));
+        assertEquals(10, SessionCompactor.factsCeiling(1_000));
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "0");
+        ConfigService.set(SessionCompactor.FACTS_CEILING_PERCENT_KEY, "0");
+        assertEquals(Long.MAX_VALUE, SessionCompactor.factsCap(1_000));
+        assertEquals(Long.MAX_VALUE, SessionCompactor.factsCeiling(1_000));
+    }
+
+    @Test
+    void pastTheFactsShareAMergeDropsOnlyTheItemsALaterItemOfTheirSectionReplaces() {
+        // 3% of a 1,000-token budget is 30 tokens: the three segments carry 34, and 27 once two are dropped, far
+        // under the default ceiling of the whole budget.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.add(msgs);
+                // 1 by 3 and 5 by 7 hold; 3 by 2 points back, 2 by 5 across sections, 6 by 99 and 7 by 7 nowhere.
+                return CONDENSED + "\n\n### Replaced items\n- 1 by 3\n- 5 by 7\n- 3 by 2\n- 2 by 5\n- 6 by 99\n- 7 by 7";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, merges.size(), "past the share, not the ceiling: no rewrite");
+        var merge = merges.getFirst();
+        assertEquals(List.of("Decisions", "Open questions and errors", "Next steps", "Replaced items"),
+                headings(merge.getFirst().content()));
+        var segments = storedSegments(conv.id);
+        var rendered = new ArrayList<String>();
+        for (var s : segments.subList(0, 3)) rendered.add(label(s.coversFrom, s.coversTo) + "\n\n" + s.summary);
+        assertEquals(ChatMessage.user(String.join("\n\n", rendered) + "\n\n[The carried goals and facts, numbered]"
+                + "\n\n### Goals and constraints\n[1] Goal 0\n[2] Goal 1\n[3] Goal 2\n\n### Identifiers and facts\n[4] "
+                + FACT + "\n[5] The repo is jclaw.\n[6] Fact 1\n[7] Fact 2"), merge.get(1));
+        assertEquals("### Goals and constraints\n- Goal 1\n- Goal 2\n\n### Decisions\n- Merged decisions"
+                + "\n\n### Identifiers and facts\n- " + FACT + "\n- Fact 1\n- Fact 2"
+                + "\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Merged next step",
+                segments.getLast().summary);
+    }
+
+    @Test
+    void aMergeWhoseFactsStillPassTheCeilingOnceTheReplacedOnesAreDroppedIsRewrittenWhole() {
+        // The share is 1% (10 tokens) and the ceiling 2% (20); the 34 tokens of items name none replaced.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "1");
+        ConfigService.set(SessionCompactor.FACTS_CEILING_PERCENT_KEY, "2");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.add(msgs);
+                return headings(msgs.getFirst().content()).contains("Replaced items")
+                        ? CONDENSED + "\n\n### Replaced items\nNone." : "WHOLE MERGE";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(2, merges.size(), "the merge, then its rewrite");
+        assertEquals(SECTIONS, headings(merges.get(1).getFirst().content()));
+        assertTrue(((String) merges.get(1).getFirst().content()).lines().toList().contains(CARRY_FORWARD));
+        assertEquals(merges.get(0).get(1).content().toString().substring(0,
+                merges.get(0).get(1).content().toString().indexOf("\n\n[The carried goals")), merges.get(1).get(1).content());
+        var segments = storedSegments(conv.id);
+        assertEquals("WHOLE MERGE", segments.getLast().summary);
+        var result = segments.getLast().id;
+        assertEquals(java.util.Arrays.asList(result, result, result, null),
+                segments.stream().map(sc -> sc.mergedIntoId).toList());
+    }
+
+    @Test
+    void aCeilingOfZeroNeverRewritesAMergeWhateverItsFactsFill() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "1");
+        ConfigService.set(SessionCompactor.FACTS_CEILING_PERCENT_KEY, "0");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new AtomicInteger();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.incrementAndGet();
+                return CONDENSED + "\n\n### Replaced items\nNone.";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, merges.get());
+        assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aFactsShareOfZeroNeverShowsTheModelTheItemsToDrop() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "0");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.add(msgs);
+                return CONDENSED;
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, merges.size());
+        assertEquals(CONDENSED_HEADINGS, headings(merges.getFirst().getFirst().content()));
+        assertFalse(((String) merges.getFirst().get(1).content()).contains("[The carried goals and facts, numbered]"));
+        assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
+    }
+
     private static final List<String> CONDENSED_HEADINGS = List.of("Decisions", "Open questions and errors",
             "Next steps");
 
