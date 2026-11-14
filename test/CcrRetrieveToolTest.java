@@ -235,6 +235,58 @@ class CcrRetrieveToolTest extends UnitTest {
     }
 
     @Test
+    void aShortenedUserMessageResolvesToItsStoredTextAndRecordsNoTool() {
+        var pasted = "Line of a pasted report.\n".repeat(2_000);
+        ConversationService.appendUserMessage(conv, pasted);
+        ConversationService.appendAssistantMessage(conv, "read it", null);
+
+        assertEquals(pasted, retrieve(ContentHash.handle(pasted)));
+
+        var row = onlyCcrRowOfThisAgent();
+        assertEquals(Boolean.TRUE, row.ccrHit);
+        assertNull(row.toolName, "a user row was produced by no tool");
+        assertEquals(ContentHash.handle(pasted), row.resultHash);
+    }
+
+    @Test
+    void aFetchedCopyOfAUserMessageResolvesToTheMessageItself() {
+        var pasted = "p".repeat(40_000);
+        ConversationService.appendUserMessage(conv, pasted);
+        ConversationService.appendAssistantMessage(conv, null, toolCallJson("call_1", CcrRetrieveTool.TOOL_NAME));
+        ConversationService.appendToolResult(conv, "call_1", pasted);
+
+        assertEquals(pasted, retrieve(ContentHash.handle(pasted)));
+
+        assertNull(onlyCcrRowOfThisAgent().toolName, "the copy names ccr_retrieve, so the message wins");
+    }
+
+    @Test
+    void anAssistantReplyIsNotFetchedBack() {
+        var reply = "r".repeat(5_000);
+        ConversationService.appendUserMessage(conv, "write it out");
+        ConversationService.appendAssistantMessage(conv, reply, null);
+
+        assertEquals("No original found for hash \"" + ContentHash.handle(reply) + "\" in this conversation"
+                + " (it may have been trimmed from history).", retrieve(ContentHash.handle(reply)));
+    }
+
+    @Test
+    void aTaskRunUserMessageResolvesByItsHash() {
+        var run = seedTaskRunWithToolResult("{\"a\":1}");
+        var prompt = new TaskRunMessage();
+        prompt.taskRun = run;
+        prompt.turnIndex = 0;
+        prompt.role = MessageRole.USER;
+        prompt.content = "q".repeat(40_000);
+        prompt.save();
+
+        var result = ToolContext.withScope(null, run.id, () -> new CcrRetrieveTool().execute(
+                "{\"hash\":\"" + ContentHash.handle(prompt.content) + "\"}", agent));
+
+        assertEquals(prompt.content, result);
+    }
+
+    @Test
     void reportsMissForUnknownHash() {
         ConversationService.appendToolResult(conv, "call_1", "{\"a\":1}");
         var result = ToolContext.withConversation(conv.id,

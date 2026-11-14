@@ -1,3 +1,4 @@
+import agents.ToolResultPruner;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
@@ -65,6 +66,7 @@ class MediaBearerRebaseTest extends UnitTest {
             }
             ConfigService.set("chat.compactionReserveTokens", "15000");
             ConfigService.set("chat.compactionReserveTokensFloor", "9000");
+            ConfigService.delete(ToolResultPruner.USER_PREVIEW_PERCENT_KEY);
         } finally {
             CompactionTriggerSync.release();
         }
@@ -150,6 +152,8 @@ class MediaBearerRebaseTest extends UnitTest {
         ConfigService.set("chat.compactionReserveTokensFloor", "50000");
         ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "0");
         ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        // The first turn's weight is a user message, which a later turn would otherwise read as a short preview.
+        ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, "0");
 
         var agent = createAgent("bearer-trim-agent");
         var convo = ConversationService.create(agent, "web", "u-bearer-trim");

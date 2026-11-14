@@ -1,6 +1,7 @@
 import agents.AgentRunner;
 import agents.ContextWindowManager;
 import agents.CurrentTimeInjector;
+import agents.ToolResultPruner;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
@@ -110,6 +111,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
                 ConfigService.delete("provider." + provider + "." + suffix);
             }
             ConfigService.delete(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider);
+            ConfigService.delete(ToolResultPruner.USER_PREVIEW_PERCENT_KEY);
             ProviderRegistry.refresh();
         } finally {
             CompactionTriggerSync.release();
@@ -247,6 +249,8 @@ class RecalledMemoryPlacementTest extends UnitTest {
         ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider, "1.0");
         // Two long rows pass the trigger; a summary would need more than they hold, so the trim alone makes room.
         ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "1000000");
+        // The oldest row is a user message, which a later turn would otherwise read as a short preview.
+        ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, "0");
         ProviderRegistry.refresh();
         int margin = intConst("OUTPUT_SAFETY_MARGIN_TOKENS");
         int target = window - intConst("RESERVED_OUTPUT_TOKENS");

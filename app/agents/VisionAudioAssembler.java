@@ -1,5 +1,7 @@
 package agents;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import llm.LlmTypes.ChatMessage;
 import models.Agent;
 import models.Message;
@@ -76,7 +78,17 @@ public final class VisionAudioAssembler {
      */
     private static final long TRANSCRIPT_AWAIT_TIMEOUT_SECONDS = 60;
 
+    // How much of a text this class built is the stored row's own text, by String instance: the notes after it are
+    // not in the row, so ToolResultPruner shortens only that prefix, whose hash ccr_retrieve finds (JF-417).
+    private static final Cache<String, Integer> STORED_TEXT = Caffeine.newBuilder().weakKeys().build();
+
     private VisionAudioAssembler() {
+    }
+
+    /** How many leading characters of {@code text} are its message row's stored text; -1 when this class did not build it. */
+    static int storedTextLength(String text) {
+        var length = STORED_TEXT.getIfPresent(text);
+        return length != null ? length : -1;
     }
 
     /**
@@ -226,6 +238,7 @@ public final class VisionAudioAssembler {
         var mediaPaths = collectNativeMediaPathNotes(
                 atts, supportsAudio && !text.isBlank(), supportsVision);
         var combinedText = text + fileNotes + transcriptBlocks + captionBlocks + mediaPaths;
+        STORED_TEXT.put(combinedText, text.length());
 
         var parts = new ArrayList<Map<String, Object>>();
         if (!combinedText.isBlank()) {
@@ -589,7 +602,11 @@ public final class VisionAudioAssembler {
                 if (!sb.isEmpty()) sb.append("\n\n");
                 sb.append(p.get("text"));
             }
-            return new ChatMessage(MessageRole.USER.value, sb.toString(), null, null, null);
+            var merged = sb.toString();
+            // The video text is no row's, so only a first part this class recorded leaves a stored prefix.
+            STORED_TEXT.put(merged, parts.getFirst().get("text") instanceof String first
+                    ? Math.max(storedTextLength(first), 0) : 0);
+            return new ChatMessage(MessageRole.USER.value, merged, null, null, null);
         }
         return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }

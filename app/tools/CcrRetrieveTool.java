@@ -27,15 +27,16 @@ import java.util.function.Function;
  * output it leaves a marker like
  * {@code [compressed — call ccr_retrieve("ab12cd34ef567890") for the full original]};
  * the LLM passes that handle here when the compressed view (first items +
- * schema + errors) isn't enough.
+ * schema + errors) isn't enough. A user message an earlier turn sent whole comes
+ * back the same way from its shortened copy (JF-417).
  *
  * <p>No cache table: the original tool result already lives durably in a
  * message row. The active run is either a chat ({@code Message} rows scoped by
  * conversation) or a task fire ({@code TaskRunMessage} rows scoped by task run —
  * task fires run on a stub Conversation with no id and persist to
  * {@code task_run_message}); the scope is surfaced via {@link ToolContext}. This
- * tool rescans the matching tool-role rows and returns the one whose content
- * SHA-256 matches the handle.
+ * tool rescans the matching tool- and user-role rows and returns the one whose
+ * content SHA-256 matches the handle.
  */
 public class CcrRetrieveTool implements ToolRegistry.Tool {
 
@@ -46,7 +47,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(new ToolAction("retrieve",
-                "Return the full original tool result for a compression hash"));
+                "Return the full original tool result or shortened message for a hash"));
     }
 
     @Override
@@ -80,8 +81,8 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        return "Retrieve the full, uncompressed original of a content-compressed tool result — "
-                + "pass the hash from its [compressed — ccr_retrieve(\"<hash>\")] marker.";
+        return "Retrieve the full, uncompressed original of a content-compressed tool result, or the full text of a "
+                + "shortened earlier message — pass the hash from its ccr_retrieve(\"<hash>\") marker.";
     }
 
     @Override
@@ -92,7 +93,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
                         "hash", Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
-                                "The hash from a [compressed — ccr_retrieve(\"…\")] marker on a tool result.")),
+                                "The hash from a ccr_retrieve(\"…\") marker on a tool result or a shortened message.")),
                 SchemaKeys.REQUIRED, List.of("hash"));
     }
 
@@ -139,7 +140,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
     private record Failed(String text) implements Lookup {}
 
     /**
-     * Locate the original tool-output whose content hash starts with {@code handle},
+     * Locate the original tool output or user message whose content hash starts with {@code handle},
      * scanning newest-first — chat {@link Message} rows when in a conversation, or
      * {@link TaskRunMessage} rows (JCLAW-462) when in a task fire.
      */
@@ -151,14 +152,15 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
             if (conv == null) {
                 return new Failed("Error: conversation not found.");
             }
-            List<Message> rows = Message.<Message>find(
-                    "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
+            List<Message> rows = Message.<Message>find("conversation = ?1 AND role IN (?2, ?3) ORDER BY id DESC",
+                    conv, MessageRole.TOOL.value, MessageRole.USER.value).fetch();
             hit = matchByHash(rows, m -> m.content, handle, m -> conversationToolName(conv, m));
         } else {
             // JCLAW-462: task fires persist tool turns to task_run_message,
             // not the chat Message/Conversation tables — scan those instead.
             List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
-                    "taskRun.id = ?1 AND role = ?2 ORDER BY id DESC", taskRunId, MessageRole.TOOL).fetch();
+                    "taskRun.id = ?1 AND role IN (?2, ?3) ORDER BY id DESC", taskRunId, MessageRole.TOOL,
+                    MessageRole.USER).fetch();
             hit = matchByHash(rows, m -> m.content, handle, m -> taskRunToolName(taskRunId, m));
         }
         if (hit != null) return hit;

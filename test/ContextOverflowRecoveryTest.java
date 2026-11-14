@@ -4,6 +4,7 @@ import agents.ContextWindowManager;
 import agents.ConversationSink;
 import agents.CurrentTimeInjector;
 import agents.ToolCallLoopRunner;
+import agents.ToolResultPruner;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 import controllers.ApiChatController;
@@ -23,6 +24,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.test.UnitTest;
@@ -76,8 +78,15 @@ class ContextOverflowRecoveryTest extends UnitTest {
     private final List<String> providers = new ArrayList<>();
     private final List<String> registered = new ArrayList<>();
 
+    @BeforeEach
+    void setup() {
+        // OLDEST is the weight a refusal trims; a later turn would otherwise read it as a short preview.
+        ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, "0");
+    }
+
     @AfterEach
     void teardown() {
+        ConfigService.delete(ToolResultPruner.USER_PREVIEW_PERCENT_KEY);
         servers.forEach(s -> s.stop(0));
         for (var name : registered) {
             ConfigService.delete("provider." + name + ".baseUrl");

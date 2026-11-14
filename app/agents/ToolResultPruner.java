@@ -1,6 +1,8 @@
 package agents;
 
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ModelInfo;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
@@ -13,17 +15,19 @@ import services.compression.ContentHash;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
  * Replaces large tool results from earlier turns with a one-line stub carrying their
- * {@code ccr_retrieve} handle (JCLAW-1202). Independent of window fill: the context-window
- * trim only truncates when the prompt overflows, which a 1M-window model never does, so an
- * early round's 70k-char file read otherwise rides along in every later call of the
- * conversation. The current turn and the newest messages are never touched, and stored
- * history is untouched — the stub points at the durable row.
+ * {@code ccr_retrieve} handle (JCLAW-1202), and a large user message from an earlier turn with
+ * its head and tail and the same kind of handle (JF-417). Independent of window fill: the
+ * context-window trim only truncates when the prompt overflows, which a 1M-window model never
+ * does, so an early round's 70k-char file read or a pasted document otherwise rides along in
+ * every later call of the conversation. The current turn is never touched, nor the newest
+ * messages' tool results, and stored history is untouched — each handle points at the durable row.
  */
 public final class ToolResultPruner {
     private ToolResultPruner() {}
@@ -42,15 +46,25 @@ public final class ToolResultPruner {
     public static final int SKILL_BUDGET_CHARS = 100_000;
     /** Prefix of every stub; also what stops a stub from being stubbed again. */
     public static final String STUB_MARKER = "[tool result elided";
+    /** The share of the model's window a user message may take before later turns read its preview; 0 or less is off. */
+    public static final String USER_PREVIEW_PERCENT_KEY = "chat.userMessagePreviewPercent";
+    public static final int DEFAULT_USER_PREVIEW_PERCENT = 10;
+    public static final int USER_PREVIEW_MIN_TOKENS = 2_000;
+    public static final int USER_PREVIEW_UNKNOWN_WINDOW_TOKENS = 8_000;
+    static final int CHARS_PER_TOKEN = 4;
+    public static final int USER_PREVIEW_HEAD_CHARS = 2_000;
+    public static final int USER_PREVIEW_TAIL_CHARS = 1_000;
 
     /** Config-driven entry point; returns the same list instance when nothing changed. */
     public static List<ChatMessage> prune(List<ChatMessage> messages, Agent agent, @Nullable Conversation conversation) {
-        if (messages == null || messages.isEmpty() || !ConfigService.getBoolean(ENABLED_KEY, true)) return messages;
-        return prune(messages, ConfigService.getInt(MIN_CHARS_KEY, DEFAULT_MIN_CHARS),
-                ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT),
-                ConfigService.getInt(EVERY_TURNS_KEY, DEFAULT_EVERY_TURNS),
-                conversation != null ? ConversationService.effectiveHistoryLimit(conversation) : Integer.MAX_VALUE,
-                agent, conversation);
+        if (messages == null || messages.isEmpty()) return messages;
+        var pruned = !ConfigService.getBoolean(ENABLED_KEY, true) ? messages
+                : prune(messages, ConfigService.getInt(MIN_CHARS_KEY, DEFAULT_MIN_CHARS),
+                        ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT),
+                        ConfigService.getInt(EVERY_TURNS_KEY, DEFAULT_EVERY_TURNS),
+                        conversation != null ? ConversationService.effectiveHistoryLimit(conversation) : Integer.MAX_VALUE,
+                        agent, conversation);
+        return previewEarlierUserMessages(pruned, userPreviewChars(agent, conversation), agent, conversation);
     }
 
     /**
@@ -195,6 +209,121 @@ public final class ToolResultPruner {
             if (isUser(m) && !(m.content() instanceof String body && CurrentTimeInjector.isClockBlock(body))) return i;
         }
         return messages.size();
+    }
+
+    /** Where the current turn's own user messages begin: a channel batch persists one row per message it carries. */
+    private static int turnRunStart(List<ChatMessage> messages) {
+        int start = turnUserIndex(messages);
+        if (start >= messages.size()) return start;
+        while (start > 0 && isUser(messages.get(start - 1))) start--;
+        return start;
+    }
+
+    /**
+     * The longest stored message, in characters, a later turn still reads whole: {@link #USER_PREVIEW_PERCENT_KEY}
+     * of the window resolved for {@code agent} on {@code conversation}, read at most 100, or 0 when off.
+     */
+    static int userPreviewChars(Agent agent, @Nullable Conversation conversation) {
+        int percent = ConfigService.getInt(USER_PREVIEW_PERCENT_KEY, DEFAULT_USER_PREVIEW_PERCENT);
+        if (percent <= 0) return 0;
+        return previewThresholdChars(percent, conversation != null ? contextWindow(agent, conversation) : 0);
+    }
+
+    private static int contextWindow(Agent agent, Conversation conversation) {
+        var provider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
+        if (provider == null) return 0;
+        return ModelResolver.resolveModelInfo(agent, conversation, provider).map(ModelInfo::contextWindow).orElse(0);
+    }
+
+    /**
+     * {@code percent} (at most 100) of {@code contextWindow} tokens, at least {@link #USER_PREVIEW_MIN_TOKENS}, or
+     * {@link #USER_PREVIEW_UNKNOWN_WINDOW_TOKENS} for a window of 0 or less, in characters at
+     * {@link #CHARS_PER_TOKEN} a token; 0, off, for a {@code percent} of 0 or less.
+     */
+    public static int previewThresholdChars(int percent, int contextWindow) {
+        if (percent <= 0) return 0;
+        long tokens = contextWindow > 0
+                ? Math.max(USER_PREVIEW_MIN_TOKENS, (long) contextWindow * Math.min(percent, 100) / 100)
+                : USER_PREVIEW_UNKNOWN_WINDOW_TOKENS;
+        return (int) Math.min(Integer.MAX_VALUE, tokens * CHARS_PER_TOKEN);
+    }
+
+    /**
+     * Pure core (test seam): every user message before the current turn's own ({@link #turnRunStart}) whose stored
+     * text is longer than {@code thresholdChars} becomes its {@link #preview}. A String body is the stored row
+     * itself; a text part is the stored row followed by attachment notes, which {@link VisionAudioAssembler} records,
+     * so an unrecorded part is left whole rather than given a handle no row hashes to. 0 or less is off; returns the
+     * same list instance when nothing changed.
+     */
+    public static List<ChatMessage> previewEarlierUserMessages(List<ChatMessage> messages, int thresholdChars,
+                                                               @Nullable Agent agent,
+                                                               @Nullable Conversation conversation) {
+        if (thresholdChars <= 0 || messages.isEmpty()) return messages;
+        int runStart = turnRunStart(messages);
+        List<ChatMessage> out = null;
+        int shortened = 0;
+        long elided = 0;
+        for (int i = 0; i < runStart; i++) {
+            var m = messages.get(i);
+            if (!isUser(m)) continue;
+            var preview = previewOf(m.content(), thresholdChars);
+            if (preview == null) continue;
+            if (out == null) out = new ArrayList<>(messages);
+            out.set(i, new ChatMessage(m.role(), preview.content(), m.toolCalls(), m.toolCallId(), m.toolName()));
+            shortened++;
+            elided += preview.elided();
+        }
+        if (out == null) return messages;
+        if (agent != null) {
+            EventLogger.info("llm", agent.name, conversation != null ? conversation.channelType : null,
+                    "Shortened %d earlier user message(s), %d chars elided; each carries its ccr_retrieve handle"
+                            .formatted(shortened, elided));
+        }
+        return out;
+    }
+
+    private record Preview(Object content, long elided) {}
+
+    private static @Nullable Preview previewOf(@Nullable Object content, int thresholdChars) {
+        if (content instanceof String body) {
+            int stored = VisionAudioAssembler.storedTextLength(body);
+            var text = preview(body, stored < 0 ? body.length() : stored, thresholdChars);
+            return text == null ? null : new Preview(text, (long) body.length() - text.length());
+        }
+        if (!(content instanceof List<?> parts)) return null;
+        List<Object> out = null;
+        long elided = 0;
+        for (int k = 0; k < parts.size(); k++) {
+            if (!(parts.get(k) instanceof Map<?, ?> part) || !"text".equals(part.get("type"))
+                    || !(part.get("text") instanceof String body)) continue;
+            int stored = VisionAudioAssembler.storedTextLength(body);
+            var text = stored < 0 ? null : preview(body, stored, thresholdChars);
+            if (text == null) continue;
+            if (out == null) out = new ArrayList<>(parts);
+            var copy = new LinkedHashMap<Object, Object>(part);
+            copy.put("text", text);
+            out.set(k, copy);
+            elided += body.length() - text.length();
+        }
+        return out == null ? null : new Preview(out, elided);
+    }
+
+    /**
+     * {@code body} with its first {@code stored} characters, a stored message's text, cut to the first
+     * {@link #USER_PREVIEW_HEAD_CHARS} and last {@link #USER_PREVIEW_TAIL_CHARS} around a line naming the message's
+     * {@code ccr_retrieve} handle, never between a surrogate pair; what follows the stored text stays. Null when the
+     * stored text is at most {@code thresholdChars}, or too short for a preview to be shorter.
+     */
+    static @Nullable String preview(String body, int stored, int thresholdChars) {
+        if (stored <= Math.max(thresholdChars, USER_PREVIEW_HEAD_CHARS + USER_PREVIEW_TAIL_CHARS)) return null;
+        int headEnd = Character.isHighSurrogate(body.charAt(USER_PREVIEW_HEAD_CHARS - 1))
+                ? USER_PREVIEW_HEAD_CHARS - 1 : USER_PREVIEW_HEAD_CHARS;
+        int tailStart = stored - USER_PREVIEW_TAIL_CHARS;
+        if (Character.isLowSurrogate(body.charAt(tailStart))) tailStart++;
+        var message = stored == body.length() ? body : body.substring(0, stored);
+        return body.substring(0, headEnd) + String.format(Locale.ROOT,
+                "\n[message shortened: %,d characters, the middle left out; call ccr_retrieve(\"%s\") for the full text]\n",
+                stored, ContentHash.handle(message)) + body.substring(tailStart);
     }
 
     private static boolean isUser(ChatMessage m) {

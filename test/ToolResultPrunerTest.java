@@ -6,21 +6,29 @@ import agents.ToolResultPruner;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
+import models.Message;
+import models.MessageAttachment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.Tx;
 import services.compression.ContentHash;
 import tools.CcrRetrieveTool;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 
 /** JCLAW-1202: old large tool results become stubs that resolve through ccr_retrieve. */
 class ToolResultPrunerTest extends UnitTest {
@@ -28,6 +36,11 @@ class ToolResultPrunerTest extends UnitTest {
     private static final String BIG = "x".repeat(5_000);
     /** A history the load did not cut at its row cap. */
     private static final int NO_CAP = Integer.MAX_VALUE;
+    /** The smallest threshold a user message preview has: 2,000 tokens at 4 characters a token. */
+    private static final int FLOOR_CHARS = 8_000;
+    private static final String PREVIEW_PROVIDER = "prune-preview-provider";
+    /** No class registers this one, so an agent on it has no known window. */
+    private static final String UNREGISTERED_PROVIDER = "prune-unregistered-provider";
 
     @BeforeEach
     void setup() {
@@ -38,6 +51,9 @@ class ToolResultPrunerTest extends UnitTest {
     @AfterEach
     void teardown() {
         ConfigService.delete(ToolResultPruner.EVERY_TURNS_KEY);
+        ConfigService.delete(ToolResultPruner.USER_PREVIEW_PERCENT_KEY);
+        for (var key : List.of("baseUrl", "apiKey", "models")) ConfigService.delete("provider." + PREVIEW_PROVIDER + "." + key);
+        ProviderRegistry.refresh();
     }
 
     private static ChatMessage tool(String id, String name, String body) {
@@ -569,5 +585,299 @@ class ToolResultPrunerTest extends UnitTest {
         var result = ToolContext.withConversation(conv.id,
                 () -> new CcrRetrieveTool().execute("{\"hash\":\"" + hash + "\"}", agent));
         assertEquals(body, result, "the handle in the stub returns the stored original verbatim");
+    }
+
+    // ─── JF-417: a large user message from an earlier turn reaches the model as its head and tail ───
+
+    @Test
+    void aUserMessageAtTheThresholdStaysWholeAndOneCharacterOverBecomesItsHeadAndTail() {
+        var atThreshold = pasted(FLOOR_CHARS);
+        var over = pasted(FLOOR_CHARS + 1);
+        var messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(atThreshold),
+                ChatMessage.assistant("read it"),
+                ChatMessage.user(over),
+                ChatMessage.assistant("read that too"),
+                ChatMessage.user("now compare them"));
+
+        var sent = ToolResultPruner.previewEarlierUserMessages(messages, FLOOR_CHARS, null, null);
+
+        assertSame(atThreshold, sent.get(1).content());
+        assertEquals(over.substring(0, 2_000)
+                + "\n[message shortened: 8,001 characters, the middle left out; call ccr_retrieve(\""
+                + ContentHash.handle(over) + "\") for the full text]\n" + over.substring(7_001), sent.get(3).content());
+        assertEquals(messages.subList(4, 6), sent.subList(4, 6));
+        assertEquals(over, messages.get(3).content(), "the input list is not mutated");
+    }
+
+    @Test
+    void thePastedMessagesOwnTurnSendsItWholeInEveryRound() {
+        var paste = pasted(40_000);
+        var turn = List.of(ChatMessage.system("sys"), ChatMessage.user("hi"), ChatMessage.assistant("hello"),
+                ChatMessage.user(paste));
+        assertSame(turn, ToolResultPruner.previewEarlierUserMessages(turn, FLOOR_CHARS, null, null));
+
+        var rounds = new ArrayList<>(CurrentTimeInjector.inject(turn));
+        for (int round = 0; round < 3; round++) {
+            assertSame(rounds, ToolResultPruner.previewEarlierUserMessages(rounds, FLOOR_CHARS, null, null),
+                    "round " + round);
+            addRounds(rounds, "r" + round, 1);
+        }
+    }
+
+    @Test
+    void aChannelBatchOfConsecutiveUserMessagesIsAllTheTurnsOwn() {
+        var batch = CurrentTimeInjector.inject(List.of(ChatMessage.system("sys"), ChatMessage.user("earlier"),
+                ChatMessage.assistant("answered"), ChatMessage.user(pasted(40_000)),
+                ChatMessage.user("and here is the second part")));
+
+        assertSame(batch, ToolResultPruner.previewEarlierUserMessages(batch, FLOOR_CHARS, null, null));
+    }
+
+    @Test
+    void fromTheNextTurnOnThePastedMessageIsSentAsItsPreviewInEveryRound() {
+        var paste = pasted(40_000);
+        var turn = new ArrayList<>(CurrentTimeInjector.inject(List.of(ChatMessage.system("sys"),
+                ChatMessage.user(paste), ChatMessage.assistant("read it"), ChatMessage.user("what does part 3 say?"))));
+        addRounds(turn, "r", 1);
+
+        var sent = ToolResultPruner.previewEarlierUserMessages(turn, FLOOR_CHARS, null, null);
+
+        assertEquals(previewOf(paste), sent.get(1).content());
+        for (int i = 0; i < turn.size(); i++) {
+            if (i != 1) assertSame(turn.get(i), sent.get(i), "message " + i);
+        }
+        assertSame(sent, ToolResultPruner.previewEarlierUserMessages(sent, FLOOR_CHARS, null, null),
+                "a later round meets the preview and sends it as it is");
+    }
+
+    @Test
+    void aPreviewNeverEndsOrStartsInsideASurrogatePair() {
+        var emoji = "\uD83D\uDE00";
+        // The head's last character and the tail's first are each half of an emoji.
+        var paste = "a".repeat(1_999) + emoji + "b".repeat(36_998) + emoji + "c".repeat(999);
+        assertEquals(40_000, paste.length());
+
+        var sent = ToolResultPruner.previewEarlierUserMessages(
+                List.of(ChatMessage.user(paste), ChatMessage.assistant("ok"), ChatMessage.user("next")),
+                FLOOR_CHARS, null, null);
+
+        assertEquals("a".repeat(1_999) + shortenedLine(40_000, ContentHash.handle(paste)) + "c".repeat(999),
+                sent.get(0).content());
+    }
+
+    @Test
+    void aTextPartNoStoredRowAccountsForIsLeftWhole() {
+        var parts = List.of(Map.<String, Object>of("type", "text", "text", pasted(40_000)));
+        var messages = List.of(ChatMessage.system("sys"), new ChatMessage("user", parts, null, null, null),
+                ChatMessage.assistant("ok"), ChatMessage.user("next"));
+
+        assertSame(messages, ToolResultPruner.previewEarlierUserMessages(messages, FLOOR_CHARS, null, null),
+                "its handle would hash attachment notes no row holds, so the agent could not fetch it back");
+    }
+
+    @Test
+    void theThresholdIsAShareOfTheWindowAtFourCharactersATokenAndNeverUnderTwoThousandTokens() {
+        assertEquals(80_000, ToolResultPruner.previewThresholdChars(10, 200_000));
+        assertEquals(400_000, ToolResultPruner.previewThresholdChars(10, 1_000_000));
+        assertEquals(200_000, ToolResultPruner.previewThresholdChars(25, 200_000));
+        assertEquals(8_000, ToolResultPruner.previewThresholdChars(10, 20_000), "10% of 20,000 is the floor itself");
+        assertEquals(8_004, ToolResultPruner.previewThresholdChars(10, 20_010));
+        assertEquals(8_000, ToolResultPruner.previewThresholdChars(10, 8_192));
+        assertEquals(800_000, ToolResultPruner.previewThresholdChars(100, 200_000));
+        assertEquals(800_000, ToolResultPruner.previewThresholdChars(101, 200_000), "a share is read at most 100");
+        assertEquals(Integer.MAX_VALUE, ToolResultPruner.previewThresholdChars(100, Integer.MAX_VALUE));
+    }
+
+    @Test
+    void anUnknownWindowTakesEightThousandTokensAndAShareOfZeroOrLessIsOff() {
+        assertEquals(32_000, ToolResultPruner.previewThresholdChars(10, 0));
+        assertEquals(32_000, ToolResultPruner.previewThresholdChars(10, -1));
+        assertEquals(32_000, ToolResultPruner.previewThresholdChars(1, 0));
+        assertEquals(8_000, ToolResultPruner.previewThresholdChars(1, 200_000));
+        assertEquals(0, ToolResultPruner.previewThresholdChars(0, 200_000));
+        assertEquals(0, ToolResultPruner.previewThresholdChars(-1, 0));
+    }
+
+    @Test
+    void theConfigEntryScalesTheThresholdWithTheModelsWindowAndTheShare() {
+        registerPreviewProvider();
+        Agent narrow = AgentService.create("prune-narrow-agent", PREVIEW_PROVIDER, "narrow-model");
+        Agent wide = AgentService.create("prune-wide-agent", PREVIEW_PROVIDER, "wide-model");
+        var narrowConv = ConversationService.create(narrow, "web", "u-narrow");
+        var wideConv = ConversationService.create(wide, "web", "u-wide");
+        var atTenPercent = pasted(80_000);
+        var over = pasted(80_001);
+        var messages = earlierAndNext(atTenPercent, over);
+
+        var onNarrow = ToolResultPruner.prune(messages, narrow, narrowConv);
+        assertSame(atTenPercent, onNarrow.get(1).content(), "10% of 200,000 tokens is 80,000 characters");
+        assertEquals(previewOf(over), onNarrow.get(3).content());
+        assertSame(messages, ToolResultPruner.prune(messages, wide, wideConv), "10% of 400,000 tokens is 160,000");
+
+        ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, "5");
+        var atFivePercent = ToolResultPruner.prune(messages, wide, wideConv);
+        assertSame(atTenPercent, atFivePercent.get(1).content(), "5% of 400,000 tokens is 80,000 characters");
+        assertEquals(previewOf(over), atFivePercent.get(3).content());
+    }
+
+    @Test
+    void withNoKnownWindowTheConfigEntryReadsEightThousandTokensWhole() {
+        registerPreviewProvider();
+        Agent unlisted = AgentService.create("prune-unlisted-agent", PREVIEW_PROVIDER, "unlisted-model");
+        Agent unregistered = AgentService.create("prune-unregistered-agent", UNREGISTERED_PROVIDER, "any-model");
+        var atDefault = pasted(32_000);
+        var over = pasted(32_001);
+        var messages = earlierAndNext(atDefault, over);
+
+        for (var agent : List.of(unlisted, unregistered)) {
+            var sent = ToolResultPruner.prune(messages, agent, ConversationService.create(agent, "web", "u-" + agent.name));
+            assertSame(atDefault, sent.get(1).content(), agent.name);
+            assertEquals(previewOf(over), sent.get(3).content(), agent.name);
+        }
+        var noConversation = ToolResultPruner.prune(messages, unlisted, null);
+        assertSame(atDefault, noConversation.get(1).content());
+        assertEquals(previewOf(over), noConversation.get(3).content());
+    }
+
+    @Test
+    void aShareOfZeroOrLessLeavesEveryUserMessageWhole() {
+        Agent agent = AgentService.create("prune-off-agent", UNREGISTERED_PROVIDER, "any-model");
+        var paste = pasted(40_000);
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(paste), ChatMessage.assistant("ok"),
+                ChatMessage.user("next"));
+
+        for (var share : List.of("0", "-1")) {
+            ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, share);
+            assertSame(messages, ToolResultPruner.prune(messages, agent, null), "share " + share);
+        }
+        ConfigService.set(ToolResultPruner.USER_PREVIEW_PERCENT_KEY, "1");
+        assertEquals(previewOf(paste), ToolResultPruner.prune(messages, agent, null).get(1).content(),
+                "a share of 1 with no known window takes the 8,000-token default");
+    }
+
+    @Test
+    void withToolResultPruningOffAPastedMessageIsStillShortenedAndToolResultsAreNot() {
+        Agent agent = AgentService.create("prune-tools-off-agent", UNREGISTERED_PROVIDER, "any-model");
+        var paste = pasted(40_000);
+        var messages = new ArrayList<ChatMessage>(List.of(ChatMessage.system("sys"), ChatMessage.user(paste)));
+        addRounds(messages, "t1", 1);
+        messages.add(ChatMessage.assistant("answered"));
+        // Twelve short messages put the tool result outside the newest twelve, which pruning protects.
+        for (int turn = 2; turn <= 7; turn++) {
+            messages.add(ChatMessage.user("ask " + turn));
+            messages.add(ChatMessage.assistant("answer " + turn));
+        }
+        messages.add(ChatMessage.user("next"));
+        assertEquals(List.of("t1c0"), stubbedCallIds(ToolResultPruner.prune(messages, agent, null)), "control");
+
+        ConfigService.set("chat.pruneToolResults", "false");
+        try {
+            var sent = ToolResultPruner.prune(messages, agent, null);
+
+            assertEquals(previewOf(paste), sent.get(1).content());
+            assertSame(messages.get(3).content(), sent.get(3).content(), "the earlier tool result is sent whole");
+        } finally {
+            ConfigService.delete("chat.pruneToolResults");
+        }
+    }
+
+    @Test
+    void aPastedMessageIsWholeOnItsTurnAndAPreviewTheRetrieveToolResolvesOnTheNextWhileTheRowIsUnchanged() {
+        Agent agent = AgentService.create("prune-paste-agent", UNREGISTERED_PROVIDER, "any-model");
+        Conversation conv = ConversationService.create(agent, "web", "u-paste");
+        var paste = pasted(40_000);
+        var row = ConversationService.appendUserMessage(conv, paste);
+
+        var ownTurn = CurrentTimeInjector.inject(hydrated(conv));
+        assertSame(ownTurn, ToolResultPruner.prune(ownTurn, agent, conv));
+
+        ConversationService.appendAssistantMessage(conv, "read it", null);
+        ConversationService.appendUserMessage(conv, "what does part 3 say?");
+        var nextTurn = ToolResultPruner.prune(CurrentTimeInjector.inject(hydrated(conv)), agent, conv);
+
+        var preview = (String) nextTurn.get(1).content();
+        assertEquals(previewOf(paste), preview);
+        assertEquals(paste, retrieve(conv, agent, handleIn(preview)));
+        assertEquals(paste, Message.<Message>findById(row.id).content, "the stored row is unchanged");
+    }
+
+    @Test
+    void aMessageWithAnAttachmentKeepsItsNoteAndOnlyItsStoredTextIsShortened() {
+        Agent agent = AgentService.create("prune-attach-agent", UNREGISTERED_PROVIDER, "any-model");
+        Conversation conv = ConversationService.create(agent, "web", "u-attach");
+        var paste = pasted(40_000);
+        var row = ConversationService.appendUserMessage(conv, paste);
+        var att = new MessageAttachment();
+        att.message = row;
+        att.uuid = UUID.randomUUID().toString();
+        att.originalFilename = "notes.txt";
+        att.storagePath = "attachments/notes.txt";
+        att.mimeType = "text/plain";
+        att.sizeBytes = 5;
+        att.kind = MessageAttachment.KIND_FILE;
+        att.save();
+        ConversationService.appendAssistantMessage(conv, "read it", null);
+        ConversationService.appendUserMessage(conv, "and the attachment?");
+        JPA.em().flush();
+        JPA.em().clear();
+        Conversation fresh = Conversation.findById(conv.id);
+        var note = "\n[Attached file: notes.txt — workspace:attachments/notes.txt]";
+        var history = hydrated(fresh);
+        assertEquals(List.of(Map.of("type", "text", "text", paste + note)), history.get(1).content());
+
+        var sent = ToolResultPruner.prune(history, agent, fresh);
+
+        assertEquals(List.of(Map.of("type", "text", "text", previewOf(paste) + note)), sent.get(1).content());
+        assertEquals(paste, retrieve(fresh, agent, handleIn(previewOf(paste))));
+    }
+
+    /** A pasted document of {@code length} characters whose every line is different. */
+    private static String pasted(int length) {
+        var sb = new StringBuilder(length + 40);
+        for (int line = 1; sb.length() < length; line++) sb.append("Line ").append(line).append(" of the pasted report.\n");
+        return sb.substring(0, length);
+    }
+
+    /** {@code stored}'s first 2,000 and last 1,000 characters around the line naming its handle. */
+    private static String previewOf(String stored) {
+        return stored.substring(0, 2_000) + shortenedLine(stored.length(), ContentHash.handle(stored))
+                + stored.substring(stored.length() - 1_000);
+    }
+
+    private static String shortenedLine(int length, String handle) {
+        return String.format(Locale.ROOT, "\n[message shortened: %,d characters, the middle left out; "
+                + "call ccr_retrieve(\"%s\") for the full text]\n", length, handle);
+    }
+
+    private static String handleIn(String preview) {
+        int start = preview.indexOf("ccr_retrieve(\"") + 14;
+        return preview.substring(start, preview.indexOf("\")", start));
+    }
+
+    /** Two earlier asks, each answered, then the current turn's. */
+    private static List<ChatMessage> earlierAndNext(String first, String second) {
+        return List.of(ChatMessage.system("sys"), ChatMessage.user(first), ChatMessage.assistant("read it"),
+                ChatMessage.user(second), ChatMessage.assistant("read that too"), ChatMessage.user("now compare them"));
+    }
+
+    private static List<ChatMessage> hydrated(Conversation conv) {
+        return Tx.run(() -> agents.MessageHydrator.buildMessages("sys", conv).messages());
+    }
+
+    private static String retrieve(Conversation conv, Agent agent, String handle) {
+        return ToolContext.withConversation(conv.id,
+                () -> new CcrRetrieveTool().execute("{\"hash\":\"" + handle + "\"}", agent));
+    }
+
+    /** A provider no other class names, never reachable, with a 200,000- and a 400,000-token model. */
+    private static void registerPreviewProvider() {
+        ConfigService.set("provider." + PREVIEW_PROVIDER + ".baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider." + PREVIEW_PROVIDER + ".apiKey", "sk-test");
+        ConfigService.set("provider." + PREVIEW_PROVIDER + ".models",
+                "[{\"id\":\"narrow-model\",\"name\":\"Narrow\",\"contextWindow\":200000,\"maxTokens\":4096},"
+                        + "{\"id\":\"wide-model\",\"name\":\"Wide\",\"contextWindow\":400000,\"maxTokens\":4096}]");
+        ProviderRegistry.refresh();
     }
 }
