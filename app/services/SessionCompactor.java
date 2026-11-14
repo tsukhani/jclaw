@@ -22,6 +22,8 @@ import utils.Strings;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -164,10 +166,13 @@ public final class SessionCompactor {
     public static final String ON_ROW_LIMIT_KEY = "chat.compaction.onRowLimit";
     /** The most summary calls one automatic compaction makes; a catch-up that needs more continues on the next turn. */
     public static final int MAX_SUMMARY_CALLS = 8;
-    /** JF-161: the live segments' total, in tokens, past which the oldest are merged. */
+    /** JF-161: the live segments' total, in tokens, past which the oldest are merged; unset, {@value #SUMMARY_BUDGET_PERCENT_KEY} sets it. */
     public static final String SUMMARY_BUDGET_KEY = "chat.compaction.summaryBudgetTokens";
     public static final int DEFAULT_SUMMARY_BUDGET = 20_000;
     public static final int MIN_SUMMARY_BUDGET = 1_000;
+    /** JF-423: the live segments' budget, in percent, of the tokens one summary call takes ({@link #summaryBudgetTokens}). */
+    public static final String SUMMARY_BUDGET_PERCENT_KEY = "chat.compaction.summaryBudgetPercent";
+    public static final int DEFAULT_SUMMARY_BUDGET_PERCENT = 15;
     /** JF-161: how many characters of each tool result, and of long tool-call arguments, a transcript carries. */
     public static final String TOOL_RESULT_CHARS_KEY = "chat.compaction.toolResultChars";
     public static final int DEFAULT_TOOL_RESULT_CHARS = 600;
@@ -304,22 +309,34 @@ public final class SessionCompactor {
      * share of the token trigger's cap, or of {@link #DEFAULT_TRIGGER_TOKENS} with the cap off.
      */
     public static long tailBudget(boolean force, int callTokens) {
-        int cap = triggerTokens();
-        long base = callTokens != Integer.MAX_VALUE ? callTokens : cap > 0 ? cap : DEFAULT_TRIGGER_TOKENS;
         int percent = force ? ConfigService.getInt(FORCED_KEEP_PERCENT_KEY, DEFAULT_FORCED_KEEP_PERCENT)
                 : ConfigService.getInt(KEEP_PERCENT_KEY, DEFAULT_KEEP_PERCENT);
-        return Math.max(0, base) * Math.clamp(percent, 0, 100) / 100;
+        return shareBase(callTokens) * Math.clamp(percent, 0, 100) / 100;
+    }
+
+    /**
+     * The most tokens the live segments hold before the oldest are merged: {@value #SUMMARY_BUDGET_KEY} when set,
+     * else {@value #SUMMARY_BUDGET_PERCENT_KEY} of {@code callTokens}, read as {@link #tailBudget} reads it, so a small
+     * model's summaries leave it room; never under {@link #MIN_SUMMARY_BUDGET}.
+     */
+    public static int summaryBudgetTokens(int callTokens) {
+        var set = ConfigService.get(SUMMARY_BUDGET_KEY);
+        long budget = set != null && !set.isBlank() ? ConfigService.getInt(SUMMARY_BUDGET_KEY, DEFAULT_SUMMARY_BUDGET)
+                : shareBase(callTokens) * Math.clamp(ConfigService.getInt(SUMMARY_BUDGET_PERCENT_KEY,
+                        DEFAULT_SUMMARY_BUDGET_PERCENT), 0, 100) / 100;
+        return (int) Math.clamp(budget, MIN_SUMMARY_BUDGET, Integer.MAX_VALUE);
+    }
+
+    /** {@code callTokens}, or for an unbounded call the token trigger's cap, else {@link #DEFAULT_TRIGGER_TOKENS}. */
+    private static long shareBase(int callTokens) {
+        int cap = triggerTokens();
+        return callTokens != Integer.MAX_VALUE ? Math.max(0, callTokens) : cap > 0 ? cap : DEFAULT_TRIGGER_TOKENS;
     }
 
     /** The fewest tokens a summary is made from: {@value #MIN_SUMMARY_TOKENS_KEY}, or {@code /compact}'s with {@code force}. */
     public static long summaryMinimum(boolean force) {
         return Math.max(0, force ? ConfigService.getInt(FORCED_MIN_SUMMARY_TOKENS_KEY, DEFAULT_FORCED_MIN_SUMMARY_TOKENS)
                 : ConfigService.getInt(MIN_SUMMARY_TOKENS_KEY, DEFAULT_MIN_SUMMARY_TOKENS));
-    }
-
-    // A value written around the validation reads as its floor.
-    private static int summaryBudgetTokens() {
-        return Math.max(MIN_SUMMARY_BUDGET, ConfigService.getInt(SUMMARY_BUDGET_KEY, DEFAULT_SUMMARY_BUDGET));
     }
 
     private static int toolResultChars() {
@@ -480,7 +497,7 @@ public final class SessionCompactor {
                     "Compaction for conversation %d stopped after %d summary calls; the next turn continues it"
                             .formatted(conversationId, maxCalls));
         }
-        calls += mergeOverBudget(conversationId, modelLabel, plainCall, maxCalls - calls);
+        calls += mergeOverBudget(conversationId, modelLabel, plainCall, maxCalls - calls, callTokens, check);
         int rowsLeft = reachedTail ? 0 : Tx.run(() -> rowsBeforeTail(conversationId, force, callTokens));
         int summaryChars = Tx.run(() -> liveChars(conversationId));
         return CompactionResult.success(turnsCompacted, summaryChars, calls, rowsLeft, rowsSkipped);
@@ -681,29 +698,39 @@ public final class SessionCompactor {
 
     // ─── Merging the oldest segments (JF-161) ───────────────────────────
 
-    /** The oldest live segments one merge call takes: their ids, their text as the call reads it, and what they cover. */
-    private record MergePlan(List<Long> ids, String segments, @Nullable Instant coversFrom,
+    /**
+     * The oldest live segments one merge call takes: their ids, their text as the call reads it, each one's summary,
+     * and what they cover.
+     */
+    private record MergePlan(List<Long> ids, String segments, List<String> summaries, @Nullable Instant coversFrom,
                              @Nullable Instant coversTo, int turnCount) {}
 
-    /** Merges the oldest live segments, one call at a time, while they pass the budget; returns the calls it made. */
+    /** Whether a merge was stored, and the calls it made, its check's included. */
+    private record Merge(boolean stored, int calls) {}
+
+    /**
+     * Merges the oldest live segments, one merge at a time, while they pass {@link #summaryBudgetTokens}; with
+     * {@code check}, each merge is checked when a call is left for it. Returns the calls it made.
+     */
     private static int mergeOverBudget(Long conversationId, Supplier<String> modelLabel, Summarizer merger,
-                                       int callsLeft) {
-        int budget = summaryBudgetTokens();
+                                       int callsLeft, int callTokens, boolean check) {
+        int budget = summaryBudgetTokens(callTokens);
         int maxOut = summaryMaxTokens();
         int calls = 0;
         while (calls < callsLeft) {
             var plan = Tx.run(() -> oldestToMerge(conversationId, budget, maxOut));
             if (plan.isEmpty()) break;
-            calls++;
-            if (!mergeAndStore(conversationId, modelLabel, plan.get(), merger)) break;
+            var merge = mergeAndStore(conversationId, modelLabel, plan.get(), merger, check && callsLeft - calls > 1);
+            calls += merge.calls();
+            if (!merge.stored()) break;
         }
         return calls;
     }
 
     /**
      * The fewest oldest live segments, two or more, whose merge brings the stack within {@code budget}, counting the
-     * merge at its input's size up to {@code maxOut}, which it cannot write past; every one when none fewer would.
-     * Empty when the stack fits or holds one segment.
+     * merge at its {@link #mergedTokens}; every one when none fewer would. Empty when the stack fits or holds one
+     * segment.
      */
     private static Optional<MergePlan> oldestToMerge(Long conversationId, int budget, int maxOut) {
         var conv = Conversation.<Conversation>findById(conversationId);
@@ -713,47 +740,109 @@ public final class SessionCompactor {
         for (var s : live) total += tokens(s);
         if (total <= budget || live.size() < 2) return Optional.empty();
         int take = live.size();
-        long head = tokens(live.getFirst());
         for (int k = 2; k < live.size(); k++) {
-            head += tokens(live.get(k - 1));
-            if (total - head + Math.min(head, maxOut) <= budget) {
+            long head = 0;
+            for (var s : live.subList(0, k)) head += tokens(s);
+            if (total - head + mergedTokens(live.subList(0, k), maxOut) <= budget) {
                 take = k;
                 break;
             }
         }
         var oldest = live.subList(0, take);
         var ids = new ArrayList<Long>(take);
+        var summaries = new ArrayList<String>(take);
         @Nullable Instant coversTo = null;
         int turnCount = 0;
         for (var s : oldest) {
             ids.add(s.id);
+            summaries.add(s.summary == null ? "" : s.summary.strip());
             if (s.coversTo != null && (coversTo == null || s.coversTo.isAfter(coversTo))) coversTo = s.coversTo;
             turnCount += s.turnCount;
         }
-        return Optional.of(new MergePlan(ids, renderSegments(oldest), oldest.getFirst().coversFrom, coversTo,
-                turnCount));
+        return Optional.of(new MergePlan(ids, renderSegments(oldest), summaries, oldest.getFirst().coversFrom,
+                coversTo, turnCount));
+    }
+
+    /**
+     * What a merge of {@code segments} comes to: their carried sections whole ({@link #CARRIED_SECTIONS}) and the
+     * rest up to {@code maxOut}, which the model cannot write past; all of it up to {@code maxOut} when one of them
+     * lacks its sections and the model rewrites it whole.
+     */
+    private static long mergedTokens(List<SessionCompaction> segments, int maxOut) {
+        long whole = 0;
+        long carried = 0;
+        boolean structured = true;
+        for (var s : segments) {
+            var text = s.summary == null ? "" : s.summary.strip();
+            whole += text.length() / 4;
+            var sections = structured ? sectionsOf(text, SECTION_NAMES, SECTION_NAMES) : null;
+            if (sections == null) {
+                structured = false;
+                continue;
+            }
+            for (var name : CARRIED_SECTIONS) carried += String.join("\n", sections.getOrDefault(name, List.of())).length() / 4;
+        }
+        return structured ? carried + Math.min(whole - carried, maxOut) : Math.min(whole, maxOut);
     }
 
     private static int tokens(SessionCompaction segment) {
         return segment.summary == null ? 0 : segment.summary.strip().length() / 4;
     }
 
-    private static boolean mergeAndStore(Long conversationId, Supplier<String> modelLabel, MergePlan plan,
-                                         Summarizer merger) {
-        String merged;
+    /**
+     * One merge of {@code plan}'s segments, stored over them. When every one holds the five {@link #SECTIONS}, their
+     * {@link #CARRIED_SECTIONS} are carried across item for item, oldest first, an exact duplicate once, and the
+     * model writes only the other three (JF-423); a merge that does not return those three is not stored, so the
+     * segments stay as they are. Otherwise the model rewrites them whole (JF-161). With {@code check}, what the model
+     * wrote is checked against the segments ({@link #checkedMerge}).
+     */
+    private static Merge mergeAndStore(Long conversationId, Supplier<String> modelLabel, MergePlan plan,
+                                       Summarizer merger, boolean check) {
+        var parsed = new ArrayList<Map<String, List<String>>>(plan.summaries().size());
+        for (var summary : plan.summaries()) {
+            var sections = sectionsOf(summary, SECTION_NAMES, SECTION_NAMES);
+            if (sections == null) break;
+            parsed.add(sections);
+        }
+        boolean structured = parsed.size() == plan.summaries().size();
+        String written;
         try {
-            merged = merger.summarize(List.of(ChatMessage.system(MERGE_INSTRUCTIONS), ChatMessage.user(plan.segments())));
+            written = merger.summarize(List.of(ChatMessage.system(structured ? MERGE_CONDENSED_INSTRUCTIONS
+                    : MERGE_INSTRUCTIONS), ChatMessage.user(plan.segments())));
         } catch (Exception e) {
             EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d failed: %s"
                     .formatted(plan.ids().size(), conversationId, e.getMessage()));
-            return false;
+            return new Merge(false, 1);
         }
-        if (merged == null || merged.isBlank()) {
+        if (written == null || written.isBlank()) {
             EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d returned an empty summary"
                     .formatted(plan.ids().size(), conversationId));
-            return false;
+            return new Merge(false, 1);
         }
-        final var text = merged.strip();
+        var condensed = structured ? sectionsOf(written, SECTION_NAMES, CONDENSED_SECTIONS) : null;
+        if (structured && condensed == null) {
+            EventLogger.warn("compaction", null, null, ("Merging %d summaries of conversation %d returned no Decisions, "
+                    + "Open questions and errors and Next steps; the summaries stay as they are")
+                    .formatted(plan.ids().size(), conversationId));
+            return new Merge(false, 1);
+        }
+        int calls = 1;
+        String text;
+        if (condensed != null) {
+            var sections = condensed;
+            if (check) {
+                calls++;
+                sections = checkedMerge(conversationId, plan, sections, merger);
+            }
+            text = assembled(carried(parsed), sections);
+        } else {
+            text = written.strip();
+            if (check) {
+                calls++;
+                text = checkedMerge(conversationId, plan, text, merger);
+            }
+        }
+        final var merged = text;
         final var label = modelLabel.get();
         boolean stored = Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(conversationId);
@@ -765,7 +854,7 @@ public final class SessionCompactor {
                 if (source == null || source.mergedIntoId != null) return false;
                 sources.add(source);
             }
-            var result = segment(conv, text, label, plan.turnCount(), plan.coversFrom(), plan.coversTo());
+            var result = segment(conv, merged, label, plan.turnCount(), plan.coversFrom(), plan.coversTo());
             result.save();
             for (var source : sources) {
                 source.mergedIntoId = result.id;
@@ -774,10 +863,158 @@ public final class SessionCompactor {
             return true;
         });
         if (stored) {
-            EventLogger.info("compaction", null, null, "Merged the oldest %d summaries of conversation %d into one"
-                    .formatted(plan.ids().size(), conversationId));
+            EventLogger.info("compaction", null, null, "Merged the oldest %d summaries of conversation %d into one%s"
+                    .formatted(plan.ids().size(), conversationId, structured ? ", their facts carried word for word" : ""));
         }
-        return stored;
+        return new Merge(stored, calls);
+    }
+
+    /**
+     * The model's three sections as the check call corrects them against the segments they merge; {@code sections}
+     * themselves when the call fails, or returns less than half of them or without those sections.
+     */
+    private static Map<String, List<String>> checkedMerge(Long conversationId, MergePlan plan,
+                                                          Map<String, List<String>> sections, Summarizer checker) {
+        var condensed = render(sections, CONDENSED_SECTIONS);
+        var reply = mergeCheckReply(conversationId, plan, condensed, checker);
+        if (reply == null) return sections;
+        var corrected = sectionsOf(reply, SECTION_NAMES, CONDENSED_SECTIONS);
+        if (corrected == null || reply.length() * 2L < condensed.length()) {
+            warnUnchecked(conversationId, reply.length(), condensed.length());
+            return sections;
+        }
+        return corrected;
+    }
+
+    /** {@code merged}, a merge the model wrote whole, as the check call corrects it, under the same rules. */
+    private static String checkedMerge(Long conversationId, MergePlan plan, String merged, Summarizer checker) {
+        var reply = mergeCheckReply(conversationId, plan, merged, checker);
+        if (reply == null || reply.length() * 2L < merged.length()) {
+            if (reply != null) warnUnchecked(conversationId, reply.length(), merged.length());
+            return merged;
+        }
+        return reply;
+    }
+
+    private static @Nullable String mergeCheckReply(Long conversationId, MergePlan plan, String merged,
+                                                    Summarizer checker) {
+        try {
+            var reply = checker.summarize(List.of(ChatMessage.system(MERGE_CHECK_INSTRUCTIONS),
+                    ChatMessage.user(MERGED_SUMMARIES_LABEL + "\n\n" + plan.segments() + "\n\n" + MERGE_LABEL + "\n\n"
+                            + merged)));
+            return reply == null ? "" : reply.strip();
+        } catch (Exception e) {
+            EventLogger.warn("compaction", null, null, ("Checking the merge of conversation %d's summaries failed "
+                    + "(%s); it is stored unchecked").formatted(conversationId, e.getMessage()));
+            return null;
+        }
+    }
+
+    private static void warnUnchecked(Long conversationId, int replyChars, int mergedChars) {
+        EventLogger.warn("compaction", null, null, ("Checking the merge of conversation %d's summaries returned %d "
+                + "characters for a merge of %d, or no sections; it is stored unchecked").formatted(conversationId,
+                replyChars, mergedChars));
+    }
+
+    // ─── A summary's sections (JF-423) ──────────────────────────────────
+
+    /** {@link #SECTIONS}' headings, in order. */
+    private static final List<String> SECTION_NAMES = List.of("Goals and constraints", "Decisions",
+            "Identifiers and facts", "Open questions and errors", "Next steps");
+    /** The sections a merge carries word for word: the facts a summary of summaries would otherwise reword or drop. */
+    private static final List<String> CARRIED_SECTIONS = List.of("Goals and constraints", "Identifiers and facts");
+    /** The sections the model writes for a merge. */
+    private static final List<String> CONDENSED_SECTIONS = List.of("Decisions", "Open questions and errors",
+            "Next steps");
+
+    private static final Pattern ITEM_START = Pattern.compile("^(?:[-*\u2022]|\\d+[.)])\\s");
+
+    /**
+     * {@code text}'s lines under each {@code ### } heading, by heading; null unless every heading is one of
+     * {@code allowed}, none repeats, nothing but blank lines comes before the first, and each of {@code required} is
+     * there.
+     */
+    private static @Nullable Map<String, List<String>> sectionsOf(String text, List<String> allowed,
+                                                                 List<String> required) {
+        var out = new LinkedHashMap<String, List<String>>();
+        List<String> current = null;
+        for (var line : text.strip().lines().toList()) {
+            if (line.startsWith("### ")) {
+                var name = line.substring(4).strip();
+                if (!allowed.contains(name) || out.containsKey(name)) return null;
+                current = new ArrayList<>();
+                out.put(name, current);
+            } else if (current != null) {
+                current.add(line);
+            } else if (!line.isBlank()) {
+                return null;
+            }
+        }
+        return out.keySet().containsAll(required) ? out : null;
+    }
+
+    /**
+     * Each carried section's items across {@code segments}, oldest first, an item a second time only when it differs:
+     * an item is a bullet with the lines that continue it, as written, and "None." is none.
+     */
+    private static Map<String, List<String>> carried(List<Map<String, List<String>>> segments) {
+        var out = new LinkedHashMap<String, List<String>>();
+        for (var name : CARRIED_SECTIONS) {
+            var seen = new HashSet<String>();
+            var items = new ArrayList<String>();
+            for (var sections : segments) {
+                for (var item : items(sections.getOrDefault(name, List.of()))) {
+                    if (seen.add(itemKey(item))) items.add(item);
+                }
+            }
+            out.put(name, items);
+        }
+        return out;
+    }
+
+    private static List<String> items(List<String> lines) {
+        var out = new ArrayList<String>();
+        var item = new StringBuilder();
+        for (var line : lines) {
+            if (line.isBlank() || ITEM_START.matcher(line).find()) {
+                addItem(out, item);
+                if (line.isBlank()) continue;
+            }
+            if (!item.isEmpty()) item.append('\n');
+            item.append(line.stripTrailing());
+        }
+        addItem(out, item);
+        return out;
+    }
+
+    private static void addItem(List<String> out, StringBuilder item) {
+        var text = item.toString().strip();
+        item.setLength(0);
+        var key = itemKey(text);
+        if (!text.isEmpty() && !key.equals("None.") && !key.equals("None")) out.add(text);
+    }
+
+    /** An item's words, its bullet mark left off, so the same item written with another mark is a duplicate. */
+    private static String itemKey(String item) {
+        return ITEM_START.matcher(item).replaceFirst("").strip();
+    }
+
+    /** The five sections in {@link #SECTIONS}' order: the carried items, then the model's three, "None." where empty. */
+    private static String assembled(Map<String, List<String>> carriedItems, Map<String, List<String>> condensed) {
+        var all = new LinkedHashMap<String, List<String>>();
+        for (var name : SECTION_NAMES) {
+            all.put(name, (carriedItems.containsKey(name) ? carriedItems : condensed).getOrDefault(name, List.of()));
+        }
+        return render(all, SECTION_NAMES);
+    }
+
+    private static String render(Map<String, List<String>> sections, List<String> names) {
+        var parts = new ArrayList<String>(names.size());
+        for (var name : names) {
+            var body = String.join("\n", sections.getOrDefault(name, List.of())).strip();
+            parts.add("### " + name + "\n" + (body.isEmpty() ? "None." : body));
+        }
+        return String.join("\n\n", parts);
     }
 
     /** The characters of every segment the prompt carries for the conversation. */
@@ -1423,26 +1660,28 @@ public final class SessionCompactor {
     // ─── Summarization prompt ────────────────────────────────────────────
 
     // Fixed sections (JF-154), so every summary records the same kinds of facts; level-3 headings nest
-    // under the system prompt's own sections once the summary is appended to it.
-    private static final String SECTIONS = """
-            Write these five sections, in this order, each under its heading as bullet points, with "None." under a heading that has nothing to record:
+    // under the system prompt's own sections once the summary is appended to it. Keyed by SECTION_NAMES.
+    private static final Map<String, String> SECTION_GUIDANCE = Map.of(
+            "Goals and constraints", """
+                    What the user wants, and every constraint, preference and requirement they set.
+                    Each fact the user stated about a person, and each person's needs and preferences, the user's own \
+                    included, in the user's own words within quotation marks, naming whom it applies to: "my partner \
+                    is vegetarian" applies to the partner alone, never to the user as well.""",
+            "Decisions", "What the user or the agent decided, with the reason when one was given.",
+            "Identifiers and facts", "The names, ids, file paths, URLs, commit hashes, numbers and other values the "
+                    + "work relies on, copied exactly as written: never shorten, round or reconstruct one.",
+            "Open questions and errors", "Questions still unanswered, errors not yet resolved, and choices still "
+                    + "waiting on the user.",
+            "Next steps", "What remains to do, starting with the user's latest request and the step in progress.");
 
-            ### Goals and constraints
-            What the user wants, and every constraint, preference and requirement they set.
-            Each fact the user stated about a person, and each person's needs and preferences, the user's own included, in the user's own words within quotation marks, naming whom it applies to: "my partner is vegetarian" applies to the partner alone, never to the user as well.
+    private static String sectionsPrompt(String count, List<String> names) {
+        var out = new StringBuilder("Write these " + count + " sections, in this order, each under its heading as "
+                + "bullet points, with \"None.\" under a heading that has nothing to record:\n");
+        for (var name : names) out.append("\n### ").append(name).append('\n').append(SECTION_GUIDANCE.get(name)).append('\n');
+        return out.toString();
+    }
 
-            ### Decisions
-            What the user or the agent decided, with the reason when one was given.
-
-            ### Identifiers and facts
-            The names, ids, file paths, URLs, commit hashes, numbers and other values the work relies on, copied exactly as written: never shorten, round or reconstruct one.
-
-            ### Open questions and errors
-            Questions still unanswered, errors not yet resolved, and choices still waiting on the user.
-
-            ### Next steps
-            What remains to do, starting with the user's latest request and the step in progress.
-            """;
+    private static final String SECTIONS = sectionsPrompt("five", SECTION_NAMES);
 
     // JF-161: a segment covers its own turns; finished work is kept short rather than left out, which a long chat needs later.
     private static final String SUMMARIZATION_INSTRUCTIONS = """
@@ -1464,6 +1703,26 @@ public final class SessionCompactor {
 
             Where the summaries disagree, the later one wins. Keep each (unverified) mark. Keep each fact about a person in the words the summaries quote, with whom it applies to: never reword one or apply it to someone else. Write as much as the summaries need. No preface and no sign-off.
             """;
+
+    // JF-423: the facts sections are carried across by code, so the model rewrites none of them.
+    private static final String MERGE_CONDENSED_INSTRUCTIONS = """
+            Several summaries of one conversation are being merged into one. Each covers the turns between the dates above it, oldest first, and the merge is what the agent will read in their place. Their Goals and constraints and their Identifiers and facts are carried into the merge word for word, so you write only the other three sections. Do not answer the user and do not call a tool; reply with those three sections alone.
+
+            """ + sectionsPrompt("three", CONDENSED_SECTIONS) + """
+
+            Keep every file path, URL, commit hash, name, number and open item these sections record, copied exactly as written, unless a later summary settles it. Finished work may shrink to one line, but keep its identifiers. Where the summaries disagree, the later one wins. Keep each (unverified) mark. No preface and no sign-off.
+            """;
+
+    private static final String MERGE_CHECK_INSTRUCTIONS = """
+            A merge of several summaries of one conversation is being checked before it replaces them. Below are the summaries, oldest first, and the merge's sections. Do not answer the user and do not call a tool.
+
+            Compare the merge's sections with the summaries. Add each decision, open question, error, next step and fact a summary records that the merge's sections leave out, unless a later summary settles it, copying its identifiers exactly. Leave everything else as it is, its headings included.
+
+            Reply with the merge's sections whole, corrected, or unchanged when nothing is missing. No preface and no sign-off.
+            """;
+
+    private static final String MERGED_SUMMARIES_LABEL = "[The summaries being merged]";
+    private static final String MERGE_LABEL = "[The merge's sections]";
 
     private static final String CHECK_INSTRUCTIONS = """
             A summary of part of a conversation is being checked before it replaces the turns it covers. Below are the summary and every message the user wrote in those turns, oldest first. Do not answer the user and do not call a tool.

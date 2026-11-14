@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -1360,8 +1361,9 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void pastTheBudgetExactlyTheOldestSegmentsMergeIntoOneThatKeepsTheCommitHashTheyName() {
-        // Defaults: a 20,000-token budget and an 8,192-token output limit. Five 5,000-token segments pass the budget,
-        // and the oldest three, merged into at most 8,192 tokens, are the fewest whose merge fits.
+        // A 20,000-token budget set as the key and the default 8,192-token output limit. Five 5,000-token segments
+        // pass the budget, and the oldest three, merged into at most 8,192 tokens, are the fewest whose merge fits.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "20000");
         var conv = ConversationService.create(agent, "web", "user1");
         var texts = new ArrayList<String>();
         for (int k = 0; k < 5; k++) {
@@ -1419,6 +1421,170 @@ class SessionCompactorTest extends UnitTest {
         assertEquals(rows.getFirst().createdAt(), result.coversFrom);
         assertEquals(rows.get(mergedEnd).createdAt(), result.coversTo);
         assertEquals(counts.get(0) + counts.get(1) + counts.get(2), result.turnCount);
+    }
+
+    // ─── A merge carries the facts sections word for word (JF-423) ───────
+
+    @Test
+    void theMergeBudgetIsFifteenPercentOfASummaryCallNeverUnderAThousandAndASetTokenBudgetOverridesIt() {
+        assertEquals(15_000, SessionCompactor.summaryBudgetTokens(100_000));
+        assertEquals(22_500, SessionCompactor.summaryBudgetTokens(Integer.MAX_VALUE),
+                "an unbounded call takes the share of the trigger's cap");
+        assertEquals(1_000, SessionCompactor.summaryBudgetTokens(6_673));
+        assertEquals(1_001, SessionCompactor.summaryBudgetTokens(6_674));
+
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY, "30");
+        assertEquals(30_000, SessionCompactor.summaryBudgetTokens(100_000));
+
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "20000");
+        assertEquals(20_000, SessionCompactor.summaryBudgetTokens(4_000), "a set token budget wins on a small model");
+        assertEquals(20_000, SessionCompactor.summaryBudgetTokens(1_000_000));
+    }
+
+    @Test
+    void aFactInOneSegmentSurvivesTwoRoundsOfMergingWordForWordAndADuplicateIsCarriedOnce() {
+        // Each segment is about 420 tokens against a 1,000-token budget, and a merge about 75: the third segment
+        // passes it and all three merge, then the merge and the next three pass it and all four merge.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.add(msgs);
+                return CONDENSED;
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 6; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(2, merges.size());
+        for (var merge : merges) assertEquals(CONDENSED_HEADINGS, headings(merge.getFirst().content()));
+        var segments = storedSegments(conv.id);
+        assertEquals(8, segments.size(), "three segments, their merge, three more and the second merge");
+        assertEquals(mergeOf(2), segments.get(3).summary);
+        assertEquals(mergeOf(5), segments.get(7).summary);
+        var first = segments.get(3).id;
+        var second = segments.get(7).id;
+        assertEquals(java.util.Arrays.asList(first, first, first, second, second, second, second, null),
+                segments.stream().map(sc -> sc.mergedIntoId).toList(), "every merged segment stays, marked");
+        assertEquals("SYS\n\n" + SessionCompactor.PRIOR_SUMMARY_HEADER + "\n\n"
+                        + label(segments.getFirst().coversFrom, segments.get(6).coversTo) + "\n\n" + mergeOf(5),
+                SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
+    @Test
+    void withTheCheckOnAMergesOwnSectionsAreCheckedAgainstTheSegmentsAndItsCarriedFactsStayAsTheyWere() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new ArrayList<List<ChatMessage>>();
+        var checks = new ArrayList<List<ChatMessage>>();
+        var written = new AtomicInteger();
+        var restored = CONDENSED + "\n- Step 1, which the merge left out";
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            var user = (String) msgs.get(1).content();
+            if (user.startsWith("[The summaries being merged]")) {
+                checks.add(msgs);
+                return restored;
+            }
+            if (user.startsWith("[Turns ")) {
+                merges.add(msgs);
+                return CONDENSED;
+            }
+            if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, merges.size());
+        assertEquals(1, checks.size());
+        assertEquals(ChatMessage.user("[The summaries being merged]\n\n" + merges.getFirst().get(1).content()
+                + "\n\n[The merge's sections]\n\n" + CONDENSED), checks.getFirst().get(1));
+        assertEquals(mergeOf(2).replace("- Merged next step", "- Merged next step\n- Step 1, which the merge left out"),
+                storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aMergeCheckThatReturnsNoSectionsLeavesTheMergeAsTheModelWroteIt() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            var user = (String) msgs.get(1).content();
+            if (user.startsWith("[The summaries being merged]")) return "Nothing is missing; " + "z".repeat(400);
+            if (user.startsWith("[Turns ")) return CONDENSED;
+            if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aMergeWhoseReplyLacksItsThreeSectionsStoresNothingAndTheSegmentsStayLive() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new AtomicInteger();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.incrementAndGet();
+                return "### Decisions\n- Merged decisions";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(1, merges.get());
+        var segments = storedSegments(conv.id);
+        assertEquals(List.of(sectioned(0), sectioned(1), sectioned(2)), segments.stream().map(sc -> sc.summary).toList());
+        assertEquals(java.util.Arrays.asList(null, null, null), segments.stream().map(sc -> sc.mergedIntoId).toList());
+    }
+
+    private static final List<String> CONDENSED_HEADINGS = List.of("Decisions", "Open questions and errors",
+            "Next steps");
+
+    /** What the merge stubs write: the three sections a merge leaves to the model, none of the facts. */
+    private static final String CONDENSED = "### Decisions\n- Merged decisions\n\n### Open questions and errors\n"
+            + "None.\n\n### Next steps\n- Merged next step";
+
+    /** The first segment's fact, with the identifiers a reworded fact would lose. */
+    private static final String FACT = "Ticket JF-999 is at https://example.com/a?b=1&c=2, after commit 76781a2.";
+
+    /** Segment {@code k} in the five sections, about 420 tokens; every one also lists the repo, a duplicate. */
+    private static String sectioned(int k) {
+        return "### Goals and constraints\n- Goal " + k + "\n\n### Decisions\n- Decision " + k + " "
+                + "d".repeat(1_500) + "\n\n### Identifiers and facts\n- " + (k == 0 ? FACT : "Fact " + k)
+                + "\n- The repo is jclaw.\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Step " + k;
+    }
+
+    /** The merge of segments 0 to {@code last}: their goals and facts in order, the repo once, then {@link #CONDENSED}. */
+    private static String mergeOf(int last) {
+        var goals = new ArrayList<String>();
+        var facts = new ArrayList<>(List.of("- " + FACT, "- The repo is jclaw."));
+        for (int k = 0; k <= last; k++) {
+            goals.add("- Goal " + k);
+            if (k > 0) facts.add("- Fact " + k);
+        }
+        return "### Goals and constraints\n" + String.join("\n", goals) + "\n\n### Decisions\n- Merged decisions"
+                + "\n\n### Identifiers and facts\n" + String.join("\n", facts)
+                + "\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Merged next step";
+    }
+
+    /** Batch {@code b} of rows, an hour after the last, then a compaction with {@code summarizer}. */
+    private void compactBatch(Conversation conv, int b, SessionCompactor.Summarizer summarizer) {
+        seedMinutes(Conversation.findById(conv.id), BASE.plusSeconds(b * 3_600L), 25, "Batch " + b);
+        commitAndReopen();
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", summarizer);
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        commitAndReopen();
     }
 
     @Test

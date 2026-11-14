@@ -420,8 +420,13 @@ public class ConfigService {
                     ? key + " must be 'true' or 'false'." : null,
             (key, value) -> key.equals(SystemPromptAssembler.VISUAL_ENABLED_KEY) && !value.isBlank()
                     && !isTrueOrFalse(value) ? key + " must be 'true' or 'false'." : null,
-            atLeast(SessionCompactor.SUMMARY_BUDGET_KEY, SessionCompactor.MIN_SUMMARY_BUDGET,
-                    " must be a whole number of tokens, at least " + SessionCompactor.MIN_SUMMARY_BUDGET + "."),
+            // Blank clears the override, and the budget follows the window again (JF-423).
+            (key, value) -> key.equals(SessionCompactor.SUMMARY_BUDGET_KEY) && value != null && !value.isBlank()
+                    && !isIntAtLeast(value, SessionCompactor.MIN_SUMMARY_BUDGET)
+                    ? key + " must be a whole number of tokens, at least " + SessionCompactor.MIN_SUMMARY_BUDGET
+                    + ", or empty to follow the window." : null,
+            (key, value) -> key.equals(SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY) && !isIntBetween(value, 1, 100)
+                    ? key + " must be a whole number from 1 to 100." : null,
             atLeast(SessionCompactor.TOOL_RESULT_CHARS_KEY, 0,
                     " must be a whole number of characters; 0 keeps only the length."),
             (key, value) -> (key.equals(SessionCompactor.KEEP_PERCENT_KEY)

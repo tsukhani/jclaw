@@ -289,14 +289,26 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
-    void theSummaryBudgetMustBeAWholeNumberOfAtLeastAThousandTokens() {
+    void theSummaryBudgetMustBeAWholeNumberOfAtLeastAThousandTokensOrEmptyToFollowTheWindow() {
         var key = "chat.compaction.summaryBudgetTokens";
-        var expected = key + " must be a whole number of tokens, at least 1000.";
-        for (var value : List.of("999", "0", "-1", "20k", "1.5", "")) {
+        var expected = key + " must be a whole number of tokens, at least 1000, or empty to follow the window.";
+        for (var value : List.of("999", "0", "-1", "20k", "1.5")) {
             assertRefused(expected, key, value);
         }
-        assertAccepted(key, "1000");
-        assertAccepted(key, "20000");
+        for (var value : List.of("1000", "20000", "", " ")) {
+            assertAccepted(key, value);
+        }
+    }
+
+    @Test
+    void theSummaryBudgetShareOfASummaryCallMustBeAWholePercentFromOneToAHundred() {
+        var expected = "chat.compaction.summaryBudgetPercent must be a whole number from 1 to 100.";
+        for (var value : List.of("0", "101", "-1", "15.5", "fifteen", "")) {
+            assertRefused(expected, SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY, value);
+        }
+        for (var value : List.of("1", "15", "100")) {
+            assertAccepted(SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY, value);
+        }
     }
 
     @Test

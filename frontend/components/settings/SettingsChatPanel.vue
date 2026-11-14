@@ -196,13 +196,23 @@ async function saveChatField(configKey: string, value: string) {
           tip="Long tool results from earlier turns are shortened to a note the agent can open again. 1 shortens them each turn. Recommended: 5 once your provider's cache holds across turns."
         />
         <SettingsConfigField
-          config-key="chat.compaction.summaryBudgetTokens"
-          label="Merge summaries past (tokens)"
+          config-key="chat.compaction.summaryBudgetPercent"
+          label="Merge summaries past (% of the summary point)"
           kind="number"
-          fallback="20000"
+          fallback="15"
+          :min="1"
+          :max="100"
+          label-width="w-80"
+          tip="Each summary is kept as written, and the agent reads them all, oldest first. When together they pass this percent of the size at which a summary is made, the oldest are merged into one. The merge keeps their goals, constraints and facts word for word and shortens the rest. 1 to 100. Default: 15."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.summaryBudgetTokens"
+          label="…or past a fixed size (tokens)"
+          kind="number"
+          fallback=""
           :min="1000"
           label-width="w-80"
-          tip="Each summary is kept as written, and the agent reads them all, oldest first. When together they pass this many tokens, the oldest are merged into one that keeps their names, file paths, links, commits and numbers. At least 1000. Default: 20000."
+          tip="Set, the summaries are merged past this many tokens whatever the model, in place of the percent above. Leave it empty to follow the percent. At least 1000."
         />
         <SettingsConfigField
           config-key="chat.compaction.toolResultChars"

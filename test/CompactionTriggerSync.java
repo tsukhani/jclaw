@@ -23,6 +23,7 @@ public final class CompactionTriggerSync {
     private static final List<String> KEYS = List.of(SessionCompactor.TRIGGER_TOKENS_KEY,
             SessionCompactor.TRIGGER_PERCENT_KEY, SessionCompactor.ON_ROW_LIMIT_KEY, ConversationService.KEY_GLOBAL_MAX,
             ConversationService.KEY_DM_LIMIT, ConversationService.KEY_GROUP_LIMIT, SessionCompactor.SUMMARY_BUDGET_KEY,
+            SessionCompactor.SUMMARY_BUDGET_PERCENT_KEY,
             SessionCompactor.TOOL_RESULT_CHARS_KEY, SessionCompactor.KEEP_PERCENT_KEY,
             SessionCompactor.MIN_SUMMARY_TOKENS_KEY, SessionCompactor.FORCED_KEEP_PERCENT_KEY,
             SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, SessionCompactor.VERBATIM_USER_TOKENS_KEY,
