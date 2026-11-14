@@ -100,8 +100,8 @@ describe('formatTokensPerSec', () => {
     expect(formatTokensPerSec({ durationMs: 1000, completion: 0 } as MessageUsage)).toBeNull()
   })
 
-  it('formats tokens per second to one decimal', () => {
-    expect(formatTokensPerSec({ durationMs: 2000, completion: 50 } as MessageUsage)).toBe('25.0 tok/s')
+  it('marks a whole-reply average as one, to one decimal', () => {
+    expect(formatTokensPerSec({ durationMs: 2000, completion: 50 } as MessageUsage)).toBe('25.0 tok/s avg')
   })
 
   it('shows how fast the final call wrote, not the whole turn\'s average, once it was timed', () => {
@@ -115,7 +115,8 @@ describe('formatTokensPerSec', () => {
     const below = { ...at, lastWriteMs: 249 }
     expect(writingSpeed(at)).toBe(200)
     expect(writingSpeed(below)).toBeNull()
-    expect(formatTokensPerSec(below)).toBe('25.0 tok/s')
+    expect(formatTokensPerSec(at)).toBe('200.0 tok/s')
+    expect(formatTokensPerSec(below)).toBe('25.0 tok/s avg')
   })
 
   it('has no writing speed for a final call that wrote nothing', () => {

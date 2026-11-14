@@ -132,7 +132,7 @@ The agent fetches the full text back with a handle when it needs it. A list of a
 
 ## Per-message usage
 
-Every assistant message carries a small **tok/s** badge: how fast the model wrote its final answer. Hover it for **This reply**, which names the model that answered and says how long the reply took and how many model calls it made. Below that:
+Every assistant message carries a small **tok/s** badge: how fast the model wrote its final answer. A badge ending in **avg** shows the reply's average speed instead (see **Average speed** below), which is usually lower, so compare it only with other **avg** badges. Hover it for **This reply**, which names the model that answered and says how long the reply took and how many model calls it made. Below that:
 
 - **Chosen by**, on a turn the Auto router sent: `Auto · <class>`, marked `(failover)` when the fallback answered.
 - **Read**: the tokens the model read, with **reused from earlier** for the part the provider had kept from before, which usually costs less. A reply that uses tools calls the model more than once, and each call rereads the conversation, so **Read** adds up every call.

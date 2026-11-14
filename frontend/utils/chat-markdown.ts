@@ -169,9 +169,12 @@ export function averageSpeed(usage: MessageUsage): number | null {
   return (usage.completion / usage.durationMs) * 1000
 }
 
+/** The badge under a reply: its writing speed, or its average marked "avg" so the two are never compared as one. */
 export function formatTokensPerSec(usage: MessageUsage): string | null {
-  const tps = writingSpeed(usage) ?? averageSpeed(usage)
-  return tps == null ? null : tps.toFixed(1) + ' tok/s'
+  const writing = writingSpeed(usage)
+  if (writing != null) return `${writing.toFixed(1)} tok/s`
+  const average = averageSpeed(usage)
+  return average == null ? null : `${average.toFixed(1)} tok/s avg`
 }
 
 // Configure DOMPurify to allow images, audio, video, and download links

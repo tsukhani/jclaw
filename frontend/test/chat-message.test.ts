@@ -281,6 +281,7 @@ describe('ChatMessage usage card', () => {
     expect(rows['Memory after this reply']).toBeUndefined()
     expect(lines).toContain('Output over the whole reply\'s time, the wait for the first word included.')
     expect(lines.some(l => l?.startsWith('Reported by'))).toBe(false)
+    expect(c.text()).toContain('25.0 tok/s avg')
     c.unmount()
   })
 })
