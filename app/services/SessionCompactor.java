@@ -883,12 +883,12 @@ public final class SessionCompactor {
                         .formatted(plan.ids().size(), conversationId, e.getMessage()));
                 return new Merge(false, calls);
             }
-            var condensed = written == null ? null
-                    : sectionsOf(written, replacing ? REPLACING_SECTION_NAMES : SECTION_NAMES, CONDENSED_SECTIONS);
+            var read = replySections(written == null ? "" : written,
+                    replacing ? REPLACING_SECTION_NAMES : SECTION_NAMES, CONDENSED_SECTIONS);
+            var condensed = read.sections();
             if (condensed == null) {
-                EventLogger.warn("compaction", null, null, ("Merging %d summaries of conversation %d returned no "
-                        + "Decisions, Open questions and errors and Next steps; the summaries stay as they are")
-                        .formatted(plan.ids().size(), conversationId));
+                EventLogger.warn("compaction", null, null, ("Merging %d summaries of conversation %d returned %s; the "
+                        + "summaries stay as they are").formatted(plan.ids().size(), conversationId, read.problem()));
                 return new Merge(false, calls);
             }
             Map<Integer, Integer> replaced = replacing
@@ -962,8 +962,8 @@ public final class SessionCompactor {
     /**
      * The model's three sections as the check call corrects them against the segments they merge, and of the items
      * {@code replaced} drops (N by M, numbered as {@link #numbered} shows them) those the check finds their
-     * replacement does not replace; {@code sections} and none restored when the call fails, or returns less than half
-     * of them or without those sections.
+     * replacement does not replace; {@code sections} and none restored when the call fails, or returns those sections
+     * unreadable ({@link #replySections}) or in less than half their length.
      */
     private static CheckedMerge checkedMerge(Long conversationId, MergePlan plan, Map<String, List<String>> sections,
                                              Map<String, List<String>> carried, Map<Integer, Integer> replaced,
@@ -974,9 +974,17 @@ public final class SessionCompactor {
                 : condensed + "\n\n" + DROPPED_ITEMS_LABEL + "\n\n" + drops(carried, replaced), checker,
                 replaced.isEmpty() ? MERGE_CHECK_INSTRUCTIONS : MERGE_CHECK_DROPS_INSTRUCTIONS);
         if (reply == null) return unchecked;
-        var corrected = sectionsOf(reply, CHECKED_SECTION_NAMES, CONDENSED_SECTIONS);
-        if (corrected == null || reply.length() * 2L < condensed.length()) {
-            warnUnchecked(conversationId, reply.length(), condensed.length());
+        var read = replySections(reply, CHECKED_SECTION_NAMES, CONDENSED_SECTIONS);
+        var corrected = read.sections();
+        if (corrected == null) {
+            warnUnchecked(conversationId, read.problem());
+            return unchecked;
+        }
+        // The sections alone are measured, so a preface or an echoed section cannot carry a cut correction past it.
+        int correctedChars = render(corrected, CONDENSED_SECTIONS).length();
+        if (correctedChars * 2L < condensed.length()) {
+            warnUnchecked(conversationId, "%d characters of sections for a merge of %d".formatted(correctedChars,
+                    condensed.length()));
             return unchecked;
         }
         var restored = new HashSet<Integer>();
@@ -1001,14 +1009,26 @@ public final class SessionCompactor {
         return String.join("\n", lines);
     }
 
-    /** {@code merged}, a merge the model wrote whole, as the check call corrects it, under the same rules. */
+    /**
+     * {@code merged}, a merge the model wrote whole, as the check call corrects it, from the reply's first section
+     * heading up to a request label it echoes; {@code merged} when the call fails, or the reply is unreadable
+     * ({@link #replySections}) or less than half as long.
+     */
     private static String checkedMerge(Long conversationId, MergePlan plan, String merged, Summarizer checker) {
         var reply = mergeCheckReply(conversationId, plan, merged, checker, MERGE_CHECK_INSTRUCTIONS);
-        if (reply == null || reply.length() * 2L < merged.length()) {
-            if (reply != null) warnUnchecked(conversationId, reply.length(), merged.length());
+        if (reply == null) return merged;
+        var read = replySections(reply, SECTION_NAMES, List.of());
+        var corrected = read.sections() == null ? null : fromFirstSection(reply);
+        if (corrected == null) {
+            warnUnchecked(conversationId, read.problem());
             return merged;
         }
-        return reply;
+        if (corrected.length() * 2L < merged.length()) {
+            warnUnchecked(conversationId, "%d characters for a merge of %d".formatted(corrected.length(),
+                    merged.length()));
+            return merged;
+        }
+        return corrected;
     }
 
     private static @Nullable String mergeCheckReply(Long conversationId, MergePlan plan, String merged,
@@ -1025,10 +1045,9 @@ public final class SessionCompactor {
         }
     }
 
-    private static void warnUnchecked(Long conversationId, int replyChars, int mergedChars) {
-        EventLogger.warn("compaction", null, null, ("Checking the merge of conversation %d's summaries returned %d "
-                + "characters for a merge of %d, or no sections; it is stored unchecked").formatted(conversationId,
-                replyChars, mergedChars));
+    private static void warnUnchecked(Long conversationId, String problem) {
+        EventLogger.warn("compaction", null, null, ("Checking the merge of conversation %d's summaries returned %s; "
+                + "it is stored unchecked").formatted(conversationId, problem));
     }
 
     // ─── A summary's sections (JF-423) ──────────────────────────────────
@@ -1061,7 +1080,8 @@ public final class SessionCompactor {
     /**
      * {@code text}'s lines under each {@code ### } heading, by heading; null unless every heading is one of
      * {@code allowed}, none repeats, nothing but blank lines comes before the first, and each of {@code required} is
-     * there.
+     * there. Stored segments are read this strictly, since one that misses the shape is merged whole and loses
+     * nothing; a model's fresh reply is read by {@link #replySections}.
      */
     private static @Nullable Map<String, List<String>> sectionsOf(String text, List<String> allowed,
                                                                  List<String> required) {
@@ -1080,6 +1100,77 @@ public final class SessionCompactor {
             }
         }
         return out.keySet().containsAll(required) ? out : null;
+    }
+
+    /** A reply's sections, or null with what kept them from being read, for a warning; never the reply's own words. */
+    private record ReplySections(@Nullable Map<String, List<String>> sections, String problem) {}
+
+    /**
+     * {@code reply}'s lines under each {@code ### } heading naming one of {@code asked}, by that name, read as models
+     * write a reply (JF-428): text before the first such heading is skipped, as are the lines under any other heading
+     * and those after a request label the reply echoes, up to the next heading; a name matches in any case, bold or
+     * with a colon. Unread when nothing names an asked section, a heading repeats, or one of {@code required} is
+     * missing.
+     */
+    private static ReplySections replySections(String reply, List<String> asked, List<String> required) {
+        if (reply.isBlank()) return new ReplySections(null, "an empty reply");
+        var out = new LinkedHashMap<String, List<String>>();
+        List<String> current = null;
+        for (var line : reply.strip().lines().toList()) {
+            var name = sectionName(line, asked);
+            if (name != null) {
+                if (out.containsKey(name)) return new ReplySections(null, "a reply with the " + name + " heading twice");
+                current = new ArrayList<>();
+                out.put(name, current);
+            } else if (line.strip().startsWith("### ") || isRequestLabel(line)) {
+                current = null;
+            } else if (current != null) {
+                current.add(line);
+            }
+        }
+        if (out.isEmpty()) return new ReplySections(null, "a reply with none of the section headings");
+        var missing = required.stream().filter(n -> !out.containsKey(n)).toList();
+        return missing.isEmpty() ? new ReplySections(out, "")
+                : new ReplySections(null, "a reply without " + joined(missing));
+    }
+
+    /** The one of {@code asked} that {@code line} names as a {@code ### } heading, as {@link #replySections} matches it. */
+    private static @Nullable String sectionName(String line, List<String> asked) {
+        var heading = line.strip();
+        if (!heading.startsWith("### ")) return null;
+        var name = heading.substring(4).replace("**", "").strip();
+        if (name.endsWith(":")) name = name.substring(0, name.length() - 1).strip();
+        for (var section : asked) {
+            if (section.equalsIgnoreCase(name)) return section;
+        }
+        return null;
+    }
+
+    private static boolean isRequestLabel(String line) {
+        var text = line.strip();
+        for (var label : REQUEST_LABELS) {
+            if (text.startsWith(label)) return true;
+        }
+        return false;
+    }
+
+    /** {@code reply} from its first {@code ### } heading naming a summary section up to a request label it echoes. */
+    private static @Nullable String fromFirstSection(String reply) {
+        var kept = new ArrayList<String>();
+        for (var line : reply.strip().lines().toList()) {
+            if (kept.isEmpty() ? sectionName(line, SECTION_NAMES) != null : !isRequestLabel(line)) {
+                kept.add(line);
+            } else if (!kept.isEmpty()) {
+                break;
+            }
+        }
+        return kept.isEmpty() ? null : String.join("\n", kept).strip();
+    }
+
+    /** "A", "A and B", "A, B and C". */
+    private static String joined(List<String> names) {
+        return names.size() == 1 ? names.getFirst()
+                : String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.getLast();
     }
 
     /**
@@ -1961,6 +2052,9 @@ public final class SessionCompactor {
     private static final String MERGE_LABEL = "[The merge's sections]";
     private static final String CARRIED_ITEMS_LABEL = "[The carried identifiers and facts, numbered]";
     private static final String DROPPED_ITEMS_LABEL = "[The identifiers and facts dropped as replaced]";
+    /** What a merge or check request marks its parts with: a reply echoing one echoes the part after it too. */
+    private static final List<String> REQUEST_LABELS = List.of(MERGED_SUMMARIES_LABEL, MERGE_LABEL, CARRIED_ITEMS_LABEL,
+            DROPPED_ITEMS_LABEL);
 
     private static final String CHECK_INSTRUCTIONS = """
             A summary of part of a conversation is being checked before it replaces the turns it covers. Below are the summary and every message the user wrote in those turns, oldest first. Do not answer the user and do not call a tool.

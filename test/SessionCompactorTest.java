@@ -42,6 +42,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1615,12 +1616,32 @@ class SessionCompactorTest extends UnitTest {
             return sectioned(written.getAndIncrement());
         };
 
-        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
 
         assertEquals(1, merges.get());
+        assertEquals(List.of(("Merging 3 summaries of conversation %d returned a reply without Open questions and "
+                + "errors and Next steps; the summaries stay as they are").formatted(conv.id)), mergeLines(events));
         var segments = storedSegments(conv.id);
         assertEquals(List.of(sectioned(0), sectioned(1), sectioned(2)), segments.stream().map(sc -> sc.summary).toList());
         assertEquals(java.util.Arrays.asList(null, null, null), segments.stream().map(sc -> sc.mergedIntoId).toList());
+    }
+
+    @Test
+    void aMergeReplyOpeningOnAPrefaceWithLooseHeadingsAndASectionItWasNotAskedForIsStillStored() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> ((String) msgs.get(1).content()).startsWith("[Turns ")
+                ? "Here is the merge of the three summaries.\n\n### decisions:\n- Merged decisions\n\n"
+                        + "### **Open questions and errors**\nNone.\n\n### Next steps\n- Merged next step"
+                        + "\n\n### Replaced items\nNone."
+                : sectioned(written.getAndIncrement());
+
+        for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+
+        assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
     }
 
     // ─── A merge past the facts share drops what a later item replaces (JF-425) ───
@@ -1704,6 +1725,154 @@ class SessionCompactorTest extends UnitTest {
                 + "jclaw.\n[2] The repo is jclaw. — replaced by [4] Fact 2"), checks.getFirst().get(1).content().toString());
         assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary,
                 "the ticket fact is restored; the repo, which the check let go, is dropped");
+    }
+
+    // ─── A merge's replies read as models write them (JF-428) ──────────
+
+    @Test
+    void aMergeCheckReplyOpeningOnAPrefaceStillRestoresTheDroppedItemItNames() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var summarizer = dropsChecked(CONDENSED, "Here is the corrected merge.\n\n" + CONDENSED
+                + "\n\n### Restored items\n- 1");
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(List.of("Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1"
+                .formatted(conv.id)), mergeLines(events));
+        assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aMergeCheckReplyEchoingTheReplacedItemsAndTheDroppedListRestoresOnlyTheItemsItNames() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var conv = ConversationService.create(agent, "web", "user1");
+        // Read under Restored items, the echoed list would restore 2 as well: it names [2] twice.
+        var summarizer = dropsChecked(CONDENSED, "[The merge's sections]\n\n" + CONDENSED
+                + "\n\n### Replaced items\n- 1 by 2\n- 2 by 4\n\n### Restored items\n- 1"
+                + "\n\n[The identifiers and facts dropped as replaced]\n\n[1] " + FACT + " — replaced by [2] The repo is "
+                + "jclaw.\n[2] The repo is jclaw. — replaced by [4] Fact 2");
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(List.of("Merging 3 summaries of conversation %d dropped 1 replaced item(s); the check restored 1"
+                .formatted(conv.id)), mergeLines(events));
+        assertEquals(mergeOf(2).replace("\n- The repo is jclaw.", ""), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
+    void aMergeCheckReplyThatCannotBeReadSaysWhyAndLeavesEveryDropTheMergeMade() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "3");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var decisions = "- Merged decisions " + "m".repeat(300);
+        var condensed = CONDENSED.replace("- Merged decisions", decisions);
+        var thin = "### Decisions\n- Kept\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Kept";
+        var replies = new LinkedHashMap<String, String>();
+        replies.put("Nothing is missing; the merge stands.", "a reply with none of the section headings");
+        replies.put("### Replaced items\n- 1 by 2", "a reply with none of the section headings");
+        replies.put("", "an empty reply");
+        replies.put(condensed + "\n\n### Decisions\n- A second list", "a reply with the Decisions heading twice");
+        replies.put("### Decisions\n" + decisions + "\n\n### Restored items\n- 1",
+                "a reply without Open questions and errors and Next steps");
+        replies.put(thin, "80 characters of sections for a merge of 405");
+        int n = 0;
+        for (var reply : replies.entrySet()) {
+            var conv = ConversationService.create(agent, "web", "unread-" + n++);
+            var summarizer = dropsChecked(condensed, reply.getKey());
+
+            var events = EventLogger.captureForTest(() -> {
+                for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+            });
+
+            assertEquals(List.of("Checking the merge of conversation %d's summaries returned %s; it is stored unchecked"
+                            .formatted(conv.id, reply.getValue()),
+                    "Merging 3 summaries of conversation %d dropped 2 replaced item(s); the check restored 0"
+                            .formatted(conv.id)), mergeLines(events), "reply: [" + reply.getKey() + "]");
+            assertEquals(mergeOf(2).replace("- Merged decisions", decisions).replace("- " + FACT + "\n- The repo is "
+                    + "jclaw.\n", ""), storedSegments(conv.id).getLast().summary, "reply: [" + reply.getKey() + "]");
+        }
+        assertEquals(405, condensed.length());
+        assertEquals(80, thin.length());
+    }
+
+    @Test
+    void aMergeCheckReplyOfHalfTheMergesSectionsCorrectsItAndOneCharacterLessIsIgnored() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        // A 160-character merge: a reply whose sections render in 80 corrects it, one in 79 is ignored, however much
+        // preface and echo surround it.
+        var condensed = CONDENSED.replace("- Merged decisions", "- Merged decisions " + "m".repeat(55));
+        var half = "### Decisions\n- Kept\n\n### Open questions and errors\nNone.\n\n### Next steps\n- Kept";
+        var less = half.replaceFirst("- Kept", "- Kep");
+        var padding = "Here is the merge, checked against every summary. " + "p".repeat(200) + "\n\n";
+        for (var reply : List.of(half, less)) {
+            var conv = ConversationService.create(agent, "web", "half-" + reply.length());
+            var summarizer = dropsChecked(condensed, padding + reply + "\n\n### Replaced items\n" + "r".repeat(200));
+
+            var events = EventLogger.captureForTest(() -> {
+                for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+            });
+
+            var stored = storedSegments(conv.id).getLast().summary;
+            if (reply.equals(half)) {
+                assertEquals(List.of(), mergeLines(events));
+                assertEquals(mergeOf(2).replace("- Merged decisions", "- Kept").replace("- Merged next step", "- Kept"),
+                        stored);
+            } else {
+                assertEquals(List.of(("Checking the merge of conversation %d's summaries returned 79 characters of "
+                        + "sections for a merge of 160; it is stored unchecked").formatted(conv.id)), mergeLines(events));
+                assertEquals(mergeOf(2).replace("- Merged decisions", "- Merged decisions " + "m".repeat(55)), stored);
+            }
+        }
+        assertEquals(160, condensed.length());
+        assertEquals(80, half.length());
+    }
+
+    @Test
+    void aWholeMergesCheckReplyIsStoredFromItsFirstHeadingToAnEchoedLabelAndOneWithNoHeadingIsIgnored() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var whole = "### Decisions\n- WHOLE MERGE " + "w".repeat(200);
+        var corrected = whole + "\n- A step the merge left out";
+        var replies = new LinkedHashMap<String, String>();
+        replies.put("Here is the corrected merge.\n\n" + corrected
+                + "\n\n[The summaries being merged]\n\nThe older summary says the same.", corrected);
+        // Before JF-428 a reply this long replaced the merge whatever it held.
+        replies.put("Nothing is missing; " + "z".repeat(400), whole);
+        int n = 0;
+        for (var reply : replies.entrySet()) {
+            var conv = ConversationService.create(agent, "web", "whole-" + n++);
+            saveSummary(conv, "x".repeat(2_400), Instant.now().minusSeconds(600));
+            seedMessages(conv, 25);
+            commitAndReopen();
+            var written = new AtomicInteger();
+
+            var events = EventLogger.captureForTest(() -> {
+                var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+                    var user = (String) msgs.get(1).content();
+                    if (user.startsWith("[The summaries being merged]")) return reply.getKey();
+                    if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+                    return written.getAndIncrement() == 0 ? "### Decisions\n" + "y".repeat(2_400) : whole;
+                });
+                assertTrue(result.compacted(), "reason=" + result.skipReason());
+            });
+
+            commitAndReopen();
+            assertEquals(2, written.get(), "the summary, then the merge the old summary's lack of sections makes whole");
+            assertEquals(reply.getValue(), storedSegments(conv.id).getLast().summary);
+            assertEquals(reply.getValue().equals(whole) ? List.of(("Checking the merge of conversation %d's summaries "
+                    + "returned a reply with none of the section headings; it is stored unchecked").formatted(conv.id))
+                    : List.of(), mergeLines(events));
+        }
     }
 
     @Test
@@ -2828,6 +2997,27 @@ class SessionCompactorTest extends UnitTest {
 
     private static List<String> compactionLines(List<EventLogger.Captured> events) {
         return events.stream().filter(e -> "compaction".equals(e.category())).map(EventLogger.Captured::message).toList();
+    }
+
+    /** What a merge and its check log of their replies: the drops and restores, and why a reply went unread. */
+    private static List<String> mergeLines(List<EventLogger.Captured> events) {
+        return compactionLines(events).stream()
+                .filter(m -> m.startsWith("Merging ") || m.startsWith("Checking the merge")).toList();
+    }
+
+    /**
+     * Segments in the five sections, a merge writing {@code condensed} and naming items 1 and 2 replaced by 2 and 4,
+     * {@code checkReply} for the merge's check, and each summary's check returning it as written.
+     */
+    private static SessionCompactor.Summarizer dropsChecked(String condensed, String checkReply) {
+        var written = new AtomicInteger();
+        return msgs -> {
+            var user = (String) msgs.get(1).content();
+            if (user.startsWith("[The summaries being merged]")) return checkReply;
+            if (user.startsWith("[Turns ")) return condensed + "\n\n### Replaced items\n- 1 by 2\n- 2 by 4";
+            if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+            return sectioned(written.getAndIncrement());
+        };
     }
 
     /** A summary as the code before JF-161 stored it: no dates for the rows it covers. */
