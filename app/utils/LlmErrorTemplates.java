@@ -45,7 +45,9 @@ public final class LlmErrorTemplates {
         MODEL_NOT_FOUND("llm_model_not_found"),
         CONTEXT_WINDOW_EXCEEDED("llm_context_window_exceeded"),
         RATE_LIMITED("llm_rate_limited"),
-        /** JF-426: the provider's breaker opened on its own failures and refused the call before the wire. */
+        /**
+         * JF-426: the provider's breaker opened on its own failed or slow calls and refused the call before the wire.
+         */
         PROVIDER_PAUSED("llm_provider_paused"),
         /** JF-426: the operator isolated the provider by hand (JCLAW-1170), so the call was refused. */
         PROVIDER_ISOLATED("llm_provider_isolated"),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * How many memories reach the prompt.
+ * How many memories reach the prompt, and the overlap that sends a new memory to
+ * consolidation.
  *
  * These counts are the ONLY bounds on their blocks. The token budgets that used
  * to sit alongside them were removed (JCLAW-955, JCLAW-979) because they dropped

@@ -301,7 +301,7 @@ describe('Settings page — Chat context savings', () => {
   })
 })
 
-/** The Advanced box's kept-tail rows: each fallback is SessionCompactor's shipped value (JF-416). */
+/** The Advanced box's rows: each fallback is the backend's shipped value. */
 describe('Settings page — Chat advanced compaction', () => {
   beforeEach(() => {
     clearNuxtData()

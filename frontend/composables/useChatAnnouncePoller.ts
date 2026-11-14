@@ -37,13 +37,13 @@ const ANNOUNCE_POLL_INTERVAL_MS = 5000
  * Keep polling for this long after the most recent subagent_announce row
  * lands, even though {@link hasPendingAsyncAnnounce} flips false. Covers
  * the gap where {@link AgentRunner#runYieldResume} runs the parent's
- * resumed turn on the backend with no SSE stream to the chat tab. The
- * event bus's conversation.updated and conversation.busy bring that turn's
- * rows in; this window is the fallback for while the bus is down. Three
- * minutes accommodates a typical Phase 4 import (Radarr scan + verify
- * + transmission cleanup, ~30-180s) plus headroom; long enough that
- * the user sees the full workflow inline, short enough that idle
- * conversations don't poll forever.
+ * resumed turn on the backend, which the conversation stream shows only
+ * while it is up. The event bus's conversation.updated and
+ * conversation.busy bring that turn's rows in; this window is the
+ * fallback for while the bus is down. Three minutes accommodates a
+ * typical Phase 4 import (Radarr scan + verify + transmission cleanup,
+ * ~30-180s) plus headroom; long enough that the user sees the full
+ * workflow inline, short enough that idle conversations don't poll forever.
  */
 const POST_ANNOUNCE_GRACE_MS = 180_000
 
@@ -198,8 +198,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
    * True when the most recent {@code subagent_announce} row arrived within
    * {@link POST_ANNOUNCE_GRACE_MS}. Drives a grace-window poll after an
    * announce lands so messages persisted by the subsequent yield-resumed
-   * turn (which has no SSE channel to this tab) surface inline rather
-   * than only on manual reload.
+   * turn surface inline rather than only on manual reload.
    */
   function isWithinPostAnnounceGrace(): boolean {
     const msgs = messages.value

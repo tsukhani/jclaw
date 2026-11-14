@@ -332,7 +332,7 @@ public final class HarnessSandbox {
      * absent — the caller must treat that as fail-closed (abort the run).
      *
      * @param trustedOrigin JCLAW-709: whether the run originates from the trusted
-     *                       operator (web chat / no channel). Ignored unless the
+     *                       operator (web chat or voice mode). Ignored unless the
      *                       configured {@link Scope} is {@link Scope#UNTRUSTED},
      *                       where only {@code false} (untrusted origin) confines.
      */
@@ -444,8 +444,8 @@ public final class HarnessSandbox {
     /**
      * What the Main Agent's fence protects (JF-325), as canonical paths, the form Seatbelt and bwrap match.
      *
-     * @param readOnly JClaw's program files: the checkout, the Play framework and the Gradle cache a restart loads
-     *                 its jars from, readable and never writable
+     * @param readOnly the checkout, the Play framework, the Gradle cache a restart loads its jars from and the
+     *                 secrets proxy's trust folder, readable and never writable
      * @param writable the agents' workspaces, writable inside the read-only checkout
      * @param hidden   JClaw's secret folders, neither readable nor writable: {@link SandboxHiddenRoots#current()}
      *                 but {@code conf/}, which holds no secret
@@ -1010,9 +1010,9 @@ public final class HarnessSandbox {
 
     /**
      * A custom agent's Seatbelt profile, public so a test can pin its text on any host: {@code $HOME} hidden
-     * except the write root and {@code homeReads} (the {@code $HOME} directories on JClaw's own PATH,
-     * {@link #homeReadReopens}), then the local services outside the sandbox refused, and last, where no grant
-     * outranks them, every signal to a process outside the run and the JVM attach socket.
+     * except the write root and {@code homeReads} (the {@code $HOME} directories on JClaw's own PATH and in
+     * {@link #HOME_READS_KEY}, {@link #homeReadReopens}), then the local services outside the sandbox refused, and
+     * last, where no grant outranks them, every signal to a process outside the run and the JVM attach socket.
      *
      * <p>A service that runs unconfined as the operator acts outside the sandbox for whoever connects: a
      * container runtime mounts any host folder. So with the network, a Unix socket takes the run's connection

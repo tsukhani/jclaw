@@ -357,7 +357,7 @@ class AgentSystemTest extends UnitTest {
 
     @Test
     void formatSkillsXmlReturnsEmptyStringForEmptyList() {
-        // Early-return branch at line 303 of SkillLoader.
+        // Early-return branch of SkillLoader.formatSkillsXml.
         assertEquals("", SkillLoader.formatSkillsXml(java.util.List.of(), true));
     }
 

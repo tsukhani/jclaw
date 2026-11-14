@@ -21,7 +21,7 @@ import static controllers.AgentAccess.Level.OWN_ONLY;
  * Download endpoint for persisted chat-message attachments (JCLAW-279).
  * Resolves the storage path via the same workspace-bounded resolver used
  * for agent workspace files, sets a content-disposition appropriate for
- * the attachment kind (inline for image/audio so the browser previews,
+ * the attachment kind (inline for raster image/audio so the browser previews,
  * attachment for everything else so the browser downloads), and streams
  * the bytes.
  */

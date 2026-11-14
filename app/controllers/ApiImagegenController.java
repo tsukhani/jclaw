@@ -62,8 +62,8 @@ public class ApiImagegenController extends Controller {
     @AgentAccess(OPEN)
     public static void state() {
         var uv = UvProbe.lastResult();
-        // Force one probe if the cache is still on the UNRUN sentinel — DefaultConfigJob
-        // primes it on startup, but a hot-reloaded dev server may not have run that yet.
+        // Force one probe if the cache is still on the UNRUN sentinel — ToolBinaryProbeJob
+        // primes it off the boot thread, so a request can arrive before it has run.
         if (!uv.available() && uv.reason() != null && uv.reason().startsWith("uv probe has not run")) {
             uv = UvProbe.probe();
         }

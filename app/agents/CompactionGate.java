@@ -94,11 +94,12 @@ public final class CompactionGate {
     private static final CompactionResult NOT_NEAR = CompactionResult.skipped("not near the trigger");
 
     /**
-     * If {@code current} exceeds the compaction budget for the
-     * effective model, run {@link SessionCompactor#compact} and
+     * If {@code current} is past the compaction trigger and the model's
+     * window does not take it, run {@link SessionCompactor#compact} and
      * return a freshly rebuilt message list (with the new summary
      * injected into the system prompt and the older turns dropped).
-     * Otherwise, returns {@code current} unchanged (JCLAW-38).
+     * Otherwise returns {@code current} unchanged, compacting on another
+     * thread when past the trigger (JCLAW-38).
      *
      * <p>Called from both {@link AgentPromptPreparer} rewrite paths
      * after the initial prep Tx closes, because the
@@ -138,7 +139,7 @@ public final class CompactionGate {
      * {@code current} is returned unchanged.
      *
      * @param reservedTokens tokens the turn sends after this list, counted toward the trigger: its
-     *                       recalled memories ({@link ContextWindowManager#reservedTokens})
+     *                       recalled memories and withheld skills ({@link ContextWindowManager#reservedTokens})
      */
     public static MessageHydrator.Hydration maybeCompactAndRebuild(
             Agent agent, Long conversationId,

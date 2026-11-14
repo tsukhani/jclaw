@@ -37,7 +37,7 @@ function setupMockApi() {
   ])
   registerEndpoint('/api/conversations/channels', () => ['web', 'telegram'])
   // JCLAW-72: useToolMeta composable fetches from /api/tools/meta on mount.
-  // Supply a minimal fixture so agents.vue renders without errors.
+  // Supply a minimal fixture so agents/[[name]].vue renders without errors.
   registerEndpoint('/api/tools/meta', () => [
     { name: 'exec', category: 'System', icon: 'terminal',
       shortDescription: 'Shell', group: null, enabled: true, requiresConfig: null, actionCount: 1 },

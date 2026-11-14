@@ -99,7 +99,7 @@ public class AgentRunner {
      * @param response     the model's final assistant content
      * @param conversation the resolved conversation (carriers like
      *                     {@code /new} create a fresh one mid-run)
-     * @param truncated    true when the final non-tool-call assistant turn
+     * @param truncated    true when the final assistant turn
      *                     came back with {@code finish_reason=length}
      * @param yieldedRunIds the runs a {@link #yielded()} turn waits on; empty otherwise
      * @param stopped      true when an operator stop ended the turn (JF-197): {@link #response} is then the stop

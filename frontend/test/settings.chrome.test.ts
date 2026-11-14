@@ -8,8 +8,8 @@ import { sectionGroups } from '~/components/settings/sections'
 import { pickValue, pickerValue } from './searchable-select-driver'
 
 /**
- * The Chrome settings panel: pairing, the per-agent site lists, and the two overrides only the main
- * agent has. Every value is an ordinary /api/config row under agent.<name>.chromeBridge.
+ * The Chrome settings panel: pairing, the per-agent site lists, the three overrides only the main
+ * agent has, and the find model. Every value is an ordinary /api/config row.
  */
 
 const HELPER_KEY = 'agent.helper.chromeBridge.allowedSites'

@@ -62,8 +62,9 @@ public final class McpServerService {
 
     /**
      * Snapshot of a single advertised tool on an MCP server. Exposed
-     * inside {@link View#tools}, which only {@code GET /api/mcp-servers/{id}}
-     * returns; the MCP Servers page reads it when a server's tool list is expanded.
+     * inside {@link View#tools}, which {@code GET /api/mcp-servers/{id}} returns
+     * and the list leaves out; the MCP Servers page reads it when a server's tool
+     * list is expanded.
      *
      * @param name        tool name from the MCP server's {@code tools/list}
      * @param description tool description from the MCP server

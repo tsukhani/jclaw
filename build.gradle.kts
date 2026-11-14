@@ -396,7 +396,7 @@ dependencies {
 
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
-    // box with no CUPS and no OS print subsystem. 3.6.4 rather than the 3.5.9 the
+    // box with no CUPS and no OS print subsystem. 3.6 rather than the 3.5.9 the
     // ticket named; 3.5.9 is two minors stale and Renovate would bump it on sight.
     implementation("org.jmdns:jmdns:3.6.5")
 
@@ -409,8 +409,8 @@ dependencies {
     // already brings this version, so a Cobalt bump cannot take the proxy's certificates with it.
     implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
 
-    // jsoup 1.23.2 is the version Tika 4.1.0's parent POM pins for its
-    // parser modules; keeps resolved/declared in sync.
+    // jsoup runs ahead of the 1.23.2 that Tika 4.2.0's parent POM pins for
+    // its parser modules.
     implementation("org.jsoup:jsoup:1.24.1")
 
     // crawler-commons — Googlebot-compatible robots.txt parsing and sitemap handling

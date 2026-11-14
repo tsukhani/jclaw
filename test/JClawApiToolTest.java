@@ -681,7 +681,7 @@ class JClawApiToolTest extends UnitTest {
                 "refresh-prices is callable -- the route itself answers only the operator and main (JF-292)");
         assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
                 "concrete path resolves against the route pattern");
-        // JCLAW-1020: the read-only halves of the two operator-only system actions share their
+        // JCLAW-1020: the read-only halves of the upgrade and restart actions share their
         // paths, so gating by verb is what keeps "what version am I on?" answerable to main,
         // the one agent those reads answer (JF-292).
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/upgrade"),

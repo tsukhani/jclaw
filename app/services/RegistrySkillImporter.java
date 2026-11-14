@@ -41,7 +41,6 @@ import java.util.regex.Pattern;
 public final class RegistrySkillImporter {
 
     private static final String CATEGORY = "skills";
-    /** Built-in skills that must never be overwritten by an import. */
     /** How many unscanned files a warning names before it counts the rest. */
     private static final int NAMED_FILES = 5;
     private static final Pattern VARIABLE = Pattern.compile("\\$\\{?([A-Za-z_][A-Za-z0-9_]*+)}?");

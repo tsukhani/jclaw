@@ -459,8 +459,6 @@ class ConversationQueueTest extends UnitTest {
                 (List<services.AttachmentService.Input>) null).attachments());
     }
 
-    // --- Interrupt mode cancellation signal ---
-
     // ── JCLAW-117: atomic ownership transfer on drain ──
 
     @Test

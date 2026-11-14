@@ -876,7 +876,7 @@ public final class DangerousActionGate {
                 var digest = MessageDigest.getInstance("SHA-256").digest(call.getBytes(StandardCharsets.UTF_8));
                 return HexFormat.of().formatHex(digest, 0, 3);
             } catch (NoSuchAlgorithmException e) {
-                // SHA-256 is mandated by the JLS; unreachable on any conforming JVM.
+                // SHA-256 is mandated by the Java SE platform; unreachable on any conforming JVM.
                 throw new IllegalStateException("SHA-256 unavailable", e);
             }
         }

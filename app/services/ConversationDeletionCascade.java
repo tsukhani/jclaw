@@ -78,7 +78,7 @@ public final class ConversationDeletionCascade {
         //    JPQL DELETE, which never fires SubagentRun.@PostRemove.
         // JCLAW-1066: capture the spawned agents before their run rows go. Once the
         // run is deleted nothing references them, so they would survive as rows no
-        // code path can reach again. Spawned only: a run that named agentId ran on one of
+        // code path can reach again. Spawned only: an agent_spawn hand-off ran on one of
         // the operator's own agents, whose parent link is null, and that agent is not the run's to take.
         List<Long> childAgentIds = em.createQuery(
                 "SELECT sr.childAgent.id FROM SubagentRun sr "

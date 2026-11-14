@@ -15,7 +15,8 @@ docs/agents/
 docs/README.md
 test/
 # The frozen ArchUnit capability allowlists (JCLAW-1152) are a build-time
-# baseline read by test/CapabilityRulesTest, never by a running install.
+# baseline read by CapabilityRulesTest and WallClockDisciplineTest, never by
+# a running install.
 archunit_store/
 loadtest/
 # The eval dataset (JCLAW-875) is a development measuring stick — the runner

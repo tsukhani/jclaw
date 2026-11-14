@@ -34,11 +34,12 @@ import java.util.Set;
  * <p>Extracted from {@link AgentRunner}. The sync ({@link #prepareSyncData} +
  * {@link #rewriteSyncMedia}) and streaming ({@link #buildStreamingPrologue} +
  * {@link #applyMediaRewrite}) shapes are deliberately kept as separate methods:
- * the two paths pass different argument values (the sync path assembles with a
- * null {@code disabledTools} set and threads a once-resolved {@code modelInfo};
- * the streaming path loads {@code disabledTools} and recomputes capability
- * flags). Preserving each path's exact arguments is the responsibility-preserving
- * contract — see the JCLAW-678 blueprint risk note.
+ * the two paths pass different argument values (the sync path assembles with
+ * {@link #turnDisabled}'s set, null unless a fence or a guest applies, and
+ * threads a once-resolved {@code modelInfo}; the streaming path loads
+ * {@code disabledTools} and recomputes capability flags). Preserving each
+ * path's exact arguments is the responsibility-preserving contract — see the
+ * JCLAW-678 blueprint risk note.
  *
  * <p>Tx-boundary invariant: {@link #prepareSyncData} / {@link #buildStreamingPrologue}
  * return fully-materialized, Tx-committed data. No lazily-loaded entity or open

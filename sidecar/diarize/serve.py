@@ -14,6 +14,8 @@ classical-SER path (DiaRemot) was rejected first for not transferring to
 
 Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, model, loaded}
+  GET  /diarize/models?ids=a,b -> 200 {status: {...}}
+  POST /diarize/prefetch {model} -> 200 {status, model}
   POST /diarize {audio_path, num_speakers?, emotions?, emotion_model?}
         -> 200 {turns: [{startMs, endMs, speaker, emotion?}, ...]}
         emotions=true adds an SER pass (ser.py) per turn — a categorical label

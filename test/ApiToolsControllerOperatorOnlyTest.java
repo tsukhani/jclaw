@@ -37,7 +37,7 @@ import java.util.function.Supplier;
  * rather than defeating one.
  *
  * <p>Tests marked CONTROL pass with the guards reverted. They are here to pin that the guards
- * did not over-reach — reads and non-privileged writes must keep working for both principals.
+ * did not over-reach — the operator's writes and the agent's reads must keep working.
  */
 class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
 

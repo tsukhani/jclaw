@@ -528,7 +528,7 @@ public final class SubagentRegistry {
 
     /**
      * Remove a finished run: its record, its transcript, and the agent its spawn created. An
-     * agent the run only reused (a spawn that named {@code agentId}) and a chat an inline run
+     * agent the run only reused (an {@code agent_spawn} hand-off) and a chat an inline run
      * wrote into are the operator's, and stay.
      */
     public static void deleteRun(Long runId) {

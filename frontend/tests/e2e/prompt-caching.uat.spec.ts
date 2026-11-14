@@ -63,7 +63,7 @@ test.describe('prompt caching UAT', () => {
     await input.fill('turn 2')
     await page.getByRole('button', { name: 'Send' }).click()
     await expect(page.getByText('ack 2')).toBeVisible()
-    // The cached breakdown lives in a hover popover (chat.vue:3175) gated on
+    // The cached breakdown lives in a hover popover (ChatMessage.vue) gated on
     // the inline "X.X tok/s" pill. Mock yields completion=7, durationMs=1400 and no
     // final-call timing → (7/1400)*1000 = "5.0 tok/s avg"; hover it to open the popover.
     await page.getByText('5.0 tok/s').hover()

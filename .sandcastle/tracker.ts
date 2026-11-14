@@ -52,7 +52,7 @@ export interface Tracker {
   unblocked?(key: string): Promise<boolean>;
   // The factory merged the story's branch into the checkout's main.
   merged(key: string): Promise<void>;
-  // The story is Done (Jira) or closed (GitHub), by whoever moved it.
+  // The story is Done (Jira) or closed or labelled afk-merged (GitHub), by whoever moved it.
   done(key: string): Promise<boolean>;
   // The operator finished the story outside the factory; landed is whether its branch reached main.
   settled(key: string, landed: boolean): Promise<void>;

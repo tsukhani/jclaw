@@ -61,9 +61,9 @@ public class NotificationBus {
     /** A message was added to a conversation outside a turn the open chat page is streaming, so it
      *  reloads its messages. Payload carries {@code conversationId}. */
     public static final String BUS_CONVERSATION_UPDATED = "conversation.updated";
-    /** A conversation's queue went from idle to busy or back, or a message joined its queue (JF-202). Payload
-     *  carries {@code conversationId} and {@code busy}; two threads' transitions can arrive out of order, so a
-     *  reader re-reads the queue. */
+    /** A conversation's queue went from idle to busy or back, or a message joined or left its queue (JF-202).
+     *  Payload carries {@code conversationId} and {@code busy}; two threads' transitions can arrive out of order,
+     *  so a reader re-reads the queue. */
     public static final String BUS_CONVERSATION_BUSY = "conversation.busy";
     /** A compaction running outside any turn stored a summary of a conversation's older rows. Payload carries
      *  {@code conversationId}, {@code rows} (how many it summarized) and {@code ms}. */

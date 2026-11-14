@@ -93,8 +93,8 @@ class MediaBearerRebaseTest extends UnitTest {
             }
             respond(exchange, response);
         });
-        // Compaction budget 20000-18000=2000 tokens; the trim's target is 20000-4096, far above
-        // anything this fixture assembles, so only the rebuild moves the list.
+        // Compaction budget 20000-18000=2000 tokens; the trim's target is 20000-4096, which the compacted list
+        // stays under, so only the rebuild moves the list.
         configureProvider(20000);
         ConfigService.set("chat.compactionReserveTokens", "18000");
         ConfigService.set("chat.compactionReserveTokensFloor", "18000");

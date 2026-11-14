@@ -12,8 +12,9 @@ import java.nio.file.Path;
 
 /**
  * Path resolution and sandbox/safety checks for {@link FileSystemTools}: resolving a tool
- * call's {@code path} argument to a contained workspace {@link Path}, classifying whether an
- * action mutates, and enforcing the skill-creator read-only guard.
+ * call's {@code path} argument to a contained workspace {@link Path} (or, for the Main Agent, a
+ * global one), classifying whether an action mutates, and enforcing the built-in skills'
+ * read-only and skill-credentials guards.
  */
 final class FsPaths {
 

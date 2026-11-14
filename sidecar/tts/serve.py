@@ -8,14 +8,14 @@ that shells each request to a PEP-723 worker carrying the ML deps — but the
 data direction is INVERTED: it takes TEXT and returns AUDIO BYTES.
 
 Engine router (JCLAW-789): the request `model` id selects the engine + weights
-inside the worker (Qwen3-TTS variants, Kokoro), mirroring the ASR AsrModel
-routing. Apple silicon runs via mlx-audio (validated JCLAW-788); the
+inside the worker (Qwen3-TTS variants, Kokoro, Chatterbox), mirroring the ASR
+AsrModel routing. Apple silicon runs via mlx-audio (validated JCLAW-788); the
 NVIDIA/vLLM backend is deferred (JCLAW-788 RTX 4090 validation).
 
 Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health -> 200 {status, model, loaded}
   POST /synthesize {text, model?, voice?, ref_audio?, speed?, format?}
-        -> 200 audio bytes (Content-Type: audio/wav) | 400/409/500 JSON on error
+        -> 200 audio bytes (Content-Type by format, wav by default) | 400/409/500 JSON on error
   POST /shutdown -> 200 (evict an adopted orphan whose identity no longer matches)
 
 Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM

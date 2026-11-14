@@ -1744,7 +1744,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     })
 
     const component = await mountSettingsSection('transcription')
-    await flushPromises() // let the diarization-models fetch populate the SER <select> options
+    await flushPromises() // let the diarization-models fetch populate the SER picker's options
 
     // The local path has no audio-model dropdown but DOES have an emotion-model
     // picker populated from the fixed serOptions.

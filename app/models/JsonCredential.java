@@ -32,7 +32,10 @@ public enum JsonCredential {
         }
     },
 
-    /** Each top-level value whose name {@link ConfigService#isSensitive} flags: what {@code ApiChannelsController} masks. */
+    /**
+     * Each top-level string value whose name {@link ConfigService#isSensitive} flags, which
+     * {@code ApiChannelsController} masks.
+     */
     CHANNEL_CONFIG("channel_config") {
         @Override
         void collect(JsonObject json, List<Slot> out) {

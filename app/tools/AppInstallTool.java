@@ -322,13 +322,13 @@ public class AppInstallTool implements ToolRegistry.Tool {
         }
     }
 
-    /** The install source relative to the agent workspace (for the result payload). */
     /** {@link #workspaceRelative}, with the workspace root itself shown as {@code .}. */
     private static String shown(Agent agent, Path p) {
         var relative = workspaceRelative(agent, p);
         return relative.isEmpty() ? "." : relative;
     }
 
+    /** The install source relative to the agent workspace (for the result payload). */
     private static String workspaceRelative(Agent agent, Path p) {
         try {
             return WorkspaceFiles.workspacePath(agent.name).relativize(p).toString();

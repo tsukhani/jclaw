@@ -998,7 +998,10 @@ final class StreamingAgentRunner {
         return reply;
     }
 
-    /** {@link AgentPromptPreparer#applyMediaRewrite}, its compaction's progress going to {@code onStatus} as status frames ahead of the turn's init. */
+    /**
+     * {@link AgentPromptPreparer#applyMediaRewrite}, its compaction's progress going to {@code onStatus} as status
+     * frames between the turn's init and its first token.
+     */
     private static AgentPromptPreparer.PreparedPrologue rewriteReportingCompaction(
             Agent agent, Conversation conversation, LlmProvider primary, AgentPromptPreparer.PreparedPrologue prepared,
             boolean supportsAudio, boolean supportsVision, java.util.function.Consumer<String> onStatus) {

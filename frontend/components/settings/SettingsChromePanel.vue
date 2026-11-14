@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Chrome extension settings: pairing, what each agent may open, and the two overrides only the
-// main agent has. Every value is an ordinary /api/config row under agent.<name>.chromeBridge., which
-// is operator-only to write, so an agent cannot widen its own reach through jclaw_api.
+// Chrome extension settings: pairing, what each agent may open, and the three overrides only the
+// main agent has. Every per-agent value is an ordinary /api/config row under
+// agent.<name>.chromeBridge., which is operator-only to write, so an agent cannot widen its own
+// reach through jclaw_api.
 import type { Agent } from '~/types/api'
 import type { SearchableOption } from '~/components/SearchableSelect.vue'
 

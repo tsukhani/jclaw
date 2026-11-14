@@ -736,11 +736,6 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * bwrap applies mounts in argument order and a tmpfs over an ancestor hides every earlier
-     * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
-     * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
-     */
-    /**
      * JF-387: a homeReads folder bound back after the $HOME tmpfs brings back every secret folder inside it, so each
      * such secret is hidden again after every bind, as macOS denies them last.
      */
@@ -796,6 +791,11 @@ class HarnessSandboxTest extends UnitTest {
         }
     }
 
+    /**
+     * bwrap applies mounts in argument order and a tmpfs over an ancestor hides every earlier
+     * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
+     * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
+     */
     @Test
     void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
         var home = System.getProperty("user.home");
@@ -1080,18 +1080,18 @@ class HarnessSandboxTest extends UnitTest {
                 "argv=" + argv);
     }
 
-    /**
-     * A tmpfs needs an existing mount point, so the backup directory, which JClaw owns, is
-     * created and then hidden; a backup made after a long-running harness started would
-     * otherwise be readable to it. Any other missing root is skipped, and a directory that
-     * cannot be created is logged rather than thrown.
-     */
     /** The production argv creates each before hiding it, as the test below shows for one. */
     @Test
     void jclawsOwnSecretFoldersAreTheBackupsAndTheFilesSkillUpdatesKept() {
         assertEquals(List.of(DatabaseService.backupsDir(), KeptSkillFiles.root()), HarnessSandbox.ownSecretFolders());
     }
 
+    /**
+     * A tmpfs needs an existing mount point, so the backup directory, which JClaw owns, is
+     * created and then hidden; a backup made after a long-running harness started would
+     * otherwise be readable to it. Any other missing root is skipped, and a directory that
+     * cannot be created is logged rather than thrown.
+     */
     @Test
     void linuxCreatesAMissingBackupDirectoryAndHidesIt() throws Exception {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");

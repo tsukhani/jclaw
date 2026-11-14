@@ -31,8 +31,9 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
- * The operator's store of skill secrets (JF-323): what the Secrets panel lists, writes and deletes. Nothing here
- * returns a value. Every method takes the agent that owns the workspace, so a subagent's skill resolves to its root's.
+ * The operator's store of skill secrets (JF-323): what the Secrets panel lists, writes and deletes. Only
+ * {@link #usable}, for a command's grant, returns a value. Every method takes the agent that owns the workspace, so a
+ * subagent's skill resolves to its root's.
  */
 public final class SkillSecrets {
 
@@ -972,7 +973,6 @@ public final class SkillSecrets {
     }
 
 
-    /** Why {@code name} cannot name a secret, or null when it can. */
     /** Whether {@code name} reads as a key, token or password, so that it is only ever a secret (JF-357). */
     public static boolean looksLikeCredential(String name) {
         for (var part : name.split("_")) {
@@ -981,6 +981,7 @@ public final class SkillSecrets {
         return false;
     }
 
+    /** Why {@code name} cannot name a secret, or null when it can. */
     static @Nullable String nameRejection(String name) {
         if (!NAME.matcher(name).matches()) {
             return "'%s' is not a secret name: use capital letters, digits and underscores, starting with a"

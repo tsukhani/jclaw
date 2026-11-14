@@ -60,10 +60,10 @@ interface TurnAnswer {
 /** What the compaction card shows: a compaction under way, one that just finished, or one that stored no summary. */
 export interface CompactionCard {
   phase: 'start' | 'done' | 'skipped'
-  /** The prompt's tokens when it began, as the meter counts them; null for a `/compact`, which only says when it ends. */
+  /** The prompt's tokens when it began, as the meter counts them; null for a `/compact` the bus has not reached. */
   tokensBefore: number | null
   tokensAfter?: number
-  /** Rows summarized so far and in all; absent until the first summary lands, and for a `/compact` the bus has not reached. */
+  /** Rows summarized so far and in all; set from the start frame, done at 0; absent for a `/compact` the bus has not reached. */
   done?: number
   total?: number
   /** Set once the rows are summarized and the oldest summaries are being merged into one, with how many. */
@@ -1008,7 +1008,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
         triggerRef(messages)
       }
     }
-    // A /compact answers when it is done, with nothing streamed meanwhile, so its card opens here and the answer ends it.
+    // A /compact answers only when it is done, so its card opens here; the bus or the answer ends it.
     const compacting = COMPACT_COMMAND.test(text)
     if (compacting) {
       // No saved row will ever pair with a command's text, so a merge before the answer leaves it where it was sent.

@@ -946,8 +946,8 @@ public class ToolRegistry {
 
     /**
      * Tools every agent has to be granted explicitly. Each constant above carries the
-     * reason it is on this list — cost, latency, an action with no undo, or no use beside
-     * {@code filesystem}.
+     * reason it is on this list — cost, latency, an action with no undo, the operator's own
+     * browser, or no use beside {@code filesystem}.
      */
     private static final List<String> OPT_IN_FOR_EVERY_AGENT = List.of(
             GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL,

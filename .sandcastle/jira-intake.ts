@@ -2,10 +2,10 @@
 // credentials.
 import type { Snapshot } from "./tracker.ts";
 
-// Free's backlog. JCLAW is JClaw Pro's, whose repo reverts this, so a factory here never builds Pro's work into Free.
+// This repo's backlog. JCLAW is JClaw Pro's, whose repo reverts this, so a factory here never builds Pro's work.
 export const PROJECT = "JF";
 
-// Only this project's keys are Jira's; another tracker's keys (GH-15) and Pro's (JCLAW-) are not.
+// Only this project's keys are Jira's; another tracker's keys (GH-15) and JCLAW's are not.
 export const ownsKey = (key: string): boolean => new RegExp(`^${PROJECT}-\\d+$`).test(key);
 
 // Labels that hold a story out of intake. `no-afk` exempts one story of an epic labelled `afk`.

@@ -173,7 +173,7 @@ public final class QueueDrainOrchestrator {
      *
      * <p>JCLAW-1226: it is forked from the turn that just finished, but the message it runs
      * may be a different sender's — so it must <em>not</em> inherit that turn's
-     * {@link DangerousActionGate} trust flags ({@code OWNER_INITIATED}, the fire origin),
+     * {@link DangerousActionGate} trust flags ({@code OWNER_INITIATED}, {@code SENDER_ID}, the fire origin),
      * which are the only {@code InheritableThreadLocal}s in {@code app/}. Inheriting them let
      * a guest message queued behind an owner's turn spend the owner's identity at the gate.
      *

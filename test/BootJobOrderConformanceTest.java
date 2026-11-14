@@ -18,7 +18,7 @@ import java.util.stream.Stream;
  * run first, the boot dies inside the mint and the migration never executes — the failure the
  * migration exists to prevent, with the fix present but too late.
  *
- * <p>Ordering between {@code @OnApplicationStart} jobs is otherwise unconstrained here — 34 of
+ * <p>Ordering between {@code @OnApplicationStart} jobs is otherwise unconstrained here — most of
  * them carry no priority at all — so this pins the single pair that matters rather than imposing
  * an order nobody needs. Lower runs earlier.
  *

@@ -300,7 +300,7 @@ describe('Chat page — model selector re-syncs after a mid-turn model switch', 
   // to the pre-switch model until a manual reload.
   it('reflects the agent model changed by the jclaw_api tool once the turn completes', async () => {
     // The /api/agents handler reads a mutable var so a mid-turn switch is
-    // observable when the finally block calls refreshAgents().
+    // observable when endTurn calls refreshAgents().
     let agentModelId = 'kimi-k2.5'
     registerEndpoint('/api/agents', () => [
       { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: agentModelId,

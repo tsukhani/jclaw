@@ -1953,7 +1953,7 @@ class SlashCommandsTest extends UnitTest {
         // has no request-scoped transaction — the first cut threw "No active
         // EntityManager for name [default]" there while passing every test,
         // because UnitTest and the web controller both supply an ambient one.
-        // Same shape as ChannelTest.channelConfigFindByTypeSurvivesCacheMiss...
+        // Same shape as ChannelTest.channelConfigFindByTypeSurvivesCacheMissFromBackgroundThread.
         var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var response = new java.util.concurrent.atomic.AtomicReference<String>();
         var thread = new Thread(() -> {

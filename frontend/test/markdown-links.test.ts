@@ -216,7 +216,7 @@ describe('rewriteWorkspaceLinks', () => {
     })
 
     it('leaves an img src pointing at a different agent workspace alone', () => {
-      // Same cross-agent safety guard anchors honor.
+      // Any agent's absolute workspace URL already names its file.
       const input = '<img src="/api/agents/99/files/other.png" alt="other">'
       const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
       expect(img.getAttribute('src')).toBe('/api/agents/99/files/other.png')

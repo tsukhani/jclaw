@@ -36,9 +36,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * Runs jclaw.sh's production restart, {@code do_restart_prod} through {@code do_stop_prod} and {@code do_start_prod}
  * as written, against a scratch install whose {@code play}, {@code pnpm} and {@code npx} are stubs and whose old
- * JVM is a {@code sleep}. The narrator is the real one, run on the compiled class, except on the Windows branch.
- * The stubs ask the narrator what it serves at each phase, so the phases, their order, and when the narrator
- * starts and stops are all read from the outside.
+ * JVM is a {@code sleep}. The narrator is the real one, run on the compiled class, except on the Windows branch
+ * and in the start-only runs. The stubs ask the narrator what it serves at each phase, so the phases, their order,
+ * and when the narrator starts and stops are all read from the outside.
  */
 class RestartProgressScriptTest extends UnitTest {
 

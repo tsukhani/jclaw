@@ -8,7 +8,7 @@ import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import { openPicker, pickerOption, pickerOptions, pickerValue, typeInPicker } from './searchable-select-driver'
 
 /**
- * JCLAW-322 — pages/agents.vue critical-path flow coverage.
+ * JCLAW-322 — pages/agents/[[name]].vue critical-path flow coverage.
  *
  * The existing agents.page.test.ts covers structural rendering (list,
  * model id, New Agent button, skills sort, empty state). This sibling spec
@@ -196,15 +196,6 @@ afterEach(() => {
   document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
 })
 
-/**
- * Helper: locate and click the helper agent's row to enter edit mode. The
- * card is keyboard-interactive via @keydown.enter, so a synthetic click on
- * the matching role="button" is the most robust trigger.
- *
- * Typed as `unknown` here because `mountSuspended`'s return type uses the
- * Nuxt-test-utils ComponentMountingOptions inference, which doesn't narrow
- * well across spec files; we only need the findAll/trigger surface.
- */
 /** The helper agent with the JF-239 compaction-model fields set as `extra` says. */
 function helperWithCompaction(extra: Record<string, unknown>) {
   return {
@@ -220,6 +211,15 @@ function helperWithCompaction(extra: Record<string, unknown>) {
   }
 }
 
+/**
+ * Helper: locate and click the helper agent's row to enter edit mode. The
+ * card is keyboard-interactive via @keydown.enter, so a synthetic click on
+ * the matching role="button" is the most robust trigger.
+ *
+ * Typed as `any` here because `mountSuspended`'s return type uses the
+ * Nuxt-test-utils ComponentMountingOptions inference, which doesn't narrow
+ * well across spec files; we only need the findAll/trigger surface.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: helper consumes the Nuxt mount wrapper without depending on its precise generic shape.
 async function openHelperEdit(component: any) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: matches the broad wrapper above.
@@ -228,7 +228,7 @@ async function openHelperEdit(component: any) {
   const helperCard = targets.find((t: any) => t.text().includes('helper'))
   expect(helperCard, 'helper agent card should be reachable').toBeTruthy()
   await helperCard!.trigger('click')
-  // Opening an agent is a route change to /agents/<id>, and the global auth
+  // Opening an agent is a route change to /agents/<name>, and the global auth
   // middleware awaits an /api/config probe before the page's route watcher runs
   // — so a single flush lands before the form exists.
   await vi.waitFor(() => {
@@ -256,7 +256,7 @@ describe('Agents page — edit flow opens form and pulls per-agent state', () =>
     // dropped variable while documenting intent.
     expect(nameInput).toBeDefined()
 
-    // Provider/Model dropdowns: the form populates both selects.
+    // Provider dropdown: the form selects the agent's provider.
     const selects = component.findAll<HTMLSelectElement>('select')
     expect(selects.length).toBeGreaterThan(0)
     const providerSel = selects.find(s => s.element.value === 'openai')

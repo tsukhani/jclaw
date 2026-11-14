@@ -801,6 +801,14 @@ public final class MemoryAutoCapture {
         return out;
     }
 
+    public static final String SHORTLIST_CONTAINMENT_KEY = "memory.consolidation.shortlist.minContainment";
+
+    // Measured on a 1,038-memory store (2026-10-30): the operator's name, in 93% of rows, let the containment rule
+    // admit 12.5 unrelated rows per new memory at 0.3; leaving out words in over 10% of rows cut that to 1.3.
+    private static final double COMMON_WORD_SHARE = 0.10;
+    // Below this many recent rows, 10% is one or two memories, and a word they share is a subject, not filler.
+    private static final int COMMON_WORD_MIN_ROWS = 20;
+
     /**
      * Plan phase (in Tx): build the comparison pool, drop candidates that already
      * have a near-duplicate stored ({@link MemorySimilarity} NOOP), cap at
@@ -824,14 +832,6 @@ public final class MemoryAutoCapture {
      * <p>Both legs keep to {@code scope} (JF-147), so a turn's candidates meet only the rows it may
      * dedup against or supersede.
      */
-    public static final String SHORTLIST_CONTAINMENT_KEY = "memory.consolidation.shortlist.minContainment";
-
-    // Measured on a 1,038-memory store (2026-10-30): the operator's name, in 93% of rows, let the containment rule
-    // admit 12.5 unrelated rows per new memory at 0.3; leaving out words in over 10% of rows cut that to 1.3.
-    private static final double COMMON_WORD_SHARE = 0.10;
-    // Below this many recent rows, 10% is one or two memories, and a word they share is a subject, not filler.
-    private static final int COMMON_WORD_MIN_ROWS = 20;
-
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan,
                                           Set<Integer> semanticDupes, Set<Long> corroborated,

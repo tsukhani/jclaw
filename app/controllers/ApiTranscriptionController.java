@@ -76,8 +76,8 @@ public class ApiTranscriptionController extends Controller {
     public static void state() {
         var ffmpeg = FfmpegProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel —
-        // DefaultConfigJob primes it on startup, but a hot-reloaded dev
-        // server may not have run that yet.
+        // ToolBinaryProbeJob primes it off the boot thread, so a request can
+        // arrive before it has run.
         if (!ffmpeg.available() && ffmpeg.reason() != null
                 && ffmpeg.reason().startsWith("ffmpeg probe has not run")) {
             ffmpeg = FfmpegProbe.probe();

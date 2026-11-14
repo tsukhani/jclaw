@@ -13,7 +13,7 @@ import Tools from '~/pages/tools.vue'
  * /mcp-servers page and excludes here) must NOT be counted.
  */
 
-// One native tool per relevant category, plus a second Utilities tool, plus
+// Two System and two Utilities tools, one Web and one Files, plus
 // an MCP-grouped tool that the page must exclude from both grid and counts.
 const META_FIXTURE = [
   { name: 'shell_exec', group: null, enabled: true, category: 'System', icon: 'terminal', shortDescription: 'Run shell commands', requiresConfig: null, actionCount: 1 },

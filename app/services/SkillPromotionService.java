@@ -105,7 +105,7 @@ public class SkillPromotionService {
      * Assumes tool validation and malware scanning have already passed. Replacing
      * a copy first copies what {@link KeptSkillFiles#select} picks in it to the
      * kept files, and the new copy holds what the registry ships plus those same
-     * files where the registry ships nothing (JF-405).
+     * files where it ships nothing or a credentials/ placeholder (JF-405).
      */
     public static void copyToAgentWorkspace(Agent agent, String skillName) throws IOException {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);

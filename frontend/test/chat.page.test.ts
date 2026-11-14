@@ -16,8 +16,8 @@ afterEach(() => {
 
 // A page left mounted shares the router, so it follows a later test's ?conversation= and fetches for it too.
 enableAutoUnmount(afterEach)
-// The last page's message-id reconcile can still be in flight when it unmounts; its 404 is logged after the file's
-// environment closes, which vitest reports as an unhandled teardown error (Jenkins 1372).
+// A page's last reads can land after the file's environment closes, which vitest reports as an unhandled teardown
+// error (Jenkins 1372).
 afterAll(() => {
   for (const level of ['error', 'warn', 'log'] as const) vi.spyOn(console, level).mockImplementation(() => {})
 })
@@ -36,10 +36,6 @@ afterAll(() => {
  *       conversation-load path threads {@code toolCalls} through to the
  *       per-message renderer, so the tool name should surface in the DOM.</li>
  * </ul>
- *
- * These tests do not drive the SSE pipeline directly — that surface is
- * exercised by the JCLAW-26/JCLAW-95/JCLAW-111 suite — but they pin the
- * frontend-side state shape that the SSE handlers update.
  */
 
 function setupBaseChatApi() {

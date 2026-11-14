@@ -101,10 +101,11 @@ import java.util.stream.Collectors;
  * <p>{@link #confinement} decides each run from the root of the agent's parent chain. Every agent
  * except {@code main} and its copies always runs through {@link HarnessSandbox#wrapCustomAgentShell}:
  * writes are limited to its resolved workspace and, on macOS, the home folder is unreadable except that
- * workspace and the home directories on JClaw's own PATH (on Linux bwrap already hides it). With the network
- * allowed it still reaches no local service through a socket file outside its workspace and its own temp
- * folder, such as a container runtime's control socket. Where no sandbox can start, its command is refused
- * with {@link ToolErrorTemplates#shellSandboxUnavailable} and nothing runs.
+ * workspace, the home directories on JClaw's own PATH and those {@code shell.sandbox.homeReads} lists (on
+ * Linux bwrap already hides it). With the network allowed it still reaches no local service through a socket
+ * file outside its workspace and its own temp folder, such as a container runtime's control socket. Where no
+ * sandbox can start, its command is refused with {@link ToolErrorTemplates#shellSandboxUnavailable} and nothing
+ * runs.
  *
  * <p>A signal from such a run reaches only the processes of that run: not the operator's, not JClaw, not
  * another agent's. Each run is a sandbox of its own, so it does not reach what an earlier run of the same
@@ -115,9 +116,10 @@ import java.util.stream.Collectors;
  * <p>{@code main} follows JCLAW-1153's tri-state {@code shell.sandbox} — {@code false} (shipped
  * default) | {@code true} (confine every run) | {@code untrusted} (confine only runs whose origin channel
  * is not the operator's own web chat or voice mode) — through the same macOS Seatbelt / Linux bwrap
- * profile builders the coding harness uses, granting writes to the workspace root and nothing else. With
- * the key on and no usable mechanism, the launch throws {@link HarnessSandbox.SandboxUnavailableException}
- * and the run aborts rather than falling back to an unconfined process.
+ * profile builders the coding harness uses, granting writes to the workspace root and the profile's temp
+ * and /dev folders only. With the key on and no usable mechanism, the launch throws
+ * {@link HarnessSandbox.SandboxUnavailableException} and the run aborts rather than falling back to an
+ * unconfined process.
  *
  * <p>The sandbox bounds <em>reach</em>, not grammar. {@code echo hi; rm -rf ~/Documents}
  * still passes the allowlist and still runs both statements; the {@code rm} fails on every path
@@ -789,10 +791,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     /**
-     * JCLAW-1153: {@code workspace} is the sandbox's single write grant, not
-     * {@code workdir} — the main agent's {@code allowGlobalPaths} can point
-     * {@code workdir} anywhere, and granting writes to wherever the model asked to
-     * run would make the confinement self-defeating. A
+     * JCLAW-1153: under {@code shell.sandbox} or a custom agent's sandbox,
+     * {@code workspace} is the single write grant, not {@code workdir} — the main
+     * agent's {@code allowGlobalPaths} can point {@code workdir} anywhere, and granting
+     * writes to wherever the model asked to run would make the confinement
+     * self-defeating. A
      * {@link HarnessSandbox.SandboxUnavailableException} from the wrap is left to
      * propagate: the run must abort, never launch unconfined.
      */

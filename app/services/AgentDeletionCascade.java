@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * Deletion-cascade collaborator for agents (JCLAW-728), extracted from {@link AgentService#delete}.
  * The DB-level {@code ON DELETE CASCADE} (JCLAW-542) removes every FK-linked child when the root
- * Agent row goes, but four resources live outside the FK graph and need an explicit sweep over the
+ * Agent row goes, but five resources live outside the FK graph and need an explicit sweep over the
  * sub-agent subtree. This class owns that out-of-band teardown across the five subsystems it used to
  * be feature-envious of — memory store, native-SQL config rows, the external Lucene index (four
  * scopes), and the filesystem workspace — then triggers the single cascading root delete.

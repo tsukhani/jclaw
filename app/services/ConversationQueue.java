@@ -39,8 +39,8 @@ import java.util.function.Supplier;
  * Prevents state corruption when multiple messages arrive simultaneously.
  *
  * A message that arrives while a turn runs waits in line (JF-245). What runs next follows the conversation's
- * channel: on Telegram, Slack and WhatsApp the waiting messages of the sender at the front run together as one
- * turn, and everywhere else each runs as its own.
+ * channel: on Telegram, Slack and WhatsApp the front sender's unbroken run of waiting messages goes as one turn,
+ * and everywhere else each runs as its own.
  *
  * A message queued from an external channel is also kept in a {@link PendingInbound} row until its
  * USER row is appended, so a restart re-queues it (JCLAW-1521).
@@ -713,8 +713,8 @@ public class ConversationQueue {
     }
 
     /**
-     * Returns an {@link AtomicBoolean} that becomes {@code true} when interrupt
-     * mode signals that the in-flight processor should cancel. Callers (e.g.
+     * Returns an {@link AtomicBoolean} that becomes {@code true} when {@link #cancelTurn}
+     * or {@link #stop} signals that the in-flight processor should cancel. Callers (e.g.
      * {@link agents.AgentRunner}) should poll this in their processing loops.
      *
      * @param conversationId the conversation whose cancel flag is needed
@@ -747,8 +747,8 @@ public class ConversationQueue {
      * permanently orphan the conversation. Idle entries are harmless (empty
      * deque + processing=false) and will be reused on the next message.
      *
-     * <p>On Telegram, Slack and WhatsApp returns the front sender's waiting messages together; elsewhere just the
-     * next message.
+     * <p>On Telegram, Slack and WhatsApp returns the front sender's unbroken run of waiting messages; elsewhere just
+     * the next message.
      *
      * @param conversationId the conversation being drained
      * @param generation     the generation the caller acquired with; a stale one

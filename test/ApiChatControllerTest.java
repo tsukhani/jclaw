@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
- * Functional HTTP tests for {@code ApiChatController}: send, streamChat, and
+ * Functional HTTP tests for {@code ApiChatController}: send, streamChat, startTurn and
  * uploadChatFiles. Existing slash-command happy paths live in {@link ControllerApiTest}
  * (chatSendRoutesModelStatusThroughFullDetailPath, chatSendRoutesModelNameWriteThroughOverride);
  * this file covers the parameter-binding and error-response surface that those
@@ -45,9 +45,9 @@ import java.util.function.Supplier;
  * <p>Real LLM dispatch is intentionally avoided — every send/streamChat path
  * exercised here either short-circuits via slash-command interception or fails
  * before the LLM round (missing agent, missing fields). That keeps the suite
- * deterministic and free of provider configuration coupling. The {@code /api/chat/turn}
- * tests (JF-202) are the exception: a started turn is only visible on its conversation's
- * stream, so they run it against a {@link HeldModel}.
+ * deterministic and free of provider configuration coupling. The tests that run a turn, on
+ * {@code /api/chat/turn} (JF-202), send or stream, are the exception: they run it against a
+ * {@link HeldModel}.
  */
 class ApiChatControllerTest extends FunctionalTest {
 
@@ -98,7 +98,7 @@ class ApiChatControllerTest extends FunctionalTest {
 
     /**
      * Every chat endpoint must require auth — covered by a single matrix to
-     * keep the auth gate uniform across send / stream / upload.
+     * keep the auth gate uniform across send / stream / turn / upload.
      */
     @ParameterizedTest(name = "{0} requires auth")
     @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/turn", "/api/chat/upload"})
@@ -108,7 +108,7 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     /**
-     * An empty body posted to each chat endpoint is a 400: send/stream both
+     * An empty body posted to each chat endpoint is a 400: send, stream and turn all
      * lack agentId+message (resolveChatContext badRequest), and upload lacks
      * the agentId param (controller badRequest).
      */

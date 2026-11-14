@@ -6,10 +6,11 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Serializes the classes that set the keys deciding when and how a chat compacts across play1's concurrent lanes: the
- * token trigger's two halves, the row-limit switch, the history limits the row trigger counts against (JF-154,
- * JF-159), the summary budget past which segments merge and the tool-result length a transcript carries (JF-161), and
- * the kept tail's share and the summary minimum, automatic and {@code /compact}'s (JF-416).
+ * Serializes the classes that set the keys deciding when and how a chat compacts across play1's concurrent lanes
+ * ({@link #KEYS}), among them the token trigger's two halves, the row-limit switch, the history limits the row
+ * trigger counts against (JF-154, JF-159), the summary budget past which segments merge and the tool-result length a
+ * transcript carries (JF-161), and the kept tail's share and the summary minimum, automatic and {@code /compact}'s
+ * (JF-416).
  * Sibling of {@link ShellSandboxSync}: the keys are process-global Config-DB state read on every turn, so one class
  * lowering a limit would compact another class's chat that expects the shipped defaults, and one class deleting a
  * key would change what another's chat does.

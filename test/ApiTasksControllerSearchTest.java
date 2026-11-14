@@ -28,8 +28,8 @@ import java.util.regex.Pattern;
 /**
  * Functional HTTP tests for {@code GET /api/task-runs/search} (JCLAW-294
  * commit 8). Routes through services.search.MessageSearch which dispatches
- * to H2 FullTextLucene under the test DB; tests both the empty/error paths
- * and the live-trigger indexing of newly inserted messages.
+ * to the direct Lucene index under the test DB; tests both the empty/error
+ * paths and the indexing of newly inserted messages.
  */
 class ApiTasksControllerSearchTest extends FunctionalTest {
 
@@ -39,16 +39,12 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
         // index at the %test path (data/jclaw-lucene-test). openForTest()
         // replaces the old close/open/wipe dance.
         LuceneTestSync.openForTest();
-        // Drop any FT state left from a prior test so Play's
-        // Fixtures.deleteDatabase doesn't trip on the FT.INDEXES
-        // housekeeping table — see H2LuceneMessageSearchRepositoryTest
-        // for the same dance.
         dropFtSafely();
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
         login();
         // FullTextSearchInitJob skips init in test mode; this test
-        // wants the live triggers + Lucene index, so init explicitly.
+        // wants the Lucene index, so init explicitly.
         services.search.MessageSearch.init();
     }
 
@@ -95,10 +91,10 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     /**
-     * Seed a TaskRun + N TaskRunMessage rows in a fresh tx so H2's
-     * FullTextLucene triggers fire on commit (the carrier-thread tx
-     * never commits, so messages seeded inline aren't indexed yet
-     * when the HTTP search hits the index).
+     * Seed a TaskRun + N TaskRunMessage rows in a fresh tx so the rows
+     * are committed and indexed before the request reads them (the
+     * carrier-thread tx never commits, so messages seeded inline aren't
+     * indexed yet when the HTTP search hits the index).
      */
     private static void seedTranscript(Long taskId, String... contents) {
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();

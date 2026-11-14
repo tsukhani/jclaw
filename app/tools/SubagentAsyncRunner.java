@@ -29,9 +29,8 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * JCLAW-677: async and detached subagent execution plus the yield handoff,
- * extracted from {@link SubagentSpawnTool}. Owns the async-outcome futures and
- * the outstanding-by-scope registry the block-await in {@code subagent_yield}
- * collects against.
+ * extracted from {@link SubagentSpawnTool}. Owns the async-outcome futures, each
+ * tagged with the scope the block-await in {@code subagent_yield} collects by.
  */
 final class SubagentAsyncRunner {
 

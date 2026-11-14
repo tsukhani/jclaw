@@ -640,7 +640,8 @@ public class ApiMetricsController extends Controller {
      * </ul>
      *
      * <p>Response shape: {@code {"since": "ISO", "rows": [{"timestamp": "ISO",
-     * "agentId": N, "channelType": "...", "usageJson": "{...}"}, ...]}}.
+     * "agentId": N, "channelType": "...", "usageJson": "{...}",
+     * "modelProvider": "..."}, ...]}}.
      * {@code usageJson} is the original Message column verbatim so the
      * frontend's TS types ({@code MessageUsage}) deserialize without
      * conversion; carries every pricing/token field the cost helpers need.

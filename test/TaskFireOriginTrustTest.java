@@ -517,7 +517,7 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         return request;
     }
 
-    /** A bearer request stamped with the calling turn's {@code origin}, exactly as {@code JClawApiTool} builds it. */
+    /** A bearer request stamped with the calling turn's {@code origin}, as {@code JClawApiTool} stamps it. */
     private static Http.Request agentRequestFrom(Agent agent, String origin) {
         var request = agentRequest(agent);
         request.headers.put(RequestPrincipal.CALLER_ORIGIN_HEADER,

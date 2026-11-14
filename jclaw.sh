@@ -3313,16 +3313,16 @@ aot_prepare() {
     return 0
 }
 
-# After a production start. A refused cache costs only time, but it would be refused at every start:
-# drop it, so the next start trains a new one. The JVM reports a refusal at the error level. $1 is
-# system.out's size before this start: Play appends to the file at every start, so reading all of it
-# let one old refusal drop every later start's freshly trained cache (JF-194).
 # Bytes in logs/system.out; empty when a fresh install has none yet. The stderr redirect comes first because
 # the shell reports a failed `<` itself, past a `2>/dev/null` written after it, into the installer's output.
 system_out_size() {
     wc -c 2>/dev/null < "$SCRIPT_DIR/logs/system.out" | tr -d ' ' || true
 }
 
+# After a production start. A refused cache costs only time, but it would be refused at every start:
+# drop it, so the next start trains a new one. The JVM reports a refusal at the error level. $1 is
+# system.out's size before this start: Play appends to the file at every start, so reading all of it
+# let one old refusal drop every later start's freshly trained cache (JF-194).
 aot_check_used() {
     local cache store out="$SCRIPT_DIR/logs/system.out" from="${1:-0}" size fresh
     cache=$(aot_cache_file)
@@ -5559,7 +5559,7 @@ do_e2e() {
 
 # ─── Consolidated test runner ───
 
-# Runs the full pre-push validation suite: backend tests (play autotest),
+# Runs the pre-push validation suite: backend tests (play autotest),
 # frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
 # typecheck). Streams each check's output and prints a consolidated summary
 # at the end. Continues past failures so the user sees every result in one

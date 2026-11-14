@@ -28,7 +28,7 @@ public final class ShellSandboxSync {
 
     private ShellSandboxSync() {}
 
-    /** Lock the flag and reset it to off. Call first in {@code @BeforeEach}. */
+    /** Lock the keys and reset them and the override to their defaults. Call first in {@code @BeforeEach}. */
     public static void acquire() {
         LOCK.lock();
         try {

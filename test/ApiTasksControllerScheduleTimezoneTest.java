@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 /**
  * JCLAW-818: a bare local date-time PATCH must resolve the fire instant in
  * the task's own timezone, not the server default. Regression guard for
- * {@code applyScheduleUpdate} switching from the 1-arg (server-zone)
+ * {@code scheduleUpdate} switching from the 1-arg (server-zone)
  * {@link services.ScheduleShorthandParser#parse(String)} to the zone-aware
  * 2-arg overload {@code create()} already uses.
  */

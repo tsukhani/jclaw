@@ -15,7 +15,7 @@ import java.util.List;
  * @param downshifted a prepaid provider's usage pushed this class onto the chat list
  * @param sticky      the previous turn's model was kept to preserve its prompt cache
  * @param relaxed     every candidate was filtered out, so filters were dropped rather than fail the turn
- * @param classifierMs how long the prompt classifier took, or null when the keyword rules decided alone
+ * @param classifierMs how long the prompt classifier took, or null when no classifier was asked
  */
 public record RouteDecision(TaskClass taskClass, ReasoningEffort effort, Target primary, @Nullable Target fallback,
                             List<String> signals, List<String> skipped,

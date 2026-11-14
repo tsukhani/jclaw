@@ -94,7 +94,7 @@ export const landBranch = async (opts: {
   key: string;
   head: string | undefined;
   messages: string[];
-  // The full suite on the named branch of the clone: undefined when green, else why it is red.
+  // The gate on the named branch of the clone: undefined when green, else why it is red.
   regate: (branch: string) => Promise<string | undefined>;
 }): Promise<Landed> => {
   const { checkout, clone, key, head } = opts;

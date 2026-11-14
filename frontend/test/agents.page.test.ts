@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import Agents from '~/pages/agents/[[name]].vue'
 
 /**
- * Page-level tests for {@code agents.vue} CRUD flows.
+ * Page-level tests for {@code pages/agents/[[name]].vue} CRUD flows.
  *
  * <p>{@code pages.test.ts} covers the structural rendering (list visible, New
  * Agent button present). These tests sit one layer deeper, exercising:

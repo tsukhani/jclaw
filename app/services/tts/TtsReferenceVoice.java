@@ -16,9 +16,9 @@ import java.util.Set;
  * Storage for the reference clip a cloning TTS model copies its speaker from
  * (JCLAW-865).
  *
- * <p>Chatterbox and Qwen3-TTS have no named voices — {@link TtsVoiceCatalog}
- * returns an empty list for them, which is why their Voice picker renders blank.
- * A reference clip is their voice selection, and without one they are fixed on
+ * <p>Chatterbox has no named voices — {@link TtsVoiceCatalog} returns an empty
+ * list for it, which is why its Voice picker renders blank.
+ * A reference clip is its voice selection, and without one it is fixed on
  * whatever speaker the model defaults to. The sidecar has always accepted
  * {@code ref_audio}; nothing on the JVM side ever sent it.
  *

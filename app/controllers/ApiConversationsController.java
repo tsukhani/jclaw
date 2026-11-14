@@ -664,7 +664,7 @@ public class ApiConversationsController extends Controller {
      *
      * @param rows   how many rows it summarized
      * @param status {@code live} while the prompt carries it, {@code merged} once folded into {@code mergedIntoId}, and
-     *               {@code reset} once a later {@code /reset} or {@code /new} set it aside, as
+     *               {@code reset} once a later {@code /reset} set it aside, as
      *               {@link SessionCompaction#findLive} decides
      */
     public record CompactionView(Long id, int rows, int summaryTokens, String model, String summary, String compactedAt,

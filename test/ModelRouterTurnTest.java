@@ -41,9 +41,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * picked, records the route beside the model that actually answered, fails over when that model
  * refuses before saying anything, and is accepted wherever a model is chosen.
  *
- * <p>This, {@code CompactionSummaryModelTest} and {@code RouteSpeculationTest} are the only classes that write the
- * process-global {@code router.*} model lists, all under {@link JevBreakerTestSync}; every other router test passes its
- * policy explicitly. Its turns
+ * <p>Every class that writes the process-global {@code router.*} model lists holds {@link JevBreakerTestSync};
+ * every other router test passes its policy explicitly. Its turns
  * read the stored classifier, which {@code RouterPolicyTest} and {@code ApiDecisionControllerTest} store for a moment,
  * so each test here holds {@link JevBreakerTestSync} as they do.
  */

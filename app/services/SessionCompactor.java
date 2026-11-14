@@ -57,7 +57,7 @@ import java.util.stream.Collectors;
  *
  * <p>A compaction summarizes the oldest rows since the floor, in chunks when they exceed what one summary call
  * takes (JF-159). Each call stores its own segment and no earlier summary is folded in; once the live segments pass
- * {@code chat.compaction.summaryBudgetTokens}, the oldest are merged into one (JF-161).
+ * {@link #summaryBudgetTokens}, the oldest are merged into one (JF-161).
  *
  * <p>Boundary selection ({@link #keptTailStart}, JF-416): the newest rows within {@link #tailBudget}, a share of the
  * tokens one summary call takes, stay as they are, always with the latest user message, and a summary needs at least
@@ -693,8 +693,8 @@ public final class SessionCompactor {
 
     /**
      * {@code summary} as the check call corrects it against the user's messages it covers (JF-418); {@code summary}
-     * itself when the call fails, returns nothing, or returns less than half of it, which is a list of changes rather
-     * than the whole summary. A check never stops the summary being stored.
+     * itself when the call fails, returns nothing, less than half of it (a list of changes, not the whole summary),
+     * or nothing under its headings. A check never stops the summary being stored.
      */
     private static String checked(Long conversationId, String summary, CompactionPlan plan, Summarizer checker) {
         String reply;

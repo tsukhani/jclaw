@@ -145,7 +145,7 @@ class ReplyJsonTest extends UnitTest {
         assertEquals(Optional.of(json("{\"t\":\"a}b\"}")), ReplyJson.lenientObject("{'t':'a}b'}"));
     }
 
-    /** The cases {@code MemoryAutoCapture.stripFences} was pinned by, now answered by the extractor. */
+    /** A fenced object is found whether or not its fence closes; text with neither finds nothing. */
     @Test
     void fenceVariants() {
         findsObject("{}", "```json\n{}\n```");

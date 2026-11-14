@@ -154,7 +154,7 @@ public class ApiChatController extends Controller {
         }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
-        // JCLAW-199: both chat routes are @NoTransaction so Play does not wrap the
+        // JCLAW-199: the chat turn routes are @NoTransaction so Play does not wrap the
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
@@ -382,7 +382,7 @@ public class ApiChatController extends Controller {
      * disconnect and {@code POST /api/conversations/{id}/stop} (which flips the same
      * flag via {@link services.ConversationQueue#stopOperatorTurn}) reach AgentRunner through one signal.
      * The turn is tied to this request; {@link #startTurn} starts one that is not (JF-202).
-     * This route stays as it is while the chat page and the load-test harness drive it.
+     * This route stays as it is while the load-test harness drives it.
      *
      * <p>JCLAW-199: {@code @NoTransaction} opts out of Play 1.x's per-request
      * JPA transaction wrapper. Without this, the framework's TransactionalFilter
@@ -609,7 +609,7 @@ public class ApiChatController extends Controller {
                                                           @Nullable Long conversationId, String username) {
         if (cmd == Commands.Command.NEW) return null;
         if (conversationId != null) {
-            // JCLAW-199: both chat routes are @NoTransaction; explicit Tx.run for
+            // JCLAW-199: the chat turn routes are @NoTransaction; explicit Tx.run for
             // the lookup since ConversationService.findById assumes its
             // caller owns the tx.
             final Long capturedConvId = conversationId;

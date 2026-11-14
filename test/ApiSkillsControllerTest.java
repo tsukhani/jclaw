@@ -111,7 +111,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     /**
      * Run a JPA mutation on a fresh platform thread (JCLAW-688: not a VT — carrier-pool starvation under load) so the write commits before
      * the FunctionalTest carrier thread proceeds. Mirrors
-     * {@code ApiAgentsControllerTest.createMainAgent}. Required whenever the
+     * {@code WebhookControllerTest.commitInFreshTx}. Required whenever the
      * row needs to be visible to a subsequent HTTP request — the carrier
      * thread is already inside an uncommitted JPA transaction, so an inline
      * {@code Tx.run} would just join that uncommitted transaction.

@@ -282,7 +282,7 @@ class CompactionGateTest extends UnitTest {
         // Force the gate over threshold AND give it enough seeded history
         // for a summary to have rows to end on — but make the
         // summarizer return an empty string so compact() reports
-        // skipReason="empty summary" and the gate falls back to `current`.
+        // a "The summary failed" skip and the gate falls back to `current`.
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
 

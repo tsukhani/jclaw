@@ -260,7 +260,6 @@ public class TaskTool implements ToolRegistry.Tool {
 
     // --- Helpers ---
 
-    /** True iff {@code args} has {@code key} and its value is not JSON null. */
     static final String ERR_MODEL_IS_MAINS = "Error: only the main agent chooses the model a task runs on. Leave "
             + "modelProvider and modelId out, and the task runs on your own model.";
 
@@ -272,6 +271,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 || (args.has(KEY_MODEL_ID) && !Objects.equals(optStr(args, KEY_MODEL_ID), modelId));
     }
 
+    /** True iff {@code args} has {@code key} and its value is not JSON null. */
     private static boolean hasValue(JsonObject args, String key) {
         return args.has(key) && !args.get(key).isJsonNull();
     }

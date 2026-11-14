@@ -501,8 +501,8 @@ public class SystemPromptAssembler {
 
         // === CACHE BOUNDARY ===
         // Everything above this line is deterministic for a given agent-day and
-        // can be served from the LLM provider's prompt cache. Nothing below it is
-        // cached; buildPrompt itself writes nothing there.
+        // can be served from the LLM provider's prompt cache. Nothing below it has a
+        // breakpoint of its own; buildPrompt itself writes nothing there.
         b.startSection("Cache Boundary");
         appendCacheBoundary(b.sb);
 

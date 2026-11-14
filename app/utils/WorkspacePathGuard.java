@@ -118,20 +118,6 @@ public final class WorkspacePathGuard {
                 && name.indexOf('/') < 0 && name.indexOf('\\') < 0 && name.indexOf('\0') < 0;
     }
 
-    /**
-     * Canonicalize {@code path} without creating anything: walk up to the
-     * deepest existing ancestor, {@code toRealPath()} it (resolving symlinks in
-     * the existing prefix), then re-attach the not-yet-created suffix verbatim.
-     * A read-only equivalent of {@link Path#toRealPath} that tolerates a path
-     * whose tail doesn't exist yet — the common case for write targets, and for
-     * a workspace root that hasn't been materialized on disk.
-     *
-     * @param path the absolute path to canonicalize
-     * @return the canonicalized absolute path, or {@code null} if no ancestor
-     *         exists (impossible for an absolute path, whose filesystem root
-     *         always exists)
-     * @throws IOException if realpath'ing the deepest existing ancestor fails
-     */
     /** The folder, in any letter case, where a skill keeps its secrets: {@code skills/<name>/credentials/}. */
     private static final String SKILL_CREDENTIALS_DIR = "credentials";
 
@@ -203,6 +189,20 @@ public final class WorkspacePathGuard {
         return out;
     }
 
+    /**
+     * Canonicalize {@code path} without creating anything: walk up to the
+     * deepest existing ancestor, {@code toRealPath()} it (resolving symlinks in
+     * the existing prefix), then re-attach the not-yet-created suffix verbatim.
+     * A read-only equivalent of {@link Path#toRealPath} that tolerates a path
+     * whose tail doesn't exist yet — the common case for write targets, and for
+     * a workspace root that hasn't been materialized on disk.
+     *
+     * @param path the absolute path to canonicalize
+     * @return the canonicalized absolute path, or {@code null} if no ancestor
+     *         exists (impossible for an absolute path, whose filesystem root
+     *         always exists)
+     * @throws IOException if realpath'ing the deepest existing ancestor fails
+     */
     static @Nullable Path canonicalize(Path path) throws IOException {
         var existing = path;
         var missingSuffix = new ArrayDeque<Path>();

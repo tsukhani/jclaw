@@ -1092,8 +1092,6 @@ public class ApiSkillsController extends Controller {
                 : "[CREDENTIAL]";
     }
 
-    /** Recursively delete a skill directory and clear the loader cache. */
-    @SuppressWarnings("java:S2259")
     /**
      * Delete what a skill saved for its next run (JF-357), only when both {@code skill-state/} and its folder are real
      * directories inside the workspace. The agent writes its workspace, links included, so either could lead
@@ -1121,6 +1119,8 @@ public class ApiSkillsController extends Controller {
         }
     }
 
+    /** Recursively delete a skill directory and clear the loader cache. */
+    @SuppressWarnings("java:S2259")
     private static void deleteSkillDir(Path dir) {
         try {
             SkillPromotionService.deleteRecursive(dir);

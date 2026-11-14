@@ -324,8 +324,8 @@ public final class LuceneIndexer {
         var indexDir = indexPath(scope);
         Files.createDirectories(indexDir);
         // Segments from a Lucene codec older than the shipped one fail to open: backward-codecs
-        // is deliberately not on the classpath. An upgrade across a codec boundary wipes
-        // data/jclaw-lucene/ instead, and the index rebuilds itself.
+        // is deliberately not on the classpath. A bump across a codec boundary must wipe
+        // data/jclaw-lucene/ instead (nothing here does); the index rebuilds itself.
         var dir = FSDirectory.open(indexDir);
         IndexWriter writer;
         try {

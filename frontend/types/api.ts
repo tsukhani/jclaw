@@ -213,7 +213,7 @@ export interface Conversation {
   compactionCount?: number
   /** Rows actually saved for the conversation; `messageCount` is a stored counter that misses tool rounds. Absent → 0. */
   messageRowCount?: number
-  /** Rows the operator sent (role user), shown beside `messageCount` in the context meter. Absent → 0. */
+  /** Rows the operator sent (role user), shown beside `messageRowCount` in the context meter. Absent → 0. */
   userPromptCount?: number
   /** JCLAW-1569: the agent's current list from its `checklist` tool; absent when it has set none. */
   checklist?: ChecklistItem[]

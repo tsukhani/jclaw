@@ -20,7 +20,7 @@ export interface UseChatScroll {
   scrollToBottom: () => void
   /** Prepends older rows without moving what the reader sees. */
   keepViewport: PrependOlder
-  /** Appends rows outside a stream, following them down only when the reader was at the bottom. */
+  /** Appends merged rows, following them down only when the reader was at the bottom. */
   appendFollowing: (append: () => void) => void
   /** {@link UseChatScroll.scrollToBottom} for a reader at the bottom only: a turn's frames leave one reading above alone. */
   followToBottom: () => void

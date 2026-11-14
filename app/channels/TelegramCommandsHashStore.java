@@ -95,7 +95,7 @@ public final class TelegramCommandsHashStore {
             byte[] digest = md.digest(sb.toString().getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the JLS; unreachable on any conforming JVM.
+            // SHA-256 is mandated by the Java SE platform; unreachable on any conforming JVM.
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }

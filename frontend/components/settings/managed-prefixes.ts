@@ -20,7 +20,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   'memory.', // JCLAW-930/932: vector embedding provider, model and dimensions — Settings
   // (Memory Embeddings). Also covers memory.jpa.vector.backfilledForModel, written by
   // the backfill job rather than by an operator, and the recall/decay/autocapture
-  // tuning keys, which are code defaults with no UI surface.
+  // tuning keys Settings (Memory Limits) does not show, which are code defaults.
   'verification.', // JCLAW-836: tool-result check toggles — seeded by DefaultConfigJob, no UI surface
   'shell.', // Shell execution defaults — Settings (allowlist + timeout)
   'db.backup.', // JCLAW-1165: backup directory, retention and daily schedule — Settings (Database)
@@ -33,7 +33,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   // installs don't surface as "Unmanaged" diagnostic noise.
   'skillsPromotion.', // Skills promotion sanitization — Settings
   'chromeBridge.', // Model that answers the Chrome tool's find (chromeBridge.find.provider and .model) — Settings (Chrome)
-  'agent.', // Per-agent config (shell privileges, etc.) — Agents page
+  'agent.', // Per-agent config — Agents page; agent.<name>.chromeBridge.* in Settings (Chrome)
   'ollama.', // Ollama provider-specific settings — Settings
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
   'auth.', // Admin password hash — Settings (Password section, not rendered as a row)

@@ -85,7 +85,8 @@ public class ApiSubagentRunsController extends Controller {
      * One run. In a list row {@code outcome} is cut to {@link #OUTCOME_EXCERPT_CHARS} and {@code outcomeTruncated}
      * says whether it was; {@link #get} returns it whole.
      */
-    @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
+    // S107: each component is one field of a run's JSON view; nesting them would change the wire shape.
+    @SuppressWarnings("java:S107")
     public record SubagentRunView(Long id, @Nullable Long parentAgentId, @Nullable String parentAgentName,
                                   @Nullable Long childAgentId, @Nullable String childAgentName,
                                   @Nullable Long parentConversationId, @Nullable Long parentTaskRunId,

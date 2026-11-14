@@ -16,8 +16,8 @@ import java.util.List;
  * saves) is driven inline from {@link controllers.ApiChannelsController#save}.
  * The three run at once, off the boot thread (JF-277): waiting for their network
  * round trips held the port closed for 1.1 s on an instance with Slack and two
- * Telegram bots, and nothing before the port opens needs them, since the channels
- * send through each provider's API rather than the receiving connection. A start
+ * Telegram bots, and nothing before the port opens needs them, since a channel
+ * that sends through its live session holds a send until it connects. A start
  * that loses the race to a stop starts nothing ({@code reconcileUnless}).
  *
  * <p>{@code @NoTransaction} skips the framework's outer JPA tx wrapper for

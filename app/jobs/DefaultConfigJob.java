@@ -37,7 +37,7 @@ import java.util.List;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.
- * Only writes values that don't already exist.
+ * Writes only absent values, except renameMovedKeys' one-shot migrations.
  *
  * <p>Runs near-FIRST among {@code @OnApplicationStart} jobs ({@code priority =
  * -100}; play1 1.13.27+ runs startup jobs in ascending priority order). Config

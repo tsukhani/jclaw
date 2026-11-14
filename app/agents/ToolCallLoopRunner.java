@@ -114,11 +114,11 @@ public final class ToolCallLoopRunner {
      * introspect raw provider responses.
      *
      * @param content   the model's final reply text
-     * @param truncated true when the final non-tool-call assistant turn
+     * @param truncated true when the final assistant turn
      *                  came back with {@code finish_reason = length /
      *                  max_tokens}
-     * @param yieldedRunIds the runs a {@code subagent_yield} suspended the sync
-     *                  loop on, in call order; empty otherwise, and always on the streaming loop
+     * @param yieldedRunIds the runs a {@code subagent_yield} suspended the
+     *                  loop on, in call order; empty otherwise
      */
     public record LoopOutcome(String content, boolean truncated, List<Long> yieldedRunIds) {
         public LoopOutcome(String content) { this(content, false); }

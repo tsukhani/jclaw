@@ -68,7 +68,6 @@ public class Agent extends TimestampedModel {
      * by the master {@link #compressionEnabled}. Nullable and resolving to ON
      * under an enabled master (operators opt a type OUT, not in) — see
      * {@link #compressionJsonEffective()} / {@link #compressionCodeEffective()}.
-     * JSON migrated here from the former global {@code chat.compression.json.enabled}.
      */
     @Column(name = "compression_json")
     public Boolean compressionJson;

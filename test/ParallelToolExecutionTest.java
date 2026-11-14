@@ -48,9 +48,10 @@ import java.util.function.Supplier;
 /**
  * Exercises {@link agents.ParallelToolExecutor#executeToolsParallel}'s scheduling model:
  * calls to different tools run on separate virtual threads (parallel),
- * while calls to the SAME tool run sequentially in declared order on one
- * thread (JCLAW-80 — same-tool calls share backend state so concurrent
- * execution produces nondeterministic order under lock contention).
+ * while calls in the SAME serialization group run in declared order, bar a
+ * run of read-only calls, which go at once (JCLAW-80 — same-tool calls
+ * share backend state so concurrent execution produces nondeterministic
+ * order under lock contention).
  */
 class ParallelToolExecutionTest extends UnitTest {
 
@@ -862,8 +863,8 @@ class ParallelToolExecutionTest extends UnitTest {
 
     @Test
     void aParallelBatchThatReadsOutsideTextWaitsOnNoLockTheTurnHolds() throws Exception {
-        // The sync chat route runs the turn inside the request's transaction, which saved the conversation row
-        // when it stored a message; each parallel call runs on its own thread, outside that transaction.
+        // The turn's own transaction holds the conversation row once it stores a message; each parallel call runs
+        // on its own thread, outside that transaction.
         var ids = new AtomicReference<long[]>();
         var seeder = Thread.ofPlatform().start(() -> ids.set(seedAgentAndConversation("outside-lock-" + System.nanoTime())));
         seeder.join();

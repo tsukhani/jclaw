@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit hook: run frontend linters on staged files only via lint-staged.
-# Keeps the full test suites (backend + frontend) in pre-push — this hook must
+# Keeps the test suites (backend + frontend) in pre-push — this hook must
 # stay fast (< 5 s typical) so rapid commits aren't disrupted.
 #
 # Enable once per clone:  git config core.hooksPath .githooks
@@ -67,9 +67,6 @@ done
 # to reach for --no-verify. .gitignore exclusion isn't checkable here:
 # ignored files never enter the index, so there's nothing for a pre-commit
 # hook to inspect for that layer.
-# bash 3.2-compatible array build — `mapfile` is bash 4+ and macOS ships
-# 3.2 by default, so this hook (which is shared across the team) avoids
-# the 4+ builtin to keep everyone's commits working.
 # The packager drops a path that starts with a .distignore line (Play1Plugin's
 # startsWith), not one a gitignore pattern matches, so that layer is checked
 # the same way: git's matcher would report an unanchored name as excluded at
@@ -88,6 +85,9 @@ distignore_matches() {
         done < "$REPO_ROOT/.distignore"
     done
 }
+# bash 3.2-compatible array build — `mapfile` is bash 4+ and macOS ships
+# 3.2 by default, so this hook (which is shared across the team) avoids
+# the 4+ builtin to keep everyone's commits working.
 added_files=()
 while IFS= read -r line; do
     added_files+=("$line")
