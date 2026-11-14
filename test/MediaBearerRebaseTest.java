@@ -12,6 +12,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.SessionCompactor;
 import services.Tx;
 
 import java.nio.file.Files;
@@ -46,6 +47,7 @@ class MediaBearerRebaseTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
+        CompactionTriggerSync.acquire();
         // 200ms gap so a prior test's lingering virtual-thread writes settle before the wipe —
         // same guard AgentRunnerCompactionTest uses.
         Thread.sleep(200);
@@ -56,14 +58,16 @@ class MediaBearerRebaseTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        if (llmServer != null) {
-            llmServer.stop(0);
-            llmServer = null;
+        try {
+            if (llmServer != null) {
+                llmServer.stop(0);
+                llmServer = null;
+            }
+            ConfigService.set("chat.compactionReserveTokens", "15000");
+            ConfigService.set("chat.compactionReserveTokensFloor", "9000");
+        } finally {
+            CompactionTriggerSync.release();
         }
-        ConfigService.set("chat.compactionReserveTokens", "15000");
-        ConfigService.set("chat.compactionReserveTokensFloor", "9000");
-        ConfigService.set("chat.compactionMinTurns", "10");
-        ConfigService.set("chat.compactionKeepMessages", "10");
     }
 
     /**
@@ -92,14 +96,13 @@ class MediaBearerRebaseTest extends UnitTest {
         configureProvider(20000);
         ConfigService.set("chat.compactionReserveTokens", "18000");
         ConfigService.set("chat.compactionReserveTokensFloor", "18000");
-        ConfigService.set("chat.compactionMinTurns", "2");
-        ConfigService.set("chat.compactionKeepMessages", "4");
 
         var agent = createAgent("bearer-compaction-agent");
         var convo = ConversationService.create(agent, "web", "u-bearer-compact");
 
-        // The bulk sits in the turns compaction will fold away, so the surviving tail stays well
-        // inside the trim target and the rebuild is the only thing that moves the image's slot.
+        // The bulk sits in the turns compaction will fold away: a summary needs 2,000 tokens, three of
+        // these four turns, so the kept tail starts at the next user turn, MARK-U3, well inside the trim
+        // target, and the rebuild is the only thing that moves the image's slot.
         var bulk = "z".repeat(3000);
         ConversationService.appendUserMessage(convo, "MARK-U1 " + bulk);
         ConversationService.appendAssistantMessage(convo, "MARK-A1 " + bulk, null);
@@ -135,13 +138,16 @@ class MediaBearerRebaseTest extends UnitTest {
             chatBody.set(request);
             respond(exchange, simpleResponse("Reply after trim."));
         });
-        // Reserve above the whole window makes the compaction budget negative, so shouldCompact is
-        // false and the trim is the only step that rebuilds. Trim target is 24000-4096=19904
-        // tokens, which has to clear the system prompt AND the tool schemas: the drop loop
-        // subtracts message tokens only, so a target below those drops the whole history.
+        // Reserve above the whole window makes the compaction budget negative and both halves of the
+        // token trigger are off, so shouldCompact is false and the trim is the only step that
+        // rebuilds. Trim target is 24000-4096=19904 tokens, which has to clear the system prompt AND
+        // the tool schemas: the drop loop subtracts message tokens only, so a target below those
+        // drops the whole history.
         configureProvider(24000);
         ConfigService.set("chat.compactionReserveTokens", "50000");
         ConfigService.set("chat.compactionReserveTokensFloor", "50000");
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "0");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
 
         var agent = createAgent("bearer-trim-agent");
         var convo = ConversationService.create(agent, "web", "u-bearer-trim");

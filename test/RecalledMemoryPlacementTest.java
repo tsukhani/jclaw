@@ -61,6 +61,7 @@ class RecalledMemoryPlacementTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
+        CompactionTriggerSync.acquire();
         // Seeding a memory indexes it in Lucene; hold the index closed so recall takes the substring fallback.
         LuceneTestSync.closedForTest();
         ConfigService.clearCache();
@@ -101,14 +102,18 @@ class RecalledMemoryPlacementTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        LuceneTestSync.release();
-        llmServer.stop(0);
-        CircuitBreakers.remove(provider);
-        for (var suffix : new String[] {"baseUrl", "apiKey", "models"}) {
-            ConfigService.delete("provider." + provider + "." + suffix);
+        try {
+            LuceneTestSync.release();
+            llmServer.stop(0);
+            CircuitBreakers.remove(provider);
+            for (var suffix : new String[] {"baseUrl", "apiKey", "models"}) {
+                ConfigService.delete("provider." + provider + "." + suffix);
+            }
+            ConfigService.delete(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider);
+            ProviderRegistry.refresh();
+        } finally {
+            CompactionTriggerSync.release();
         }
-        ConfigService.delete(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider);
-        ProviderRegistry.refresh();
     }
 
     @Test
@@ -240,6 +245,8 @@ class RecalledMemoryPlacementTest extends UnitTest {
                 + "\"contextWindow\":" + window + ",\"maxTokens\":" + window + "}]");
         // Other classes set the global multiplier; this provider's own key outranks it.
         ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + provider, "1.0");
+        // Two long rows pass the trigger; a summary would need more than they hold, so the trim alone makes room.
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "1000000");
         ProviderRegistry.refresh();
         int margin = intConst("OUTPUT_SAFETY_MARGIN_TOKENS");
         int target = window - intConst("RESERVED_OUTPUT_TOKENS");

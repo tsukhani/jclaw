@@ -9,12 +9,10 @@ const chatMaxToolRounds = computed(() => configValue('chat.maxToolRounds', '100'
 const chatMaxContextMessages = computed(() => configValue('chat.maxContextMessages', '1000'))
 
 // Advanced context-management knobs — collapsed by default in the Chat panel.
-// All four are runtime-tunable via ConfigService side-effects (no restart).
-// Defaults mirror the Java-side fallbacks: SessionCompactor for the chat.compaction*
-// trio, ContextWindowManager.DEFAULT_SAFETY_MULTIPLIER for the jtokkit knob.
+// All are runtime-tunable via ConfigService side-effects (no restart).
+// Defaults mirror the Java-side fallbacks: SessionCompactor for the compaction
+// rows, ContextWindowManager.DEFAULT_SAFETY_MULTIPLIER for the jtokkit knob.
 const compactionReserveTokens = computed(() => configValue('chat.compactionReserveTokens', '15000'))
-const compactionMinTurns = computed(() => configValue('chat.compactionMinTurns', '10'))
-const compactionKeepMessages = computed(() => configValue('chat.compactionKeepMessages', '10'))
 const jtokkitSafetyMultiplier = computed(() => configValue('jtokkit.safetyMultiplier.unmatched', '1.4'))
 
 const showAdvancedChat = ref(false)
@@ -239,8 +237,8 @@ async function saveChatField(configKey: string, value: string) {
          safety, and the defaults are deliberately conservative. Surface them
          because non-OpenAI providers (Kimi, DeepSeek, Gemma, Qwen, GLM,
          Mistral, Llama) have systematic tokenizer-bias gaps the safety
-         multiplier compensates for; the compaction trio also lets operators
-         tune when summary-vs-trim takes over. -->
+         multiplier compensates for; the compaction rows tune when a summary
+         fires and how much of the chat it keeps as it is. -->
     <div class="bg-surface-elevated border border-border">
       <button
         class="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-fg-muted hover:text-fg-strong transition-colors"
@@ -314,116 +312,44 @@ async function saveChatField(configKey: string, value: string) {
             </button>
           </template>
         </div>
-        <!-- chat.compactionMinTurns -->
-        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
-            compactionMinTurns
-            <InfoTip
-              label="About compactionMinTurns"
-              content-class="w-72 font-mono"
-            >
-              Minimum messages in the to-summarize prefix for auto-compaction. Below this, the gate skips and trim drops oldest instead. Manual /compact uses the relaxed forced threshold (default 2).
-            </InfoTip>
-          </span>
-          <template v-if="editingChatField === 'compactionMinTurns'">
-            <input
-              v-model="chatFieldEdit"
-              type="number"
-              min="1"
-              max="50"
-              aria-label="Compaction min turns"
-              class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              @click="saveChatField('chat.compactionMinTurns', chatFieldEdit)"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingChatField = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex-1 text-sm text-fg-primary font-mono">{{ compactionMinTurns }} messages</span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Edit"
-              @click="editingChatField = 'compactionMinTurns'; chatFieldEdit = compactionMinTurns"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-        </div>
-        <!-- chat.compactionKeepMessages -->
-        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
-            compactionKeepMessages
-            <InfoTip
-              label="About compactionKeepMessages"
-              content-class="w-72 font-mono"
-            >
-              Minimum messages kept verbatim at the end of the conversation after compaction. Below this, the gate finds no safe boundary and skips. Smaller keep = more aggressive summarization.
-            </InfoTip>
-          </span>
-          <template v-if="editingChatField === 'compactionKeepMessages'">
-            <input
-              v-model="chatFieldEdit"
-              type="number"
-              min="1"
-              max="50"
-              aria-label="Compaction keep messages"
-              class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              @click="saveChatField('chat.compactionKeepMessages', chatFieldEdit)"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingChatField = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex-1 text-sm text-fg-primary font-mono">{{ compactionKeepMessages }} messages</span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Edit"
-              @click="editingChatField = 'compactionKeepMessages'; chatFieldEdit = compactionKeepMessages"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-        </div>
+        <SettingsConfigField
+          config-key="chat.compaction.keepPercent"
+          label="compaction.keepPercent"
+          kind="number"
+          fallback="30"
+          :min="0"
+          :max="100"
+          label-width="w-60"
+          tip="When a summary is made, the newest messages stay as they are, up to this percent of the size at which a summary is due, and always your latest message. 0 keeps only your latest message and what follows it. Default: 30."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.minSummaryTokens"
+          label="compaction.minSummaryTokens"
+          kind="number"
+          fallback="2000"
+          :min="0"
+          label-width="w-60"
+          tip="A summary is made only when the messages before the ones kept come to at least this many tokens. Default: 2000."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.forcedKeepPercent"
+          label="compaction.forcedKeepPercent"
+          kind="number"
+          fallback="10"
+          :min="0"
+          :max="100"
+          label-width="w-60"
+          tip="As compaction.keepPercent, for /compact. Default: 10."
+        />
+        <SettingsConfigField
+          config-key="chat.compaction.forcedMinSummaryTokens"
+          label="compaction.forcedMinSummaryTokens"
+          kind="number"
+          fallback="200"
+          :min="0"
+          label-width="w-60"
+          tip="As compaction.minSummaryTokens, for /compact. Default: 200."
+        />
         <!-- jtokkit.safetyMultiplier.unmatched -->
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">

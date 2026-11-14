@@ -50,8 +50,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * compact() flow runs against the real H2 DB so the SessionCompaction
  * row and the compactionSince watermark bump are verified by reading
  * back through the JPA layer — same path production code takes.
+ *
+ * <p>Seeded rows render to {@link #ROW_CHARS} characters, {@link #ROW_TOKENS} tokens, and {@link #setup} sets an
+ * automatic rule of ten such rows each way: the tail keeps 10% of an unbounded call's 150,000 tokens, ten rows, and a
+ * summary needs ten rows before them. A test of the shipped rule calls {@link #shippedRule} first.
  */
 class SessionCompactorTest extends UnitTest {
+
+    private static final int ROW_TOKENS = 1_500;
+    private static final int ROW_CHARS = 4 * ROW_TOKENS;
 
     private Agent agent;
 
@@ -65,6 +72,14 @@ class SessionCompactorTest extends UnitTest {
         agent.modelProvider = "openrouter";
         agent.modelId = "test-model";
         agent.save();
+        ConfigService.set(SessionCompactor.KEEP_PERCENT_KEY, "10");
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, String.valueOf(10 * ROW_TOKENS));
+    }
+
+    /** The shipped automatic rule: the keys {@link #setup} set, deleted. */
+    private static void shippedRule() {
+        ConfigService.delete(SessionCompactor.KEEP_PERCENT_KEY);
+        ConfigService.delete(SessionCompactor.MIN_SUMMARY_TOKENS_KEY);
     }
 
     @AfterEach
@@ -72,72 +87,130 @@ class SessionCompactorTest extends UnitTest {
         CompactionTriggerSync.release();
     }
 
-    // ─── findSafeBoundary ────────────────────────────────────────────────
+    // ─── keptTailStart: where a summary ends (JF-416) ───────────────────
 
     @Test
-    void findSafeBoundary_returnsNegativeOne_whenBelowMinSize() {
-        // total=8 < minCompactable (10 default): no boundary possible
-        var msgs = buildFakeHistory(8, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
-        assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
+    void theTailIsTheNewestRowsWithinTheBudgetAndOneTokenLessLeavesTheOldestOfThemOut() {
+        var rows = alternating(6);
+        assertEquals(2, SessionCompactor.keptTailStart(rows, 4L * ROW_TOKENS, ROW_TOKENS),
+                "rows 2 to 5 come to the budget exactly");
+        assertEquals(4, SessionCompactor.keptTailStart(rows, 4L * ROW_TOKENS - 1, ROW_TOKENS),
+                "without row 2 the tail opens on reply 3, so it starts at the next user row");
     }
 
     @Test
-    void findSafeBoundary_picksLatestUserInRange() {
-        // total=25, keepMin=10 → maxBoundary=15, walk 15..10 looking for user.
-        // Place user roles at 0,2,4,...,24 — so msg[14] is user (14 is even).
-        var msgs = buildFakeHistory(25, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
-        // Latest user in [10,15] is at 14.
-        assertEquals(14, SessionCompactor.findSafeBoundary(msgs));
+    void aSummaryNeedsTheMinimumBeforeTheTailAndOneTokenMoreMakesNone() {
+        var rows = alternating(6);
+        assertEquals(4, SessionCompactor.keptTailStart(rows, 2L * ROW_TOKENS, 4L * ROW_TOKENS));
+        assertEquals(-1, SessionCompactor.keptTailStart(rows, 2L * ROW_TOKENS, 4L * ROW_TOKENS + 1),
+                "the latest user row, 4, may not be summarized, and no tool round follows it");
     }
 
     @Test
-    void findSafeBoundary_walksBackward_whenTrailingTurnsLackUser() {
-        // total=25; users at 0,5,10,15. keepMin=10 → maxBoundary=15.
-        // msg[15] is user → boundary=15. (Verifies we don't miss the top of the range.)
-        var msgs = buildFakeHistory(25, i -> i % 5 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
-        assertEquals(15, SessionCompactor.findSafeBoundary(msgs));
+    void theMinimumIsMetByKeepingLessThanTheBudgetWouldHold() {
+        assertEquals(4, SessionCompactor.keptTailStart(alternating(6), 4L * ROW_TOKENS, 3L * ROW_TOKENS),
+                "the budget would keep rows 2 to 5, but a summary of two rows is below the minimum");
     }
 
     @Test
-    void findSafeBoundary_returnsNegativeOne_whenNoUserInEligibleRange() {
-        // total=25, only users at 0..5 (all below minCompactable=10). keepMin=10.
-        var msgs = buildFakeHistory(25, i -> i < 6 ? MessageRole.USER : MessageRole.ASSISTANT);
-        assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
+    void aChatWithinTheBudgetIsSummarizedOnlyAsFarAsTheMinimumNeeds() {
+        assertEquals(2, SessionCompactor.keptTailStart(alternating(6), 100L * ROW_TOKENS, ROW_TOKENS));
+        assertEquals(-1, SessionCompactor.keptTailStart(alternating(6), 100L * ROW_TOKENS, 5L * ROW_TOKENS),
+                "the minimum reaches past the latest user row, and no tool round follows it");
     }
 
     @Test
-    void findSafeBoundary_cutsAfterAToolRound_whenTheOnlyUserRowOpensTheTurn() {
-        // One prompt, then 31 rounds of assistant call + tool result: 63 rows, keepMin 10 → boundary range [10, 53].
-        var msgs = oneLongTurn(31);
-        int boundary = SessionCompactor.findSafeBoundary(msgs);
-        assertEquals(53, boundary);
-        assertEquals(MessageRole.ASSISTANT.value, msgs.get(boundary).role);
-        assertEquals(MessageRole.TOOL.value, msgs.get(boundary - 1).role,
-                "the prefix must end on a tool result so no call is separated from its answer");
+    void aTailThatIsOneHugeMessageKeepsItWholeAndSummarizesEverythingBeforeIt() {
+        var prompt = alternating(4);
+        prompt.add(row(MessageRole.USER, 10 * ROW_TOKENS));
+        assertEquals(4, SessionCompactor.keptTailStart(prompt, 4L * ROW_TOKENS, ROW_TOKENS));
+
+        var reply = alternating(5);
+        reply.add(row(MessageRole.ASSISTANT, 10 * ROW_TOKENS));
+        assertEquals(4, SessionCompactor.keptTailStart(reply, 4L * ROW_TOKENS, ROW_TOKENS),
+                "the latest user message stays with the huge reply after it");
     }
 
     @Test
-    void findSafeBoundary_prefersAUserRowOverAToolRound() {
-        var msgs = oneLongTurn(31);
-        msgs.get(12).role = MessageRole.USER.value;
-        assertEquals(12, SessionCompactor.findSafeBoundary(msgs));
+    void aToolRoundAtTheBoundaryIsCutAfterItsResultAndNeverBetweenTheCallAndIt() {
+        var rows = new ArrayList<>(List.of(row(MessageRole.USER, ROW_TOKENS), call("c1"), result("c1"), call("c2"),
+                result("c2"), row(MessageRole.ASSISTANT, ROW_TOKENS), row(MessageRole.USER, ROW_TOKENS)));
+
+        assertEquals(3, SessionCompactor.keptTailStart(rows, 4L * ROW_TOKENS, ROW_TOKENS),
+                "call c2 opens the tail with its result");
+        assertEquals(5, SessionCompactor.keptTailStart(rows, 4L * ROW_TOKENS - 1, ROW_TOKENS),
+                "result c2 cannot open the tail without its call, so the reply after it does");
     }
 
     @Test
-    void findSafeBoundary_neverCutsAnAssistantThatFollowsAnAssistantWithoutAToolResult() {
-        // Assistant rows only after the opening prompt: no completed tool round, so no cut.
-        var msgs = buildFakeHistory(63, i -> i == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
-        assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
+    void oneLongTurnWithTooLittleBeforeItsPromptIsCutAfterAFinishedToolRoundInsideIt() {
+        // One prompt, then 31 rounds of a call and its result: 63 rows.
+        var rows = oneLongTurn(31);
+        int cut = SessionCompactor.keptTailStart(rows, 10L * ROW_TOKENS, 10L * ROW_TOKENS);
+        assertEquals(53, cut);
+        assertEquals(MessageRole.ASSISTANT.value, rows.get(cut).role);
+        assertEquals(MessageRole.TOOL.value, rows.get(cut - 1).role,
+                "the summary must end on a tool result so no call is separated from its answer");
     }
 
     @Test
-    void findSafeBoundary_honorsConfigOverrides() {
-        ConfigService.set("chat.compactionKeepMessages", "5");
-        ConfigService.set("chat.compactionMinTurns", "3");
-        // total=12, keepMin=5 → maxBoundary=7. minCompactable=3.
-        // Users at 3 and 7. Walks back from 7 — finds user at 7.
-        var msgs = buildFakeHistory(12, i -> (i == 3 || i == 7) ? MessageRole.USER : MessageRole.ASSISTANT);
-        assertEquals(7, SessionCompactor.findSafeBoundary(msgs));
+    void aUserMessageInsideTheLongTurnHoldsTheTailThoughItPassesTheBudget() {
+        var rows = oneLongTurn(31);
+        rows.get(12).role = MessageRole.USER.value;
+        assertEquals(12, SessionCompactor.keptTailStart(rows, 10L * ROW_TOKENS, 10L * ROW_TOKENS));
+    }
+
+    @Test
+    void anAssistantRowAfterAnotherWithNoToolResultBetweenIsNeverACut() {
+        var rows = new ArrayList<Message>();
+        rows.add(row(MessageRole.USER, ROW_TOKENS));
+        for (int i = 1; i < 63; i++) rows.add(row(MessageRole.ASSISTANT, ROW_TOKENS));
+        assertEquals(-1, SessionCompactor.keptTailStart(rows, 10L * ROW_TOKENS, 10L * ROW_TOKENS));
+    }
+
+    @Test
+    void anEmptyHistoryHasNoCut() {
+        assertEquals(-1, SessionCompactor.keptTailStart(List.of(), 10L * ROW_TOKENS, 0));
+    }
+
+    // ─── The budget and the minimum the keys set (JF-416) ───────────────
+
+    @Test
+    void withTheKeysAbsentTheTailKeepsThirtyPercentAndASummaryNeedsTwoThousandTokensAndSlashCompactsTenAndTwoHundred() {
+        shippedRule();
+        assertEquals(3_000, SessionCompactor.tailBudget(false, 10_000));
+        assertEquals(1_000, SessionCompactor.tailBudget(true, 10_000));
+        assertEquals(45_000, SessionCompactor.tailBudget(false, Integer.MAX_VALUE),
+                "an unbounded call takes the share of the 150,000-token cap");
+        assertEquals(2_000, SessionCompactor.summaryMinimum(false));
+        assertEquals(200, SessionCompactor.summaryMinimum(true));
+    }
+
+    @Test
+    void theStoredSharesAndMinimumsAreReadAndAnUnboundedCallTakesTheStoredCapOrWithItOffTheDefault() {
+        ConfigService.set(SessionCompactor.KEEP_PERCENT_KEY, "50");
+        ConfigService.set(SessionCompactor.FORCED_KEEP_PERCENT_KEY, "5");
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "100");
+        ConfigService.set(SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, "0");
+        assertEquals(5_000, SessionCompactor.tailBudget(false, 10_000));
+        assertEquals(500, SessionCompactor.tailBudget(true, 10_000));
+        assertEquals(100, SessionCompactor.summaryMinimum(false));
+        assertEquals(0, SessionCompactor.summaryMinimum(true));
+
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "40000");
+        assertEquals(20_000, SessionCompactor.tailBudget(false, Integer.MAX_VALUE));
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        assertEquals(75_000, SessionCompactor.tailBudget(false, Integer.MAX_VALUE));
+    }
+
+    @Test
+    void aValueWrittenAroundTheValidationReadsAsTheNearestOneItAllows() {
+        ConfigService.set(SessionCompactor.KEEP_PERCENT_KEY, "150");
+        ConfigService.set(SessionCompactor.FORCED_KEEP_PERCENT_KEY, "-5");
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "-1");
+        assertEquals(10_000, SessionCompactor.tailBudget(false, 10_000));
+        assertEquals(0, SessionCompactor.tailBudget(true, 10_000));
+        assertEquals(0, SessionCompactor.summaryMinimum(false));
     }
 
     // ─── shouldCompact ──────────────────────────────────────────────────
@@ -641,7 +714,7 @@ class SessionCompactorTest extends UnitTest {
     @Test
     void compact_persistsRowAndBumpsWatermark_onSuccess() {
         var conv = ConversationService.create(agent, "web", "user1");
-        // Seed 25 messages — enough to pass the default 10-turn minimum.
+        // The tail keeps about ten of these, and the rows before it pass the minimum of ten.
         seedMessages(conv, 25);
         // Commit so the compact() flow sees the rows through its own Tx.
         commitAndReopen();
@@ -716,7 +789,7 @@ class SessionCompactorTest extends UnitTest {
         var kept = ConversationService.loadRecentMessages(fresh);
         assertEquals(MessageRole.ASSISTANT.value, kept.getFirst().role,
                 "the kept tail opens on the assistant row that follows the last summarized tool result");
-        assertEquals(10, kept.size(), "the newest ten rows stay verbatim");
+        assertEquals(10, kept.size(), "the newest ten rows, the budget, stay verbatim");
         assertEquals("summary of the long turn", SessionCompaction.<SessionCompaction>findAll().getFirst().summary);
         assertTrue(seen.getFirst().contains("[USER] do the long task"), "the prompt that opened the turn is summarized");
         assertTrue(seen.getFirst().contains("[TOOL_RESULT_ID] call-25"), "the last summarized row is call 25's result");
@@ -724,35 +797,86 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_skipsWhenTooFewMessages() {
+    void compact_skipsWhenTheRowsBeforeTheTailAreBelowTheMinimum() {
         var conv = ConversationService.create(agent, "web", "user1");
-        seedMessages(conv, 5); // below minCompactable
+        seedMessages(conv, 5);
         commitAndReopen();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
 
-        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
-                msgs -> "would summarize");
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            calls.incrementAndGet();
+            return "would summarize";
+        });
         assertFalse(result.compacted());
         assertEquals("no safe boundary or below min-turns", result.skipReason());
+        assertEquals(0, calls.get());
     }
 
     @Test
-    void compactForced_succeedsWhereAutoSkipsDueToLowTurnCount() {
-        // 8 messages — well below auto-trigger's 10-turn minimum.
+    void compactForced_succeedsWhereAutoSkipsBelowItsMinimum() {
+        // Eight rows come to less than the automatic minimum of ten; /compact's is 200 tokens.
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 8);
         commitAndReopen();
 
-        // Auto mode skips (below min-turns).
         var auto = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "s");
         assertFalse(auto.compacted(), "auto should skip");
 
-        // Forced mode succeeds with relaxed thresholds (default 4 keep, 2 min).
         var forced = SessionCompactor.compact(conv.id, "openrouter/test-model",
                 msgs -> "Forced summary.", /*force*/ true, null);
         assertTrue(forced.compacted(), "forced should compact; reason=" + forced.skipReason());
+        assertEquals(2, forced.turnsCompacted(),
+                "all eight fit /compact's budget, so it summarizes as far as its minimum needs: the first exchange");
 
         commitAndReopen();
         assertNotNull(Conversation.<Conversation>findById(conv.id).compactionSince);
+    }
+
+    @Test
+    void aFourMessageChatPastTheTriggerIsSummarizedUpToItsLatestUserMessage() {
+        shippedRule();
+        // A 32K window fires at 16,384 tokens; each row is 5,000 and the tail keeps 30% of 16,384.
+        var mi = new ModelInfo("m", "M", 32_768, 8192, false);
+        assertTrue(SessionCompactor.shouldCompact(4 * 5_000, mi));
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedRows(conv, 4, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 20_000);
+        commitAndReopen();
+        var rows = allRows(conv.id);
+        var calls = new ArrayList<List<ChatMessage>>();
+
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                    calls.add(msgs);
+                    return reply("FOUR-ROW SUMMARY");
+                }, false, null, SessionCompactor.summaryCallTokens(mi), SessionCompactor.MAX_SUMMARY_CALLS);
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertEquals(2, result.turnsCompacted());
+        assertEquals(1, calls.size());
+        commitAndReopen();
+        assertEquals(contents(rows.subList(2, 4)), ConversationService.loadRecentMessages(
+                Conversation.findById(conv.id)).stream().map(m -> m.content).toList(),
+                "the latest user message and its reply stay, though together they pass the tail's budget");
+    }
+
+    @Test
+    void slashCompactKeepsItsOwnSmallerShareAndNeedsItsOwnSmallerMinimum() {
+        shippedRule();
+        // Six rows of 400 tokens on a 10,000-token call: the automatic rule keeps up to 3,000 and needs 2,000 before
+        // them, which leaves too little; /compact keeps up to 1,000 and needs 200.
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedRows(conv, 6, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 1_600);
+        commitAndReopen();
+        SessionCompactor.ModelCall call = (msgs, defs) -> reply("SLASH SUMMARY");
+
+        var auto = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 10_000, Integer.MAX_VALUE);
+        var forced = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                new TurnRequest(turnMessages(conv.id), TOOLS), call, true, null, 10_000, Integer.MAX_VALUE);
+
+        assertEquals(SessionCompactor.CompactionResult.skipped(SessionCompactor.NO_CUT_REASON), auto);
+        assertTrue(forced.compacted(), "reason=" + forced.skipReason());
+        assertEquals(4, forced.turnsCompacted(), "rows 4 and 5 come to 800 tokens, rows 3 to 5 to 1,200");
     }
 
     @Test
@@ -817,7 +941,7 @@ class SessionCompactorTest extends UnitTest {
     void aChatAtTwoAndAHalfTimesTheLimitIsSummarizedInChunksOldestFirst() {
         ConfigService.set("chat.maxContextMessages", "40");
         var conv = ConversationService.create(agent, "web", "user1");
-        seedRows(conv, 100, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 0);
+        seedRows(conv, 100, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, ROW_CHARS);
         commitAndReopen();
         var rows = allRows(conv.id);
         var calls = new ArrayList<List<ChatMessage>>();
@@ -848,10 +972,12 @@ class SessionCompactorTest extends UnitTest {
     @Test
     void eachChunkFitsTheTokensOneCallTakesAndTheNextCompactionResumesWhereTheCallLimitStopped() {
         ConfigService.set("chat.maxContextMessages", "40");
+        // Calls of ten rows, and a tail as large as one call.
+        int callTokens = 10 * ROW_TOKENS;
+        ConfigService.set(SessionCompactor.KEEP_PERCENT_KEY, "100");
         int max = SessionCompactor.MAX_SUMMARY_CALLS;
         var conv = ConversationService.create(agent, "web", "user1");
-        // Each row renders to 400 characters, 100 tokens, so 1,000 tokens hold 10 rows.
-        seedRows(conv, 10 * max + 20, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 400);
+        seedRows(conv, 10 * max + 20, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, ROW_CHARS);
         commitAndReopen();
         var rows = allRows(conv.id);
         var calls = new ArrayList<List<ChatMessage>>();
@@ -862,7 +988,7 @@ class SessionCompactorTest extends UnitTest {
 
         var stopped = new AtomicReference<SessionCompactor.CompactionResult>();
         var events = EventLogger.captureForTest(() -> stopped.set(SessionCompactor.compact(conv.id,
-                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000,
+                "openrouter/test-model", new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, callTokens,
                 max)));
 
         assertEquals(10 * max, stopped.get().turnsCompacted());
@@ -881,7 +1007,7 @@ class SessionCompactorTest extends UnitTest {
 
         calls.clear();
         var resumed = SessionCompactor.compact(conv.id, "openrouter/test-model",
-                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, 1_000, max);
+                new TurnRequest(turnMessages(conv.id), TOOLS), call, false, null, callTokens, max);
 
         assertEquals(10, resumed.turnsCompacted(), "the 20 rows left fit the limit: one call, keeping 10");
         assertEquals(1, calls.size());
@@ -895,7 +1021,8 @@ class SessionCompactorTest extends UnitTest {
         ConfigService.set("chat.maxContextMessages", "40");
         var conv = ConversationService.create(agent, "web", "user1");
         // One user row, then 59 rows of a single tool loop, then 40 rows of ordinary turns.
-        seedRows(conv, 100, i -> i == 0 || i >= 60 && i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, 0);
+        seedRows(conv, 100, i -> i == 0 || i >= 60 && i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
+                ROW_CHARS);
         commitAndReopen();
         var rows = allRows(conv.id);
         var inputs = new ArrayList<List<ChatMessage>>();
@@ -1015,6 +1142,8 @@ class SessionCompactorTest extends UnitTest {
 
     @Test
     void aTranscriptCarriesEachToolResultCutToSixHundredCharactersWithItsLengthAndTheTurnsTextWhole() {
+        // /compact keeps 10% of the 1,000-token cap: the six short rows, not the reply before them.
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "1000");
         var conv = ConversationService.create(agent, "web", "user1");
         var ask = "Fetch the LeaveFlow docs. " + "u".repeat(3_000);
         var reply = "Here is what the docs say. " + "a".repeat(3_000);
@@ -1044,7 +1173,7 @@ class SessionCompactorTest extends UnitTest {
         }, true, null);
 
         assertTrue(result.compacted(), "reason=" + result.skipReason());
-        assertEquals(10, result.turnsCompacted(), "/compact keeps 4, from the user row 'more'");
+        assertEquals(8, result.turnsCompacted(), "/compact keeps the rows from the user row 'next'");
         var shortArgs = longArgs.substring(0, 600) + "… [first 600 of " + longArgs.length() + " characters]";
         assertEquals("[USER] " + ask + "\n\n"
                 + "[ASSISTANT]\n[TOOL_CALLS] " + toolCall("call_1", shortArgs) + "\n\n"
@@ -1053,9 +1182,7 @@ class SessionCompactorTest extends UnitTest {
                 + "[TOOL] " + exact + "\n[TOOL_RESULT_ID] call_2\n\n"
                 + "[ASSISTANT]\n[TOOL_CALLS] " + toolCall("call_3", "{}") + "\n\n"
                 + "[TOOL] " + "t".repeat(600) + "… [first 600 of 601 characters]\n[TOOL_RESULT_ID] call_3\n\n"
-                + "[ASSISTANT] " + reply + "\n\n"
-                + "[USER] next\n\n"
-                + "[ASSISTANT] ok\n\n", input.get());
+                + "[ASSISTANT] " + reply + "\n\n", input.get());
     }
 
     @Test
@@ -1334,7 +1461,10 @@ class SessionCompactorTest extends UnitTest {
         return call.toString();
     }
 
-    /** {@code count} alternating user and assistant rows {@code label i}, at least a minute apart from {@code from}. */
+    /**
+     * {@code count} alternating user and assistant rows {@code label i} of {@link #ROW_TOKENS}, at least a minute
+     * apart from {@code from}.
+     */
     private static List<MessageSnapshot> seedMinutes(Conversation conv, Instant from, int count, String label) {
         var tick = new AtomicLong(from.toEpochMilli() - 60_000);
         var ticking = new Clock() {
@@ -1345,8 +1475,8 @@ class SessionCompactorTest extends UnitTest {
         var out = new ArrayList<MessageSnapshot>();
         AppClock.runWith(ticking, () -> {
             for (int i = 0; i < count; i++) {
-                var m = ConversationService.appendMessage(conv, i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT,
-                        label + " " + i, null, null, null);
+                var role = i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT;
+                var m = ConversationService.appendMessage(conv, role, sized(role, label + " " + i), null, null, null);
                 out.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
             }
         });
@@ -1431,36 +1561,64 @@ class SessionCompactorTest extends UnitTest {
                 List.of(new Choice(0, new ChatMessage("assistant", null, List.of(call), null, null), "tool_calls")), null);
     }
 
-    private static List<Message> buildFakeHistory(int total, java.util.function.IntFunction<MessageRole> roleAt) {
-        var out = new ArrayList<Message>(total);
-        for (int i = 0; i < total; i++) {
-            var m = new Message();
-            m.role = roleAt.apply(i).value;
-            m.content = "msg-" + i;
-            out.add(m);
-        }
+    /** {@code count} alternating user and assistant rows of {@link #ROW_TOKENS}, the first a user row. */
+    private static List<Message> alternating(int count) {
+        var out = new ArrayList<Message>(count);
+        for (int i = 0; i < count; i++) out.add(row(i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT, ROW_TOKENS));
         return out;
     }
 
-    /** One user prompt, then {@code rounds} of an assistant row that calls a tool and the tool row that answers it. */
+    private static Message row(MessageRole role, int tokens) {
+        var m = new Message();
+        m.role = role.value;
+        m.content = role.value + " row";
+        return padded(m, 4 * tokens);
+    }
+
+    /** An assistant row of {@link #ROW_TOKENS} calling the tool whose result {@link #result} answers. */
+    private static Message call(String id) {
+        var m = new Message();
+        m.role = MessageRole.ASSISTANT.value;
+        m.content = "step " + id;
+        m.toolCalls = utils.GsonHolder.GSON.toJson(new ToolCall(id, "function", new FunctionCall("datetime", "{}")));
+        return padded(m, ROW_CHARS);
+    }
+
+    private static Message result(String id) {
+        var m = new Message();
+        m.role = MessageRole.TOOL.value;
+        m.content = "result " + id;
+        m.toolResults = id;
+        return padded(m, ROW_CHARS);
+    }
+
+    /** {@code m} with its content lengthened so the row renders to exactly {@code chars} characters. */
+    private static Message padded(Message m, int chars) {
+        int rendered = SessionCompactor.renderTurns(List.of(new MessageSnapshot(m.role, m.content, m.toolCalls,
+                m.toolResults, null))).length();
+        m.content = m.content + " " + "x".repeat(chars - rendered - 1);
+        return m;
+    }
+
+    /** {@code text}, lengthened so a {@code role} row of it renders to {@link #ROW_CHARS} characters. */
+    private static String sized(MessageRole role, String text) {
+        int overhead = ("[" + role.value.toUpperCase() + "] ").length() + 2;
+        return text + " " + "x".repeat(ROW_CHARS - overhead - text.length() - 1);
+    }
+
+    /**
+     * One user prompt, then {@code rounds} of an assistant row that calls a tool and the tool row that answers it,
+     * each row {@link #ROW_TOKENS}.
+     */
     private static List<Message> oneLongTurn(int rounds) {
         var out = new ArrayList<Message>(1 + 2 * rounds);
         var prompt = new Message();
         prompt.role = MessageRole.USER.value;
         prompt.content = "do the long task";
-        out.add(prompt);
+        out.add(padded(prompt, ROW_CHARS));
         for (int r = 0; r < rounds; r++) {
-            var call = new Message();
-            call.role = MessageRole.ASSISTANT.value;
-            call.content = "step " + r;
-            call.toolCalls = utils.GsonHolder.GSON.toJson(new ToolCall("call-" + r, "function",
-                    new FunctionCall("datetime", "{}")));
-            out.add(call);
-            var result = new Message();
-            result.role = MessageRole.TOOL.value;
-            result.content = "result " + r;
-            result.toolResults = "call-" + r;
-            out.add(result);
+            out.add(call("call-" + r));
+            out.add(result("call-" + r));
         }
         return out;
     }
@@ -1476,12 +1634,11 @@ class SessionCompactorTest extends UnitTest {
         seedMessages(conv, count, "Turn");
     }
 
+    /** {@code count} alternating rows of {@link #ROW_TOKENS}, the first a user row, so a cut lands on a user row. */
     private static void seedMessages(Conversation conv, int count, String label) {
-        // Alternating user/assistant messages (starts with user) so the
-        // prefix is always anchorable at a user boundary.
         for (int i = 0; i < count; i++) {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
-            ConversationService.appendMessage(conv, role, label + " " + i + " content", null, null, null);
+            ConversationService.appendMessage(conv, role, sized(role, label + " " + i + " content"), null, null, null);
         }
     }
 

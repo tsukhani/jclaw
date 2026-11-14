@@ -282,8 +282,8 @@ class CompactionSummaryRequestTest extends UnitTest {
         var result = new AtomicReference<Commands.Result>();
         ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(slashCompact(agent, convo, null)));
 
-        // /compact keeps 4: chunks of rows 0-11 and 12-23 past the limit, then 24-25 ahead of the kept 26-29.
-        assertEquals(3, requests.size());
+        // The newest 12 rows, 18-29, fit /compact's budget and stay: rows 0-11 past the limit, then 12-17.
+        assertEquals(2, requests.size());
         var rows = storedContents(convo.id);
         var inputs = new ArrayList<String>();
         for (var request : requests) {
@@ -293,13 +293,13 @@ class CompactionSummaryRequestTest extends UnitTest {
         // Each chunk goes alone, with no earlier summary folded in (JF-161).
         assertTrue(inputs.get(0).startsWith("[USER] " + rows.get(0)), inputs.get(0));
         assertTrue(inputs.get(1).startsWith("[USER] " + rows.get(12)), inputs.get(1));
-        assertTrue(inputs.get(2).startsWith("[USER] " + rows.get(24)), inputs.get(2));
-        assertEquals(3L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
+        assertFalse(inputs.get(1).contains(rows.get(18)), inputs.get(1));
+        assertEquals(2L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
         assertEquals("""
                 > Conversation Compacted
 
-                Summarized 26 earlier messages in 3 summary calls; the summaries the agent reads in their place \
-                come to ~6 tokens. Older messages remain in history and will stop being shipped to the model \
+                Summarized 18 earlier messages in 2 summary calls; the summaries the agent reads in their place \
+                come to ~4 tokens. Older messages remain in history and will stop being shipped to the model \
                 starting next turn.""", result.get().responseText());
     }
 
@@ -320,18 +320,18 @@ class CompactionSummaryRequestTest extends UnitTest {
         var result = new AtomicReference<Commands.Result>();
         ToolRegistrySync.withTools(List.of(countingTool()), () -> result.set(slashCompact(agent, convo, null)));
 
-        // /compact keeps 4: nine chunks of 12 rows past the limit, then rows 108-115 ahead of the kept 116-119.
-        assertEquals(10, requests.size());
+        // The newest 12 rows, 108-119, fit /compact's budget and stay: nine chunks of 12 rows before them.
+        assertEquals(9, requests.size());
         var rows = storedContents(convo.id);
         var last = content(requests.getLast().getAsJsonArray("messages").get(1));
-        assertTrue(last.startsWith("[USER] " + rows.get(108)), last);
-        assertEquals(10L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
-        // "SUMMARY 1" to "SUMMARY 9" and "SUMMARY 10": 91 characters, 22 tokens at four a token.
+        assertTrue(last.startsWith("[USER] " + rows.get(96)), last);
+        assertEquals(9L, (long) Tx.run(() -> SessionCompaction.count("conversation.id = ?1", convo.id)));
+        // "SUMMARY 1" to "SUMMARY 9": 81 characters, 20 tokens at four a token.
         assertEquals("""
                 > Conversation Compacted
 
-                Summarized 116 earlier messages in 10 summary calls; the summaries the agent reads in their place \
-                come to ~22 tokens. Older messages remain in history and will stop being shipped to the model \
+                Summarized 108 earlier messages in 9 summary calls; the summaries the agent reads in their place \
+                come to ~20 tokens. Older messages remain in history and will stop being shipped to the model \
                 starting next turn.""", result.get().responseText());
     }
 

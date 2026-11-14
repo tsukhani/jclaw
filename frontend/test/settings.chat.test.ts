@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -20,9 +20,12 @@ const BACKEND_MAX_CONTEXT_MESSAGES = 1000
 type Body = { key?: string, value?: string }
 
 let posted: Body[] = []
+// What ConfigService.setWithSideEffects answers for the next write, as a 403.
+let refusal: string | null = null
 
 function baseEndpoints(entries: Array<{ key: string, value: string }> = []) {
   posted = []
+  refusal = null
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
@@ -31,6 +34,10 @@ function baseEndpoints(entries: Array<{ key: string, value: string }> = []) {
   registerEndpoint('/api/config', {
     method: 'POST',
     handler: async (event) => {
+      if (refusal) {
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: refusal, template: null }
+      }
       posted.push(await readBody(event) as Body)
       return { status: 'ok' }
     },
@@ -244,5 +251,105 @@ describe('Settings page — Chat context savings', () => {
 
     expect(posted).toEqual([])
     expect(shown(component, PERCENT)).toBe('50')
+  })
+})
+
+/** The Advanced box's kept-tail rows: each fallback is SessionCompactor's shipped value (JF-416). */
+describe('Settings page — Chat advanced compaction', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  const KEEP = 'chat.compaction.keepPercent'
+  const MIN = 'chat.compaction.minSummaryTokens'
+  const FORCED_KEEP = 'chat.compaction.forcedKeepPercent'
+  const FORCED_MIN = 'chat.compaction.forcedMinSummaryTokens'
+
+  async function mountAdvanced() {
+    const component = await mountChat()
+    const toggle = component.findAll('button').find(b => b.text() === 'Advanced — context window & compaction')
+    expect(toggle).toBeDefined()
+    await toggle!.trigger('click')
+    await flushPromises()
+    return component
+  }
+
+  function row(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
+    return component.find(`[data-testid="config-field-${key}"]`)
+  }
+
+  function shown(component: Awaited<ReturnType<typeof mountChat>>, key: string) {
+    return row(component, key).find('span.truncate').text()
+  }
+
+  it('shows the four rows at the backend defaults when their keys are unset, and no row counts messages', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+
+    expect([KEEP, MIN, FORCED_KEEP, FORCED_MIN].map(key => row(component, key).find('span').text()))
+      .toEqual(['compaction.keepPercent', 'compaction.minSummaryTokens', 'compaction.forcedKeepPercent',
+        'compaction.forcedMinSummaryTokens'])
+    expect([KEEP, MIN, FORCED_KEEP, FORCED_MIN].map(key => shown(component, key))).toEqual(['30', '2000', '10', '200'])
+    expect(component.text()).not.toContain('compactionMinTurns')
+    expect(component.text()).not.toContain('compactionKeepMessages')
+  })
+
+  it('shows the stored values when the keys are set', async () => {
+    baseEndpoints([
+      { key: KEEP, value: '40' },
+      { key: MIN, value: '0' },
+      { key: FORCED_KEEP, value: '5' },
+      { key: FORCED_MIN, value: '50' },
+    ])
+    const component = await mountAdvanced()
+
+    expect([KEEP, MIN, FORCED_KEEP, FORCED_MIN].map(key => shown(component, key))).toEqual(['40', '0', '5', '50'])
+  })
+
+  it('saves the kept share typed into its editor, which starts from 30 and stays within 0 to 100', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+    const field = row(component, KEEP)
+    await field.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    const input = field.find('input')
+
+    expect({ value: (input.element as HTMLInputElement).value, min: input.attributes('min'), max: input.attributes('max') })
+      .toEqual({ value: '30', min: '0', max: '100' })
+    await input.setValue('20')
+    await field.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: KEEP, value: '20' }])
+  })
+
+  it('saves the /compact summary minimum typed into its editor, which starts from 200 and goes no lower than 0', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+    const field = row(component, FORCED_MIN)
+    await field.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    const input = field.find('input')
+
+    expect({ value: (input.element as HTMLInputElement).value, min: input.attributes('min'), max: input.attributes('max') })
+      .toEqual({ value: '200', min: '0', max: undefined })
+    await input.setValue('500')
+    await field.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([{ key: FORCED_MIN, value: '500' }])
+  })
+
+  it('shows why a share above 100 is refused and stores nothing', async () => {
+    baseEndpoints()
+    const component = await mountAdvanced()
+    refusal = 'chat.compaction.keepPercent must be a whole number from 0 to 100; 0 keeps only the latest message and what follows it.'
+    const field = row(component, KEEP)
+    await field.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await field.find('input').setValue('101')
+    await field.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    expect(field.find('[role="alert"]').text()).toContain(refusal)
+    expect(posted).toEqual([])
   })
 })

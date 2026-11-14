@@ -299,6 +299,33 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theKeptSharesMustBeAWholePercentFromZeroToAHundred() {
+        for (var key : List.of(SessionCompactor.KEEP_PERCENT_KEY, SessionCompactor.FORCED_KEEP_PERCENT_KEY)) {
+            var expected = key + " must be a whole number from 0 to 100; 0 keeps only the latest message and what "
+                    + "follows it.";
+            for (var value : List.of("-1", "101", "30.5", "most", "")) {
+                assertRefused(expected, key, value);
+            }
+            for (var value : List.of("0", "30", "100")) {
+                assertAccepted(key, value);
+            }
+        }
+    }
+
+    @Test
+    void theSummaryMinimumsMustBeAWholeNumberOfZeroOrMore() {
+        for (var key : List.of(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY)) {
+            var expected = key + " must be a whole number of tokens; 0 sets no minimum.";
+            for (var value : List.of("-1", "2k", "1.5", "")) {
+                assertRefused(expected, key, value);
+            }
+            for (var value : List.of("0", "2000")) {
+                assertAccepted(key, value);
+            }
+        }
+    }
+
+    @Test
     void theShorteningStepMustBeAWholeNumberOfAtLeastOne() {
         var expected = "chat.pruneToolResultsEveryTurns must be a whole number of turns, at least 1.";
         assertRefused(expected, ToolResultPruner.EVERY_TURNS_KEY, "0");

@@ -50,9 +50,11 @@ import java.util.function.Supplier;
  * takes (JF-159). Each call stores its own segment and no earlier summary is folded in; once the live segments pass
  * {@code chat.compaction.summaryBudgetTokens}, the oldest are merged into one (JF-161).
  *
- * <p>Boundary selection: we anchor cuts at user-message boundaries so
- * we never split an assistant's tool_calls from its tool_result
- * companions. Providers reject contexts with orphaned tool calls.
+ * <p>Boundary selection ({@link #keptTailStart}, JF-416): the newest rows within {@link #tailBudget}, a share of the
+ * tokens one summary call takes, stay as they are, always with the latest user message, and a summary needs at least
+ * {@link #summaryMinimum} tokens before them; past the history limit every row before them is summarized, whatever
+ * its size. The cut falls on a user row or straight after a tool result, so no tool call is separated from its
+ * result, which providers reject.
  *
  * <p>Re-injection: the segments are appended to the system prompt as a
  * "[Prior conversation summary]" section by the caller (not here). That
@@ -135,7 +137,8 @@ public final class SessionCompactor {
      */
     public static final String LEADING_USER_NOTE = "[Earlier messages of this conversation are summarized in the system prompt.]";
 
-    /** The skip reason when no row in the eligible range can end a summary. */
+    /** The skip reason when no cut leaves the kept tail and at least the summary minimum before it. */
+    // Commands.buildCompactResponseText matches this text, so it stays as it is.
     public static final String NO_CUT_REASON = "no safe boundary or below min-turns";
 
     /** JF-154: the token trigger's cap; 0 or less turns this half off. */
@@ -158,6 +161,18 @@ public final class SessionCompactor {
     /** The output limit of every summary call, a merge's included. */
     public static final String MAX_TOKENS_KEY = "chat.compactionMaxTokens";
     public static final int DEFAULT_MAX_TOKENS = 8192;
+    /** JF-416: the kept tail's share, in percent, of the tokens one summary call takes ({@link #tailBudget}). */
+    public static final String KEEP_PERCENT_KEY = "chat.compaction.keepPercent";
+    public static final int DEFAULT_KEEP_PERCENT = 30;
+    /** JF-416: the fewest tokens before the kept tail a summary is made from ({@link #summaryMinimum}). */
+    public static final String MIN_SUMMARY_TOKENS_KEY = "chat.compaction.minSummaryTokens";
+    public static final int DEFAULT_MIN_SUMMARY_TOKENS = 2_000;
+    /** JF-416: {@code /compact}'s {@value #KEEP_PERCENT_KEY}. */
+    public static final String FORCED_KEEP_PERCENT_KEY = "chat.compaction.forcedKeepPercent";
+    public static final int DEFAULT_FORCED_KEEP_PERCENT = 10;
+    /** JF-416: {@code /compact}'s {@value #MIN_SUMMARY_TOKENS_KEY}. */
+    public static final String FORCED_MIN_SUMMARY_TOKENS_KEY = "chat.compaction.forcedMinSummaryTokens";
+    public static final int DEFAULT_FORCED_MIN_SUMMARY_TOKENS = 200;
 
     /**
      * True when the current message list reaches the token trigger ({@link #triggerThreshold}) or exceeds the
@@ -265,6 +280,25 @@ public final class SessionCompactor {
         return ConfigService.getInt(MAX_TOKENS_KEY, DEFAULT_MAX_TOKENS);
     }
 
+    /**
+     * The most tokens the kept tail holds: {@value #KEEP_PERCENT_KEY} of {@code callTokens}, or with {@code force}
+     * {@code /compact}'s {@value #FORCED_KEEP_PERCENT_KEY}. An unbounded call ({@link Integer#MAX_VALUE}) takes the
+     * share of the token trigger's cap, or of {@link #DEFAULT_TRIGGER_TOKENS} with the cap off.
+     */
+    public static long tailBudget(boolean force, int callTokens) {
+        int cap = triggerTokens();
+        long base = callTokens != Integer.MAX_VALUE ? callTokens : cap > 0 ? cap : DEFAULT_TRIGGER_TOKENS;
+        int percent = force ? ConfigService.getInt(FORCED_KEEP_PERCENT_KEY, DEFAULT_FORCED_KEEP_PERCENT)
+                : ConfigService.getInt(KEEP_PERCENT_KEY, DEFAULT_KEEP_PERCENT);
+        return Math.max(0, base) * Math.clamp(percent, 0, 100) / 100;
+    }
+
+    /** The fewest tokens a summary is made from: {@value #MIN_SUMMARY_TOKENS_KEY}, or {@code /compact}'s with {@code force}. */
+    public static long summaryMinimum(boolean force) {
+        return Math.max(0, force ? ConfigService.getInt(FORCED_MIN_SUMMARY_TOKENS_KEY, DEFAULT_FORCED_MIN_SUMMARY_TOKENS)
+                : ConfigService.getInt(MIN_SUMMARY_TOKENS_KEY, DEFAULT_MIN_SUMMARY_TOKENS));
+    }
+
     // A value written around the validation reads as its floor.
     private static int summaryBudgetTokens() {
         return Math.max(MIN_SUMMARY_BUDGET, ConfigService.getInt(SUMMARY_BUDGET_KEY, DEFAULT_SUMMARY_BUDGET));
@@ -316,10 +350,9 @@ public final class SessionCompactor {
     }
 
     /**
-     * Full-knob variant. {@code force=true} bypasses the default too-few-turns
-     * guard so a manual {@code /compact} invocation can summarize small
-     * conversations the auto-trigger would skip — boundaries still anchor
-     * on user messages to keep tool-call cycles intact.
+     * Full-knob variant. {@code force=true} applies {@code /compact}'s smaller
+     * tail budget and summary minimum ({@link #tailBudget}, {@link #summaryMinimum})
+     * so it can summarize small conversations the auto-trigger would skip.
      * {@code additionalInstructions} is appended to the summarization
      * system prompt so the user can steer the summary ("focus on the SQL
      * migration work").
@@ -350,10 +383,11 @@ public final class SessionCompactor {
     }
 
     /**
-     * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} relaxes the
-     * too-few-turns guard as the transcript form's does, and {@code additionalInstructions} follows the instruction,
-     * in the transcript retries too. {@code callTokens} bounds the rows of each summary call the turn's own request
-     * cannot carry ({@link #summaryCallTokens}), and {@code maxCalls} the summary calls, merges included: automatic
+     * {@link #compact(Long, String, TurnRequest, ModelCall)} with {@code /compact}'s knobs: {@code force} takes its
+     * tail budget and minimum as the transcript form's does, and {@code additionalInstructions} follows the
+     * instruction, in the transcript retries too. {@code callTokens} bounds the rows of each summary call the turn's
+     * own request cannot carry ({@link #summaryCallTokens}) and sets the kept tail's {@link #tailBudget}, and
+     * {@code maxCalls} the summary calls, merges included: automatic
      * compaction passes {@link #MAX_SUMMARY_CALLS}, {@code /compact} no bound, so it reaches the kept tail. Each
      * stored summary names {@link ModelCall#answeredBy}, else {@code modelLabel}.
      */
@@ -388,7 +422,7 @@ public final class SessionCompactor {
             }
             var plan = planOpt.get();
             if (first) {
-                int total = Tx.run(() -> rowsBeforeTail(conversationId, force));
+                int total = Tx.run(() -> rowsBeforeTail(conversationId, force, callTokens));
                 rowsTotal = total;
                 CompactionProgress.started(total);
             }
@@ -420,7 +454,7 @@ public final class SessionCompactor {
                             .formatted(conversationId, maxCalls));
         }
         calls += mergeOverBudget(conversationId, modelLabel, merger, maxCalls - calls);
-        int rowsLeft = reachedTail ? 0 : Tx.run(() -> rowsBeforeTail(conversationId, force));
+        int rowsLeft = reachedTail ? 0 : Tx.run(() -> rowsBeforeTail(conversationId, force, callTokens));
         int summaryChars = Tx.run(() -> liveChars(conversationId));
         return CompactionResult.success(turnsCompacted, summaryChars, calls, rowsLeft, rowsSkipped);
     }
@@ -582,12 +616,14 @@ public final class SessionCompactor {
     }
 
     /** Rows since the floor ahead of where a compaction would keep the tail: what one that stopped short leaves. */
-    private static int rowsBeforeTail(Long conversationId, boolean force) {
+    private static int rowsBeforeTail(Long conversationId, boolean force, int callTokens) {
         var conv = Conversation.<Conversation>findById(conversationId);
         if (conv == null) return 0;
         long total = ConversationService.countSinceFloor(conv);
         var recent = ConversationService.loadRecentMessages(conv);
-        int boundary = findSafeBoundary(recent, keepMessages(force), minTurns(force));
+        boolean pastLimit = total > recent.size();
+        int boundary = tailStart(recent, tailBudget(force, callTokens), pastLimit ? 0 : summaryMinimum(force),
+                pastLimit ? 0 : 1);
         return (int) Math.max(0, total - recent.size() + Math.max(0, boundary));
     }
 
@@ -719,37 +755,40 @@ public final class SessionCompactor {
                           boolean last, int skipped) {}
 
     /**
-     * The next summary call's rows (JF-159): the oldest since the floor, ending on a user row that leaves at least the
-     * kept tail, at most the history limit and, past the turn's own history, at most {@code callTokens}. When no user
-     * row ends such a chunk in a chat past its limit, today's plan on the newest rows, with one line saying what it
-     * leaves out.
+     * The next summary call's rows (JF-159): within the history limit, every row before the kept tail
+     * ({@link #keptTailStart}); past it, or continuing a catch-up, the oldest since the floor up to the kept tail,
+     * found among the newest rows, else ending on a user row within the history limit and, past the turn's own
+     * history, {@code callTokens}. When no row ends such a chunk in a chat past its limit, the plan on the newest
+     * rows, with one line saying what it leaves out.
      */
     private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force, int callTokens,
                                                       boolean firstCall) {
         var conv = Conversation.<Conversation>findById(conversationId);
         if (conv == null) return Optional.empty();
-        int keep = keepMessages(force);
-        int min = minTurns(force);
+        long keep = tailBudget(force, callTokens);
         int limit = ConversationService.effectiveHistoryLimit(conv);
         long total = ConversationService.countSinceFloor(conv);
+        var recent = ConversationService.loadRecentMessages(conv);
         if (firstCall && total <= limit) {
-            var recent = ConversationService.loadRecentMessages(conv);
-            return planAt(recent, findSafeBoundary(recent, keep, min), true, true, 0);
+            return planAt(recent, keptTailStart(recent, keep, summaryMinimum(force)), true, true, 0);
         }
+        // No minimum: past the limit, and through the rest of a catch-up begun there, rows not summarized are dropped unread.
+        int inWindow = tailStart(recent, keep, 0, total > recent.size() ? 0 : 1);
+        long tail = total - recent.size() + Math.max(0, inWindow);
         var oldest = ConversationService.loadOldestMessages(conv, (int) Math.min(total, limit + 1L));
-        int reach = (int) Math.min(limit, total - keep);
+        int reach = (int) Math.min(limit, tail);
         int fit = rowsWithin(oldest, callTokens);
-        int boundary = latestCut(oldest, min, Math.min(reach, fit));
-        if (boundary > 0) return planAt(oldest, boundary, false, reach == total - keep && fit >= reach, 0);
+        if (inWindow >= 0 && tail > 0 && tail <= Math.min(reach, fit)) return planAt(oldest, reach, false, true, 0);
+        int boundary = latestCut(oldest, 1, Math.min(reach, fit));
+        if (boundary > 0) return planAt(oldest, boundary, false, false, 0);
         // One chunk over the budget beats none: the call may still fit, and one that fails only stops the catch-up.
-        boundary = earliestCut(oldest, Math.max(min, fit + 1), reach);
+        boundary = earliestCut(oldest, fit + 1, reach);
         if (boundary > 0) return planAt(oldest, boundary, false, false, 0);
         if (total <= limit) return Optional.empty();
         EventLogger.info("compaction", null, null, ("Compaction for conversation %d found no user message or tool "
                 + "round to end a summary on among its oldest rows; the %d rows before its newest %d are not summarized")
                 .formatted(conversationId, total - limit, limit));
-        var recent = ConversationService.loadRecentMessages(conv);
-        return planAt(recent, findSafeBoundary(recent, keep, min), firstCall, true, (int) (total - limit));
+        return planAt(recent, tailStart(recent, keep, 0, 1), firstCall, true, (int) (total - limit));
     }
 
     private static Optional<CompactionPlan> planAt(List<Message> rows, int boundary, boolean turnsOwnHistory,
@@ -872,61 +911,60 @@ public final class SessionCompactor {
     }
 
     /**
-     * Pick an index in {@code messages} that splits a "to-summarize"
-     * prefix from a "keep verbatim" suffix. Constraints:
-     *
-     * <ul>
-     *   <li>Suffix has at least {@code chat.compactionKeepMessages}
-     *       messages (default 10) — a minimum tail so the model keeps
-     *       tight coupling with the most recent work.</li>
-     *   <li>Prefix has at least {@code chat.compactionMinTurns}
-     *       messages (default 10) — below that, compaction costs more
-     *       than it saves.</li>
-     *   <li>The boundary message is a USER role — guarantees we don't
-     *       split a tool-call cycle across the boundary, since user
-     *       messages start new turns. Without one in range, it is an
-     *       assistant row straight after a tool result (JF-236), which
-     *       splits no call from its result either.</li>
-     * </ul>
-     *
-     * Returns {@code -1} if no valid boundary exists (conversation too
-     * short, or neither a user message nor a completed tool round in the
-     * eligible range).
+     * Where a summary of {@code rows}, the history since the floor oldest first, ends: the index of the first row kept
+     * as it is, or -1 when nothing can be summarized (JF-416). The kept tail is the longest run of newest rows within
+     * {@code keepTokens} that holds the latest user message and leaves at least {@code minTokens} before it; the
+     * latest user message and what follows it are kept whole when they alone pass {@code keepTokens}. With less than
+     * {@code minTokens} before the latest user message, or none, the cut falls after a finished tool round inside its
+     * turn instead (JF-236). A row counts the characters {@link #renderTurns(List)} renders it with, over four. The
+     * cut is a user row or an assistant row straight after a tool result, so no tool call is separated from its result.
      */
-    public static int findSafeBoundary(List<Message> messages) {
-        return findSafeBoundary(messages, keepMessages(false), minTurns(false));
+    public static int keptTailStart(List<Message> rows, long keepTokens, long minTokens) {
+        return tailStart(rows, keepTokens, minTokens, 1);
     }
 
-    /**
-     * Relaxed thresholds for manual {@code /compact} invocations —
-     * {@code chat.compactionForcedKeepMessages} (default 4) and
-     * {@code chat.compactionForcedMinTurns} (default 2). Still anchors at a
-     * user message so tool-call cycles stay intact.
-     */
-    public static int findSafeBoundaryForced(List<Message> messages) {
-        return findSafeBoundary(messages, keepMessages(true), minTurns(true));
+    // lowest is 0 for the newest rows of a chat past its history limit: a cut at the first summarizes those before it.
+    private static int tailStart(List<Message> rows, long keepTokens, long minTokens, int lowest) {
+        int n = rows.size();
+        var tokens = new long[n];
+        for (int i = 0; i < n; i++) tokens[i] = rowTokens(rows.get(i));
+        int fits = n;
+        for (long tail = 0; fits > 0 && tail + tokens[fits - 1] <= keepTokens; fits--) tail += tokens[fits - 1];
+        int enough = -1;
+        long head = 0;
+        for (int i = 0; i < n && enough < 0; i++) {
+            if (i >= lowest && head >= minTokens) enough = i;
+            head += tokens[i];
+        }
+        if (enough < 0) return -1;
+        int user = latestUserRow(rows, 0, n - 1);
+        if (user >= enough) return fits <= user ? earliestAnyCut(rows, Math.max(fits, enough), user) : user;
+        int cut = earliestAnyCut(rows, Math.max(fits, enough), n - 1);
+        return cut >= 0 ? cut : latestAnyCut(rows, enough, fits - 1);
     }
 
-    public static int findSafeBoundary(List<Message> messages, int keepMin, int minCompactable) {
-        return latestCut(messages, minCompactable, messages.size() - keepMin);
+    private static long rowTokens(Message m) {
+        return renderTurns(List.of(snapshot(m))).length() / 4;
     }
 
-    /**
-     * The fewest rows since the floor a summary can be made from, automatic or, with {@code force}, {@code /compact}'s:
-     * the kept tail and the least it summarizes.
-     */
-    public static int rowsNeededToSummarize(boolean force) {
-        return keepMessages(force) + minTurns(force);
+    /** The first row from {@code from} to {@code to} a summary may end on, user row or tool round alike, or -1. */
+    private static int earliestAnyCut(List<Message> rows, int from, int to) {
+        for (int i = Math.max(from, 0); i <= Math.min(to, rows.size() - 1); i++) {
+            if (endsASummary(rows, i)) return i;
+        }
+        return -1;
     }
 
-    private static int keepMessages(boolean force) {
-        return force ? Math.max(1, ConfigService.getInt("chat.compactionForcedKeepMessages", 4))
-                : Math.max(1, ConfigService.getInt("chat.compactionKeepMessages", 10));
+    /** {@link #earliestAnyCut} from the other end. */
+    private static int latestAnyCut(List<Message> rows, int from, int to) {
+        for (int i = Math.min(to, rows.size() - 1); i >= Math.max(from, 0); i--) {
+            if (endsASummary(rows, i)) return i;
+        }
+        return -1;
     }
 
-    private static int minTurns(boolean force) {
-        return force ? Math.max(1, ConfigService.getInt("chat.compactionForcedMinTurns", 2))
-                : Math.max(1, ConfigService.getInt("chat.compactionMinTurns", 10));
+    private static boolean endsASummary(List<Message> rows, int i) {
+        return MessageRole.USER.value.equals(rows.get(i).role) || (i > 0 && opensToolRound(rows, i));
     }
 
     /** The last user row at an index from {@code from} to {@code to}, or -1. */

@@ -28,6 +28,7 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.SessionCompactor;
 import services.Tx;
 import slash.Commands;
 import utils.AppClock;
@@ -73,6 +74,9 @@ class CompactionSummaryModelTest extends UnitTest {
     void setUp() throws Exception {
         JevBreakerTestSync.acquire();
         CompactionTriggerSync.acquire();
+        // The seeded turns are a few tokens each, so a summary here needs only a few of them.
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "10");
+        ConfigService.set(SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, "10");
         var id = UUID.randomUUID().toString().substring(0, 8);
         a = "jf160-a-" + id;
         b = "jf160-b-" + id;
@@ -429,7 +433,8 @@ class CompactionSummaryModelTest extends UnitTest {
 
         slashCompact(agent, conv);
 
-        // /compact keeps 4: rows 0-5, 6-11, 12-17 and 18-23 in chunks of six, then 24-25.
+        // /compact keeps the latest user row, 28, and its reply: rows 0-5, 6-11, 12-17 and 18-23 in chunks of six,
+        // then 24-27.
         var inputs = new ArrayList<String>();
         for (var request : requests.get(b)) inputs.add(content(request.getAsJsonArray("messages"), 1));
         assertEquals(5, inputs.size());

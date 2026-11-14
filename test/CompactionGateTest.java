@@ -58,6 +58,8 @@ class CompactionGateTest extends UnitTest {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
+        // The seeded turns are a few tokens each, so a summary here needs only a few of them.
+        ConfigService.set(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, "10");
 
         agent = new Agent();
         agent.name = "compaction-gate-test";
@@ -78,8 +80,6 @@ class CompactionGateTest extends UnitTest {
             // don't inherit them. Mirrors AgentRunnerCompactionTest's own teardown.
             ConfigService.set("chat.compactionReserveTokens", "15000");
             ConfigService.set("chat.compactionReserveTokensFloor", "9000");
-            ConfigService.set("chat.compactionMinTurns", "10");
-            ConfigService.set("chat.compactionKeepMessages", "10");
         } finally {
             CompactionTriggerSync.release();
         }
@@ -280,7 +280,7 @@ class CompactionGateTest extends UnitTest {
     @Test
     void triggersCompactionButFallsBackWhenSummarizerSkips() throws Exception {
         // Force the gate over threshold AND give it enough seeded history
-        // for findSafeBoundary to land on a real index — but make the
+        // for a summary to have rows to end on — but make the
         // summarizer return an empty string so compact() reports
         // skipReason="empty summary" and the gate falls back to `current`.
         ConfigService.set("chat.compactionReserveTokens", "500");
@@ -291,8 +291,8 @@ class CompactionGateTest extends UnitTest {
         var primary = llm.ProviderRegistry.get("test-provider");
 
         var conv = ConversationService.create(agent, "web", "user1");
-        // Seed 25 turns (above the 10-turn default minimum) with USER roles
-        // on the even indices so findSafeBoundary lands on a user.
+        // Seed 25 turns with USER roles on the even indices so the summary
+        // ends on a user row.
         for (int i = 0; i < 25; i++) {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
             ConversationService.appendMessage(conv, role, "turn " + i, null, null, null);
@@ -316,10 +316,9 @@ class CompactionGateTest extends UnitTest {
         // SessionCompaction row gets persisted, compactionSince bumps, and
         // the gate returns a freshly hydrated list (NOT the input list).
         //
-        // Use 25 seeded turns + default keep/min thresholds (10/10) so the
-        // safe-boundary search has the same headroom that SessionCompactorTest
-        // relies on. contextWindow tight enough that 25 seeded chars + 8000-char
-        // current message far exceeds the budget.
+        // Use 25 seeded turns, enough to pass the minimum setup sets, with a
+        // contextWindow tight enough that the 8000-char current message far
+        // exceeds the budget.
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
 

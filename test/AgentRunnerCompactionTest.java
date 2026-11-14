@@ -66,8 +66,6 @@ class AgentRunnerCompactionTest extends UnitTest {
         // them.
         ConfigService.set("chat.compactionReserveTokens", "15000");
         ConfigService.set("chat.compactionReserveTokensFloor", "9000");
-        ConfigService.set("chat.compactionMinTurns", "10");
-        ConfigService.set("chat.compactionKeepMessages", "10");
     }
 
     /**
@@ -97,28 +95,23 @@ class AgentRunnerCompactionTest extends UnitTest {
             }
             LlmReplyFixture.send(exchange, responseBody);
         });
-        // Use a tiny contextWindow + relaxed compaction thresholds so a
-        // modest seed of messages is enough to cross the budget AND clear
-        // the min-turns gate.
+        // Use a tiny contextWindow so a modest seed of messages is enough to
+        // cross the budget.
         configureTinyContextProvider();
         ConfigService.set("chat.compactionReserveTokens", "200");
         ConfigService.set("chat.compactionReserveTokensFloor", "100");
-        // Lower the safety floors so a short seeded history is summarisable.
-        ConfigService.set("chat.compactionMinTurns", "4");
-        ConfigService.set("chat.compactionKeepMessages", "2");
 
         var agent = createAgent("compaction-agent", "test-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "u-compact");
 
         // Seed enough pre-existing turns to (a) cross the
         // estimateTokens > 1800 (window 2000 - reserve 200) threshold and
-        // (b) clear the compactionMinTurns=4 / compactionKeepMessages=2
-        // boundary in SessionCompactor.findSafeBoundary.
+        // (b) pass the 2,000-token minimum a summary needs.
         //
         // Each filler turn is ~2000 chars => ~500 tokens, and we add 8
         // turns (4 user / 4 assistant) for ~4000 tokens of context which
-        // is well past the budget while still leaving room for the
-        // safe-boundary scan to find a USER row in the eligible range.
+        // is well past the budget, while the tail, 30% of the 1,000-token
+        // trigger, keeps only the newest user turn.
         var bigBlock = "x".repeat(2000);
         ConversationService.appendUserMessage(convo, "u1 " + bigBlock);
         ConversationService.appendAssistantMessage(convo, "a1 " + bigBlock, null);
@@ -248,8 +241,6 @@ class AgentRunnerCompactionTest extends UnitTest {
         configureTinyContextProvider();
         ConfigService.set("chat.compactionReserveTokens", "200");
         ConfigService.set("chat.compactionReserveTokensFloor", "100");
-        ConfigService.set("chat.compactionMinTurns", "4");
-        ConfigService.set("chat.compactionKeepMessages", "2");
 
         var agent = createAgent("compaction-persist-agent", "test-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "u-compact-persist");
@@ -302,8 +293,6 @@ class AgentRunnerCompactionTest extends UnitTest {
         configureTinyContextProvider();
         ConfigService.set("chat.compactionReserveTokens", "200");
         ConfigService.set("chat.compactionReserveTokensFloor", "100");
-        ConfigService.set("chat.compactionMinTurns", "4");
-        ConfigService.set("chat.compactionKeepMessages", "2");
 
         var agent = createAgent("compaction-jf148-agent", "test-provider", "test-model");
         var grant = new models.AgentToolConfig();

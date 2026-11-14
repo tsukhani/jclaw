@@ -145,8 +145,8 @@ class SlashCommandsTest extends UnitTest {
     @Test
     void compactOnShortConversationAcksNothingToCompact() {
         // Seed a real provider so we pass the provider gate, then invoke
-        // on a conversation with only 2 messages — below even the forced
-        // minimums (keepMin=4, minCompactable=2 → requires total >= 6).
+        // on a conversation of 2 short messages: a few tokens, below even
+        // /compact's 200-token minimum.
         seedProvider("openrouter", "gpt-4.1",
                 "{\"id\":\"gpt-4.1\",\"name\":\"GPT-4.1\",\"contextWindow\":1000000,\"maxTokens\":32768}");
         var convo = ConversationService.create(agent, "web", "user1");
@@ -155,8 +155,8 @@ class SlashCommandsTest extends UnitTest {
 
         var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", convo);
         assertEquals(Commands.Command.COMPACT, result.command());
-        assertTrue(result.responseText().contains("Nothing to compact"),
-                "expected 'Nothing to compact' response, got: " + result.responseText());
+        assertEquals("> Nothing to compact\n\nThis conversation doesn't have enough earlier turns to summarize yet.",
+                result.responseText());
         // No SessionCompaction row should be written.
         assertEquals(0L, models.SessionCompaction.count());
     }

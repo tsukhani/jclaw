@@ -424,6 +424,13 @@ public class ConfigService {
                     " must be a whole number of tokens, at least " + SessionCompactor.MIN_SUMMARY_BUDGET + "."),
             atLeast(SessionCompactor.TOOL_RESULT_CHARS_KEY, 0,
                     " must be a whole number of characters; 0 keeps only the length."),
+            (key, value) -> (key.equals(SessionCompactor.KEEP_PERCENT_KEY)
+                    || key.equals(SessionCompactor.FORCED_KEEP_PERCENT_KEY)) && !isIntBetween(value, 0, 100)
+                    ? key + " must be a whole number from 0 to 100; 0 keeps only the latest message and what follows it."
+                    : null,
+            atLeast(SessionCompactor.MIN_SUMMARY_TOKENS_KEY, 0, " must be a whole number of tokens; 0 sets no minimum."),
+            atLeast(SessionCompactor.FORCED_MIN_SUMMARY_TOKENS_KEY, 0,
+                    " must be a whole number of tokens; 0 sets no minimum."),
             atLeast(ToolResultPruner.EVERY_TURNS_KEY, 1, " must be a whole number of turns, at least 1."),
             under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
             // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
