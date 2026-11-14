@@ -102,6 +102,43 @@ describe('a compaction stored after a reply', () => {
   })
 })
 
+describe('a /compact whose request is lost while it runs (JF-429)', () => {
+  it('follows the command on the bus and shows its stored reply after it, as the page read it', async () => {
+    const rows = [
+      { id: 1, role: 'user', content: 'plan the trip', createdAt: '2026-11-14T10:00:01Z' },
+      { id: 2, role: 'assistant', content: 'Here is the plan.', createdAt: '2026-11-14T10:00:02Z' },
+    ]
+    serveConversation(5, rows)
+    registerEndpoint('/api/chat/turn', { method: 'POST', handler: () => new Promise<object>(() => {}) })
+    const component = await openConversation(5)
+    await component.find<HTMLTextAreaElement>('textarea').setValue('/compact')
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+    const card = () => component.get('[data-testid="chat-compaction-card"]')
+    const line = () => card().get('[data-testid="compaction-summary"]').text()
+    expect(line()).toBe('Summarizing earlier messages')
+
+    emitBus('conversation.compaction', { conversationId: 5, compaction: { phase: 'start', tokensBefore: 40000, rows: 11 } })
+    await flushPromises()
+    expect(line()).toBe('Summarizing 11 earlier messages · 40k tokens')
+    emitBus('conversation.compaction', { conversationId: 5, compaction: { phase: 'progress', stage: 'merging', summaries: 2 } })
+    await flushPromises()
+    expect(line()).toBe('Merging 2 earlier summaries into one')
+
+    emitBus('conversation.compaction', { conversationId: 5,
+      compaction: { phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 557786 } })
+    rows.push({ id: 3, role: 'assistant', content: '> Conversation Compacted', createdAt: '2026-11-14T10:09:20Z' })
+    emitBus('conversation.updated', { conversationId: 5 })
+    await flushPromises()
+
+    expect(card().get('[data-testid="compaction-title"]').text()).toBe('Conversation compacted')
+    expect(card().get('[data-testid="compaction-result"]').text()).toBe('40k → 9.0k tokens · 77% freed')
+    const vm = component.vm as unknown as { messages: Array<{ role: string, content: string }> }
+    await vi.waitFor(() => expect(vm.messages.map(m => `${m.role}: ${m.content}`)).toEqual([
+      'user: plan the trip', 'assistant: Here is the plan.', 'user: /compact', 'assistant: > Conversation Compacted']))
+  })
+})
+
 describe('a summary stored after the reply the meter reads, on a load', () => {
   const REPLY_AT = '2026-11-14T10:00:02Z'
 

@@ -22,6 +22,7 @@ import play.mvc.SseStream;
 import play.mvc.With;
 import services.AgentService;
 import services.AttachmentService;
+import services.CompactionProgress;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
@@ -570,8 +571,11 @@ public class ApiChatController extends Controller {
         // JCLAW-111: the typed arguments go through the args-aware execute overload, so /model status, /model reset
         // and /model NAME don't fall through to the no-args summary branch on web, as JCLAW-109 fixed for Telegram.
         // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
-        return Commands.execute(slashCmd.get(), agent, "web", username, slashConv,
-                Commands.extractArgs(messageText), true, stopTurn);
+        ScopedValue.CallableOp<Commands.Result, RuntimeException> execute = () -> Commands.execute(slashCmd.get(),
+                agent, "web", username, slashConv, Commands.extractArgs(messageText), true, stopTurn);
+        if (slashConv == null) return execute.call();
+        // No stream carries a command's frames, so a /compact's card follows them on the bus (JF-429).
+        return ScopedValue.where(CompactionProgress.SINK, CompactionProgress.onBus(slashConv.id)).call(execute);
     }
 
     /**

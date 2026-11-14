@@ -1551,6 +1551,33 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void aMergeTellsTheCardItIsMergingTheSummariesOnceTheirRowsAreSummarized() {
+        // JF-429: a merge can take as long as a summary, and the card said "Summarizing" through it.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> ((String) msgs.get(1).content()).startsWith("[Turns ")
+                ? CONDENSED : sectioned(written.getAndIncrement());
+        compactBatch(conv, 0, summarizer);
+        compactBatch(conv, 1, summarizer);
+        seedMinutes(Conversation.findById(conv.id), BASE.plusSeconds(2 * 3_600L), 25, "Batch 2");
+        commitAndReopen();
+        var frames = new ArrayList<String>();
+
+        var result = ScopedValue.where(services.CompactionProgress.SINK, frames::add).call(() ->
+                services.CompactionProgress.open(5_000).around(() ->
+                        SessionCompactor.compact(conv.id, "openrouter/test-model", summarizer)));
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        int rows = result.turnsCompacted();
+        assertEquals(List.of("{\"compaction\":{\"phase\":\"start\",\"tokensBefore\":5000,\"rows\":%d}}".formatted(rows),
+                "{\"compaction\":{\"phase\":\"progress\",\"done\":%d,\"total\":%d}}".formatted(rows, rows),
+                "{\"compaction\":{\"phase\":\"progress\",\"stage\":\"merging\",\"summaries\":3}}"), frames);
+        commitAndReopen();
+        assertEquals(mergeOf(2), storedSegments(conv.id).getLast().summary);
+    }
+
+    @Test
     void withTheCheckOnAMergesOwnSectionsAreCheckedAgainstTheSegmentsAndItsCarriedFactsStayAsTheyWere() {
         ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
         ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");

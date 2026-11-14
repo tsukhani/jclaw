@@ -63,13 +63,19 @@ export interface CompactionCard {
   /** The prompt's tokens when it began, as the meter counts them; null for a `/compact`, which only says when it ends. */
   tokensBefore: number | null
   tokensAfter?: number
-  /** Rows summarized so far and in all; absent until the first summary lands, and for a `/compact`. */
+  /** Rows summarized so far and in all; absent until the first summary lands, and for a `/compact` the bus has not reached. */
   done?: number
   total?: number
+  /** Set once the rows are summarized and the oldest summaries are being merged into one, with how many. */
+  stage?: 'merging'
+  summaries?: number
   ms?: number
   /** Why a skipped compaction stored no summary, as the server words it. */
   reason?: string
 }
+
+/** A compaction frame's body, as the server's CompactionProgress writes it. */
+type CompactionFrame = Record<string, number | string>
 
 const COMPACT_COMMAND = /^\/compact(\s|$)/i
 /** How long the finished card stays before it clears itself. */
@@ -84,6 +90,14 @@ interface OpenTurn {
   bubble: StreamingMessage
   initId: string
   turnId: number | null
+}
+
+/** A `/compact` this tab sent, until its answer: `ended` once the bus has said how it ended. */
+interface CompactSend {
+  conversationId: number | null
+  sent: Message
+  request: Promise<unknown>
+  ended: boolean
 }
 
 // A /stop as the server reads one: the command, any `@bot` suffix, then whitespace or nothing.
@@ -298,6 +312,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   // a second send from that chat goes there. `left` once the operator leaves that chat, after which nothing from it is
   // placed.
   let newChatSend: { conversation: Promise<number | null>, left: boolean } | null = null
+  // This tab's /compact until its answer comes, which the bus may end first.
+  let compactSend: CompactSend | null = null
 
   const stream = useConversationStream({ onFrame: dispatchFrame, onOpen: () => void settleIfIdle(), onGiveUp: giveUpTurn })
   watch(stream.up, (up) => {
@@ -489,27 +505,53 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
    */
   function applyCompactionFrame(content: string) {
     try {
-      const body = (JSON.parse(content) as { compaction?: Record<string, number | string> }).compaction
-      if (!body) return
-      const current = compaction.value
-      if (body.phase === 'start') {
-        setCompaction({ phase: 'start', tokensBefore: Number(body.tokensBefore), done: 0, total: Number(body.rows) })
-      }
-      else if (body.phase === 'progress' && current?.phase === 'start') {
-        setCompaction({ ...current, done: Number(body.done), total: Number(body.total) })
-      }
-      else if (body.phase === 'done') {
-        setCompaction({ phase: 'done', tokensBefore: Number(body.tokensBefore), tokensAfter: Number(body.tokensAfter),
-          ms: Number(body.ms), done: current?.total, total: current?.total })
-      }
-      else if (body.phase === 'skipped') {
-        setCompaction({ phase: 'skipped', tokensBefore: current?.tokensBefore ?? null,
-          ...(typeof body.reason === 'string' && body.reason ? { reason: body.reason } : {}) })
-      }
+      const body = (JSON.parse(content) as { compaction?: CompactionFrame }).compaction
+      if (body) applyCompaction(body)
     }
     catch {
       // A frame this page cannot read changes nothing on it.
     }
+  }
+
+  function applyCompaction(body: CompactionFrame) {
+    const current = compaction.value
+    if (body.phase === 'start') {
+      setCompaction({ phase: 'start', tokensBefore: Number(body.tokensBefore), done: 0, total: Number(body.rows) })
+    }
+    else if (body.phase === 'progress' && current?.phase === 'start') {
+      setCompaction(body.stage === 'merging'
+        ? { ...current, stage: 'merging', summaries: Number(body.summaries) }
+        : { ...current, done: Number(body.done), total: Number(body.total) })
+    }
+    else if (body.phase === 'done') {
+      setCompaction({ phase: 'done', tokensBefore: Number(body.tokensBefore), tokensAfter: Number(body.tokensAfter),
+        ms: Number(body.ms), done: current?.total, total: current?.total })
+    }
+    else if (body.phase === 'skipped') {
+      setCompaction({ phase: 'skipped', tokensBefore: current?.tokensBefore ?? null,
+        ...(typeof body.reason === 'string' && body.reason ? { reason: body.reason } : {}) })
+    }
+  }
+
+  // A /compact runs inside its request, which no stream carries and which can be lost while the command runs on: the
+  // server publishes its frames on the bus (JF-429), and its reply as a row saved outside the stream.
+  onEvent('conversation.compaction', (data) => {
+    const event = data as { conversationId?: unknown, compaction?: CompactionFrame } | null
+    if (event?.conversationId == null || event.conversationId !== selectedConvoId.value || !event.compaction) return
+    applyCompaction(event.compaction)
+    const ended = event.compaction.phase === 'done' || event.compaction.phase === 'skipped'
+    if (ended && compactSend && compactSend.conversationId === event.conversationId) endCompactSend(compactSend)
+  })
+
+  /** The bus says this tab's /compact has ended: its answer may never come, so nothing waits on it any more. */
+  function endCompactSend(pending: CompactSend) {
+    pending.ended = true
+    sends.delete(pending.request)
+    if (pending.sent._sending) {
+      delete pending.sent._sending
+      triggerRef(messages)
+    }
+    void refreshConversations()
   }
 
   /**
@@ -968,7 +1010,11 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
     // A /compact answers when it is done, with nothing streamed meanwhile, so its card opens here and the answer ends it.
     const compacting = COMPACT_COMMAND.test(text)
-    if (compacting) setCompaction({ phase: 'start', tokensBefore: null })
+    if (compacting) {
+      // No saved row will ever pair with a command's text, so a merge before the answer leaves it where it was sent.
+      sent._local = true
+      setCompaction({ phase: 'start', tokensBefore: null })
+    }
     const post = useApiMutation()
     const request = post.mutate<TurnAnswer>('/api/chat/turn', {
       method: 'POST',
@@ -983,6 +1029,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       },
     })
     sends.add(request)
+    const pendingCompact: CompactSend | null = compacting
+      ? { conversationId: sentConversationId, sent, request, ended: false }
+      : null
+    if (pendingCompact) compactSend = pendingCompact
     let settle: (conversationId: number | null) => void = () => {}
     const created = sentConversationId === null
       ? {
@@ -1002,9 +1052,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       finally {
         sends.delete(request)
         delete sent._sending
-        if (compacting) setCompaction(null)
+        if (compactSend === pendingCompact) compactSend = null
+        if (pendingCompact && !pendingCompact.ended) setCompaction(null)
       }
-      if (compacting && answer?.compaction) {
+      if (pendingCompact && !pendingCompact.ended && answer?.compaction) {
         setCompaction({ phase: 'done', ...answer.compaction, tokensBefore: answer.compaction.tokensBefore })
       }
       refreshConversations()
@@ -1015,6 +1066,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // Its own answer may follow its conversation, which closes the view: that is not leaving it.
       if (created && newChatSend === created) newChatSend = null
       if (!answer) {
+        // The bus already showed how the command ended, and its reply arrives as a saved row: the lost request is no error.
+        if (pendingCompact?.ended) return
         sent._local = true
         const refused: Message = { _key: crypto.randomUUID(), role: 'assistant', content: 'Error: ' + (post.error.value || 'Failed to get response'), createdAt: new Date().toISOString(), _local: true }
         messages.value = [...messages.value, refused]

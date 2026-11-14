@@ -68,6 +68,9 @@ public class NotificationBus {
     /** A compaction running outside any turn stored a summary of a conversation's older rows. Payload carries
      *  {@code conversationId}, {@code rows} (how many it summarized) and {@code ms}. */
     public static final String BUS_CONVERSATION_COMPACTED = "conversation.compacted";
+    /** A frame of a compaction no stream of the conversation carries, a web {@code /compact}'s (JF-429). Payload
+     *  carries {@code conversationId} and {@code compaction}, the frame's body as {@link CompactionProgress} writes it. */
+    public static final String BUS_CONVERSATION_COMPACTION = "conversation.compaction";
 
     private static final Gson gson = GSON;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();

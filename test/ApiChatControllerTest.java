@@ -18,6 +18,7 @@ import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.ConversationTurnStream;
+import services.NotificationBus;
 import services.Tx;
 
 import java.io.File;
@@ -1159,6 +1160,51 @@ class ApiChatControllerTest extends FunctionalTest {
             assertEquals(Map.of("status", "command", "conversationId", created, "content", slash.Commands.NEW_TEXT,
                     "saved", "true"), flat(answer));
         }
+    }
+
+    @Test
+    void aSlashCompactStartedAsATurnPublishesItsCardOnTheBusAndThenItsReplyOnceSaved() throws Exception {
+        // JF-429: a /compact answers only when it is done, and its request can be lost before then.
+        login();
+        try (var model = HeldModel.replying(_ -> summaryCompletion())) {
+            var chat = seedWebChat(model);
+            commitInFreshTx(() -> {
+                models.Conversation conv = models.Conversation.findById(chat.conversationId());
+                for (int r = 0; r < 24; r++) {
+                    var text = "Row " + r + " about the ledger. " + "l".repeat(4_000);
+                    if (r % 2 == 0) services.ConversationService.appendUserMessage(conv, text);
+                    else services.ConversationService.appendAssistantMessage(conv, text, null);
+                }
+                return null;
+            });
+            var seen = new java.util.concurrent.CopyOnWriteArrayList<String>();
+            var off = NotificationBus.subscribeEvents((type, data) -> {
+                if (!Long.valueOf(chat.conversationId()).equals(data.get("conversationId"))) return;
+                if (NotificationBus.BUS_CONVERSATION_COMPACTION.equals(type)) {
+                    seen.add(((JsonObject) data.get("compaction")).get("phase").getAsString());
+                } else if (NotificationBus.BUS_CONVERSATION_UPDATED.equals(type)) {
+                    seen.add("updated: " + assistantReply(chat.conversationId()));
+                }
+            });
+            JsonObject answer;
+            try {
+                answer = json(POST("/api/chat/turn", "application/json", turnBody(chat, "/compact")));
+            } finally {
+                off.run();
+            }
+
+            var reply = answer.get("content").getAsString();
+            assertTrue(reply.startsWith("> Conversation Compacted"), reply);
+            assertEquals(List.of("start", "progress", "done", "updated: " + reply), seen,
+                    "the card's frames, then the reply, readable when it is announced");
+        }
+    }
+
+    private static String summaryCompletion() {
+        return """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":120,"completion_tokens":40,"total_tokens":160}}"""
+                .formatted(SummaryFixture.asSummaryInJson("The ledger questions were answered."));
     }
 
     // A /stop typed in web chat on a web conversation is the Stop button (JF-202); its reply is never saved.

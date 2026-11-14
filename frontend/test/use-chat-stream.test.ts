@@ -8,22 +8,34 @@ import { useChatStream, type UseChatStream, type UseChatStreamDeps } from '~/com
 import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
 import { fakeConversationStreams, FakeEventSource, openStreamsOn, serveTurnStart, streamOn } from './conversation-stream'
 
-// The SSE bus is mocked so a test can reconnect it.
-const bus = vi.hoisted(() => ({ openHandlers: [] as Array<() => void> }))
+// The SSE bus is mocked so a test can reconnect it and deliver the server's events.
+const bus = vi.hoisted(() => ({
+  openHandlers: [] as Array<() => void>,
+  handlers: [] as Array<{ type: string, handler: (data: unknown) => void }>,
+}))
 vi.mock('~/composables/useEventBus', () => ({
   useEventBus: () => ({
     on: () => {},
     off: () => {},
-    onEvent: () => {},
+    onEvent: (type: string, handler: (data: unknown) => void) => {
+      bus.handlers.push({ type, handler })
+    },
     onOpen: (handler: () => void) => {
       bus.openHandlers.push(handler)
     },
   }),
 }))
 
+function emitBus(type: string, data: unknown) {
+  for (const entry of bus.handlers) {
+    if (entry.type === type) entry.handler(data)
+  }
+}
+
 beforeEach(() => {
   fakeConversationStreams()
   bus.openHandlers.length = 0
+  bus.handlers.length = 0
 })
 
 afterEach(() => {
@@ -447,6 +459,119 @@ describe('useChatStream', () => {
       const { api } = await mountStream(deps)
       await send(api, deps, '/compactor')
       expect(api.compaction.value).toBeNull()
+    })
+
+    it('says when it merges the earlier summaries, once the rows are summarized, and ends as before', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      stream.send(frame({ phase: 'start', tokensBefore: 40000, rows: 11 }))
+      stream.send(frame({ phase: 'progress', done: 11, total: 11 }))
+      stream.send(frame({ phase: 'progress', stage: 'merging', summaries: 2 }))
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: 40000, done: 11, total: 11, stage: 'merging',
+        summaries: 2 })
+
+      stream.send(frame({ phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 1200 }))
+      await flushPromises()
+      expect(api.compaction.value).toEqual({ phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 1200, done: 11,
+        total: 11 })
+    })
+
+    describe('a /compact whose answer never comes (JF-429)', () => {
+      const onBus = (conversationId: number, compaction: object) =>
+        emitBus('conversation.compaction', { conversationId, compaction })
+
+      it('follows the command on the bus to its end, and holds up no later turn', async () => {
+        serveTurnStart(() => new Promise<object>(() => {}))
+        const deps = onConversation(42)
+        const { api } = await mountStream(deps)
+        deps.input.value = '/compact'
+        void api.sendMessage()
+        await flushPromises()
+        expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: null })
+        expect(deps.messages.value.map(m => [m.content, m._sending, m._local])).toEqual([['/compact', true, true]])
+
+        onBus(43, { phase: 'start', tokensBefore: 70000, rows: 30 })
+        expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: null })
+
+        onBus(42, { phase: 'start', tokensBefore: 40000, rows: 11 })
+        expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: 40000, done: 0, total: 11 })
+        onBus(42, { phase: 'progress', done: 11, total: 11 })
+        onBus(42, { phase: 'progress', stage: 'merging', summaries: 2 })
+        expect(api.compaction.value).toEqual({ phase: 'start', tokensBefore: 40000, done: 11, total: 11,
+          stage: 'merging', summaries: 2 })
+
+        onBus(42, { phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 557786 })
+        await flushPromises()
+        expect(api.compaction.value).toEqual({ phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 557786,
+          done: 11, total: 11 })
+        expect(deps.messages.value.map(m => [m.content, m._sending])).toEqual([['/compact', undefined]])
+        expect(deps.refreshConversations).toHaveBeenCalledTimes(1)
+
+        // A turn's rows wait on every send still unanswered; the lost /compact is no longer one.
+        await turn(streamOn(42), 42)
+        await vi.waitFor(() => expect(deps.readQueue).toHaveBeenCalledWith({ init: true }))
+      })
+
+      it('shows no error when the request fails after the bus has ended the command', async () => {
+        let fail: () => void = () => {}
+        const failing = new Promise<void>((resolve) => {
+          fail = resolve
+        })
+        registerEndpoint('/api/chat/turn', {
+          method: 'POST',
+          handler: async (event) => {
+            await failing
+            const { setResponseStatus } = await import('h3')
+            setResponseStatus(event, 502)
+            return { code: 'bad_gateway', message: 'The connection closed.' }
+          },
+        })
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        const deps = onConversation(42)
+        const { api } = await mountStream(deps)
+        deps.input.value = '/compact'
+        const sending = api.sendMessage()
+        await flushPromises()
+
+        onBus(42, { phase: 'start', tokensBefore: 40000, rows: 11 })
+        onBus(42, { phase: 'skipped', reason: 'The summary failed on 4 tries.' })
+        fail()
+        await sending
+        await flushPromises()
+
+        expect(contents(deps)).toEqual([['user', '/compact']])
+        expect(api.compaction.value).toEqual({ phase: 'skipped', tokensBefore: 40000,
+          reason: 'The summary failed on 4 tries.' })
+      })
+
+      it('keeps the card the bus ended when the answer comes after all', async () => {
+        let release: () => void = () => {}
+        const held = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        serveTurnStart(async () => {
+          await held
+          return { status: 'command', conversationId: 42, content: 'Compacted.', saved: true,
+            compaction: { tokensBefore: 40000, tokensAfter: 9000, ms: 557786 } }
+        })
+        const deps = onConversation(42)
+        const { api } = await mountStream(deps)
+        deps.input.value = '/compact'
+        const sending = api.sendMessage()
+        await flushPromises()
+
+        onBus(42, { phase: 'start', tokensBefore: 40000, rows: 11 })
+        onBus(42, { phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 557786 })
+        release()
+        await sending
+        await flushPromises()
+
+        expect(api.compaction.value).toEqual({ phase: 'done', tokensBefore: 40000, tokensAfter: 9000, ms: 557786,
+          done: 11, total: 11 })
+        expect(deps.mergeSavedRows).toHaveBeenCalled()
+      })
     })
   })
 

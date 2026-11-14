@@ -29,6 +29,17 @@ describe('ChatCompactionCard', () => {
     expect(w.find('[data-testid="compaction-bar-indeterminate"]').exists()).toBe(true)
   })
 
+  it('says when it is merging earlier summaries, with a sliding bar, though every row is summarized', async () => {
+    const two = await mountCard({ phase: 'start', tokensBefore: 40000, done: 11, total: 11, stage: 'merging', summaries: 2 })
+    expect(two.get('[data-testid="compaction-title"]').text()).toBe('Compacting conversation')
+    expect(two.get('[data-testid="compaction-summary"]').text()).toBe('Merging 2 earlier summaries into one')
+    expect(two.find('[data-testid="compaction-bar-indeterminate"]').exists()).toBe(true)
+    expect(two.find('[data-testid="compaction-bar-rows"]').exists()).toBe(false)
+
+    const unnamed = await mountCard({ phase: 'start', tokensBefore: null, stage: 'merging' })
+    expect(unnamed.get('[data-testid="compaction-summary"]').text()).toBe('Merging earlier summaries')
+  })
+
   it('ends with the token count before and after, how much it freed and how long it took', async () => {
     const w = await mountCard({ phase: 'done', tokensBefore: 182345, tokensAfter: 41000, ms: 14200 })
     expect(w.get('[data-testid="compaction-title"]').text()).toBe('Conversation compacted')

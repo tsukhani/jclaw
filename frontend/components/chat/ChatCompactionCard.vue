@@ -3,9 +3,9 @@
  * The card above the composer while a conversation is being compacted, and for a few seconds after.
  *
  * Under way it shows the tokens being compressed and a bar of the rows summarized so far; a compaction that has not
- * said how many rows it has (a `/compact`, which only answers when it is done) shows a sliding bar instead. When it
- * ends it shows the prompt's token count before and after in the provider's units, as the context meter counts them,
- * or, when no summary was stored, why.
+ * said how many rows it has (a `/compact` before its first frame reaches the bus) shows a sliding bar instead, as one
+ * merging its earlier summaries does. When it ends it shows the prompt's token count before and after in the
+ * provider's units, as the context meter counts them, or, when no summary was stored, why.
  */
 import { ArrowsPointingInIcon, CheckCircleIcon, ExclamationTriangleIcon } from '@heroicons/vue/24/outline'
 import type { CompactionCard } from '~/composables/useChatStream'
@@ -34,8 +34,9 @@ const percentRows = computed(() => {
   const { done, total } = props.card
   return total && total > 0 && done != null ? Math.min(100, Math.round((done / total) * 100)) : null
 })
-// Rows are only counted once the first summary has landed, so a bar at 0 would look stalled.
-const determinate = computed(() => percentRows.value != null && percentRows.value > 0)
+const merging = computed(() => props.card.stage === 'merging')
+// Rows are only counted once the first summary has landed, so a bar at 0 would look stalled; a merge has no count.
+const determinate = computed(() => !merging.value && percentRows.value != null && percentRows.value > 0)
 const kept = computed(() => {
   const { tokensBefore, tokensAfter } = props.card
   return tokensBefore && tokensAfter != null && tokensBefore > 0
@@ -65,7 +66,8 @@ const took = computed(() => {
   return `${(ms / 1000).toFixed(digits)} s`
 })
 const summary = computed(() => {
-  const { tokensBefore, total } = props.card
+  const { tokensBefore, total, summaries } = props.card
+  if (merging.value) return summaries && summaries > 1 ? `Merging ${summaries} earlier summaries into one` : 'Merging earlier summaries'
   const plural = total === 1 ? '' : 's'
   const rows = total ? `${total} earlier message${plural}` : 'earlier messages'
   return tokensBefore ? `Summarizing ${rows} · ${tokens(tokensBefore)} tokens` : `Summarizing ${rows}`

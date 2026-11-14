@@ -1,8 +1,10 @@
 package services;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.jspecify.annotations.Nullable;
 
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -11,8 +13,9 @@ import java.util.function.Supplier;
  * runs; the gate and {@code /compact} open a tracker for the compaction they start, and {@link SessionCompactor}
  * reports its progress to it without knowing the transport. The sink receives status-frame JSON of the shape
  * {@code {"compaction":{"phase":"start"|"progress"|"done"|"skipped", ...}}}, which the web chat renders as a card and a
- * channel sink turns into its own notice. Unbound, every call is a no-op. The context-window trim reports through the
- * same sink ({@link #trimmed}), which only the web chat shows.
+ * channel sink turns into its own notice; a progress frame either counts the rows summarized or, with
+ * {@code "stage":"merging"}, says that earlier summaries are being merged. Unbound, every call is a no-op. The
+ * context-window trim reports through the same sink ({@link #trimmed}), which only the web chat shows.
  *
  * <p>The tracker announces a compaction only once the compactor has found a cut, so a conversation that has none
  * flashes nothing on each turn.
@@ -57,6 +60,26 @@ public final class CompactionProgress {
         if (CURRENT.isBound()) CURRENT.get().progress(done, total);
     }
 
+    /** The compactor is merging the {@code summaries} oldest summaries into one, which can take as long as a summary. */
+    static void merging(int summaries) {
+        if (CURRENT.isBound()) CURRENT.get().merge(summaries);
+    }
+
+    /**
+     * A {@link #SINK} that publishes each compaction frame on the bus as
+     * {@link NotificationBus#BUS_CONVERSATION_COMPACTION}, for a compaction of {@code conversationId} that no stream of
+     * the open chat carries. A web {@code /compact} answers only when it is done, and its request can be lost before
+     * then (JF-429), so the card follows the bus, which heartbeats.
+     */
+    public static Consumer<String> onBus(Long conversationId) {
+        return frame -> {
+            if (!frame.startsWith("{\"compaction\"")) return;
+            var body = JsonParser.parseString(frame).getAsJsonObject().getAsJsonObject("compaction");
+            NotificationBus.publishDetached(NotificationBus.BUS_CONVERSATION_COMPACTION,
+                    Map.of("conversationId", conversationId, "compaction", body));
+        };
+    }
+
     private void start(int rows) {
         announced = true;
         emit("{\"compaction\":{\"phase\":\"start\",\"tokensBefore\":%d,\"rows\":%d}}".formatted(tokensBefore, rows));
@@ -65,6 +88,11 @@ public final class CompactionProgress {
     private void progress(int done, int total) {
         if (!announced) return;
         emit("{\"compaction\":{\"phase\":\"progress\",\"done\":%d,\"total\":%d}}".formatted(done, total));
+    }
+
+    private void merge(int summaries) {
+        if (!announced) return;
+        emit("{\"compaction\":{\"phase\":\"progress\",\"stage\":\"merging\",\"summaries\":%d}}".formatted(summaries));
     }
 
     /** The compaction ended with the prompt at {@code tokensAfter} tokens, in {@link #open}'s units, after {@code ms} milliseconds. */
@@ -107,7 +135,7 @@ public final class CompactionProgress {
     public static @Nullable String startNotice(@Nullable String frame) {
         if (frame == null || !frame.startsWith("{\"compaction\"")) return null;
         try {
-            var body = com.google.gson.JsonParser.parseString(frame).getAsJsonObject().getAsJsonObject("compaction");
+            var body = JsonParser.parseString(frame).getAsJsonObject().getAsJsonObject("compaction");
             if (!"start".equals(body.get("phase").getAsString())) return null;
             return "Compacting this conversation (~%s tokens)…".formatted(tokenLabel(body.get("tokensBefore").getAsInt()));
         } catch (RuntimeException _) {

@@ -27,6 +27,7 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.ModelOverrideResolver;
+import services.NotificationBus;
 import services.SessionCompactor;
 import services.SubagentRegistry;
 import services.Tx;
@@ -36,6 +37,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -892,6 +894,12 @@ public final class Commands {
                                                    Conversation current, String text, String outcome) {
         final Long convId = current.id;
         boolean saved = Tx.run(() -> persistCannedResponseInTx(current, text));
+        // A /compact can outlast the request that runs it (JF-429): an open chat reads the reply as it reads any row
+        // saved outside its stream.
+        if (saved) {
+            NotificationBus.publishDetachedAfterCommit(NotificationBus.BUS_CONVERSATION_UPDATED,
+                    Map.of("conversationId", convId));
+        }
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/compact for conversation %d: %s".formatted(convId, outcome));
         return saved;

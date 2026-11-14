@@ -774,6 +774,7 @@ public final class SessionCompactor {
         while (calls < callsLeft) {
             var plan = Tx.run(() -> oldestToMerge(conversationId, budget, maxOut, ceiling));
             if (plan.isEmpty()) break;
+            CompactionProgress.merging(plan.get().ids().size());
             var merge = mergeAndStore(conversationId, modelLabel, plan.get(), merger, check, callsLeft - calls, cap,
                     ceiling);
             calls += merge.calls();
