@@ -48,11 +48,12 @@ public enum TtsModel {
      * Whether this model picks its speaker from a reference clip rather than a
      * named preset (JCLAW-865).
      *
-     * <p>These are exactly the models {@link TtsVoiceCatalog} returns no voices
-     * for, which is why their Voice picker renders empty: cloning IS their voice
-     * selection, and without a clip they are stuck on whatever speaker the model
-     * defaults to. Kokoro is the counterpart — it has eight curated voices and
-     * uses the {@code voice} field instead.
+     * <p>Of these, only Chatterbox gets no voices from {@link TtsVoiceCatalog},
+     * which is why its Voice picker renders empty: a clip is its only voice
+     * selection, and without one it keeps whatever speaker the model defaults
+     * to. The Qwen3 models also offer numbered seed voices. Kokoro is the
+     * counterpart — it has eight curated voices and uses the {@code voice} field
+     * instead.
      */
     public boolean supportsCloning() {
         return this == CHATTERBOX || this == QWEN3_06B || this == QWEN3_06B_4BIT;

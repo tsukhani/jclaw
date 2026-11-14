@@ -96,7 +96,7 @@ public class SessionCompaction extends Model {
 
     /**
      * The segments the prompt carries for {@code conversation}, oldest first: those not merged and written after its
-     * last {@code /reset} or {@code /new} ({@link Conversation#contextSince}).
+     * last {@code /reset} ({@link Conversation#contextSince}).
      */
     public static List<SessionCompaction> findLive(Conversation conversation) {
         List<SessionCompaction> rows = conversation.contextSince == null
