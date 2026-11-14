@@ -1,4 +1,4 @@
-// The AFK factory: intake from Jira and, when configured, GitHub issues, then per story → implement → full-suite gate
+// The AFK factory: intake from Jira and, when configured, GitHub issues, then per story → implement → test gate
 // (baselined on main, with repair) → review → gate → brief → write-back to the story's tracker, up to
 // FACTORY_MAX_PARALLEL stories at once, each in its own sandbox, polling until signalled.
 // Local only: branches are never pushed, and the agent never touches a tracker.
@@ -322,7 +322,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     }
     lines.push("", m.heading("Harness gates"), ...gates.map(m.bullet));
     if (environmentFailures.size) lines.push(m.bullet(`Also failing on main in the sandbox, so not counted: ${[...environmentFailures].join(", ")}`));
-    lines.push(...flakes.map((f) => m.bullet(`${f.gate}: failed in the full suite but passed alone, so not counted: ${m.code(f.failure)}`)));
+    lines.push(...flakes.map((f) => m.bullet(`${f.gate}: failed in the gate but passed alone, so not counted: ${m.code(f.failure)}`)));
     lines.push(m.bullet(`Timings: ${Object.entries(timings).map(([k, v]) => `${k} ${v}s`).join(", ")}`));
     return lines.join("\n");
   };
@@ -561,7 +561,7 @@ const land = async (key: string): Promise<void> => {
     board.set(key, { state: "merged", sha: landed.merge, by: "factory" });
     await tracker.merged(key);
     const tested = landed.regated
-      ? `Main had moved since the branch was built, so the full suite ran again on the rebased branch (${gates.join("; ")}).`
+      ? `Main had moved since the branch was built, so the gate ran again on the rebased branch (${gates.join("; ")}).`
       : "Main had not moved since the branch was built, so the gate in the review comment covers this exact tree.";
     await tracker.comment(key, `${tracker.header}: merged\nRebased onto main with every commit re-signed, then merged as ${m.code(landed.merge.slice(0, 8))} with a signed merge commit, in your checkout and not pushed. ${tested} Its branches are deleted; /deploy ships it.`);
     console.log(`[${key} merge] merged as ${landed.merge.slice(0, 8)}${landed.regated ? " after a re-gate" : ""}`);

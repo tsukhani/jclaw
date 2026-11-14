@@ -2,7 +2,7 @@
 
 Implement ticket {{KEY}}: {{SUMMARY}}
 
-You are on branch `{{SOURCE_BRANCH}}`, created from `main` by the harness that launched you; any story this one depends on is already merged there. AGENTS.md tells agents to work on `main` and not to create branches; in this run the harness owns branching, so stay on this branch and commit to it.
+You are on branch `{{SOURCE_BRANCH}}`, created from `main` by the harness that launched you; any story this one depends on is already merged there. AGENTS.md names a ticket's branch and worktree; in this run the harness owns branching, so stay on this branch and commit to it.
 
 # TICKET
 

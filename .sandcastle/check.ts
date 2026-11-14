@@ -333,7 +333,7 @@ check("a story the factory gave up on is requeued once afk-blocked is gone, and 
 check("only an In Progress story is requeued: To Do is already in intake, Review and Done are not the factory's to move",
   [gaveUp("To Do", ["afk"]), gaveUp("Review", ["afk"]), gaveUp("Done", ["afk"])], [false, false, false]);
 
-check("the factory owns Free's JF keys and refuses Pro's JCLAW ones and another tracker's",
+check("the factory owns JF keys and refuses JCLAW ones and another tracker's",
   ["JF-1", "JF-191", "JCLAW-1594", "GH-15", "JF-", "xJF-1", "JF-1a"].map(ownsKey), [true, true, false, false, false, false, false]);
 
 const SPRINT = "project = JF AND sprint in openSprints() AND issuetype not in (Epic, Sub-task)";

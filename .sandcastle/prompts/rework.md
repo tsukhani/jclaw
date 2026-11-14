@@ -1,6 +1,6 @@
 # TASK
 
-The human reviewer sent ticket {{KEY}} ({{SUMMARY}}) back from review. You are on its branch `{{SOURCE_BRANCH}}`, which holds the rejected submission. Address every point of the feedback on this branch. AGENTS.md tells agents to work on `main` and not to create branches; in this run the harness owns branching, so stay on this branch and commit to it.
+The human reviewer sent ticket {{KEY}} ({{SUMMARY}}) back from review. You are on its branch `{{SOURCE_BRANCH}}`, which holds the rejected submission. Address every point of the feedback on this branch. AGENTS.md names a ticket's branch and worktree; in this run the harness owns branching, so stay on this branch and commit to it.
 
 # REVIEWER FEEDBACK
 
