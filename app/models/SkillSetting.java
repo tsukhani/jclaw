@@ -14,6 +14,7 @@ import play.db.jpa.Model;
 import utils.AppClock;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 /**
  * A setting one of an agent's skills uses (JF-357): a value that is not secret, such as a service's address, a user
@@ -48,6 +49,7 @@ public class SkillSetting extends Model {
     @PrePersist
     @PreUpdate
     void stamp() {
-        updatedAt = AppClock.now();
+        // H2 keeps microseconds and Linux's clock has nanoseconds: the time a save reports must be the one it stores.
+        updatedAt = AppClock.now().truncatedTo(ChronoUnit.MICROS);
     }
 }

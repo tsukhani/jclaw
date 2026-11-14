@@ -20,6 +20,7 @@ import utils.AppClock;
 import utils.CredentialCipher;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 /**
  * A secret one of an agent's skills uses (JF-323): the value, sealed with {@link CredentialCipher} under
@@ -65,7 +66,8 @@ public class SkillSecret extends Model {
     @PrePersist
     @PreUpdate
     void stamp() {
-        updatedAt = AppClock.now();
+        // H2 keeps microseconds and Linux's clock has nanoseconds: the time a save reports must be the one it stores.
+        updatedAt = AppClock.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     /** Seals {@link #value}; a stored value that will not decrypt reads as null, as if unset. */
