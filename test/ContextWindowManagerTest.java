@@ -16,14 +16,18 @@ import models.Conversation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.CompactionProgress;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
 import services.SessionCompactor;
+import tools.ConversationSearchTool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Branch coverage for {@link ContextWindowManager}'s context-window
@@ -81,6 +85,71 @@ class ContextWindowManagerTest extends UnitTest {
         m.setAccessible(true);
         return (List<ChatMessage>) m.invoke(null, messages, agent, conv, provider);
     }
+
+    @SuppressWarnings("unchecked")
+    private static List<ChatMessage> trim(List<ChatMessage> messages, Agent agent, LlmProvider provider,
+                                          List<ToolDef> tools) throws Exception {
+        var m = ContextWindowManager.class.getDeclaredMethod("trimToContextWindow",
+                List.class, Agent.class, Conversation.class, LlmProvider.class, List.class);
+        m.setAccessible(true);
+        return (List<ChatMessage>) m.invoke(null, messages, agent, null, provider, tools);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<ChatMessage> trimToBudget(List<ChatMessage> messages, LlmProvider provider,
+                                                  List<ToolDef> tools, int budget) throws Exception {
+        var m = ContextWindowManager.class.getDeclaredMethod("trimToBudget",
+                List.class, Agent.class, Conversation.class, LlmProvider.class, List.class, int.class);
+        m.setAccessible(true);
+        return (List<ChatMessage>) m.invoke(null, messages, agentUsing("model-1"), null, provider, tools, budget);
+    }
+
+    private static String trimNotice(int dropped, boolean searchable) throws Exception {
+        var m = ContextWindowManager.class.getDeclaredMethod("trimNotice", int.class, boolean.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, dropped, searchable);
+    }
+
+    private static ChatMessage withTrimNotice(ChatMessage system, int dropped, List<ToolDef> tools) throws Exception {
+        var m = ContextWindowManager.class.getDeclaredMethod("withTrimNotice", ChatMessage.class, int.class, List.class);
+        m.setAccessible(true);
+        return (ChatMessage) m.invoke(null, system, dropped, tools);
+    }
+
+    /** What the trim logs and sends a bound sink while {@code body} runs. */
+    private record Reported(List<EventLogger.Captured> logged, List<String> frames) {}
+
+    private interface TrimCall {
+        void run() throws Exception;
+    }
+
+    private static Reported reported(TrimCall body) {
+        var frames = new ArrayList<String>();
+        var logged = EventLogger.captureForTest(() -> ScopedValue.where(CompactionProgress.SINK,
+                (Consumer<String>) frames::add).run(() -> {
+                    try {
+                        body.run();
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                }));
+        return new Reported(logged, frames);
+    }
+
+    /** Forty long turns over a 4,000-token window, whose trim target is 2,000: the drop-oldest branch must cut. */
+    private static List<ChatMessage> longHistory() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("System prompt."));
+        for (int i = 0; i < 20; i++) {
+            messages.add(ChatMessage.user("Question " + i + ": " + "what did the ledger show for the harbour account? ".repeat(12)));
+            messages.add(ChatMessage.assistant("Answer " + i + ": " + "the ledger balanced, with two late payments. ".repeat(12)));
+        }
+        messages.add(ChatMessage.user("And today?"));
+        return messages;
+    }
+
+    private static final List<ToolDef> SEARCH_TOOL = List.of(ToolDef.of(ConversationSearchTool.TOOL_NAME,
+            "Search conversation history by keyword.", Map.of("type", "object")));
 
     private static int intConst(String name) throws Exception {
         var f = ContextWindowManager.class.getDeclaredField(name);
@@ -256,6 +325,140 @@ class ContextWindowManagerTest extends UnitTest {
         var trimmedTool = (String) out.get(1).content();
         assertTrue(trimmedTool.length() < big.length(), "oversized tool result must shrink");
         assertTrue(trimmedTool.contains("JClaw elided"), "elision marker must be present");
+    }
+
+    // ─── what the trim tells the agent and the operator (JF-419) ────────────
+
+    @Test
+    void theNoticeCountsOneMessageOrSeveralAndNamesTheSearchOnlyWhenOffered() throws Exception {
+        assertEquals("[1 earlier message of this conversation is left out of this request to fit the model's context "
+                + "window. It is still stored.]", trimNotice(1, false));
+        assertEquals("[2 earlier messages of this conversation are left out of this request to fit the model's context "
+                + "window. They are still stored, and conversation_search with includeCurrent set to true can find "
+                + "them.]", trimNotice(2, true));
+        assertEquals("[1 earlier message of this conversation is left out of this request to fit the model's context "
+                + "window. It is still stored, and conversation_search with includeCurrent set to true can find it.]",
+                trimNotice(1, true));
+    }
+
+    @Test
+    void aDropThatLeavesMessagesOutTellsTheAgentHowManyInTheSystemMessage() throws Exception {
+        var messages = longHistory();
+        var out = new ArrayList<ChatMessage>();
+
+        var reported = reported(() -> out.addAll(trim(messages, agentUsing("model-1"), providerWith(4000, 8000), List.of())));
+
+        int dropped = messages.size() - out.size();
+        assertTrue(dropped > 0, "the history must not fit the 2,000-token target");
+        assertEquals("System prompt.\n\n" + trimNotice(dropped, false), out.getFirst().content());
+        assertEquals("system", out.getFirst().role());
+        assertEquals(messages.subList(1 + dropped, messages.size()), out.subList(1, out.size()),
+                "every later message keeps its place");
+        assertEquals(List.of("{\"contextTrim\":{\"dropped\":" + dropped + "}}"), reported.frames());
+        var trimLines = reported.logged().stream().filter(e -> e.message().startsWith("Left the ")).toList();
+        assertEquals(1, trimLines.size(), () -> "one trim line: " + reported.logged());
+        var line = trimLines.getFirst();
+        assertEquals("WARN", line.level());
+        assertEquals("llm", line.category());
+        assertTrue(line.message().matches("Left the " + dropped + " oldest messages out of the request to fit the "
+                        + "model's context window of 4000 tokens: it came to about \\d+ tokens, over the 2000 it may "
+                        + "use after 2000 kept for the reply and 0 for recalled memories and skills, and to about \\d+ "
+                        + "without them\\. They are still stored\\."),
+                () -> "the operator's line: " + line.message());
+    }
+
+    @Test
+    void aDropTellsAnAgentOfferedConversationSearchHowToFindWhatWentOut() throws Exception {
+        var messages = longHistory();
+
+        var out = trim(messages, agentUsing("model-1"), providerWith(4000, 8000), SEARCH_TOOL);
+
+        int dropped = messages.size() - out.size();
+        assertTrue(dropped > 0, "the history must not fit the 2,000-token target");
+        assertEquals("System prompt.\n\n" + trimNotice(dropped, true), out.getFirst().content());
+    }
+
+    @Test
+    void aRequestThatFitsCarriesNoNoticeAndSendsNoFrame() throws Exception {
+        var messages = List.of(ChatMessage.system("System prompt."), ChatMessage.user("Hi"));
+        var out = new ArrayList<List<ChatMessage>>();
+
+        var reported = reported(() -> out.add(trim(messages, agentUsing("model-1"), providerWith(100_000, 8000), SEARCH_TOOL)));
+
+        assertSame(messages, out.getFirst());
+        assertEquals(List.of(), reported.frames());
+        assertEquals(List.of(), reported.logged().stream().filter(e -> e.message().startsWith("Left ")).toList());
+    }
+
+    @Test
+    void aTrimThatOnlyTruncatesAToolResultCarriesNoNotice() throws Exception {
+        var big = "The quick brown fox jumps over the lazy dog. ".repeat(450);
+        var messages = List.of(ChatMessage.system("System prompt."), ChatMessage.toolResult("call-1", "grep", big),
+                ChatMessage.user("follow up one"), ChatMessage.user("follow up two"),
+                ChatMessage.user("follow up three"), ChatMessage.user("follow up four"));
+        var out = new ArrayList<ChatMessage>();
+
+        var reported = reported(() -> out.addAll(trim(messages, agentUsing("model-1"), providerWith(4000, 8000), List.of())));
+
+        assertEquals(messages.size(), out.size(), "truncation alone must fit the target");
+        assertEquals("System prompt.", out.getFirst().content());
+        assertEquals(List.of(), reported.frames());
+    }
+
+    @Test
+    void aResendTrimAddsItsDropsToTheNoticeThePrologueLeft() throws Exception {
+        var prologue = withTrimNotice(ChatMessage.system("System prompt."), 3, List.of());
+        var messages = List.of(prologue, ChatMessage.user("Old question."), ChatMessage.assistant("Old answer."),
+                ChatMessage.user("Current question?"));
+        var out = new ArrayList<ChatMessage>();
+
+        var reported = reported(() -> out.addAll(trimToBudget(messages, providerWith(100_000, 8000), SEARCH_TOOL, 1)));
+
+        assertEquals(List.of(ChatMessage.system("System prompt.\n\n" + trimNotice(5, true)), messages.get(3)), out);
+        assertEquals(List.of("{\"contextTrim\":{\"dropped\":5}}"), reported.frames(),
+                "the frame counts every message the request leaves out");
+        var line = reported.logged().stream().filter(e -> e.message().startsWith("Left ")).toList();
+        assertEquals(1, line.size(), () -> "one resend line: " + reported.logged());
+        assertTrue(line.getFirst().message().matches("Left 2 earlier messages out of the resend of a request the "
+                        + "provider refused as longer than its context window: it came to about \\d+ tokens, over the 1 "
+                        + "the resend aims at, and to about \\d+ without them\\. They are still stored\\."),
+                () -> "the operator's line: " + line.getFirst().message());
+    }
+
+    @Test
+    void aResendTrimOfAnUntrimmedRequestStartsTheCountAtWhatItDrops() throws Exception {
+        var messages = List.of(ChatMessage.system("System prompt."), ChatMessage.assistant("Old answer."),
+                ChatMessage.user("Current question?"));
+
+        var out = trimToBudget(messages, providerWith(100_000, 8000), List.of(), 1);
+
+        assertEquals(List.of(ChatMessage.system("System prompt.\n\n" + trimNotice(1, false)), messages.get(2)), out);
+    }
+
+    @Test
+    void theNoticeLeavesAMessageThatIsNoSystemTextAsItIs() throws Exception {
+        var user = ChatMessage.user("Hi");
+        assertSame(user, withTrimNotice(user, 2, List.of()));
+        var parts = new ChatMessage("system", List.of(Map.of("type", "text", "text", "System prompt.")), null, null, null);
+        assertSame(parts, withTrimNotice(parts, 2, List.of()));
+    }
+
+    @Test
+    void aSystemPromptEndingOnOtherBracketedTextGetsANoticeOfItsOwn() throws Exception {
+        var system = ChatMessage.system("System prompt.\n\n[Reply in English.]");
+
+        var noticed = withTrimNotice(system, 2, List.of());
+
+        assertEquals("System prompt.\n\n[Reply in English.]\n\n" + trimNotice(2, false), noticed.content());
+    }
+
+    @Test
+    void aSecondNoticeReplacesTheFirstAndTakesTheToolsOfTheLatestRequest() throws Exception {
+        var once = withTrimNotice(ChatMessage.system("System prompt."), 1, SEARCH_TOOL);
+
+        var twice = withTrimNotice(once, 1, List.of());
+
+        assertEquals("System prompt.\n\n" + trimNotice(2, false), twice.content());
     }
 
     @Test

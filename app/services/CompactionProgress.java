@@ -11,7 +11,8 @@ import java.util.function.Supplier;
  * runs; the gate and {@code /compact} open a tracker for the compaction they start, and {@link SessionCompactor}
  * reports its progress to it without knowing the transport. The sink receives status-frame JSON of the shape
  * {@code {"compaction":{"phase":"start"|"progress"|"done"|"skipped", ...}}}, which the web chat renders as a card and a
- * channel sink turns into its own notice. Unbound, every call is a no-op.
+ * channel sink turns into its own notice. Unbound, every call is a no-op. The context-window trim reports through the
+ * same sink ({@link #trimmed}), which only the web chat shows.
  *
  * <p>The tracker announces a compaction only once the compactor has found a cut, so a conversation that has none
  * flashes nothing on each turn.
@@ -85,6 +86,14 @@ public final class CompactionProgress {
         var frame = new JsonObject();
         frame.add("compaction", body);
         emit(frame.toString());
+    }
+
+    /**
+     * The context-window trim left {@code dropped} earlier messages in all out of the request, those of a trim before it
+     * included: a {@code {"contextTrim":{"dropped":N}}} frame, which {@link #startNotice} ignores.
+     */
+    public static void trimmed(int dropped) {
+        if (SINK.isBound()) SINK.get().accept("{\"contextTrim\":{\"dropped\":%d}}".formatted(dropped));
     }
 
     private void emit(String frame) {

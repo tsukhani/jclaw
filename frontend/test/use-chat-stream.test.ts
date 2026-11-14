@@ -450,6 +450,122 @@ describe('useChatStream', () => {
     })
   })
 
+  describe('context trim', () => {
+    const trimFrame = (dropped: unknown) => ({ type: 'status', content: JSON.stringify({ contextTrim: { dropped } }) })
+
+    it('shows the count a trim ahead of the init sends, and keeps it through the turn it opens', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+
+      stream.send(trimFrame(7))
+      await flushPromises()
+      expect(api.contextTrim.value).toBe(7)
+
+      await turn(stream, 42, { type: 'token', content: 'Hi' }, { type: 'complete', content: 'Hi' })
+      expect(api.contextTrim.value).toBe(7)
+    })
+
+    it('takes a resend\'s total mid-turn and keeps the frame out of the bubble and the status line', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      stream.send(trimFrame(7))
+      await turn(stream, 42, { type: 'status', content: 'Processing results (round 2)...' })
+
+      stream.send(trimFrame(9))
+      await flushPromises()
+
+      expect(api.contextTrim.value).toBe(9)
+      expect(api.streamStatus.value).toBe('Processing results (round 2)...')
+      expect(contents(deps)).toEqual([['assistant', '']])
+    })
+
+    it('shows a count first sent mid-turn, by a resend of a request the prologue did not trim', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      await turn(stream, 42)
+
+      stream.send(trimFrame(1))
+      await flushPromises()
+
+      expect(api.contextTrim.value).toBe(1)
+    })
+
+    it('clears the count when the next turn opens without a trim, and shows the next trim\'s own', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      stream.send(trimFrame(7))
+      await turn(stream, 42, { type: 'complete', content: 'One' })
+
+      await turn(stream, 42)
+      expect(api.contextTrim.value).toBeNull()
+      stream.send({ type: 'complete', content: 'Two' })
+
+      stream.send(trimFrame(3))
+      await turn(stream, 42)
+      expect(api.contextTrim.value).toBe(3)
+    })
+
+    it('keeps the count when a reconnect replays the turn from before its init', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      stream.send(trimFrame(7), '99')
+      stream.send({ type: 'init', conversationId: 42 }, '100')
+      stream.send(trimFrame(9), '101')
+      await flushPromises()
+
+      stream.send(trimFrame(7), '99')
+      stream.send({ type: 'init', conversationId: 42 }, '100')
+      stream.send(trimFrame(9), '101')
+      await flushPromises()
+
+      expect(api.contextTrim.value).toBe(9)
+    })
+
+    it('clears the count when the operator opens another conversation', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      streamOn(42).send(trimFrame(7))
+      await flushPromises()
+
+      deps.selectedConvoId.value = 43
+      deps.followedConvoId.value = 43
+      await flushPromises()
+
+      expect(api.contextTrim.value).toBeNull()
+    })
+
+    it('clears the count when the operator leaves the view', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      streamOn(42).send(trimFrame(7))
+      await flushPromises()
+
+      api.leaveView()
+
+      expect(api.contextTrim.value).toBeNull()
+    })
+
+    it('ignores a trim frame that counts nothing or cannot be read, and never shows it as the status line', async () => {
+      const deps = onConversation(42)
+      const { api } = await mountStream(deps)
+      const stream = streamOn(42)
+      await turn(stream, 42)
+
+      stream.send(trimFrame(0))
+      stream.send(trimFrame('seven'))
+      stream.send({ type: 'status', content: '{"contextTrim":' })
+      await flushPromises()
+
+      expect(api.contextTrim.value).toBeNull()
+      expect(api.streamStatus.value).toBe('')
+    })
+  })
+
   it('shows an unsaved slash command reply as a row that pairs with nothing, and merges a saved one in', async () => {
     serveTurnStart(body => body.message === '/model kimi'
       ? { status: 'command', conversationId: 42, content: 'Model set.', saved: true }

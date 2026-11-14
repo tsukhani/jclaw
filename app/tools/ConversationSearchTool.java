@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.Message;
 import play.db.jpa.JPA;
+import services.ConversationService;
 import services.TimezoneResolver;
 import services.Tx;
 import services.search.LuceneIndexer;
@@ -40,6 +41,7 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "conversation_search";
     private static final String PARAM_QUERY = "query";
     private static final String PARAM_LIMIT = "limit";
+    private static final String PARAM_INCLUDE_CURRENT = "includeCurrent";
 
     /**
      * Stands in for "no current conversation" — the tool also runs outside a chat turn,
@@ -47,6 +49,9 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      * and the query stays one static string rather than two assembled at runtime.
      */
     private static final long NO_CONVERSATION = -1L;
+
+    /** Stands in for "no row of the current conversation is out of view": no row predates it. */
+    private static final Instant NO_HISTORY_START = Instant.EPOCH;
 
     /**
      * The permission boundary and the self-exclusion, as one query. Every value is bound;
@@ -57,7 +62,7 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
             SELECT m FROM Message m
              WHERE m.id IN :ids
                AND m.conversation.agent.id IN :agentIds
-               AND m.conversation.id <> :excludedId
+               AND (m.conversation.id <> :excludedId OR m.createdAt < :historyStart)
             """;
     static final int DEFAULT_LIMIT = 20;
     static final int MAX_LIMIT = 50;
@@ -112,10 +117,13 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
                 not know which conversation it was — then pass the conversation id to \
                 conversation_history for the full transcript. \
                 Required: `query` (keywords; matching is whole-word, not substring). \
-                Optional: `limit` (1-%d, default %d). \
-                Scope: your own conversations and those of any subagent beneath you, \
-                excluding the one you are in — this finds earlier conversations, not the \
-                current one. It does not reach conversations belonging to any other agent. \
+                Optional: `limit` (1-%d, default %d); `includeCurrent` (true to search all of \
+                the conversation you are in as well, for messages a notice says were left out \
+                of this request; your own latest messages then match too). \
+                Scope: your own conversations and those of any subagent beneath you. Of the \
+                conversation you are in, it finds only the messages you no longer see, those \
+                summarized or older than your history reaches, unless `includeCurrent` is \
+                true. It does not reach conversations belonging to any other agent. \
                 Timestamps are already the user's local wall-clock time in the named zone: \
                 repeat them as given, and do not convert or re-express them in UTC. The \
                 timestamp beside a result is when that message was written; any time \
@@ -137,6 +145,9 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         props.put(PARAM_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Maximum messages to return (1-" + MAX_LIMIT + ", default " + DEFAULT_LIMIT + ")."));
+        props.put(PARAM_INCLUDE_CURRENT, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                SchemaKeys.DESCRIPTION,
+                "Also search the messages of the current conversation still in view (default false)."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
@@ -163,6 +174,8 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
                 return "Error: 'limit' must be an integer.";
             }
         }
+        var include = args.get(PARAM_INCLUDE_CURRENT);
+        boolean includeCurrent = include != null && include.isJsonPrimitive() && include.getAsBoolean();
 
         List<Long> hitIds;
         try {
@@ -174,7 +187,7 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
 
         final var agentId = callingAgent.id;
         final int cap = limit;
-        return Tx.run(() -> render(query, readable(hitIds, agentId), hitIds, cap));
+        return Tx.run(() -> render(query, readable(hitIds, agentId, includeCurrent), hitIds, cap));
     }
 
     /**
@@ -182,19 +195,29 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      * any agent beneath it. Ownership, not run linkage — a subagent two levels down is
      * still the caller's own work, and a conversation belonging to an unrelated agent
      * never is.
+     *
+     * <p>Of the current conversation, only rows its history no longer loads take part
+     * ({@link ConversationService#historyStart}): those a summary covers, those before a
+     * {@code /reset}, and those older than the history limit reaches. Rows the
+     * context-window trim leaves out of one request cannot be known here, since the trim
+     * decides per request; {@code includeCurrent} reaches them by taking in the whole
+     * conversation.
      */
-    private static List<Message> readable(List<Long> hitIds, Long agentId) {
+    private static List<Message> readable(List<Long> hitIds, Long agentId, boolean includeCurrent) {
         // The caller's own question is already in this conversation and was indexed
         // before the tool ran, so without this the top hit is always the turn that
         // asked — "which conversation discussed X" answers "this one". Excluding the
-        // whole conversation, not just that message, keeps a long thread from
+        // whole conversation in view, not just that message, keeps a long thread from
         // crowding out the older ones the caller is actually looking for.
-        var current = ToolContext.conversationId();
+        var current = includeCurrent ? null : ToolContext.conversationId();
+        var conversation = current != null ? ConversationService.findById(current) : null;
+        var historyStart = conversation != null ? ConversationService.historyStart(conversation) : null;
         @SuppressWarnings("unchecked")
         List<Message> rows = JPA.em().createQuery(READABLE_JPQL)
                 .setParameter("ids", hitIds)
                 .setParameter("agentIds", subtreeIds(agentId))
                 .setParameter("excludedId", current != null ? current : NO_CONVERSATION)
+                .setParameter("historyStart", historyStart != null ? historyStart : NO_HISTORY_START)
                 .getResultList();
         return rows;
     }

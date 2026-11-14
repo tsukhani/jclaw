@@ -150,6 +150,11 @@ export interface UseChatStream {
   summarizedSinceReply: Ref<boolean>
   /** Counts the summaries stored outside a turn for the open conversation, so its row is read again after each. */
   compactedTick: Ref<number>
+  /**
+   * How many earlier messages the context-window trim left out of the open or last turn's request, its resend's
+   * included; null when it left none out.
+   */
+  contextTrim: Ref<number | null>
   streamingMessageKey: Ref<string | null>
   streamContentHtml: Ref<string>
   streamReasoningHtml: Ref<string>
@@ -244,6 +249,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   }
   const summarizedSinceReply = ref(false)
   const compactedTick = ref(0)
+  const contextTrim = ref<number | null>(null)
+  // A trim frame ahead of an init belongs to the turn that init opens; a turn with none clears the last turn's count.
+  let trimmedAhead = false
   // A compaction after a reply runs outside any turn, so no frame carries its card: the bus says when it is stored.
   const { onEvent } = useEventBus()
   onEvent('conversation.compacted', (data) => {
@@ -334,6 +342,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   // Switching conversations, New Chat or an agent change closes the stream; the page reopens it once rows load.
   watch(followedConvoId, (id) => {
     setCompaction(null)
+    contextTrim.value = null
+    trimmedAhead = false
     summarizedSinceReply.value = false
     closeView()
     stream.close()
@@ -347,6 +357,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     followedConvoId.value = null
     closeView()
     setCompaction(null)
+    contextTrim.value = null
+    trimmedAhead = false
   }
 
   /** Every merge: the open bubble and a send not yet answered pair with nothing, and a bubble drops a call a saved row shows. */
@@ -500,9 +512,28 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
+  /**
+   * A `{"contextTrim":{"dropped":N}}` status frame: the trim left N earlier messages in all out of the turn's request,
+   * from its prologue ahead of the init or from a resend mid-turn, which counts the prologue's too.
+   */
+  function applyTrimFrame(content: string) {
+    try {
+      const dropped = Number((JSON.parse(content) as { contextTrim?: { dropped?: unknown } }).contextTrim?.dropped)
+      if (!Number.isInteger(dropped) || dropped <= 0) return
+      contextTrim.value = dropped
+      if (!turn) trimmedAhead = true
+    }
+    catch {
+      // A frame this page cannot read changes nothing on it.
+    }
+  }
+
   function handleStreamInitEvent(event: TurnFrame, eventId: string) {
+    const trimmed = trimmedAhead
+    trimmedAhead = false
     // The same turn replayed around a resync, which rebuilds the bubble from the frames after it.
     if (turn && eventId && turn.initId === eventId) return
+    if (!trimmed) contextTrim.value = null
     // A turn whose terminal never reached this page: what its bubble holds is unknown, so its saved rows replace it.
     if (turn) {
       const stale = turn.bubble
@@ -749,6 +780,11 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // A compaction runs in the turn's prologue, ahead of its init, so its frames belong to no bubble.
     if (event.type === 'status' && typeof event.content === 'string' && event.content.startsWith('{"compaction"')) {
       applyCompactionFrame(event.content)
+      return
+    }
+    // A trim comes from the prologue too, or from a resend mid-turn, and shows by the composer, not in the bubble.
+    if (event.type === 'status' && typeof event.content === 'string' && event.content.startsWith('{"contextTrim"')) {
+      applyTrimFrame(event.content)
       return
     }
     const m = turn?.bubble
@@ -1006,6 +1042,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     compaction,
     summarizedSinceReply,
     compactedTick,
+    contextTrim,
     streamingMessageKey,
     streamContentHtml,
     streamReasoningHtml,

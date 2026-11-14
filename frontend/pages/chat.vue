@@ -54,6 +54,7 @@ import { useStreamProgress } from '~/composables/useStreamProgress'
 import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import ChatSummaryDivider from '~/components/chat/ChatSummaryDivider.vue'
+import ChatTrimNotice from '~/components/chat/ChatTrimNotice.vue'
 import ChatBrowserSetupBar from '~/components/chat/ChatBrowserSetupBar.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
@@ -588,6 +589,7 @@ const {
   compaction,
   summarizedSinceReply,
   compactedTick,
+  contextTrim,
   streamingMessageKey,
   streamContentHtml,
   streamReasoningHtml,
@@ -1406,6 +1408,10 @@ function exportConversation() {
           <ChatCompactionCard
             v-if="compaction"
             :card="compaction"
+          />
+          <ChatTrimNotice
+            v-if="contextTrim"
+            :dropped="contextTrim"
           />
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form

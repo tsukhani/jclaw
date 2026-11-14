@@ -60,6 +60,8 @@ class ContextOverflowRecoveryTest extends UnitTest {
     private static final String SYSTEM = "You are terse.";
     private static final String CURRENT = "Current question?";
     private static final String SHORT_ANSWER = "Short answer.";
+    /** The system prompt of a request the resend trimmed by one message, as the trim's notice ends it (JF-419). */
+    private static final String TRIMMED_SYSTEM = SYSTEM + "\n\n" + leftOut(1);
     /** Large enough that dropping it alone meets the retry budget beside a streamed turn's full system prompt. */
     private static final String OLDEST = "Oldest question about the harbour. ".repeat(2000);
     private static final String GENERIC_REPLY =
@@ -100,7 +102,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
         assertEquals(List.of("primary", "primary"), calls);
         assertEquals(List.of("system:" + SYSTEM, "user:" + OLDEST, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
                 sent(primary.bodies.get(0)));
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
                 sent(primary.bodies.get(1)));
         assertTrue(primary.bodies.get(1).length() < primary.bodies.get(0).length(),
                 "the retried request is smaller than the refused one");
@@ -182,7 +184,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
         assertEquals(List.of("primary", "fallback", "primary"), calls);
         assertEquals(List.of("system:" + SYSTEM, "user:" + OLDEST, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
                 sent(secondary.bodies.get(0)));
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT),
                 sent(primary.bodies.get(1)));
     }
 
@@ -197,7 +199,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
         assertEquals(contextWindowMessage(provider.config().name()), outcome.content());
         assertEquals(List.of("primary", "primary", "primary"), calls,
                 "the turn's one retry went to round 1, so round 2's refusal ends it");
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1"), sent(primary.bodies.get(2)));
     }
 
@@ -211,7 +213,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         assertEquals("Answer within the budget.", outcome.content());
         assertEquals(List.of("primary", "primary", "primary"), calls);
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT, "user:" + ANSWER_NUDGE),
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT, "user:" + ANSWER_NUDGE),
                 sent(primary.bodies.get(2)), "the retry leaves out what the provider refused");
     }
 
@@ -225,7 +227,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         assertEquals("Answer within the budget.", outcome.content());
         assertEquals(List.of("primary", "primary", "primary", "primary"), calls);
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1", "user:" + SYNTHESIS_NUDGE), sent(primary.bodies.get(3)));
     }
 
@@ -242,8 +244,34 @@ class ContextOverflowRecoveryTest extends UnitTest {
         assertEquals(List.of("primary", "primary"), calls);
         assertEquals(List.of("system:" + SYSTEM, "user:" + OLDEST, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1"), sent(primary.bodies.get(0)));
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1"), sent(primary.bodies.get(1)));
+    }
+
+    @Test
+    void aStreamedResendTellsTheChatHowManyMessagesItLeftOut() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), text("Answer after trimming."));
+        var statuses = new CopyOnWriteArrayList<String>();
+
+        runContinuation(provider("primary", primary), null, statuses::add);
+
+        assertEquals(List.of("{\"contextTrim\":{\"dropped\":1}}"), trimFrames(statuses));
+    }
+
+    @Test
+    void aStreamedContinuationTheProviderTakesSendsNoTrimFrame() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, text("Answer at once."));
+        var statuses = new CopyOnWriteArrayList<String>();
+
+        assertEquals("Answer at once.", runContinuation(provider("primary", primary), null, statuses::add));
+
+        assertEquals(List.of(), trimFrames(statuses));
+    }
+
+    private static List<String> trimFrames(List<String> statuses) {
+        return statuses.stream().filter(s -> s.startsWith("{\"contextTrim\"")).toList();
     }
 
     @Test
@@ -282,7 +310,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         assertEquals("Answer after the fallback refused.", result);
         assertEquals(List.of("primary", "fallback", "primary"), calls);
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1"), sent(primary.bodies.get(1)));
     }
 
@@ -296,7 +324,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         assertEquals("The fallback took the trimmed list.", result);
         assertEquals(List.of("primary", "fallback", "primary", "fallback"), calls);
-        var trimmed = List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        var trimmed = List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1");
         assertEquals(trimmed, sent(primary.bodies.get(1)));
         assertEquals(trimmed, sent(secondary.bodies.get(1)));
@@ -326,7 +354,7 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         assertEquals("Answer within the budget.", result);
         assertEquals(List.of("primary", "primary", "primary"), calls);
-        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+        assertEquals(List.of("system:" + TRIMMED_SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
                 "assistant->tc1", "tool<-tc1", "user:" + SYNTHESIS_NUDGE), sent(primary.bodies.get(2)));
     }
 
@@ -469,7 +497,8 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         var trimmed = trimToBudget(messages, 1);
 
-        assertEquals(List.of(messages.get(0), messages.get(5), messages.get(6), messages.get(7)), trimmed);
+        assertEquals(List.of(ChatMessage.system(SYSTEM + "\n\n" + leftOut(4)), messages.get(5), messages.get(6),
+                messages.get(7)), trimmed);
     }
 
     @Test
@@ -481,8 +510,8 @@ class ContextOverflowRecoveryTest extends UnitTest {
 
         var trimmed = trimToBudget(messages, 1);
 
-        assertEquals(List.of(messages.get(0), messages.get(3), messages.get(4), messages.get(5), messages.get(6)),
-                trimmed);
+        assertEquals(List.of(ChatMessage.system(SYSTEM + "\n\n" + leftOut(2)), messages.get(3), messages.get(4),
+                messages.get(5), messages.get(6)), trimmed);
     }
 
     @Test
@@ -491,8 +520,8 @@ class ContextOverflowRecoveryTest extends UnitTest {
         int estimate = TokenUsageEstimator.estimateChatRequest(MODEL, messages, List.of()).promptTokens();
 
         assertNull(trimToBudget(messages, estimate), "at the budget nothing is removed");
-        assertEquals(List.of(messages.get(0), messages.get(2), messages.get(3)), trimToBudget(messages, estimate - 1),
-                "one token over it, the oldest message goes");
+        assertEquals(List.of(ChatMessage.system(TRIMMED_SYSTEM), messages.get(2), messages.get(3)),
+                trimToBudget(messages, estimate - 1), "one token over it, the oldest message goes");
     }
 
     @Test
@@ -695,11 +724,16 @@ class ContextOverflowRecoveryTest extends UnitTest {
     }
 
     private String runContinuation(LlmProvider primary, LlmProvider secondary) throws Exception {
+        return runContinuation(primary, secondary, _ -> {});
+    }
+
+    private String runContinuation(LlmProvider primary, LlmProvider secondary,
+                                   java.util.function.Consumer<String> statuses) throws Exception {
         var agent = persistAgent(primary.config().name(), null);
         var convo = conversation(agent, "web");
         var fallback = secondary == null ? null : new LlmProvider.Fallback(secondary, MODEL);
         AgentRunner.StreamingCallbacks cb = new AgentRunner.StreamingCallbacks(
-                _ -> {}, _ -> {}, _ -> {}, _ -> {}, _ -> {}, _ -> {}, _ -> {}, () -> {});
+                _ -> {}, _ -> {}, _ -> {}, statuses, _ -> {}, _ -> {}, _ -> {}, () -> {});
         var ctx = new ToolCallLoopRunner.StreamingTurnContext(agent, convo, convo.id, List.of(), primary, fallback,
                 cb, null, new AtomicBoolean(false), new LatencyTrace(), new LlmProvider.TurnUsage(),
                 new ArrayList<>(), "web", new ConversationSink(convo));
@@ -763,6 +797,15 @@ class ContextOverflowRecoveryTest extends UnitTest {
         m.setAccessible(true);
         return (List<ChatMessage>) m.invoke(null, messages, offlineAgent(), new Conversation(), offlineProvider(),
                 List.of(), budget);
+    }
+
+    /** The notice a trim of {@code dropped} messages ends the system prompt on, for a request offered no tools. */
+    private static String leftOut(int dropped) {
+        return dropped == 1
+                ? "[1 earlier message of this conversation is left out of this request to fit the model's context "
+                        + "window. It is still stored.]"
+                : "[" + dropped + " earlier messages of this conversation are left out of this request to fit the "
+                        + "model's context window. They are still stored.]";
     }
 
     private static Agent offlineAgent() {

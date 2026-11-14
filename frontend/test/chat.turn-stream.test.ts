@@ -164,6 +164,26 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
     expect(stopButton(component).exists()).toBe(false)
   })
 
+  it('trimmed turn: a card by the composer says how many earlier messages the agent did not read, and the next turn clears it', async () => {
+    serveConversation(5, [row(1, 'user', 'earlier')])
+    serveQueue(5, { busy: true, stoppable: true })
+    const { component, stream } = await openConversation(5)
+    expect(component.find('[data-testid="chat-trim-notice"]').exists()).toBe(false)
+
+    stream.send({ type: 'status', content: '{"contextTrim":{"dropped":4}}' })
+    stream.send({ type: 'init', conversationId: 5, startedAt: new Date().toISOString() })
+    await flushPromises()
+
+    expect(component.get('[data-testid="trim-notice-detail"]').text()).toBe('4 earlier messages were left out of what '
+      + 'the agent read for this reply, to fit the model\'s context window. They are still saved in this conversation.')
+    expect(component.text()).not.toContain('contextTrim')
+
+    stream.send({ type: 'complete', content: 'Done.' })
+    stream.send({ type: 'init', conversationId: 5, startedAt: new Date().toISOString() })
+    await flushPromises()
+    expect(component.find('[data-testid="chat-trim-notice"]').exists()).toBe(false)
+  })
+
   it('new chat: the answer\'s id selects the conversation and opens its stream, from which the turn renders', async () => {
     const rows: Row[] = []
     serveConversation(42, rows)

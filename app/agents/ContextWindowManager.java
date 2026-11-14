@@ -9,14 +9,18 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
+import services.CompactionProgress;
 import services.ConfigService;
 import services.EventLogger;
+import tools.ConversationSearchTool;
 import utils.LlmErrorTemplates;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Token-estimation and context-window arithmetic for the agent loop.
@@ -265,7 +269,9 @@ public final class ContextWindowManager {
      * token count fits inside {@code contextWindow - RESERVED_OUTPUT_TOKENS}
      * (JCLAW-291). Always preserves the system message (index 0) and the
      * latest message (last index) since those are required for any
-     * meaningful continuation. Returns the input list unchanged when the
+     * meaningful continuation; once any are dropped, the system message ends
+     * on {@link #trimNotice} and a bound {@link CompactionProgress#SINK} gets
+     * the count. Returns the input list unchanged when the
      * model has no configured context window, or when the prompt already
      * fits.
      */
@@ -356,22 +362,93 @@ public final class ContextWindowManager {
         // with the budget check above.
         int total = estimatedTokens;
         int dropCount = 0;
-        for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
+        int notice = noticeTokens(messages, tools, providerName, modelId);
+        for (int i = 1; i < messages.size() - 1 && total + notice > trimTarget; i++) {
             int rawMsgTokens = TokenUsageEstimator.estimateMessage(modelId, messages.get(i)).tokens();
             total -= adjustedMessageTokens(rawMsgTokens, modelMatched, providerName, modelId);
             dropCount++;
         }
         if (dropCount > 0) {
             EventLogger.warn("llm", agent.name, null,
-                    "Trimmed %d messages to fit context window (window=%d, reservation=%d, recall=%d, target=%d, estimated=%d, post-trim=%d)"
-                            .formatted(dropCount, contextWindow, reservation, reservedTokens, trimTarget, estimatedTokens, total));
-            // Build result: system message + surviving history (skip dropped range)
+                    "Left the %d oldest %s out of the request to fit the model's context window of %d tokens: it came to about %d tokens, over the %d it may use after %d kept for the reply and %d for recalled memories and skills, and to about %d without them. They are still stored."
+                            .formatted(dropCount, messagesWord(dropCount), contextWindow, estimatedTokens, trimTarget,
+                                    reservation, reservedTokens, total + notice));
             var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
-            trimmed.add(messages.getFirst());
+            trimmed.add(withTrimNotice(messages.getFirst(), dropCount, tools));
             trimmed.addAll(messages.subList(1 + dropCount, messages.size()));
+            CompactionProgress.trimmed(leftOutAfter(messages.getFirst(), dropCount));
             return new Trimmed(trimmed, dropCount);
         }
         return new Trimmed(messages, 0);
+    }
+
+    // ─── What the agent is told when the trim drops messages ────────────────
+
+    private static final String NOTICE_SEPARATOR = "\n\n";
+    private static final Pattern TRIM_NOTICE = Pattern.compile(
+            "\\[(\\d{1,9}) earlier messages? of this conversation (?:is|are) left out of this request[^\\]]*]");
+
+    /**
+     * What the system message tells the agent of the {@code dropped} earlier messages a trim left out of the request,
+     * naming {@code conversation_search} only when the request offers it.
+     */
+    static String trimNotice(int dropped, boolean searchable) {
+        boolean one = dropped == 1;
+        return "[%d earlier message%s of this conversation %s left out of this request to fit the model's context window. %s still stored%s.]"
+                .formatted(dropped, one ? "" : "s", one ? "is" : "are", one ? "It is" : "They are",
+                        searchable ? ", and " + ConversationSearchTool.TOOL_NAME
+                                + " with includeCurrent set to true can find " + (one ? "it" : "them") : "");
+    }
+
+    /**
+     * {@code system} followed by the notice of {@code dropped} more messages left out, or, when it ends on such a
+     * notice already, by one counting both, as a resend trims a request the prologue trimmed; unchanged when it is not
+     * a system message of text. Index-preserving, so the media bearers stay where they are.
+     */
+    static ChatMessage withTrimNotice(ChatMessage system, int dropped, @Nullable List<ToolDef> tools) {
+        if (!MessageRole.SYSTEM.value.equals(system.role()) || !(system.content() instanceof String text)) return system;
+        var prior = priorNotice(text);
+        var base = prior != null ? text.substring(0, text.lastIndexOf(NOTICE_SEPARATOR)) : text;
+        int total = dropped + (prior != null ? Integer.parseInt(prior.group(1)) : 0);
+        return new ChatMessage(system.role(), base + NOTICE_SEPARATOR + trimNotice(total, offersSearch(tools)),
+                system.toolCalls(), system.toolCallId(), system.toolName());
+    }
+
+    /** How many messages {@code system} says are left out once {@code dropped} more are, as {@link #withTrimNotice} counts them. */
+    private static int leftOutAfter(ChatMessage system, int dropped) {
+        var prior = system.content() instanceof String text ? priorNotice(text) : null;
+        return dropped + (prior != null ? Integer.parseInt(prior.group(1)) : 0);
+    }
+
+    /** The match of the notice {@code text} ends on, or null when it ends on none. */
+    private static @Nullable Matcher priorNotice(String text) {
+        int at = text.lastIndexOf(NOTICE_SEPARATOR);
+        if (at < 0) return null;
+        var prior = TRIM_NOTICE.matcher(text.substring(at + NOTICE_SEPARATOR.length()));
+        return prior.matches() ? prior : null;
+    }
+
+    private static boolean offersSearch(@Nullable List<ToolDef> tools) {
+        if (tools == null) return false;
+        for (var tool : tools) {
+            var fn = tool.function();
+            if (fn != null && ConversationSearchTool.TOOL_NAME.equals(fn.name())) return true;
+        }
+        return false;
+    }
+
+    /** What the notice adds once anything of {@code messages} is dropped, scaled as the trim scales a message. */
+    private static int noticeTokens(List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                    @Nullable String providerName, @Nullable String modelId) {
+        if (messages.isEmpty() || !MessageRole.SYSTEM.value.equals(messages.getFirst().role())
+                || !(messages.getFirst().content() instanceof String)) return 0;
+        var count = TokenUsageEstimator.estimateText(modelId,
+                NOTICE_SEPARATOR + trimNotice(messages.size(), offersSearch(tools)));
+        return adjustedMessageTokens(count.tokens(), count.modelMatched(), providerName, modelId);
+    }
+
+    private static String messagesWord(int count) {
+        return count == 1 ? "message" : "messages";
     }
 
     private static int reservationFor(int contextWindow) {
@@ -442,7 +519,8 @@ public final class ContextWindowManager {
      * {@code messages} cut to {@code budget} estimated tokens: oversized tool results truncated
      * first, recent ones included, then the oldest messages after the first dropped, each tool call
      * with its results. The latest user turn — its run of consecutive user messages, the clock block
-     * among them — and the final message or call-and-results group always stay. Null when the list
+     * among them — and the final message or call-and-results group always stay, and the system
+     * message says how many went, as {@link #trimToContextWindow} does. Null when the list
      * already fits or nothing could be removed.
      */
     static @Nullable List<ChatMessage> trimToBudget(List<ChatMessage> messages, Agent agent, Conversation conv,
@@ -470,8 +548,10 @@ public final class ContextWindowManager {
         }
         var dropped = new boolean[n];
         int dropCount = 0;
+        // Counted only when something must go: a list the truncation already fit takes no notice.
+        int notice = total > budget ? noticeTokens(working, tools, providerName, modelId) : 0;
         int i = 1;
-        while (i < finalGroup && total > budget) {
+        while (i < finalGroup && total + notice > budget) {
             int end = groupEnd(working, i);
             if (i < userTurnStart || i > latestUser) {
                 for (int j = i; j < end; j++) {
@@ -484,14 +564,16 @@ public final class ContextWindowManager {
             i = end;
         }
         if (truncation == null && dropCount == 0) return null;
-        if (dropCount > 0) {
-            EventLogger.warn("llm", agent.name, null,
-                    "Dropped %d message(s) to resend a request the provider refused as too long (budget=%d, estimated=%d, post-trim=%d)"
-                            .formatted(dropCount, budget, estimate, total));
-        }
         var kept = new ArrayList<ChatMessage>(n - dropCount);
         for (int j = 0; j < n; j++) {
             if (!dropped[j]) kept.add(working.get(j));
+        }
+        if (dropCount > 0) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Left %d earlier %s out of the resend of a request the provider refused as longer than its context window: it came to about %d tokens, over the %d the resend aims at, and to about %d without them. They are still stored."
+                            .formatted(dropCount, messagesWord(dropCount), estimate, budget, total + notice));
+            CompactionProgress.trimmed(leftOutAfter(kept.getFirst(), dropCount));
+            kept.set(0, withTrimNotice(kept.getFirst(), dropCount, tools));
         }
         return kept;
     }

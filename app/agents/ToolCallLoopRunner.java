@@ -11,6 +11,7 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
+import services.CompactionProgress;
 import services.EventLogger;
 import services.SubagentRegistry;
 import tools.SubagentSpawnTool;
@@ -1018,7 +1019,9 @@ public final class ToolCallLoopRunner {
         var sent = withNote(view, note);
         var attempt = onFallbackIfPrimaryRefused(ctx, sent, refused);
         if (attempt == null || refusedForLength(attempt) == null) return attempt;
-        var trimmed = ctx.overflow().trimForRetry(view, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
+        // The prologue's sink binding has ended, so the trim's count reaches the chat through this turn's status frames.
+        var trimmed = ScopedValue.where(CompactionProgress.SINK, ctx.cb().onStatus()).call(() ->
+                ctx.overflow().trimForRetry(view, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools()));
         if (trimmed == null) return attempt;
         var resend = withNote(trimmed, note);
         logOverflowRetry(ctx.agent(), ctx.channelType(), sent, resend);

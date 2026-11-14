@@ -1,12 +1,16 @@
 import agents.ToolContext;
 import agents.ToolRegistry;
 import models.Agent;
+import models.Conversation;
+import models.Message;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.ConfigService;
 import services.ConversationService;
 import services.TimezoneResolver;
 import services.Tx;
@@ -217,6 +221,153 @@ class ConversationSearchToolTest extends UnitTest {
                 "the current conversation must not be returned to itself, got: " + out);
         assertTrue(out.contains("conversation " + ids.get(2)),
                 "the earlier conversation is what the caller is looking for, got: " + out);
+    }
+
+    // ─── the current conversation's messages out of view (JF-419) ──────────
+
+    private static final Instant T0 = Instant.parse("2026-03-01T09:00:00Z");
+
+    /** A user message written {@code minutes} after {@link #T0}. */
+    private static Message writtenAt(Conversation convo, int minutes, String content) {
+        var m = ConversationService.appendUserMessage(convo, content);
+        m.createdAt = T0.plusSeconds(60L * minutes);
+        // createdAt is updatable = false, so only a bulk update can date the row.
+        JPA.em().createQuery("UPDATE Message m SET m.createdAt = :at WHERE m.id = :id")
+                .setParameter("at", m.createdAt).setParameter("id", m.id).executeUpdate();
+        return m;
+    }
+
+    /** The tool's line for {@code m}. */
+    private static String line(Message m) {
+        var zone = TimezoneResolver.appZone();
+        return "- conversation %d | %s (%s) | user: %s".formatted(m.conversation.id,
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(m.createdAt.atZone(zone)), zone.getId(), m.content);
+    }
+
+    private static String matches(String query, Message... rows) {
+        return "%d match(es) for \"%s\":%n%s".formatted(rows.length, query,
+                String.join("\n", java.util.Arrays.stream(rows).map(ConversationSearchToolTest::line).toList()));
+    }
+
+    /** The caller, the conversation it searches from, and the answers the test accepts. */
+    private record CurrentRows(long agentId, long conversationId, List<String> expected) {}
+
+    private static String searchIn(CurrentRows rows, String args) {
+        var caller = Agent.<Agent>findById(rows.agentId());
+        return ToolContext.withConversation(rows.conversationId(), () -> new ConversationSearchTool().execute(args, caller));
+    }
+
+    @Test
+    void findsTheCurrentConversationsMessagesFromBeforeItsCompactionFloorAndNoneAfter() {
+        var token = "convsearchfloortoken";
+        var rows = commitInFreshTx(() -> {
+            var agent = newAgent("cs-floor", null);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            var summarized = writtenAt(current, 0, "summarized " + token);
+            writtenAt(current, 20, "still in view " + token);
+            current.compactionSince = T0.plusSeconds(60L * 10);
+            current.save();
+            var stranger = newAgent("cs-floor-other", null);
+            writtenAt(ConversationService.create(stranger, "web", "x-" + System.nanoTime()), 0, "theirs " + token);
+            return new CurrentRows(agent.id, current.id, List.of(matches(token, summarized)));
+        });
+
+        assertEquals(rows.expected().getFirst(), searchIn(rows, "{\"query\":\"" + token + "\"}"));
+    }
+
+    @Test
+    void aResetAfterTheCompactionFloorMovesTheLineToTheReset() {
+        var token = "convsearchresettoken";
+        var rows = commitInFreshTx(() -> {
+            var agent = newAgent("cs-reset", null);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            var summarized = writtenAt(current, 0, "summarized " + token);
+            var beforeReset = writtenAt(current, 20, "before the reset " + token);
+            writtenAt(current, 40, "after the reset " + token);
+            current.compactionSince = T0.plusSeconds(60L * 10);
+            current.contextSince = T0.plusSeconds(60L * 30);
+            current.save();
+            return new CurrentRows(agent.id, current.id, List.of(matches(token, beforeReset, summarized),
+                    matches(token, summarized, beforeReset)));
+        });
+
+        var out = searchIn(rows, "{\"query\":\"" + token + "\"}");
+
+        assertTrue(rows.expected().contains(out), () -> "both rows before the reset, in Lucene's order, got: " + out);
+    }
+
+    @Test
+    void aMessageAtTheFloorIsStillInViewAndNotReturned() {
+        var token = "convsearchedgetoken";
+        var rows = commitInFreshTx(() -> {
+            var agent = newAgent("cs-edge", null);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            var before = writtenAt(current, 9, "a minute before " + token);
+            writtenAt(current, 10, "at the floor " + token);
+            current.compactionSince = T0.plusSeconds(60L * 10);
+            current.save();
+            return new CurrentRows(agent.id, current.id, List.of(matches(token, before)));
+        });
+
+        assertEquals(rows.expected().getFirst(), searchIn(rows, "{\"query\":\"" + token + "\"}"));
+    }
+
+    @Test
+    void findsTheCurrentConversationsMessagesOlderThanTheHistoryLimitLoads() {
+        CompactionTriggerSync.acquire();
+        try {
+            var token = "convsearchlimittoken";
+            var rows = commitInFreshTx(() -> {
+                var agent = newAgent("cs-limit", null);
+                var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+                var oldest = writtenAt(current, 0, "oldest " + token);
+                writtenAt(current, 1, "middle " + token);
+                writtenAt(current, 2, "newest " + token);
+                return new CurrentRows(agent.id, current.id, List.of(matches(token, oldest)));
+            });
+            var query = "{\"query\":\"" + token + "\"}";
+
+            ConfigService.set(ConversationService.KEY_GLOBAL_MAX, "3");
+            assertEquals("No messages matched \"" + token + "\".", searchIn(rows, query),
+                    "a limit that loads all three rows leaves none out of view");
+
+            ConfigService.set(ConversationService.KEY_GLOBAL_MAX, "2");
+            assertEquals(rows.expected().getFirst(), searchIn(rows, query), "a limit of two leaves the oldest out");
+        } finally {
+            CompactionTriggerSync.release();
+        }
+    }
+
+    @Test
+    void includeCurrentSearchesTheWholeConversationYouAreInButNoOtherAgents() {
+        var token = "convsearchincludetoken";
+        var rows = commitInFreshTx(() -> {
+            var agent = newAgent("cs-include", null);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            var inView = writtenAt(current, 0, "still in view " + token);
+            var stranger = newAgent("cs-include-other", null);
+            writtenAt(ConversationService.create(stranger, "web", "x-" + System.nanoTime()), 0, "theirs " + token);
+            return new CurrentRows(agent.id, current.id, List.of(matches(token, inView)));
+        });
+
+        assertEquals(rows.expected().getFirst(),
+                searchIn(rows, "{\"query\":\"" + token + "\",\"includeCurrent\":true}"));
+        assertEquals("No messages matched \"" + token + "\".",
+                searchIn(rows, "{\"query\":\"" + token + "\",\"includeCurrent\":false}"));
+    }
+
+    @Test
+    void anIncludeCurrentThatIsNoBooleanSearchesAsIfLeftOut() {
+        var token = "convsearchmalformedtoken";
+        var rows = commitInFreshTx(() -> {
+            var agent = newAgent("cs-malformed", null);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            writtenAt(current, 0, "still in view " + token);
+            return new CurrentRows(agent.id, current.id, List.of());
+        });
+
+        assertEquals("No messages matched \"" + token + "\".",
+                searchIn(rows, "{\"query\":\"" + token + "\",\"includeCurrent\":{\"on\":true}}"));
     }
 
     @Test

@@ -569,6 +569,23 @@ public class ConversationService {
                 : Message.count("conversation = ?1 AND createdAt >= ?2", conversation, floor);
     }
 
+    /**
+     * The instant before which none of {@code conversation}'s rows is loaded by {@link #loadRecentMessages}: the floor,
+     * or the oldest row it loads when more rows since the floor exist than it loads. Null when it loads every row.
+     */
+    public static @Nullable Instant historyStart(Conversation conversation) {
+        var floor = latestOf(conversation.contextSince, conversation.compactionSince);
+        // Ordered as findRecent orders: a row strictly older than the oldest it loads is never loaded, whatever the tie order.
+        List<Instant> edge = JPA.em().createQuery("SELECT m.createdAt FROM Message m WHERE m.conversation = :conversation"
+                        + " AND m.createdAt >= :floor ORDER BY m.createdAt DESC", Instant.class)
+                .setParameter("conversation", conversation)
+                .setParameter("floor", floor != null ? floor : Instant.EPOCH)
+                .setFirstResult(Math.max(0, effectiveHistoryLimit(conversation) - 1))
+                .setMaxResults(2)
+                .getResultList();
+        return edge.size() == 2 ? edge.getFirst() : floor;
+    }
+
     /** The oldest {@code limit} rows since the floor, in chronological order: where a compaction starts (JF-159). */
     public static List<Message> loadOldestMessages(Conversation conversation, int limit) {
         return Message.findOldest(conversation, limit, latestOf(conversation.contextSince, conversation.compactionSince));
