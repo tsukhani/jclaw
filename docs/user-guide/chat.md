@@ -12,7 +12,9 @@ The Chat page has three regions:
 - **Message rail**: the active conversation: your messages, the agent's replies, tool calls, and inline reasoning when the model supports it.
 - **Composer**: at the bottom, where you type, attach, and send.
 
-The context meter appears once a conversation has started. It reads `used / window`: the prompt and completion tokens of the latest turn's last model call, against the model's context window, over a bar that turns amber at 70% and red at 90%. While a reply is still running, the meter moves each time the agent calls the model, so you can watch the context fill up. Hover it for **Context usage** as a percentage, **Prompt tokens**, **Thinking tokens** and **Cached tokens** when there are any, **Completion** and **Current context**, then **Conversation total** (every turn's tokens added up), **Messages** (every saved message, tool results included), **Prompts** (the ones you sent), **Compactions** (each one lowers the current context), and the running **Turns** (model replies, several for one prompt when tools run) and **Cost** (when the model has pricing).
+The context meter appears once a conversation has started. It shows how much of the conversation the agent rereads each time it answers, as `used / limit` over a small bar. The limit is the size at which JClaw summarizes the oldest messages to make room, set in [Settings → Chat](/guide#settings-chat). When the model has no such point, the limit is its whole context window. The bar turns amber at 80% and red when the conversation comes near the model's own window, where the oldest messages are cut instead of summarized. While a reply is still running, the meter moves each time the agent calls the model, so you can watch it fill up.
+
+Hover the meter for **Conversation memory**: how full it is and a sentence saying what that means, then **Model's limit** (the model's whole window, when the limit is a summary point) and **Summarized so far** (how many times older messages were summarized). Under **So far in this conversation** come **Your messages**, **Replies**, **All saved messages** (tool results included), **Tokens processed** (every reread added up, which is how providers bill) and **Cost** (when the model has pricing). Tokens are word pieces: 100 tokens is about 75 English words.
 
 Closing or refreshing the page is safe. Your conversation history is server-side. A reply that is still running keeps going when you close the tab, reload it, switch to another conversation, or start a new one. Only a stop ends it: **Stop generating**, or `/stop` typed in web chat. Open the conversation again and the reply shows: what it has written so far, then the rest as it comes. To reopen an earlier thread, click its row on [Conversations](/conversations).
 
@@ -130,9 +132,16 @@ The agent fetches the full text back with a handle when it needs it. A list of a
 
 ## Per-message usage
 
-Every assistant message carries a small **tok/s** badge. Hover it for the full accounting of that turn: prompt, thinking, and cached tokens, completion, speed, wall-clock time, and the computed dollar cost. It also names the **Model** that answered, and, on a turn the Auto router sent, its **Route** (`Auto · <class>`, marked `(failover)` when the fallback answered).
+Every assistant message carries a small **tok/s** badge: how fast the model wrote its final answer. Hover it for **This reply**, which names the model that answered and says how long the reply took and how many model calls it made. Below that:
 
-Below those, when the provider reports them, come **provider-specific metrics**: numbers a provider returns that the common OpenAI usage schema has no field for. So they differ by provider rather than being a fixed list. Hovering a row shows the provider's own field name for it.
+- **Chosen by**, on a turn the Auto router sent: `Auto · <class>`, marked `(failover)` when the fallback answered.
+- **Read**: the tokens the model read, with **reused from earlier** for the part the provider had kept from before, which usually costs less. A reply that uses tools calls the model more than once, and each call rereads the conversation, so **Read** adds up every call.
+- **Wrote**, and **Thinking** when the model thought first.
+- **Memory after this reply**: what the next reply starts from. The context meter shows this for the latest reply.
+- **Writing speed**: tokens per second from the final call's first thought or word to its end. When the final call has no timing, or was too short to time, the card shows **Average speed** instead: everything the reply wrote over its whole time, the wait for the first word included.
+- **Cost**, when the model has pricing.
+
+Last, under **Reported by** and the provider's name, come numbers a provider returns that the common OpenAI usage schema has no field for. So they differ by provider rather than being a fixed list. Hovering a row shows the provider's own field name for it.
 
 The most useful today come from OpenRouter. It reports what your call cost *it* upstream, alongside what it charged you:
 
@@ -143,16 +152,16 @@ The most useful today come from OpenRouter. It reports what your call cost *it* 
 | Upstream inference completions cost | The output half. |
 | Audio / image / video tokens | Per-modality token breakdown, for multimodal turns. |
 
-Ollama reports nothing beyond the standard schema over its OpenAI-compatible endpoint, so the section is absent there by default. Turn on **useNativeApi** for an Ollama provider in [Settings → LLM Providers](/settings), and its chat requests use the daemon's native API instead. That adds the daemon's own per-request timings, shown as time:
+Ollama reports nothing beyond the standard schema over its OpenAI-compatible endpoint, so the section is absent there by default. Turn on **useNativeApi** for an Ollama provider in [Settings → LLM Providers](/settings), and its chat requests use the daemon's native API instead. That adds the daemon's own timings, each added up over every model call of the reply:
 
 | Row | Meaning |
 |-------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| Total duration | Server-side wall clock for the request, from receipt to the last token. |
-| Load duration | Time spent loading the model into memory. A large value means the model had been evicted since the previous turn (see **keepAlive**). |
-| Prompt eval duration | Time spent evaluating the prompt. |
-| Eval duration | Time spent generating the reply. Completion tokens divided by this is the daemon's own tokens-per-second. |
+| Model time | How long the daemon worked on the calls, from receiving each request to its last token. |
+| Loading the model | Time spent loading the model into memory. A large value means the model had been unloaded since the previous turn (see **keepAlive**). |
+| Reading the prompt | Time spent reading the prompt. |
+| Writing the reply | Time spent writing. **Wrote** divided by this is the daemon's own tokens per second. |
 
-A local daemon reports all four. Ollama Cloud reports total duration only, since the other three are node-local timings a hosted service does not expose. The same four appear as `llm_*_duration` histograms on the Chat Performance dashboard.
+A local daemon reports all four. Ollama Cloud reports **Model time** only, since the other three are timings on the machine running the model, which a hosted service does not expose. The same four appear as `llm_*_duration` histograms on the Chat Performance dashboard.
 
 Metrics are summed across every round of a turn. So a turn that made several tool calls shows the total rather than the last round.
 

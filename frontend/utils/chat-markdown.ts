@@ -152,10 +152,26 @@ const chatMarked = new Marked({ breaks: true, gfm: true }, {
   ],
 })
 
-export function formatTokensPerSec(usage: MessageUsage): string | null {
+/** A final call that wrote for less than this streamed in a packet or two, too few to time. */
+const MIN_TIMED_WRITE_MS = 250
+
+/** Tokens per second the turn's final call wrote at, or null when it was not timed long enough to say. */
+export function writingSpeed(usage: MessageUsage): number | null {
+  const ms = usage.lastWriteMs
+  const tokens = usage.lastCompletion
+  if (!ms || ms < MIN_TIMED_WRITE_MS || !tokens) return null
+  return (tokens / ms) * 1000
+}
+
+/** The turn's output over its whole time, the wait for the first word and any tool runs included. */
+export function averageSpeed(usage: MessageUsage): number | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
-  const tps = (usage.completion / usage.durationMs) * 1000
-  return tps.toFixed(1) + ' tok/s'
+  return (usage.completion / usage.durationMs) * 1000
+}
+
+export function formatTokensPerSec(usage: MessageUsage): string | null {
+  const tps = writingSpeed(usage) ?? averageSpeed(usage)
+  return tps == null ? null : tps.toFixed(1) + ' tok/s'
 }
 
 // Configure DOMPurify to allow images, audio, video, and download links

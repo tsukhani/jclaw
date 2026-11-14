@@ -195,10 +195,19 @@ public final class SessionCompactor {
      * window budget, or within {@link #BACKGROUND_MARGIN_PERCENT} of whichever comes first. False when neither can fire.
      */
     public static boolean nearCompaction(int estimatedTokens, int fixedTokens, @Nullable ModelInfo modelInfo) {
-        long fires = Math.min(triggerThreshold(modelInfo, triggerPercent(), triggerTokens(), fixedTokens),
-                (long) windowBudget(modelInfo) + 1);
+        long fires = compactionPoint(modelInfo, fixedTokens);
         if (fires >= Integer.MAX_VALUE) return false;
         return estimatedTokens >= fires - fires * BACKGROUND_MARGIN_PERCENT / 100;
+    }
+
+    /**
+     * The request size at which a summary fires: {@link #triggerThreshold(ModelInfo, int, int, int)} or one past the
+     * window budget, whichever comes first; {@link Integer#MAX_VALUE} when neither can fire. The chat's context meter
+     * fills toward it.
+     */
+    public static int compactionPoint(@Nullable ModelInfo modelInfo, int fixedTokens) {
+        return (int) Math.min(triggerThreshold(modelInfo, triggerPercent(), triggerTokens(), fixedTokens),
+                (long) windowBudget(modelInfo) + 1);
     }
 
     /** {@link #triggerThreshold(ModelInfo, int, int, int)} with nothing fixed. */

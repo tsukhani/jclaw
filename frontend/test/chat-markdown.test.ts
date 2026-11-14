@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeMarkdownLinks, renderMarkdown, renderMarkdownStreaming, formatTokensPerSec } from '~/utils/chat-markdown'
+import { averageSpeed, normalizeMarkdownLinks, renderMarkdown, renderMarkdownStreaming, formatTokensPerSec, writingSpeed } from '~/utils/chat-markdown'
 import type { MessageUsage } from '~/utils/usage-cost'
 
 describe('normalizeMarkdownLinks', () => {
@@ -102,6 +102,24 @@ describe('formatTokensPerSec', () => {
 
   it('formats tokens per second to one decimal', () => {
     expect(formatTokensPerSec({ durationMs: 2000, completion: 50 } as MessageUsage)).toBe('25.0 tok/s')
+  })
+
+  it('shows how fast the final call wrote, not the whole turn\'s average, once it was timed', () => {
+    const turn = { durationMs: 3000, completion: 228, lastCompletion: 179, lastWriteMs: 925 } as MessageUsage
+    expect(formatTokensPerSec(turn)).toBe('193.5 tok/s')
+    expect(averageSpeed(turn)).toBe(76)
+  })
+
+  it('times a final call from a quarter second, and falls back to the average below it', () => {
+    const at = { durationMs: 2000, completion: 50, lastCompletion: 50, lastWriteMs: 250 } as MessageUsage
+    const below = { ...at, lastWriteMs: 249 }
+    expect(writingSpeed(at)).toBe(200)
+    expect(writingSpeed(below)).toBeNull()
+    expect(formatTokensPerSec(below)).toBe('25.0 tok/s')
+  })
+
+  it('has no writing speed for a final call that wrote nothing', () => {
+    expect(writingSpeed({ durationMs: 2000, completion: 50, lastCompletion: 0, lastWriteMs: 900 } as MessageUsage)).toBeNull()
   })
 })
 

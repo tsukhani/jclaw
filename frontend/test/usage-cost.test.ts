@@ -737,11 +737,18 @@ describe('providerMetricRows (JCLAW-1147)', () => {
       },
     }))
     expect(rows.map(r => [r.label, r.value])).toEqual([
-      ['Eval duration', '66 ms'],
-      ['Load duration', '6.42 s'],
-      ['Prompt eval duration', '222 ms'],
-      ['Total duration', '6.78 s'],
+      ['Model time', '6.78 s'],
+      ['Loading the model', '6.42 s'],
+      ['Reading the prompt', '222 ms'],
+      ['Writing the reply', '66 ms'],
     ])
+  })
+
+  it('keeps a duration it has no plain name for under the provider\'s own, after the named ones', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: { total_duration: 6777481000, queue_duration: 1_000_000 },
+    }))
+    expect(rows.map(r => r.label)).toEqual(['Model time', 'Queue duration'])
   })
 
   it('places durations after counts and before costs', () => {
@@ -752,7 +759,7 @@ describe('providerMetricRows (JCLAW-1147)', () => {
         'eval_count': 4,
       },
     }))
-    expect(rows.map(r => r.label)).toEqual(['Eval count', 'Eval duration', 'Upstream inference cost'])
+    expect(rows.map(r => r.label)).toEqual(['Eval count', 'Writing the reply', 'Upstream inference cost'])
   })
 })
 

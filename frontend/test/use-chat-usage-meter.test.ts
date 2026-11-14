@@ -48,9 +48,21 @@ describe('useChatUsageMeter', () => {
       prompt: 18_878_532, lastPrompt: 254_066, completion: 93_588, lastCompletion: 1_100,
       reasoning: 33_573, lastReasoning: 400, cached: 18_468_731, lastCached: 252_000,
     })])
-    expect(api.contextUsage.value).toEqual({ prompt: 254_066, completion: 1_100, reasoning: 400, cached: 252_000 })
+    expect(api.contextUsage.value).toEqual({
+      prompt: 254_066, completion: 1_100, reasoning: 400, cached: 252_000, compactAt: null, measuredWindow: null,
+    })
     const legacy = mountMeter([assistant({ prompt: 30_000, completion: 5, reasoning: 2, cached: 100 })])
-    expect(legacy.api.contextUsage.value).toEqual({ prompt: 30_000, completion: 5, reasoning: 2, cached: 100 })
+    expect(legacy.api.contextUsage.value).toEqual({
+      prompt: 30_000, completion: 5, reasoning: 2, cached: 100, compactAt: null, measuredWindow: null,
+    })
+  })
+
+  it('carries the summary point and the window it was worked out on, and keeps both while a reply streams', () => {
+    const earlier = assistant({ prompt: 28_025, lastPrompt: 28_025, completion: 179, compactAt: 150_000, contextWindow: 1_048_576 })
+    const live = { role: 'assistant', content: 'working', _contextTokens: 31_000 } as Message
+    const { api } = mountMeter([earlier, user(), live], true)
+
+    expect(api.contextUsage.value).toMatchObject({ prompt: 31_000, compactAt: 150_000, measuredWindow: 1_048_576 })
   })
 
   it('reads a streaming reply\'s context frame until its usage lands', () => {

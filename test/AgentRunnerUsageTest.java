@@ -618,6 +618,57 @@ class AgentRunnerUsageTest extends UnitTest {
         assertEquals(900, obj.get("lastPrompt").getAsInt());
     }
 
+    // --- calls and writing time, for the message's usage popover ---
+
+    @Test
+    void theUsageRecordCountsEveryModelCallOfTheReply() {
+        var three = new LlmProvider.TurnUsage();
+        three.addRound(roundWithUsage(new Usage(100, 10, 110, 0, 0, 0)));
+        three.addRound(roundWithUsage(null));
+        three.addRound(roundWithUsage(new Usage(300, 30, 330, 0, 0, 0)));
+        var one = new LlmProvider.TurnUsage();
+        one.addRound(roundWithUsage(new Usage(100, 10, 110, 0, 0, 0)));
+
+        assertEquals(3, usageOf(three).get("calls").getAsInt(), "a call that reported no usage still ran");
+        assertEquals(1, usageOf(one).get("calls").getAsInt());
+    }
+
+    @Test
+    void theWritingTimeIsTheFinalCallsFromItsFirstThinkingChunkToItsEnd() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(timedRound(0L, 1_000_000_000L, 1_900_000_000L));
+        turn.addRound(timedRound(5_000_000_000L, 5_200_000_000L, 5_700_000_000L));
+
+        assertEquals(700, usageOf(turn).get("lastWriteMs").getAsLong());
+    }
+
+    @Test
+    void aCallThatDidNotThinkIsTimedFromItsFirstVisibleWord() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(timedRound(0L, 2_000_000_000L, 2_250_000_000L));
+
+        assertEquals(250, usageOf(turn).get("lastWriteMs").getAsLong());
+    }
+
+    @Test
+    void aFinalCallThatStreamedNothingRecordsNoWritingTimeEvenWhenAnEarlierCallDid() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(timedRound(0L, 1_000_000_000L, 1_500_000_000L));
+        turn.addRound(timedRound(0L, 0L, 3_000_000_000L));
+
+        var obj = usageOf(turn);
+
+        assertFalse(obj.has("lastWriteMs"), "an earlier call's time is not the final call's: " + obj);
+        assertEquals(2, obj.get("calls").getAsInt());
+    }
+
+    @Test
+    void aCallStillRunningHasNoWritingTime() {
+        assertEquals(0L, timedRound(1_000_000_000L, 1_100_000_000L, 0L).writeMs());
+        assertEquals(100L, timedRound(1_000_000_000L, 1_100_000_000L, 1_100_000_000L).writeMs(),
+                "thinking that starts first opens the window");
+    }
+
     // --- per-round context frame ---
 
     @Test
@@ -655,6 +706,12 @@ class AgentRunnerUsageTest extends UnitTest {
 
     private static LlmProvider.StreamAccumulator roundWithUsage(Usage u) {
         return LlmProvider.StreamAccumulator.builder().usage(u).build();
+    }
+
+    private static LlmProvider.StreamAccumulator timedRound(long reasoningStartNanos, long firstContentNanos,
+                                                            long completedNanos) {
+        return LlmProvider.StreamAccumulator.builder().usage(new Usage(100, 20, 120, 0, 0, 0))
+                .timing(reasoningStartNanos, firstContentNanos, completedNanos).build();
     }
 
     private static com.google.gson.JsonObject usageOf(LlmProvider.TurnUsage turn) {

@@ -27,6 +27,12 @@ export interface MessageUsage {
   /** JF-151: the first call's prompt and cache reads, the only call that can reuse what the previous turn cached. Absent on turns saved before it. */
   firstPrompt?: number
   firstCached?: number
+  /** Model calls the turn made; `prompt` and `completion` add up all of them. Absent on turns saved before it. */
+  calls?: number
+  /** Ms the final call spent writing, from its first thinking or visible chunk to its end; absent when it streamed neither. */
+  lastWriteMs?: number
+  /** The `lastPrompt + lastCompletion` size at which this turn's model gets its older messages summarized. */
+  compactAt?: number
   completion: number
   total: number
   reasoning: number
@@ -208,7 +214,25 @@ function compareMetricRows(a: ProviderMetricRow, b: ProviderMetricRow): number {
   if (kind !== 0) return kind
   const nest = metricParent(a.key).localeCompare(metricParent(b.key))
   if (nest !== 0) return nest
+  const named = namedMetricRank(a.key) - namedMetricRank(b.key)
+  if (named !== 0) return named
   return a.label.localeCompare(b.label)
+}
+
+/**
+ * Ollama's native timings, named for what the operator waits on rather than the daemon's field
+ * names, and listed whole first and then in the order the phases happen.
+ */
+const NAMED_METRICS: ReadonlyArray<readonly [key: string, label: string]> = [
+  ['total_duration', 'Model time'],
+  ['load_duration', 'Loading the model'],
+  ['prompt_eval_duration', 'Reading the prompt'],
+  ['eval_duration', 'Writing the reply'],
+]
+
+function namedMetricRank(key: string): number {
+  const i = NAMED_METRICS.findIndex(([k]) => k === key)
+  return i < 0 ? NAMED_METRICS.length : i
 }
 
 function metricParent(key: string): string {
@@ -243,6 +267,8 @@ function metricLeaf(key: string): string {
  * that path verbatim for anyone who needs it.
  */
 function providerMetricLabel(key: string, qualify: boolean): string {
+  const named = NAMED_METRICS.find(([k]) => k === key)
+  if (named) return named[1]
   const leaf = metricLeaf(key).replaceAll('_', ' ').trim()
   if (!leaf) return key
   const dot = key.lastIndexOf('.')

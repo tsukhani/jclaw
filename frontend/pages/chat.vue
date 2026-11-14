@@ -379,6 +379,13 @@ const {
   conversationCostSummary,
 } = useChatUsageMeter(displayMessages, streaming, earlierUsages)
 
+// A summary point worked out on another model's window would misstate the one now selected.
+const meterCompactAt = computed(() => {
+  const u = contextUsage.value
+  const window = (selectedModelInfo.value?.contextWindow as number | undefined) ?? null
+  return u.compactAt != null && u.measuredWindow === window ? u.compactAt : null
+})
+
 // The meter's counts come from the open conversation's row, fetched when the sidebar's 50 do not include it.
 const meterConversation = useOpenConversationRow(selectedConvoId, currentConversation, streaming)
 
@@ -917,9 +924,8 @@ function exportConversation() {
             v-if="!isEmptyChat"
             :prompt-tokens="contextUsage.prompt"
             :completion-tokens="contextUsage.completion"
-            :reasoning-tokens="contextUsage.reasoning"
-            :cached-tokens="contextUsage.cached"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
+            :compact-at="meterCompactAt"
             :cumulative-tokens="conversationCumulativeTokens"
             :message-count="meterConversation?.messageRowCount ?? null"
             :user-prompt-count="meterConversation?.userPromptCount ?? null"

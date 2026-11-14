@@ -1094,7 +1094,7 @@ const groupedProviders = computed(() => {
                 label="About useNativeApi"
                 content-class="w-64 font-mono"
               >
-                Send chat requests to Ollama's native <code class="font-mono text-fg-primary">/api/chat</code> instead of the OpenAI-compatible endpoint. Adds the daemon's per-request timings (model load, prompt evaluation, generation) to each message's usage popover and to Chat Performance. A local daemon reports all of them; Ollama Cloud reports total duration only.
+                Send chat requests to Ollama's native <code class="font-mono text-fg-primary">/api/chat</code> instead of the OpenAI-compatible endpoint. Adds the daemon's own timings (loading the model, reading the prompt, writing the reply) to each message's usage popover and to Chat Performance. A local daemon reports all of them; Ollama Cloud reports the model time only.
               </InfoTip>
             </span>
             <button

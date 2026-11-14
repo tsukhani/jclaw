@@ -25,11 +25,20 @@ export interface ContextUsage {
   completion: number
   reasoning: number
   cached: number
+  /** Where the turn's model summarizes, and the window it was worked out on: valid only while that model is selected. */
+  compactAt: number | null
+  measuredWindow: number | null
 }
 
-/** A mid-turn reading: the prompt alone, since the call's completion is already inside the next call's prompt. */
-function liveContextUsage(tokens: number): MessageUsage {
-  return { prompt: tokens, lastPrompt: tokens, completion: 0, total: tokens, reasoning: 0, cached: 0, durationMs: 0 }
+/**
+ * A mid-turn reading: the prompt alone, since the call's completion is already inside the next call's prompt. The
+ * summary point is the previous turn's, so the meter keeps its scale while the reply streams.
+ */
+function liveContextUsage(tokens: number, prior: MessageUsage | null): MessageUsage {
+  return {
+    prompt: tokens, lastPrompt: tokens, completion: 0, total: tokens, reasoning: 0, cached: 0, durationMs: 0,
+    compactAt: prior?.compactAt, contextWindow: prior?.contextWindow,
+  }
 }
 
 export function useChatUsageMeter(
@@ -81,7 +90,7 @@ export function useChatUsageMeter(
       const m = msgs[i]
       if (m?.role !== 'assistant') continue
       if (m.usage) return m.usage
-      if (m._contextTokens) return liveContextUsage(m._contextTokens)
+      if (m._contextTokens) return liveContextUsage(m._contextTokens, previousAssistantUsage(i))
     }
     return null
   })
@@ -95,6 +104,8 @@ export function useChatUsageMeter(
       completion: u?.lastCompletion ?? u?.completion ?? 0,
       reasoning: u?.lastReasoning ?? u?.reasoning ?? 0,
       cached: u?.lastCached ?? u?.cached ?? 0,
+      compactAt: u?.compactAt ?? null,
+      measuredWindow: u?.contextWindow ?? null,
     }
   })
 

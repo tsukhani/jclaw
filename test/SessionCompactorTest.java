@@ -1,4 +1,8 @@
 import agents.MessageHydrator;
+import agents.UsageMetricsBuilder;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.Choice;
@@ -269,6 +273,50 @@ class SessionCompactorTest extends UnitTest {
         assertFalse(SessionCompactor.nearCompaction(opens - 1, 0, mi));
         assertFalse(SessionCompactor.nearCompaction(Integer.MAX_VALUE - 1, 0, null));
         assertFalse(SessionCompactor.nearCompaction(Integer.MAX_VALUE - 1, 0, new ModelInfo("m", "M", 0, 0, false)));
+    }
+
+    // ─── the point the context meter fills toward ──────────────────────
+
+    @Test
+    void theUsageRecordCarriesTheSizeAtWhichTheReplysModelIsSummarized() {
+        var large = new ModelInfo("m", "M", 1_048_576, 8192, false);
+        var mid = new ModelInfo("m", "M", 200_000, 8192, false);
+
+        assertEquals(150_000, compactAtOf(large), "the 150,000 cap comes before half of a 1M window");
+        assertEquals(100_000, compactAtOf(mid), "half the window comes before the cap");
+        assertEquals(150_000, compactAtOf(null), "no known window leaves the cap alone");
+    }
+
+    @Test
+    void withTheTriggerOffTheMeterFillsTowardTheWindowRuleAndWithNoWindowNothingIsRecorded() {
+        ConfigService.set(SessionCompactor.TRIGGER_PERCENT_KEY, "0");
+        ConfigService.set(SessionCompactor.TRIGGER_TOKENS_KEY, "0");
+        var mi = new ModelInfo("m", "M", 200_000, 8192, false);
+
+        assertEquals(200_000 - SessionCompactor.effectiveReserveTokens() + 1, compactAtOf(mi));
+        var unknown = usageJsonOf(null);
+        assertFalse(unknown.has("compactAt"), "nothing can fire, so the meter has no point to fill toward: " + unknown);
+    }
+
+    @Test
+    void theCompactionPointIsWhereTheBackgroundMarginIsTakenFrom() {
+        var large = new ModelInfo("m", "M", 1_000_000, 8192, false);
+        int point = SessionCompactor.compactionPoint(large, 0);
+
+        assertEquals(150_000, point);
+        assertTrue(SessionCompactor.nearCompaction(point - point / 10, 0, large));
+        assertFalse(SessionCompactor.nearCompaction(point - point / 10 - 1, 0, large));
+    }
+
+    private static int compactAtOf(ModelInfo mi) {
+        return usageJsonOf(mi).get("compactAt").getAsInt();
+    }
+
+    private static JsonObject usageJsonOf(ModelInfo mi) {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(LlmProvider.StreamAccumulator.builder().usage(new Usage(100, 10, 110, 0, 0, 0)).build());
+        return JsonParser.parseString(UsageMetricsBuilder.buildUsageJson(turn, mi, System.currentTimeMillis(), null, null))
+                .getAsJsonObject();
     }
 
     @Test

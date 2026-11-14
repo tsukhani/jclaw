@@ -14,10 +14,12 @@ import {
   TrashIcon,
   UsersIcon,
 } from '@heroicons/vue/24/outline'
-import { formatTokensPerSec, renderMarkdown } from '~/utils/chat-markdown'
+import { averageSpeed, formatTokensPerSec, renderMarkdown, writingSpeed } from '~/utils/chat-markdown'
 import { vStructureViewers } from '~/utils/structure/directive'
 import { vVisualFigures } from '~/utils/visual/directive'
-import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/utils/usage-cost'
+import {
+  formatNanosDuration, formatUsageCost, formatUsageCostTooltip, providerMetricRows, type MessageUsage,
+} from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
 import { QUOTE_KIND_LABELS, splitQuotedReply, type QuotedReplyParts } from '~/utils/quoted-reply'
@@ -113,6 +115,30 @@ function formatModelLabel(msg: Message): string {
   const u = msg.usage
   if (!u) return '?'
   return u.modelProvider ? `${u.modelProvider}/${u.modelId ?? '?'}` : (u.modelId ?? '?')
+}
+
+/** "Took 3.00 s, in 2 model calls.", under the usage card's title; empty for a turn that was not timed. */
+function usageTookLine(u: MessageUsage): string {
+  if (!u.durationMs) return ''
+  const took = `Took ${formatNanosDuration(u.durationMs * 1e6)}`
+  if (!u.calls) return `${took}.`
+  return `${took}, in ${u.calls === 1 ? 'one model call' : `${u.calls.toLocaleString()} model calls`}.`
+}
+
+function usageReadNotes(u: MessageUsage): string[] {
+  const notes: string[] = []
+  if ((u.calls ?? 0) > 1) notes.push(`Each model call rereads the conversation, so Read adds up all ${u.calls}.`)
+  if (u.cached) notes.push('Reused tokens were read before, so they usually cost less.')
+  return notes
+}
+
+/** The final call's prompt and completion, the reading the header's context meter takes. */
+function memoryAfter(u: MessageUsage): number {
+  return (u.lastPrompt ?? 0) + (u.lastCompletion ?? 0)
+}
+
+function speedLabel(tokensPerSecond: number | null): string {
+  return tokensPerSecond == null ? '' : `${tokensPerSecond.toFixed(1)} tokens/s`
 }
 
 // Read-aloud (TTS) playback, shared across messages so only one plays at a time
@@ -668,139 +694,188 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
               side="top"
               align="start"
               :side-offset="8"
-              class="w-max min-w-52 max-w-[calc(100vw-2rem)] px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+              class="w-max min-w-60 max-w-[calc(100vw-2rem)] px-3 py-2.5 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
               @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
               @mouseleave="emit('set-tok-stats-hover-key', null)"
               @focusin="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
               @focusout="emit('set-tok-stats-hover-key', null)"
             >
-              <dl class="grid gap-1.5 text-xs">
-                <div
-                  v-if="msg.usage.modelId"
-                  class="flex items-center justify-between gap-4"
-                >
-                  <dt class="text-muted-foreground">
-                    Model
-                  </dt>
-                  <dd class="font-mono text-right break-all">
+              <!-- A note is w-0 min-w-full so its sentence wraps to the card rather than widening it. -->
+              <div
+                data-testid="usage-card"
+                class="grid gap-2 text-xs"
+              >
+                <div>
+                  <p class="font-medium text-fg-strong">
+                    This reply
+                  </p>
+                  <p
+                    v-if="msg.usage.modelId"
+                    class="font-mono text-muted-foreground break-all"
+                  >
                     {{ formatModelLabel(msg) }}
-                  </dd>
+                  </p>
+                  <p
+                    v-if="usageTookLine(msg.usage)"
+                    class="text-muted-foreground"
+                  >
+                    {{ usageTookLine(msg.usage) }}
+                  </p>
                 </div>
-                <div
-                  v-if="msg.usage.route"
-                  class="flex items-center justify-between gap-4"
-                  :title="msg.usage.route.reason"
+                <dl class="grid gap-1.5">
+                  <div
+                    v-if="msg.usage.route"
+                    class="flex items-center justify-between gap-4"
+                    :title="msg.usage.route.reason"
+                  >
+                    <dt class="text-muted-foreground">
+                      Chosen by
+                    </dt>
+                    <dd class="text-right">
+                      Auto · {{ routeClassLabel(msg.usage.route) }}{{ msg.usage.route.failover ? ' (failover)' : '' }}
+                    </dd>
+                  </div>
+                  <div class="flex items-center justify-between gap-4">
+                    <dt class="text-muted-foreground">
+                      Read
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ msg.usage.prompt.toLocaleString() }} tokens
+                    </dd>
+                  </div>
+                  <div
+                    v-if="msg.usage.cached"
+                    class="flex items-center justify-between gap-4 pl-3"
+                  >
+                    <dt class="text-muted-foreground">
+                      reused from earlier
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ msg.usage.cached.toLocaleString() }}
+                    </dd>
+                  </div>
+                  <div class="flex items-center justify-between gap-4">
+                    <dt class="text-muted-foreground">
+                      Wrote
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ msg.usage.completion.toLocaleString() }} tokens
+                    </dd>
+                  </div>
+                  <div
+                    v-if="msg.usage.reasoning"
+                    class="flex items-center justify-between gap-4"
+                  >
+                    <dt class="text-muted-foreground">
+                      Thinking
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ msg.usage.reasoning.toLocaleString() }} tokens
+                    </dd>
+                  </div>
+                </dl>
+                <p
+                  v-for="note in usageReadNotes(msg.usage)"
+                  :key="note"
+                  class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground"
                 >
-                  <dt class="text-muted-foreground">
-                    Route
-                  </dt>
-                  <dd class="text-right">
-                    Auto · {{ routeClassLabel(msg.usage.route) }}{{ msg.usage.route.failover ? ' (failover)' : '' }}
-                  </dd>
-                </div>
+                  {{ note }}
+                </p>
+                <template v-if="msg.usage.lastPrompt != null">
+                  <div
+                    aria-hidden="true"
+                    class="border-t border-neutral-200 dark:border-neutral-700/50"
+                  />
+                  <dl class="grid gap-1.5">
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">
+                        Memory after this reply
+                      </dt>
+                      <dd class="font-mono tabular-nums">
+                        {{ memoryAfter(msg.usage).toLocaleString() }} tokens
+                      </dd>
+                    </div>
+                  </dl>
+                  <p class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground">
+                    The meter at the top shows this for the latest reply.
+                  </p>
+                </template>
                 <div
-                  v-if="msg.usage.modelId"
                   aria-hidden="true"
-                  class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+                  class="border-t border-neutral-200 dark:border-neutral-700/50"
                 />
-                <div class="flex items-center justify-between gap-4">
-                  <dt class="text-muted-foreground">
-                    Prompt tokens
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ msg.usage.prompt.toLocaleString() }}
-                  </dd>
-                </div>
-                <div
-                  v-if="msg.usage.reasoning"
-                  class="flex items-center justify-between gap-4"
+                <dl class="grid gap-1.5">
+                  <div
+                    v-if="writingSpeed(msg.usage) != null"
+                    class="flex items-center justify-between gap-4"
+                  >
+                    <dt class="text-muted-foreground">
+                      Writing speed
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ speedLabel(writingSpeed(msg.usage)) }}
+                    </dd>
+                  </div>
+                  <div
+                    v-else-if="averageSpeed(msg.usage) != null"
+                    class="flex items-center justify-between gap-4"
+                  >
+                    <dt class="text-muted-foreground">
+                      Average speed
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ speedLabel(averageSpeed(msg.usage)) }}
+                    </dd>
+                  </div>
+                  <div
+                    v-if="formatUsageCost(msg.usage)"
+                    class="flex items-center justify-between gap-4"
+                    :title="formatUsageCostTooltip(msg.usage) ?? undefined"
+                  >
+                    <dt class="text-muted-foreground">
+                      Cost
+                    </dt>
+                    <dd class="font-mono tabular-nums text-amber-700 dark:text-amber-400">
+                      {{ formatUsageCost(msg.usage) }}
+                    </dd>
+                  </div>
+                </dl>
+                <p
+                  v-if="writingSpeed(msg.usage) == null && averageSpeed(msg.usage) != null"
+                  class="w-0 min-w-full text-[11px] leading-relaxed text-muted-foreground"
                 >
-                  <dt class="text-muted-foreground">
-                    Thinking tokens
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ msg.usage.reasoning.toLocaleString() }}
-                  </dd>
-                </div>
-                <div
-                  v-if="msg.usage.cached"
-                  class="flex items-center justify-between gap-4"
-                >
-                  <dt class="text-muted-foreground">
-                    Cached tokens
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ msg.usage.cached.toLocaleString() }}
-                  </dd>
-                </div>
-                <div class="flex items-center justify-between gap-4">
-                  <dt class="text-muted-foreground">
-                    Completion
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ msg.usage.completion.toLocaleString() }}
-                  </dd>
-                </div>
-                <div
-                  aria-hidden="true"
-                  class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
-                />
-                <div class="flex items-center justify-between gap-4">
-                  <dt class="text-muted-foreground">
-                    Speed
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ formatTokensPerSec(msg.usage) }}
-                  </dd>
-                </div>
-                <div
-                  v-if="msg.usage.durationMs"
-                  class="flex items-center justify-between gap-4"
-                >
-                  <dt class="text-muted-foreground">
-                    Total
-                  </dt>
-                  <dd class="font-mono tabular-nums">
-                    {{ (msg.usage.durationMs / 1000).toFixed(2) }}s
-                  </dd>
-                </div>
-                <div
-                  v-if="formatUsageCost(msg.usage)"
-                  class="flex items-center justify-between gap-4"
-                  :title="formatUsageCostTooltip(msg.usage) ?? undefined"
-                >
-                  <dt class="text-muted-foreground">
-                    Cost
-                  </dt>
-                  <dd class="font-mono tabular-nums text-amber-700 dark:text-amber-400">
-                    {{ formatUsageCost(msg.usage) }}
-                  </dd>
-                </div>
+                  Output over the whole reply's time, the wait for the first word included.
+                </p>
                 <!--
                   JCLAW-1147: whatever this provider reports beyond the OpenAI usage
                   schema. Rendered last and only when present, so a provider that says
-                  nothing extra leaves the popover exactly as it was.
+                  nothing extra adds no section.
                 -->
                 <template v-if="providerMetricRows(msg.usage).length">
                   <div
                     aria-hidden="true"
-                    class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+                    class="border-t border-neutral-200 dark:border-neutral-700/50"
                   />
-                  <div
-                    v-for="row in providerMetricRows(msg.usage)"
-                    :key="row.key"
-                    class="flex items-center justify-between gap-4"
-                    :title="row.key"
-                  >
-                    <dt class="text-muted-foreground">
-                      {{ row.label }}
-                    </dt>
-                    <dd class="font-mono tabular-nums">
-                      {{ row.value }}
-                    </dd>
-                  </div>
+                  <p class="font-medium text-fg-strong">
+                    Reported by {{ msg.usage.modelProvider ?? 'the provider' }}
+                  </p>
+                  <dl class="grid gap-1.5">
+                    <div
+                      v-for="row in providerMetricRows(msg.usage)"
+                      :key="row.key"
+                      class="flex items-center justify-between gap-4"
+                      :title="row.key"
+                    >
+                      <dt class="text-muted-foreground">
+                        {{ row.label }}
+                      </dt>
+                      <dd class="font-mono tabular-nums">
+                        {{ row.value }}
+                      </dd>
+                    </div>
+                  </dl>
                 </template>
-              </dl>
+              </div>
             </PopoverContent>
           </Popover>
         </div>

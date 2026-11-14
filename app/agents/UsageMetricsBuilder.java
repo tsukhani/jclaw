@@ -8,6 +8,7 @@ import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.SessionCompactor;
 
 import java.time.Duration;
 
@@ -136,6 +137,8 @@ public final class UsageMetricsBuilder {
         // JF-151: only the first call can read what the previous turn left in the provider's cache.
         usageMap.addProperty("firstPrompt", providerUsage ? turnUsage.firstPromptTokens() : turnUsage.firstJtokkitPromptTokens());
         usageMap.addProperty("firstCached", providerUsage ? turnUsage.firstCachedTokens() : 0);
+        usageMap.addProperty("calls", turnUsage.calls());
+        if (turnUsage.lastWriteMs() > 0L) usageMap.addProperty("lastWriteMs", turnUsage.lastWriteMs());
         usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens() : 0);
         // JCLAW-901: only emitted when the provider actually reported a cost. Absent
         // rather than 0 on purpose — a hard 0 cannot be told apart from "this call was
@@ -153,6 +156,9 @@ public final class UsageMetricsBuilder {
         addProviderMetrics(usageMap, turnUsage);
 
         addModelInfoFields(usageMap, modelInfo);
+        // CompactionGate.afterReply measures lastPrompt + lastCompletion with nothing fixed, so the meter does too.
+        int compactAt = SessionCompactor.compactionPoint(modelInfo, 0);
+        if (compactAt < Integer.MAX_VALUE) usageMap.addProperty("compactAt", compactAt);
         addResolvedModelIdentity(usageMap, agent, conversation);
         addDiscardedCall(usageMap, turnUsage.discarded());
         return gson.toJson(usageMap);

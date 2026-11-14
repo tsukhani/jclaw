@@ -5,58 +5,55 @@ import ChatContextMeter from '~/components/ChatContextMeter.vue'
 /**
  * JCLAW-314 — ChatContextMeter coverage.
  *
- * The meter renders a token readout (used / capacity) and a thin progress
- * bar. Its primary responsibility is mapping numeric usage to a stable
- * label + bar width without bumping into divide-by-zero, undefined props,
- * or the 100 percent ceiling. Tests pin the three sample-point contract
- * from the JIRA acceptance: 0%, 50%, and 95%.
- *
- * Anchors via data-testid attributes on the readout and the inner bar span
- * so assertions don't break on adjacent class/style refactors.
+ * The meter renders a token readout (used / what it fills toward) and a thin
+ * progress bar, and its hover card says in words what the reading means.
+ * Anchors via data-testid attributes on the readout, the bar, the percent and
+ * the summary so assertions don't break on adjacent class/style refactors.
  */
+
+type MeterProps = InstanceType<typeof ChatContextMeter>['$props']
+
+async function openCard(props: MeterProps) {
+  const component = await mountSuspended(ChatContextMeter, { props })
+  const trigger = component.find('button')
+  await trigger.trigger('mouseenter')
+  return { component, trigger }
+}
+
+/** The hover card's rows as label → value, read from the teleported popover. */
+function rows(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    [...document.body.querySelectorAll('dl > div')]
+      .map(row => [row.querySelector('dt')?.textContent?.trim(), row.querySelector('dd')?.textContent?.trim()])
+      .filter(([label]) => label),
+  )
+}
+
+function text(testId: string): string | undefined {
+  return document.body.querySelector(`[data-testid="${testId}"]`)?.textContent?.trim()
+}
 
 describe('ChatContextMeter — percentage rendering at 0 / 50 / 95 percent', () => {
   it('renders 0 percent for zero prompt+completion against a non-zero capacity', async () => {
     const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 0,
-        completionTokens: 0,
-        contextWindow: 100_000,
-      },
+      props: { promptTokens: 0, completionTokens: 0, contextWindow: 100_000 },
     })
-    // Trigger button shows "used / capacity-kFormatted"; on zero usage the
-    // left side is "0" and the bar width style sits at 0%.
     expect(component.find('[data-testid="context-readout"]').text()).toBe('0 / 100.0k')
-    // The bar uses an inline style with the computed width — 0% means a
-    // collapsed bar.
     expect(component.find('[data-testid="context-bar"]').attributes('style')).toContain('width: 0%')
   })
 
   it('renders 50 percent for half-full context (50k of 100k)', async () => {
     const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 30_000,
-        completionTokens: 20_000,
-        contextWindow: 100_000,
-      },
+      props: { promptTokens: 30_000, completionTokens: 20_000, contextWindow: 100_000 },
     })
-    // 30k + 20k = 50k used. The trigger uses toLocaleString() on the total,
-    // so "50,000 / 100.0k" is the canonical readout.
     expect(component.find('[data-testid="context-readout"]').text()).toBe('50,000 / 100.0k')
-    // Width style is the computed percent — 50% in this scenario.
     expect(component.find('[data-testid="context-bar"]').attributes('style')).toContain('width: 50%')
   })
 
-  it('renders the >=90 percent red coloring at 95 percent fill', async () => {
+  it('renders the red coloring at 95 percent of the model window', async () => {
     const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 90_000,
-        completionTokens: 5_000,
-        contextWindow: 100_000,
-      },
+      props: { promptTokens: 90_000, completionTokens: 5_000, contextWindow: 100_000 },
     })
-    // 95k of 100k -> 95% used. The component's color rule is
-    //   p >= 90 -> bg-danger, p >= 70 -> bg-warning, else bg-ok
     expect(component.find('[data-testid="context-readout"]').text()).toBe('95,000 / 100.0k')
     const bar = component.find('[data-testid="context-bar"]')
     expect(bar.attributes('style')).toContain('width: 95%')
@@ -64,31 +61,77 @@ describe('ChatContextMeter — percentage rendering at 0 / 50 / 95 percent', () 
   })
 })
 
-describe('ChatContextMeter — capacity handling edge cases', () => {
-  it('renders an em-dash for capacity when no contextWindow is provided', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: null,
-      },
+describe('ChatContextMeter — filling toward the summary point', () => {
+  it('fills toward where older messages get summarized, not the model window', async () => {
+    const { component, trigger } = await openCard({
+      promptTokens: 28_025, completionTokens: 179, contextWindow: 1_048_576, compactAt: 150_000,
     })
-    // No capacity -> percent computes to 0 and the right-hand label shows
-    // an em-dash. Trigger text reads "150 / —".
-    expect(component.find('[data-testid="context-readout"]').text()).toBe('150 / —')
-    expect(component.find('[data-testid="context-bar"]').attributes('style')).toContain('width: 0%')
+
+    expect(component.find('[data-testid="context-readout"]').text()).toBe('28,204 / 150.0k')
+    expect(component.find('[data-testid="context-bar"]').attributes('style'))
+      .toContain(`width: ${(28_204 / 150_000) * 100}%`)
+    expect(text('context-percent')).toBe('19% full')
+    expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 28,204 tokens right now. '
+      + 'At about 150,000, JClaw summarizes the oldest messages to make room.')
+    expect(rows()['Model\'s limit']).toBe('1,048,576 tokens')
+    await trigger.trigger('mouseleave')
   })
 
+  it('turns amber at 80 percent of the summary point and not one token before', async () => {
+    const at = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 120_000, completionTokens: 0, contextWindow: 1_048_576, compactAt: 150_000 },
+    })
+    const below = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 119_999, completionTokens: 0, contextWindow: 1_048_576, compactAt: 150_000 },
+    })
+
+    expect(at.find('[data-testid="context-bar"]').classes()).toContain('bg-warning')
+    expect(below.find('[data-testid="context-bar"]').classes()).toContain('bg-ok')
+  })
+
+  it('turns red only near the model window, where messages are cut rather than summarized', async () => {
+    const at = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 90_000, completionTokens: 0, contextWindow: 100_000 },
+    })
+    const below = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 89_999, completionTokens: 0, contextWindow: 100_000 },
+    })
+
+    expect(at.find('[data-testid="context-bar"]').classes()).toContain('bg-danger')
+    expect(below.find('[data-testid="context-bar"]').classes()).toContain('bg-warning')
+  })
+
+  it('names the model window as the limit when no summary point is known, and has no separate limit row', async () => {
+    const { trigger } = await openCard({ promptTokens: 1_000, completionTokens: 200, contextWindow: 100_000 })
+
+    expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 1,200 tokens right now. '
+      + 'This model can take 100,000 at most.')
+    expect(rows()['Model\'s limit']).toBeUndefined()
+    await trigger.trigger('mouseleave')
+  })
+
+  it('says only what it holds when neither a summary point nor a window is known', async () => {
+    const { component, trigger } = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: null })
+
+    expect(component.find('[data-testid="context-readout"]').text()).toBe('150 / —')
+    expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 150 tokens right now.')
+    expect(text('context-percent')).toBeUndefined()
+    await trigger.trigger('mouseleave')
+  })
+
+  it('says there is nothing to measure before the first reply', async () => {
+    const { trigger } = await openCard({ promptTokens: 0, completionTokens: 0, contextWindow: 100_000, compactAt: 50_000 })
+
+    expect(text('context-summary')).toBe('Nothing to measure until the agent replies.')
+    await trigger.trigger('mouseleave')
+  })
+})
+
+describe('ChatContextMeter — capacity handling edge cases', () => {
   it('clamps to 100 percent when used tokens exceed the context window', async () => {
     const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 150_000,
-        completionTokens: 0,
-        contextWindow: 100_000,
-      },
+      props: { promptTokens: 150_000, completionTokens: 0, contextWindow: 100_000 },
     })
-    // The percent computation is Math.min(100, total/capacity * 100) — the
-    // bar must not visually overflow even when usage exceeds capacity.
     const bar = component.find('[data-testid="context-bar"]')
     expect(bar.attributes('style')).toContain('width: 100%')
     expect(bar.classes()).toContain('bg-danger')
@@ -96,214 +139,79 @@ describe('ChatContextMeter — capacity handling edge cases', () => {
 
   it('treats nullish promptTokens/completionTokens as zero', async () => {
     const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: null,
-        completionTokens: null,
-        contextWindow: 50_000,
-      },
+      props: { promptTokens: null, completionTokens: null, contextWindow: 50_000 },
     })
-    // Both null -> total 0 -> displayed as "0 / 50.0k"; no crash.
     expect(component.find('[data-testid="context-readout"]').text()).toBe('0 / 50.0k')
   })
 })
 
-describe('ChatContextMeter — popover content', () => {
-  it('renders prompt / completion / total breakdown rows in the popover', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 1_000,
-        completionTokens: 200,
-        contextWindow: 100_000,
-      },
+describe('ChatContextMeter — the conversation so far', () => {
+  it('shows replies and cost when the cost summary has them', async () => {
+    const { trigger } = await openCard({
+      promptTokens: 100, completionTokens: 50, contextWindow: 50_000, costLabel: '$0.0042', turnCount: 3,
     })
-    // The PopoverContent is rendered conditionally with v-if when the
-    // Popover root is open; the component HTML still contains the dl
-    // body. Force open via the exposed trigger.
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    // The popover may teleport; query both the component html and document body.
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('Prompt tokens')
-    expect(html).toContain('Completion')
-    expect(html).toContain('Current context')
-    // Cleanup: close popover so leaked content doesn't bleed into the next test.
+
+    expect(rows().Replies).toBe('3')
+    expect(rows().Cost).toBe('$0.0042')
     await trigger.trigger('mouseleave')
   })
 
-  it('shows the cost row only when costLabel is provided', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-        costLabel: '$0.0042',
-        turnCount: 3,
-      },
+  it('shows the tokens processed, with what that number counts, only when there are any', async () => {
+    const some = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, cumulativeTokens: 9_876 })
+    expect(rows()['Tokens processed']).toBe('9,876')
+    expect(document.body.textContent).toContain('Every reread counts, as providers bill it.')
+    await some.trigger.trigger('mouseleave')
+
+    const none = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, cumulativeTokens: 0 })
+    expect(rows()['Tokens processed']).toBeUndefined()
+    await none.trigger.trigger('mouseleave')
+  })
+
+  it('shows messages, your messages and summaries, zero included', async () => {
+    const { trigger } = await openCard({
+      promptTokens: 100, completionTokens: 50, contextWindow: 50_000, messageCount: 1234, userPromptCount: 56, compactionCount: 0,
     })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('$0.0042')
-    expect(html).toContain('Turns')
+
+    expect(rows()['All saved messages']).toBe('1,234')
+    expect(rows()['Your messages']).toBe('56')
+    expect(rows()['Summarized so far']).toBe('Not yet')
     await trigger.trigger('mouseleave')
   })
 
-  it('shows the thinking-tokens row when reasoningTokens > 0', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        reasoningTokens: 25,
-        contextWindow: 50_000,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('Thinking tokens')
-    await trigger.trigger('mouseleave')
-  })
+  it('counts summaries in words: once, then a number of times', async () => {
+    const once = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, compactionCount: 1 })
+    expect(rows()['Summarized so far']).toBe('Once')
+    await once.trigger.trigger('mouseleave')
 
-  it('shows the cached-tokens row when cachedTokens > 0', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        cachedTokens: 30,
-        contextWindow: 50_000,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('Cached tokens')
-    await trigger.trigger('mouseleave')
-  })
-
-  it('shows the conversation-total row when cumulativeTokens > 0', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-        cumulativeTokens: 9_876,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('Conversation total')
-    expect(html).toContain('9,876')
-    await trigger.trigger('mouseleave')
-  })
-
-  it('hides the conversation-total row when its value is zero', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-        cumulativeTokens: 0,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).not.toContain('Conversation total')
-    await trigger.trigger('mouseleave')
-  })
-
-  it('shows messages, prompts and compactions as numbers, zero included', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-        messageCount: 1234,
-        userPromptCount: 56,
-        compactionCount: 0,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const rows = Object.fromEntries(
-      [...document.body.querySelectorAll('dl > div')]
-        .map(row => [row.querySelector('dt')?.textContent?.trim(), row.querySelector('dd')?.textContent?.trim()])
-        .filter(([label]) => label),
-    )
-    expect(rows.Messages).toBe('1,234')
-    expect(rows.Prompts).toBe('56')
-    expect(rows.Compactions).toBe('0')
-    await trigger.trigger('mouseleave')
+    const twice = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, compactionCount: 2 })
+    expect(rows()['Summarized so far']).toBe('2 times')
+    await twice.trigger.trigger('mouseleave')
   })
 
   it('shows no count it has no value for, rather than a zero', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: { promptTokens: 100, completionTokens: 50, contextWindow: 50_000, messageCount: null, userPromptCount: null, compactionCount: null },
+    const { trigger } = await openCard({
+      promptTokens: 100, completionTokens: 50, contextWindow: 50_000, messageCount: null, userPromptCount: null, compactionCount: null,
     })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).not.toContain('Messages')
-    expect(html).not.toContain('Prompts')
-    expect(html).not.toContain('Compactions')
-    await trigger.trigger('mouseleave')
-  })
 
-  it('shows the compactions row when compactionCount > 0', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-        compactionCount: 2,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('Compactions')
-    expect(document.body.textContent).toMatch(/Compactions\s*2/)
+    expect(rows()['All saved messages']).toBeUndefined()
+    expect(rows()['Your messages']).toBeUndefined()
+    expect(rows()['Summarized so far']).toBeUndefined()
+    expect(document.body.textContent).not.toContain('So far in this conversation')
     await trigger.trigger('mouseleave')
   })
 })
 
 describe('ChatContextMeter — trigger button interactions', () => {
   it('opens the popover on mouseenter and closes on mouseleave', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 100,
-        completionTokens: 50,
-        contextWindow: 50_000,
-      },
-    })
-    const trigger = component.find('button')
-    // Just exercise the handler chain — assertion via no-throw + popover render.
-    await trigger.trigger('mouseenter')
-    const openedHtml = component.html() + document.body.innerHTML
-    expect(openedHtml).toContain('Prompt tokens')
+    const { component, trigger } = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000 })
+    expect(component.html() + document.body.innerHTML).toContain('Conversation memory')
     await trigger.trigger('mouseleave')
-    // After mouseleave the handleMouseLeave path ran (would have thrown
-    // if the ref was wrong); we don't assert focus because Popover's
-    // Teleport + jsdom focus handling is unreliable.
+    // We don't assert focus because Popover's Teleport + jsdom focus handling is unreliable.
     await trigger.trigger('focus')
     await trigger.trigger('blur')
   })
 
-  it('uses amber bar coloring between 70 and 90 percent', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        promptTokens: 80_000,
-        completionTokens: 0,
-        contextWindow: 100_000,
-      },
-    })
-    const bar = component.find('[data-testid="context-bar"]')
-    expect(bar.classes()).toContain('bg-warning')
-  })
-
-  it('renders the trigger right-side as em-dash when capacity is null but uses kFormat when small', async () => {
-    // capacity 100 stays raw "100"; 1000 becomes "1k"; in-between rounds.
+  it('renders the trigger right-side raw when small and kFormatted from 1000', async () => {
     const c1 = await mountSuspended(ChatContextMeter, {
       props: { promptTokens: 0, completionTokens: 0, contextWindow: 100 },
     })
@@ -316,18 +224,8 @@ describe('ChatContextMeter — trigger button interactions', () => {
   })
 
   it('formats sub-1% usage with one decimal place in the percent label', async () => {
-    const component = await mountSuspended(ChatContextMeter, {
-      props: {
-        // 200/100000 = 0.2% -> "0.2%" not "0%".
-        promptTokens: 200,
-        completionTokens: 0,
-        contextWindow: 100_000,
-      },
-    })
-    const trigger = component.find('button')
-    await trigger.trigger('mouseenter')
-    const html = component.html() + document.body.innerHTML
-    expect(html).toContain('0.2%')
+    const { trigger } = await openCard({ promptTokens: 200, completionTokens: 0, contextWindow: 100_000 })
+    expect(text('context-percent')).toBe('0.2% full')
     await trigger.trigger('mouseleave')
   })
 })

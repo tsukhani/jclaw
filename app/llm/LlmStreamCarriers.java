@@ -92,6 +92,8 @@ interface LlmStreamCarriers {
          * tool-execution gap between rounds).
          */
         volatile long firstContentNanos = 0L;
+        /** nanoTime the call ended, finished or failed; 0 while it runs. */
+        volatile long completedNanos = 0L;
         private final CountDownLatch latch = new CountDownLatch(1);
         @SuppressWarnings("java:S3077") // a Runnable swapped whole, never changed in place
         private volatile @Nullable Runnable cancel;
@@ -184,7 +186,18 @@ interface LlmStreamCarriers {
             return (reasoningEndNanos - reasoningStartNanos) / 1_000_000L;
         }
 
-        void markComplete() { complete = true; latch.countDown(); }
+        /**
+         * Milliseconds from the call's first thinking or visible chunk to its end: how long the model spent writing,
+         * without the wait for its first token. 0 when it streamed neither, as a call that only names tools does.
+         */
+        public long writeMs() {
+            long start = reasoningStartNanos == 0L ? firstContentNanos
+                    : firstContentNanos == 0L ? reasoningStartNanos : Math.min(reasoningStartNanos, firstContentNanos);
+            if (start == 0L || completedNanos == 0L) return 0L;
+            return Math.max(0L, (completedNanos - start) / 1_000_000L);
+        }
+
+        void markComplete() { completedNanos = System.nanoTime(); complete = true; latch.countDown(); }
         public void awaitCompletion() throws InterruptedException { latch.await(); }
         public boolean awaitCompletion(long timeoutMs) throws InterruptedException {
             return latch.await(timeoutMs, TimeUnit.MILLISECONDS);
@@ -226,6 +239,15 @@ interface LlmStreamCarriers {
             public Builder promptTokenEstimate(TokenUsageEstimator.ChatRequestTokens estimate) { acc.promptTokenEstimate = estimate; return this; }
             public Builder completionTokenEstimate(TokenUsageEstimator.TokenCount estimate) { acc.completionTokenEstimate = estimate; return this; }
             public Builder reasoningTokenEstimate(TokenUsageEstimator.TokenCount estimate) { acc.reasoningTokenEstimate = estimate; return this; }
+
+            /** The call's first thinking chunk, first visible chunk and end, as nanoTime values; 0 for one it never had. */
+            public Builder timing(long reasoningStartNanos, long firstContentNanos, long completedNanos) {
+                acc.reasoningStartNanos = reasoningStartNanos;
+                acc.reasoningEndNanos = reasoningStartNanos;
+                acc.firstContentNanos = firstContentNanos;
+                acc.completedNanos = completedNanos;
+                return this;
+            }
 
             public StreamAccumulator build() { return acc; }
         }
@@ -301,6 +323,9 @@ interface LlmStreamCarriers {
         int firstPromptTokens;
         int firstJtokkitPromptTokens;
         int firstCachedTokens;
+        /** Model calls folded into the turn, and the last one's {@link StreamAccumulator#writeMs}. */
+        int calls;
+        long lastWriteMs;
         private boolean anyRoundFolded;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
@@ -355,6 +380,8 @@ interface LlmStreamCarriers {
 
         public synchronized void addRound(StreamAccumulator acc) {
             if (acc == null) return;
+            calls++;
+            lastWriteMs = acc.writeMs();
             var u = acc.usage;
             // A first round that reported nothing stays 0: the second round reads what the first just cached.
             if (!anyRoundFolded) {
@@ -458,6 +485,8 @@ interface LlmStreamCarriers {
         public int firstPromptTokens() { return firstPromptTokens; }
         public int firstJtokkitPromptTokens() { return firstJtokkitPromptTokens; }
         public int firstCachedTokens() { return firstCachedTokens; }
+        public int calls() { return calls; }
+        public long lastWriteMs() { return lastWriteMs; }
         public int completionTokens() { return completionTokens; }
         public int totalTokens() { return totalTokens; }
         public int reasoningTokens() { return reasoningTokens; }
