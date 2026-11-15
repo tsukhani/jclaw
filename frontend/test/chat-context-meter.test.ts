@@ -50,6 +50,20 @@ describe('ChatContextMeter — percentage rendering at 0 / 50 / 95 percent', () 
     expect(component.find('[data-testid="context-bar"]').attributes('style')).toContain('width: 50%')
   })
 
+  it('repeats the bar under the card\'s title, in the same fill and color', async () => {
+    const { trigger } = await openCard({ promptTokens: 30_000, completionTokens: 20_000, contextWindow: 100_000 })
+    const bar = document.body.querySelector<HTMLElement>('[data-testid="context-card-bar"]')!
+    expect(bar.style.width).toBe('50%')
+    expect(bar.classList.contains('bg-ok')).toBe(true)
+    await trigger.trigger('mouseleave')
+  })
+
+  it('draws no card bar when there is nothing to fill toward', async () => {
+    const { trigger } = await openCard({ promptTokens: 150, completionTokens: 0 })
+    expect(document.body.querySelector('[data-testid="context-card-bar"]')).toBeNull()
+    await trigger.trigger('mouseleave')
+  })
+
   it('renders the red coloring at 95 percent of the model window', async () => {
     const component = await mountSuspended(ChatContextMeter, {
       props: { promptTokens: 90_000, completionTokens: 5_000, contextWindow: 100_000 },
@@ -189,11 +203,12 @@ describe('ChatContextMeter — the conversation so far', () => {
   it('shows the tokens processed, with what that number counts, only when there are any', async () => {
     const some = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, cumulativeTokens: 9_876 })
     expect(rows()['Tokens processed']).toBe('9,876')
-    expect(document.body.textContent).toContain('Every reread counts, as providers bill it.')
+    expect(document.body.textContent).toContain('Tokens processed counts every reread, as providers bill it.')
     await some.trigger.trigger('mouseleave')
 
     const none = await openCard({ promptTokens: 100, completionTokens: 50, contextWindow: 50_000, cumulativeTokens: 0 })
     expect(rows()['Tokens processed']).toBeUndefined()
+    expect(document.body.textContent).not.toContain('counts every reread')
     await none.trigger.trigger('mouseleave')
   })
 

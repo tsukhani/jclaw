@@ -251,35 +251,56 @@ describe('ChatMessage usage card', () => {
     return { c, rows, lines }
   }
 
-  it('says what the reply took in words, that Read adds up every call, and the memory the meter shows', async () => {
+  it('heads each group, puts its help under its rows, and names a unit once', async () => {
     const { c, rows, lines } = await openCard(31, twoCalls)
 
-    expect(lines.slice(0, 3)).toEqual(['This reply', 'ollama-cloud/deepseek-v4.1-flash', 'Took 3.00 s, in 2 model calls.'])
-    expect(rows.Read).toBe('54,581 tokens')
-    expect(rows['reused from earlier']).toBe('40,448')
-    expect(rows.Wrote).toBe('228 tokens')
-    expect(rows['Memory after this reply']).toBe('28,204 tokens')
-    expect(rows['Writing speed']).toBe('193.5 tokens/s')
-    expect(rows['Model time']).toBe('2.05 s')
-    expect(lines).toContain('Each model call rereads the conversation, so Read adds up all 2.')
-    expect(lines).toContain('Reused tokens were read before, so they usually cost less.')
-    expect(lines).toContain('The meter at the top shows this for the latest reply.')
-    expect(lines).toContain('Reported by ollama-cloud')
+    expect(lines).toEqual([
+      'This reply',
+      'Took 3.00 s',
+      'ollama-cloud/deepseek-v4.1-flash',
+      '2 model calls',
+      'Tokens',
+      'Each model call rereads the conversation, so Read adds up all 2. Reused tokens were read before, so they usually cost less.',
+      'Memory',
+      'The meter at the top shows this for the latest reply.',
+      'Speed',
+      'Reported by ollama-cloud',
+    ])
+    expect(rows).toEqual({
+      'Read': '54,581',
+      'Reused from earlier': '40,448',
+      'Wrote': '228',
+      'After this reply': '28,204 tokens',
+      'Writing speed': '193.5 tokens/s',
+      'Model time': '2.05 s',
+    })
     expect(c.text()).toContain('193.5 tok/s')
     c.unmount()
   })
 
-  it('says a one-call reply made one call, with no reread or reuse note, and shows its thinking', async () => {
+  it('says a one-call reply made one call, with no reread or reuse note, and heads a priced reply\'s speed with its cost', async () => {
     const { c, rows, lines } = await openCard(32, {
       prompt: 900, completion: 300, total: 1_200, reasoning: 12, cached: 0, lastPrompt: 900, lastCompletion: 300,
-      calls: 1, lastWriteMs: 1_000, durationMs: 1_200,
+      calls: 1, lastWriteMs: 1_000, durationMs: 1_200, promptPrice: 1, completionPrice: 2,
     })
 
-    expect(lines).toContain('Took 1.20 s, in one model call.')
-    expect(rows.Thinking).toBe('12 tokens')
-    expect(rows['reused from earlier']).toBeUndefined()
-    expect(lines.filter(l => l?.startsWith('Each model call') || l?.startsWith('Reused tokens'))).toEqual([])
-    expect(rows['Writing speed']).toBe('300.0 tokens/s')
+    expect(lines).toEqual([
+      'This reply',
+      'Took 1.20 s',
+      'One model call',
+      'Tokens',
+      'Memory',
+      'The meter at the top shows this for the latest reply.',
+      'Speed and cost',
+    ])
+    expect(rows).toEqual({
+      'Read': '900',
+      'Wrote': '300',
+      'Thinking': '12',
+      'After this reply': '1,200 tokens',
+      'Writing speed': '300.0 tokens/s',
+      'Cost': '$0.0015',
+    })
     c.unmount()
   })
 
@@ -288,13 +309,25 @@ describe('ChatMessage usage card', () => {
       prompt: 1_000, completion: 50, total: 1_050, reasoning: 0, cached: 0, durationMs: 2_000,
     })
 
-    expect(lines).toContain('Took 2.00 s.')
-    expect(rows['Average speed']).toBe('25.0 tokens/s')
-    expect(rows['Writing speed']).toBeUndefined()
-    expect(rows['Memory after this reply']).toBeUndefined()
-    expect(lines).toContain('Output over the whole reply\'s time, the wait for the first word included.')
-    expect(lines.some(l => l?.startsWith('Reported by'))).toBe(false)
+    expect(lines).toEqual([
+      'This reply',
+      'Took 2.00 s',
+      'Tokens',
+      'Speed',
+      'Output over the whole reply\'s time, the wait for the first word included.',
+    ])
+    expect(rows).toEqual({ 'Read': '1,000', 'Wrote': '50', 'Average speed': '25.0 tokens/s' })
     expect(c.text()).toContain('25.0 tok/s avg')
+    c.unmount()
+  })
+
+  it('names the router\'s choice beside the call count, with its reason on hover', async () => {
+    const route = { class: 'agentic', provider: 'ollama-cloud', model: 'deepseek-v4.1-flash', reason: 'tool markers', failover: true }
+    const { c } = await openCard(35, { ...twoCalls, route })
+    const card = document.body.querySelector('[data-testid="usage-card"]')!
+    const meta = [...card.querySelectorAll('p')].find(p => p.textContent?.includes('model calls'))!
+    expect(meta.textContent?.trim()).toBe('2 model calls · Chosen by Auto · Agent work (failover)')
+    expect(meta.getAttribute('title')).toBe('tool markers')
     c.unmount()
   })
 

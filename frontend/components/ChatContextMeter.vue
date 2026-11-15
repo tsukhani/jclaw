@@ -155,53 +155,68 @@ function keepFocusWhereItIs(event: Event) {
       </button>
     </PopoverTrigger>
     <!--
-      Styling traced from Unsloth Studio's tooltip via devtools: px-3 py-2,
-      rounded-[10px], text-xs body, font-mono on numerical values. w-72 gives
-      the explanation a readable line length. The explicit border-neutral
-      override is for Unsloth's hairline; --border is heavier. /50 opacity
-      thins it in dark mode.
+      Laid out as the reply's usage card is (ChatMessage.vue): rows 2px apart, groups 16px apart, a rule only
+      before the running totals. The border-neutral override is a hairline, since --border is heavier; /50 thins
+      it in dark mode. overflow-hidden clips the footer band to the card's rounded corners.
     -->
     <PopoverContent
       align="end"
       :side-offset="12"
-      class="w-72 max-w-[calc(100vw-2rem)] px-3 py-2.5 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+      class="w-72 max-w-[calc(100vw-2rem)] p-4 overflow-hidden rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
       @focusout="open = false"
       @close-auto-focus="keepFocusWhereItIs"
     >
-      <div class="grid gap-2 text-xs">
-        <div class="flex items-baseline justify-between gap-4">
-          <span class="font-medium text-fg-strong">Conversation memory</span>
+      <div class="grid gap-4 text-xs">
+        <div>
+          <div class="flex items-baseline justify-between gap-4">
+            <span class="text-[13px] leading-5 font-semibold text-fg-strong">Conversation memory</span>
+            <span
+              v-if="target"
+              data-testid="context-percent"
+              class="text-[13px] leading-5 font-medium tabular-nums"
+              :class="percentColor"
+            >{{ percentLabel }} full</span>
+          </div>
           <span
             v-if="target"
-            data-testid="context-percent"
-            class="font-mono tabular-nums font-medium"
-            :class="percentColor"
-          >{{ percentLabel }} full</span>
+            aria-hidden="true"
+            class="mt-2 block h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700/60 overflow-hidden"
+          >
+            <span
+              data-testid="context-card-bar"
+              class="block h-full rounded-full"
+              :class="barColor"
+              :style="{ width: `${percent}%` }"
+            />
+          </span>
         </div>
         <p
           data-testid="context-summary"
-          class="text-muted-foreground leading-relaxed"
+          class="text-muted-foreground leading-normal"
         >
           {{ summary }}
         </p>
-        <dl class="grid gap-1.5">
+        <dl
+          v-if="(compactAt && capacity) || compactionCount != null"
+          class="grid gap-0.5"
+        >
           <div
             v-if="compactAt && capacity"
-            class="flex items-center justify-between gap-4"
+            class="flex items-baseline justify-between gap-4 leading-5"
           >
             <dt class="text-muted-foreground">
               Model's limit
             </dt>
-            <dd class="font-mono tabular-nums">
-              {{ capacity.toLocaleString() }} tokens
+            <dd class="tabular-nums">
+              {{ capacity.toLocaleString() }} <span class="text-fg-muted">tokens</span>
             </dd>
           </div>
           <div
             v-if="compactionCount != null"
-            class="flex items-center justify-between gap-4"
+            class="flex items-baseline justify-between gap-4 leading-5"
           >
             <dt class="text-muted-foreground">
               Summarized so far
@@ -216,72 +231,77 @@ function keepFocusWhereItIs(event: Event) {
             aria-hidden="true"
             class="border-t border-neutral-200 dark:border-neutral-700/50"
           />
-          <p class="font-medium text-fg-strong">
-            So far in this conversation
-          </p>
-          <dl class="grid gap-1.5">
-            <div
-              v-if="userPromptCount != null"
-              class="flex items-center justify-between gap-4"
-            >
-              <dt class="text-muted-foreground">
-                Your messages
-              </dt>
-              <dd class="font-mono tabular-nums">
-                {{ (userPromptCount ?? 0).toLocaleString() }}
-              </dd>
-            </div>
-            <div
-              v-if="(turnCount ?? 0) > 0"
-              class="flex items-center justify-between gap-4"
-            >
-              <dt class="text-muted-foreground">
-                Replies
-              </dt>
-              <dd class="font-mono tabular-nums">
-                {{ (turnCount ?? 0).toLocaleString() }}
-              </dd>
-            </div>
-            <div
-              v-if="messageCount != null"
-              class="flex items-center justify-between gap-4"
-            >
-              <dt class="text-muted-foreground">
-                All saved messages
-              </dt>
-              <dd class="font-mono tabular-nums">
-                {{ (messageCount ?? 0).toLocaleString() }}
-              </dd>
-            </div>
-            <div
+          <div>
+            <p class="mb-1 text-[11px] leading-4 font-medium uppercase tracking-wider text-fg-muted">
+              So far in this conversation
+            </p>
+            <dl class="grid gap-0.5">
+              <div
+                v-if="userPromptCount != null"
+                class="flex items-baseline justify-between gap-4 leading-5"
+              >
+                <dt class="text-muted-foreground">
+                  Your messages
+                </dt>
+                <dd class="tabular-nums">
+                  {{ (userPromptCount ?? 0).toLocaleString() }}
+                </dd>
+              </div>
+              <div
+                v-if="(turnCount ?? 0) > 0"
+                class="flex items-baseline justify-between gap-4 leading-5"
+              >
+                <dt class="text-muted-foreground">
+                  Replies
+                </dt>
+                <dd class="tabular-nums">
+                  {{ (turnCount ?? 0).toLocaleString() }}
+                </dd>
+              </div>
+              <div
+                v-if="messageCount != null"
+                class="flex items-baseline justify-between gap-4 leading-5"
+              >
+                <dt class="text-muted-foreground">
+                  All saved messages
+                </dt>
+                <dd class="tabular-nums">
+                  {{ (messageCount ?? 0).toLocaleString() }}
+                </dd>
+              </div>
+              <div
+                v-if="cumulative > 0"
+                class="flex items-baseline justify-between gap-4 leading-5"
+              >
+                <dt class="text-muted-foreground">
+                  Tokens processed
+                </dt>
+                <dd class="tabular-nums">
+                  {{ cumulative.toLocaleString() }}
+                </dd>
+              </div>
+              <div
+                v-if="costLabel != null"
+                class="flex items-baseline justify-between gap-4 leading-5"
+                :title="costTooltip ?? undefined"
+              >
+                <dt class="text-muted-foreground">
+                  Cost
+                </dt>
+                <dd class="tabular-nums">
+                  {{ costLabel }}
+                </dd>
+              </div>
+            </dl>
+            <p
               v-if="cumulative > 0"
-              class="grid grid-cols-[1fr_auto] gap-x-4"
+              class="mt-1.5 text-[11.5px] leading-4 text-fg-muted"
             >
-              <dt class="text-muted-foreground">
-                Tokens processed
-              </dt>
-              <dd class="font-mono tabular-nums text-right">
-                {{ cumulative.toLocaleString() }}
-              </dd>
-              <dd class="col-span-2 text-xs text-muted-foreground">
-                Every reread counts, as providers bill it.
-              </dd>
-            </div>
-            <div
-              v-if="costLabel != null"
-              class="flex items-center justify-between gap-4"
-              :title="costTooltip ?? undefined"
-            >
-              <dt class="text-muted-foreground">
-                Cost
-              </dt>
-              <dd class="font-mono tabular-nums">
-                {{ costLabel }}
-              </dd>
-            </div>
-          </dl>
+              Tokens processed counts every reread, as providers bill it.
+            </p>
+          </div>
         </template>
-        <p class="text-xs text-muted-foreground">
+        <p class="-mx-4 -mb-4 px-4 py-2.5 border-t border-neutral-200 dark:border-neutral-700/50 bg-neutral-50 dark:bg-black/15 text-[11.5px] leading-4 text-fg-muted">
           Tokens are word pieces: 100 tokens is about 75 English words.
         </p>
       </div>
