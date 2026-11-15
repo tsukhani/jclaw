@@ -1181,14 +1181,6 @@ The allowlist is off by default, and that default is the shipped state on every 
 
 For the pool endpoint, `awaiting` is the number that signals trouble: a sustained non-zero value means callers are blocking on `db.pool.timeout` waiting for a connection. `active` sitting near `max` is normal on a busy system.
 
-## Unmanaged keys
-
-A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually these are stale rows from a prior schema or mid-migration state. The list is a signal that something needs cleanup, not a place to add new config.
-
-## Unused keys
-
-A list that appears only when the Config DB holds rows that no code in this version reads, usually a setting an earlier version used. It shows as **unused config keys**, with a **Delete** button on each row. Delete asks you to confirm first. Deleting one of these rows changes nothing, because nothing reads it, but a deleted value cannot be brought back. When JClaw starts, it deletes by itself the keys it knows it no longer uses.
-
 ---
 
 ## Tips

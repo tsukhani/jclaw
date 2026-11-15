@@ -11,8 +11,8 @@ import java.util.stream.Collectors;
  * keys (JF-440). A line is an exact key or a pattern whose {@code *} stands for a name the code fills in at run time
  * (a provider, agent, plan or model id, which may itself hold dots).
  *
- * <p>A stored row no {@link #READ} line matches is one this build does not read: {@code GET /api/config} marks it
- * unknown and Settings offers to delete it. {@code DefaultConfigJob} deletes every {@link #RETIRED} row at boot.
+ * <p>A stored row no {@link #READ} line matches is one this build does not read, which {@code /quality}'s dead config
+ * rows pass reports. {@code DefaultConfigJob} deletes every {@link #RETIRED} row at boot.
  * {@code ConfigKeyCatalogConformanceTest} holds the lists to the code: a key the code names must be on one of them,
  * and a {@code READ} line the code no longer names moves to {@code RETIRED}.
  */

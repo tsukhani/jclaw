@@ -65,38 +65,6 @@ class ApiConfigControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theListMarksTheRowsNoCodeReads() {
-        login();
-        // Read-since-start is process-wide, so the keys that must read as unknown are this run's own.
-        var run = System.nanoTime();
-        var unknown = "jf440.nothing.reads.this." + run;
-        var readAtRunTime = "jf440.readatruntime." + run;
-        commitInFreshTx(() -> {
-            ConfigService.set("onboarding.tourMaxStep", "3");
-            ConfigService.set("printer.default.option.jf440-sides", "two-sided-long-edge");
-            ConfigService.set(unknown, "x");
-            ConfigService.set(readAtRunTime, "y");
-        });
-        ConfigService.get(readAtRunTime);
-
-        var resp = GET("/api/config");
-        assertIsOk(resp);
-        var expected = java.util.Map.of(
-                "onboarding.tourMaxStep", true,
-                "printer.default.option.jf440-sides", true,
-                unknown, false,
-                readAtRunTime, true);
-        var known = new java.util.TreeMap<String, Boolean>();
-        for (var e : com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject()
-                .getAsJsonArray("entries")) {
-            var row = e.getAsJsonObject();
-            var key = row.get("key").getAsString();
-            if (expected.containsKey(key)) known.put(key, row.get("known").getAsBoolean());
-        }
-        assertEquals(expected, known);
-    }
-
-    @Test
     void getReturns404ForUnknownKey() {
         login();
         var resp = GET("/api/config/definitely-not-a-real-key");

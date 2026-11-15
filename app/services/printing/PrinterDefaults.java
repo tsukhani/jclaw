@@ -155,8 +155,8 @@ public final class PrinterDefaults {
         // Drop every existing option row before writing the new set. Merging
         // instead would strand options from a previously-selected printer — a
         // tray setting from an office laser silently riding along to a home inkjet
-        // that has no such tray. Deleted rather than blanked so the Settings
-        // unmanaged-keys diagnostic does not fill with empty printer options.
+        // that has no such tray. Deleted rather than blanked, so no row is left
+        // for an option the printer lacks.
         for (var stale : List.copyOf(loadOptions().keySet())) {
             ConfigService.delete(KEY_OPTION_PREFIX + stale);
         }

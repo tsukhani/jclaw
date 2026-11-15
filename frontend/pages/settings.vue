@@ -60,10 +60,6 @@ watch(() => route.query.section, (s) => {
       Settings
     </h1>
 
-    <!-- Anomaly notice: surfaces Config DB rows not owned by any section. Renders
-         nothing when the config is clean, so it's a signal, not a fixture. -->
-    <SettingsUnmanagedBanner />
-
     <!-- Stored credentials this installation's secret cannot decrypt (JCLAW-1455); nothing when every one does. -->
     <SettingsUnreadableCredentialsBanner />
 

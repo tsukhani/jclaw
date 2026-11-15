@@ -155,17 +155,6 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    void aKeyCountsAsReadOnceCodeReadsIt() {
-        var key = "jf440.readprobe." + System.nanoTime();
-        assertFalse(ConfigService.readSinceStart(key));
-        ConfigService.entry(key);
-        ConfigService.listAll();
-        assertFalse(ConfigService.readSinceStart(key), "the config API's own reads are not the code reading it");
-        assertNull(ConfigService.get(key));
-        assertTrue(ConfigService.readSinceStart(key), "a read of an unset key still counts");
-    }
-
-    @Test
     void theOllamaDecisionAddressIsScreenedLikeAProviderUrl() {
         // JCLAW-1336. Only rejectionFor is asked, so nothing here stores an address another class could read.
         var key = OllamaDecision.BASE_URL_KEY;

@@ -150,9 +150,8 @@ describe('Settings page', () => {
   })
 
   it('does not expose an add-entry form for ad-hoc config', async () => {
-    // Unmanaged keys are surfaced read-only via a warning banner, never an
-    // editor — arbitrary config rows aren't read by anything, so there's no
-    // affordance to create them.
+    // Arbitrary config rows aren't read by anything, so there's no affordance
+    // to create them.
     setupMockApi()
     const component = await mountSuspended(Settings)
     await flushPromises()

@@ -25,9 +25,7 @@ import static utils.GsonHolder.GSON;
  * progress and the user must re-enter from the Guided Tour sidebar button.
  *
  * <p>A single Config key — JClaw is single-operator, so there is no per-user
- * scoping. The prefix {@code onboarding.} is reserved in the Settings page's
- * {@code MANAGED_PREFIXES} list so the unmanaged-keys diagnostic doesn't surface
- * this key.
+ * scoping.
  */
 @With(AuthCheck.class)
 public class ApiOnboardingController extends Controller {

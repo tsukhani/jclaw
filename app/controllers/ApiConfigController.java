@@ -9,7 +9,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.ConfigKeyCatalog;
 import services.ConfigService;
 import services.InternalApiTokenService;
 import services.LoadTestRunner;
@@ -54,8 +53,7 @@ public class ApiConfigController extends Controller {
 
     private static final String READ_CONFIG = "read the configuration";
 
-    /** {@code known} is false for a row no code in this build reads, which Settings offers to delete. */
-    public record ConfigEntry(String key, @Nullable String value, String updatedAt, boolean known) {}
+    public record ConfigEntry(String key, @Nullable String value, String updatedAt) {}
 
     public record ConfigListResponse(List<ConfigEntry> entries) {}
 
@@ -111,8 +109,7 @@ public class ApiConfigController extends Controller {
         var value = row.value();
         var shown = row.unreadable() || value == null
                 ? "" : ConfigService.maskValue(row.key(), effectiveValue(row.key(), value));
-        var known = ConfigKeyCatalog.isRead(row.key()) || ConfigService.readSinceStart(row.key());
-        return new ConfigEntry(row.key(), shown, row.updatedAt().toString(), known);
+        return new ConfigEntry(row.key(), shown, row.updatedAt().toString());
     }
 
     /**

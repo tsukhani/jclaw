@@ -1,23 +1,23 @@
 ---
 name: quality
-description: Six-pass source-quality sweep of app/ — trim verbose/redundant comments, normalize British spellings to American, remove provably-dead code, modernize to Java 25 idiom, replace inline fully-qualified names with imports, and drop unused dependencies — each behavior-preserving, applied in an isolated worktree, and gated on spotlessApply + compile + play autotest. Destructive passes (dead code, deps) present evidence and confirm before removing.
+description: Seven-pass source-quality sweep of app/ — trim verbose/redundant comments, normalize British spellings to American, remove provably-dead code, modernize to Java 25 idiom, replace inline fully-qualified names with imports, drop unused dependencies, and retire config keys no code reads — each behavior-preserving, applied in an isolated worktree, and gated on spotlessApply + compile + play autotest. Destructive passes (dead code, deps, config keys) present evidence and confirm before removing.
 category: Quality
 tags: [quality, refactor, cleanup, dead-code, java25, modernization, imports, dependencies, comments, spelling, worktree]
-argument-hint: "[empty | comments | spelling | deadcode | modernize | imports | deps] [path-scope]"
+argument-hint: "[empty | comments | spelling | deadcode | modernize | imports | deps | configkeys] [path-scope]"
 ---
 
 **Code Quality Sweep Workflow**
 
-Run up to six behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, **(5)** replace inline fully-qualified names with imports, and **(6)** remove dependencies that are *provably* unused. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (spelling's identifier renames, dead code, modernization, imports, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
+Run up to seven behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, **(5)** replace inline fully-qualified names with imports, **(6)** remove dependencies that are *provably* unused, and **(7)** retire Config DB rows no code reads. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (spelling's identifier renames, dead code, modernization, imports, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
 
 The bias throughout is **conservatism**: this codebase already scored A-/A on Clean Code and Imports & Idiom in the JCLAW-717 audit — its comments are largely intentional "why"s, its idiom is already broadly Java-25, and its deps are lean. So the job is to find the genuine residue, not to churn healthy code. **When in doubt, leave it and report it** rather than change it.
 
 **Arguments** — `$ARGUMENTS` may be:
-- *(empty)* → all six passes in order (comments → spelling → dead code → modernize → imports → deps), scoped to `app/`.
-- a pass word — `comments` | `spelling` | `deadcode` | `modernize` | `imports` | `deps` → run only that pass.
+- *(empty)* → all seven passes in order (comments → spelling → dead code → modernize → imports → deps → config keys), scoped to `app/`.
+- a pass word — `comments` | `spelling` | `deadcode` | `modernize` | `imports` | `deps` | `configkeys` → run only that pass.
 - an optional **path scope** as the last token (e.g. `deadcode app/services`, `modernize app/tools/TaskTool.java`, or just `app/channels` to sweep that subtree). Defaults to `app/`.
 
-**Scope & the deps pass.** The comments, spelling, dead-code, modernize, and imports passes honor the path scope. The **deps pass (Phase 6) is whole-tree by nature** — it analyzes `build.gradle.kts` against usage everywhere — so it runs **only when the scope is the full production tree**: an empty/default run, or an explicit `app/` / `app`. A narrower subtree scope (`app/utils`, a single file, …) runs passes 1–5 and **skips Phase 6 with a one-line note** pointing the user at `/quality deps`. Naming the pass explicitly (`/quality deps`) always analyzes the whole tree, ignoring any trailing path.
+**Scope & the deps pass.** The comments, spelling, dead-code, modernize, and imports passes honor the path scope. The **deps pass (Phase 6) is whole-tree by nature** — it analyzes `build.gradle.kts` against usage everywhere — so it runs **only when the scope is the full production tree**: an empty/default run, or an explicit `app/` / `app`. A narrower subtree scope (`app/utils`, a single file, …) runs passes 1–5 and **skips Phase 6 with a one-line note** pointing the user at `/quality deps`. Naming the pass explicitly (`/quality deps`) always analyzes the whole tree, ignoring any trailing path. The **config keys pass (Phase 7)** is whole-tree for the same reason, and follows the same rule: `/quality configkeys` runs it, a narrower scope skips it with a one-line note.
 
 Reject anything else with a clear message; do not guess.
 
@@ -189,21 +189,80 @@ Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the 
 
 ---
 
-**Phase 7 — Validate & report**
+**Phase 7 — Retire dead config rows** *(whole-tree scope only)*
 
-23. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
+**Gate:** whole-tree only, as Phase 6, and only where a live instance has a database: the main checkout's `data/jclaw.mv.db`. Without one, skip the pass with a one-line note.
+
+Goal: a Config DB row no code reads is retired through `services.ConfigKeyCatalog`. Its `RETIRED` keys are deleted by `DefaultConfigJob` at boot, on this install and on every install that upgrades. The operator never manages these rows: a dead one is an internal bug, and this pass is where it is caught. `ConfigKeyCatalogConformanceTest` already makes the commit that removes a key's last reader retire it, so what this pass finds is a row older than the catalog (JF-440), or a catalog gap.
+
+23. **Read the live key names, read-only: names, never values**, since a value can be a credential (AGENTS.md). Run a single-file SELECT with the H2 jar the live JVM loads, and let it exit: an `AUTO_SERVER` client left running takes the database port and blocks the next restart. The script and its output go in a temporary directory, never the repo:
+    ```bash
+    SCRATCH=$(mktemp -d)
+    MAIN=$(dirname "$(/usr/bin/git rev-parse --path-format=absolute --git-common-dir)")
+    H2=$(ls /opt/play1/framework/lib/h2-*.jar | head -1)
+    cat > "$SCRATCH/ConfigKeys.java" <<'EOF'
+    import java.sql.DriverManager;
+    public class ConfigKeys {
+        public static void main(String[] a) throws Exception {
+            var url = "jdbc:h2:" + a[0] + "/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE;IFEXISTS=TRUE";
+            try (var c = DriverManager.getConnection(url, "", ""); var s = c.createStatement();
+                 var r = s.executeQuery("SELECT config_key FROM config ORDER BY config_key")) {
+                while (r.next()) System.out.println(r.getString(1));
+            }
+        }
+    }
+    EOF
+    java -cp "$H2" "$SCRATCH/ConfigKeys.java" "$MAIN" > "$SCRATCH/live-keys.txt"
+    ```
+24. **Match each name against the catalog**, the way `ConfigKeyCatalog.isRead` does: a line is an exact key, or a pattern whose `*` is any non-empty run. The two known cases at the top fail the run if the matcher is wrong, so a broken match cannot report every row as read:
+    ```bash
+    python3 -I - "$SCRATCH/live-keys.txt" app/services/ConfigKeyCatalog.java <<'EOF'
+    import re, sys
+    src = open(sys.argv[2], encoding="utf-8").read()
+    def block(name):
+        body = re.search(r'static final String %s = """\n(.*?)"""' % name, src, re.S).group(1)
+        return [l.strip() for l in body.splitlines() if l.strip()]
+    read, retired = block("READ"), set(block("RETIRED"))
+    rx = re.compile("|".join(".+".join(re.escape(p) for p in l.split("*")) for l in read))
+    is_read = lambda k: rx.fullmatch(k) is not None
+    assert is_read("chat.maxToolRounds") and is_read("jtokkit.safetyMultiplier.openrouter.vendor/model-1")
+    assert not is_read("chat.compaction.onToolRound")
+    for key in (l.strip() for l in open(sys.argv[1]) if l.strip()):
+        if key in retired: print("retired, deleted at the next boot:", key)
+        elif not is_read(key): print("unread:", key)
+    EOF
+    ```
+    No `unread:` line ends the pass: report "every live config row is read".
+25. **Prove each unread key dead before proposing it**:
+    - `/usr/bin/git grep -n -F '<key>' -- app test frontend conf sidecar skills`, and the same for its last one or two segments, since a family is built at run time (`"provider." + name + ".paymentModality"`). A hit that reads the key is a **catalog gap**, not a dead row: its fix is a `READ` line, plus an extension of `ConfigKeyCatalogConformanceTest` when its scan missed that way of reading.
+    - `/usr/bin/git log -S'<key>' --format='%h %ad %s' --date=short` finds the commit that removed its last reader. That commit is the evidence: name it.
+    - A rename source (an old name in a `renameKeyIfPresent` call) is not a dead row: the boot job moves it.
+    - If the evidence is thin, classify it **"possibly dead — needs human confirmation"** and leave it.
+26. **Present the list** (key, verdict: dead / catalog gap / possibly dead, and the commit or the code site behind it), never a value, and get confirmation.
+27. **Apply in the worktree.** A dead key goes on `RETIRED` (exact keys only, sorted), and a gap goes on `READ`. **Never delete a row by SQL or through the config API**: a catalog retirement reaches every install, and a hand delete reaches only this one. Run `./gradlew playAutotest -Ptests=ConfigKeyCatalogConformanceTest,ConfigKeyCatalogTest,ConfigServiceTest`, then commit:
+    ```
+    fix(config): retire config keys no code reads
+    ```
+28. Report the retired keys with their evidence, and that their rows go at the instance's next restart, which needs the operator's yes (AGENTS.md).
+
+---
+
+**Phase 8 — Validate & report**
+
+29. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
     - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the worktree's hook-seeded `PLAY_TEST_PORT` is actually free (`lsof -nP -iTCP:<port> -sTCP:LISTEN`) and re-run once; don't chase it as a real failure.
-24. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts, identifiers renamed and kept with reasons, and the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, fully-qualified names converted to imports (+ every FQN deliberately left and why), and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
+30. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts, identifiers renamed and kept with reasons, and the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, fully-qualified names converted to imports (+ every FQN deliberately left and why), deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note**, and config keys retired or added to `READ` (+ any "possibly dead" left) — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
 
 ---
 
 **Hard rules**
 - **Proof, not guesswork.** Remove code or a dependency only when non-use is *proven* against Play's indirection (routes, reflection, SPI, lifecycle, serialization, frontend). Anything merely-probably-unused is reported as "needs human confirmation," never removed.
-- **Confirm before the destructive passes.** Present the dead-code and dead-dep candidate lists with evidence and get a quick OK before deleting; comments, spelling, and modernization apply directly (they're behavior-preserving and git-revertable) but are still reported.
+- **Confirm before the destructive passes.** Present the dead-code, dead-dep and dead-config-key candidate lists with evidence and get a quick OK before deleting; comments, spelling, and modernization apply directly (they're behavior-preserving and git-revertable) but are still reported.
 - **Every pass is behavior-preserving and gated.** `spotlessApply` + `compileJava`/`compileTestJava` after every pass; a full `play autotest` after the dead-code, modernization, and dependency passes. Red means the change wasn't safe — revert it, don't force it.
 - **Always `spotlessApply` before each commit** — the pre-push gate rejects import-order drift, and these passes (especially dead-code and modernization) churn imports.
 - Work in the `../jclaw-quality` worktree only; never edit the primary working tree. **Never `git push` or merge** — that's the user's call (`/deploy`). Remove the worktree only on the user's say-so (`/usr/bin/git worktree remove ../jclaw-quality`).
 - **The spelling pass changes spelling, nothing else.** Comments, Javadoc and identifiers, with every reference renamed — except the `cancelled` family (JDK vocabulary), overrides of JDK or library methods, and names that are a wire or storage contract (`models`, Gson-serialized fields, controller actions and their parameters, reflective lookups). Never string literals (tests assert on them, config keys persist), and never bundled with re-hyphenation, rewrapping, or grammar edits. Match an explicit word list, never an `-ise`/`-our`/`-re` suffix regex.
+- **Config rows retire through `ConfigKeyCatalog.RETIRED` only**, never by SQL or the config API, and the live database is read for key names alone: never print a value.
 - **Preserve the "why".** Keep threat-model, perf, framework-quirk, and `JCLAW-xxx`-anchored comments even when terse trimming is tempting; only *what*-restating and dead-commented code go.
 - **Don't over-modernize.** No virtual-thread introduction, no public-API reshaping, no style-only rewrites of already-idiomatic code, and keep the known Java-25 traps in mind (`S1612` method-refs on Play finders stay lambdas).
 - One commit per pass, each independently revertable. Never run an interactive `jshell` to "probe" — it blocks on stdin and orphans; use `./gradlew compileJava`.

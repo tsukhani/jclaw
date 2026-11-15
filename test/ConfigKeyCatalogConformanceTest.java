@@ -19,9 +19,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Holds {@link ConfigKeyCatalog} to the source (JF-440). Settings offers to delete every stored row the catalog does
- * not list as read, so a key the code reads but the catalog misses puts a live setting, a credential among them, one
- * click from deletion; and a key the code stopped reading but the catalog still lists leaves a dead row unflagged.
+ * Holds {@link ConfigKeyCatalog} to the source (JF-440). {@code /quality} reports every stored row the catalog does not
+ * list as read as dead, so a key the code reads but the catalog misses sends a live setting, a credential among them,
+ * toward retirement; and a key the code stopped reading but the catalog still lists keeps its dead row out of that
+ * report and off the boot deletion.
  *
  * <p><b>What counts as named.</b> Every string literal in {@code app/} and the frontend source whose shape is a config
  * key and whose first segment is a namespace the catalog uses, every String constant resolving to one, the key at
@@ -33,7 +34,7 @@ import java.util.stream.Stream;
  * <p><b>Known blind spots.</b> A key the code builds from a name no catalog namespace starts (a sidecar's
  * {@code configPrefix() + ".port"}) is invisible to the scan, which is why {@link #UNRESOLVED_KEY_SITES} names each
  * call whose key it cannot resolve. A literal that is still named but whose reader is gone (a seed with no consumer)
- * passes; {@code ConfigService.readSinceStart} covers the opposite gap at run time.
+ * passes.
  */
 class ConfigKeyCatalogConformanceTest extends UnitTest {
 
@@ -144,7 +145,7 @@ class ConfigKeyCatalogConformanceTest extends UnitTest {
             if (!onACatalogList(key)) missing.put(key, where);
         });
         assertTrue(missing.isEmpty(), "the code names these config keys, and ConfigKeyCatalog lists none of them, so "
-                + "Settings would offer to delete a stored row under any of them. Add each to READ, or to NOT_CONFIG "
+                + "/quality would report a stored row under any of them as dead. Add each to READ, or to NOT_CONFIG "
                 + "when no Config DB row is ever stored under it (an application.conf key, a bus event): " + missing);
     }
 
