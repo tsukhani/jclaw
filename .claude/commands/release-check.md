@@ -41,12 +41,20 @@ argument-hint: "[empty | patch | minor | major | x.y.z]"
    - **Changed:** `node bin/replay-candidate.mjs <SHA> <new version>`. It replays a recent build with the candidate's own Jenkinsfile, so the change runs here rather than first in the release's build, and touches no parameter defaults. Find the build among the newest by its name.
 
    Either way the build names itself `#<n> candidate <SHA's first 12>`.
-9. Wait without polling: a candidate takes about 25 minutes (Build, Test, Sonar and Package, which a release commit's build would otherwise be the first to run). Start a background `sleep 1200`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
+9. **Meanwhile, run on this Mac the tests the candidate cannot** (JF-447): the live-browser classes, which only `./jclaw.sh test` turns on, and the macOS sides of tests that branch on the OS, since Jenkins runs on Linux. It is the run the old pre-push made, the backend classes that `bin/select-tests.mjs` picks from the range since `origin/main`, and the Mac would otherwise sit idle while the candidate builds. Wait until `jcmd -l | grep playAutotest | grep -v -e -Ptests=` and `pgrep -fl '[.]githooks/pre-push'` print nothing, then run it in the background, redirected to a file and never piped:
+   ```bash
+   ./gradlew --quiet compileTestJava
+   sel=$(node bin/select-tests.mjs --base origin/main --head HEAD)
+   case "$sel" in NONE) scope=none ;; ALL) scope=all ;; *) scope=$sel ;; esac
+   JCLAW_TEST_BACKEND="$scope" JCLAW_TEST_FRONTEND=0 ./jclaw.sh test > logs/release-check-local.log 2>&1
+   ```
+   Its summary says whether Playwright's Chromium was found, and so whether the live-browser classes ran. The frontend run is the candidate's.
+10. Wait for the candidate without polling: it takes about 25 minutes (Build, Test, Sonar and Package, which a release commit's build would otherwise be the first to run). Start a background `sleep 1200`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
 
 **Report**
 
-10. **On `SUCCESS`** (its description reads `tested <SHA>`): say the candidate is green for v<new version>, and offer the operator both next steps: `/deploy <the same argument>`, which pushes and tags it, or `/deploy <the same argument> release`, which also publishes it as a GitHub Release. The choice is theirs (AGENTS.md Policy). Either holds only while `main` has not moved: a commit landing after this check needs a new one.
-11. **On any other result:** report the failing stage. For tests, `mcp__jenkins__getTestResults`. For Sonar, the build log lists each open issue under the stage (`mcp__jenkins__searchBuildLog` for `open Sonar issue`). Fix them, or accept or mark them in Sonar with `/sonar`'s verdicts, then run this command again: no version was spent. Delete the failed candidate's branch, since nothing will release it: `/usr/bin/git push origin --delete candidate/<SHA's first 12>`.
+11. **When both pass**, the candidate ending `SUCCESS` (its description reads `tested <SHA>`) and the local run exiting 0: say the candidate is green for v<new version> and which classes ran on the Mac, and offer the operator both next steps: `/deploy <the same argument>`, which pushes and tags it, or `/deploy <the same argument> release`, which also publishes it as a GitHub Release. The choice is theirs (AGENTS.md Policy). Either holds only while `main` has not moved: a commit landing after this check needs a new one.
+12. **When either fails:** say which. For the local run, its summary names each failed check's `logs/test-*.log`. For the candidate, report the failing stage. For tests, `mcp__jenkins__getTestResults`. For Sonar, the build log lists each open issue under the stage (`mcp__jenkins__searchBuildLog` for `open Sonar issue`). Fix them, or accept or mark them in Sonar with `/sonar`'s verdicts, then run this command again: no version was spent. Delete the failed candidate's branch, since nothing will release it: `/usr/bin/git push origin --delete candidate/<SHA's first 12>`.
 
 ---
 
