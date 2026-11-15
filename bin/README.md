@@ -13,6 +13,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
 | `candidate-vouch.mjs` | Whether a green `/release-check` candidate build tested a commit, for `.githooks/pre-push` — see below |
 | `candidate-vouch.test.mjs` | Its tests, the hook's candidate skip among them: `node --test bin/candidate-vouch.test.mjs` |
+| `replay-candidate.mjs` | Starts a `/release-check` candidate build with the candidate's own Jenkinsfile — see below |
+| `replay-candidate.test.mjs` | Its tests: `node --test bin/replay-candidate.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
 | `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
@@ -170,6 +172,23 @@ It asks Jenkins with the `--header` and URL of the `jenkins` MCP server in `~/.c
 names another file), so it needs no secret of its own, and gives up after 10 seconds. Exit 0 printed the build; exit
 1 means no green candidate build tested the commit; exit 2 means it could not ask, for a sha that is not a full one,
 a config without the server, a refusal or a Jenkins that is down. Anything but 0 runs every test as before.
+
+## replay-candidate.mjs
+
+```bash
+node bin/replay-candidate.mjs <full sha> <version>   # replayed #1422 as candidate 0123456789ab for v1.0.20
+```
+
+A candidate build that `/release-check` triggers runs the Jenkinsfile on Bitbucket's `main`, so a candidate that
+changes the Jenkinsfile would first run the change in the release's own build (JF-445). This replays the newest
+finished build that neither releases nor publishes the dev container, with the candidate's Jenkinsfile as its script.
+In that script every read of `params.CANDIDATE` and `params.CANDIDATE_VERSION` is replaced by the candidate's sha and
+version, so candidate mode runs whatever parameters the replayed build carries, and the job's parameter definitions
+and defaults stay as they are. It refuses a Jenkinsfile with no candidate mode, or with a read it cannot replace.
+
+It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and sends the replay with the crumb and session
+Jenkins issues. Exit 0 printed the replayed build; exit 2 means nothing was replayed: a malformed sha or version, no
+Jenkinsfile at the commit, no build fit to replay, a config without the server, or a refusal.
 
 ## policy-guard.mjs
 

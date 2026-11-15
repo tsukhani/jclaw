@@ -203,7 +203,9 @@ pipeline {
                     def tested = "tested ${env.BUILD_COMMIT}".toString()
                     def releaseOfTested = params.RELEASE && currentBuild.previousSuccessfulBuild?.description == tested
                     // /deploy's version bump over a green candidate: that candidate's build ran the whole suite and
-                    // Sonar on this tree but for its version line, so this build skips them too (JF-441).
+                    // Sonar on this tree but for its version line, so this build skips them too (JF-441). Only a
+                    // candidate build counts, as in bin/candidate-vouch.mjs: a push build of the parent may itself
+                    // have skipped its tests on a candidate's word.
                     env.TESTED_CANDIDATE = ''
                     if (!params.RELEASE && !params.CANDIDATE && sh(returnStatus: true, script: '''
                         set -e
@@ -215,7 +217,8 @@ pipeline {
                         def parent = sh(returnStdout: true, script: 'git rev-parse HEAD^').trim()
                         def b = currentBuild.previousBuild
                         for (int i = 0; i < 30 && b != null && !env.TESTED_CANDIDATE; i++) {
-                            if (b.result == 'SUCCESS' && b.description == "tested ${parent}".toString()) {
+                            if (b.result == 'SUCCESS' && b.description == "tested ${parent}".toString()
+                                    && (b.displayName ?: '').endsWith("candidate ${parent.substring(0, 12)}".toString())) {
                                 env.TESTED_CANDIDATE = parent
                             }
                             b = b.previousBuild
