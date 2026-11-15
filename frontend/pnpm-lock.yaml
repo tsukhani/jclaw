@@ -201,7 +201,7 @@ importers:
         version: 3.4.17
       driver.js:
         specifier: ^1.8.0
-        version: 1.11.0
+        version: 1.12.1
       katex:
         specifier: 0.19.1
         version: 0.19.1
@@ -2736,8 +2736,8 @@ packages:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
-  driver.js@1.11.0:
-    resolution: {integrity: sha512-Xp/tYNYQ4Wth6AN3HqVVYdrCF4ahe4FVBDphWKylVDBBbeDEsFqnogxko6Gv30Yf9T/B92g0RZOCp4xfl1gqqw==}
+  driver.js@1.12.1:
+    resolution: {integrity: sha512-upBRqQW+bz+yfH7ee1gjWBaq0ue7i2343f2U3WzIUc3bhs5hwb2jz86cuB8gArRh3nfNp77CLNgkUtArTYTKFA==}
 
   duplexer@0.1.2:
     resolution: {integrity: sha512-jtD6YG370ZCIi/9GTaJKQxWTZD045+4R4hTk/x1UyoqadyJ9x9CgSi1RlVDQF8U2sxLLSnFkCaMihqljHIWgMg==}
@@ -7787,7 +7787,7 @@ snapshots:
 
   dotenv@17.4.2: {}
 
-  driver.js@1.11.0: {}
+  driver.js@1.12.1: {}
 
   duplexer@0.1.2: {}
 
