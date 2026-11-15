@@ -209,7 +209,7 @@ Only the rows the user named. Work in `../jclaw-wcag`; never edit the primary tr
    Stylelint enforces `comment-empty-line-before`, so a comment added above a rule needs a blank line before it.
 5. **Stop the dev server** you started, by its port and not by name, so a `pkill` pattern can't reach the user's other processes:
    ```bash
-   lsof -nP -iTCP:3100 -sTCP:LISTEN | awk 'NR>1{print $2}' | sort -u | xargs -r kill
+   lsof -nP -t -iTCP:3100 -sTCP:LISTEN | xargs -r kill
    ```
    Verify :3100 is free and :9000 still answers.
 6. **Commit in the worktree**, one commit for the batch (or one per area if the batch is large). The GitHub mirror is public, so the body is a published artifact: state what changed, the measured before/after, and what was deliberately left. Never push, never merge — that's the user's call via `/deploy`.

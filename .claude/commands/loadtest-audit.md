@@ -7,7 +7,7 @@ argument-hint: "[--provider P --model M] [--concurrency N --turns N]   (sizes th
 
 Answer one question: **under load, does JClaw leak memory, run short of memory, or add latency of its own?** The evidence comes from `loadtest/audit.sh`, which drives `./jclaw.sh loadtest` against the backend on :9000 and watches that JVM throughout; you judge the digest it writes. Use `/usr/bin/git` for any git invocation.
 
-**Real-pass arguments:** `$ARGUMENTS`. Empty means `openrouter` / `nvidia/nemotron-3-nano-30b-a3b` at concurrency 10 × 5 turns: the smallest and cheapest nemotron chat model there ($0.05/M in, $0.20/M out), well under a cent per run. The `:free` variants' per-minute and daily caps refuse concurrent calls. The mock passes are always 100 × 50.
+**Real-pass arguments:** `$ARGUMENTS`. Empty means `openrouter` / `nvidia/nemotron-3-nano-30b-a3b` at concurrency 10 × 5 turns: the smallest and cheapest nemotron chat model there (5 US cents per million tokens in, 20 out), well under a cent per run. The `:free` variants' per-minute and daily caps refuse concurrent calls. The mock passes are always 100 × 50.
 
 ## The rule that governs this command
 

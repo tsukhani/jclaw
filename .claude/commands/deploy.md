@@ -18,7 +18,7 @@ Bump the project version, commit every pending change alongside it, push the res
 - `patch` / `minor` / `major` → bump that segment; lower segments reset to `0`. Examples: `minor` on `1.0.5` → `1.1.0`; `major` on `1.4.2` → `2.0.0`.
 - An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. Any leading `v` is stripped.
 
-`release` (alone, as in `/deploy release`, or after a bump, as in `/deploy minor release`) also publishes the tagged version as a GitHub Release (step 20). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy).
+`release` (alone, as in `/deploy release`, or after a bump, as in `/deploy minor release`) also publishes the tagged version as a GitHub Release (step 20). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy). Say, too, that a release is best chosen now: Sonar keeps one result for the project, so a RELEASE build run after the next `/release-check` is judged by that check's analysis of newer code, and its open issues refuse this version.
 
 Reject anything else with a clear message; do not guess.
 
@@ -62,24 +62,8 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 
 `/release-check` runs this release's Jenkins build before a version is spent: the whole suite and Sonar on `HEAD`, analysed as the new version, passing only when Sonar shows 0 open issues. Find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <HEAD's first 12>`, `result` is `SUCCESS`, and `description` is `tested <HEAD's full SHA>`.
 
-- **Found:** `/usr/bin/git status --porcelain` must print nothing, since an uncommitted file would ship without the candidate having seen it, and the version Phase 1 computes must be the candidate's `CANDIDATE_VERSION` (`mcp__jenkins__getBuild` with `tree: "actions[parameters[name,value]]"`). Skip the Sonar pre-check below, which the candidate's real analysis supersedes. The release commit's build then skips Test and Sonar, because its tree differs from the candidate's only in the version line.
-- **Not found, or `main` has moved past it:** run `/release-check <the same version argument>` first, and go on only once it passes. Deploy without one only on the user's explicit yes, which covers this release only; then run the Sonar pre-check below, and the release commit's build runs Test and Sonar itself.
-
-**Preflight: Sonar's rules over what this release changes**
-
-Jenkins reaches Sonar only after its tests, and a failed quality gate aborts the build before Package. Check first, while stopping costs no version:
-
-```bash
-node bin/sonar-precheck.mjs
-```
-
-Run it in the background: it needs Docker and takes about 3 seconds a file. It covers every file changed since the newest version tag, uncommitted and untracked files included because `git add -A` ships them, and reports only what falls on changed lines. `bin/README.md` has the contract.
-
-- **Exit 0:** carry on, and keep any findings it lists for the report.
-- **Exit 1:** it found issues that can fail the gate. Stop and list them, with `/sonar`'s known verdict for any rule that has one, and ask whether to fix them first or deploy anyway. Sonar cannot mark an issue until an analysis has raised it, so a false positive needs a code change or, in Java, `@SuppressWarnings` with its reason; without one, this build aborts at the gate. The answer covers this release only.
-- **Exit 2:** it did not finish. Report why and carry on: a Docker or analyzer failure must not block a release.
-
-It cannot see duplication or coverage, the gate's other two conditions, so a clean result does not promise a green gate. Read new test code by hand for a copied test body: that is how #1315 aborted, with no issue to find.
+- **Found:** `/usr/bin/git status --porcelain` must print nothing, since an uncommitted file would ship without the candidate having seen it, and the version Phase 1 computes must be the candidate's `CANDIDATE_VERSION` (`mcp__jenkins__getBuild` with `tree: "actions[parameters[name,value]]"`). The release commit's build then skips Test and Sonar, because its tree differs from the candidate's only in the version line.
+- **Not found, or `main` has moved past it:** run `/release-check <the same version argument>` first, and go on only once it passes. Deploy without one only on the user's explicit yes, which covers this release only; the release commit's build then runs Test and Sonar itself, and a red one spends the version.
 
 **Phase 1: Bump the version**
 
@@ -159,12 +143,15 @@ It cannot see duplication or coverage, the gate's other two conditions, so a cle
     /usr/bin/git for-each-ref --merged "$REL" --format='%(refname:short) %(worktreepath)' refs/heads |
       while read -r b wt; do [ "$b" != main ] && [ -z "$wt" ] && echo "$b"; done |
       xargs -r /usr/bin/git branch -d
-    /usr/bin/git worktree list --porcelain | awk '/^worktree /{wt=substr($0, 10)} /^branch /{print substr($0, 8), wt}' |
-      while read -r ref wt; do
-        [ "$ref" != refs/heads/main ] && /usr/bin/git merge-base --is-ancestor "$ref" "$REL" &&
-          [ -z "$(/usr/bin/git -C "$wt" status --porcelain)" ] && echo "merged and clean: $wt (${ref#refs/heads/})"
-      done
+    /usr/bin/git worktree list --porcelain | while read -r key value; do
+      case "$key" in
+        worktree) wt=$value ;;
+        branch) [ "$value" != refs/heads/main ] && /usr/bin/git merge-base --is-ancestor "$value" "$REL" &&
+          [ -z "$(/usr/bin/git -C "$wt" status --porcelain)" ] && echo "merged and clean: $wt (${value#refs/heads/})" ;;
+      esac
+    done
     ```
+    Named shell variables only, never awk's numbered fields: Claude Code replaces a dollar sign followed by a digit with the command's arguments before the shell sees it.
 
 **Phase 4: Tag the version once Jenkins passes it**
 
@@ -185,7 +172,7 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
 
 **Phase 5: Report**
 
-22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one, and the Sonar pre-check's findings or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
+22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
