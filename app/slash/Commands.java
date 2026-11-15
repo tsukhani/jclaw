@@ -1680,7 +1680,7 @@ public final class Commands {
         // small set of rows is cheap; we filter further in Java to extract
         // the canonical run_id field rather than matching string prefixes
         // that could collide with a substring elsewhere in the payload.
-        List<EventLog> rows = EventLog.<EventLog>find(
+        List<EventLog> rows = EventLog.find(
                 "details LIKE ?1 AND category LIKE 'SUBAGENT_%' ORDER BY timestamp ASC",
                 runIdLikePattern(runId)).fetch(SUBAGENT_LOG_LIMIT);
         if (rows.isEmpty()) {
@@ -1738,7 +1738,7 @@ public final class Commands {
         // Fetch one beyond the limit so we know whether to render the
         // "more available" footer without a separate count query.
         int fetchLimit = SUBAGENT_HISTORY_LIMIT + 1;
-        List<Message> rows = Message.<Message>find(
+        List<Message> rows = Message.find(
                 "conversation = ?1 ORDER BY createdAt ASC", childConv).fetch(fetchLimit);
         if (rows.isEmpty()) {
             return "Subagent run #" + runId + " transcript: (no messages yet)";
@@ -1825,7 +1825,7 @@ public final class Commands {
     /** Find the most recent SUBAGENT_SPAWN event for a given run id and
      *  return its {@code details} JSON, or null when no event exists yet. */
     private static @Nullable String findSpawnEventDetails(Long runId) {
-        List<EventLog> rows = EventLog.<EventLog>find(
+        List<EventLog> rows = EventLog.find(
                 "category = ?1 AND details LIKE ?2 ORDER BY timestamp DESC",
                 "SUBAGENT_SPAWN", runIdLikePattern(runId)).fetch(1);
         return rows.isEmpty() ? null : rows.getFirst().details;

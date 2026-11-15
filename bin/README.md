@@ -17,6 +17,7 @@ trees. Nothing here ships in a `play dist` tarball.
 | `replay-candidate.test.mjs` | Its tests: `node --test bin/replay-candidate.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
 | `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
+| `eslint.config.mjs` | ESLint's recommended rules for these scripts, which `./jclaw.sh check` runs; it loads ESLint from `frontend/`'s dependencies |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |

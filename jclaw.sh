@@ -190,8 +190,9 @@ Commands:
             test failure and ArchUnit violation as one JSON array — the
             machine-readable form of what 'test' prints for a human.
   check     Run what fails without running a test: wildcard imports,
-            import order, the compile with NullAway, ESLint, Stylelint and
-            the typecheck. --backend-only leaves the frontend out.
+            import order, the compile with NullAway and Error Prone, Ruff,
+            ShellCheck, ESLint, Stylelint and the typecheck. --backend-only
+            leaves the frontend out.
   check-arch
             Run the ArchUnit and conformance test classes alone.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
@@ -1310,9 +1311,11 @@ usage_check() {
 Usage: ${INVOKE} check [--backend-only]
 
 Run what fails without running a test: the wildcard-import grep, spotlessCheck,
-compileJava with NullAway, ESLint, Stylelint and the typecheck. Every check
-runs, so one pass names everything to fix. Logs at logs/check-*.log. Exits
-non-zero if any check fails.
+compileJava with NullAway and Error Prone's error-level checks, Ruff over the
+sidecars, ShellCheck over the shell scripts, ESLint over bin/ and frontend/,
+Stylelint and the typecheck. Every check runs, so one pass names everything to
+fix; one whose tool is not installed (ruff, shellcheck) is reported as skipped.
+Logs at logs/check-*.log. Exits non-zero if any check fails.
 
   --backend-only   Leave the frontend checks out
 
@@ -2749,7 +2752,8 @@ locate_pnpm() {
         "$HOME/.local/share/pnpm/pnpm"
     do
         [[ -n "$candidate" && -x "$candidate" ]] || continue
-        export PATH="$(dirname "$candidate"):$PATH"
+        PATH="$(dirname "$candidate"):$PATH"
+        export PATH
         return 0
     done
     return 1
@@ -3550,7 +3554,7 @@ restart_begin() {
 
 restart_finish() {
     restart_phase_end "$(date +%s)"
-    restart_status done
+    restart_status "done"
 }
 
 # A restart that dies leaves its failure for the panels, with a narrator to serve it while no JVM does.
@@ -4628,7 +4632,8 @@ do_loadtest() {
     #  --message    → show the operator-supplied single message
     #  (neither)    → show the backend default DEFAULT_USER_MESSAGE explicitly
     if [[ -n "$LT_PROMPTS_FILE" ]]; then
-        local lt_prompt_count=$(echo "$LT_PROMPTS_JSON" | python3 -c "import json, sys; print(len(json.load(sys.stdin)))")
+        local lt_prompt_count
+        lt_prompt_count=$(echo "$LT_PROMPTS_JSON" | python3 -c "import json, sys; print(len(json.load(sys.stdin)))" || true)
         echo "    prompts=$LT_PROMPTS_FILE ($lt_prompt_count available, first $LT_TURNS will be used)"
     else
         local lt_msg_display="${LT_MESSAGE:-Why is the sky blue? Answer in exactly 50 words.}"
@@ -5799,12 +5804,52 @@ check_step() {
     elapsed=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
     if [[ "$rc" -eq 0 ]]; then
         printf ' %-10s: PASSED  (%ss)\n' "$name" "$elapsed"
+    elif [[ "$rc" -eq "$CHECK_SKIPPED" ]]; then
+        printf ' %-10s: SKIPPED (%s)\n' "$name" "$(head -1 "$log")"
     else
         printf ' %-10s: FAILED  (%ss)\n' "$name" "$elapsed"
         cat "$log" >&2
         check_hint "$name" "$log"
         CHECK_FAILED=1
     fi
+}
+
+# A step whose tool is not installed exits with this, outside any code the tools themselves use, and is reported as
+# skipped: the Mac /release-check runs on has them all, and a clone or sandbox without one still gets the rest (JF-446).
+CHECK_SKIPPED=99
+
+check_ruff() {
+    command -v ruff >/dev/null 2>&1 || { echo "ruff is not installed"; return "$CHECK_SKIPPED"; }
+    local dir rc=0
+    # Each sidecar's own pyproject.toml extends sidecar/ruff-shared.toml.
+    for dir in "$SCRIPT_DIR"/sidecar/*/; do
+        [[ -f "$dir/pyproject.toml" ]] || continue
+        (cd "$dir" && ruff check --quiet . && ruff format --check --quiet .) || rc=1
+    done
+    return "$rc"
+}
+
+# Every tracked shell script: the *.sh files, jclaw.sh, and the git hooks, which carry no extension.
+shell_scripts() {
+    local f
+    for f in $(git -C "$SCRIPT_DIR" ls-files '*.sh' jclaw.sh .githooks); do
+        case "$f" in
+            *.sh) echo "$f" ;;
+            *) head -1 "$SCRIPT_DIR/$f" | grep -q -E '^#!.*(ba)?sh' && echo "$f" ;;
+        esac
+    done
+}
+
+check_shellcheck() {
+    command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck is not installed"; return "$CHECK_SKIPPED"; }
+    # Warnings and errors fail; info and style notes do not. Each script's shebang picks its dialect.
+    shell_scripts | sort -u | (cd "$SCRIPT_DIR" && xargs shellcheck --severity=warning)
+}
+
+check_eslint_bin() {
+    local eslint="$SCRIPT_DIR/frontend/node_modules/.bin/eslint"
+    [[ -x "$eslint" ]] || { echo "frontend/node_modules is not installed"; return "$CHECK_SKIPPED"; }
+    (cd "$SCRIPT_DIR" && "$eslint" --config bin/eslint.config.mjs bin)
 }
 
 check_wildcard_imports() {
@@ -5830,6 +5875,9 @@ do_check() {
     check_step spotless ./gradlew --quiet spotlessCheck
     # JCLAW-1149: Play's ECJ compile cannot host a javac plugin, so the Gradle compileJava is the only place NullAway runs.
     check_step compile ./gradlew --quiet compileJava
+    check_step ruff check_ruff
+    check_step shellcheck check_shellcheck
+    check_step eslint-bin check_eslint_bin
     if [[ "$BACKEND_ONLY" != true ]]; then
         # The typecheck reads the generated .nuxt, which a fresh tree does not have.
         [[ -d "$SCRIPT_DIR/frontend/.nuxt" ]] || check_step prepare frontend_script exec nuxi prepare
@@ -6227,10 +6275,6 @@ IZGsQ3joF/NEpzn/jTMzI+UT4r/btJ+LTsXpI+pHG+7Rl2VV2mI4dadqSg==
 # These are the inverse case: merging them would leave a deleted class on
 # the classpath, two versions of a jar in lib/, or orphaned SPA chunks.
 UPGRADE_NO_MERGE="precompiled lib framework modules .classpath public/spa server.pid"
-
-# Paths that must survive the swap, relative to the app root. Recorded only for
-# the preflight's reassurance text — the carry-over itself is rule-driven.
-UPGRADE_PRESERVED="data workspace logs certs public/apps sidecar (virtualenvs) conf/application.conf (if edited)"
 
 sha256_file() {
     if command -v shasum >/dev/null 2>&1; then
@@ -6740,7 +6784,7 @@ do_upgrade() {
         [[ -n "$db_backup" ]] && echo "    Database backup: ${db_backup#"$SCRIPT_DIR"/}"
         rm -rf "$prev"
         UPGRADE_SWAPPED=false
-        upgrade_status done 100 "Upgraded to $installed."
+        upgrade_status "done" 100 "Upgraded to $installed."
         return 0
     fi
 
@@ -7082,7 +7126,7 @@ successful backup.${note}" || exit 0
         db_status_json restore starting "Starting JClaw…" "$backup_name"
         db_start_instance
     fi
-    db_status_json restore done "Restored from $backup_name" "$backup_name"
+    db_status_json restore "done" "Restored from $backup_name" "$backup_name"
     DB_OP_DONE=1
     echo "==> Done. The database is the backup from $(db_mtime "$zip")."
 }
@@ -7124,9 +7168,9 @@ repair creates are kept in data/ until you clean them up.${note}" || exit 0
         db_start_instance
     fi
     if [[ $rc -eq 0 ]]; then
-        db_status_json repair done "Repair complete"
+        db_status_json repair "done" "Repair complete"
     else
-        db_status_json repair done "Repair incomplete — the damaged file is kept for another attempt"
+        db_status_json repair "done" "Repair incomplete — the damaged file is kept for another attempt"
     fi
     DB_OP_DONE=1
     echo ""
@@ -7183,7 +7227,7 @@ of the credentials. The file is replaced only once the rewrite matches it row fo
         DB_OP_DONE=1
         exit 1
     fi
-    db_status_json compact done "Compaction complete"
+    db_status_json compact "done" "Compaction complete"
     DB_OP_DONE=1
     echo "==> Done. Backups taken before now may still hold the old copies: '${INVOKE} backup --list' marks them."
 }

@@ -38,7 +38,7 @@ public final class TaskService {
      * one from an unordered fetch.
      */
     public static List<Task> findRecurringConflicts(String name, Agent agent) {
-        return Task.<Task>find(
+        return Task.find(
                 "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5 ORDER BY id",
                 name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
         ).fetch();

@@ -393,7 +393,9 @@ const isSignal = (a) => /^-\d+$/.test(a) || SIGNALS.has(a.slice(1).toUpperCase()
 const PKILL_VALUES = "FGgPstUu";
 // Linux procps spells the matching flags long too.
 const PKILL_LONG = new Map([["--full", "f"], ["--inverse", "v"], ["--exact", "x"], ["--ignore-case", "i"]]);
-// A shell expansion or substitution the lexer left in a word hides the pattern pkill really gets.
+// A shell expansion or substitution the lexer left in a word hides the pattern pkill really gets. The NUL is the mark
+// the lexer writes where it took out a command substitution.
+// eslint-disable-next-line no-control-regex
 const EXPANSION = /\$[\w{@*#?$!]|\u0000/;
 // ERE bracket classes such as [[:alpha:]] compile in JS as a plain character set and match something else.
 const POSIX_CLASS = /\[([:=.])[^\]]*\1\]/;

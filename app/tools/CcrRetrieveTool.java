@@ -152,13 +152,13 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
             if (conv == null) {
                 return new Failed("Error: conversation not found.");
             }
-            List<Message> rows = Message.<Message>find("conversation = ?1 AND role IN (?2, ?3) ORDER BY id DESC",
+            List<Message> rows = Message.find("conversation = ?1 AND role IN (?2, ?3) ORDER BY id DESC",
                     conv, MessageRole.TOOL.value, MessageRole.USER.value).fetch();
             hit = matchByHash(rows, m -> m.content, handle, m -> conversationToolName(conv, m));
         } else {
             // JCLAW-462: task fires persist tool turns to task_run_message,
             // not the chat Message/Conversation tables — scan those instead.
-            List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
+            List<TaskRunMessage> rows = TaskRunMessage.find(
                     "taskRun.id = ?1 AND role IN (?2, ?3) ORDER BY id DESC", taskRunId, MessageRole.TOOL,
                     MessageRole.USER).fetch();
             hit = matchByHash(rows, m -> m.content, handle, m -> taskRunToolName(taskRunId, m));
@@ -188,7 +188,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     private static @Nullable String conversationToolName(Conversation conv, Message toolRow) {
         if (toolRow.toolResults == null) return null;
-        List<Message> calls = Message.<Message>find(
+        List<Message> calls = Message.find(
                 "conversation = ?1 AND role = ?2 AND id < ?3 AND toolCalls LIKE ?4 ORDER BY id DESC",
                 conv, MessageRole.ASSISTANT.value, toolRow.id, callIdPattern(toolRow.toolResults))
                 .fetch(CALL_ROW_CANDIDATES);
@@ -197,7 +197,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     private static @Nullable String taskRunToolName(@Nullable Long taskRunId, TaskRunMessage toolRow) {
         if (toolRow.toolResults == null) return null;
-        List<TaskRunMessage> calls = TaskRunMessage.<TaskRunMessage>find(
+        List<TaskRunMessage> calls = TaskRunMessage.find(
                 "taskRun.id = ?1 AND role = ?2 AND id < ?3 AND toolCalls LIKE ?4 ORDER BY id DESC",
                 taskRunId, MessageRole.ASSISTANT, toolRow.id, callIdPattern(toolRow.toolResults))
                 .fetch(CALL_ROW_CANDIDATES);

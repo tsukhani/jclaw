@@ -56,6 +56,7 @@ if [ -z "${PLAY_SECRET:-}" ]; then
         # Source the .env in a subshell to read PLAY_SECRET without leaking
         # any other variables it may contain into the parent shell. The
         # subshell pipes only PLAY_SECRET back through stdout.
+        # shellcheck source=/dev/null  # the operator's .env, read at run time
         PLAY_SECRET=$(set -a; . "$ENV_FILE"; set +a; printf '%s' "${PLAY_SECRET:-}")
     fi
     if [ -z "${PLAY_SECRET:-}" ]; then
@@ -78,6 +79,7 @@ fi
 
 # ── PLAY_SECRET_PREVIOUS pass-through ───────────────────────────────────────
 if [ -z "${PLAY_SECRET_PREVIOUS:-}" ] && [ -s "$ENV_FILE" ]; then
+    # shellcheck source=/dev/null  # the operator's .env, read at run time
     PLAY_SECRET_PREVIOUS=$(set -a; . "$ENV_FILE"; set +a; printf '%s' "${PLAY_SECRET_PREVIOUS:-}")
 fi
 

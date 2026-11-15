@@ -62,7 +62,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
         var cutoff = AppClock.now().minusSeconds(ORPHAN_AGE_SECONDS);
         List<SubagentRun> orphans;
         try {
-            orphans = Tx.run(() -> SubagentRun.<SubagentRun>find(
+            orphans = Tx.run(() -> SubagentRun.find(
                     "status = ?1 AND startedAt < ?2",
                     SubagentRun.Status.RUNNING, cutoff).fetch());
         } catch (RuntimeException e) {

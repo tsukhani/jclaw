@@ -625,7 +625,7 @@ public class ToolRegistry {
                     ToolResult.Outcome.INVALID_ARGS);
         }
         try {
-            JsonParser.parseString(argsJson);
+            var _ = JsonParser.parseString(argsJson);
         } catch (JsonSyntaxException e) {
             return ToolResult.refused(
                     "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"

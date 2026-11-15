@@ -97,7 +97,7 @@ fi
 # the two-remote /deploy flow also short-circuits.
 should_skip_for_docs() {
     # No upstream → can't compute scope cheaply, fall through to tests
-    git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1 || return 1
+    git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1 || return 1
 
     local files
     files=$(git diff --name-only "@{u}..HEAD" 2>/dev/null) || return 1
@@ -147,6 +147,7 @@ fast_checks() {
 # Their git runs in scratch repositories, so git's environment for this repository is cleared first (JF-299).
 run_bin_tests() {
     echo "[jclaw pre-push] Running the bin/ script tests..."
+    # shellcheck disable=SC2046  # one variable name per word is what unset needs
     if ! (cd "$repo_root" && unset $(git rev-parse --local-env-vars) && node --test bin/*.test.mjs); then
         echo "[jclaw pre-push] The bin/ script tests failed — push aborted." >&2
         exit 1
@@ -239,6 +240,7 @@ echo "[jclaw pre-push] Testing $current_sha before push..."
 # Git exports GIT_DIR to a hook run in a worktree, and a test that runs git in a scratch directory inherits it:
 # RestartProgressScriptTest's git add then lands in this repository's index while the test still passes (JF-299).
 # The list is the one git's own scripts clear before they work in another repository.
+# shellcheck disable=SC2046  # one variable name per word is what unset needs
 if (cd "$repo_root" && unset $(git rev-parse --local-env-vars) \
         && JCLAW_TEST_BACKEND="$backend_scope" JCLAW_TEST_FRONTEND="$run_frontend" ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"

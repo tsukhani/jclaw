@@ -201,11 +201,11 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
         int fetchLimit = limit + 1;
         List<Message> rows;
         if (beforeMessageId != null) {
-            rows = Message.<Message>find(
+            rows = Message.find(
                     "conversation = ?1 AND id < ?2 ORDER BY id DESC",
                     childConv, beforeMessageId).fetch(fetchLimit);
         } else {
-            rows = Message.<Message>find(
+            rows = Message.find(
                     "conversation = ?1 ORDER BY id DESC",
                     childConv).fetch(fetchLimit);
         }

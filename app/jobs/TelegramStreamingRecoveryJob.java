@@ -108,8 +108,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
      */
     private static Set<Long> recoverPlaceholders(@Nullable Instant cutoff, @Nullable Long restartAsker) {
         List<Conversation> orphans = Tx.run(() -> cutoff == null
-                ? Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL").fetch()
-                : Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL AND updatedAt < ?1", cutoff).fetch());
+                ? Conversation.find("activeStreamMessageId IS NOT NULL").fetch()
+                : Conversation.find("activeStreamMessageId IS NOT NULL AND updatedAt < ?1", cutoff).fetch());
         if (orphans.isEmpty()) return Set.of();
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,

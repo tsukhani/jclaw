@@ -115,7 +115,7 @@ public final class MemoryReembedService {
         // covered twice, which is harmless because the upsert is idempotent.
         LuceneIndexer.clear(LuceneIndexer.Scope.MEMORY);
 
-        var rows = Tx.run(() -> Memory.<Memory>find("supersededAt IS NULL ORDER BY id").<Memory>fetch()
+        var rows = Tx.run(() -> Memory.find("supersededAt IS NULL ORDER BY id").<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text, String.valueOf(m.agent.id))).toList());
         total.set(rows.size());
         EventLogger.info(EVENT_CATEGORY,

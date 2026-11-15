@@ -182,7 +182,7 @@ public final class McpServerService {
     }
 
     public static List<Summary> listAll() {
-        var rows = McpServer.<McpServer>find("ORDER BY name ASC").<McpServer>fetch();
+        var rows = McpServer.find("ORDER BY name ASC").<McpServer>fetch();
         return rows.stream().map(row -> Summary.of(View.of(row).withDuplicateOf(originalFor(row, rows)))).toList();
     }
 

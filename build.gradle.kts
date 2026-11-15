@@ -19,8 +19,9 @@ tasks.withType<JavaCompile>().configureEach {
         // no nullness annotations, and the contracts being enforced are production ones. It is
         // re-enabled below for MustBeClosed alone.
         enabled.set(name == "compileJava")
-        // Two named checks only. Adopting the rest of Error Prone's catalogue is its own decision.
-        disableAllChecks.set(true)
+        // Error Prone's error-level checks fail the build too, its warning-level ones stay off: 589 warnings over 39
+        // checks on 2026-11-16, against 27 errors fixed with this (JF-446).
+        disableAllWarnings.set(true)
         check("NullAway", CheckSeverity.ERROR)
         // JCLAW-1156: an @MustBeClosed AutoCloseable whose result escapes without a
         // try-with-resources (or a @MustBeClosed caller that returns it on) fails the build.

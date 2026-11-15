@@ -64,6 +64,6 @@ public final class ContentTypeDetector {
     /** Two fence lines or `##` headings, whichever: one is a stray line in a source file. */
     private static boolean isMarkdown(String content) {
         var marks = MARKDOWN_MARK.matcher(content);
-        return marks.find() && marks.find();
+        return marks.results().limit(2).count() == 2;
     }
 }

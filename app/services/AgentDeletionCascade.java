@@ -199,7 +199,7 @@ public final class AgentDeletionCascade {
      * so the per-call cost is bounded.
      */
     private static List<Agent> findDirectChildren(Long parentId) {
-        return Agent.<Agent>find("parentAgent.id = ?1", parentId).fetch();
+        return Agent.find("parentAgent.id = ?1", parentId).fetch();
     }
 
     /**

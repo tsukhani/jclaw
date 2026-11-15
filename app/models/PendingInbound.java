@@ -62,7 +62,7 @@ public class PendingInbound extends Model {
 
     /** Rows from before {@code cutoff}, oldest first, so a conversation's messages re-queue in arrival order. */
     public static List<PendingInbound> createdBefore(Instant cutoff) {
-        return PendingInbound.<PendingInbound>find("createdAt < ?1 ORDER BY id", cutoff).fetch();
+        return PendingInbound.find("createdAt < ?1 ORDER BY id", cutoff).fetch();
     }
 
     public static void deleteByIds(Collection<Long> ids) {

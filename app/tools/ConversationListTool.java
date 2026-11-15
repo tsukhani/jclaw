@@ -224,7 +224,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
         jpql.append(" ORDER BY startedAt DESC");
 
         int fetchLimit = parsed.limit() + 1;
-        List<SubagentRun> rows = SubagentRun.<SubagentRun>find(
+        List<SubagentRun> rows = SubagentRun.find(
                         jpql.toString(), params.toArray())
                 .from(parsed.offset()).fetch(fetchLimit);
         boolean hasMore = rows.size() > parsed.limit();

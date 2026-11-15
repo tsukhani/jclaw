@@ -544,7 +544,7 @@ public final class RestartNarrator {
         }
         var options = parsed.get();
         // jclaw.sh may delete these class files mid-restart (a source checkout's precompile): load them all now.
-        RestartNarrator.class.getNestMembers();
+        var _ = RestartNarrator.class.getNestMembers();
         long started = System.nanoTime();
         // A parent already gone by now is a failed restart's jclaw.sh, which has exited and left this to serve it.
         var parent = options.parentPid() > 0 ? ProcessHandle.of(options.parentPid()) : Optional.<ProcessHandle>empty();

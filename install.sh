@@ -339,7 +339,7 @@ provision_jre() {
     # Locate bin/java — handles the macOS zulu-25.jre/Contents/Home nesting and Linux flat.
     _jbin=$(find "$JRE_DIR" -type f -name java -path '*/bin/java' 2>/dev/null | head -n1)
     [ -n "$_jbin" ] || die "unpacked the JRE but found no bin/java under $JRE_DIR."
-    JAVA_HOME=$(CDPATH= cd -- "$(dirname "$(dirname "$_jbin")")" && pwd)
+    JAVA_HOME=$(CDPATH='' cd -- "$(dirname "$(dirname "$_jbin")")" && pwd)
     export JAVA_HOME
     PATH="$JAVA_HOME/bin:$PATH"
     export PATH

@@ -84,12 +84,12 @@ public final class McpAllowlist {
     public static int registerForAllAgents(String serverName, List<McpToolDef> tools) {
         var skillName = SKILL_PREFIX + serverName;
 
-        List<Agent> agents = Agent.<Agent>find(TOP_LEVEL_AGENTS).fetch();
+        List<Agent> agents = Agent.find(TOP_LEVEL_AGENTS).fetch();
         Set<String> incoming = new HashSet<>();
         for (var tool : tools) incoming.add(tool.name());
 
         List<AgentSkillAllowedTool> existing =
-                AgentSkillAllowedTool.<AgentSkillAllowedTool>find(QUERY_SKILL_TOP_LEVEL, skillName).fetch();
+                AgentSkillAllowedTool.find(QUERY_SKILL_TOP_LEVEL, skillName).fetch();
         Set<String> current = new HashSet<>();
         for (var row : existing) current.add(row.toolName);
         if (current.equals(incoming) && existing.size() == agents.size() * incoming.size()) {
@@ -174,7 +174,7 @@ public final class McpAllowlist {
                 removed += deleteAndEvict(QUERY_SKILL_NAME, skillName);
             }
         }
-        List<Agent> subagents = Agent.<Agent>find("parentAgent is not null").fetch();
+        List<Agent> subagents = Agent.find("parentAgent is not null").fetch();
         for (var agent : subagents) {
             if (runningAgentIds.contains(agent.id)) continue;
             removed += revokeForAgent(agent);
@@ -231,7 +231,7 @@ public final class McpAllowlist {
      */
     public static int inheritFromParent(Agent child) {
         if (child == null || child.id == null || child.parentAgent == null) return 0;
-        List<AgentSkillAllowedTool> parentRows = AgentSkillAllowedTool.<AgentSkillAllowedTool>find(
+        List<AgentSkillAllowedTool> parentRows = AgentSkillAllowedTool.find(
                 "agent = ?1 and skillName like ?2", child.parentAgent, SKILL_PREFIX + "%").fetch();
         for (var parentRow : parentRows) {
             var row = new AgentSkillAllowedTool();

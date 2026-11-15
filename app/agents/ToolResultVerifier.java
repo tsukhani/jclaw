@@ -180,7 +180,7 @@ public final class ToolResultVerifier {
 
     private static boolean parses(String json) {
         try {
-            JsonParser.parseString(json);
+            var _ = JsonParser.parseString(json);
             return true;
         } catch (RuntimeException _) {
             return false;

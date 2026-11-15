@@ -139,7 +139,7 @@ public final class MemoryKeyBackfillService {
     }
 
     private static List<Row> load(Agent agent) {
-        return Tx.run(() -> Memory.<Memory>find(
+        return Tx.run(() -> Memory.find(
                         "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
     }
