@@ -1656,6 +1656,104 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void aMergeCallThatFailsStoresNothingAndTheLogSaysWhy() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new AtomicInteger();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                merges.incrementAndGet();
+                throw new IllegalStateException("merge provider down");
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(1, merges.get());
+        assertEquals(List.of("Merging 3 summaries of conversation %d failed: merge provider down".formatted(conv.id)),
+                mergeLines(events));
+        var segments = storedSegments(conv.id);
+        assertEquals(List.of(sectioned(0), sectioned(1), sectioned(2)), segments.stream().map(sc -> sc.summary).toList());
+        assertEquals(java.util.Arrays.asList(null, null, null), segments.stream().map(sc -> sc.mergedIntoId).toList());
+    }
+
+    @Test
+    void aMergeWhoseWholeRewriteFailsIsStoredAroundItsCarriedItemsInstead() {
+        // The share is 1% (10 tokens) and the ceiling 2% (20); the 34 tokens of items name none replaced.
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.FACTS_BUDGET_PERCENT_KEY, "1");
+        ConfigService.set(SessionCompactor.FACTS_CEILING_PERCENT_KEY, "2");
+        var conv = ConversationService.create(agent, "web", "user1");
+        var merges = new AtomicInteger();
+        var written = new AtomicInteger();
+        SessionCompactor.Summarizer summarizer = msgs -> {
+            if (((String) msgs.get(1).content()).startsWith("[Turns ")) {
+                if (merges.getAndIncrement() > 0) throw new IllegalStateException("rewrite provider down");
+                return CONDENSED + "\n\n### Replaced items\nNone.";
+            }
+            return sectioned(written.getAndIncrement());
+        };
+
+        var events = EventLogger.captureForTest(() -> {
+            for (int b = 0; b < 3; b++) compactBatch(conv, b, summarizer);
+        });
+
+        assertEquals(2, merges.get(), "the merge, then its rewrite");
+        assertEquals(List.of("Merging 3 summaries of conversation %d failed: rewrite provider down".formatted(conv.id)),
+                mergeLines(events));
+        var segments = storedSegments(conv.id);
+        assertEquals(mergeOf(2), segments.getLast().summary);
+        var result = segments.getLast().id;
+        assertEquals(java.util.Arrays.asList(result, result, result, null),
+                segments.stream().map(sc -> sc.mergedIntoId).toList());
+    }
+
+    @Test
+    void aMergesOwnCheckIsMadeOnlyWhenACallIsLeftForIt() {
+        ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
+        ConfigService.set(SessionCompactor.CHECK_SUMMARY_KEY, "true");
+        var restored = CONDENSED + "\n- Step 1, which the merge left out";
+        // The third batch's summary and its check take two calls, and the merge a third.
+        for (int max : new int[] {3, 4}) {
+            var conv = ConversationService.create(agent, "web", "merge-cap-" + max);
+            var written = new AtomicInteger();
+            SessionCompactor.Summarizer summarizer = msgs -> {
+                var user = (String) msgs.get(1).content();
+                if (user.startsWith("[Summary]")) return user.substring(11, user.indexOf("\n\n[The user's messages"));
+                return sectioned(written.getAndIncrement());
+            };
+            for (int b = 0; b < 2; b++) compactBatch(conv, b, summarizer);
+            seedMinutes(Conversation.findById(conv.id), BASE.plusSeconds(2 * 3_600L), 25, "Batch 2");
+            commitAndReopen();
+            var mergeChecks = new AtomicInteger();
+
+            var result = SessionCompactor.compact(conv.id, "openrouter/test-model",
+                    new TurnRequest(turnMessages(conv.id), TOOLS), (msgs, defs) -> {
+                        if (!defs.isEmpty()) return reply(sectioned(2));
+                        var user = (String) msgs.get(1).content();
+                        if (user.startsWith("[Summary]")) {
+                            return reply(user.substring(11, user.indexOf("\n\n[The user's messages")));
+                        }
+                        if (user.startsWith("[Turns ")) return reply(CONDENSED);
+                        mergeChecks.incrementAndGet();
+                        return reply(restored);
+                    }, false, null, Integer.MAX_VALUE, max);
+
+            assertTrue(result.compacted(), "reason=" + result.skipReason());
+            assertEquals(max, result.calls());
+            assertEquals(max - 3, mergeChecks.get());
+            commitAndReopen();
+            assertEquals(max == 3 ? mergeOf(2)
+                    : mergeOf(2).replace("- Merged next step", "- Merged next step\n- Step 1, which the merge left out"),
+                    storedSegments(conv.id).getLast().summary);
+        }
+    }
+
+    @Test
     void aMergeReplyOpeningOnAPrefaceWithLooseHeadingsAndASectionItWasNotAskedForIsStillStored() {
         ConfigService.set(SessionCompactor.SUMMARY_BUDGET_KEY, "1000");
         var conv = ConversationService.create(agent, "web", "user1");

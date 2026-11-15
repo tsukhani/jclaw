@@ -860,85 +860,140 @@ public final class SessionCompactor {
      */
     private static Merge mergeAndStore(Long conversationId, Supplier<String> modelLabel, MergePlan plan,
                                        Summarizer merger, boolean check, int callsLeft, long cap, long ceiling) {
+        var run = new MergeRun(conversationId, plan, merger, check, cap, ceiling, new CallBudget(callsLeft));
+        var parsed = parsedSegments(plan);
+        var draft = parsed == null ? wholeDraft(run) : sectionedDraft(run, parsed);
+        if (draft == null) return new Merge(false, run.calls().made());
+        var text = draft.text();
+        if (check && draft.whole() && run.calls().spend()) text = checkedMerge(conversationId, plan, text, merger);
+        boolean stored = storeMerge(conversationId, plan, text, modelLabel.get());
+        if (stored) {
+            EventLogger.info("compaction", null, null, "Merged the oldest %d summaries of conversation %d into one"
+                    .formatted(plan.ids().size(), conversationId));
+        }
+        return new Merge(stored, run.calls().made());
+    }
+
+    /** What one merge {@link #mergeAndStore} makes was given, and the calls it may still make. */
+    private record MergeRun(Long conversationId, MergePlan plan, Summarizer merger, boolean check, long cap,
+                            long ceiling, CallBudget calls) {}
+
+    /** The calls one merge may make, and those it has made, its first included. */
+    private static final class CallBudget {
+        private final int left;
+        private int made = 1;
+
+        CallBudget(int left) {
+            this.left = left;
+        }
+
+        int made() {
+            return made;
+        }
+
+        /** Spends one more call when one is left. */
+        boolean spend() {
+            if (made >= left) return false;
+            made++;
+            return true;
+        }
+    }
+
+    /** A merge's text, and whether the model wrote it whole rather than around the carried items. */
+    private record Draft(String text, boolean whole) {}
+
+    /** Each segment's sections, or null when one lacks them, so the model writes the merge whole (JF-161). */
+    private static @Nullable List<Map<String, List<String>>> parsedSegments(MergePlan plan) {
         var parsed = new ArrayList<Map<String, List<String>>>(plan.summaries().size());
         for (var summary : plan.summaries()) {
             var sections = sectionsOf(summary, SECTION_NAMES, SECTION_NAMES);
-            if (sections == null) break;
+            if (sections == null) return null;
             parsed.add(sections);
         }
-        int calls = 1;
-        boolean checkText = check;
-        String text;
-        if (parsed.size() < plan.summaries().size()) {
-            var whole = wholeMerge(conversationId, plan, merger);
-            if (whole == null) return new Merge(false, calls);
-            text = whole;
-        } else {
-            var carriedItems = carried(parsed);
-            boolean replacing = carriedTokens(carriedItems) > cap;
-            String written;
-            try {
-                written = merger.summarize(List.of(ChatMessage.system(replacing ? MERGE_REPLACING_INSTRUCTIONS
-                        : MERGE_CONDENSED_INSTRUCTIONS), ChatMessage.user(replacing ? plan.segments() + "\n\n"
-                        + CARRIED_ITEMS_LABEL + "\n\n" + numbered(carriedItems) : plan.segments())));
-            } catch (Exception e) {
-                EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d failed: %s"
-                        .formatted(plan.ids().size(), conversationId, e.getMessage()));
-                return new Merge(false, calls);
-            }
-            var read = replySections(written == null ? "" : written,
-                    replacing ? REPLACING_SECTION_NAMES : SECTION_NAMES, CONDENSED_SECTIONS);
-            var condensed = read.sections();
-            if (condensed == null) {
-                EventLogger.warn("compaction", null, null, ("Merging %d summaries of conversation %d returned %s; the "
-                        + "summaries stay as they are").formatted(plan.ids().size(), conversationId, read.problem()));
-                return new Merge(false, calls);
-            }
-            if (!read.leftOut().isEmpty()) {
-                EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d left out what the "
-                        + "reply was not asked for: %s").formatted(plan.ids().size(), conversationId, read.leftOut()));
-            }
-            Map<Integer, Integer> replaced = replacing
-                    ? replacedPairs(carriedItems, condensed.getOrDefault(REPLACED_ITEMS, List.of())) : Map.of();
-            var kept = without(carriedItems, replaced.keySet());
-            @Nullable String whole = null;
-            if (carriedTokens(kept) > ceiling && callsLeft > calls) {
-                calls++;
-                EventLogger.info("compaction", null, null, ("The goals and facts of %d summaries of conversation %d "
-                        + "pass %d tokens with every replaced item dropped; the merge is rewritten whole")
-                        .formatted(plan.ids().size(), conversationId, ceiling));
-                whole = wholeMerge(conversationId, plan, merger);
-            }
-            if (whole != null) {
-                text = whole;
-            } else {
-                var sections = condensed;
-                Set<Integer> dropped = replaced.keySet();
-                if (check && callsLeft > calls) {
-                    calls++;
-                    var checked = checkedMerge(conversationId, plan, sections, carriedItems, replaced, merger);
-                    sections = checked.sections();
-                    if (!checked.restored().isEmpty()) {
-                        dropped = new HashSet<>(dropped);
-                        dropped.removeAll(checked.restored());
-                    }
-                }
-                if (!replaced.isEmpty()) {
-                    EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d dropped %d "
-                            + "replaced item(s); the check restored %d").formatted(plan.ids().size(), conversationId,
-                            dropped.size(), replaced.size() - dropped.size()));
-                }
-                text = assembled(without(carriedItems, dropped), sections);
-                checkText = false;
+        return parsed;
+    }
+
+    private static @Nullable Draft wholeDraft(MergeRun run) {
+        var whole = wholeMerge(run.conversationId(), run.plan(), run.merger());
+        return whole == null ? null : new Draft(whole, true);
+    }
+
+    /**
+     * The merge of segments that all hold their sections: their carried items, less those the model names as replaced
+     * past the cap, around the three sections it writes, unless the items still pass the ceiling and a call is left to
+     * rewrite the merge whole. Null when the model's sections cannot be had.
+     */
+    private static @Nullable Draft sectionedDraft(MergeRun run, List<Map<String, List<String>>> parsed) {
+        var carriedItems = carried(parsed);
+        boolean replacing = carriedTokens(carriedItems) > run.cap();
+        var condensed = condensedReply(run, carriedItems, replacing);
+        if (condensed == null) return null;
+        Map<Integer, Integer> replaced = replacing
+                ? replacedPairs(carriedItems, condensed.getOrDefault(REPLACED_ITEMS, List.of())) : Map.of();
+        if (carriedTokens(without(carriedItems, replaced.keySet())) > run.ceiling() && run.calls().spend()) {
+            EventLogger.info("compaction", null, null, ("The goals and facts of %d summaries of conversation %d pass %d "
+                    + "tokens with every replaced item dropped; the merge is rewritten whole")
+                    .formatted(run.plan().ids().size(), run.conversationId(), run.ceiling()));
+            var whole = wholeMerge(run.conversationId(), run.plan(), run.merger());
+            if (whole != null) return new Draft(whole, true);
+        }
+        return new Draft(assembledChecked(run, carriedItems, condensed, replaced), false);
+    }
+
+    /** The three sections the model writes; null, the reason logged, when the call fails or the reply lacks them. */
+    private static @Nullable Map<String, List<String>> condensedReply(MergeRun run,
+                                                                      Map<String, List<String>> carriedItems,
+                                                                      boolean replacing) {
+        var plan = run.plan();
+        String written;
+        try {
+            written = run.merger().summarize(List.of(ChatMessage.system(replacing ? MERGE_REPLACING_INSTRUCTIONS
+                    : MERGE_CONDENSED_INSTRUCTIONS), ChatMessage.user(replacing ? plan.segments() + "\n\n"
+                    + CARRIED_ITEMS_LABEL + "\n\n" + numbered(carriedItems) : plan.segments())));
+        } catch (Exception e) {
+            EventLogger.warn("compaction", null, null, "Merging %d summaries of conversation %d failed: %s"
+                    .formatted(plan.ids().size(), run.conversationId(), e.getMessage()));
+            return null;
+        }
+        var read = replySections(written == null ? "" : written,
+                replacing ? REPLACING_SECTION_NAMES : SECTION_NAMES, CONDENSED_SECTIONS);
+        var condensed = read.sections();
+        if (condensed == null) {
+            EventLogger.warn("compaction", null, null, ("Merging %d summaries of conversation %d returned %s; the "
+                    + "summaries stay as they are").formatted(plan.ids().size(), run.conversationId(), read.problem()));
+            return null;
+        }
+        if (!read.leftOut().isEmpty()) {
+            EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d left out what the "
+                    + "reply was not asked for: %s").formatted(plan.ids().size(), run.conversationId(), read.leftOut()));
+        }
+        return condensed;
+    }
+
+    /** The carried items around the model's sections, a dropped item left out unless a check restores it. */
+    private static String assembledChecked(MergeRun run, Map<String, List<String>> carriedItems,
+                                           Map<String, List<String>> condensed, Map<Integer, Integer> replaced) {
+        var sections = condensed;
+        Set<Integer> dropped = replaced.keySet();
+        if (run.check() && run.calls().spend()) {
+            var checked = checkedMerge(run.conversationId(), run.plan(), sections, carriedItems, replaced, run.merger());
+            sections = checked.sections();
+            if (!checked.restored().isEmpty()) {
+                dropped = new HashSet<>(dropped);
+                dropped.removeAll(checked.restored());
             }
         }
-        if (checkText && callsLeft > calls) {
-            calls++;
-            text = checkedMerge(conversationId, plan, text, merger);
+        if (!replaced.isEmpty()) {
+            EventLogger.info("compaction", null, null, ("Merging %d summaries of conversation %d dropped %d replaced "
+                    + "item(s); the check restored %d").formatted(run.plan().ids().size(), run.conversationId(),
+                    dropped.size(), replaced.size() - dropped.size()));
         }
-        final var merged = text;
-        final var label = modelLabel.get();
-        boolean stored = Tx.run(() -> {
+        return assembled(without(carriedItems, dropped), sections);
+    }
+
+    /** Stores {@code merged} over {@code plan}'s segments; false when the conversation or one of them is gone. */
+    private static boolean storeMerge(Long conversationId, MergePlan plan, String merged, String label) {
+        return Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(conversationId);
             if (conv == null) return false;
             var sources = new ArrayList<SessionCompaction>(plan.ids().size());
@@ -956,11 +1011,6 @@ public final class SessionCompactor {
             }
             return true;
         });
-        if (stored) {
-            EventLogger.info("compaction", null, null, "Merged the oldest %d summaries of conversation %d into one"
-                    .formatted(plan.ids().size(), conversationId));
-        }
-        return new Merge(stored, calls);
     }
 
     /** The model's three sections as a check left them, and the dropped items it restores. */
