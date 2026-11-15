@@ -1,8 +1,6 @@
 package services.secrets;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
@@ -19,17 +17,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
-import java.net.URLDecoder;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -67,7 +60,6 @@ final class SecretCapture {
     private static final String METHOD_PARAMETER = "_method";
     /** A header value that is a token after at most one scheme word, as in {@code Bearer TOKEN}. */
     private static final Pattern SCHEMED = Pattern.compile("(?:[!#$%&'*+.^_`|~0-9A-Za-z-]+ +)?(\\S+)");
-    private static final Pattern PART_NAME = Pattern.compile("(?i)(?:^|;)\\s*name\\s*=\\s*(?:\"([^\"]*)\"|([^;\\s]*))");
 
     /**
      * The request as the command sent it, before any placeholder was replaced: its head's headers, its body, null when
@@ -230,52 +222,11 @@ final class SecretCapture {
      */
     private static @Nullable List<@Nullable String> jsonStrings(byte[] body, String name) {
         if (body.length == 0) return List.of();
-        var text = utf8(body);
-        if (text == null || fields(text) == null) return null;
+        var text = BodyFields.utf8(body);
+        if (text == null || BodyFields.jsonFields(text) == null) return null;
         var out = new ArrayList<@Nullable String>();
-        for (var field : rawFields(text)) {
+        for (var field : BodyFields.rawJsonFields(text)) {
             if (field.name().equals(name)) out.add(field.raw());
-        }
-        return out;
-    }
-
-    /** A top-level field of a JSON object: its decoded name, and its string value as written, or null if no string. */
-    private record RawField(String name, @Nullable String raw) {}
-
-    /** The top-level fields of {@code text}, which {@link #fields} has read as one strict JSON object. */
-    private static List<RawField> rawFields(String text) {
-        var out = new ArrayList<RawField>();
-        int depth = 0;
-        @Nullable String name = null;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '"') {
-                int end = i + 1;
-                while (text.charAt(end) != '"') end += text.charAt(end) == '\\' ? 2 : 1;
-                var raw = text.substring(i + 1, end);
-                if (depth == 1 && name == null) {
-                    name = JsonParser.parseString("\"" + raw + "\"").getAsString();
-                } else if (depth == 1 && name != null) {
-                    out.add(new RawField(name, raw));
-                    name = null;
-                }
-                i = end;
-            } else if (c == '{' || c == '[') {
-                if (depth == 1 && name != null) {
-                    out.add(new RawField(name, null));
-                    name = null;
-                }
-                depth++;
-            } else if (c == '}' || c == ']') {
-                depth--;
-            } else if (depth == 1 && name != null && c != ':' && c != ',' && !Character.isWhitespace(c)) {
-                out.add(new RawField(name, null));
-                name = null;
-                while (i + 1 < text.length() && ",}".indexOf(text.charAt(i + 1)) < 0
-                        && !Character.isWhitespace(text.charAt(i + 1))) {
-                    i++;
-                }
-            }
         }
         return out;
     }
@@ -287,31 +238,9 @@ final class SecretCapture {
      */
     private static @Nullable List<String> formFields(byte[] body, @Nullable String contentType, String name) {
         var media = contentType == null ? null : MediaType.parse(contentType);
-        if (contentType != null && media == null && namesMultipart(contentType)) return null;
-        if (media != null && multipart(media)) {
-            var parts = parts(body, media);
-            if (parts == null) return null;
-            var out = new ArrayList<String>();
-            for (var part : parts) {
-                if (part.getKey().equals(name)) out.add(part.getValue());
-            }
-            return out;
-        }
-        var out = new ArrayList<String>();
-        for (var pair : new String(body, StandardCharsets.ISO_8859_1).split("&")) {
-            int eq = pair.indexOf('=');
-            if (eq > 0 && formDecoded(pair.substring(0, eq)).equals(name)) out.add(pair.substring(eq + 1));
-        }
-        return out;
-    }
-
-    /** A form field decoded as a server decodes it, or as written when its escapes are malformed. */
-    private static String formDecoded(String text) {
-        try {
-            return URLDecoder.decode(text, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException _) {
-            return text;
-        }
+        if (contentType != null && media == null && BodyFields.namesMultipart(contentType)) return null;
+        if (media != null && BodyFields.multipart(media)) return BodyFields.multipartValues(body, media, name);
+        return BodyFields.urlencodedValues(body, name);
     }
 
     /** Whether a capture takes from {@code response}: a success or a redirect, as a service answers a sign-in. */
@@ -349,35 +278,28 @@ final class SecretCapture {
         var media = MediaType.parse(contentType);
         if (media == null) {
             // The proxy wrote the body as its type says; a server may still read a type it cannot parse whole.
-            return encoding == PlaceholderRewriter.Encoding.RAW && !namesMultipart(contentType) ? List.of() : null;
+            return encoding == PlaceholderRewriter.Encoding.RAW && !BodyFields.namesMultipart(contentType) ? List.of()
+                    : null;
         }
-        boolean multipart = multipart(media);
+        boolean multipart = BodyFields.multipart(media);
         if (!multipart && encoding == PlaceholderRewriter.Encoding.RAW) return List.of();
         var body = sent.body();
         if (body == null) return null;
         if (multipart) {
-            var parts = parts(body, media);
-            if (parts == null) return null;
-            var out = new ArrayList<@Nullable String>();
-            for (var part : parts) {
-                if (part.getKey().equals(METHOD_PARAMETER)) {
-                    out.add(new String(part.getValue().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8));
-                }
-            }
-            return out;
+            var values = BodyFields.multipartValues(body, media, METHOD_PARAMETER);
+            return values == null ? null : values.stream()
+                    .map(v -> new String(v.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8)).toList();
         }
         if (encoding == PlaceholderRewriter.Encoding.FORM) {
-            var out = new ArrayList<@Nullable String>();
-            for (var pair : new String(body, StandardCharsets.ISO_8859_1).split("&")) {
-                int eq = pair.indexOf('=');
-                if (eq > 0 && formDecoded(pair.substring(0, eq)).equals(METHOD_PARAMETER)) {
-                    out.add(formDecoded(pair.substring(eq + 1)));
-                }
-            }
-            return out;
+            return BodyFields.urlencodedValues(body, METHOD_PARAMETER).stream().map(BodyFields::formDecoded).toList();
         }
+        return jsonMethods(body);
+    }
+
+    /** The {@code _method} fields of a JSON body: none when it is no object, null when it cannot be read. */
+    private static @Nullable List<@Nullable String> jsonMethods(byte[] body) {
         if (body.length == 0) return List.of();
-        var text = utf8(body);
+        var text = BodyFields.utf8(body);
         if (text == null) return null;
         try {
             var reader = new JsonReader(new StringReader(text));
@@ -386,7 +308,7 @@ final class SecretCapture {
         } catch (IOException | RuntimeException _) {
             return null;
         }
-        var fields = fields(text);
+        var fields = BodyFields.jsonFields(text);
         if (fields == null) return null;
         var out = new ArrayList<@Nullable String>();
         for (var field : fields) {
@@ -395,76 +317,6 @@ final class SecretCapture {
             }
         }
         return out;
-    }
-
-    private static boolean multipart(MediaType media) {
-        return media.type().equalsIgnoreCase("multipart") && media.subtype().equalsIgnoreCase("form-data");
-    }
-
-    /** Whether a content type MediaType cannot parse still names a multipart form. */
-    private static boolean namesMultipart(String contentType) {
-        return contentType.strip().toLowerCase(Locale.ROOT).startsWith("multipart/form-data");
-    }
-
-    /**
-     * The parts of a multipart body, each its name and its content as Latin-1, as a lenient server reads them: a last
-     * part with no closing delimiter runs to the end, and a head may end in a bare blank line. Null when the body has
-     * no boundary or no delimiter to start at, or when a delimiter follows a bare LF, not CRLF: a strict server reads
-     * that as content and a lenient one as a new part, so which field holds what cannot be told.
-     */
-    private static @Nullable List<Map.Entry<String, String>> parts(byte[] body, MediaType media) {
-        var boundary = media.parameter("boundary");
-        if (boundary == null || boundary.isEmpty()) return null;
-        var text = new String(body, StandardCharsets.ISO_8859_1);
-        var delimiter = "--" + boundary;
-        for (int lf = text.indexOf("\n" + delimiter); lf >= 0; lf = text.indexOf("\n" + delimiter, lf + 1)) {
-            if (lf == 0 || text.charAt(lf - 1) != '\r') return null;
-        }
-        int at = text.startsWith(delimiter) ? 0 : text.indexOf("\r\n" + delimiter);
-        if (at < 0) return null;
-        if (at > 0) at += 2;
-        var out = new ArrayList<Map.Entry<String, String>>();
-        while (true) {
-            int after = at + delimiter.length();
-            if (text.startsWith("--", after)) return out;
-            int lineEnd = text.indexOf('\n', after);
-            if (lineEnd < 0) return out;
-            int headStart = lineEnd + 1;
-            int headEnd;
-            int contentStart;
-            if (text.startsWith("\r\n", headStart) || text.startsWith("\n", headStart)) {
-                headEnd = headStart;
-                contentStart = headStart + (text.charAt(headStart) == '\r' ? 2 : 1);
-            } else {
-                int blank = text.indexOf("\r\n\r\n", headStart);
-                int lfBlank = text.indexOf("\n\n", headStart);
-                if (blank >= 0 && (lfBlank < 0 || blank < lfBlank)) {
-                    headEnd = blank;
-                    contentStart = blank + 4;
-                } else if (lfBlank >= 0) {
-                    headEnd = lfBlank;
-                    contentStart = lfBlank + 2;
-                } else {
-                    return out;
-                }
-            }
-            var next = text.indexOf("\r\n" + delimiter, contentStart);
-            int contentEnd = next < 0 ? text.length() : next;
-            var name = partName(text.substring(headStart, headEnd));
-            if (name != null) out.add(Map.entry(name, text.substring(contentStart, Math.max(contentStart, contentEnd))));
-            if (next < 0) return out;
-            at = next + 2;
-        }
-    }
-
-    private static @Nullable String partName(String head) {
-        for (var line : head.split("\r?\n")) {
-            int colon = line.indexOf(':');
-            if (colon < 0 || !line.substring(0, colon).strip().equalsIgnoreCase("Content-Disposition")) continue;
-            var m = PART_NAME.matcher(line.substring(colon + 1));
-            if (m.find()) return m.group(1) != null ? m.group(1) : m.group(2);
-        }
-        return null;
     }
 
     /** A server answers a HEAD from its GET route. */
@@ -487,34 +339,16 @@ final class SecretCapture {
             if (noBody) return miss(rules, "it has no body");
             var body = readUpTo(response.body().byteStream(), LIMIT + 1);
             if (body.length > LIMIT) return miss(rules, "its body is longer than the %d bytes the proxy reads".formatted(LIMIT));
-            text = utf8(body);
+            text = BodyFields.utf8(body);
             json = text == null ? null : object(text);
             if (json == null) return miss(rules, "its body is not a JSON object");
         }
         var captured = new ArrayList<SecretGrants.Captured>();
         for (var rule : rules) {
-            var field = rule.capture().field();
-            boolean fromJson = rule.capture().from() == SkillSecrets.Capture.From.JSON;
-            // A parser keeps one of two same-named fields and a client may read the other: which is the key is unknown.
-            if (fromJson && json != null && json.repeated().contains(field)) {
-                return miss(List.of(rule), "it has the field " + field + " more than once");
-            }
-            @Nullable String value;
-            if (!fromJson) value = header(response, field);
-            else value = json == null ? null : string(json.object(), field);
-            if (value == null) {
-                return miss(List.of(rule), rule.capture().from() == SkillSecrets.Capture.From.HEADER
-                        ? "it has no single, non-empty header " + field
-                        : "it has no field " + field + " holding a non-empty string");
-            }
-            if (value.length() > SkillSecrets.MAX_VALUE_CHARS) {
-                return miss(List.of(rule), "its value is longer than the %d characters a secret holds"
-                        .formatted(SkillSecrets.MAX_VALUE_CHARS));
-            }
-            if (!SkillSecrets.headerSafe(value)) {
-                return miss(List.of(rule), "its value holds a line break or a NUL, which no header can carry");
-            }
-            captured.add(new SecretGrants.Captured(rule, value));
+            var value = value(rule, response, json);
+            var why = whyNotTaken(rule, value, json);
+            if (why != null) return miss(List.of(rule), why);
+            captured.add(new SecretGrants.Captured(rule, Objects.requireNonNull(value)));
         }
         SkillSecrets.@Nullable Renewable refused;
         try {
@@ -524,17 +358,50 @@ final class SecretCapture {
             return miss(rules, "storing it failed (%s)".formatted(e.getClass().getSimpleName()));
         }
         if (refused != null) return miss(List.of(refused), "the secret or its rule changed");
-        var replaced = new ArrayList<SecretGrant.Binding>();
-        for (var c : captured) {
-            var rule = c.rule();
-            var placeholder = grant.placeholderOf(rule.skill(), rule.name());
-            replaced.add(new SecretGrant.Binding(rule.skill(), rule.name(), c.value(), List.of(),
-                    placeholder != null ? placeholder : MARKER.formatted(rule.name())));
-        }
+        var replaced = bindings(captured);
         grant.maskFromNowOn(replaced);
         byte[] body = text == null ? null
                 : PlaceholderRewriter.replaceInJsonStrings(text, replaced).getBytes(StandardCharsets.UTF_8);
         return new Taken(body);
+    }
+
+    /** The value {@code rule} takes from the answer: its header, or its field of {@code json}; null when there is none. */
+    private static @Nullable String value(SkillSecrets.Renewable rule, Response response, @Nullable Parsed json) {
+        var field = rule.capture().field();
+        if (rule.capture().from() != SkillSecrets.Capture.From.JSON) return header(response, field);
+        return json == null ? null : string(json.object(), field);
+    }
+
+    /** Why {@code value}, which {@code rule} took from the answer, cannot be stored; null when it can. */
+    private static @Nullable String whyNotTaken(SkillSecrets.Renewable rule, @Nullable String value,
+                                                @Nullable Parsed json) {
+        var field = rule.capture().field();
+        // A parser keeps one of two same-named fields and a client may read the other: which is the key is unknown.
+        if (rule.capture().from() == SkillSecrets.Capture.From.JSON && json != null && json.repeated().contains(field)) {
+            return "it has the field " + field + " more than once";
+        }
+        if (value == null) {
+            return rule.capture().from() == SkillSecrets.Capture.From.HEADER
+                    ? "it has no single, non-empty header " + field
+                    : "it has no field " + field + " holding a non-empty string";
+        }
+        if (value.length() > SkillSecrets.MAX_VALUE_CHARS) {
+            return "its value is longer than the %d characters a secret holds".formatted(SkillSecrets.MAX_VALUE_CHARS);
+        }
+        if (!SkillSecrets.headerSafe(value)) return "its value holds a line break or a NUL, which no header can carry";
+        return null;
+    }
+
+    /** Each stored value, bound to the grant's stand-in for its secret, or to a marker when the grant has none. */
+    private List<SecretGrant.Binding> bindings(List<SecretGrants.Captured> captured) {
+        var out = new ArrayList<SecretGrant.Binding>();
+        for (var c : captured) {
+            var rule = c.rule();
+            var placeholder = grant.placeholderOf(rule.skill(), rule.name());
+            out.add(new SecretGrant.Binding(rule.skill(), rule.name(), c.value(), List.of(),
+                    placeholder != null ? placeholder : MARKER.formatted(rule.name())));
+        }
+        return out;
     }
 
     /** Whether the body is still encoded: OkHttp undoes only the gzip it asked for itself. */
@@ -571,7 +438,7 @@ final class SecretCapture {
 
     /** {@code text} as one JSON object, read strictly, so every string in it is one {@link PlaceholderRewriter} can find. */
     private static @Nullable Parsed object(String text) {
-        var fields = fields(text);
+        var fields = BodyFields.jsonFields(text);
         if (fields == null) return null;
         var object = new JsonObject();
         var repeated = new HashSet<String>();
@@ -580,34 +447,6 @@ final class SecretCapture {
             object.add(field.getKey(), field.getValue());
         }
         return new Parsed(object, Set.copyOf(repeated));
-    }
-
-    /** The top-level fields of {@code text} read strictly as one JSON object, in order, repeats kept; null if it is none. */
-    private static @Nullable List<Map.Entry<String, JsonElement>> fields(String text) {
-        try {
-            var reader = new JsonReader(new StringReader(text));
-            reader.setStrictness(Strictness.STRICT);
-            if (reader.peek() != JsonToken.BEGIN_OBJECT) return null;
-            var out = new ArrayList<Map.Entry<String, JsonElement>>();
-            reader.beginObject();
-            while (reader.hasNext()) {
-                var name = reader.nextName();
-                out.add(Map.entry(name, JsonParser.parseReader(reader)));
-            }
-            reader.endObject();
-            return reader.peek() == JsonToken.END_DOCUMENT ? out : null;
-        } catch (IOException | RuntimeException _) {
-            return null;
-        }
-    }
-
-    private static @Nullable String utf8(byte[] body) {
-        try {
-            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(body)).toString();
-        } catch (CharacterCodingException _) {
-            return null;
-        }
     }
 
     private static byte[] readUpTo(InputStream in, int limit) throws IOException {

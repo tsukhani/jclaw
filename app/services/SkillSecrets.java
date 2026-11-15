@@ -361,50 +361,23 @@ public final class SkillSecrets {
      */
     public static Listing put(Agent owner, String skill, String name, @Nullable String value, List<String> hosts,
                               boolean setCapture, @Nullable Capture capture) {
-        var rejection = nameRejection(name);
-        if (rejection != null) throw new Refused(rejection);
-        if (value != null && value.isEmpty()) throw new Refused("The value is empty.");
-        if (value != null && value.length() > MAX_VALUE_CHARS) {
-            throw new Refused("The value is longer than %d characters.".formatted(MAX_VALUE_CHARS));
-        }
+        refuseNameOrValue(name, value);
         var normalized = normalizeHosts(hosts);
-        SkillSetting setting = SkillSetting.find("agent = ?1 AND name = ?2", owner, name).first();
-        if (setting != null) {
-            throw new Refused(("Skill '%s' on this agent has a setting named %s. A command finds a value by its name, so"
-                    + " each name is used once on an agent.").formatted(setting.skillName, name));
-        }
-        SkillSecret elsewhere = SkillSecret.find("agent = ?1 AND name = ?2 AND skillName <> ?3", owner, name, skill).first();
-        if (elsewhere != null) {
-            throw new Refused(("Skill '%s' on this agent already has a secret named %s. A command finds a secret by its"
-                    + " name, so each name is used once on an agent; that skill's commands can use it too.")
-                    .formatted(elsewhere.skillName, name));
-        }
-        if (setCapture && capture != null && !capture.credential().equals(name)
-                && SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, capture.credential())
-                        .first() == null) {
-            throw new Refused(("%s is not a secret of skill '%s': the rule names the secret its sign-in sends, so add"
-                    + " that secret to this skill first, or name %s itself for a sign-in that sends the renewed key.")
-                    .formatted(capture.credential(), skill, name));
-        }
-        if (setCapture && capture != null && !capture.credential().equals(name)) {
-            SkillSecret credential = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill,
-                    capture.credential()).first();
-            if (credential != null) refuseUnsendable(capture.credential(), credential, name, normalized);
+        refuseNameTaken(owner, skill, name);
+        var newRule = setCapture ? capture : null;
+        if (newRule != null && !newRule.credential().equals(name)) {
+            refuseCredential(owner, skill, name, newRule.credential(), normalized);
         }
         SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, name).first();
-        if (setCapture && capture != null && capture.credential().equals(name) && value == null
+        if (newRule != null && newRule.credential().equals(name) && value == null
                 && (row == null || row.value == null || row.value.isEmpty())) {
             throw new Refused(("A rule whose sign-in sends %s itself needs a value for %s to send: enter its current"
                     + " value too, or name the secret the sign-in sends, such as its password.").formatted(name, name));
         }
         boolean created = row == null;
         if (row == null) {
-            if (value == null && (!setCapture || capture == null)) throw new Refused("A new secret needs a value.");
-            row = new SkillSecret();
-            row.agent = owner;
-            row.skillName = skill;
-            row.name = name;
-            row.value = "";
+            if (value == null && newRule == null) throw new Refused("A new secret needs a value.");
+            row = newRow(owner, skill, name);
         }
         var previous = captureOf(row);
         var rule = setCapture ? capture : previous;
@@ -430,6 +403,53 @@ public final class SkillSecrets {
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s %s for skill %s, sent only to %s%s".formatted(
                 name, putVerb(created, value != null, hostsChanged), skill, String.join(", ", normalized), renewal));
         return listing(row);
+    }
+
+    private static void refuseNameOrValue(String name, @Nullable String value) {
+        var rejection = nameRejection(name);
+        if (rejection != null) throw new Refused(rejection);
+        if (value != null && value.isEmpty()) throw new Refused("The value is empty.");
+        if (value != null && value.length() > MAX_VALUE_CHARS) {
+            throw new Refused("The value is longer than %d characters.".formatted(MAX_VALUE_CHARS));
+        }
+    }
+
+    /** Refuse {@code name} when the agent already uses it for a setting, or for a secret of another skill. */
+    private static void refuseNameTaken(Agent owner, String skill, String name) {
+        SkillSetting setting = SkillSetting.find("agent = ?1 AND name = ?2", owner, name).first();
+        if (setting != null) {
+            throw new Refused(("Skill '%s' on this agent has a setting named %s. A command finds a value by its name, so"
+                    + " each name is used once on an agent.").formatted(setting.skillName, name));
+        }
+        SkillSecret elsewhere = SkillSecret.find("agent = ?1 AND name = ?2 AND skillName <> ?3", owner, name, skill).first();
+        if (elsewhere != null) {
+            throw new Refused(("Skill '%s' on this agent already has a secret named %s. A command finds a secret by its"
+                    + " name, so each name is used once on an agent; that skill's commands can use it too.")
+                    .formatted(elsewhere.skillName, name));
+        }
+    }
+
+    /**
+     * Refuse a rule for {@code name}, sent to {@code hosts}, whose sign-in sends {@code credential}, another secret,
+     * unless {@code skill} holds that secret and the sign-in could send it ({@link #refuseUnsendable}).
+     */
+    private static void refuseCredential(Agent owner, String skill, String name, String credential, List<String> hosts) {
+        SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, skill, credential).first();
+        if (row == null) {
+            throw new Refused(("%s is not a secret of skill '%s': the rule names the secret its sign-in sends, so add"
+                    + " that secret to this skill first, or name %s itself for a sign-in that sends the renewed key.")
+                    .formatted(credential, skill, name));
+        }
+        refuseUnsendable(credential, row, name, hosts);
+    }
+
+    private static SkillSecret newRow(Agent owner, String skill, String name) {
+        var row = new SkillSecret();
+        row.agent = owner;
+        row.skillName = skill;
+        row.name = name;
+        row.value = "";
+        return row;
     }
 
     /** Whether {@code value} can go in a header, where the proxy refuses a CR, an LF or a NUL. */
@@ -730,30 +750,45 @@ public final class SkillSecrets {
             if ("setting".equals(m.group(1)) && !looksLikeCredential(name)) {
                 settings.add(new DeclaredSetting(name, description, m.group(3).strip(), optional));
             } else {
-                boolean renewed = RENEWED.equals(m.group(1));
-                var parts = renewed ? renewedParts(m.group(3)) : new RenewedParts(m.group(3), null);
-                var examples = new ArrayList<String>();
-                for (var example : parts.hosts().split("[,\\s]+")) {
-                    if (example.isBlank()) continue;
-                    try {
-                        examples.addAll(normalizeHosts(List.of(example)));
-                    } catch (Refused _) {
-                        // An example that is no host is left out; the secret is still declared.
-                    }
-                }
-                var rule = parts.rule();
-                var suggested = suggestion(rule);
-                var unreadable = suggested != null || rule == null || rule.isBlank() ? null : rule.strip();
-                secrets.add(new Declared(name, description, List.copyOf(examples), optional, renewed, suggested,
-                        unreadable));
+                secrets.add(declaredSecret(m.group(1), name, m.group(3), description, optional));
             }
             if (secrets.size() + settings.size() == MAX_DECLARED) break;
         }
         return new Declarations(List.copyOf(secrets), List.copyOf(settings));
     }
 
+    /** The secret a line of kind {@code kind} declares, with {@code example} its example hosts and any rule. */
+    private static Declared declaredSecret(@Nullable String kind, String name, String example, String description,
+                                           boolean optional) {
+        boolean renewed = RENEWED.equals(kind);
+        var parts = exampleParts(kind, example);
+        var rule = parts.rule();
+        var suggested = suggestion(rule);
+        var unreadable = suggested != null || rule == null || rule.isBlank() ? null : rule.strip();
+        return new Declared(name, description, exampleHosts(parts.hosts()), optional, renewed, suggested, unreadable);
+    }
+
+    /** The hosts of a declaration's example, separated by commas or spaces, as the store would take each. */
+    private static List<String> exampleHosts(String hosts) {
+        var out = new ArrayList<String>();
+        for (var example : hosts.split("[,\\s]+")) {
+            if (example.isBlank()) continue;
+            try {
+                out.addAll(normalizeHosts(List.of(example)));
+            } catch (Refused _) {
+                // An example that is no host is left out; the secret is still declared.
+            }
+        }
+        return List.copyOf(out);
+    }
+
     /** A renewed secret's example apart: its hosts, and the text of the rule after {@code from}, or null. */
     private record RenewedParts(String hosts, @Nullable String rule) {}
+
+    /** A line's example apart: a renewed line's may suggest a rule, and any other line's is hosts alone. */
+    private static RenewedParts exampleParts(@Nullable String kind, String example) {
+        return RENEWED.equals(kind) ? renewedParts(example) : new RenewedParts(example, null);
+    }
 
     private static RenewedParts renewedParts(String example) {
         var m = SUGGESTED_RULE.matcher(example);
@@ -930,27 +965,31 @@ public final class SkillSecrets {
      */
     public static boolean holdsMoreThanDeclarations(String text) {
         for (var line : text.split("\\R")) {
-            if (line.isBlank()) continue;
-            var m = DECLARATION.matcher(line);
-            if (line.stripLeading().startsWith("#") || !m.matches()) {
-                if (masked(line.strip().replaceFirst("^#+", ""))) return true;
-                continue;
-            }
-            if (masked(m.group(2)) || looksRandom(m.group(2).split("_"))) return true;
-            if ("setting".equals(m.group(1))) {
-                // A setting's example is free text, such as an address with a path; it may hold no key.
-                if (masked(m.group(3)) || looksRandom(m.group(3).split("[^A-Za-z0-9]+"))) return true;
-            } else {
-                var parts = RENEWED.equals(m.group(1)) ? renewedParts(m.group(3)) : new RenewedParts(m.group(3), null);
-                var rule = parts.rule();
-                // A suggested rule is a method, a path and a field name: none of them random, none of them a key.
-                if (rule != null && (masked(rule) || looksRandom(rule.split("[^A-Za-z0-9]+")))) return true;
-                for (var example : parts.hosts().split("[,\\s]+")) {
-                    if (example.isBlank()) continue;
-                    if (!isPlausibleExampleHost(example) || masked(example)) return true;
-                }
-            }
-            if (m.group(4) != null && masked(m.group(4))) return true;
+            if (!line.isBlank() && lineHoldsMore(line)) return true;
+        }
+        return false;
+    }
+
+    private static boolean lineHoldsMore(String line) {
+        var m = DECLARATION.matcher(line);
+        if (line.stripLeading().startsWith("#") || !m.matches()) return masked(line.strip().replaceFirst("^#+", ""));
+        if (masked(m.group(2)) || looksRandom(m.group(2).split("_"))) return true;
+        if ("setting".equals(m.group(1))) {
+            // A setting's example is free text, such as an address with a path; it may hold no key.
+            if (masked(m.group(3)) || looksRandom(m.group(3).split("[^A-Za-z0-9]+"))) return true;
+        } else if (exampleHoldsMore(exampleParts(m.group(1), m.group(3)))) {
+            return true;
+        }
+        return m.group(4) != null && masked(m.group(4));
+    }
+
+    /** Whether a secret's example holds more than hosts and a suggested rule. */
+    private static boolean exampleHoldsMore(RenewedParts parts) {
+        var rule = parts.rule();
+        // A suggested rule is a method, a path and a field name: none of them random, none of them a key.
+        if (rule != null && (masked(rule) || looksRandom(rule.split("[^A-Za-z0-9]+")))) return true;
+        for (var example : parts.hosts().split("[,\\s]+")) {
+            if (!example.isBlank() && (!isPlausibleExampleHost(example) || masked(example))) return true;
         }
         return false;
     }

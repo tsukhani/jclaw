@@ -799,6 +799,47 @@ class RenewedSecretCaptureTest extends FunctionalTest {
     }
 
     @Test
+    void eachValueAnAnswerCannotGiveIsWithheldAndTheLogNamesItsReason() {
+        var tooLong = "k".repeat(services.SkillSecrets.MAX_VALUE_CHARS + 1);
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
+            saveRule("json", "session");
+            for (var body : List.of("{\"session\":\"fake-first-jf442\",\"session\":\"fake-second-jf442\"}",
+                    "{\"session\":\"\"}", "{\"session\":7}", "{\"session\":\"" + tooLong + "\"}")) {
+                signInAnswers(SecretProxyFixture.Reply.json(201, body));
+                expectWithheld();
+            }
+            saveRule("header", "X-Session");
+            var text = Map.of("Content-Type", "text/plain");
+            for (var reply : List.of(
+                    new SecretProxyFixture.Reply(200, text, "signed in".getBytes(StandardCharsets.UTF_8)),
+                    new SecretProxyFixture.Reply(200, text, "signed in".getBytes(StandardCharsets.UTF_8),
+                            Map.of("X-Session", List.of(KEY, "fake-second-session-jf374"))))) {
+                signInAnswers(reply);
+                expectWithheld();
+            }
+        });
+        assertEquals("", stored());
+        var why = "Secrets proxy: withheld the answer to POST " + SIGN_IN + " from " + SecretProxyFixture.BOUND + ", as "
+                + NAME + " could not be renewed from it: ";
+        assertEquals(List.of(why + "it has the field session more than once",
+                why + "it has no field session holding a non-empty string",
+                why + "it has no field session holding a non-empty string",
+                why + "its value is longer than the " + services.SkillSecrets.MAX_VALUE_CHARS
+                        + " characters a secret holds",
+                why + "it has no single, non-empty header X-Session",
+                why + "it has no single, non-empty header X-Session"),
+                events.stream().map(EventLogger.Captured::message).filter(m -> m.startsWith("Secrets proxy:")).toList());
+    }
+
+    private void expectWithheld() {
+        try (var grant = running("bash skills/backoffice/run.sh")) {
+            assertEquals(withheld(), signIn(grant));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
     void aKeyOfTheLongestValueAStoreTakesIsCapturedAndOneCharacterLongerIsWithheld() throws Exception {
         saveRule("json", "session");
         var longest = "k".repeat(services.SkillSecrets.MAX_VALUE_CHARS);

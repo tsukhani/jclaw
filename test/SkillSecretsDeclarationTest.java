@@ -15,6 +15,26 @@ class SkillSecretsDeclarationTest extends UnitTest {
     }
 
     @Test
+    void eachExampleIsKeptAsTheStoreWouldTakeItAndOneThatIsNoHostIsLeftOut() {
+        var declared = SkillSecrets.declaredIn("""
+                ```secrets
+                API_KEY=API.Example.COM., https://x.example.com  *.example.com,b.example.com:08443   # the key
+                ```
+                """);
+        assertEquals(1, declared.size());
+        assertEquals("API_KEY", declared.getFirst().name());
+        assertEquals(java.util.List.of("api.example.com", "b.example.com:8443"), declared.getFirst().exampleHosts());
+    }
+
+    @Test
+    void anExampleHostWithNoDotHoldsMoreUnlessItIsLocalhostAndEachExampleIsJudged() {
+        assertEquals(true, found("API_KEY=apiserver\n"));
+        assertEquals(false, found("API_KEY=localhost:8080, api.example.com\n"));
+        assertEquals(true, found("API_KEY=api.example.com, apiserver\n"));
+        assertEquals(true, found("renewed S_KEY=apiserver from POST /v1/sessions json session\n"));
+    }
+
+    @Test
     void theFirstTopLevelSecretsBlockIsTheDeclaration() {
         var split = SkillSecrets.splitDeclaration("""
                 # Demo

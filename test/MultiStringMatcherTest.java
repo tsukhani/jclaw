@@ -38,6 +38,48 @@ class MultiStringMatcherTest extends UnitTest {
     }
 
     @Test
+    void nonAsciiStringsAreFoundAndACharacterNoStringHoldsEndsAPartialMatch() {
+        assertEquals("x [K] y", masked(Map.of("pässwörd-ä1", "K"), "x pässwörd-ä1 y"));
+        assertEquals("aé€[K]", masked(Map.of("aé-b", "K"), "aé€aé-b"));
+        assertEquals("aé-€b", masked(Map.of("aé-b", "K"), "aé-€b"));
+    }
+
+    @Test
+    void anEmptyKeyIsIgnored() {
+        var strings = new LinkedHashMap<String, String>();
+        strings.put("", "EMPTY");
+        assertEquals("abc", masked(strings, "abc"));
+        strings.put("abc", "K");
+        assertEquals("x[K]y", masked(strings, "xabcy"));
+    }
+
+    @Test
+    void stringsSharingAPrefixAreEachFoundWithTheirOwnLabel() {
+        var strings = new LinkedHashMap<String, String>();
+        strings.put("abc", "ONE");
+        strings.put("abd", "TWO");
+        assertEquals("[ONE] [TWO] ab", masked(strings, "abc abd ab"));
+    }
+
+    @Test
+    void aShorterStringInsideALongerOnesFalseStartIsFound() {
+        var strings = new LinkedHashMap<String, String>();
+        strings.put("abcd", "LONG");
+        strings.put("bc", "SHORT");
+        assertEquals("a[SHORT]x", masked(strings, "abcx"));
+        assertEquals("[LONG]", masked(strings, "abcd"));
+    }
+
+    @Test
+    void aDeepStateThatCannotGoOnFallsBackToTheStartOfAnotherString() {
+        var strings = new LinkedHashMap<String, String>();
+        strings.put("xyz", "A");
+        strings.put("ab", "B");
+        assertEquals("xy[B]", masked(strings, "xyab"));
+        assertEquals("[A][B]", masked(strings, "xyzab"));
+    }
+
+    @Test
     void noStringsOrNoTextChangesNothing() {
         assertEquals("plain text", masked(Map.of(), "plain text"));
         assertEquals("", masked(Map.of("abcdefgh", "K"), ""));
