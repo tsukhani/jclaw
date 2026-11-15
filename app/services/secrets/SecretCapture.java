@@ -73,9 +73,11 @@ final class SecretCapture {
      * The request as the command sent it, before any placeholder was replaced: its head's headers, its body, null when
      * it was too long to read whole, and its content type as forwarded.
      */
+    @SuppressWarnings("java:S6218") // carries one request's bytes and is never compared, hashed or printed
     record Sent(List<String[]> headers, byte @Nullable [] body, @Nullable String contentType) {}
 
     /** What a capture that stored its values sends in place of the answer's body: the body it rewrote, or null. */
+    @SuppressWarnings("java:S6218") // carries one answer's bytes and is never compared, hashed or printed
     record Taken(byte @Nullable [] body) {}
 
     /**

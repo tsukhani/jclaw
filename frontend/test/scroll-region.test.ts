@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick, ref } from 'vue'
+import { useScrollRegion } from '~/composables/useScrollRegion'
 import { markScrollRegion } from '~/utils/scroll-region'
 
 function box(widths: { scroll: number, client: number }) {
@@ -35,5 +38,49 @@ describe('markScrollRegion', () => {
     widths.client = 1624
     markScrollRegion(el, 'Wide figure, scrolls sideways')
     expect(marks(el)).toEqual([null, null, null])
+  })
+})
+
+describe('useScrollRegion', () => {
+  const ScrollBox = defineComponent({
+    props: { shown: Boolean },
+    setup() {
+      const box = ref<HTMLElement | null>(null)
+      useScrollRegion(box, 'Context size by file, scrolls sideways')
+      return { box }
+    },
+    template: '<div><div v-if="shown" ref="box" data-scroll="560" data-client="326"><table /></div></div>',
+  })
+
+  function stubWidths() {
+    const keys = [['scrollWidth', 'scroll'], ['clientWidth', 'client']] as const
+    const saved = keys.map(([key]) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, key))
+    for (const [key, attr] of keys) {
+      Object.defineProperty(HTMLElement.prototype, key, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return Number(this.dataset[attr] ?? 0)
+        },
+      })
+    }
+    return () => keys.forEach(([key], i) => {
+      const before = saved[i]
+      if (before) Object.defineProperty(HTMLElement.prototype, key, before)
+      else Reflect.deleteProperty(HTMLElement.prototype, key)
+    })
+  }
+
+  it('marks a box that only appears after the page has mounted, as a card loaded later does', async () => {
+    const restore = stubWidths()
+    try {
+      const c = mount(ScrollBox, { props: { shown: false } })
+      await c.setProps({ shown: true })
+      await nextTick()
+      expect(marks(c.find('[data-scroll]').element as HTMLElement)).toEqual(['0', 'region', 'Context size by file, scrolls sideways'])
+      c.unmount()
+    }
+    finally {
+      restore()
+    }
   })
 })

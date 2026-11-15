@@ -58,6 +58,8 @@ definePageMeta({ key: () => '/skills' })
 
 const route = useRoute()
 const router = useRouter()
+const contextSizeScroller = ref<HTMLElement | null>(null)
+useScrollRegion(contextSizeScroller, 'Context size by file, scrolls sideways')
 
 /** JSON object keys are strings; the template indexes by the numeric agent id. */
 function toSkillsMap(seed: Record<string, AgentSkill[]> | null | undefined): Record<number, AgentSkill[]> {
@@ -1767,10 +1769,8 @@ function totalSkillCount(agentId: number) {
           </span>
         </div>
         <div
+          ref="contextSizeScroller"
           class="overflow-x-auto"
-          tabindex="0"
-          role="region"
-          aria-label="Context size by file"
         >
           <table class="text-xs">
             <thead>

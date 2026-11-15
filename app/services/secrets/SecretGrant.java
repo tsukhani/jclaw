@@ -66,6 +66,7 @@ public final class SecretGrant implements AutoCloseable {
     private final byte[] token;
     private final String ownerName;
     private final boolean forAgent;
+    @SuppressWarnings("java:S3077") // an immutable State swapped whole, never changed in place
     private volatile State state;
     private final List<Binding> retired = new ArrayList<>();
     private final Set<String> revoked = ConcurrentHashMap.newKeySet();

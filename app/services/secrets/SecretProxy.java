@@ -317,6 +317,7 @@ public final class SecretProxy {
      * A request body as it goes upstream, and {@code sent}, the body as the command wrote it, or null when it streams,
      * too long to read whole.
      */
+    @SuppressWarnings("java:S6218") // carries one request's bytes and is never compared, hashed or printed
     private record Body(@Nullable RequestBody body, byte @Nullable [] sent) {}
 
     /** The request body, rewritten, each stand-in counted in {@code replaced}: whole when it is small, streamed when it is long. */

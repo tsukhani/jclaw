@@ -667,13 +667,12 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             @update:open="(v) => { if (!v) emit('set-tok-stats-hover-key', null) }"
           >
             <PopoverTrigger as-child>
-              <!-- JCLAW-175: tok/s is informational, so it keeps no clickable look: no
-                   button styling, and nothing a mouse user sees changes. The breakdown opens
-                   on hover through the controlled :open binding, and on keyboard focus too
+              <!-- JCLAW-175: tok/s is informational, so it keeps no clickable look: a button only so a
+                   keyboard reaches it, with no button styling, so nothing a mouse user sees changes. The
+                   breakdown opens on hover through the controlled :open binding, and on keyboard focus too
                    (WCAG 2.1.1), with a ring drawn only for keyboard focus. -->
-              <!-- eslint-disable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
-              <span
-                tabindex="0"
+              <button
+                type="button"
                 class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
                 @mouseleave="emit('set-tok-stats-hover-key', null)"
@@ -681,8 +680,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                 @blur="emit('set-tok-stats-hover-key', null)"
               >
                 {{ formatTokensPerSec(msg.usage) }}
-              </span>
-              <!-- eslint-enable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
+              </button>
             </PopoverTrigger>
             <PopoverContent
               side="top"
