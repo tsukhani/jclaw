@@ -32,7 +32,7 @@ argument-hint: "[empty | patch | minor | major | x.y.z]"
    ```
    The guard passes this form only: a commit on `main`, from the main checkout, to `origin`, on a branch named for that commit, created once and never moved. The pre-push hook skips the local tests, which the Jenkins build runs. A rerun for the same commit is a no-op push.
 7. Start the build: `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"CANDIDATE": "<SHA>", "CANDIDATE_VERSION": "<new version>"}`. Follow the queue item (`mcp__jenkins__getQueueItem`) to its build number. The build names itself `#<n> candidate <SHA's first 12>`.
-8. Wait without polling: a candidate takes about 20 minutes (Build, Test, Sonar; no Package). Start a background `sleep 1200`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
+8. Wait without polling: a candidate takes about 25 minutes (Build, Test, Sonar and Package, which a release commit's build would otherwise be the first to run). Start a background `sleep 1200`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
 
 **Report**
 

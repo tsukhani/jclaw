@@ -72,7 +72,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
-        string(name: 'CANDIDATE', defaultValue: '', description: 'A commit /release-check pushed to candidate/<sha>: test it and run Sonar on it, and package and release nothing (JF-441)')
+        string(name: 'CANDIDATE', defaultValue: '', description: 'A commit /release-check pushed to candidate/<sha>: test, analyse and package it, and release nothing (JF-441)')
         string(name: 'CANDIDATE_VERSION', defaultValue: '', description: 'The version the candidate will be released as, such as 1.0.19, which its Sonar analysis carries')
         booleanParam(name: 'PUBLISH_DEVCONTAINER', defaultValue: false, description: 'Check to build and push .devcontainer/Dockerfile to ghcr.io/tsukhani/jclaw-devcontainer (independent of RELEASE; rerun only when .devcontainer/ changes)')
     }
@@ -467,9 +467,8 @@ pipeline {
         }
 
         stage('Package') {
-            when {
-                expression { !params.CANDIDATE }
-            }
+            // A candidate packages too: a zip that fails to build or keeps its debug info would otherwise first fail
+            // in the release commit's build, after the version is spent.
             steps {
                 // ONE Gradle invocation, both packaging tasks. This is load-
                 // bearing, not style: playDist and playBundle each declare
