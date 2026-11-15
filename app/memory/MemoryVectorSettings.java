@@ -83,7 +83,7 @@ public final class MemoryVectorSettings {
      *
      * <p>Only the Lucene backend has a cap low enough to hit by accident: it rejects
      * anything above {@link LuceneIndexer#maxVectorDimensions()} (1024 on
-     * lucene-core 10.5.2), while text-embedding-3-small — this class's own default
+     * lucene-core 10.6.0), while text-embedding-3-small — this class's own default
      * model — is 1536. pgvector's ceiling is far higher and is not asserted here,
      * since it has not been verified against a live Postgres.
      */

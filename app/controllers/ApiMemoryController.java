@@ -647,7 +647,10 @@ public class ApiMemoryController extends Controller {
         renderJSON(gson.toJson(CoreMemoryCapMigration.status(String.valueOf(agentId))));
     }
 
-    /** 404s unless {@code agentId} names an existing agent. */
+    /**
+     * 404s unless {@code agentId} names an existing agent, and 403s when the caller may not reach it
+     * ({@link RequestPrincipal#mayReachAgentScopedRow}).
+     */
     private static void requireAgentById(Long agentId) {
         var agent = agentId == null ? null : Agent.<Agent>findById(agentId);
         if (agent == null) {

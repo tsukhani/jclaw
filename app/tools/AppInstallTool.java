@@ -368,9 +368,9 @@ public class AppInstallTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Why {@code src} is never published, or null (JF-322): it holds a skill's credentials folder, or it holds a link,
-     * which {@link #copyTree} would publish as its target's contents, a skill's credentials or a file outside the
-     * workspace alike.
+     * Why {@code src} is never published, or null (JF-322): it holds a skill's credentials or saved state, or it holds
+     * a link, which {@link #copyTree} would publish as its target's contents, a skill's credentials or a file outside
+     * the workspace alike.
      */
     private static @Nullable String sourceRefusal(Agent agent, Path src) {
         if (WorkspacePathGuard.reachesSkillCredentials(WorkspaceFiles.workspacePath(agent.name), src)) {

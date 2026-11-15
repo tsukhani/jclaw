@@ -469,7 +469,7 @@ public class ToolRegistry {
         return tool.serializationGroup();
     }
 
-    /** {@link Tool#readsOnly(String)} of the registered tool; false for an unknown name or arguments that are not a JSON object. */
+    /** {@link Tool#readsOnly(String)} of the registered tool; false for an unknown name or null arguments. */
     public static boolean readsOnly(@Nullable String toolName, @Nullable String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && argsJson != null && tool.readsOnly(argsJson);

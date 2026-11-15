@@ -154,7 +154,6 @@ public final class SessionCompactor {
     public static final String LEADING_USER_NOTE = "[Earlier messages of this conversation are summarized in the system prompt.]";
 
     /** The skip reason when no cut leaves the kept tail and at least the summary minimum before it. */
-    // Commands.buildCompactResponseText matches this text, so it stays as it is.
     public static final String NO_CUT_REASON = "There are not enough earlier messages to summarize yet.";
     /** How every reason a summary that failed gives starts, so {@code /compact} can say it failed. */
     public static final String FAILED_REASON_PREFIX = "The summary failed";

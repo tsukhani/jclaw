@@ -300,7 +300,7 @@ public final class McpConnectionManager {
     }
 
     /** Stop all connections. Called from {@code ShutdownJob}. Each server goes through {@link #stop}'s
-     *  steps in its order, but the clients close at once: a stdio server is given up to 2 s to exit, and
+     *  steps in its order, but the clients close in parallel: a stdio server is given up to 2 s to exit, and
      *  24 closed one after another took 1.1 to 3.1 s of a shutdown (JF-268). */
     public static void shutdown() {
         var names = new ArrayList<>(connections.keySet());
@@ -332,10 +332,11 @@ public final class McpConnectionManager {
     private static final int MAX_CLOSE_THREADS = 8;
 
     /**
-     * Runs every closer at once and returns when all of them have finished. A closer that throws is
-     * logged with its server's name and does not stop the others. Platform threads: a stdio close
-     * parks in a timed {@code waitFor}, the wait that starves virtual threads (JDK-8373224). The pool's
-     * {@code close()} waits for every closer, and an interrupt meanwhile interrupts them: they touch no database.
+     * Runs the closers in parallel, at most {@link #MAX_CLOSE_THREADS} at a time, and returns when all of them have
+     * finished. A closer that throws is logged with its server's name and does not stop the others. Platform
+     * threads: a stdio close parks in a timed {@code waitFor}, the wait that starves virtual threads (JDK-8373224).
+     * The pool's {@code close()} waits for every closer, and an interrupt meanwhile interrupts them: they touch no
+     * database.
      */
     public static void closeAll(Map<String, Runnable> closers) {
         if (closers.isEmpty()) return;

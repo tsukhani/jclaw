@@ -798,14 +798,14 @@ public class TaskTool implements ToolRegistry.Tool {
         return reported ? triggered + " " + TaskRunReports.AGENT_NOTE : triggered;
     }
 
+    private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds, int paused) {}
+
     /**
      * Inside the calling Tx: scan tasks matching (name, agent) and prepare
      * them for a manual fire. Counts the CANCELLED rows it revives and the
      * paused ones it skips, and lists LOST ids for the caller to force-remove.
      * Returns the ids to fire.
      */
-    private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds, int paused) {}
-
     private static RunNowScan collectRunNowTargets(String name, Agent agent) {
         var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
         var ids = new ArrayList<Long>(tasks.size());

@@ -175,7 +175,8 @@ public final class SecretRedactor {
                 }
             }
         }
-        // A Telegram start lies before the colon that found it, so it can arrive after a later start.
+        // Already ascending: a Telegram start lies before its colon, but only digits lie between them and no format
+        // starts at a digit. The sort keeps the order if an arm is added that can break it.
         Arrays.sort(shapes.at, 0, shapes.count);
     }
 

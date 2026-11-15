@@ -129,7 +129,10 @@ final class SecretsCa {
         return caCert;
     }
 
-    /** A server-side TLS context presenting a certificate for {@code host}, issued once per host per start. */
+    /**
+     * A server-side TLS context presenting a certificate for {@code host}, issued once per host until
+     * {@link #MAX_CACHED_HOSTS} hosts fill the cache, which is then cleared.
+     */
     SSLContext serverContext(String host) {
         var cached = hostContexts.get(host);
         if (cached != null) return cached;
