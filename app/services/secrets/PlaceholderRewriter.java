@@ -3,6 +3,7 @@ package services.secrets;
 import org.jspecify.annotations.Nullable;
 import utils.HttpKeys;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
@@ -82,7 +83,7 @@ final class PlaceholderRewriter {
             throws Refused {
         if (!text.contains(SecretGrants.PLACEHOLDER_PREFIX)) return text;
         var in = text.getBytes(StandardCharsets.ISO_8859_1);
-        var out = new java.io.ByteArrayOutputStream(in.length + 64);
+        var out = new ByteArrayOutputStream(in.length + 64);
         try {
             new Substituter(grant, host, port, encoding, replaced).feed(in, in.length, true, out);
         } catch (IOException e) {
@@ -104,7 +105,7 @@ final class PlaceholderRewriter {
         }
         var credentials = new String(decoded, StandardCharsets.UTF_8);
         if (!credentials.contains(SecretGrants.PLACEHOLDER_PREFIX)) return headerValue;
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
         try {
             var bytes = credentials.getBytes(StandardCharsets.UTF_8);
             new Substituter(grant, host, port, Encoding.RAW, replaced).feed(bytes, bytes.length, true, out);
@@ -247,7 +248,7 @@ final class PlaceholderRewriter {
         /** {@code text} as OkHttp decoded it, UTF-8, with each value replaced. */
         String mask(String text) {
             var bytes = text.getBytes(StandardCharsets.UTF_8);
-            var out = new java.io.ByteArrayOutputStream(bytes.length);
+            var out = new ByteArrayOutputStream(bytes.length);
             try {
                 feed(bytes, bytes.length, true, out);
             } catch (IOException e) {

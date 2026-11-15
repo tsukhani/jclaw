@@ -3,6 +3,7 @@ package tools;
 import agents.DangerousActionGate;
 import agents.SkillLoader;
 import agents.ToolContext;
+import com.sun.security.auth.module.UnixSystem;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ConfigService;
@@ -27,6 +28,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-672: opt-in OS sandbox around a coding-harness process. When enabled
@@ -208,8 +211,8 @@ public final class HarnessSandbox {
     /** Which PID namespace a custom agent's run gets here, once a launch has shown it; a failure is probed again. */
     private static volatile @Nullable LinuxPids customAgentPids;
 
-    private static final java.util.concurrent.atomic.AtomicReference<CustomAgentOverride> CUSTOM_AGENT_OVERRIDE =
-            new java.util.concurrent.atomic.AtomicReference<>(CustomAgentOverride.NONE);
+    private static final AtomicReference<CustomAgentOverride> CUSTOM_AGENT_OVERRIDE =
+            new AtomicReference<>(CustomAgentOverride.NONE);
 
     private HarnessSandbox() {}
 
@@ -223,7 +226,7 @@ public final class HarnessSandbox {
     private static boolean detectRoot() {
         if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) return false;
         try {
-            return new com.sun.security.auth.module.UnixSystem().getUid() == 0;
+            return new UnixSystem().getUid() == 0;
         } catch (LinkageError | RuntimeException _) {
             return false;
         }
@@ -389,7 +392,7 @@ public final class HarnessSandbox {
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
     public static ConfinedShell wrapCustomAgentShell(List<String> argv, File writeRoot) {
-        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
+        var override = Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
         if (override == CustomAgentOverride.PASSTHROUGH) return new ConfinedShell(argv, Map.of());
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
@@ -485,7 +488,7 @@ public final class HarnessSandbox {
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
     public static List<String> wrapMainFence(List<String> argv, File workspaceRoot) {
-        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
+        var override = Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
         if (override == CustomAgentOverride.PASSTHROUGH) return argv;
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
@@ -524,7 +527,7 @@ public final class HarnessSandbox {
                 scriptFolderRejection("interpreter folder", interpreterDir, home, hidden)}) {
             if (rejected != null) throw new SandboxUnavailableException(rejected);
         }
-        var override = java.util.Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
+        var override = Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
         if (override == CustomAgentOverride.PASSTHROUGH) return argv;
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();

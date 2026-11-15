@@ -1004,7 +1004,7 @@ final class StreamingAgentRunner {
      */
     private static AgentPromptPreparer.PreparedPrologue rewriteReportingCompaction(
             Agent agent, Conversation conversation, LlmProvider primary, AgentPromptPreparer.PreparedPrologue prepared,
-            boolean supportsAudio, boolean supportsVision, java.util.function.Consumer<String> onStatus) {
+            boolean supportsAudio, boolean supportsVision, Consumer<String> onStatus) {
         return ScopedValue.where(CompactionProgress.SINK, onStatus).call(() ->
                 AgentPromptPreparer.applyMediaRewrite(agent, conversation, primary, prepared, supportsAudio, supportsVision));
     }

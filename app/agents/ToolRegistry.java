@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -648,7 +649,7 @@ public class ToolRegistry {
     private static ToolResult masked(ToolResult result) {
         var text = CredentialMask.mask(result.text());
         var json = CredentialMask.mask(result.structuredJson());
-        if (java.util.Objects.equals(text, result.text()) && java.util.Objects.equals(json, result.structuredJson())) {
+        if (Objects.equals(text, result.text()) && Objects.equals(json, result.structuredJson())) {
             return result;
         }
         return new ToolResult(text == null ? "" : text, json, result.attachments(), result.videoJob(), result.outcome());

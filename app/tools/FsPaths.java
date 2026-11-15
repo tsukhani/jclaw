@@ -9,6 +9,7 @@ import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.nio.file.Path;
+import java.util.Objects;
 
 /**
  * Path resolution and sandbox/safety checks for {@link FileSystemTools}: resolving a tool
@@ -60,7 +61,7 @@ final class FsPaths {
             var global = FsGlobalPaths.resolve(agent, path, mutating);
             var target = global.target();
             return target != null ? TargetPath.ok(workspace, target)
-                    : TargetPath.err(java.util.Objects.requireNonNull(global.error()));
+                    : TargetPath.err(Objects.requireNonNull(global.error()));
         }
         try {
             return TargetPath.ok(workspace, AgentService.acquireWorkspacePath(agent.name, path));

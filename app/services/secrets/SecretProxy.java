@@ -26,6 +26,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -114,7 +115,7 @@ public final class SecretProxy {
     }
 
     /** The certificate commands are told to trust, for a test's client. */
-    public static java.security.cert.X509Certificate caForTest() {
+    public static X509Certificate caForTest() {
         return SecretsCa.get().caCertificate();
     }
 

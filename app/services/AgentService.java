@@ -6,6 +6,7 @@ import llm.routing.ModelRouter;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.AgentToolConfig;
+import models.PersonaFileVersion;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 
@@ -436,7 +437,7 @@ public class AgentService {
 
     /** The operator's save: a persona file written here is approved as the operator's (JF-136). */
     public static void writeWorkspaceFileAsOperator(String agentName, String filename, String content) {
-        WorkspaceFiles.writeWorkspaceFile(agentName, filename, content, models.PersonaFileVersion.Source.OPERATOR);
+        WorkspaceFiles.writeWorkspaceFile(agentName, filename, content, PersonaFileVersion.Source.OPERATOR);
     }
 
     /** A file a tool writes for the agent, which approves nothing (see {@link WorkspaceFiles#writeAgentFile}). */

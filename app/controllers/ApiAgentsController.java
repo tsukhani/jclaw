@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -845,7 +846,7 @@ public class ApiAgentsController extends Controller {
                     ? approved.sha256() : null;
             return new PersonaApprovalView(filename, pending, pending ? approvedText : null, pending ? disk : null,
                     PersonaFileApprovals.sha256(disk),
-                    approved == null ? null : approved.source().name().toLowerCase(java.util.Locale.ROOT),
+                    approved == null ? null : approved.source().name().toLowerCase(Locale.ROOT),
                     approved == null ? null : approved.approvedAt().toString(), undo);
         }).toList();
         renderJSON(gson.toJson(new PersonaApprovalsResponse(files)));

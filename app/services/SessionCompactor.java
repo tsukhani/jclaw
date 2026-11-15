@@ -29,9 +29,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Session compaction: when a conversation's active context approaches the
@@ -1008,7 +1010,7 @@ public final class SessionCompactor {
     private static String drops(Map<String, List<String>> carried, Map<Integer, Integer> replaced) {
         var items = carried.getOrDefault(DROPPABLE_SECTION, List.of());
         var lines = new ArrayList<String>(replaced.size());
-        for (var drop : new java.util.TreeMap<>(replaced).entrySet()) {
+        for (var drop : new TreeMap<>(replaced).entrySet()) {
             lines.add("[" + drop.getKey() + "] " + itemKey(items.get(drop.getKey() - 1)) + " — replaced by ["
                     + drop.getValue() + "] " + itemKey(items.get(drop.getValue() - 1)));
         }
@@ -1080,17 +1082,17 @@ public final class SessionCompactor {
             "Next steps");
     /** JF-425: where a merge past the facts share names the carried items a later one replaces. */
     private static final String REPLACED_ITEMS = "Replaced items";
-    private static final List<String> REPLACING_SECTION_NAMES = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
-            java.util.stream.Stream.of(REPLACED_ITEMS)).toList();
+    private static final List<String> REPLACING_SECTION_NAMES = Stream.concat(SECTION_NAMES.stream(),
+            Stream.of(REPLACED_ITEMS)).toList();
     /** The one carried section an item may be dropped from as replaced: goals and facts about people never are. */
     private static final String DROPPABLE_SECTION = "Identifiers and facts";
     /** Where a merge's check names the dropped items whose replacement does not replace them. */
     private static final String RESTORED_ITEMS = "Restored items";
-    private static final List<String> CHECKED_SECTION_NAMES = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
-            java.util.stream.Stream.of(RESTORED_ITEMS)).toList();
+    private static final List<String> CHECKED_SECTION_NAMES = Stream.concat(SECTION_NAMES.stream(),
+            Stream.of(RESTORED_ITEMS)).toList();
     /** Every heading the summary, merge and check prompts name: one a call did not ask for is an echo of another's. */
-    private static final List<String> PROMPT_SECTIONS = java.util.stream.Stream.concat(SECTION_NAMES.stream(),
-            java.util.stream.Stream.of(REPLACED_ITEMS, RESTORED_ITEMS)).toList();
+    private static final List<String> PROMPT_SECTIONS = Stream.concat(SECTION_NAMES.stream(),
+            Stream.of(REPLACED_ITEMS, RESTORED_ITEMS)).toList();
 
     private static final Pattern ITEM_START = Pattern.compile("^(?:[-*\u2022]|\\d+[.)])\\s");
 
