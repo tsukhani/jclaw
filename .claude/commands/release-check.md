@@ -12,7 +12,7 @@ argument-hint: "[empty | patch | minor | major | x.y.z]"
 
 **Arguments**
 
-`$ARGUMENTS` takes exactly what `/deploy` takes, and must be what the `/deploy` after it is given: the candidate is analysed as the version that release becomes, so Sonar's new-code period lines up with it. Empty means the next patch.
+`$ARGUMENTS` takes the version argument `/deploy` takes, without `release`, and must be the one the `/deploy` after it is given: the candidate is analysed as the version that release becomes, so Sonar's new-code period lines up with it. Empty means the next patch.
 
 ---
 
@@ -36,7 +36,7 @@ argument-hint: "[empty | patch | minor | major | x.y.z]"
 
 **Report**
 
-9. **On `SUCCESS`** (its description reads `tested <SHA>`): say the candidate is green for v<new version>, and that `/deploy <the same argument>` now releases it, provided `main` has not moved. A commit landing on `main` after this check needs a new one.
+9. **On `SUCCESS`** (its description reads `tested <SHA>`): say the candidate is green for v<new version>, and offer the operator both next steps: `/deploy <the same argument>`, which pushes and tags it, or `/deploy <the same argument> release`, which also publishes it as a GitHub Release. The choice is theirs (AGENTS.md Policy). Either holds only while `main` has not moved: a commit landing after this check needs a new one.
 10. **On any other result:** report the failing stage. For tests, `mcp__jenkins__getTestResults`. For Sonar, the build log lists each open issue under the stage (`mcp__jenkins__searchBuildLog` for `open Sonar issue`). Fix them, or accept or mark them in Sonar with `/sonar`'s verdicts, then run this command again: no version was spent. Delete the failed candidate's branch, since nothing will release it: `/usr/bin/git push origin --delete candidate/<SHA's first 12>`.
 
 ---

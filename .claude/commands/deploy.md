@@ -12,11 +12,13 @@ Bump the project version, commit every pending change alongside it, push the res
 
 **Arguments**
 
-`$ARGUMENTS` may be one of:
+`$ARGUMENTS` may be one of the following, optionally followed by the word `release`:
 
 - *(empty)* → bump the **patch**: `1.0.0` → `1.0.1`. Each JF sprint is named after the minor release it ships (`v1.0` holds 1.0.1, 1.0.2, …; `v1.1` the 1.1.x releases), so the first release of a new sprint is `/deploy minor`, and every later one in it is a bare `/deploy`.
 - `patch` / `minor` / `major` → bump that segment; lower segments reset to `0`. Examples: `minor` on `1.0.5` → `1.1.0`; `major` on `1.4.2` → `2.0.0`.
 - An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. Any leading `v` is stripped.
+
+`release` (alone, as in `/deploy release`, or after a bump, as in `/deploy minor release`) also publishes the tagged version as a GitHub Release (step 20). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy).
 
 Reject anything else with a clear message; do not guess.
 
@@ -61,7 +63,7 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 `/release-check` runs this release's Jenkins build before a version is spent: the whole suite and Sonar on `HEAD`, analysed as the new version, passing only when Sonar shows 0 open issues. Find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <HEAD's first 12>`, `result` is `SUCCESS`, and `description` is `tested <HEAD's full SHA>`.
 
 - **Found:** `/usr/bin/git status --porcelain` must print nothing, since an uncommitted file would ship without the candidate having seen it, and the version Phase 1 computes must be the candidate's `CANDIDATE_VERSION` (`mcp__jenkins__getBuild` with `tree: "actions[parameters[name,value]]"`). Skip the Sonar pre-check below, which the candidate's real analysis supersedes. The release commit's build then skips Test and Sonar, because its tree differs from the candidate's only in the version line.
-- **Not found, or `main` has moved past it:** stop and offer `/release-check <the same argument>`. Deploy without one only on the user's explicit yes, which covers this release only; then run the Sonar pre-check below, and the release commit's build runs Test and Sonar itself.
+- **Not found, or `main` has moved past it:** run `/release-check <the same version argument>` first, and go on only once it passes. Deploy without one only on the user's explicit yes, which covers this release only; then run the Sonar pre-check below, and the release commit's build runs Test and Sonar itself.
 
 **Preflight: Sonar's rules over what this release changes**
 
@@ -177,11 +179,13 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
     /usr/bin/git push github "refs/tags/v<NEW_VERSION>"
     ```
     The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build needs this tag. One started earlier, such as RELEASE ticked straight after the push, waits up to 20 minutes in Setup for the tag to reach GitHub, then refuses before building anything and prints these commands for when the deploy session is gone; the Release stage's `gh release create --verify-tag` also refuses a version with no tag rather than minting an unsigned one at `main`'s head. That build skips Test and Sonar, because the green build recorded the commit as tested in its description, so a flaky test cannot fail a release whose commit already passed.
+
+    **With `release`, start the GitHub Release once both tag pushes succeeded:** `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"RELEASE": true}`, then wait for it as in step 19; it skips Test and Sonar for the tagged commit, and took 7 minutes for v1.0.18 (#1415). Its Release stage refuses while Sonar shows an open issue. On `SUCCESS`, the release is at `https://github.com/tsukhani/jclaw/releases/tag/v<NEW_VERSION>`; on any other result, report the failing stage. The tag stands either way, and a later RELEASE build can publish the version. Without `release`, start nothing.
 21. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
 
 **Phase 5: Report**
 
-22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one, and the Sonar pre-check's findings or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
+22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one, and the Sonar pre-check's findings or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
