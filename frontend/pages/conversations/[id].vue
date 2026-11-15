@@ -12,6 +12,7 @@ import { routeClassLabel, routeDescription } from '~/utils/model-route'
 import { renderMarkdown } from '~/utils/chat-markdown'
 import { vStructureViewers } from '~/utils/structure/directive'
 import { vVisualFigures } from '~/utils/visual/directive'
+import { vYoutubeEmbeds } from '~/utils/youtube-embed'
 import { syncVisualEnabled } from '~/utils/visual/spec'
 
 const route = useRoute()
@@ -405,6 +406,7 @@ function exportConversation() {
               v-if="msg.role === 'assistant' && msg.content"
               v-structure-viewers="conversation?.agentId ?? null"
               v-visual-figures
+              v-youtube-embeds
               class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary overflow-x-auto"
               data-testid="message-body-rendered"
               v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"

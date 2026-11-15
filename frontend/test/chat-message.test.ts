@@ -3,6 +3,7 @@ import { mountSuspended } from '@nuxt/test-utils/runtime'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import type { Message } from '~/types/api'
 import type { MessageUsage } from '~/utils/usage-cost'
+import { renderMarkdownStreaming } from '~/utils/chat-markdown'
 
 function msg(o: Partial<Message> = {}): Message {
   return { id: 1, role: 'assistant', content: 'hello', createdAt: '2026-07-10T00:00:00Z', ...o } as Message
@@ -81,6 +82,18 @@ describe('ChatMessage (JCLAW-690)', () => {
     finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('adds a YouTube player to a reply only once it has finished streaming', async () => {
+    const content = '[Talk](https://youtu.be/dQw4w9WgXcQ)'
+    const streaming = msg({ role: 'assistant', content, _key: 'k1' } as Partial<Message>)
+    const c = await mountSuspended(ChatMessage, {
+      props: props(streaming, { streaming: true, streamingMessageKey: 'k1', streamContent: content, streamContentHtml: renderMarkdownStreaming(content) }),
+    })
+    expect(c.find('.prose-chat a').attributes('href')).toBe('https://youtu.be/dQw4w9WgXcQ')
+    expect(c.findAll('.youtube-embed')).toHaveLength(0)
+    await c.setProps({ streaming: false, streamingMessageKey: null })
+    expect(c.findAll('.youtube-embed').map(p => p.attributes('data-video-id'))).toEqual(['dQw4w9WgXcQ'])
   })
 
   it('renders a ChatToolCalls block when the message carries tool calls', async () => {

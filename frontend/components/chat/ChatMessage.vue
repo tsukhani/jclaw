@@ -17,6 +17,7 @@ import {
 import { averageSpeed, formatTokensPerSec, renderMarkdown, writingSpeed } from '~/utils/chat-markdown'
 import { vStructureViewers } from '~/utils/structure/directive'
 import { vVisualFigures } from '~/utils/visual/directive'
+import { vYoutubeEmbeds } from '~/utils/youtube-embed'
 import {
   formatNanosDuration, formatUsageCost, formatUsageCostTooltip, providerMetricRows, type MessageUsage,
 } from '~/utils/usage-cost'
@@ -280,6 +281,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
           v-if="msg.messageKind === 'subagent_send'"
           v-structure-viewers="agentId"
           v-visual-figures
+          v-youtube-embeds
           class="prose-chat inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base break-words"
           v-html="renderMarkdown(msg.content ?? '', agentId)"
         />
@@ -456,6 +458,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
           v-if="msg._key === streamingMessageKey ? !!streamContent : !!msg.content"
           v-structure-viewers="agentId"
           v-visual-figures
+          v-youtube-embeds="msg._key !== streamingMessageKey"
           class="prose-chat text-fg-primary text-base overflow-x-auto break-words"
           v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', agentId)"
         />
