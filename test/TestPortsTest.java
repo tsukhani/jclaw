@@ -54,7 +54,7 @@ class TestPortsTest extends UnitTest {
     }
 
     @Test
-    void theRangesEdgesAreInsideAndTheirNeighboursOutside() throws IOException {
+    void theRangesEdgesAreInsideAndTheirNeighborsOutside() throws IOException {
         assumeTrue(isFree(TestPorts.FIRST) && isFree(TestPorts.LAST), "an edge port is in use on this host");
         assertEquals(20000, TestPorts.freeNonEphemeral(() -> 20000));
         assertEquals(32767, TestPorts.freeNonEphemeral(() -> 32767));

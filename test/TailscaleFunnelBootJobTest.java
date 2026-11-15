@@ -44,7 +44,7 @@ class TailscaleFunnelBootJobTest extends UnitTest {
     }
 
     @Test
-    void anAnswerOnTheFunnelledLoopbackPortCountsAsListening() {
+    void anAnswerOnTheFunneledLoopbackPortCountsAsListening() {
         var attempts = new AtomicInteger();
         var urls = new ArrayList<String>();
 

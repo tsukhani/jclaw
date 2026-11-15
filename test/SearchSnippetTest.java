@@ -36,7 +36,7 @@ class SearchSnippetTest extends UnitTest {
     }
 
     @Test
-    void aPluralQueryCentresOnTheSingularItMatched() {
+    void aPluralQueryCentersOnTheSingularItMatched() {
         var message = "A".repeat(500) + " zebra " + "B".repeat(500);
         assertEquals("…" + "A".repeat(96) + " zebra " + "B".repeat(97) + "…",
                 SearchSnippet.around(message, "zebras"));
@@ -55,7 +55,7 @@ class SearchSnippetTest extends UnitTest {
     }
 
     @Test
-    void theEarliestOfSeveralQueryTermsIsTheCentre() {
+    void theEarliestOfSeveralQueryTermsIsTheCenter() {
         var message = "A".repeat(500) + " zebra " + "B".repeat(300) + " yak " + "C".repeat(300);
         assertEquals("…" + "A".repeat(96) + " zebra " + "B".repeat(97) + "…",
                 SearchSnippet.around(message, "yak zebra"));

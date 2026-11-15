@@ -161,8 +161,8 @@ public final class MemoryAutoCapture {
      * The judge's verdict: {@code survivor index → superseded shortlist indices}, and
      * {@code survivor index → the shortlist index it extends} (GH-15).
      */
-    private record Judgement(Map<Integer, List<Integer>> supersessions, Map<Integer, Integer> extensions) {
-        static final Judgement NONE = new Judgement(Map.of(), Map.of());
+    private record Judgment(Map<Integer, List<Integer>> supersessions, Map<Integer, Integer> extensions) {
+        static final Judgment NONE = new Judgment(Map.of(), Map.of());
     }
 
     public record CaptureResult(int captured, int skipped, @Nullable String skipReason) {
@@ -632,13 +632,13 @@ public final class MemoryAutoCapture {
                         ("Turn yielded more than the %d-memory per-turn cap — %d lower-importance "
                                 + "candidate(s) not stored").formatted(maxPerTurn, plan.overflow()));
             }
-            var judgement = judge(agentName, plan, consolidator, breaker);
+            var judgment = judge(agentName, plan, consolidator, breaker);
             // Persist the survivor rows inside the apply Tx (capturing their ids), then
             // generate + write their embeddings AFTER it commits — the embedding HTTP
             // round-trip must never run inside the write tx (same "slow call OUTSIDE the
             // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
             // pooled connection across up to maxPerTurn sequential embedding calls).
-            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, judgement, provenance));
+            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, judgment, provenance));
             int embedded = embedStored(storedIds);
             if (embedded < storedIds.size()) {
                 // Distinct from "Auto-capture failed", which reads as "nothing was captured".
@@ -974,14 +974,14 @@ public final class MemoryAutoCapture {
      * breaker, call failure, or malformed output all yield no supersessions and
      * no extensions, and the capture stores append-only, exactly the pre-525 behavior.
      */
-    private static Judgement judge(String agentName, ConsolidationPlan plan,
+    private static Judgment judge(String agentName, ConsolidationPlan plan,
                                    @Nullable Consolidator consolidator, CircuitBreaker breaker) {
-        if (consolidator == null || plan.survivors().isEmpty() || plan.shortlist().isEmpty()) return Judgement.NONE;
-        if (!ConfigService.getBoolean("memory.consolidation.enabled", true)) return Judgement.NONE;
+        if (consolidator == null || plan.survivors().isEmpty() || plan.shortlist().isEmpty()) return Judgment.NONE;
+        if (!ConfigService.getBoolean("memory.consolidation.enabled", true)) return Judgment.NONE;
         if (!breaker.allowRequest()) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Memory consolidation suspended (circuit breaker %s)".formatted(breaker.state()));
-            return Judgement.NONE;
+            return Judgment.NONE;
         }
         try {
             var messages = List.<ChatMessage>of(
@@ -991,14 +991,14 @@ public final class MemoryAutoCapture {
             breaker.recordSuccess();
             int newCount = plan.survivors().size();
             int existingCount = plan.shortlist().size();
-            return new Judgement(parseSupersessions(raw, newCount, existingCount),
+            return new Judgment(parseSupersessions(raw, newCount, existingCount),
                     parseExtensions(raw, newCount, existingCount));
         } catch (Exception e) {
             breaker.recordFailure();
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Memory consolidation judge failed (storing without supersession): %s"
                             .formatted(e.getMessage()));
-            return Judgement.NONE;
+            return Judgment.NONE;
         }
     }
 
@@ -1015,8 +1015,8 @@ public final class MemoryAutoCapture {
      * supersession has applied, so a link lands on the routine's current row (GH-15).
      */
     private static List<String> applyPlan(String agentKey, String agentName, ConsolidationPlan plan,
-                                          Judgement judgement, MemoryProvenance provenance) {
-        var supersessions = judgement.supersessions();
+                                          Judgment judgment, MemoryProvenance provenance) {
+        var supersessions = judgment.supersessions();
         var store = MemoryStoreFactory.get();
         var storedIds = new ArrayList<String>(plan.survivors().size());
         var applied = new HashSet<List<Integer>>();
@@ -1034,7 +1034,7 @@ public final class MemoryAutoCapture {
                 }
             }
         }
-        for (var ext : judgement.extensions().entrySet()) {
+        for (var ext : judgment.extensions().entrySet()) {
             // A pair judged both ways is a replacement once a guard let it apply; a refused one still links.
             if (applied.contains(List.of(ext.getKey(), ext.getValue()))) continue;
             linkExtension(agentName, Long.parseLong(storedIds.get(ext.getKey())),

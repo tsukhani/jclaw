@@ -476,7 +476,7 @@ class ChromeControlToolTest extends UnitTest {
     }
 
     @Test
-    void findListsMatchesLabelledUntrustedAndRemembersWhichAreLinks() throws Exception {
+    void findListsMatchesLabeledUntrustedAndRemembersWhichAreLinks() throws Exception {
         var helper = helper();
         allow(helper, "example.com");
         var fake = onAllowedTab("find", "{\"matches\":[{\"ref\":\"f1\",\"tag\":\"a\",\"text\":\"Pricing\","
@@ -499,7 +499,7 @@ class ChromeControlToolTest extends UnitTest {
     }
 
     @Test
-    void consoleAndNetworkAreLabelledUntrustedAndListWhatWasCaptured() throws Exception {
+    void consoleAndNetworkAreLabeledUntrustedAndListWhatWasCaptured() throws Exception {
         allow(helper(), "example.com");
         var fake = scripted(Map.of("tab_info", ok(ALLOWED_TAB),
                 "console", ok("{\"lines\":[\"error: boom\",\"log: hi\"]}"),

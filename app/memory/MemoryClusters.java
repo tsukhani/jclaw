@@ -97,7 +97,7 @@ public final class MemoryClusters {
     /** The seeds with at least one edge, found in one query; all of them when that query hit its cap. */
     private static Set<Long> linkedSeeds(Long pk, Set<Long> seeds, @Nullable MemoryScope scope) {
         int cap = MAX_VISITED * seeds.size();
-        var rows = neighbours(pk, seeds, scope, cap);
+        var rows = neighbors(pk, seeds, scope, cap);
         if (rows.size() >= cap) return seeds;
         var linked = new HashSet<Long>();
         for (var row : rows) {
@@ -115,7 +115,7 @@ public final class MemoryClusters {
         Set<Long> frontier = Set.of(seed);
         while (!frontier.isEmpty()) {
             var next = new HashSet<Long>();
-            for (var row : neighbours(pk, frontier, scope, 2 * MAX_VISITED)) {
+            for (var row : neighbors(pk, frontier, scope, 2 * MAX_VISITED)) {
                 if (!discovered.contains(row.id)) {
                     if (discovered.size() >= MAX_VISITED) continue;
                     discovered.add(row.id);
@@ -132,7 +132,7 @@ public final class MemoryClusters {
     }
 
     /** The visible rows of {@code ids}, and those pointing at one of them, retired rows included. */
-    private static List<Memory> neighbours(Long pk, Collection<Long> ids, @Nullable MemoryScope scope, int limit) {
+    private static List<Memory> neighbors(Long pk, Collection<Long> ids, @Nullable MemoryScope scope, int limit) {
         return Memory.findVisible(scope,
                 "agent.id = ?1 AND (id IN (?2) OR extendsId IN (?2) OR supersededById IN (?2)) ORDER BY id",
                 pk, List.copyOf(ids)).fetch(limit);

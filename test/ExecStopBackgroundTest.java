@@ -140,7 +140,7 @@ class ExecStopBackgroundTest extends UnitTest {
 
     /** A running process is named by its pid and its command line, on one line and cut where it runs long. */
     @Test
-    void aRunningProcessIsLabelledWithItsPidAndItsCommandOnOneLine() {
+    void aRunningProcessIsLabeledWithItsPidAndItsCommandOnOneLine() {
         assertEquals("pid 12 (sleep 300)", entry(12, "sleep 300").label(80));
         assertEquals("pid 12 (sh -c sleep 1; echo done)", entry(12, " sh -c\n  sleep 1;\techo done\n").label(80));
         assertEquals("pid 12 (abcde)", entry(12, "abcde").label(5));

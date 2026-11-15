@@ -598,7 +598,7 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void aRefusedAddressIsNeverDialled() {
+    void aRefusedAddressIsNeverDialed() {
         withOllama(installedWith(List.of("nimble:latest")), () -> OllamaDecision.unloadUnused("http://169.254.169.254", null));
         assertTrue(requests.isEmpty());
     }
@@ -760,7 +760,7 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void statusRefusesALinkLocalAddressWithoutDialling() {
+    void statusRefusesALinkLocalAddressWithoutDialing() {
         var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status("http://169.254.169.254"));
         assertTrue(requests.isEmpty());
         assertFalse(status.reachable());
@@ -792,7 +792,7 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void loopbackAndLanAddressesAreDialled() {
+    void loopbackAndLanAddressesAreDialed() {
         for (var base : List.of("http://localhost:11434", "http://127.0.0.1:11434", "http://10.0.0.5:11434", BASE)) {
             var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(base));
             assertTrue(status.reachable(), () -> base + ": " + status.error());

@@ -101,7 +101,7 @@ class AgreementTest extends UnitTest {
     }
 
     @Test
-    void aSecondLabellerMatchesByAnySpanAndDisagreementsLowerTheScores() {
+    void aSecondLabelerMatchesByAnySpanAndDisagreementsLowerTheScores() {
         var first = new Case("x", List.of("plain"), "The user works at Harborlight Analytics, a lab, with Wren.",
                 List.of(Entity.of("operator", "The user", "Person"),
                         Entity.of("harborlight", "Harborlight Analytics", "Organization", "a lab"),

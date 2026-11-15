@@ -90,7 +90,7 @@ class ChromeScriptToolTest extends UnitTest {
     }
 
     @Test
-    void anEnabledMainAgentGetsTheValueLabelledUntrusted() throws Exception {
+    void anEnabledMainAgentGetsTheValueLabeledUntrusted() throws Exception {
         var main = enabledMain();
         var fake = new ChromeBridgeSync.Fake(msg -> ok(msg.get("action").getAsString().equals("tab_info")
                 ? "{\"url\":\"https://example.com/\"}" : "{\"value\":\"Example Domain\",\"type\":\"string\"}"));

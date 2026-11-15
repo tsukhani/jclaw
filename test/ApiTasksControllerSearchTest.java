@@ -273,7 +273,7 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     @Test
-    void aMatchInTheMiddleIsCentredAndCutAtBothEnds() {
+    void aMatchInTheMiddleIsCenteredAndCutAtBothEnds() {
         var agent = seedAgent();
         var taskId = seedTask(agent, "middle-task");
         seedTranscript(taskId, "A".repeat(500) + " zebra " + "B".repeat(500));
@@ -291,7 +291,7 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     @Test
-    void theSnippetCentresOnTheMatchWhateverItsCase() {
+    void theSnippetCentersOnTheMatchWhateverItsCase() {
         var agent = seedAgent();
         var taskId = seedTask(agent, "case-task");
         seedTranscript(taskId, "A".repeat(500) + " ZEBRA " + "B".repeat(500));

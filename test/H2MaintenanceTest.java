@@ -198,7 +198,7 @@ class H2MaintenanceTest extends UnitTest {
     // ---- a copy taken while writes landed (JF-311) ----
 
     @Test
-    void theModelledCopyDropsAWriteAndRowsItShowedWhenOpenedAsItIs() throws Exception {
+    void theModeledCopyDropsAWriteAndRowsItShowedWhenOpenedAsItIs() throws Exception {
         var extract = BackupFixtures.extractDatabase(BackupFixtures.aCopyTakenWhileWritesLanded(tmp), tmp.resolve("as-is"));
         long shown;
         // One session: the first read-write open is the one whose writes the next open drops.
@@ -254,7 +254,7 @@ class H2MaintenanceTest extends UnitTest {
     }
 
     @Test
-    void theWriteCheckFailsTheModelledCopyPassesAGoodBackupAndChangesNeither() throws Exception {
+    void theWriteCheckFailsTheModeledCopyPassesAGoodBackupAndChangesNeither() throws Exception {
         var data = Files.createDirectories(tmp.resolve("data"));
         var torn = BackupFixtures.aCopyTakenWhileWritesLanded(tmp);
         var tornSha = H2Maintenance.sha256(torn);
