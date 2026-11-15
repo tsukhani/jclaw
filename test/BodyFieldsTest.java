@@ -20,9 +20,21 @@ class BodyFieldsTest extends UnitTest {
 
     @Test
     void eachNamedPartIsReadAndANamelessOneIsReadPast() {
-        var body = "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nalpha\r\n"
-                + "--B\r\nContent-Type: text/plain\r\n\r\nno name\r\n"
-                + "--B\r\ncontent-disposition: form-data; NAME=b\r\n\r\nbeta\r\n--B--\r\n";
+        var body = """
+                --B\r
+                Content-Disposition: form-data; name="a"\r
+                \r
+                alpha\r
+                --B\r
+                Content-Type: text/plain\r
+                \r
+                no name\r
+                --B\r
+                content-disposition: form-data; NAME=b\r
+                \r
+                beta\r
+                --B--\r
+                """;
         assertEquals(List.of(Map.entry("a", "alpha"), Map.entry("b", "beta")),
                 BodyFields.multipartParts(latin1(body), FORM_DATA));
     }
@@ -57,8 +69,16 @@ class BodyFieldsTest extends UnitTest {
         assertNull(BodyFields.multipartParts(part, MediaType.get("multipart/form-data")));
         assertNull(BodyFields.multipartParts(part, MediaType.get("multipart/form-data; boundary=\"\"")));
         assertNull(BodyFields.multipartParts(latin1("no delimiter at all"), FORM_DATA));
-        var bareLf = "--B\r\nContent-Disposition: form-data; name=a\r\n\r\nalpha\n--B\r\n"
-                + "Content-Disposition: form-data; name=b\r\n\r\nbeta\r\n--B--";
+        var bareLf = """
+                --B\r
+                Content-Disposition: form-data; name=a\r
+                \r
+                alpha
+                --B\r
+                Content-Disposition: form-data; name=b\r
+                \r
+                beta\r
+                --B--""";
         assertNull(BodyFields.multipartParts(latin1(bareLf), FORM_DATA));
     }
 
@@ -70,9 +90,20 @@ class BodyFieldsTest extends UnitTest {
 
     @Test
     void multipartValuesAreThoseOfTheNamedPartsInOrder() {
-        var body = latin1("--B\r\nContent-Disposition: form-data; name=a\r\n\r\none\r\n"
-                + "--B\r\nContent-Disposition: form-data; name=b\r\n\r\nother\r\n"
-                + "--B\r\nContent-Disposition: form-data; name=a\r\n\r\ntwo\r\n--B--");
+        var body = latin1("""
+                --B\r
+                Content-Disposition: form-data; name=a\r
+                \r
+                one\r
+                --B\r
+                Content-Disposition: form-data; name=b\r
+                \r
+                other\r
+                --B\r
+                Content-Disposition: form-data; name=a\r
+                \r
+                two\r
+                --B--""");
         assertEquals(List.of("one", "two"), BodyFields.multipartValues(body, FORM_DATA, "a"));
         assertEquals(List.of(), BodyFields.multipartValues(body, FORM_DATA, "c"));
         assertNull(BodyFields.multipartValues(body, MediaType.get("multipart/form-data"), "a"));
