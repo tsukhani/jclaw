@@ -3,8 +3,9 @@
 # The backend runs only the test classes the pushed change reaches
 # (bin/select-tests.mjs), the frontend checks only when a frontend input
 # changed, and the bin/ scripts' node tests only when a bin/ file changed;
-# Jenkins runs the whole Java suite on every push. Skips the run when the
-# current HEAD has already been tested (so the two-remote deploy flow, origin
+# Jenkins runs the whole Java suite on every push. A release commit over a
+# green /release-check candidate runs only the fast checks and the bin/ tests.
+# Skips the run when the current HEAD has already been tested (so the two-remote deploy flow, origin
 # then github, pays once). Cache lives inside $GIT_DIR so it stays local to this
 # clone and is automatically scoped per worktree.
 #
@@ -39,13 +40,16 @@ zero_sha=0000000000000000000000000000000000000000
 on_remote() {
     [[ -n "$remote" && -n "$(git for-each-ref --contains "$1^{commit}" "refs/remotes/$remote" 2>/dev/null || true)" ]]
 }
-refs_seen=0; deletions_only=1; known_tags_only=1; candidates_only=1; pushed_sha=""
-while read -r local_ref local_sha remote_ref _remote_sha; do
+refs_seen=0; deletions_only=1; known_tags_only=1; candidates_only=1; pushed_sha=""; pushed_over=""
+while read -r local_ref local_sha remote_ref remote_sha; do
     [[ -z "$local_ref" ]] && continue
     refs_seen=1
     [[ "$local_sha" == "$zero_sha" ]] && continue
     deletions_only=0
-    [[ "$remote_ref" == refs/heads/main ]] && pushed_sha=$local_sha
+    if [[ "$remote_ref" == refs/heads/main ]]; then
+        pushed_sha=$local_sha
+        pushed_over=$remote_sha
+    fi
     [[ "$local_ref" == refs/tags/* ]] && on_remote "$local_sha" || known_tags_only=0
     [[ "$remote_ref" == refs/heads/candidate/* ]] || candidates_only=0
 done <<< "$refs"
@@ -127,12 +131,67 @@ if should_skip_for_docs; then
 fi
 
 # The fast checks run before the slower suite, so a wildcard import, an import-order slip or a nullness error
-# fails the push in seconds.
-echo "[jclaw pre-push] Running the fast checks..."
-if ! (cd "$repo_root" && ./jclaw.sh check --backend-only); then
+# fails the push in seconds. With "frontend", they take in ESLint, Stylelint and the typecheck as well.
+fast_checks() {
+    echo "[jclaw pre-push] Running the fast checks..."
+    if [[ "${1:-}" == frontend ]]; then
+        (cd "$repo_root" && ./jclaw.sh check) && return 0
+    else
+        (cd "$repo_root" && ./jclaw.sh check --backend-only) && return 0
+    fi
     echo "[jclaw pre-push] The fast checks failed: see the output above." >&2
     exit 1
+}
+
+# Nothing else runs the bin/ scripts' node tests, the policy guard's among them: not ./jclaw.sh test, not Jenkins.
+# Their git runs in scratch repositories, so git's environment for this repository is cleared first (JF-299).
+run_bin_tests() {
+    echo "[jclaw pre-push] Running the bin/ script tests..."
+    if ! (cd "$repo_root" && unset $(git rev-parse --local-env-vars) && node --test bin/*.test.mjs); then
+        echo "[jclaw pre-push] The bin/ script tests failed — push aborted." >&2
+        exit 1
+    fi
+}
+
+# The inputs the factory's frontend gate watches (.sandcastle/frontend-gate.ts FRONTEND_INPUTS).
+frontend_inputs='^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)'
+
+# Whether $1 changes only the application.version line, as /deploy's release commit does. No grep -q in a pipe: under
+# pipefail its early exit fails the pipeline, which would read here as "only the version changed".
+version_only() {
+    local diff extra
+    [[ "$(git rev-list --parents -n 1 "$1" | wc -w | tr -d ' ')" == 2 ]] || return 1
+    [[ "$(git diff --name-only "$1^" "$1")" == conf/application.conf ]] || return 1
+    diff=$(git diff -U0 "$1^" "$1" -- conf/application.conf)
+    grep -qE '^\+application[.]version=' <<< "$diff" || return 1
+    extra=$(grep -E '^[-+]' <<< "$diff" | grep -vE '^(\+\+\+|---) ' | grep -vE '^[-+]application[.]version=' || true)
+    [[ -z "$extra" ]]
+}
+
+# A release commit over a green /release-check candidate (JF-444): Jenkins ran the whole backend suite and the
+# frontend tests on its parent's tree, so only what Jenkins never runs is run here, the fast checks and the bin/
+# tests. A candidate the hook cannot confirm runs everything below.
+if [[ -n "$pushed_sha" ]] && version_only "$current_sha"; then
+    parent=$(git rev-parse "$current_sha^")
+    if vouch=$(node "$repo_root/bin/candidate-vouch.mjs" "$parent" 2>&1); then
+        echo "[jclaw pre-push] $current_sha changes only the version line of $parent, which candidate build $vouch passed whole: skipping the backend and frontend tests."
+        frontend=frontend
+        bin_changed=1
+        if [[ -n "$pushed_over" && "$pushed_over" != "$zero_sha" ]] \
+                && changed=$(git diff --name-only "$pushed_over...$current_sha" 2>/dev/null); then
+            grep -qE "$frontend_inputs" <<< "$changed" || frontend=""
+            grep -qE '^bin/' <<< "$changed" || bin_changed=0
+        fi
+        fast_checks "$frontend"
+        [[ "$bin_changed" == 0 ]] || run_bin_tests
+        echo "$current_sha" > "$cache_file"
+        echo "[jclaw pre-push] Checks passed — proceeding with push."
+        exit 0
+    fi
+    echo "[jclaw pre-push] No green candidate vouches for $parent ($vouch): running the tests."
 fi
+
+fast_checks
 
 # The selection reads the compiled test classes, so they are compiled here as well.
 echo "[jclaw pre-push] Compiling the tests..."
@@ -153,10 +212,10 @@ if base=$(git rev-parse --verify --quiet "@{u}") && command -v node >/dev/null 2
         NONE) backend_scope=none ;;
         *) backend_scope="$selection" ;;
     esac
-    # The inputs the factory's frontend gate watches (.sandcastle/frontend-gate.ts FRONTEND_INPUTS). A here-string,
-    # not a pipe: under pipefail, grep -q exiting at its first match fails the pipeline with git's SIGPIPE.
+    # A here-string, not a pipe: under pipefail, grep -q exiting at its first match fails the pipeline with git's
+    # SIGPIPE.
     changed=$(git diff --name-only "$base...HEAD")
-    if ! grep -qE '^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)' <<< "$changed"; then
+    if ! grep -qE "$frontend_inputs" <<< "$changed"; then
         run_frontend=0
     fi
     if ! grep -qE '^bin/' <<< "$changed"; then
@@ -174,15 +233,7 @@ bin_label=run
 [[ "$run_bin" == 1 ]] || bin_label=skipped
 echo "[jclaw pre-push] Backend: $backend_label; frontend checks: $frontend_label; bin/ tests: $bin_label. Jenkins runs the Java suite."
 
-# Nothing else runs the bin/ scripts' node tests, the policy guard's among them: not ./jclaw.sh test, not Jenkins.
-# Their git runs in scratch repositories, so git's environment for this repository is cleared first (JF-299).
-if [[ "$run_bin" == 1 ]]; then
-    echo "[jclaw pre-push] Running the bin/ script tests..."
-    if ! (cd "$repo_root" && unset $(git rev-parse --local-env-vars) && node --test bin/*.test.mjs); then
-        echo "[jclaw pre-push] The bin/ script tests failed — push aborted." >&2
-        exit 1
-    fi
-fi
+[[ "$run_bin" == 0 ]] || run_bin_tests
 
 echo "[jclaw pre-push] Testing $current_sha before push..."
 # Git exports GIT_DIR to a hook run in a worktree, and a test that runs git in a scratch directory inherits it:

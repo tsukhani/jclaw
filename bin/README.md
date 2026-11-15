@@ -11,6 +11,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `select-tests.test.mjs` | Its tests: `node --test bin/select-tests.test.mjs` |
 | `policy-guard.mjs` | Enforces AGENTS.md's Policy block for Claude Code, Codex and `.githooks/pre-push` — see below |
 | `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
+| `candidate-vouch.mjs` | Whether a green `/release-check` candidate build tested a commit, for `.githooks/pre-push` — see below |
+| `candidate-vouch.test.mjs` | Its tests, the hook's candidate skip among them: `node --test bin/candidate-vouch.test.mjs` |
 | `sonar-precheck.mjs` | Sonar's rules over the files a release changes, run by `/deploy` before it bumps anything — see below |
 | `sonar-precheck.test.mjs` | Its tests: `node --test bin/sonar-precheck.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
@@ -188,6 +190,25 @@ refuses, because nothing then says what to keep. A Release whose image is alread
 | --- | --- |
 | 0 | Finished, or nothing to delete |
 | 1 | Refused or stopped, and the reason is printed. A failed delete stops the run, and earlier deletions stand |
+
+## candidate-vouch.mjs
+
+```bash
+node bin/candidate-vouch.mjs <full sha>   # prints the vouching build, such as #1418
+```
+
+The pre-push hook asks it about the parent of a release commit that changes only the `application.version` line
+(JF-444). A finished, successful build of the `JClaw` job vouches when its description reads `tested <sha>` and its
+display name ends `candidate <first 12 of sha>`, the record a `/release-check` candidate build writes. A push build
+of the same commit does not count, since it may itself have skipped its tests on a candidate's word. When a build
+vouches, the hook runs only what Jenkins never runs, `./jclaw.sh check` (with the frontend gates when a frontend
+input changed) and the `bin/` tests (when a `bin/` file changed), and skips the backend classes and the frontend
+tests the candidate ran.
+
+It asks Jenkins with the `--header` and URL of the `jenkins` MCP server in `~/.claude.json` (`JCLAW_CLAUDE_JSON`
+names another file), so it needs no secret of its own, and gives up after 10 seconds. Exit 0 printed the build; exit
+1 means no green candidate build tested the commit; exit 2 means it could not ask, for a sha that is not a full one,
+a config without the server, a refusal or a Jenkins that is down. Anything but 0 runs every test as before.
 
 ## policy-guard.mjs
 
