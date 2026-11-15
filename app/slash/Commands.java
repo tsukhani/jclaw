@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -811,7 +810,8 @@ public final class Commands {
             return new Result(null, "Nothing to compact: this conversation was deleted.", Command.COMPACT);
         }
         // Counted as the meter counts the conversation, on the model its turns run on, not the summary's.
-        var counted = Objects.requireNonNullElse(ownModel(agent, configured), summary.first());
+        var own = ownModel(agent, configured);
+        var counted = own != null ? own : summary.first();
         var providerName = counted.provider().config().name();
         var modelId = counted.modelId();
         var anchor = Tx.run(() -> {

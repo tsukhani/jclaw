@@ -203,9 +203,10 @@ public final class RouterClassifier {
      */
     private static Classification orRules(Candidate classifier, JevRouterClassifier.Verdict verdict, String message,
                                           @Nullable TaskClass priorClass, int priorToolCalls) {
-        if (verdict.classification() != null) {
+        var classification = verdict.classification();
+        if (classification != null) {
             ClassifierHealth.succeeded(classifier.describe());
-            return verdict.classification();
+            return classification;
         }
         if (!verdict.signal()) ClassifierHealth.failed(classifier.describe(), verdict.reason());
         var rules = PromptClassifier.classify(message, priorClass, priorToolCalls);

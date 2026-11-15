@@ -355,7 +355,7 @@ public final class ParallelToolExecutor {
     /** Body of one parallel-safe work unit: dispatch a single call. */
     private static void runSafeCall(DispatchContext ctx, ToolRegistry.ToolResult[] results, int i) {
         try {
-            if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
+            if (ctx.isCancelled() instanceof AtomicBoolean stop && stop.get()) return;
             results[i] = runToolCallSafely(
                     ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
                     ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());
@@ -374,7 +374,7 @@ public final class ParallelToolExecutor {
         try {
             int i = 0;
             while (i < group.size()) {
-                if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
+                if (ctx.isCancelled() instanceof AtomicBoolean stop && stop.get()) break;
                 int end = i;
                 while (end < group.size() && readsOnly(ctx, group.get(end))) end++;
                 if (end - i >= 2) {
@@ -396,7 +396,7 @@ public final class ParallelToolExecutor {
     }
 
     private static void runInGroup(DispatchContext ctx, ToolRegistry.ToolResult[] results, int idx) {
-        if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
+        if (ctx.isCancelled() instanceof AtomicBoolean stop && stop.get()) return;
         results[idx] = runToolCallSafely(
                 ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
                 ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());

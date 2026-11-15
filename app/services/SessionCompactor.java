@@ -1810,7 +1810,7 @@ public final class SessionCompactor {
 
     /** A String body is the stored text itself; with attachments, the first text part opens with it. */
     private static boolean carriesWhole(ChatMessage sent, @Nullable String stored) {
-        var text = Objects.requireNonNullElse(stored, "");
+        var text = stored == null ? "" : stored;
         if (sent.content() instanceof String body) return body.equals(text);
         if (!(sent.content() instanceof List<?> parts)) return text.isEmpty();
         for (var part : parts) {

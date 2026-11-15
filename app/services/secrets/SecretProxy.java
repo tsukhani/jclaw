@@ -156,13 +156,12 @@ public final class SecretProxy {
             }
             out.write("HTTP/1.1 200 Connection established\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
-            var tls = (SSLSocket) SecretsCa.get().serverContext(host).getSocketFactory()
-                    .createSocket(raw, host, port, false);
-            tls.setUseClientMode(false);
-            var params = tls.getSSLParameters();
-            params.setApplicationProtocols(new String[] {"http/1.1"});
-            tls.setSSLParameters(params);
-            try (tls) {
+            try (var tls = (SSLSocket) SecretsCa.get().serverContext(host).getSocketFactory()
+                    .createSocket(raw, host, port, false)) {
+                tls.setUseClientMode(false);
+                var params = tls.getSSLParameters();
+                params.setApplicationProtocols(new String[] {"http/1.1"});
+                tls.setSSLParameters(params);
                 tls.startHandshake();
                 tls.setSoTimeout(IO_TIMEOUT_MS);
                 relay(grant, host, port, tls);

@@ -75,6 +75,7 @@ public final class SecretGrant implements AutoCloseable {
     private volatile boolean closed;
 
     @MustBeClosed
+    @SuppressWarnings("java:S2637") // state is assigned below on every path; the rule misses the assignment
     SecretGrant(String id, String token, String ownerName, boolean forAgent, List<Binding> bindings,
                 @Nullable OkHttpClient upstream, SecretGrants.@Nullable CaptureFaults captureFaults) {
         this.id = id;
