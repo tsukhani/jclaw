@@ -116,7 +116,7 @@ public final class SkillSecrets {
                 }
                 if (kind == null) return null;
                 if (kind == Kind.BASIC) return words.length == 1 ? new Place(kind, null) : null;
-                var field = kind == Kind.FORM ? FORM_FIELD : FIELD;
+                var field = kind == Kind.FORM ? FORM_FIELD_SHAPE : FIELD_SHAPE;
                 if (words.length != 2 || !field.matcher(words[1]).matches()) return null;
                 return new Place(kind, words[1]);
             }
@@ -139,11 +139,11 @@ public final class SkillSecrets {
             }
         }
 
-        private static final Pattern METHOD = Pattern.compile("[A-Za-z]{1,16}");
-        private static final Pattern PATH = Pattern.compile("/[A-Za-z0-9\\-._~!$&'()*+,;=:@%/]{0,1023}");
-        private static final Pattern FIELD = Pattern.compile("[A-Za-z0-9_$-]{1,128}");
+        private static final Pattern METHOD_SHAPE = Pattern.compile("[A-Za-z]{1,16}");
+        private static final Pattern PATH_SHAPE = Pattern.compile("/[A-Za-z0-9\\-._~!$&'()*+,;=:@%/]{0,1023}");
+        private static final Pattern FIELD_SHAPE = Pattern.compile("[A-Za-z0-9_$-]{1,128}");
         /** A form field may name a nested one, as in {@code user[password]} or {@code user.password}. */
-        private static final Pattern FORM_FIELD = Pattern.compile("[A-Za-z0-9_$.\\[\\]-]{1,128}");
+        private static final Pattern FORM_FIELD_SHAPE = Pattern.compile("[A-Za-z0-9_$.\\[\\]-]{1,128}");
         private static final Set<String> COOKIE_HEADERS = Set.of("set-cookie", "set-cookie2", "cookie");
 
         /**
@@ -160,11 +160,11 @@ public final class SkillSecrets {
                         + " BACKOFFICE_PASSWORD in json password: JClaw takes a value only from a sign-in made with it.");
             }
             var m = method.strip();
-            if (!METHOD.matcher(m).matches()) {
+            if (!METHOD_SHAPE.matcher(m).matches()) {
                 throw new Refused("'%s' is not an HTTP method: give one such as POST.".formatted(m));
             }
             var p = path.strip();
-            var normalized = PATH.matcher(p).matches() ? UrlPaths.normalize(p) : null;
+            var normalized = PATH_SHAPE.matcher(p).matches() ? UrlPaths.normalize(p) : null;
             if (normalized == null) {
                 throw new Refused(("'%s' is not a path a rule can match: give it as the service receives it, starting"
                         + " with /, such as /v1/sessions/current, with no host, query, space, encoded slash or backslash.")
@@ -180,7 +180,7 @@ public final class SkillSecrets {
                 where = named;
             }
             var f = field.strip();
-            if (!FIELD.matcher(f).matches()) {
+            if (!FIELD_SHAPE.matcher(f).matches()) {
                 throw new Refused(("'%s' is not a field name: give the JSON field or the header by its name alone, such"
                         + " as session or X-Session.").formatted(f));
             }
@@ -232,7 +232,9 @@ public final class SkillSecrets {
 
         /** {@code offered}, {@code switchedOff}, {@code notOffered} or {@code notInstalled}, as the API names it. */
         public String state() {
-            return !installed ? "notInstalled" : switchedOff ? "switchedOff" : offered ? "offered" : "notOffered";
+            if (!installed) return "notInstalled";
+            if (switchedOff) return "switchedOff";
+            return offered ? "offered" : "notOffered";
         }
 
         /** Of {@code holders}, as {@link Provided#holdersOf} returns them, each holder of a value whose switch is off. */
@@ -290,7 +292,7 @@ public final class SkillSecrets {
      * example, 4 the description.
      */
     private static final Pattern DECLARATION = Pattern.compile(
-            "\\s*(?:(setting|renewed)\\s+)?(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
+            "\\s*(?:(setting|renewed)\\s+)?(?:export\\s+)?([A-Za-z_]\\w*)\\s*=\\s*([^#]*?)\\s*(?:#\\s*(.*?))?\\s*");
     private static final String RENEWED = "renewed";
     /** Stored rules already warned about, by row id and when it was saved. */
     private static final Set<String> UNREADABLE_RULES_WARNED = ConcurrentHashMap.newKeySet();
@@ -335,6 +337,13 @@ public final class SkillSecrets {
         var out = new ArrayList<Listing>();
         for (var row : rows) out.add(listing(row));
         return out;
+    }
+
+    /** The log's word for what {@link #put} did to a secret. */
+    private static String putVerb(boolean created, boolean valueChanged, boolean hostsChanged) {
+        if (created) return "added";
+        if (valueChanged) return "replaced";
+        return hostsChanged ? "kept, hosts changed" : "kept";
     }
 
     /**
@@ -414,11 +423,12 @@ public final class SkillSecrets {
         row.save();
         if (created) SkillLoader.clearCache();
         afterWrite();
-        var renewal = Objects.equals(previous, rule) ? ""
-                : rule == null ? ", no longer renewed" : ", renewed from the answer to " + rule.describe();
+        var renewal = "";
+        if (!Objects.equals(previous, rule)) {
+            renewal = rule == null ? ", no longer renewed" : ", renewed from the answer to " + rule.describe();
+        }
         EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s %s for skill %s, sent only to %s%s".formatted(
-                name, created ? "added" : value != null ? "replaced" : hostsChanged ? "kept, hosts changed" : "kept", skill,
-                String.join(", ", normalized), renewal));
+                name, putVerb(created, value != null, hostsChanged), skill, String.join(", ", normalized), renewal));
         return listing(row);
     }
 
@@ -759,8 +769,9 @@ public final class SkillSecrets {
     private static @Nullable Capture suggestion(@Nullable String rule) {
         if (rule == null) return null;
         var words = rule.strip().split("\\s+");
-        int using = words.length > 4 && words[4].equalsIgnoreCase("using") ? 4
-                : words.length > 3 && words[3].equalsIgnoreCase("using") ? 3 : -1;
+        int using = -1;
+        if (words.length > 4 && words[4].equalsIgnoreCase("using")) using = 4;
+        else if (words.length > 3 && words[3].equalsIgnoreCase("using")) using = 3;
         if (using < 0 || words.length < using + 4 || words.length > using + 5
                 || !words[using + 2].equalsIgnoreCase("in")) {
             return null;

@@ -540,7 +540,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     if (event?.conversationId == null || event.conversationId !== selectedConvoId.value || !event.compaction) return
     applyCompaction(event.compaction)
     const ended = event.compaction.phase === 'done' || event.compaction.phase === 'skipped'
-    if (ended && compactSend && compactSend.conversationId === event.conversationId) endCompactSend(compactSend)
+    if (ended && compactSend?.conversationId === event.conversationId) endCompactSend(compactSend)
   })
 
   /** The bus says this tab's /compact has ended: its answer may never come, so nothing waits on it any more. */

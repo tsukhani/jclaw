@@ -131,7 +131,7 @@ class EvalFanOutTest extends UnitTest {
             await(bombing);
             try {
                 bombThread.get().join();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } finally {
                 release.countDown();

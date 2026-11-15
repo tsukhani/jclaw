@@ -1246,7 +1246,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aNameIsUsedOnceAcrossSecretsAndSettings() throws Exception {
+    void aNameIsUsedOnceAcrossSecretsAndSettings() {
         assertIsOk(put("SITE_ID", "{\"value\":\"v\",\"hosts\":[\"api.example.com\"]}"));
         assertEquals("400 invalid_request Skill 'demo' on this agent has a secret named SITE_ID. A command finds a value"
                 + " by its name, so each name is used once on an agent.", errorOf(putSetting("SITE_ID", "{\"value\":\"x\"}")));
@@ -1299,7 +1299,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void anAgentCannotReadOrWriteASetting() throws Exception {
+    void anAgentCannotReadOrWriteASetting() {
         for (var action : List.of("putSetting", "deleteSetting")) {
             var method = java.util.Arrays.stream(ApiSkillSecretsController.class.getMethods())
                     .filter(m -> m.getName().equals(action)).findFirst().orElseThrow();
@@ -1378,7 +1378,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void everyRouteIsTheOperatorsAloneAndAnAgentChangesNothing() throws Exception {
+    void everyRouteIsTheOperatorsAloneAndAnAgentChangesNothing() {
         for (var action : List.of("list", "put", "delete")) {
             var method = java.util.Arrays.stream(ApiSkillSecretsController.class.getMethods())
                     .filter(m -> m.getName().equals(action)).findFirst().orElseThrow();
@@ -1936,7 +1936,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aKeptIdThatLeadsOutOfTheKeptFolderIsRefusedAndAMissingOneIsNotFound() throws Exception {
+    void aKeptIdThatLeadsOutOfTheKeptFolderIsRefusedAndAMissingOneIsNotFound() {
         var encoder = java.util.Base64.getUrlEncoder().withoutPadding();
         var outward = encoder.encodeToString("../../../../certs/.env".getBytes(StandardCharsets.UTF_8));
         var missing = encoder.encodeToString("20261113T000000.000Z/credentials/x.txt".getBytes(StandardCharsets.UTF_8));
@@ -1972,7 +1972,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void noLogLineOrResponseCarriesAKeptFilesContent() throws Exception {
+    void noLogLineOrResponseCarriesAKeptFilesContent() {
         var bodies = new ArrayList<String>();
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
             try {

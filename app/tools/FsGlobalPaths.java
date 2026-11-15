@@ -42,7 +42,9 @@ final class FsGlobalPaths {
 
     static Resolution resolve(Agent agent, String path, boolean mutating) {
         var home = System.getProperty("user.home", "");
-        var expanded = path.equals("~") ? home : path.startsWith("~/") ? home + path.substring(1) : path;
+        String expanded;
+        if (path.equals("~")) expanded = home;
+        else expanded = path.startsWith("~/") ? home + path.substring(1) : path;
         // Contained by the filesystem root, so the guard adds only what it does for a workspace: a dangling link
         // refused, two resolutions that must agree, and a file with a second hard link refused (JF-400).
         var root = Objects.requireNonNull(AgentService.workspacePath(agent.name).toAbsolutePath().getRoot());

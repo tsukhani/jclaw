@@ -264,7 +264,7 @@ public final class SecretProxy {
             if (judged != null) {
                 var taken = judged.take(response, noBody);
                 if (taken == null) {
-                    reply(out, 502, "Bad Gateway", SecretCapture.WITHHELD);
+                    reply(out, 502, "Bad Gateway", SecretCapture.WITHHELD_REPLY);
                     return;
                 }
                 read = taken.body();

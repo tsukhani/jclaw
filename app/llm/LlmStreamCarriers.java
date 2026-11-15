@@ -191,8 +191,9 @@ interface LlmStreamCarriers {
          * without the wait for its first token. 0 when it streamed neither, as a call that only names tools does.
          */
         public long writeMs() {
-            long start = reasoningStartNanos == 0L ? firstContentNanos
-                    : firstContentNanos == 0L ? reasoningStartNanos : Math.min(reasoningStartNanos, firstContentNanos);
+            long start;
+            if (reasoningStartNanos == 0L) start = firstContentNanos;
+            else start = firstContentNanos == 0L ? reasoningStartNanos : Math.min(reasoningStartNanos, firstContentNanos);
             if (start == 0L || completedNanos == 0L) return 0L;
             return Math.max(0L, (completedNanos - start) / 1_000_000L);
         }

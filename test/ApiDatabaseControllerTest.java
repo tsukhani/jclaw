@@ -30,7 +30,7 @@ import java.util.zip.ZipOutputStream;
  * first — without it a POST would stop the tree the suite is running from. The test database
  * is in-memory, so H2's online copy is exercised here only for the refusal it answers with;
  * the copy itself is covered against a file database in {@code H2MaintenanceTest}, and the
- * route's handling of what the copy's write check found through {@code onlineCopyForTest}.
+ * route's handling of what the copy's write check found through {@code setOnlineCopyForTest}.
  */
 class ApiDatabaseControllerTest extends FunctionalTest {
 
@@ -156,13 +156,13 @@ class ApiDatabaseControllerTest extends FunctionalTest {
     /** POST a backup whose online copies are {@code copies}, in order, and return the response's JSON. */
     private JsonObject backUpWith(Path... copies) {
         var queue = new ArrayDeque<>(List.of(copies));
-        DatabaseService.onlineCopyForTest = zip -> Files.copy(queue.remove(), zip);
+        DatabaseService.setOnlineCopyForTest(zip -> Files.copy(queue.remove(), zip));
         try {
             var response = POST("/api/system/database/backups", "application/json", "{}");
             assertEquals(201, response.status.intValue(), getContent(response));
             return JsonParser.parseString(getContent(response)).getAsJsonObject();
         } finally {
-            DatabaseService.onlineCopyForTest = null;
+            DatabaseService.setOnlineCopyForTest(null);
         }
     }
 

@@ -820,6 +820,15 @@ public final class DangerousActionGate {
 
         /** A one-line reason, written so that none of it reads as markup. */
         abstract String why(String oneLine);
+
+        /**
+         * Slack's control characters, plus a backtick run: model-controlled args inside the
+         * fence would otherwise close it and render the rest of the payload as mrkdwn in an
+         * approval prompt. A zero-width space between backticks cannot open or close a fence.
+         */
+        private static String slackSafe(@Nullable String s) {
+            return s == null ? "" : SlackMarkdownFormatter.escape(s).replace("`", "`\u200b");
+        }
     }
 
     /**
@@ -924,15 +933,6 @@ public final class DangerousActionGate {
             pieces.add(raw.substring(start));
             return pieces;
         }
-    }
-
-    /**
-     * Slack's control characters, plus a backtick run: model-controlled args inside the
-     * fence would otherwise close it and render the rest of the payload as mrkdwn in an
-     * approval prompt. A zero-width space between backticks cannot open or close a fence.
-     */
-    private static String slackSafe(@Nullable String s) {
-        return s == null ? "" : SlackMarkdownFormatter.escape(s).replace("`", "`\u200b");
     }
 
     /**

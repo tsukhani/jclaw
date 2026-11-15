@@ -59,7 +59,13 @@ public final class DatabaseService {
     /** Test seam: replaces the {@code SELECT 1} probe. */
     public static @Nullable ProbeForTest probeForTest;
     /** Test seam: replaces H2's {@code BACKUP TO}, which the in-memory test database refuses; it writes the zip. */
-    public static @Nullable OnlineCopyForTest onlineCopyForTest;
+    @SuppressWarnings("java:S3077") // a test seam swapped whole, never changed in place
+    private static volatile @Nullable OnlineCopyForTest onlineCopyOverride;
+
+    /** Replaces the online copy with {@code seam}, or restores H2's {@code BACKUP TO} when it is null. */
+    public static void setOnlineCopyForTest(@Nullable OnlineCopyForTest seam) {
+        onlineCopyOverride = seam;
+    }
 
     @FunctionalInterface
     public interface ProbeForTest {
@@ -282,7 +288,7 @@ public final class DatabaseService {
         // Graph writers wait across both steps, so no withdrawal lands between the database and the graph.
         try {
             GraphStore.get().pauseWriters(() -> {
-                var seam = onlineCopyForTest;
+                var seam = onlineCopyOverride;
                 if (seam != null) {
                     seam.copy(zip);
                 } else {

@@ -686,7 +686,9 @@ public class ApiConversationsController extends Controller {
 
     private static CompactionView compactionView(SessionCompaction s, Conversation conversation) {
         var setAside = conversation.contextSince != null && !s.compactedAt.isAfter(conversation.contextSince);
-        var status = s.mergedIntoId != null ? "merged" : setAside ? "reset" : "live";
+        String status;
+        if (s.mergedIntoId != null) status = "merged";
+        else status = setAside ? "reset" : "live";
         return new CompactionView(s.id, s.turnCount, s.summaryTokens, s.model, s.summary, s.compactedAt.toString(),
                 s.coversFrom != null ? s.coversFrom.toString() : null, s.coversTo != null ? s.coversTo.toString() : null,
                 s.mergedIntoId, status);

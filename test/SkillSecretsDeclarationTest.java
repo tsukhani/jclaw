@@ -6,8 +6,6 @@ import services.SkillSecrets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** JF-353: a skill declares its secrets in a fenced block of its SKILL.md, and skill-creator tells agents to write it. */
 class SkillSecretsDeclarationTest extends UnitTest {
@@ -303,7 +301,7 @@ class SkillSecretsDeclarationTest extends UnitTest {
         for (var place : java.util.List.of("json user[password]", "json user.password", "header X[1]")) {
             try {
                 SkillSecrets.Capture.of("POST", "/v1/s", "json", "session", "API_PASSWORD", place);
-            } catch (SkillSecrets.Refused e) {
+            } catch (SkillSecrets.Refused _) {
                 refused.add(place);
             }
         }
@@ -312,7 +310,7 @@ class SkillSecretsDeclarationTest extends UnitTest {
         for (var field : java.util.List.of("user[session]", "user.session")) {
             try {
                 SkillSecrets.Capture.of("POST", "/v1/s", "json", field, "API_PASSWORD", "form password");
-            } catch (SkillSecrets.Refused e) {
+            } catch (SkillSecrets.Refused _) {
                 refusedField.add(field);
             }
         }

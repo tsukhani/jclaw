@@ -240,7 +240,7 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
             if (json.has("code") && json.has("message")) {
                 return response.status + " " + json.get("code").getAsString() + " " + json.get("message").getAsString();
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             // Not a JSON error body: the status alone says what happened.
         }
         return String.valueOf(response.status);

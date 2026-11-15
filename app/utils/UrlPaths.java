@@ -143,13 +143,10 @@ public final class UrlPaths {
         var out = new StringBuilder(raw.length());
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
-            int hi = c == '%' && i + 2 < raw.length() ? Character.digit(raw.charAt(i + 1), 16) : -1;
-            int lo = hi < 0 ? -1 : Character.digit(raw.charAt(i + 2), 16);
-            if (lo >= 0) {
-                int b = hi << 4 | lo;
-                if (strict && (b == '/' || b == '\\')) return null;
-                if (unreserved(b)) out.append((char) b);
-                else escape(out, b);
+            int escaped = escapedByte(raw, i);
+            if (escaped >= 0) {
+                if (strict && (escaped == '/' || escaped == '\\')) return null;
+                appendByte(out, escaped);
                 i += 2;
             } else if (c == '%' || c == '\\' || c == '#') {
                 if (strict) return null;
@@ -163,6 +160,20 @@ public final class UrlPaths {
             }
         }
         return out.toString();
+    }
+
+    /** The byte a {@code %XX} escape at {@code i} encodes, or -1 when no escape starts there. */
+    private static int escapedByte(String raw, int i) {
+        if (raw.charAt(i) != '%' || i + 2 >= raw.length()) return -1;
+        int hi = Character.digit(raw.charAt(i + 1), 16);
+        int lo = Character.digit(raw.charAt(i + 2), 16);
+        return hi < 0 || lo < 0 ? -1 : hi << 4 | lo;
+    }
+
+    /** A decoded byte as path text: itself when unreserved, else escaped in capitals. */
+    private static void appendByte(StringBuilder out, int b) {
+        if (unreserved(b)) out.append((char) b);
+        else escape(out, b);
     }
 
     private static boolean unreserved(int c) {

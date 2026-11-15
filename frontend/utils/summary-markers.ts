@@ -93,5 +93,6 @@ export function summaryMarkdown(marker: SummaryMarker): string {
     '',
     ...c.summary.split('\n'),
   ]
-  return `${lines.map(line => (line ? `> ${line}` : '>')).join('\n')}\n`
+  const quoted = lines.map(line => (line ? `> ${line}` : '>')).join('\n')
+  return `${quoted}\n`
 }

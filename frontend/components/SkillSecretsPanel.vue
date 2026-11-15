@@ -53,7 +53,7 @@ interface Expected {
 }
 
 type CredentialPlace = 'json' | 'form' | 'header' | 'basic'
-const CREDENTIAL_PLACES: CredentialPlace[] = ['json', 'form', 'header', 'basic']
+const CREDENTIAL_PLACES = new Set<CredentialPlace>(['json', 'form', 'header', 'basic'])
 
 const secrets = ref<Secret[]>([])
 const expected = ref<Expected[]>([])
@@ -166,7 +166,7 @@ function fillRule(rule: SkillSecretCapture | null | undefined, suggested: boolea
   formField.value = rule?.field ?? ''
   formCredential.value = rule?.credential ?? ''
   const [place = 'json', ...field] = (rule?.credentialIn ?? '').trim().split(/\s+/)
-  formCredentialPlace.value = CREDENTIAL_PLACES.includes(place as CredentialPlace) ? place as CredentialPlace : 'json'
+  formCredentialPlace.value = CREDENTIAL_PLACES.has(place as CredentialPlace) ? place as CredentialPlace : 'json'
   formCredentialField.value = field.join(' ')
   formRuleSuggested.value = suggested && !!rule
 }

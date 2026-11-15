@@ -394,10 +394,10 @@ public final class ContextWindowManager {
      */
     static String trimNotice(int dropped, boolean searchable) {
         boolean one = dropped == 1;
+        var them = one ? "it" : "them";
         return "[%d earlier message%s of this conversation %s left out of this request to fit the model's context window. %s still stored%s.]"
                 .formatted(dropped, one ? "" : "s", one ? "is" : "are", one ? "It is" : "They are",
-                        searchable ? ", and " + ConversationSearchTool.TOOL_NAME
-                                + " with includeCurrent set to true can find " + (one ? "it" : "them") : "");
+                        searchable ? ", and " + ConversationSearchTool.TOOL_NAME + " with includeCurrent set to true can find " + them : "");
     }
 
     /**

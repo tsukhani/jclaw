@@ -770,7 +770,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
      * the answer, so neither is, the answer is withheld, and the log says why.
      */
     @Test
-    void aRuleChangedWhileItsSignInIsInFlightStoresNeitherSecretAndWithholdsTheAnswer() throws Exception {
+    void aRuleChangedWhileItsSignInIsInFlightStoresNeitherSecretAndWithholdsTheAnswer() {
         saveRule("json", "session");
         saveRule(REFRESH, "POST", SIGN_IN, "json", "refresh");
         var changed = new AtomicReference<Integer>();
@@ -859,7 +859,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
 
     /** No event holds the key, and a tool result produced straight after the capture already masks it. */
     @Test
-    void noEventHoldsTheKeyAndAToolResultMasksItAtOnce() throws Exception {
+    void noEventHoldsTheKeyAndAToolResultMasksItAtOnce() {
         saveRule("json", "session");
         assertEquals("signed in as " + KEY, maskedOnAToolThread("signed in as " + KEY));
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
@@ -997,7 +997,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
      * value: the proxy would send nothing, or refuse the sign-in. It is refused, and nothing is saved.
      */
     @Test
-    void aRuleWhoseCredentialHasNoValueOrSharesNoHostIsRefused() throws Exception {
+    void aRuleWhoseCredentialHasNoValueOrSharesNoHostIsRefused() {
         saveRule(REFRESH, "POST", "/v1/refresh", "json", "refresh", PASSWORD_NAME, "form password");
         assertEquals("400 " + REFRESH + " has no value yet, so a sign-in that sends it sends nothing, and the rule could"
                         + " never take a value for " + NAME + ": give " + REFRESH + " a value first.",
@@ -1073,7 +1073,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
 
     /** Why a stray password withholds the answer is logged, naming the secrets and the rule, never a value. */
     @Test
-    void aStrayPasswordIsLoggedByNameWithoutItsValue() throws Exception {
+    void aStrayPasswordIsLoggedByNameWithoutItsValue() {
         saveRule("json", "session");
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
             try (var grant = running("bash skills/backoffice/run.sh")) {
@@ -1186,7 +1186,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
 
     /** A value holding a line break or a NUL would break every header it went in: it is not stored, and the log says why. */
     @Test
-    void aCapturedValueHoldingALineBreakOrANulIsWithheldAndTheLogSaysWhy() throws Exception {
+    void aCapturedValueHoldingALineBreakOrANulIsWithheldAndTheLogSaysWhy() {
         saveRule("json", "session");
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
             for (var escape : List.of("n", "r", "u0000")) {
@@ -1267,7 +1267,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
      * read, and so is one saved only in part, which is no rule either.
      */
     @Test
-    void aStoredRuleThatCannotBeReadIsWarnedAboutOncePerSavedVersion() throws Exception {
+    void aStoredRuleThatCannotBeReadIsWarnedAboutOncePerSavedVersion() {
         saveRule("json", "session");
         var cannot = "Secret " + NAME + " of skill backoffice has a stored capture rule JClaw cannot read%s, so nothing is"
                 + " taken under it: save its rule again in the Secrets panel.";
@@ -1502,7 +1502,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
 
     /** A capture rule read that fails sends nothing, and the command is told its secrets could not be checked. */
     @Test
-    void aRulesReadThatFailsSendsNothingAndRepliesThatItCouldNotBeChecked() throws Exception {
+    void aRulesReadThatFailsSendsNothingAndRepliesThatItCouldNotBeChecked() {
         saveRule("json", "session");
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
             try (var grant = running("bash skills/backoffice/run.sh", () -> {
@@ -1524,7 +1524,7 @@ class RenewedSecretCaptureTest extends FunctionalTest {
 
     /** A store that fails stores nothing, the answer is withheld, and the log says why without the failure's text. */
     @Test
-    void aStoreThatFailsWithholdsTheAnswerAndStoresNothing() throws Exception {
+    void aStoreThatFailsWithholdsTheAnswerAndStoresNothing() {
         saveRule("json", "session");
         var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), seen -> {
             try (var grant = running("bash skills/backoffice/run.sh", () -> { }, () -> {

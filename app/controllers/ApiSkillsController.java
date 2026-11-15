@@ -613,17 +613,15 @@ public class ApiSkillsController extends Controller {
         // skill is dead on this agent despite enabled=true in the DB.
         // Only enforce on enable: turning a missing skill off is a no-op
         // we shouldn't reject (lets callers clean up stale configs).
-        if (enabled) {
-            if (!Files.exists(agentSkillDir.resolve(SKILL_MD))) {
-                ApiResponses.errorWithTemplate(400, ApiResponses.INVALID_REQUEST,
-                        ("Skill '%s' is not installed on agent '%s'. "
-                        + "Install it first via POST /api/agents/%d/skills/%s/copy "
-                        + "(copies the global skill into the agent's workspace, "
-                        + "syncs the shell allowlist, and runs a malware scan); "
-                        + "then this toggle endpoint can flip it on/off.")
-                        .formatted(name, agent.name, id, name),
-                        ApiErrorTemplates.skillNotInstalled());
-            }
+        if (enabled && !Files.exists(agentSkillDir.resolve(SKILL_MD))) {
+            ApiResponses.errorWithTemplate(400, ApiResponses.INVALID_REQUEST,
+                    ("Skill '%s' is not installed on agent '%s'. "
+                    + "Install it first via POST /api/agents/%d/skills/%s/copy "
+                    + "(copies the global skill into the agent's workspace, "
+                    + "syncs the shell allowlist, and runs a malware scan); "
+                    + "then this toggle endpoint can flip it on/off.")
+                    .formatted(name, agent.name, id, name),
+                    ApiErrorTemplates.skillNotInstalled());
         }
 
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);

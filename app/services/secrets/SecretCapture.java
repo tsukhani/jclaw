@@ -55,7 +55,7 @@ import java.util.regex.Pattern;
  */
 final class SecretCapture {
 
-    static final String WITHHELD = "JClaw withheld this response: renewing a secret from it failed.";
+    static final String WITHHELD_REPLY = "JClaw withheld this response: renewing a secret from it failed.";
     static final String UNCHECKED = "JClaw could not check this request's secrets; try again.";
     private static final String MARKER = "[renewed: %s]";
     private static final int LIMIT = SecretProxy.BUFFERED_BODY_LIMIT;
@@ -185,7 +185,7 @@ final class SecretCapture {
     }
 
     /** Each occurrence of {@code place} in {@code sent}, as the command wrote it; null for a body that cannot be read. */
-    private static @Nullable List<? extends @Nullable String> valuesIn(SkillSecrets.Capture.Place place, Sent sent) {
+    private static @Nullable List<@Nullable String> valuesIn(SkillSecrets.Capture.Place place, Sent sent) {
         var name = place.name();
         var body = sent.body();
         return switch (place.kind()) {
@@ -499,7 +499,9 @@ final class SecretCapture {
             if (fromJson && json != null && json.repeated().contains(field)) {
                 return miss(List.of(rule), "it has the field " + field + " more than once");
             }
-            var value = !fromJson ? header(response, field) : json == null ? null : string(json.object(), field);
+            @Nullable String value;
+            if (!fromJson) value = header(response, field);
+            else value = json == null ? null : string(json.object(), field);
             if (value == null) {
                 return miss(List.of(rule), rule.capture().from() == SkillSecrets.Capture.From.HEADER
                         ? "it has no single, non-empty header " + field

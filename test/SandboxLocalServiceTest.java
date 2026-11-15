@@ -349,7 +349,7 @@ class SandboxLocalServiceTest extends UnitTest {
     /** The profile names the run's temp folder, so the run may not take it away and leave something else at its name. */
     @Test
     @EnabledOnOs(OS.MAC)
-    void onMacACustomAgentCannotRemoveOrRenameItsOwnTempFolder() throws Exception {
+    void onMacACustomAgentCannotRemoveOrRenameItsOwnTempFolder() {
         assumeWorkingSandbox();
         var workspace = AgentService.workspacePath(AGENT);
         var temp = HarnessSandbox.customAgentTempDir(workspace.toFile());
@@ -401,7 +401,7 @@ class SandboxLocalServiceTest extends UnitTest {
      */
     @Test
     @EnabledOnOs(OS.MAC)
-    void onMacFilesInASharedTempFolderAndFoldersOfTheRunsOwnStillComeAndGo() throws Exception {
+    void onMacFilesInASharedTempFolderAndFoldersOfTheRunsOwnStillComeAndGo() {
         assumeWorkingSandbox();
         var name = "jf302-" + UUID.randomUUID().toString().substring(0, 8);
         for (var shared : List.of(Path.of("/private/tmp", name), Path.of(System.getProperty("java.io.tmpdir"), name))) {

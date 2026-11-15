@@ -98,7 +98,7 @@ class ScriptNodeTest extends UnitTest {
     }
 
     @Test
-    void aNodejsPathThatIsNotAFileIsRefusedAndNothingIsDownloaded() throws IOException {
+    void aNodejsPathThatIsNotAFileIsRefusedAndNothingIsDownloaded() {
         var missing = root.resolve("missing/node");
         var requests = new ArrayList<String>();
 
@@ -181,7 +181,7 @@ class ScriptNodeTest extends UnitTest {
     }
 
     @Test
-    void aChecksumMismatchIsRefusedNamingTheDownloadAndInstallsNothing() throws IOException {
+    void aChecksumMismatchIsRefusedNamingTheDownloadAndInstallsNothing() {
         var tampered = new PlaywrightNode.Build("linux", URL, "0".repeat(64), ENTRY);
         var reason = "checksum mismatch for " + URL + ": expected " + "0".repeat(64) + ", got "
                 + PlaywrightNodeTest.sha256(archive);
@@ -198,7 +198,7 @@ class ScriptNodeTest extends UnitTest {
     }
 
     @Test
-    void aFailedDownloadIsRefusedNamingItAndTheNextAttemptClearsTheFailure() throws IOException {
+    void aFailedDownloadIsRefusedNamingItAndTheNextAttemptClearsTheFailure() {
         var failed = HttpFactories.callWith(serving(503, new ArrayList<>(), () -> {}),
                 () -> ScriptNode.resolve(host(Map.of(), null), progress));
 
@@ -229,7 +229,7 @@ class ScriptNodeTest extends UnitTest {
     void theBrowsersOwnDownloadLeavesItsSetupInFlightForChromium() {
         progress.begin();
 
-        var node = HttpFactories.callWith(serving(200, new ArrayList<>(), () -> {}), () -> {
+        var downloaded = HttpFactories.callWith(serving(200, new ArrayList<>(), () -> {}), () -> {
             try {
                 return BrowserSetup.downloadNode(build, cacheRoot(), progress, "Downloading the browser driver");
             } catch (IOException e) {
@@ -237,7 +237,7 @@ class ScriptNodeTest extends UnitTest {
             }
         });
 
-        assertEquals(PlaywrightNode.installedNode(cacheRoot(), "linux"), node);
+        assertEquals(PlaywrightNode.installedNode(cacheRoot(), "linux"), downloaded);
         var settings = BrowserSetup.snapshot(progress);
         assertTrue(settings.active());
         assertEquals("Downloading the browser driver", settings.step());
@@ -456,7 +456,7 @@ class ScriptNodeTest extends UnitTest {
     private static void awaitQuietly(CountDownLatch latch) {
         try {
             assertTrue(latch.await(30, TimeUnit.SECONDS), "never released");
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

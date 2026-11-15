@@ -20,7 +20,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** JF-361: credential values JClaw holds are masked in tool results before the model or the transcript sees them. */
 class CredentialMaskTest extends UnitTest {
@@ -157,7 +156,7 @@ class CredentialMaskTest extends UnitTest {
      * binding token or an MCP header, which nothing invalidates.
      */
     @Test
-    void oldValuesKeepMaskingWhileABackgroundReadFetchesNewOnes() throws Exception {
+    void oldValuesKeepMaskingWhileABackgroundReadFetchesNewOnes() {
         var unannounced = "fake-unannounced-token-5e0b9c21";
         CredentialMask.mask("warm");
         commitInFreshTx(() -> {

@@ -553,35 +553,41 @@ async function previewUpdate(agentId: number, skillName: string): Promise<SkillU
 
 /** The warning an update's confirmation carries, or '' when it needs and keeps nothing. */
 function updateWarning(preview: SkillUpdatePreview): string {
-  const parts: string[] = []
   const filledBySignIn = preview.filledBySignIn ?? {}
+  return [
+    ...missingValuesWarning(preview, filledBySignIn),
+    ...switchedOffWarnings(preview),
+    // A renewed secret with no value yet is its own skill's to fill, at that skill's next sign-in.
+    ...signInGroups(preview.needs, filledBySignIn).map(group => `The new version needs ${group.names.join(', ')}, ${signInClause(group)}.`),
+    ...keptFilesWarning(preview.keeps),
+  ].join('\n\n')
+}
+
+function missingValuesWarning(preview: SkillUpdatePreview, filledBySignIn: Record<string, unknown>): string[] {
   const toAdd = preview.needs.filter(name => !preview.heldBySwitchedOff[name] && !filledBySignIn[name])
-  if (toAdd.length) {
-    const one = toAdd.length === 1
-    parts.push(`The new version needs ${one ? 'a value' : 'values'} this agent does not have yet: `
-      + `${toAdd.join(', ')}. Add ${one ? 'it' : 'them'} in the skill's Secrets panel.`)
-  }
-  // A name is used once on an agent, so a value another skill holds cannot be added here: that skill must be on.
+  if (!toAdd.length) return []
+  const one = toAdd.length === 1
+  return [`The new version needs ${one ? 'a value' : 'values'} this agent does not have yet: `
+    + `${toAdd.join(', ')}. Add ${one ? 'it' : 'them'} in the skill's Secrets panel.`]
+}
+
+/** A name is used once on an agent, so a value another skill holds cannot be added here: that skill must be on. */
+function switchedOffWarnings(preview: SkillUpdatePreview): string[] {
   const bySkill = new Map<string, string[]>()
   for (const name of preview.needs) {
     const holder = preview.heldBySwitchedOff[name]
     if (holder) bySkill.set(holder, [...(bySkill.get(holder) ?? []), name])
   }
-  for (const [holder, names] of bySkill) {
-    parts.push(`The new version needs ${names.join(', ')}, set in ${holder}, which is switched off. Switch ${holder} on `
-      + `so this skill can use ${names.length === 1 ? 'it' : 'them'}.`)
-  }
-  // A renewed secret with no value yet is its own skill's to fill, at that skill's next sign-in.
-  for (const group of signInGroups(preview.needs, filledBySignIn)) {
-    parts.push(`The new version needs ${group.names.join(', ')}, ${signInClause(group)}.`)
-  }
-  if (preview.keeps.length) {
-    const one = preview.keeps.length === 1
-    parts.push(`The new copy keeps ${one ? 'this file' : 'these files'} of the old copy, unless the new version ships `
-      + `its own file there outside credentials/, and the skill's Secrets panel lists a copy of ${one ? 'it' : 'each'}: `
-      + `${preview.keeps.join(', ')}.`)
-  }
-  return parts.join('\n\n')
+  return [...bySkill].map(([holder, names]) => `The new version needs ${names.join(', ')}, set in ${holder}, which is switched off. `
+    + `Switch ${holder} on so this skill can use ${names.length === 1 ? 'it' : 'them'}.`)
+}
+
+function keptFilesWarning(keeps: string[]): string[] {
+  if (!keeps.length) return []
+  const one = keeps.length === 1
+  return [`The new copy keeps ${one ? 'this file' : 'these files'} of the old copy, unless the new version ships `
+    + `its own file there outside credentials/, and the skill's Secrets panel lists a copy of ${one ? 'it' : 'each'}: `
+    + `${keeps.join(', ')}.`]
 }
 
 async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
@@ -591,9 +597,10 @@ async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
   const warning = updateWarning(preview)
   if (warning) {
     const version = updateAvailable(skill)
+    const toVersion = version ? ` to version ${version}` : ''
     const confirmed = await confirm({
       title: 'Update skill',
-      message: `Update '${skillName}'${version ? ` to version ${version}` : ''}?\n\n${warning}`,
+      message: `Update '${skillName}'${toVersion}?\n\n${warning}`,
       confirmText: 'Update',
     })
     if (!confirmed) return
@@ -648,6 +655,33 @@ function onAgentDragLeave(agentId: number) {
   if (dropTarget.value === agentId) dropTarget.value = null
 }
 
+/** The agent already holds this version or a newer one: switch it on if it is off, and copy nothing over it. */
+async function enableIfOff(agent: Agent, existing: AgentSkill, skillName: string) {
+  if (existing.enabled) return
+  const ok = await dragSave.attempt(async () => {
+    await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
+      method: 'PUT', body: { enabled: true },
+    })
+    agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
+  })
+  if (!ok) showDragError(dragSave.saveError.value!.message)
+}
+
+/** Asks before an older copy on the agent is replaced; false when its preview failed or the operator declined. */
+async function confirmReplace(agent: Agent, existing: AgentSkill, skillName: string, globalVersion: string): Promise<boolean> {
+  const preview = await previewUpdate(agent.id, skillName)
+  if (!preview) return false
+  const warning = updateWarning(preview)
+  return confirm({
+    title: 'Replace skill',
+    message:
+      `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n`
+      + `Replace with global version ${globalVersion}?`
+      + (warning ? `\n\n${warning}` : ''),
+    confirmText: 'Replace',
+  })
+}
+
 async function onAgentDrop(e: DragEvent, agent: Agent) {
   e.preventDefault()
   dropTarget.value = null
@@ -662,36 +696,9 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
   // If the agent already has this skill at the same or newer version, just ensure it's
   // enabled and move on — no point overwriting identical content.
   if (existing) {
-    const cmp = compareVersions((existing.version as string) || '0.0.0', globalVersion)
-    if (cmp >= 0) {
-      if (!existing.enabled) {
-        const ok = await dragSave.attempt(async () => {
-          await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
-            method: 'PUT', body: { enabled: true },
-          })
-          agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
-        })
-        if (!ok) showDragError(dragSave.saveError.value!.message)
-      }
-      dragging.value = null
-      return
-    }
-    // Existing is older — confirm replacement
-    const preview = await previewUpdate(agent.id, skillName)
-    if (!preview) {
-      dragging.value = null
-      return
-    }
-    const warning = updateWarning(preview)
-    const ok = await confirm({
-      title: 'Replace skill',
-      message:
-        `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n`
-        + `Replace with global version ${globalVersion}?`
-        + (warning ? `\n\n${warning}` : ''),
-      confirmText: 'Replace',
-    })
-    if (!ok) {
+    const current = compareVersions((existing.version as string) || '0.0.0', globalVersion) >= 0
+    if (current) await enableIfOff(agent, existing, skillName)
+    if (current || !(await confirmReplace(agent, existing, skillName, globalVersion))) {
       dragging.value = null
       return
     }

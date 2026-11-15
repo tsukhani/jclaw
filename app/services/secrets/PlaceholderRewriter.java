@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -260,12 +261,8 @@ final class PlaceholderRewriter {
 
     static int indexOf(byte[] buf, byte[] needle, int from, int len) {
         if (needle.length == 0) return -1;
-        outer:
         for (int i = Math.max(0, from); i <= len - needle.length; i++) {
-            for (int j = 0; j < needle.length; j++) {
-                if (buf[i + j] != needle[j]) continue outer;
-            }
-            return i;
+            if (Arrays.equals(buf, i, i + needle.length, needle, 0, needle.length)) return i;
         }
         return -1;
     }

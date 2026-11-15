@@ -603,6 +603,27 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     @SuppressWarnings("java:S107") // one call's whole environment, resolved by execute
+    /** The call's result: the exit code, the output with any kill note, and the remedy when the run failed. */
+    private String resultEnvelope(String command, Process process, String output, long durationMs, boolean truncated,
+                                  boolean timedOut, boolean stopped, int timeoutSec, boolean background) {
+        boolean wasStopped = stopped && !timedOut;
+        int exitCode = timedOut || wasStopped ? -1 : process.exitValue();
+        var result = new JsonObject();
+        result.addProperty(FIELD_EXIT_CODE, exitCode);
+        result.addProperty(FIELD_OUTPUT, output + killNote(timedOut, wasStopped, timeoutSec));
+        result.addProperty(FIELD_DURATION_MS, durationMs);
+        result.addProperty(FIELD_TRUNCATED, truncated);
+        result.addProperty(FIELD_TIMED_OUT, timedOut);
+        result.addProperty(FIELD_STOPPED, wasStopped);
+        if (background) result.addProperty(PARAM_BACKGROUND, true);
+
+        // Inside the envelope, not replacing it — the model needs the output as well as the remedy.
+        var failure = wasStopped ? ToolErrorTemplates.shellStopped(command)
+                : failureTemplate(command, exitCode, timedOut, timeoutSec);
+        if (failure != null) result.add(FIELD_ERROR, ToolErrorTemplates.asJsonObject(failure));
+        return result.toString();
+    }
+
     private String executeCommand(String command, Path workdir, Path workspace, int timeoutSec,
                                   int maxOutputBytes, Map<String, String> env, long startTime,
                                   Agent agent, boolean background, @Nullable SecretGrant grant) {
@@ -684,22 +705,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 processedOutput += "\n[A background command is given no skill secrets: run it in the foreground to use them.]";
             }
 
-            boolean wasStopped = stopped.get() && !timedOut.get();
-            int exitCode = timedOut.get() || wasStopped ? -1 : process.exitValue();
-            var result = new JsonObject();
-            result.addProperty(FIELD_EXIT_CODE, exitCode);
-            result.addProperty(FIELD_OUTPUT, processedOutput + killNote(timedOut.get(), wasStopped, timeoutSec));
-            result.addProperty(FIELD_DURATION_MS, durationMs);
-            result.addProperty(FIELD_TRUNCATED, readResult.truncated());
-            result.addProperty(FIELD_TIMED_OUT, timedOut.get());
-            result.addProperty(FIELD_STOPPED, wasStopped);
-            if (background) result.addProperty(PARAM_BACKGROUND, true);
-
-            // Inside the envelope, not replacing it — the model needs the output as well as the remedy.
-            var failure = wasStopped ? ToolErrorTemplates.shellStopped(command)
-                    : failureTemplate(command, exitCode, timedOut.get(), timeoutSec);
-            if (failure != null) result.add(FIELD_ERROR, ToolErrorTemplates.asJsonObject(failure));
-            return result.toString();
+            return resultEnvelope(command, process, processedOutput, durationMs, readResult.truncated(), timedOut.get(),
+                    stopped.get(), timeoutSec, background);
 
         } catch (IOException e) {
             return ToolErrorTemplates.render(

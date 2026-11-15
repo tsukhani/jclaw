@@ -308,7 +308,7 @@ class McpTaskActionFenceTest extends UnitTest {
     }
 
     /** The unoffered-action warnings one fire of a task with {@code list} logs, run as TaskExecutor runs one. */
-    private List<String> fireWarnings(String taskName, String list) throws Exception {
+    private List<String> fireWarnings(String taskName, String list) {
         var runId = seedTaskRun(taskName, list);
         commit();
         var failure = new Throwable[1];
@@ -327,7 +327,7 @@ class McpTaskActionFenceTest extends UnitTest {
                     });
                     try {
                         fire.join();
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException _) {
                         Thread.currentThread().interrupt();
                     }
                 });

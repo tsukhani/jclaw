@@ -54,7 +54,7 @@ public final class KeptSkillFiles {
     /** Four bytes for each character the store takes, so an import never reads a large file into memory. */
     public static final long MAX_IMPORT_BYTES = 4L * SkillSecrets.MAX_VALUE_CHARS;
     /** {@code [export] name=rest}; {@link #reading} says which names make it an assignment, spaces around {@code =} or not. */
-    private static final Pattern ASSIGNMENT = Pattern.compile("\\s*(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=(.*)");
+    private static final Pattern ASSIGNMENT = Pattern.compile("\\s*(?:export\\s+)?([A-Za-z_]\\w*)\\s*=(.*)");
     /** In an unquoted value, a {@code #} that starts a word starts a comment. */
     private static final Pattern COMMENT = Pattern.compile("\\s#");
     private static final String DQ_ESCAPED = "\"\\$`";

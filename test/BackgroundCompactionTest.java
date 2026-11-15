@@ -105,7 +105,7 @@ class BackgroundCompactionTest extends UnitTest {
                 } else {
                     LlmReplyFixture.send(exchange, reply(SummaryFixture.asSummaryInJson("SUMMARY " + summaries.size()), 10));
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } finally {
                 summariesInFlight.decrementAndGet();

@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** JF-405: what an update carries from a skill's old copy into the new one it stages. */
 class KeptSkillFilesCarryOverTest extends UnitTest {

@@ -59,12 +59,13 @@ public final class ToolResultPruner {
     /** Config-driven entry point; returns the same list instance when nothing changed. */
     public static List<ChatMessage> prune(List<ChatMessage> messages, Agent agent, @Nullable Conversation conversation) {
         if (messages == null || messages.isEmpty()) return messages;
-        var pruned = !ConfigService.getBoolean(ENABLED_KEY, true) ? messages
-                : prune(messages, ConfigService.getInt(MIN_CHARS_KEY, DEFAULT_MIN_CHARS),
-                        ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT),
-                        ConfigService.getInt(EVERY_TURNS_KEY, DEFAULT_EVERY_TURNS),
-                        conversation != null ? ConversationService.effectiveHistoryLimit(conversation) : Integer.MAX_VALUE,
-                        agent, conversation);
+        var pruned = messages;
+        if (ConfigService.getBoolean(ENABLED_KEY, true)) {
+            int historyLimit = conversation != null ? ConversationService.effectiveHistoryLimit(conversation) : Integer.MAX_VALUE;
+            pruned = prune(messages, ConfigService.getInt(MIN_CHARS_KEY, DEFAULT_MIN_CHARS),
+                    ConfigService.getInt(PROTECT_RECENT_KEY, DEFAULT_PROTECT_RECENT),
+                    ConfigService.getInt(EVERY_TURNS_KEY, DEFAULT_EVERY_TURNS), historyLimit, agent, conversation);
+        }
         return previewEarlierUserMessages(pruned, userPreviewChars(agent, conversation), agent, conversation);
     }
 

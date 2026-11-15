@@ -3048,8 +3048,10 @@ class SessionCompactorTest extends UnitTest {
                 () -> ConversationService.appendMessage(conv, role, content, null, null, null));
     }
 
-    /** A carried user message: the minute after {@link #BASE} it was written, in the operator's zone, then its text. */
-    /** A quoted message as the prompt renders it: its time, then every line of {@code text} behind "> ". */
+    /**
+     * A quoted message as the prompt renders it: the minute after {@link #BASE} it was written, in the operator's zone,
+     * then every line of {@code text} behind "> ".
+     */
     private static String entry(int minute, String text) {
         var zone = services.TimezoneResolver.appZone();
         var quoted = String.join("\n", text.lines().map(line -> line.isEmpty() ? ">" : "> " + line).toList());

@@ -332,7 +332,7 @@ public final class SessionCompactor {
         long budget = set != null && !set.isBlank() ? ConfigService.getInt(SUMMARY_BUDGET_KEY, DEFAULT_SUMMARY_BUDGET)
                 : shareBase(callTokens) * Math.clamp(ConfigService.getInt(SUMMARY_BUDGET_PERCENT_KEY,
                         DEFAULT_SUMMARY_BUDGET_PERCENT), 0, 100) / 100;
-        return (int) Math.clamp(budget, MIN_SUMMARY_BUDGET, Integer.MAX_VALUE);
+        return Math.clamp(budget, MIN_SUMMARY_BUDGET, Integer.MAX_VALUE);
     }
 
     /**
@@ -359,8 +359,9 @@ public final class SessionCompactor {
 
     /** {@code callTokens}, or for an unbounded call the token trigger's cap, else {@link #DEFAULT_TRIGGER_TOKENS}. */
     private static long shareBase(int callTokens) {
+        if (callTokens != Integer.MAX_VALUE) return Math.max(0, callTokens);
         int cap = triggerTokens();
-        return callTokens != Integer.MAX_VALUE ? Math.max(0, callTokens) : cap > 0 ? cap : DEFAULT_TRIGGER_TOKENS;
+        return cap > 0 ? cap : DEFAULT_TRIGGER_TOKENS;
     }
 
     /** The fewest tokens a summary is made from: {@value #MIN_SUMMARY_TOKENS_KEY}, or {@code /compact}'s with {@code force}. */
@@ -1172,6 +1173,12 @@ public final class SessionCompactor {
             }
         }
         if (echo != null) leftOut.add(echo.described());
+        return finished(out, leftOut, preface, required);
+    }
+
+    /** A read reply checked for its {@code required} sections, with what the reading left out said in words. */
+    private static ReplySections finished(LinkedHashMap<String, List<String>> out, List<String> leftOut, int preface,
+                                          List<String> required) {
         if (out.isEmpty()) return new ReplySections(null, "a reply with none of the section headings", "");
         var missing = required.stream().filter(n -> !out.containsKey(n)).toList();
         if (!missing.isEmpty()) return new ReplySections(null, "a reply without " + joined(missing), "");
@@ -1191,8 +1198,8 @@ public final class SessionCompactor {
         }
 
         String described() {
-            return label ? "the " + name + " label it echoed" + (lines == 0 ? "" : ", with " + lines(lines) + " after it")
-                    : "a " + name + " section of " + lines(lines);
+            if (!label) return "a " + name + " section of " + lines(lines);
+            return "the " + name + " label it echoed" + (lines == 0 ? "" : ", with " + lines(lines) + " after it");
         }
     }
 
@@ -1874,7 +1881,11 @@ public final class SessionCompactor {
         var tokens = new long[n];
         for (int i = 0; i < n; i++) tokens[i] = rowTokens(rows.get(i));
         int fits = n;
-        for (long tail = 0; fits > 0 && tail + tokens[fits - 1] <= keepTokens; fits--) tail += tokens[fits - 1];
+        long tail = 0;
+        while (fits > 0 && tail + tokens[fits - 1] <= keepTokens) {
+            tail += tokens[fits - 1];
+            fits--;
+        }
         int enough = -1;
         long head = 0;
         for (int i = 0; i < n && enough < 0; i++) {

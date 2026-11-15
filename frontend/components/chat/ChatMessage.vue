@@ -122,7 +122,8 @@ function usageTookLine(u: MessageUsage): string {
   if (!u.durationMs) return ''
   const took = `Took ${formatNanosDuration(u.durationMs * 1e6)}`
   if (!u.calls) return `${took}.`
-  return `${took}, in ${u.calls === 1 ? 'one model call' : `${u.calls.toLocaleString()} model calls`}.`
+  const calls = u.calls === 1 ? 'one model call' : `${u.calls.toLocaleString()} model calls`
+  return `${took}, in ${calls}.`
 }
 
 function usageReadNotes(u: MessageUsage): string[] {

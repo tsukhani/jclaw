@@ -646,7 +646,7 @@ class CompactionGateTest extends UnitTest {
             requests.incrementAndGet();
             try {
                 release.await(30, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             summary.handle(exchange);

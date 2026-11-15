@@ -5,8 +5,6 @@ import utils.MultiStringMatcher;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** JF-361: the one-pass matcher the credential mask replaces values with. */
 class MultiStringMatcherTest extends UnitTest {

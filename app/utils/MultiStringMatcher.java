@@ -145,7 +145,8 @@ public final class MultiStringMatcher<L> {
                 int base = denseRow[state];
                 for (int c = 1; c < width; c++) {
                     int child = child(state, c);
-                    dense[base + c] = child >= 0 ? child : state == 0 ? 0 : step(fail[state], c);
+                    if (child >= 0) dense[base + c] = child;
+                    else dense[base + c] = state == 0 ? 0 : step(fail[state], c);
                 }
             }
         }

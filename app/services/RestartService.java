@@ -380,7 +380,6 @@ public final class RestartService {
 
     /** {@link #STATUS_FILE}; the autotest server, which shares the checkout, reads its own. */
     public static Path statusFile() {
-        var root = Play.applicationPath.toPath();
         return restartFile("restart-status.json");
     }
 

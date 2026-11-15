@@ -33,7 +33,7 @@ class DatabaseServiceTest extends UnitTest {
     void clearSeams() {
         DatabaseService.backupsDirForTest = null;
         DatabaseService.dataDirForTest = null;
-        DatabaseService.onlineCopyForTest = null;
+        DatabaseService.setOnlineCopyForTest(null);
     }
 
     // ---- the write check after each online backup (JF-311) ----
@@ -45,7 +45,7 @@ class DatabaseServiceTest extends UnitTest {
         DatabaseService.dataDirForTest = data;
         DatabaseService.backupsDirForTest = Files.createDirectories(tmp.resolve("backups"));
         var queue = new ArrayDeque<>(List.of(copies));
-        DatabaseService.onlineCopyForTest = zip -> Files.copy(queue.remove(), zip);
+        DatabaseService.setOnlineCopyForTest(zip -> Files.copy(queue.remove(), zip));
         return DatabaseService.backupsDirForTest;
     }
 

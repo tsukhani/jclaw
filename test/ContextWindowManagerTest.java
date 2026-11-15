@@ -379,7 +379,7 @@ class ContextWindowManagerTest extends UnitTest {
     }
 
     @Test
-    void aRequestThatFitsCarriesNoNoticeAndSendsNoFrame() throws Exception {
+    void aRequestThatFitsCarriesNoNoticeAndSendsNoFrame() {
         var messages = List.of(ChatMessage.system("System prompt."), ChatMessage.user("Hi"));
         var out = new ArrayList<List<ChatMessage>>();
 
@@ -391,7 +391,7 @@ class ContextWindowManagerTest extends UnitTest {
     }
 
     @Test
-    void aTrimThatOnlyTruncatesAToolResultCarriesNoNotice() throws Exception {
+    void aTrimThatOnlyTruncatesAToolResultCarriesNoNotice() {
         var big = "The quick brown fox jumps over the lazy dog. ".repeat(450);
         var messages = List.of(ChatMessage.system("System prompt."), ChatMessage.toolResult("call-1", "grep", big),
                 ChatMessage.user("follow up one"), ChatMessage.user("follow up two"),

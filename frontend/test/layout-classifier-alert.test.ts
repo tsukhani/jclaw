@@ -132,7 +132,7 @@ describe('default layout — router classifier alert', () => {
     routerAlert = RETIRED
     statusUp = false
     await mountLayout()
-    await vi.waitFor(() => expect(layout!.findAll('[role="alert"]').length).toBe(1))
+    await vi.waitFor(() => expect(layout!.findAll('[role="alert"]')).toHaveLength(1))
     expect(banner()).toBeUndefined()
   })
 
