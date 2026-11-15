@@ -111,7 +111,22 @@ public class ConfigService {
         return read(key).unreadable();
     }
 
+    /**
+     * Whether code has read {@code key} since this process started. Settings never offers to delete such a row, so a
+     * key {@link ConfigKeyCatalog} misses still shows as in use once anything reads it.
+     */
+    public static boolean readSinceStart(String key) {
+        return readKeys.contains(key);
+    }
+
+    private static final Set<String> readKeys = ConcurrentHashMap.newKeySet();
+
     private static Read read(String key) {
+        if (readKeys.add(key) && !ConfigKeyCatalog.isRead(key) && !Play.runningInTestMode()) {
+            EventLogger.warn(EVENT_CATEGORY, ("Config key %s was read but ConfigKeyCatalog does not list it, so "
+                    + "Settings would offer to delete its row after a restart: add it to ConfigKeyCatalog.READ")
+                    .formatted(key));
+        }
         // get(key, loader) provides single-flight semantics — concurrent misses
         // for the same key invoke the loader at most once.
         return cache.get(key, k -> {

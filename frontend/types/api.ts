@@ -535,6 +535,8 @@ export interface Message {
 export interface ConfigEntry {
   key: string
   value: string
+  /** False for a row no code in this build reads; absent in fixtures that predate it. */
+  known?: boolean
 }
 
 /** The shape returned by GET /api/config. */

@@ -9,6 +9,7 @@ import play.Logger;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
+import services.ConfigKeyCatalog;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
@@ -484,10 +485,7 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-1302: the TypeSafe key moved to Decision Providers; neither consumer needs it re-entered.
         renameKeyIfPresent(DecisionSettings.LEGACY_API_KEY, DecisionSettings.API_KEY);
 
-        // JF-135: the Model Router offers every decision model, so the cards no longer tick a selection.
-        for (var retired : List.of("decision.ollama.models", "decision.laya.models", "decision.baseten.models")) {
-            ConfigService.delete(retired);
-        }
+        deleteRetiredKeys();
 
         // The scrape sidecars' keys moved under web_scrape.*, where Settings > Web Scraping edits them.
         for (var sidecar : List.of("stealth", "impersonate")) {
@@ -508,6 +506,19 @@ public class DefaultConfigJob extends Job<Void> {
         raiseHistoryLimitsOnce();
         adoptRollingSummariesOnce();
         dropQueueModeRows();
+    }
+
+    /** Each stored {@link ConfigKeyCatalog#retired} row goes, since no code in this build reads it. */
+    public static void deleteRetiredKeys() {
+        var retired = ConfigKeyCatalog.retired();
+        List<String> present = Tx.run(() -> {
+            List<Config> rows = Config.find("key in (?1)", retired).fetch();
+            return rows.stream().map(c -> c.key).toList();
+        });
+        for (var key : present) {
+            ConfigService.delete(key);
+            EventLogger.info(EVENT_CATEGORY_SYSTEM, "Deleted the config row %s: no code reads it".formatted(key));
+        }
     }
 
     /** JF-245: nothing reads a per-agent queue mode any more, so each stored row goes. */

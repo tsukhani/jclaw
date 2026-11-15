@@ -59,7 +59,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
 ## Conventions that differ from defaults
 
-- Config keys live in the Config DB; document an unseeded key in `conf/application.conf`, and never seed a key whose absence already means "off".
+- Config keys live in the Config DB; document an unseeded key in `conf/application.conf`, and never seed a key whose absence already means "off". List every key the code reads in `services.ConfigKeyCatalog` and move one it stops reading to the catalog's `RETIRED` list, which deletes the row at boot: Settings offers to delete any row the catalog does not list (`ConfigKeyCatalogConformanceTest`).
 - `git grep -P`, never `-E`, for `\b`, `\d`, `\s` — macOS `git grep -E` drops them silently and matches nothing.
 - `jclaw.sh` targets macOS bash 3.2 under `set -euo pipefail`: brace an interpolation before a non-ASCII character, guard a command substitution that can fail (`$(cmd || true)`), use an `EXIT` trap rather than `ERR`.
 - New tool names are `<singular_noun>_<verb>` (`conversation_send`, `subagent_spawn`); older names such as `generate_image`, `task_manager` and `exec` predate the rule and keep their names.
