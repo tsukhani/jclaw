@@ -1,26 +1,20 @@
 ---
 name: deploy
-description: Merge in the pull requests merged on GitHub, bump application.version (the patch by default) in conf/application.conf, commit all changes, push to both git remotes (origin + github), and tag the version once its Jenkins build passes.
+description: Fast-forward main to the release commit /release-check made and its candidate build tested, push it to both git remotes (origin + github), tag the version once its Jenkins build passes, and, given release, publish it as a GitHub Release.
 category: Release
 tags: [release, version, git, deploy]
-argument-hint: "[empty | patch | minor | major | x.y.z]"
+argument-hint: "[release]"
 ---
 
 **Deploy Workflow**
 
-Bump the project version, commit every pending change alongside it, push the result to both remotes, and tag it once Jenkins has built it green. Use `/usr/bin/git` for every git invocation (per project convention).
+Ship the release commit `/release-check` made and tested: fast-forward `main` to it, push it to both remotes, and tag it once Jenkins has built it green. The commit that goes out is the commit the candidate build and the Mac run tested, by sha (JF-448), so nothing is bumped or committed here. Use `/usr/bin/git` for every git invocation (per project convention).
 
 **Arguments**
 
-`$ARGUMENTS` may be one of the following, optionally followed by the word `release`:
+`$ARGUMENTS` may be `release`, which also publishes the tagged version as a GitHub Release (step 10). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy). Say, too, that a release is best chosen now: Sonar keeps one result for the project, so a RELEASE build run after the next `/release-check` is judged by that check's analysis of newer code, and its open issues refuse this version.
 
-- *(empty)* → bump the **patch**: `1.0.0` → `1.0.1`. Each JF sprint is named after the minor release it ships (`v1.0` holds 1.0.1, 1.0.2, …; `v1.1` the 1.1.x releases), so the first release of a new sprint is `/deploy minor`, and every later one in it is a bare `/deploy`.
-- `patch` / `minor` / `major` → bump that segment; lower segments reset to `0`. Examples: `minor` on `1.0.5` → `1.1.0`; `major` on `1.4.2` → `2.0.0`.
-- An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. Any leading `v` is stripped.
-
-`release` (alone, as in `/deploy release`, or after a bump, as in `/deploy minor release`) also publishes the tagged version as a GitHub Release (step 20). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy). Say, too, that a release is best chosen now: Sonar keeps one result for the project, so a RELEASE build run after the next `/release-check` is judged by that check's analysis of newer code, and its open issues refuse this version.
-
-Reject anything else with a clear message; do not guess.
+The version is the one the release commit carries, chosen when `/release-check` ran. A version argument (`patch`, `minor`, `major` or `x.y.z`, with `/release-check`'s meaning) is used only on the path without a candidate (preflight 2); given alongside a tested release commit, it must name that commit's version, or stop. Reject anything else with a clear message; do not guess.
 
 ---
 
@@ -33,7 +27,7 @@ Contributors' pull requests are merged on GitHub (CONTRIBUTING.md), so `github/m
 /usr/bin/git merge-base --is-ancestor github/main HEAD && echo "nothing new on GitHub"
 ```
 
-- **Nothing new on GitHub:** go on to the next preflight. The release goes out as it always has.
+- **Nothing new on GitHub:** go on to the next preflight.
 - **New commits:** CONTRIBUTING.md takes a change only under the Developer Certificate of Origin, so every commit a contributor wrote must carry a `Signed-off-by` line. List what comes in, then the commits without one:
   ```bash
   /usr/bin/git log --no-merges --format='%h %an | %s' HEAD..github/main
@@ -43,154 +37,120 @@ Contributors' pull requests are merged on GitHub (CONTRIBUTING.md), so `github/m
   ```bash
   /usr/bin/git merge --no-ff -S -m "Merge GitHub's main: <the pull requests it brings in>" github/main
   ```
-  On a conflict, run `/usr/bin/git merge --abort` and stop before the bump, with nothing committed, and report the conflicting files. Resolving a contributor's conflict is the user's call, never a release step's. The merged commits reach the release notes (step 10) like any other, so name each contributor's change there.
+  On a conflict, run `/usr/bin/git merge --abort` and stop, with nothing committed, and report the conflicting files. Resolving a contributor's conflict is the user's call, never a release step's. A merge moves `main` past the release commit's parent, so stop after it and run `/release-check` again: its notes then name each contributor's change. `/release-check` runs this preflight on its own for the same reason.
+
+**Preflight: the release commit a green candidate tested**
+
+`/release-check` made the signed `Release vX.Y.Z` commit over `main`'s HEAD and pushed it to `candidate/<its first 12>` on `origin`, where Jenkins ran the whole suite and Sonar on it, passing only when Sonar showed 0 open issues. Find it among the candidate branches by its parent:
+
+```bash
+/usr/bin/git fetch -q origin
+head=$(/usr/bin/git rev-parse HEAD)
+/usr/bin/git for-each-ref --format='%(refname:short)' refs/remotes/origin/candidate/ |
+  while read -r b; do [ "$(/usr/bin/git rev-parse "$b^" 2>/dev/null)" = "$head" ] && /usr/bin/git log -1 --format='%H %s' "$b"; done
+```
+
+Each line is a release commit over this `HEAD`: its full SHA is `<REL>` and its subject names the version. Then find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <REL's first 12>`, `result` is `SUCCESS`, and `description` is `tested <REL>`.
+
+- **One line, with a green build:** that commit is the release. `/usr/bin/git status --porcelain -- conf/application.conf` must print nothing, or the fast-forward fails. Other uncommitted work stays out of the release, so name it in the report.
+- **Several lines:** a check ran more than once over this `HEAD`. Use the one with a green build; if more than one has, ask which.
+- **None, or no green build:** run `/release-check` first, and go on only once it passes. A commit landing on `main` after a check leaves its release commit over an older `HEAD`, so it is no longer found here and needs a new check. Deploy without a candidate only on the user's explicit yes, which covers this release only: make the release commit as `/release-check` steps 4 to 8 do, remove its worktree, and go on with that commit as `<REL>`. Its push build then runs Test and Sonar itself, and a red one spends the version.
 
 **Preflight: every commit either remote would receive is signed, and committed by you**
 
-GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the pre-push tests while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. After the fetch above, check before bumping anything:
+GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the pre-push tests while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. After the fetch above, check the range up to the release commit (`<REL>`, found by the next preflight) before anything moves:
 
 ```bash
 me=$(/usr/bin/git config user.email)
-for r in origin github; do /usr/bin/git log "$r/main..HEAD" --not github/main --format='%G? %ce %h %an | %s'; done | grep -vE "^(G $me|[GU] renovate@abundent\.com) " | sort -u
+for r in origin github; do /usr/bin/git log "$r/main..<REL>" --not github/main --format='%G? %ce %h %an | %s'; done | grep -vE "^(G $me|[GU] renovate@abundent\.com) " | sort -u
 ```
 
 Commits already on `github/main` are left out: GitHub verified them when it took them, contributors' commits and GitHub's own merge commits alike, and this keyring cannot check their keys. Renovate's own commits pass as `U`: a good signature from the Renovate runner's key, which GitHub verifies but this keyring does not trust.
 
 If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 
-**Preflight: a green candidate for this commit**
+**Phase 1: Fast-forward `main` to the release commit**
 
-`/release-check` runs this release's Jenkins build before a version is spent: the whole suite and Sonar on `HEAD`, analysed as the new version, passing only when Sonar shows 0 open issues. Find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <HEAD's first 12>`, `result` is `SUCCESS`, and `description` is `tested <HEAD's full SHA>`.
+1. Confirm the main checkout is on `main` (`/usr/bin/git rev-parse --abbrev-ref HEAD`); releases go out only from `main`.
+2. `/usr/bin/git merge --ff-only <REL>`, then check that `/usr/bin/git rev-parse HEAD` prints `<REL>`. The commit changes only `conf/application.conf`, so the checkout moves by that one line. If git refuses because `main` has moved, another session committed since the check: nothing changed, so run `/release-check` again; it makes a new release commit for the same version.
 
-- **Found:** `/usr/bin/git status --porcelain` must print nothing, since an uncommitted file would ship without the candidate having seen it, and the version Phase 1 computes must be the candidate's `CANDIDATE_VERSION` (`mcp__jenkins__getBuild` with `tree: "actions[parameters[name,value]]"`). The release commit's build then skips Test and Sonar, because its tree differs from the candidate's only in the version line.
-- **Not found, or `main` has moved past it:** run `/release-check <the same version argument>` first, and go on only once it passes. Deploy without one only on the user's explicit yes, which covers this release only; the release commit's build then runs Test and Sonar itself, and a red one spends the version.
+**Phase 2: Push the release commit to both remotes**
 
-**Phase 1: Bump the version**
-
-1. Read `conf/application.conf` and find the single line that starts with `application.version=`. If missing, stop and tell the user — this command only runs against a project that already uses that key.
-2. Parse the current value (right-hand side of `=`). Split on `.` to get the `MAJOR.MINOR.PATCH` triple; preserve any trailing `-suffix` pre-release tag by dropping it before bumping (explicit-version arg is the only way to set one back).
-3. **Determine the new version** per the argument rules above.
-4. Replace the line in place via the Edit tool — do **not** rewrite the file. The change must touch exactly one line.
-5. Record both the old and new version; you'll use both in the commit message.
-
-**Phase 2: Stage everything and commit**
-
-6. Run `/usr/bin/git status` to confirm there are changes to commit. The version bump itself counts; if `git status` shows only that, proceed — a deploy that ships just the bump is valid. If the working tree was already clean *before* the bump and the bump is the only change, that's still a valid release-only commit.
-7. Run `/usr/bin/git diff` to review the full set of changes (including the version bump) so the commit message reflects reality.
-8. Run `/usr/bin/git log --oneline -5` to match the repository's commit-message style.
-9. Stage every change with `/usr/bin/git add -A`.
-10. **Establish the range the notes must cover.** The body of this commit *is* the GitHub release notes — `Jenkinsfile`'s RELEASE stage copies it verbatim (minus the `Co-Authored-By:` trailer) into `gh release create`. So the audience is a reader on the Releases page, and the span they see is **from the last published Release**, not from the last tag. Those differ: `/deploy` tags every version whose build passes, while a Release is cut only when someone ticks the Jenkins `RELEASE` toggle, so several versions routinely sit between them.
-
-    ```bash
-    # Tag of the newest published Release — the reader's actual starting point.
-    PREV=$(gh release view --repo tsukhani/jclaw --json tagName --jq .tagName 2>/dev/null)
-    # Fall back to the previous tag if the repo has no Releases yet.
-    [ -n "$PREV" ] || PREV=$(/usr/bin/git describe --tags --abbrev=0 HEAD 2>/dev/null)
-    /usr/bin/git log "$PREV"..HEAD --no-merges --format='%h %s%n%b'
-    ```
-
-    Read that log properly — subjects alone are not enough, because a subject can describe an approach a later commit reverses. Where two commits in the range supersede each other, chronicle **where it landed**, not the journey.
-
-11. Compose a commit message:
-    - Title line: `Release vNEW_VERSION` (e.g. `Release v0.7.6`).
-    - Body: **reader-facing release notes covering the whole range from step 10**, in the shape the play1 fork uses (see `/opt/play1/.claude/commands/deploy.md` and any recent `gh release view --repo tsukhani/play1`):
-      - `### Section` headings grouping the work by what a reader cares about — the feature area, `Fixes`, `Dependencies`. Not one heading per commit.
-      - Under each, `- **Bold lead clause naming the change.**` followed by prose: what it does for the user, and the why or consequence where that isn't obvious. Name the ticket in parentheses when there is one.
-      - Dependency bumps collapse to a single compact bullet list; don't give each its own paragraph.
-      - A trailing `Note:` paragraph for anything genuinely surprising a reader would otherwise trip over.
-      - Write for someone who has not read the diff and does not know the internals. No file paths, no function names, no "refactored X" — say what changed for them.
-    - If nothing shipped but the bump, write `Version bump only; no code changes since v<OLD_VERSION>.`
-    - Keep it publishable: this lands on the **public** GitHub mirror, so no credentials, customer specifics, or unreleased commercial plans (AGENTS.md, Commit Messages Are Public).
-    - Trailer: the `Co-Authored-By:` line your standing instructions specify, which names the model actually authoring the commit. **Do not hardcode a model version in this file.** It goes stale at every model bump, and a wrong trailer breaks nothing — no hook, test, or push rejects it — so the drift survives indefinitely. If your instructions specify no trailer, omit it rather than guessing a model name.
-
-    The body is write-once: once pushed, correcting it would mean rewriting published history, and Jenkins reads whatever is in the commit. Get it right here.
-12. Create the **signed** commit using a HEREDOC so line breaks survive the shell. The `-S` flag is explicit even though `commit.gpgsign=true` is set globally — this documents the workflow's intent in the file and survives if the global config is ever disabled or the deploy runs on a machine missing it:
-    ```bash
-    /usr/bin/git commit -S -m "$(cat <<'EOF'
-    Release v<NEW_VERSION>
-
-    <body paragraph>
-
-    <Co-Authored-By trailer per step 11 — do not paste a model version from this file>
-    EOF
-    )"
-    ```
-    Record the release commit: `REL=$(/usr/bin/git rev-parse HEAD)`. Phase 4 tags that commit, not whatever `HEAD` is by then.
-
-**Phase 3: Push the release commit to both remotes**
-
-13. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
-14. Push the release commit to `origin` first, by name: `/usr/bin/git push origin <REL>:refs/heads/main`, with the full SHA of step 12 written out, because the policy guard reads the command before the shell expands `$REL`. Not `HEAD`: other sessions commit to this checkout, and one landing while this push runs its tests would make `HEAD` a commit that is not the release, which the guard refuses and which would reach one remote only. No tag goes with it: a tag marks a version Jenkins has built green, so it waits for Phase 4. Report the result.
-15. Push it to `github` the same way: `/usr/bin/git push github <REL>:refs/heads/main`. `pre-push` remembers the commit it tested, so this push does not run the tests again. Report the result.
-16. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. If `pre-push` says `HEAD` has moved past the release commit, another session committed before the first push tested it: nothing went out, so run `/deploy` again for a release commit at `HEAD`. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
-17. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed release commit contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch it does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
+3. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
+4. Push the release commit to `origin` first, by name: `/usr/bin/git push origin <REL>:refs/heads/main`, with the full SHA written out, because the policy guard reads the command before the shell expands a variable. Not `HEAD`: other sessions commit to this checkout, and one landing while this push runs would make `HEAD` a commit that is not the release, which the guard refuses and which would reach one remote only. The pre-push hook finds the green candidate for this very commit and runs only the fast checks and the `bin/` tests, which Jenkins never runs. No tag goes with it: a tag marks a version Jenkins has built green, so it waits for Phase 3. Report the result.
+5. Push it to `github` the same way: `/usr/bin/git push github <REL>:refs/heads/main`. `pre-push` remembers the commit it tested, so this push does not run the checks again. Report the result.
+6. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. If `pre-push` says `HEAD` has moved past the release commit, another session committed on top of it in the moments since the fast-forward, and the hook can vouch only for `HEAD`: nothing went out, and the release commit stays on local `main`, tested but unpushed. Stop and tell the operator: this version is never published, and the next `/release-check`, over the newer `HEAD`, releases the version after it. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
+7. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed release commit contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch it does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
     ```bash
     /usr/bin/git fetch -q origin --prune
     /usr/bin/git branch -r --list 'origin/renovate/*' | sed 's|^ *origin/||' |
-      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "$REL" && echo "$b"; done |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "<REL>" && echo "$b"; done |
       xargs -r /usr/bin/git push origin --delete
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
 
-    Then delete the `candidate/*` branches `/release-check` pushed for this release or an earlier one, the same way. Each holds a commit of `main`, so the release contains every one:
+    Then delete the `candidate/*` branches this release supersedes, the same way: its own, and any release commit `/release-check` made over a commit this release contains, which can no longer be released. A candidate over a newer commit cannot exist yet, so the test is the candidate's parent:
     ```bash
     /usr/bin/git branch -r --list 'origin/candidate/*' | sed 's|^ *origin/||' |
-      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "$REL" && echo "$b"; done |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b^" "<REL>" && echo "$b"; done |
       xargs -r /usr/bin/git push origin --delete
     ```
-18. **Delete the local branches this release merged, and list the worktrees it finished.** Only after both pushes succeeded. A branch landed outside the factory, such as an `agent/*` branch you merged yourself, stays behind otherwise; the factory deletes only the branches it lands. `git branch -d` refuses a branch that is not merged, so this cannot lose work, and a branch checked out in a worktree is skipped. A worktree is listed, never removed: one that is clean and merged can still belong to another session, mid-run, so removing it is the user's call (`/usr/bin/git worktree remove <path>`, then `/usr/bin/git branch -d <branch>`):
+8. **Delete the local branches this release merged, and list the worktrees it finished.** Only after both pushes succeeded. A branch landed outside the factory, such as an `agent/*` branch you merged yourself, stays behind otherwise; the factory deletes only the branches it lands. `git branch -d` refuses a branch that is not merged, so this cannot lose work, and a branch checked out in a worktree is skipped. A worktree is listed, never removed: one that is clean and merged can still belong to another session, mid-run, so removing it is the user's call (`/usr/bin/git worktree remove <path>`, then `/usr/bin/git branch -d <branch>`):
     ```bash
-    /usr/bin/git for-each-ref --merged "$REL" --format='%(refname:short) %(worktreepath)' refs/heads |
+    /usr/bin/git for-each-ref --merged "<REL>" --format='%(refname:short) %(worktreepath)' refs/heads |
       while read -r b wt; do [ "$b" != main ] && [ -z "$wt" ] && echo "$b"; done |
       xargs -r /usr/bin/git branch -d
     /usr/bin/git worktree list --porcelain | while read -r key value; do
       case "$key" in
         worktree) wt=$value ;;
-        branch) [ "$value" != refs/heads/main ] && /usr/bin/git merge-base --is-ancestor "$value" "$REL" &&
+        branch) [ "$value" != refs/heads/main ] && /usr/bin/git merge-base --is-ancestor "$value" "<REL>" &&
           [ -z "$(/usr/bin/git -C "$wt" status --porcelain)" ] && echo "merged and clean: $wt (${value#refs/heads/})" ;;
       esac
     done
     ```
     Named shell variables only, never awk's numbered fields: Claude Code replaces a dollar sign followed by a digit with the command's arguments before the shell sees it.
 
-**Phase 4: Tag the version once Jenkins passes it**
+**Phase 3: Tag the version once Jenkins passes it**
 
-The pre-push hook runs only the tests the change reaches, so the release commit's Jenkins build is the first whole-suite run it gets. The tag waits for that build: a version whose build fails is never tagged, and a RELEASE build cannot run for it.
+The tag waits for the release commit's own push build: a version whose build fails for a cause in the commit is never tagged, and a RELEASE build cannot run for it.
 
-19. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes; one whose Setup reports a green candidate skips Test and Sonar, so check it after five minutes instead. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 20.
-20. **On `SUCCESS`, tag `$REL` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
+9. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `<REL>`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. Its Setup names the candidate build that tested this commit and skips Test and Sonar, so it takes about five minutes: start a background `sleep 300`, check when it fires, and then every two minutes until `building` is false. A release made without a candidate runs Test and Sonar and takes 20–25 minutes, so wait `sleep 1320` first. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 10.
+10. **On `SUCCESS`, tag `<REL>` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
     ```bash
-    /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>" "$REL"
+    /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>" "<REL>"
     /usr/bin/git tag -v "v<NEW_VERSION>"        # must print Good "git" signature
     /usr/bin/git push origin "refs/tags/v<NEW_VERSION>"
     /usr/bin/git push github "refs/tags/v<NEW_VERSION>"
     ```
     The pre-push hook skips a push of tags alone when each tagged commit is already on that remote, so these need no bypass. A RELEASE=true build needs this tag. One started earlier, such as RELEASE ticked straight after the push, waits up to 20 minutes in Setup for the tag to reach GitHub, then refuses before building anything and prints these commands for when the deploy session is gone; the Release stage's `gh release create --verify-tag` also refuses a version with no tag rather than minting an unsigned one at `main`'s head. That build skips Test and Sonar, because the green build recorded the commit as tested in its description, so a flaky test cannot fail a release whose commit already passed.
 
-    **With `release`, start the GitHub Release once both tag pushes succeeded:** `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"RELEASE": true}`, then wait for it as in step 19; it skips Test and Sonar for the tagged commit, and took 7 minutes for v1.0.18 (#1415). Its Release stage refuses while Sonar shows an open issue. On `SUCCESS`, the release is at `https://github.com/tsukhani/jclaw/releases/tag/v<NEW_VERSION>`; on any other result, report the failing stage. The tag stands either way, and a later RELEASE build can publish the version. Without `release`, start nothing.
-21. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag. Report the failing stage and tests (`mcp__jenkins__getTestResults`, `mcp__jenkins__searchBuildLog`). The version is spent: its release commit stays on `main` untagged, and the `/deploy` after the fix bumps past it. That release's notes still start from the last published Release (step 10), so nothing is lost. Never tag a later commit with this version.
+    **With `release`, start the GitHub Release once both tag pushes succeeded:** `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"RELEASE": true}`, then wait for it as in step 9; it skips Test and Sonar for the tagged commit, and took 7 minutes for v1.0.18 (#1415). Its Release stage refuses while Sonar shows an open issue. On `SUCCESS`, the release is at `https://github.com/tsukhani/jclaw/releases/tag/v<NEW_VERSION>`; on any other result, report the failing stage. The tag stands either way, and a later RELEASE build can publish the version. Without `release`, start nothing.
+11. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag yet, and report the failing stage (`mcp__jenkins__searchBuildLog`; `mcp__jenkins__getTestResults` when Test ran).
+    - **A candidate tested this commit:** the push build ran only stages the candidate passed on the same commit, so look for a cause outside it, and name it: a controller restart (`Resuming build … after Jenkins restart`, then `script returned exit code -1`), a full disk, a lost agent. Once it is named, rebuild (`mcp__jenkins__rebuildBuild`), check that the new build's `lastBuiltRevision.SHA1` is `<REL>`, and wait and tag as in steps 9 and 10. The version is not spent.
+    - **No candidate, or the cause is in the commit:** the version is spent. Its release commit stays on `main` untagged, and the next `/release-check` bumps past it; that release's notes still start from the last published Release, so nothing is lost. Never tag a later commit with this version.
 
-**Phase 5: Report**
+**Phase 4: Report**
 
-22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
+12. Summarize in one message: the version, the release commit's hash, the candidate build that tested it (or the user's yes to go without one), both push destinations with their reported ref updates, the push build and its result (and any rebuild, with its cause), the tag (or why there is none), the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 7 deleted and the local branches step 8 deleted, if any, the worktrees step 8 listed, and any uncommitted work the preflight found, which did not ship. Example:
 
-    > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
+    > Released **v0.7.6** as `a1b2c3d` on `main` (signed), the commit candidate build #1373 tested. Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
     > - github: `<old-sha>..a1b2c3d`, then tag `v0.7.6`
 
-23. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
+13. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
 
     > This release touched the frontend. To verify what shipped: `./jclaw.sh restart`, then `/e2e-audit`.
 
     Only a reminder, deliberately. The e2e suite is **not** a release gate and must not become one: it needs a live instance, so at push time it would exercise whatever build is currently *running* — i.e. the one being replaced — and a stopped app would fail every spec and block the push on a false red. Everything in `./jclaw.sh test` is a pure function of the source tree; the e2e suite is a function of the tree *plus* deployed state, which makes it post-deploy verification rather than merge gating. Restarting first is what makes it meaningful. See JCLAW-1139.
+
 
 ---
 
 **Hard rules**
 
 - Never use `--force`, `--force-with-lease`, `--no-verify`, or any flag that bypasses hooks, signing, or history.
-- Never amend a prior commit to fold in the version bump — always create a new commit.
+- Never amend, recreate or add to the release commit: what ships is the commit the candidate tested, by sha.
 - Never push to `main` with `--force` even if a hook rejects; report the hook failure and let the user decide.
-- Never modify any file other than `conf/application.conf` as part of the bump itself. Whatever else is in the working tree ships as-is.
-- If the current branch is not `main`, stop before bumping anything and report the branch — releases go out only from `main`.
+- Nothing uncommitted ships: the fast-forward moves only `conf/application.conf`, and other work in the checkout stays out of the release.
+- If the current branch is not `main`, stop before anything moves and report the branch — releases go out only from `main`.
 - Never tag a release commit before its Jenkins build has passed, and never move or delete a tag once it is pushed.

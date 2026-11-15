@@ -15,7 +15,7 @@ import { REASONS, commandVerdict, hookVerdict, refsVerdict } from "./policy-guar
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GUARD = join(ROOT, "bin", "policy-guard.mjs");
 
-const RELEASE = { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true };
+const RELEASE = { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true, releaseOverMain: true };
 const SHA = "c".repeat(40);
 const ARGV = "/usr/bin/java -cp /repo/precompiled:/Users/x/.gradle/caches/a.jar play.server.Server";
 const ctx = (state = RELEASE, pid = "4242", argv = ARGV) => ({
@@ -32,9 +32,9 @@ const RENOVATE_CLEANUP = `/usr/bin/git fetch -q origin --prune
   while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && echo "$b"; done |
   xargs -r /usr/bin/git push origin --delete`;
 
-// The candidate cleanup exactly as .claude/commands/deploy.md step 17 runs it.
+// The candidate cleanup exactly as .claude/commands/deploy.md step 7 runs it, with the release commit's sha filled in.
 const CANDIDATE_CLEANUP = `/usr/bin/git branch -r --list 'origin/candidate/*' | sed 's|^ *origin/||' |
-  while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "$REL" && echo "$b"; done |
+  while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b^" "${"c".repeat(40)}" && echo "$b"; done |
   xargs -r /usr/bin/git push origin --delete`;
 
 const CASES = [
@@ -232,12 +232,14 @@ test("a release commit pushed by name must be a release, on main, named in full"
   deepStrictEqual(commandVerdict(`git push --force github ${SHA}:refs/heads/main`, ctx()), refused("push"));
 });
 
-test("a candidate is pushed only from main in the main checkout, and only a commit main holds", () => {
+test("a candidate is pushed only from main in the main checkout, and only a release commit made over main", () => {
   const command = `git push origin ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`;
-  deepStrictEqual(commandVerdict(command, ctx({ ...RELEASE, subject: "feat: a candidate needs no release subject" })), null);
-  deepStrictEqual(commandVerdict(command, ctx({ ...RELEASE, onMain: false })), refused("push"));
-  deepStrictEqual(commandVerdict(command, ctx({ ...RELEASE, branch: "side" })), refused("push"));
-  deepStrictEqual(commandVerdict(command, ctx({ ...RELEASE, mainCheckout: false })), refused("push"));
+  const releaseCommit = { ...RELEASE, onMain: false };
+  deepStrictEqual(commandVerdict(command, ctx(releaseCommit)), null);
+  deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, subject: "feat: main's own commit" })), refused("push"));
+  deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, releaseOverMain: false })), refused("push"));
+  deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, branch: "side" })), refused("push"));
+  deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, mainCheckout: false })), refused("push"));
 });
 
 test("the named commit is the one judged, not HEAD", () => {
@@ -310,8 +312,8 @@ test("the hook prints Claude Code's deny decision with the rule's reason, and no
   strictEqual(denied.stdout, `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse",
     permissionDecision: "deny", permissionDecisionReason: "Pushing is /deploy's job (AGENTS.md Policy): stop at the "
     + "local commit and report its hash. The guard passes only a \"Release vX.Y.Z\" commit on main pushed to origin or "
-    + "github as HEAD or by its full sha, a version tag pushed alone, /release-check's candidate/<sha> branch on origin, "
-    + "and the deletion of renovate/* and candidate/* branches."
+    + "github as HEAD or by its full sha, a version tag pushed alone, /release-check's candidate/<sha> branch on origin "
+    + "for a release commit over main, and the deletion of renovate/* and candidate/* branches."
     } })}\n`);
   const allowed = run({ tool_name: "Bash", tool_input: { command: "git status" }, cwd: ROOT });
   strictEqual(allowed.status, 0);
@@ -381,11 +383,12 @@ test("refsVerdict passes /deploy's and /renovate's refs and refuses every other"
     no("refs/tags/v1.0.0-rc1"));
 });
 
-test("refsVerdict passes a candidate branch named for its commit, on origin, created once and never moved", () => {
+test("refsVerdict passes a candidate branch named for its release commit, on origin, created once and never moved", () => {
   const zero = "0".repeat(40);
   const sha = "a".repeat(40);
   const ref = `refs/heads/candidate/${sha.slice(0, 12)}`;
-  const onMain = () => ({ branch: "main", subject: "feat: x", mainCheckout: true, onMain: true, fastForward: true });
+  const onMain = () => ({ branch: "main", subject: "Release v1.0.1", mainCheckout: true, onMain: false,
+    releaseOverMain: true, fastForward: true });
   const no = { ...refused("push"), ref };
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", onMain), null);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${sha}\n`, "origin", onMain), null);
@@ -396,7 +399,8 @@ test("refsVerdict passes a candidate branch named for its commit, on origin, cre
   deepStrictEqual(refsVerdict(`HEAD ${sha} ${ref} ${zero}\n`, "origin", onMain), no);
   const other = `refs/heads/candidate/${"b".repeat(12)}`;
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${other} ${zero}\n`, "origin", onMain), { ...refused("push"), ref: other });
-  deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), onMain: false })), no);
+  deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), releaseOverMain: false })), no);
+  deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), subject: "feat: x" })), no);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), mainCheckout: false })), no);
 });
 
@@ -468,9 +472,23 @@ test("through git itself, the pre-push hook lets /deploy's pushes out and refuse
   });
 });
 
+// /release-check's release commit: the version bump over main's HEAD, made on a detached HEAD so main stays where it was.
+const releaseCommitOverMain = (work, git, files = {}) => {
+  git(work, "checkout", "-q", "--detach");
+  mkdirSync(join(work, "conf"), { recursive: true });
+  for (const [path, text] of Object.entries({ "conf/application.conf": "application.version=0.0.1\n", ...files })) {
+    writeFileSync(join(work, path), text);
+  }
+  git(work, "add", "-A");
+  git(work, "commit", "-q", "-m", "Release v0.0.1");
+  const sha = git(work, "rev-parse", "HEAD").stdout.trim();
+  git(work, "checkout", "-q", "main");
+  return sha;
+};
+
 test("a candidate push goes out without the local tests, which its Jenkins build runs, and its branch can be deleted", () => {
   inScratchRepo(({ scratch, work, git, env }) => {
-    const sha = git(work, "rev-parse", "HEAD").stdout.trim();
+    const sha = releaseCommitOverMain(work, git);
     const branch = `candidate/${sha.slice(0, 12)}`;
     const { JCLAW_SKIP_TESTS: _, ...tested } = env;
     const push = spawnSync("git", ["push", "origin", `${sha}:refs/heads/${branch}`], { cwd: work, env: tested, encoding: "utf8" });
@@ -481,6 +499,18 @@ test("a candidate push goes out without the local tests, which its Jenkins build
     strictEqual(git(work, "push", "github", `${sha}:refs/heads/${branch}`).status, 1);
     strictEqual(git(work, "push", "origin", "--delete", branch).status, 0);
     strictEqual(git(scratch, "--git-dir=origin.git", "branch", "--list", branch).stdout.trim(), "");
+  });
+});
+
+test("through git itself, a candidate that is main's own commit, or carries more than the version bump, is refused", () => {
+  inScratchRepo(({ scratch, work, git }) => {
+    const head = git(work, "rev-parse", "HEAD").stdout.trim();
+    const mainsOwn = git(work, "push", "origin", `${head}:refs/heads/candidate/${head.slice(0, 12)}`);
+    strictEqual(mainsOwn.status, 1);
+    strictEqual(mainsOwn.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/candidate/${head.slice(0, 12)}: ${REASONS.push}`);
+    const widened = releaseCommitOverMain(work, git, { "bin/extra.mjs": "export {};\n" });
+    strictEqual(git(work, "push", "origin", `${widened}:refs/heads/candidate/${widened.slice(0, 12)}`).status, 1);
+    strictEqual(git(scratch, "--git-dir=origin.git", "branch", "--list", "candidate/*").stdout.trim(), "");
   });
 });
 

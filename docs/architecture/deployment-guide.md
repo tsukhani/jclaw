@@ -123,6 +123,6 @@ If fronting with nginx:
 
 ## Release cadence
 
-- `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`vX.Y.Z`), and pushes to both remotes.
+- `/release-check` bumps `application.version` in `conf/application.conf` in the signed release commit; `/deploy` pushes that commit to both remotes and tags it (`vX.Y.Z`).
 - Jenkins triggers on push; release builds (tag + GitHub Release + GHCR) are gated by the `RELEASE` parameter.
 - Current release version is `application.version` in `conf/application.conf`; the matching tag is `v<application.version>`.

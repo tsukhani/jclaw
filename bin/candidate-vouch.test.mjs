@@ -180,17 +180,20 @@ const inReleaseRepo = (respond, body) => withJenkins(respond, async ({ config, d
 });
 
 const BUMP = { "conf/application.conf": "application.name=t\napplication.version=1.0.1\n" };
+const testedAs = (sha, extra = {}) => candidate({ displayName: `#1418 candidate ${sha.slice(0, 12)}`, description: `tested ${sha}`,
+  ...extra });
+const EVERY_TEST = ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test"];
 
-test("a release commit over a green candidate runs only the fast checks and the bin/ tests, and says why", async () => {
+test("the release commit a green candidate tested runs only the fast checks and the bin/ tests, and says why", async () => {
   let builds = [];
   await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed, onOrigin, seen }) => {
-    const feature = commit("feat: a page and a script", { "frontend/a.ts": "a\n", "bin/b.mjs": "b\n" });
+    commit("feat: a page and a script", { "frontend/a.ts": "a\n", "bin/b.mjs": "b\n" });
     const release = commit("Release v1.0.1", BUMP);
-    builds = [candidate({ number: 1418, displayName: `#1418 candidate ${feature.slice(0, 12)}`, description: `tested ${feature}` })];
+    builds = [testedAs(release, { number: 1418 })];
     const pushed = await push();
     strictEqual(pushed.code, 0, pushed.lines.join("\n"));
     deepStrictEqual(pushed.lines, [
-      `[jclaw pre-push] ${release} changes only the version line of ${feature}, which candidate build #1418 passed whole: skipping the backend and frontend tests.`,
+      `[jclaw pre-push] Candidate build #1418 passed ${release} whole: skipping the backend and frontend tests.`,
       "[jclaw pre-push] Running the fast checks...",
       "[jclaw pre-push] Running the bin/ script tests...",
       "[jclaw pre-push] Checks passed — proceeding with push.",
@@ -201,12 +204,12 @@ test("a release commit over a green candidate runs only the fast checks and the 
   });
 });
 
-test("over a candidate that touched neither the frontend nor bin/, only the backend fast checks run", async () => {
+test("over a candidate whose range touched neither the frontend nor bin/, only the backend fast checks run", async () => {
   let builds = [];
   await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed }) => {
-    const feature = commit("feat: a backend change", { "conf/routes": "GET / x\n" });
-    commit("Release v1.0.1", BUMP);
-    builds = [candidate({ displayName: `#1418 candidate ${feature.slice(0, 12)}`, description: `tested ${feature}` })];
+    commit("feat: a backend change", { "conf/routes": "GET / x\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    builds = [testedAs(release)];
     const pushed = await push();
     strictEqual(pushed.code, 0, pushed.lines.join("\n"));
     strictEqual(pushed.lines.includes("[jclaw pre-push] Running the bin/ script tests..."), false);
@@ -214,33 +217,39 @@ test("over a candidate that touched neither the frontend nor bin/, only the back
   });
 });
 
-test("with no green candidate for the parent, or Jenkins down, the push runs every test as before", async () => {
-  await inReleaseRepo(json({ builds: [candidate({ result: "FAILURE" })] }), async ({ commit, push, stubbed }) => {
-    const feature = commit("feat: x", { "frontend/a.ts": "a\n" });
-    commit("Release v1.0.1", BUMP);
+test("with no green candidate for the commit, or Jenkins down, the push runs every test as before", async () => {
+  let builds = [];
+  await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed }) => {
+    commit("feat: x", { "frontend/a.ts": "a\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    builds = [testedAs(release, { result: "FAILURE" })];
     const pushed = await push();
     strictEqual(pushed.code, 0, pushed.lines.join("\n"));
     strictEqual(pushed.lines[0],
-      `[jclaw pre-push] No green candidate vouches for ${feature} (no green candidate build tested it): running the tests.`);
-    deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test"]);
+      `[jclaw pre-push] No green candidate vouches for ${release} (no green candidate build tested it): running the tests.`);
+    deepStrictEqual(stubbed(), EVERY_TEST);
   });
   await inReleaseRepo((req, res) => { res.writeHead(503); res.end(); }, async ({ commit, push, stubbed }) => {
-    const feature = commit("feat: x", { "frontend/a.ts": "a\n" });
-    commit("Release v1.0.1", BUMP);
+    commit("feat: x", { "frontend/a.ts": "a\n" });
+    const release = commit("Release v1.0.1", BUMP);
     const pushed = await push();
-    strictEqual(pushed.lines[0], `[jclaw pre-push] No green candidate vouches for ${feature} (Jenkins answered 503): running the tests.`);
-    deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test"]);
+    strictEqual(pushed.lines[0], `[jclaw pre-push] No green candidate vouches for ${release} (Jenkins answered 503): running the tests.`);
+    deepStrictEqual(stubbed(), EVERY_TEST);
   });
 });
 
-test("a release commit that changes more than the version line never asks Jenkins and runs every test", async () => {
-  await inReleaseRepo(json({ builds: [] }), async ({ commit, push, stubbed, seen }) => {
-    commit("feat: x", { "frontend/a.ts": "a\n" });
-    commit("Release v1.0.1", { ...BUMP, "frontend/a.ts": "changed with the bump\n" });
+test("a green candidate of the release commit's parent vouches for nothing, so the push runs every test", async () => {
+  let builds = [];
+  await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed, seen }) => {
+    const feature = commit("feat: x", { "frontend/a.ts": "a\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    builds = [testedAs(feature)];
     const pushed = await push();
     strictEqual(pushed.code, 0, pushed.lines.join("\n"));
-    deepStrictEqual(seen, []);
-    deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test"]);
+    strictEqual(pushed.lines[0],
+      `[jclaw pre-push] No green candidate vouches for ${release} (no green candidate build tested it): running the tests.`);
+    deepStrictEqual(stubbed(), EVERY_TEST);
+    strictEqual(seen.length, 1);
   });
 });
 
@@ -248,9 +257,9 @@ test("over a green candidate, failed fast checks still refuse the push", async (
   let builds = [];
   await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, onOrigin }) => {
     const before = onOrigin();
-    const feature = commit("feat: x", { "frontend/a.ts": "a\n" });
-    commit("Release v1.0.1", BUMP);
-    builds = [candidate({ displayName: `#1418 candidate ${feature.slice(0, 12)}`, description: `tested ${feature}` })];
+    commit("feat: x", { "frontend/a.ts": "a\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    builds = [testedAs(release)];
     const pushed = await push({ STUB_CHECK_RC: "1" });
     strictEqual(pushed.code, 1);
     strictEqual(pushed.lines.at(-1), "[jclaw pre-push] The fast checks failed: see the output above.");

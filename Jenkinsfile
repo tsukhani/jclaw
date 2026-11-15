@@ -72,8 +72,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
-        string(name: 'CANDIDATE', defaultValue: '', description: 'A commit /release-check pushed to candidate/<sha>: test, analyse and package it, and release nothing (JF-441)')
-        string(name: 'CANDIDATE_VERSION', defaultValue: '', description: 'The version the candidate will be released as, such as 1.0.19, which its Sonar analysis carries')
+        string(name: 'CANDIDATE', defaultValue: '', description: 'A release commit /release-check pushed to candidate/<sha>: test, analyse and package it as the version it carries, and release nothing (JF-441, JF-448)')
         booleanParam(name: 'PUBLISH_DEVCONTAINER', defaultValue: false, description: 'Check to build and push .devcontainer/Dockerfile to ghcr.io/tsukhani/jclaw-devcontainer (independent of RELEASE; rerun only when .devcontainer/ changes)')
     }
 
@@ -140,9 +139,6 @@ pipeline {
                         if (!params.CANDIDATE.matches('[0-9a-f]{40}')) {
                             error("CANDIDATE is a full commit sha, not '${params.CANDIDATE}'.")
                         }
-                        if (!params.CANDIDATE_VERSION.matches('[0-9]+[.][0-9]+[.][0-9]+')) {
-                            error("CANDIDATE_VERSION is the version the candidate becomes, such as 1.0.19, not '${params.CANDIDATE_VERSION}'.")
-                        }
                         if (sh(returnStatus: true, script: "git cat-file -e ${params.CANDIDATE}^{commit}") != 0) {
                             error("Commit ${params.CANDIDATE} is not in this clone: push it to candidate/${params.CANDIDATE.substring(0, 12)} on origin first.")
                         }
@@ -202,37 +198,29 @@ pipeline {
                     // record is the description post { success } writes.
                     def tested = "tested ${env.BUILD_COMMIT}".toString()
                     def releaseOfTested = params.RELEASE && currentBuild.previousSuccessfulBuild?.description == tested
-                    // /deploy's version bump over a green candidate: that candidate's build ran the whole suite and
-                    // Sonar on this tree but for its version line, so this build skips them too (JF-441). Only a
-                    // candidate build counts, as in bin/candidate-vouch.mjs: a push build of the parent may itself
-                    // have skipped its tests on a candidate's word.
+                    // /deploy's push of the release commit a green candidate build tested: that build ran the whole
+                    // suite and Sonar on this very commit, so this one skips them (JF-441, JF-448). Only a candidate
+                    // build counts, as in bin/candidate-vouch.mjs: an earlier push build of the commit may itself have
+                    // skipped its tests on a candidate's word.
                     env.TESTED_CANDIDATE = ''
-                    if (!params.RELEASE && !params.CANDIDATE && sh(returnStatus: true, script: '''
-                        set -e
-                        [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2 ]
-                        [ "$(git diff --name-only HEAD^ HEAD)" = "conf/application.conf" ]
-                        ! git diff -U0 HEAD^ HEAD -- conf/application.conf | grep -E '^[-+]' \\
-                            | grep -v -E '^(\\+\\+\\+|---) ' | grep -v -E '^[-+]application[.]version='
-                    ''') == 0) {
-                        def parent = sh(returnStdout: true, script: 'git rev-parse HEAD^').trim()
+                    if (!params.RELEASE && !params.CANDIDATE) {
                         def b = currentBuild.previousBuild
                         for (int i = 0; i < 30 && b != null && !env.TESTED_CANDIDATE; i++) {
-                            if (b.result == 'SUCCESS' && b.description == "tested ${parent}".toString()
-                                    && (b.displayName ?: '').endsWith("candidate ${parent.substring(0, 12)}".toString())) {
-                                env.TESTED_CANDIDATE = parent
+                            if (b.result == 'SUCCESS' && b.description == tested
+                                    && (b.displayName ?: '').endsWith("candidate ${env.BUILD_COMMIT.substring(0, 12)}".toString())) {
+                                env.TESTED_CANDIDATE = "#${b.number}".toString()
                             }
                             b = b.previousBuild
                         }
                     }
                     env.ALREADY_TESTED = (releaseOfTested || env.TESTED_CANDIDATE) ? 'true' : 'false'
-                    env.SONAR_VERSION = params.CANDIDATE ? params.CANDIDATE_VERSION : env.APP_VERSION
                 }
                 echo "application.version = ${env.APP_VERSION}"
                 script {
                     if (env.ALREADY_TESTED == 'true') {
                         if (env.TESTED_CANDIDATE) {
-                            echo "Commit ${env.BUILD_COMMIT} changes only the version line of candidate ${env.TESTED_CANDIDATE}, " +
-                                 "whose build passed the whole suite and Sonar: skipping Test and Sonar Analysis"
+                            echo "Commit ${env.BUILD_COMMIT} is the release commit candidate build ${env.TESTED_CANDIDATE} " +
+                                 "passed whole, Sonar included: skipping Test and Sonar Analysis"
                         } else {
                             echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
                         }
@@ -240,7 +228,8 @@ pipeline {
                         // badge (Badge plugin). Its tooltip is escaped twice, so it must hold no apostrophe.
                         def sonarDashboard = 'https://sonar.abundent.com/dashboard?id=abundent%3Ajclaw'
                         addBadge(icon: '/plugin/sonar/images/SonarQube_Mark.png', link: sonarDashboard, target: '_blank',
-                                 text: 'Analyzed by SonarQube in the push build of this commit')
+                                 text: env.TESTED_CANDIDATE ? 'Analyzed by SonarQube in the candidate build of this commit'
+                                                            : 'Analyzed by SonarQube in the push build of this commit')
                         echo "Sonar result for this commit: ${sonarDashboard}"
                     }
                 }
@@ -440,7 +429,7 @@ pipeline {
                     def analysed = false
                     catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                         withSonarQubeEnv('SonarQube') {
-                            sh "./gradlew sonar -Dsonar.projectVersion=v${env.SONAR_VERSION}"
+                            sh "./gradlew sonar -Dsonar.projectVersion=v${env.APP_VERSION}"
                         }
                         analysed = true
                     }

@@ -3,8 +3,8 @@
 # The backend runs only the test classes the pushed change reaches
 # (bin/select-tests.mjs), the frontend checks only when a frontend input
 # changed, and the bin/ scripts' node tests only when a bin/ file changed;
-# Jenkins runs the whole Java suite on every push. A release commit over a
-# green /release-check candidate runs only the fast checks and the bin/ tests.
+# Jenkins runs the whole Java suite on every push. A release commit a green
+# /release-check candidate tested runs only the fast checks and the bin/ tests.
 # Skips the run when the current HEAD has already been tested (so the two-remote deploy flow, origin
 # then github, pays once). Cache lives inside $GIT_DIR so it stays local to this
 # clone and is automatically scoped per worktree.
@@ -157,25 +157,12 @@ run_bin_tests() {
 # The inputs the factory's frontend gate watches (.sandcastle/frontend-gate.ts FRONTEND_INPUTS).
 frontend_inputs='^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)'
 
-# Whether $1 changes only the application.version line, as /deploy's release commit does. No grep -q in a pipe: under
-# pipefail its early exit fails the pipeline, which would read here as "only the version changed".
-version_only() {
-    local diff extra
-    [[ "$(git rev-list --parents -n 1 "$1" | wc -w | tr -d ' ')" == 2 ]] || return 1
-    [[ "$(git diff --name-only "$1^" "$1")" == conf/application.conf ]] || return 1
-    diff=$(git diff -U0 "$1^" "$1" -- conf/application.conf)
-    grep -qE '^\+application[.]version=' <<< "$diff" || return 1
-    extra=$(grep -E '^[-+]' <<< "$diff" | grep -vE '^(\+\+\+|---) ' | grep -vE '^[-+]application[.]version=' || true)
-    [[ -z "$extra" ]]
-}
-
-# A release commit over a green /release-check candidate (JF-444): Jenkins ran the whole backend suite and the
-# frontend tests on its parent's tree, so only what Jenkins never runs is run here, the fast checks and the bin/
-# tests. A candidate the hook cannot confirm runs everything below.
-if [[ -n "$pushed_sha" ]] && version_only "$current_sha"; then
-    parent=$(git rev-parse "$current_sha^")
-    if vouch=$(node "$repo_root/bin/candidate-vouch.mjs" "$parent" 2>&1); then
-        echo "[jclaw pre-push] $current_sha changes only the version line of $parent, which candidate build $vouch passed whole: skipping the backend and frontend tests."
+# The release commit a green /release-check candidate build tested (JF-444, JF-448): Jenkins ran the whole backend
+# suite and the frontend tests on this very commit, so only what Jenkins never runs is run here, the fast checks and
+# the bin/ tests. A commit the hook cannot confirm runs everything below.
+if [[ -n "$pushed_sha" ]]; then
+    if vouch=$(node "$repo_root/bin/candidate-vouch.mjs" "$current_sha" 2>&1); then
+        echo "[jclaw pre-push] Candidate build $vouch passed $current_sha whole: skipping the backend and frontend tests."
         frontend=frontend
         bin_changed=1
         if [[ -n "$pushed_over" && "$pushed_over" != "$zero_sha" ]] \
@@ -189,7 +176,7 @@ if [[ -n "$pushed_sha" ]] && version_only "$current_sha"; then
         echo "[jclaw pre-push] Checks passed — proceeding with push."
         exit 0
     fi
-    echo "[jclaw pre-push] No green candidate vouches for $parent ($vouch): running the tests."
+    echo "[jclaw pre-push] No green candidate vouches for $current_sha ($vouch): running the tests."
 fi
 
 fast_checks

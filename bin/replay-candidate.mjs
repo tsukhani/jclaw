@@ -13,20 +13,20 @@ import { jenkinsFrom } from "./candidate-vouch.mjs";
 const JOB = "JClaw";
 const TIMEOUT_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
-const VERSION = /^\d+\.\d+\.\d+$/;
+const VERSION_LINE = /^application\.version=(\d+\.\d+\.\d+)$/m;
 
 /**
- * {@code jenkinsfile} with each read of the two candidate parameters replaced by the candidate's values, so a replay
- * runs candidate mode whatever parameters the replayed build carries, and the job's parameter definitions stay as
- * they are. Throws when the Jenkinsfile reads neither, or a read is left that is not the whole parameter's name.
+ * {@code jenkinsfile} with each read of the candidate parameter replaced by the candidate's sha, so a replay runs
+ * candidate mode whatever parameters the replayed build carries, and the job's parameter definitions stay as they
+ * are. Throws when the Jenkinsfile never reads it, or reads another candidate parameter, such as the version a
+ * Jenkinsfile from before JF-448 took, that this cannot fill.
  */
-export function candidateScript(jenkinsfile, sha, version) {
-  const versionReads = /params\.CANDIDATE_VERSION\b/g;
+export function candidateScript(jenkinsfile, sha) {
   const shaReads = /params\.CANDIDATE\b/g;
-  if (!versionReads.test(jenkinsfile) || !shaReads.test(jenkinsfile)) {
-    throw new Error("the Jenkinsfile reads no candidate parameters, so it has no candidate mode to replay");
+  if (!shaReads.test(jenkinsfile)) {
+    throw new Error("the Jenkinsfile reads no candidate parameter, so it has no candidate mode to replay");
   }
-  const script = jenkinsfile.replace(versionReads, `'${version}'`).replace(shaReads, `'${sha}'`);
+  const script = jenkinsfile.replace(shaReads, `'${sha}'`);
   if (/params\.CANDIDATE/.test(script)) throw new Error("the Jenkinsfile reads a candidate parameter this cannot replace");
   return script;
 }
@@ -45,15 +45,17 @@ async function call(url, init) {
 }
 
 /** 0 when Jenkins took the replay, 2 when it did not or could not be asked. */
-async function run(sha, version, configPath, cwd) {
-  if (!SHA.test(sha ?? "") || !VERSION.test(version ?? "")) {
-    return { code: 2, message: "give the candidate's full sha and the version it becomes, such as 1.0.20" };
-  }
+async function run(sha, configPath, cwd) {
+  if (!SHA.test(sha ?? "")) return { code: 2, message: "give the release commit's full sha" };
   const shown = spawnSync("git", ["show", `${sha}:Jenkinsfile`], { cwd, encoding: "utf8" });
   if (shown.status !== 0) return { code: 2, message: `no Jenkinsfile at ${sha}` };
+  // The candidate is analysed as the version it carries, so a commit without one is not a release commit.
+  const conf = spawnSync("git", ["show", `${sha}:conf/application.conf`], { cwd, encoding: "utf8" });
+  const version = conf.status === 0 ? conf.stdout.match(VERSION_LINE)?.[1] : undefined;
+  if (!version) return { code: 2, message: `no application.version in conf/application.conf at ${sha}` };
   let script;
   try {
-    script = candidateScript(shown.stdout, sha, version);
+    script = candidateScript(shown.stdout, sha);
   } catch (error) {
     return { code: 2, message: error.message };
   }
@@ -93,7 +95,7 @@ async function run(sha, version, configPath, cwd) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const configPath = process.env.JCLAW_CLAUDE_JSON ?? join(homedir(), ".claude.json");
-  const { code, message } = await run(process.argv[2], process.argv[3], configPath, process.cwd());
+  const { code, message } = await run(process.argv[2], configPath, process.cwd());
   (code === 0 ? process.stdout : process.stderr).write(`${message}\n`);
   process.exit(code);
 }

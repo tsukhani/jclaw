@@ -161,10 +161,11 @@ refuses, because nothing then says what to keep. A Release whose image is alread
 node bin/candidate-vouch.mjs <full sha>   # prints the vouching build, such as #1418
 ```
 
-The pre-push hook asks it about the parent of a release commit that changes only the `application.version` line
-(JF-444). A finished, successful build of the `JClaw` job vouches when its description reads `tested <sha>` and its
-display name ends `candidate <first 12 of sha>`, the record a `/release-check` candidate build writes. A push build
-of the same commit does not count, since it may itself have skipped its tests on a candidate's word. When a build
+The pre-push hook asks it about the commit `/deploy` pushes to `main`, which is the release commit `/release-check`
+made and its candidate build tested (JF-444, JF-448). A finished, successful build of the `JClaw` job vouches when its
+description reads `tested <sha>` and its display name ends `candidate <first 12 of sha>`, the record a candidate build
+writes. A push build of the same commit does not count, since it may itself have skipped its tests on a candidate's
+word, and neither does a candidate of the commit's parent: the shipped commit is the one tested. When a build
 vouches, the hook runs only what Jenkins never runs, `./jclaw.sh check` (with the frontend gates when a frontend
 input changed) and the `bin/` tests (when a `bin/` file changed), and skips the backend classes and the frontend
 tests the candidate ran.
@@ -177,19 +178,21 @@ a config without the server, a refusal or a Jenkins that is down. Anything but 0
 ## replay-candidate.mjs
 
 ```bash
-node bin/replay-candidate.mjs <full sha> <version>   # replayed #1422 as candidate 0123456789ab for v1.0.20
+node bin/replay-candidate.mjs <full sha>   # replayed #1422 as candidate 0123456789ab for v1.0.20
 ```
 
 A candidate build that `/release-check` triggers runs the Jenkinsfile on Bitbucket's `main`, so a candidate that
 changes the Jenkinsfile would first run the change in the release's own build (JF-445). This replays the newest
 finished build that neither releases nor publishes the dev container, with the candidate's Jenkinsfile as its script.
-In that script every read of `params.CANDIDATE` and `params.CANDIDATE_VERSION` is replaced by the candidate's sha and
-version, so candidate mode runs whatever parameters the replayed build carries, and the job's parameter definitions
-and defaults stay as they are. It refuses a Jenkinsfile with no candidate mode, or with a read it cannot replace.
+In that script every read of `params.CANDIDATE` is replaced by the release commit's sha, so candidate mode runs
+whatever parameters the replayed build carries, and the job's parameter definitions and defaults stay as they are.
+The build is analysed as the version the commit carries, which the printed line names. It refuses a Jenkinsfile with
+no candidate mode, or one that reads another candidate parameter, such as the `CANDIDATE_VERSION` of a Jenkinsfile
+from before JF-448.
 
 It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and sends the replay with the crumb and session
-Jenkins issues. Exit 0 printed the replayed build; exit 2 means nothing was replayed: a malformed sha or version, no
-Jenkinsfile at the commit, no build fit to replay, a config without the server, or a refusal.
+Jenkins issues. Exit 0 printed the replayed build; exit 2 means nothing was replayed: a malformed sha, no Jenkinsfile
+or no `application.version` at the commit, no build fit to replay, a config without the server, or a refusal.
 
 ## policy-guard.mjs
 
@@ -222,9 +225,9 @@ The command layer refuses:
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
 `main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, the deletion of `renovate/*`
-and `candidate/*` branches on `origin`, and `/release-check`'s candidate: a commit on `main`, pushed from the main
-checkout by its full SHA to `origin`'s `candidate/<a prefix of that SHA>`, which the ref layer lets be created but never
-moved. `pre-push` runs no tests for a push of candidates alone, since their Jenkins build runs the whole suite. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
+and `candidate/*` branches on `origin`, and `/release-check`'s candidate: its `Release vX.Y.Z` commit, whose one
+parent is on `main` and which changes only `conf/application.conf`, pushed from the main checkout on `main` by its full
+SHA to `origin`'s `candidate/<a prefix of that SHA>`, which the ref layer lets be created but never moved (JF-448). `pre-push` runs no tests for a push of candidates alone, since their Jenkins build runs the whole suite. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
 back. `/deploy` pushes by SHA, so a commit another session lands between its two pushes goes out in neither. `pre-push`
 tests the checkout, so a named commit that is not HEAD passes only if it was already tested.
 

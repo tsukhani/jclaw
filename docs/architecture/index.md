@@ -65,7 +65,7 @@ Browser (Nuxt 4 SPA) ── $fetch + EventSource ──► Play :9000/:9443 ─�
 - **Enums in DB:** string-backed (`@Enumerated(STRING)` or manual conversion) for hot-reload safety.
 - **Full-text search:** **Lucene 10** (`LuceneIndexer` + `DirectLuceneMessageSearchRepository`), synced via JPA `@Post*` hooks. Status/type filters still use LIKE.
 - **Test commands:** `play autotest` (NOT `play test`, which is interactive) + `cd frontend && pnpm test` after every frontend edit.
-- **Commit flow:** stop at the local commit; `/deploy` bumps `application.version` → pushes to **both** remotes (`origin` Bitbucket + `github`).
+- **Commit flow:** stop at the local commit; `/release-check` bumps `application.version` → `/deploy` pushes to **both** remotes (`origin` Bitbucket + `github`).
 
 ## Open work / external references
 

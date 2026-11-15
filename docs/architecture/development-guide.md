@@ -89,7 +89,7 @@ Every code change goes through this order — do not skip steps:
 3. `cd frontend && pnpm test` — frontend green (required if any file under `frontend/` was touched).
 4. **Stop at the local commit.** The `pre-commit` hook runs here; fix every issue it surfaces and re-commit (never `--no-verify`).
 
-**Releasing is a separate, deliberate step.** Pushing is *not* part of ordinary coding — the `/deploy` slash command bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag, and pushes to **both** remotes (`origin` Bitbucket + `github`). Do not `git push` as part of a coding task.
+**Releasing is a separate, deliberate step.** Pushing is *not* part of ordinary coding — the `/release-check` slash command creates the signed release commit, bumping `application.version` in `conf/application.conf`, and `/deploy` tags it and pushes it to **both** remotes (`origin` Bitbucket + `github`). Do not `git push` as part of a coding task.
 
 ## Codebase conventions
 
