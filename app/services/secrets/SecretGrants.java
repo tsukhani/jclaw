@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
  * Which secrets a shell command gets, and the live grants the proxy redeems (JF-324). A command gets a secret of a
  * skill enabled on the agent that owns its workspace when it names the secret ({@code $NAS_PASSWORD} or
  * {@code ${NAS_PASSWORD}}) or runs in, or names, that skill's folder ({@code skills/nas-filestation/}). Every other
- * command runs as before, with no proxy and no placeholder.
+ * command runs with no proxy and no placeholder.
  */
 public final class SecretGrants {
 

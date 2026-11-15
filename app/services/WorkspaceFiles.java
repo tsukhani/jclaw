@@ -346,7 +346,7 @@ public final class WorkspaceFiles {
         return agent.parentAgent == null ? agent.serviceAgent : ownedByServiceAgent(agent.name);
     }
 
-    /** The agent whose workspace {@code agent} reads: itself, or for a subagent the root of its parent chain. */
+    /** {@link #workspaceOwner}'s name. */
     public static String workspaceOwnerName(Agent agent) {
         return workspaceOwner(agent).name;
     }

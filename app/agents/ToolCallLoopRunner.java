@@ -286,7 +286,6 @@ public final class ToolCallLoopRunner {
                         .formatted(finishReason, round + 1));
     }
 
-    /** {@code messages} followed by {@code note} as a user message, in a copy; {@code messages} itself when there is no note. */
     private static List<ChatMessage> withNote(List<ChatMessage> messages, @Nullable String note) {
         if (note == null) return messages;
         var out = new ArrayList<>(messages);

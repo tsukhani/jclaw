@@ -156,7 +156,7 @@ public final class QueueDrainOrchestrator {
         } catch (Exception e) {
             EventLogger.error("queue", msg.agent().name, msg.channelType(),
                     "Failed to process queued message: %s".formatted(e.getMessage()));
-            // Dropped as before rather than retried at every boot; a row the USER append consumed is already gone.
+            // Dropped rather than retried at every boot; a row the USER append consumed is already gone.
             ConversationQueue.discardPending(pendingIds);
             if (!runStarted) {
                 // Exception before run() — release so we don't wedge the queue.

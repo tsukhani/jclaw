@@ -242,7 +242,6 @@ public class ApiPromptsController extends Controller {
         return c;
     }
 
-    /** The prompt, or 404. */
     @SuppressWarnings("java:S2259")
     private static Prompt requirePrompt(Long id) {
         Prompt row = Prompt.findById(id);

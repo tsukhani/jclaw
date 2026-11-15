@@ -270,7 +270,6 @@ public final class WhatsAppSubscription {
         return "unexpected Graph response: " + Strings.truncate(body, 200);
     }
 
-    /** Logs a refused Graph id and returns {@code reason} for the caller's result. */
     static String refused(String reason) {
         EventLogger.warn("channel", null, "whatsapp", reason);
         return reason;

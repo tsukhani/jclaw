@@ -610,7 +610,7 @@ public class ApiAgentsController extends Controller {
     }
 
     /** Saved, a model no provider registers switches the agent off ({@link AgentService#update}), which main would
-     *  learn of only from a later turn of that agent failing. The operator keeps the old behaviour; an unchanged
+     *  learn of only from a later turn of that agent failing. The operator is not refused; an unchanged
      *  echo is no pick. */
     private static void requireRegisteredModelForAgent(Agent agent, String modelProvider, String modelId) {
         if (!RequestPrincipal.isAgentOriginated()) return;

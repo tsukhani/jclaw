@@ -406,7 +406,6 @@ public final class ConfigKeyCatalog {
             .map(ConfigKeyCatalog::regexOf)
             .collect(Collectors.joining("|")));
 
-    /** Whether some code in this build reads {@code key}. */
     public static boolean isRead(String key) {
         return READ_EXACT.contains(key) || READ_PATTERNS.matcher(key).matches();
     }

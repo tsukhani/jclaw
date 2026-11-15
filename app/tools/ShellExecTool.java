@@ -724,10 +724,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 ToolErrorTemplates.shellSandboxUnavailable(command, String.valueOf(e.getMessage())));
     }
 
-    /** How {@code exec} confines a run. */
     public enum Confinement {
         /**
-         * A main-rooted agent while {@code shell.sandbox} does not apply: everything as before except JClaw's own
+         * A main-rooted agent while {@code shell.sandbox} does not apply: it reaches everything but JClaw's own
          * files, {@link HarnessSandbox.MainFence} (JF-325).
          */
         FENCE,

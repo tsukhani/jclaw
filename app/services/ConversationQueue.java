@@ -105,7 +105,6 @@ public class ConversationQueue {
             return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id, ownerInitiated, senderId);
         }
 
-        /** Each attachment's original file name, or its kind when it came without one. */
         public List<String> attachmentNames() {
             return attachments.stream().map(a -> a.originalFilename() != null ? a.originalFilename() : a.kind()).toList();
         }
@@ -867,7 +866,6 @@ public class ConversationQueue {
                 Map.of("conversationId", conversationId, "busy", busy));
     }
 
-    /** The rows of {@code messages} that carry one. */
     public static List<Long> pendingIdsOf(List<QueuedMessage> messages) {
         return messages.stream().map(QueuedMessage::pendingId).filter(Objects::nonNull).toList();
     }
@@ -962,7 +960,6 @@ public class ConversationQueue {
     public record Snapshot(boolean busy, int queueSize, boolean stoppable, boolean stopDropsQueue,
                            List<PendingView> pending, int clears) {}
 
-    /** {@link Snapshot} of the queue of {@code conversationId}, a conversation on {@code channelType}. */
     public static Snapshot snapshot(Long conversationId, @Nullable String channelType) {
         var state = queues.get(conversationId);
         if (state == null) return new Snapshot(false, 0, false, stopDropsQueue(channelType), List.of(), 0);

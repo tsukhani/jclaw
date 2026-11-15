@@ -242,7 +242,7 @@ public final class HarnessSandbox {
      * of its own ({@code --new-session}), whose process groups hold only the run.
      */
     public enum LinuxPids {
-        /** JClaw's own namespace: {@code main}'s {@code exec} and a coding harness, as before. */
+        /** JClaw's own namespace: {@code main}'s {@code exec} and a coding harness. */
         SHARED,
         /** A namespace of the run's own, with that namespace's procfs on {@code /proc}. */
         OWN,

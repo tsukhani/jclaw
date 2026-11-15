@@ -383,7 +383,6 @@ public final class McpServerService {
         };
     }
 
-    /** The stored config as an object, or null when it is blank or not a JSON object. */
     private static @Nullable JsonObject parseConfig(String configJson) {
         if (configJson == null || configJson.isBlank()) return null;
         try {

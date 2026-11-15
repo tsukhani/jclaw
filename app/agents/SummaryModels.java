@@ -121,7 +121,7 @@ public final class SummaryModels implements SessionCompactor.ModelCall {
         var primary = first();
         answered = primary;
         if (overridden) return callOverride(primary, messages, tools);
-        // The caller's own model fails as it always has: no fallback, and no router bench on its provider.
+        // The caller's own model gets no fallback, and no router bench on its provider.
         if (!routed) return primary.provider().chat(primary.modelId(), messages, tools, maxOutput, null, channel);
         var next = choices.size() > 1 ? choices.get(1) : null;
         var fallback = next != null ? new LlmProvider.Fallback(next.provider(), next.modelId()) : null;

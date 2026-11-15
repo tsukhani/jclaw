@@ -122,7 +122,6 @@ public final class SherpaNative {
         return new Status(BUILDS.containsKey(classifier) ? Source.MISSING : Source.UNSUPPORTED, classifier, null);
     }
 
-    /** Fetches {@code build}'s jar and {@link #install}s it. */
     public static Path download(Build build, Path cacheRoot) throws IOException {
         Files.createDirectories(cacheRoot);
         var jar = Files.createTempFile(cacheRoot, "sherpa-", ".part");

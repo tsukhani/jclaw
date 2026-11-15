@@ -209,7 +209,6 @@ public final class ConversationTurnStream {
         return CHANNELS.containsKey(conversationId);
     }
 
-    /** The subscribers open on {@code conversationId}. */
     public static int subscriberCount(Long conversationId) {
         var channel = CHANNELS.get(conversationId);
         if (channel == null) return 0;
@@ -310,7 +309,6 @@ public final class ConversationTurnStream {
             closeDropped(channel, dropped);
         }
 
-        /** End the turn with a {@code stopped} frame. */
         public void stop() {
             end(STOPPED);
         }

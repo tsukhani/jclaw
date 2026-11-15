@@ -66,7 +66,7 @@ public final class QueryEmbedPrefetch {
 
     /**
      * The query embedding of {@code text}: the one this turn started, waited for, when it is for the same text and did
-     * not fail; otherwise computed here, as before the prefetch.
+     * not fail; otherwise computed here.
      */
     public static float @Nullable [] embed(String text) {
         return embed(text, QueryEmbedPrefetch::embedQuery);
@@ -79,7 +79,7 @@ public final class QueryEmbedPrefetch {
             try {
                 return prefetch.result.join();
             } catch (CompletionException _) {
-                // The fork's failure is the inline call's to report, with the cause it gives today.
+                // The fork's failure is the inline call's to report, with its own cause.
             }
         }
         return timedEmbed(text, embedder);

@@ -39,7 +39,7 @@ import java.util.function.Consumer;
  * starts the call. Its output is held from the reader in {@link Held}, and the turn runs no tool until the route is
  * known. When the router keeps the model and every input the request took from it is unchanged ({@link ModelInputs}),
  * the held output is released in order and the turn carries on; otherwise the call is cancelled by aborting its HTTP
- * request, never by interrupting a thread (AGENTS.md, Known pitfalls), and the turn runs on the chosen model as before.
+ * request, never by interrupting a thread (AGENTS.md, Known pitfalls), and the turn runs on the chosen model.
  *
  * <p>A discarded call is still billed, so a turn speculates only where {@link RouterPolicy#SPECULATE} allows, by
  * default on a prepaid provider alone.
@@ -65,7 +65,7 @@ final class RouteSpeculation {
         return speculative.primary();
     }
 
-    /** The turn's speculation with the router started beside it, or null when the turn routes first, as before. */
+    /** The turn's speculation with the router started beside it, or null when the turn routes first. */
     static @Nullable RouteSpeculation start(Agent agent, Conversation conversation, TurnRouting.PriorTurn prior,
                                             String userMessage, @Nullable List<AttachmentService.Input> attachments,
                                             @Nullable String channel, @Nullable LatencyTrace trace) {
@@ -126,7 +126,7 @@ final class RouteSpeculation {
 
     /**
      * Called before a prompt build compacts inline. A speculative build gives up instead, so the summary call and its
-     * progress frames come from the chosen route's build, as before, and never from a build the router may discard.
+     * progress frames come from the chosen route's build, never from a build the router may discard.
      */
     static void yieldBeforeInlineCompaction(@Nullable Long conversationId) {
         if (BUILDING.isBound() && BUILDING.get().equals(conversationId)) throw new Abandoned();

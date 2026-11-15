@@ -30,7 +30,6 @@ public class WhatsAppAcceptedMessageCleanupJob extends PeriodicJob {
     public static final int MIN_RETENTION_DAYS =
             (int) Duration.ofSeconds(WhatsAppChannel.REPLAY_WINDOW_SECONDS).toDays() + 1;
 
-    /** Default retention window when the config key is absent. */
     public static final int DEFAULT_RETENTION_DAYS = MIN_RETENTION_DAYS;
 
     private static final int MAX_RETENTION_DAYS = 3650;

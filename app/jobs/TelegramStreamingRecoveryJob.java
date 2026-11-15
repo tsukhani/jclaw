@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * that Telegram no longer knows about (e.g., user deleted the chat) just
  * produces a logged warning and we continue.
  *
- * <p>JCLAW-1521 widened it into the boot sweep: after the placeholders,
+ * <p>It is also the boot sweep (JCLAW-1521): after the placeholders,
  * {@link InboundRecoverySweep} sends the same note to every other channel
  * turn the restart cut off and re-queues the stored messages that never
  * started. The cutoff is the JVM's start, so nothing this process wrote is

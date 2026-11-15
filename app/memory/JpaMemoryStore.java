@@ -623,7 +623,6 @@ public class JpaMemoryStore implements MemoryStore {
                 .getResultList();
     }
 
-    /** Bind {@code clause}'s parameters from position {@code first}. */
     private static Query bind(Query query, int first, Memory.Clause clause) {
         for (int i = 0; i < clause.params().size(); i++) query.setParameter(first + i, clause.params().get(i));
         return query;

@@ -40,7 +40,6 @@ public final class ChromeBridgePolicy {
 
     private ChromeBridgePolicy() {}
 
-    /** The config key holding {@code setting} for the agent named {@code agentName}. */
     public static String key(String agentName, String setting) {
         return AgentService.AGENT_CONFIG_PREFIX + agentName + ".chromeBridge." + setting;
     }

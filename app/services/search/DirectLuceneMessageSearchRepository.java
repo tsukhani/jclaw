@@ -295,7 +295,6 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         return collectScored(sm, query, null, List.of(), limit, true).stream().map(ScoredId::id).toList();
     }
 
-    /** {@code query} minus the documents whose id is in {@code excludeIds}. */
     private static Query excluding(Query query, Collection<Long> excludeIds) {
         if (excludeIds.isEmpty()) return query;
         var terms = excludeIds.stream().map(id -> new BytesRef(String.valueOf(id))).toList();

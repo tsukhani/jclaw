@@ -109,10 +109,8 @@ public final class ParallelToolExecutor {
             logResult(agent, displayName, unoffered.text());
             return unoffered;
         }
-        // JCLAW-382: gate sensitive/irreversible actions through
-        // DangerousActionGate. No-op for non-dangerous tools — it answers
-        // null before any I/O. Uses the raw (wire-format) name so the
-        // gate's dangerous() lookup matches the registered tool.
+        // JCLAW-382: the gate answers null, before any I/O, for a non-dangerous tool. It gets the raw
+        // (wire-format) name so its dangerous() lookup matches the registered tool.
         var refused = DangerousActionGate.refusal(agent, conversationId, rawName, rawArgs, displayName);
         if (refused != null) {
             return ToolRegistry.ToolResult.text(refused);

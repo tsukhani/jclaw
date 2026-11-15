@@ -412,9 +412,6 @@ public final class AttachmentService {
         }
     }
 
-    /**
-     * Whether any input has an IMAGE kind.
-     */
     public static boolean anyImage(List<Input> inputs) {
         if (inputs == null) return false;
         return inputs.stream().anyMatch(i -> MessageAttachment.KIND_IMAGE.equalsIgnoreCase(i.kind()));

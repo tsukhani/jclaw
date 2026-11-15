@@ -53,7 +53,6 @@ public final class BasetenDecision {
         return JevApi.breaker(target(""));
     }
 
-    /** Whether {@code id} is the ID of one of {@link #MODELS}. */
     public static boolean isModel(String id) {
         return MODELS.stream().anyMatch(m -> m.id().equals(id));
     }
