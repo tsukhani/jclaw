@@ -38,7 +38,7 @@ import java.util.function.Consumer;
  * <p>The router runs on a forked virtual thread while the turn thread builds the prompt for the previous model and
  * starts the call. Its output is held from the reader in {@link Held}, and the turn runs no tool until the route is
  * known. When the router keeps the model and every input the request took from it is unchanged ({@link ModelInputs}),
- * the held output is released in order and the turn carries on; otherwise the call is cancelled by aborting its HTTP
+ * the held output is released in order and the turn carries on; otherwise the call is canceled by aborting its HTTP
  * request, never by interrupting a thread (AGENTS.md, Known pitfalls), and the turn runs on the chosen model.
  *
  * <p>A discarded call is still billed, so a turn speculates only where {@link RouterPolicy#SPECULATE} allows, by

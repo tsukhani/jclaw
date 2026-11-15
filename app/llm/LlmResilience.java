@@ -410,7 +410,7 @@ public final class LlmResilience {
         }
 
         /**
-         * The caller cancelled the stream (JF-377), which says nothing about the provider, so no outcome is charged.
+         * The caller canceled the stream (JF-377), which says nothing about the provider, so no outcome is charged.
          * A HALF_OPEN probe still hands its permit back, by the success the 4xx rule above reports.
          */
         public void cancelled() {

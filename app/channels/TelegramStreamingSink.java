@@ -604,7 +604,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         TelegramChannel.forToken(botToken).sendTurn(chatId, notice, agent, replyToMessageId, messageThreadId);
     }
 
-    /** {@link #cancel}'s work; false, doing nothing, once the sink was sealed, errored, cancelled or stopped. */
+    /** {@link #cancel}'s work; false, doing nothing, once the sink was sealed, errored, canceled or stopped. */
     private boolean quiesce() {
         if (!sealed.compareAndSet(false, true)) return false;
         cancelTypingHeartbeat();

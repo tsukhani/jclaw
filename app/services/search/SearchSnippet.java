@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 
 /**
  * A search hit's excerpt: at most {@link #WINDOW_CHARS} characters of the message, with whitespace runs
- * collapsed to one space, centred on the first case-insensitive match of a query term and marked with
+ * collapsed to one space, centered on the first case-insensitive match of a query term and marked with
  * {@link #CUT_MARK} at each end that was cut. A message that fits comes back whole and unmarked; one with no
  * literal match (the analyzer's stemming can match a form the text does not spell) shows its opening.
  */

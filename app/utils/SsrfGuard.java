@@ -629,7 +629,7 @@ public final class SsrfGuard {
     /**
      * {@link SocketFactory} wired in beside {@link #PROVIDER_SAFE_DNS}: its sockets refuse an
      * {@link #isBlockedForProvider} address before the TCP handshake. OkHttp hands the resolver names only, so
-     * without it an IP literal, configured or named by a redirect's {@code Location}, is dialled unscreened
+     * without it an IP literal, configured or named by a redirect's {@code Location}, is dialed unscreened
      * (JCLAW-1448). Redirects stay on: a hop to an allowed address is followed exactly as before.
      */
     public static final SocketFactory PROVIDER_SAFE_SOCKETS = new SocketFactory() {

@@ -448,7 +448,7 @@ public class ApiGraphEvalController extends Controller {
         target.writeChunk((json + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
-    /** {@code POST /api/graph/eval/blind-sheet}: the blind subset's ids, text, anchors and owner for a second labeller. */
+    /** {@code POST /api/graph/eval/blind-sheet}: the blind subset's ids, text, anchors and owner for a second labeler. */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "measurement harness -- loopback plus X-Loadtest-Auth; writes a file under data/graph-eval")

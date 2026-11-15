@@ -23,7 +23,7 @@ import java.util.function.BooleanSupplier;
  * tears it down on graceful stop, so we re-create it here on the next start. A
  * restart's stop leaves it on instead (JF-269), and this boot takes it over first.
  * It runs off the boot thread (JF-16), and the fork starts an async job before the
- * server binds, so it first waits for the funnelled port to answer: a funnel opened
+ * server binds, so it first waits for the funneled port to answer: a funnel opened
  * earlier forwards to a closed port. Free when the feature is disabled — the common
  * case — and skipped in test mode.
  */

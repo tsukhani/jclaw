@@ -23,7 +23,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Agreement between the committed labels and a blind second labeller over a fixed subset of the cases
+ * Agreement between the committed labels and a blind second labeler over a fixed subset of the cases
  * (JCLAW-1356). Pure: no I/O, no clock.
  */
 public final class Agreement {
@@ -35,7 +35,7 @@ public final class Agreement {
 
     /**
      * {@code covered} of the {@code selected} blind cases carry second labels; the scores are over those, each null
-     * when it has nothing to measure. {@code statusKappa} is over the relation triples both labellers wrote; the
+     * when it has nothing to measure. {@code statusKappa} is over the relation triples both labelers wrote; the
      * {@code valid}, {@code occurs}, {@code valence} and {@code dates} agreements are exact-match shares over matched
      * items where either side has a value. {@code reason} says why no second labels were read, when none were.
      */
@@ -66,8 +66,8 @@ public final class Agreement {
     }
 
     /**
-     * The sheet a blind labeller works from: the selected cases' ids, text and anchors, the set's {@code capturedAt},
-     * and its {@code userMd} when it declares an owner, so the labeller knows whose name stands for the operator.
+     * The sheet a blind labeler works from: the selected cases' ids, text and anchors, the set's {@code capturedAt},
+     * and its {@code userMd} when it declares an owner, so the labeler knows whose name stands for the operator.
      * Nothing else.
      */
     public static JsonObject blindSheet(List<Case> cases, @Nullable String userMd, LocalDate capturedAt) {

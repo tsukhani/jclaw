@@ -148,7 +148,7 @@ public final class TurnFrames {
         return Map.of(TYPE, "error", CONTENT, ErrorRendering.RICH.render(ChannelErrorTemplates.forTurnFailure(error)));
     }
 
-    /** {@code stopped}: the turn was cancelled; whatever it had not committed is gone. */
+    /** {@code stopped}: the turn was canceled; whatever it had not committed is gone. */
     public static Map<String, Object> stopped() {
         return Map.of(TYPE, "stopped");
     }

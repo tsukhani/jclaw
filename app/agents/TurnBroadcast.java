@@ -39,7 +39,7 @@ public final class TurnBroadcast {
         this.cancelled = cancelled;
     }
 
-    /** A streamed turn's, cancelled by {@code isCancelled}; it publishes nothing until {@link #acquired}. */
+    /** A streamed turn's, canceled by {@code isCancelled}; it publishes nothing until {@link #acquired}. */
     static TurnBroadcast forStreamedTurn(AtomicBoolean isCancelled) {
         return new TurnBroadcast(true, isCancelled);
     }
@@ -49,7 +49,7 @@ public final class TurnBroadcast {
         return owning(conversationId, generation, null);
     }
 
-    /** {@link #owning(Long, long)} for a turn cancelled by {@code cancelled}, its owner's flag (JF-197). */
+    /** {@link #owning(Long, long)} for a turn canceled by {@code cancelled}, its owner's flag (JF-197). */
     public static TurnBroadcast owning(Long conversationId, long generation, @Nullable AtomicBoolean cancelled) {
         var broadcast = new TurnBroadcast(true, cancelled);
         broadcast.acquired(conversationId, generation);

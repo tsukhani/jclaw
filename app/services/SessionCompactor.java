@@ -1606,7 +1606,7 @@ public final class SessionCompactor {
 
     /**
      * The line above a segment: the dates of the first and last rows it covers, in the operator's zone. A summary from
-     * before JF-161 whose rows could not be dated is labelled with the time it was written.
+     * before JF-161 whose rows could not be dated is labeled with the time it was written.
      */
     public static String segmentLabel(SessionCompaction segment) {
         var zone = TimezoneResolver.appZone();

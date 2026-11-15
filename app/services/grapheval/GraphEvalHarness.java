@@ -127,7 +127,7 @@ public final class GraphEvalHarness {
 
     /**
      * Runs the committed set. {@code ownerName} is the set's declared owner, a known name to the candidates, or null;
-     * {@code secondLabels} are the blind second labeller's cases, empty when there are none; {@code adjudications}
+     * {@code secondLabels} are the blind second labeler's cases, empty when there are none; {@code adjudications}
      * are the verdicts on earlier wrong records.
      */
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,

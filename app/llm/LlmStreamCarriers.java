@@ -358,7 +358,7 @@ interface LlmStreamCarriers {
         private final StringBuilder reasoningText = new StringBuilder();
 
         /**
-         * A call the turn started and cancelled unseen (JF-377). Its provider bills it, but it is no part of the
+         * A call the turn started and canceled unseen (JF-377). Its provider bills it, but it is no part of the
          * reply, so it stays out of the sums above, which the answering model's prices apply to.
          *
          * @param providerUsage whether the counts are the provider's, which only a call that finished reports;

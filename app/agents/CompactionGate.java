@@ -331,7 +331,7 @@ public final class CompactionGate {
         }
     }
 
-    // Never cancelled or interrupted: the summary is stored through H2 (AGENTS.md, Known pitfalls), and every wait
+    // Never canceled or interrupted: the summary is stored through H2 (AGENTS.md, Known pitfalls), and every wait
     // in it ends with its own call's timeout.
     private static void startInBackground(Long conversationId, Supplier<CompactionResult> body) {
         var mine = new CompletableFuture<CompactionResult>();

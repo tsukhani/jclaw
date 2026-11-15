@@ -461,7 +461,7 @@ public class ConfigService {
             under(OtelConfig.KEY_PREFIX, OtelConfig::rejectionFor),
             // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
             under(JevSettings.KEY_PREFIX, JevSettings::rejectionFor),
-            // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
+            // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialed.
             under(DecisionSettings.KEY_PREFIX, DecisionSettings::rejectionFor),
             // A typo in either sandbox key reads as off and leaves processes unconfined.
             HarnessSandbox::rejectionFor,

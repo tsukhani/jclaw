@@ -17,7 +17,7 @@ import java.util.List;
  * Animated images from still frames, with the JDK alone. The JDK has no WebP reader or writer, so the
  * browser encodes each frame as WebP and {@link #webp} only joins them: an animated WebP is a RIFF container
  * holding ordinary stills, a header, and a duration per frame. {@link #gif} decodes PNG frames and writes a
- * GIF through ImageIO's GIF writer, which reduces each frame to 256 colours.
+ * GIF through ImageIO's GIF writer, which reduces each frame to 256 colors.
  */
 public final class AnimatedImages {
 

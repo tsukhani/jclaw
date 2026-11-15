@@ -473,7 +473,7 @@ final class SecretCapture {
 
     /**
      * Take each rule's value from {@code response}, an answer {@link #answers} accepts, as {@link #judge} decided, and
-     * store them all; null when the judgement withheld the answer, or a value cannot be taken or stored. A rule taking
+     * store them all; null when the judgment withheld the answer, or a value cannot be taken or stored. A rule taking
      * a JSON field reads the body, which the caller then sends from {@link Taken#body} rather than from the response.
      */
     @Nullable Taken take(Response response, boolean noBody) throws IOException {

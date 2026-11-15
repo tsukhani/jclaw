@@ -231,7 +231,7 @@ public final class LatencyTrace {
 
     /**
      * Record how a call started on the previous turn's model while the router decided ended (JF-377): kept, with how
-     * long it had run when the route confirmed it, or discarded, with how long it ran before it was cancelled. Each
+     * long it had run when the route confirmed it, or discarded, with how long it ran before it was canceled. Each
      * segment's count is how many turns it happened on, and the two counts together are the turns that speculated.
      */
     public void recordRouteSpeculation(boolean kept, long elapsedMs) {
