@@ -296,14 +296,14 @@ class McpTaskActionFenceTest extends UnitTest {
     }
 
     @Test
-    void aFireWarnsOnceOfANamedActionItsServerDoesNotOffer() throws Exception {
+    void aFireWarnsOnceOfANamedActionItsServerDoesNotOffer() {
         assertEquals(List.of("WARN " + TaskToolPolicy.EVENT_CATEGORY + " Task 'stale-fire' (agent 'jf373-agent') names "
                         + "MCP actions their servers do not offer, so its runs cannot use them: " + HANDLE + ": removed_action"),
                 fireWarnings("stale-fire", "[\"" + HANDLE + "/search_messages\",\"" + HANDLE + "/removed_action\"]"));
     }
 
     @Test
-    void aFireWhoseNamedActionsAreAllOfferedWarnsNothing() throws Exception {
+    void aFireWhoseNamedActionsAreAllOfferedWarnsNothing() {
         assertEquals(List.of(), fireWarnings("current-fire", NARROWED));
     }
 
