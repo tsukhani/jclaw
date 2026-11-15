@@ -26,6 +26,24 @@ def dockerPrelude() {
     '''
 }
 
+// The number of Sonar issues open on the project (OPEN or CONFIRMED), each one named in the log. The operator's rule
+// is no GitHub Release while any is open, so a candidate must leave none and the Release stage refuses while one is
+// (JF-441). Accepted issues and false positives are resolved, so they do not count. Call it once the analysis it
+// judges has been processed: waitForQualityGate waits for that.
+def sonarOpenIssues() {
+    def open = 0
+    withSonarQubeEnv('SonarQube') {
+        open = Integer.parseInt(sh(returnStdout: true, script: '''
+            set +x
+            body=$(curl -fsS -u "${SONAR_TOKEN:-$SONAR_AUTH_TOKEN}:" \
+                "$SONAR_HOST_URL/api/issues/search?componentKeys=abundent:jclaw&issueStatuses=OPEN,CONFIRMED&ps=100")
+            printf '%s' "$body" | jq -r '.issues[] | "  \\(.rule) \\(.component | sub("^abundent:jclaw:"; "")):\\(.line // "-") \\(.message)"' >&2
+            printf '%s' "$body" | jq -er '.paging.total'
+        ''').trim())
+    }
+    return open
+}
+
 pipeline {
     agent any
 
@@ -54,6 +72,8 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
+        string(name: 'CANDIDATE', defaultValue: '', description: 'A commit /release-check pushed to candidate/<sha>: test it and run Sonar on it, and package and release nothing (JF-441)')
+        string(name: 'CANDIDATE_VERSION', defaultValue: '', description: 'The version the candidate will be released as, such as 1.0.19, which its Sonar analysis carries')
         booleanParam(name: 'PUBLISH_DEVCONTAINER', defaultValue: false, description: 'Check to build and push .devcontainer/Dockerfile to ghcr.io/tsukhani/jclaw-devcontainer (independent of RELEASE; rerun only when .devcontainer/ changes)')
     }
 
@@ -110,6 +130,26 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
+                // A candidate build tests the commit /release-check names, not main: the job fetches every branch, so
+                // the candidate is already in the clone, and it is checked out before anything installs from it.
+                script {
+                    if (params.CANDIDATE) {
+                        if (params.RELEASE || params.PUBLISH_DEVCONTAINER) {
+                            error('A candidate build tests and analyses only: untick RELEASE and PUBLISH_DEVCONTAINER.')
+                        }
+                        if (!params.CANDIDATE.matches('[0-9a-f]{40}')) {
+                            error("CANDIDATE is a full commit sha, not '${params.CANDIDATE}'.")
+                        }
+                        if (!params.CANDIDATE_VERSION.matches('[0-9]+[.][0-9]+[.][0-9]+')) {
+                            error("CANDIDATE_VERSION is the version the candidate becomes, such as 1.0.19, not '${params.CANDIDATE_VERSION}'.")
+                        }
+                        if (sh(returnStatus: true, script: "git cat-file -e ${params.CANDIDATE}^{commit}") != 0) {
+                            error("Commit ${params.CANDIDATE} is not in this clone: push it to candidate/${params.CANDIDATE.substring(0, 12)} on origin first.")
+                        }
+                        sh "git checkout --force --detach ${params.CANDIDATE}"
+                        currentBuild.displayName = "#${env.BUILD_NUMBER} candidate ${params.CANDIDATE.substring(0, 12)}"
+                    }
+                }
                 sh 'java -version'
                 sh 'play version || echo "Play not found at ${PLAY_HOME}"'
                 // pnpm is installed here rather than resolved through corepack:
@@ -161,13 +201,38 @@ pipeline {
                     // of a commit whose own build had passed (build 1372). The
                     // record is the description post { success } writes.
                     def tested = "tested ${env.BUILD_COMMIT}".toString()
-                    env.ALREADY_TESTED = (params.RELEASE
-                        && currentBuild.previousSuccessfulBuild?.description == tested) ? 'true' : 'false'
+                    def releaseOfTested = params.RELEASE && currentBuild.previousSuccessfulBuild?.description == tested
+                    // /deploy's version bump over a green candidate: that candidate's build ran the whole suite and
+                    // Sonar on this tree but for its version line, so this build skips them too (JF-441).
+                    env.TESTED_CANDIDATE = ''
+                    if (!params.RELEASE && !params.CANDIDATE && sh(returnStatus: true, script: '''
+                        set -e
+                        [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2 ]
+                        [ "$(git diff --name-only HEAD^ HEAD)" = "conf/application.conf" ]
+                        ! git diff -U0 HEAD^ HEAD -- conf/application.conf | grep -E '^[-+]' \\
+                            | grep -v -E '^(\\+\\+\\+|---) ' | grep -v -E '^[-+]application[.]version='
+                    ''') == 0) {
+                        def parent = sh(returnStdout: true, script: 'git rev-parse HEAD^').trim()
+                        def b = currentBuild.previousBuild
+                        for (int i = 0; i < 30 && b != null && !env.TESTED_CANDIDATE; i++) {
+                            if (b.result == 'SUCCESS' && b.description == "tested ${parent}".toString()) {
+                                env.TESTED_CANDIDATE = parent
+                            }
+                            b = b.previousBuild
+                        }
+                    }
+                    env.ALREADY_TESTED = (releaseOfTested || env.TESTED_CANDIDATE) ? 'true' : 'false'
+                    env.SONAR_VERSION = params.CANDIDATE ? params.CANDIDATE_VERSION : env.APP_VERSION
                 }
                 echo "application.version = ${env.APP_VERSION}"
                 script {
                     if (env.ALREADY_TESTED == 'true') {
-                        echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
+                        if (env.TESTED_CANDIDATE) {
+                            echo "Commit ${env.BUILD_COMMIT} changes only the version line of candidate ${env.TESTED_CANDIDATE}, " +
+                                 "whose build passed the whole suite and Sonar: skipping Test and Sonar Analysis"
+                        } else {
+                            echo "Commit ${env.BUILD_COMMIT} already passed the whole suite: skipping Test and Sonar Analysis"
+                        }
                         // The Sonar plugin badges only a build that ran the analysis, so give this one the same
                         // badge (Badge plugin). Its tooltip is escaped twice, so it must hold no apostrophe.
                         def sonarDashboard = 'https://sonar.abundent.com/dashboard?id=abundent%3Ajclaw'
@@ -372,13 +437,26 @@ pipeline {
                     def analysed = false
                     catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                         withSonarQubeEnv('SonarQube') {
-                            sh "./gradlew sonar -Dsonar.projectVersion=v${env.APP_VERSION}"
+                            sh "./gradlew sonar -Dsonar.projectVersion=v${env.SONAR_VERSION}"
                         }
                         analysed = true
+                    }
+                    if (params.CANDIDATE && !analysed) {
+                        error("Sonar analysis did not complete for candidate ${params.CANDIDATE}, so it is not verified: run it again.")
                     }
                     if (analysed) {
                         timeout(time: 5, unit: 'MINUTES') {
                             waitForQualityGate abortPipeline: true
+                        }
+                        // A green gate can still leave open issues, and a version with any open is never released,
+                        // so a candidate passes only at 0: the release build then skips Sonar on its word (JF-441).
+                        if (params.CANDIDATE) {
+                            def open = sonarOpenIssues()
+                            if (open > 0) {
+                                error("Candidate ${params.CANDIDATE} leaves ${open} open Sonar issue(s), listed above: " +
+                                      'fix them in a new candidate, or accept or mark them in Sonar and run this one again.')
+                            }
+                            echo "Candidate ${params.CANDIDATE}: Sonar shows 0 open issues."
                         }
                     } else {
                         echo 'Sonar analysis did not complete — skipping the quality gate. ' +
@@ -389,6 +467,9 @@ pipeline {
         }
 
         stage('Package') {
+            when {
+                expression { !params.CANDIDATE }
+            }
             steps {
                 // ONE Gradle invocation, both packaging tasks. This is load-
                 // bearing, not style: playDist and playBundle each declare
@@ -468,6 +549,11 @@ pipeline {
             steps {
                 script {
                     def version = "v${env.APP_VERSION}"
+                    // The operator's rule: no GitHub Release while Sonar shows any open issue (JF-441).
+                    def open = sonarOpenIssues()
+                    if (open > 0) {
+                        error("Sonar shows ${open} open issue(s), listed above: ${version} is not released while any is open.")
+                    }
                     echo "Creating release: ${version}"
 
                     // No local `git tag` here: /deploy pushes the signed tag once
@@ -587,7 +673,7 @@ pipeline {
 
         stage('Publish Dev Container') {
             when {
-                expression { params.PUBLISH_DEVCONTAINER }
+                expression { params.PUBLISH_DEVCONTAINER && !params.CANDIDATE }
             }
             steps {
                 // script{} wrapper is required, not cosmetic: Declarative

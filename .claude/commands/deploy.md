@@ -56,6 +56,13 @@ Commits already on `github/main` are left out: GitHub verified them when it took
 
 If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 
+**Preflight: a green candidate for this commit**
+
+`/release-check` runs this release's Jenkins build before a version is spent: the whole suite and Sonar on `HEAD`, analysed as the new version, passing only when Sonar shows 0 open issues. Find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <HEAD's first 12>`, `result` is `SUCCESS`, and `description` is `tested <HEAD's full SHA>`.
+
+- **Found:** `/usr/bin/git status --porcelain` must print nothing, since an uncommitted file would ship without the candidate having seen it, and the version Phase 1 computes must be the candidate's `CANDIDATE_VERSION` (`mcp__jenkins__getBuild` with `tree: "actions[parameters[name,value]]"`). Skip the Sonar pre-check below, which the candidate's real analysis supersedes. The release commit's build then skips Test and Sonar, because its tree differs from the candidate's only in the version line.
+- **Not found, or `main` has moved past it:** stop and offer `/release-check <the same argument>`. Deploy without one only on the user's explicit yes, which covers this release only; then run the Sonar pre-check below, and the release commit's build runs Test and Sonar itself.
+
 **Preflight: Sonar's rules over what this release changes**
 
 Jenkins reaches Sonar only after its tests, and a failed quality gate aborts the build before Package. Check first, while stopping costs no version:
@@ -138,6 +145,13 @@ It cannot see duplication or coverage, the gate's other two conditions, so a cle
       xargs -r /usr/bin/git push origin --delete
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
+
+    Then delete the `candidate/*` branches `/release-check` pushed for this release or an earlier one, the same way. Each holds a commit of `main`, so the release contains every one:
+    ```bash
+    /usr/bin/git branch -r --list 'origin/candidate/*' | sed 's|^ *origin/||' |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" "$REL" && echo "$b"; done |
+      xargs -r /usr/bin/git push origin --delete
+    ```
 18. **Delete the local branches this release merged, and list the worktrees it finished.** Only after both pushes succeeded. A branch landed outside the factory, such as an `agent/*` branch you merged yourself, stays behind otherwise; the factory deletes only the branches it lands. `git branch -d` refuses a branch that is not merged, so this cannot lose work, and a branch checked out in a worktree is skipped. A worktree is listed, never removed: one that is clean and merged can still belong to another session, mid-run, so removing it is the user's call (`/usr/bin/git worktree remove <path>`, then `/usr/bin/git branch -d <branch>`):
     ```bash
     /usr/bin/git for-each-ref --merged "$REL" --format='%(refname:short) %(worktreepath)' refs/heads |
@@ -154,7 +168,7 @@ It cannot see duplication or coverage, the gate's other two conditions, so a cle
 
 The pre-push hook runs only the tests the change reaches, so the release commit's Jenkins build is the first whole-suite run it gets. The tag waits for that build: a version whose build fails is never tagged, and a RELEASE build cannot run for it.
 
-19. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 20.
+19. **Find the release commit's build.** The push to `origin` starts the `JClaw` job (a Bitbucket webhook on `main`). Its build is the newest one whose checked-out commit is `$REL`: `mcp__jenkins__getBuild` with `jobFullName: "JClaw"` and `tree: "number,building,result,actions[lastBuiltRevision[SHA1]]"` returns it as `lastBuiltRevision.SHA1`. A build takes about 20–25 minutes; one whose Setup reports a green candidate skips Test and Sonar, so check it after five minutes instead. Do not poll: start a background `sleep 1320`, check when it fires, and then every five minutes until `building` is false. If the Jenkins tools are unavailable, stop here and report the tag as pending, with the command from step 20.
 20. **On `SUCCESS`, tag `$REL` and push the tag to both remotes.** The lowercase `-s` makes the tag annotated and signed; the message stays short because the notes live in the commit body:
     ```bash
     /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>" "$REL"
@@ -167,7 +181,7 @@ The pre-push hook runs only the tests the change reaches, so the release commit'
 
 **Phase 5: Report**
 
-22. Summarize in one message: new version, commit hash, branch name, the Sonar pre-check's findings (or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
+22. Summarize in one message: new version, commit hash, branch name, the candidate build the release relied on (or the user's yes to go without one, and the Sonar pre-check's findings or why it did not finish), both push destinations with their reported ref updates, the Jenkins build and its result, the tag (or why there is none), the Renovate and candidate branches step 17 deleted and the local branches step 18 deleted, if any, and the worktrees step 18 listed. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed). Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`

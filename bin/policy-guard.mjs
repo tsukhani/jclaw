@@ -15,6 +15,10 @@ const REMOTES = new Set(["origin", "github"]);
 const RELEASE = /^Release v\d+\.\d+\.\d+$/;
 const VERSION_TAG = /^refs\/tags\/v\d+\.\d+\.\d+$/;
 const NAMED_COMMIT = /^([0-9a-f]{40}):refs\/heads\/main$/;
+// /release-check names a candidate branch for its commit, so the name alone says which commit Jenkins tests (JF-441).
+const CANDIDATE_PUSH = /^([0-9a-f]{40}):refs\/heads\/candidate\/([0-9a-f]{7,40})$/;
+const CANDIDATE_BRANCH = /^(?:refs\/heads\/)?candidate\/[0-9a-f]{7,40}$/;
+const CANDIDATE_REF = /^refs\/heads\/candidate\/([0-9a-f]{7,40})$/;
 const STOPS = new Set(["restart", "stop", "restore", "repair", "compact", "reset", "upgrade", "uninstall"]);
 const APPROVAL = "JCLAW_OPERATOR_APPROVED";
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
@@ -33,7 +37,7 @@ const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
     + "a \"Release vX.Y.Z\" commit on main pushed to origin or github as HEAD or by its full sha, a version tag pushed "
-    + "alone, and /renovate's deletion of renovate/* branches.",
+    + "alone, /release-check's candidate/<sha> branch on origin, and the deletion of renovate/* and candidate/* branches.",
   noVerify: "Skipping git hooks is refused (AGENTS.md Policy): fix what the hook reports, then commit again.",
   hooksPath: "Changing core.hooksPath skips the repository's hooks (AGENTS.md Policy): leave it at .githooks.",
   skipTests: "JCLAW_SKIP_TESTS is a human's bypass, never an agent's (AGENTS.md Policy): let the pre-push tests run.",
@@ -320,10 +324,15 @@ function pushAllowed(rest, state) {
       const s = state(rev);
       return s.branch === "main" && s.mainCheckout && s.onMain && RELEASE.test(s.subject);
     }
+    const candidate = rest[0] === "origin" ? rest[1].match(CANDIDATE_PUSH) : null;
+    if (candidate && candidate[1].startsWith(candidate[2])) {
+      const s = state(candidate[1]);
+      return s.branch === "main" && s.mainCheckout && s.onMain;
+    }
   }
   // The names usually arrive through xargs, where only the ref layer sees them.
   return rest[0] === "origin" && rest[1] === "--delete"
-    && rest.slice(2).every((r) => r.startsWith("renovate/") || r.startsWith("refs/heads/renovate/"));
+    && rest.slice(2).every((r) => r.startsWith("renovate/") || r.startsWith("refs/heads/renovate/") || CANDIDATE_BRANCH.test(r));
 }
 
 function stashesUntracked(rest) {
@@ -512,7 +521,17 @@ export function refsVerdict(text, remote, state) {
 }
 
 function refAllowed(localRef, localSha, remoteRef, remoteSha, remote, state) {
-  if (/^0+$/.test(localSha)) return remote === "origin" && remoteRef.startsWith("refs/heads/renovate/");
+  if (/^0+$/.test(localSha)) {
+    return remote === "origin" && (remoteRef.startsWith("refs/heads/renovate/") || CANDIDATE_REF.test(remoteRef));
+  }
+  const candidate = remoteRef.match(CANDIDATE_REF);
+  if (candidate) {
+    // Created once at its commit and never moved, so a candidate's name always says what Jenkins tested.
+    if (remote !== "origin" || localRef !== localSha || !localSha.startsWith(candidate[1])) return false;
+    if (!/^0+$/.test(remoteSha) && remoteSha !== localSha) return false;
+    const s = state(localSha, remoteSha);
+    return s.branch === "main" && s.mainCheckout && s.onMain;
+  }
   if (!REMOTES.has(remote)) return false;
   if (VERSION_TAG.test(remoteRef)) return localRef === remoteRef;
   if (remoteRef !== "refs/heads/main") return false;

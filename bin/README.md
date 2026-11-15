@@ -219,8 +219,10 @@ The command layer refuses:
   prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting.
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
-`main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, and the deletion of `renovate/*`
-branches on `origin`. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
+`main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, the deletion of `renovate/*`
+and `candidate/*` branches on `origin`, and `/release-check`'s candidate: a commit on `main`, pushed from the main
+checkout by its full SHA to `origin`'s `candidate/<a prefix of that SHA>`, which the ref layer lets be created but never
+moved. `pre-push` runs no tests for a push of candidates alone, since their Jenkins build runs the whole suite. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
 back. `/deploy` pushes by SHA, so a commit another session lands between its two pushes goes out in neither. `pre-push`
 tests the checkout, so a named commit that is not HEAD passes only if it was already tested.
 
