@@ -213,7 +213,7 @@ Only the rows the user named. Work in `../jclaw-wcag`; never edit the primary tr
    ```
    Verify :3100 is free and :9000 still answers.
 6. **Commit in the worktree**, one commit for the batch (or one per area if the batch is large). The GitHub mirror is public, so the body is a published artifact: state what changed, the measured before/after, and what was deliberately left. Never push, never merge — that's the user's call via `/deploy`.
-7. Report the worktree path (`../jclaw-wcag`), branch (`wcag-fixes`), commit hashes, the gate result, and the rows still open. Leave the worktree for the user to review; remove it only on their say-so.
+7. Report the worktree path (`../jclaw-wcag`), branch (`wcag-fixes`), commit hashes, the gate result, and the rows still open. Leave the worktree for the user to review. Once their merge has landed and `main` contains the branch tip, remove the worktree and the branch in the same turn without asking: `/usr/bin/git worktree remove ../jclaw-wcag` (never `--force`, so uncommitted work stops it) and `/usr/bin/git branch -d wcag-fixes` (never `-D`). Before an unmerged worktree goes, ask.
 
 ---
 

@@ -103,4 +103,4 @@ Present a **triage table** (rule/file, severity/probability/density, count, verd
 - Mark a hotspot FIXED only after its code fix actually lands and tests pass — never pre-emptively.
 - Duplication >60% is a *consideration gate*, not an auto-fix mandate — REMEDIATE only when a clean, non-coupling shared abstraction genuinely exists; otherwise ACCEPT (the wrong abstraction is worse than the duplication) and document why. Any remediation must be behavior-preserving and leave tests green.
 - Honor the known-FP list — "fixing" those reintroduces real bugs.
-- When done with the worktree, remove it only on the user's say-so (`/usr/bin/git worktree remove ../jclaw-sonar`).
+- Once the user's merge has landed and `main` contains the branch tip, remove the worktree and the branch in the same turn without asking: `/usr/bin/git worktree remove ../jclaw-sonar` (never `--force`, so uncommitted work stops it) and `/usr/bin/git branch -d sonar-fixes` (never `-D`). Before an unmerged worktree goes, ask.
