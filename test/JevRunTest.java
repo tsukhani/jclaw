@@ -18,6 +18,7 @@ import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -46,6 +47,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 /**
  * A Jev run end to end in real Chromium (JCLAW-1274), on an inline {@code data:} form. Jev is
@@ -99,6 +101,7 @@ class JevRunTest extends UnitTest {
 
     private static Playwright playwright;
     private static Browser browser;
+    private static @Nullable String noBrowser = "JCLAW_PLAYWRIGHT_TEST is not set";
     private Page page;
     private JevPage jev;
     private final AtomicInteger jevCalls = new AtomicInteger();
@@ -115,36 +118,46 @@ class JevRunTest extends UnitTest {
         if (!isPlaywrightTestEnabled()) return;
         // startDriver's lock: a driver started beside the tool's own leaves the tool unable to tell which is its.
         playwright = PlaywrightBrowserTool.startDriver().playwright();
-        browser = launchOrNull(playwright);
+        var launched = launch(playwright, List.of());
+        browser = launched.browser();
+        noBrowser = launched.missing();
     }
 
-    /** Headless Chromium, or null when Playwright's Chromium is not installed — the browser tests then skip. */
-    static Browser launchOrNull(Playwright playwright) {
-        return launchOrNull(playwright, List.of());
-    }
+    /** A headless Chromium, or why there is none. */
+    record Launch(@Nullable Browser browser, @Nullable String missing) {}
 
-    /** {@link #launchOrNull(Playwright)} with Chromium launch arguments. */
-    static Browser launchOrNull(Playwright playwright, List<String> args) {
+    /** Launch headless Chromium; a missing build is a {@link Launch} naming it, any other failure throws. */
+    static Launch launch(Playwright playwright, List<String> args) {
         try {
-            return playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true).setArgs(args));
+            return new Launch(
+                    playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true).setArgs(args)), null);
         } catch (PlaywrightException e) {
-            if (String.valueOf(e.getMessage()).contains("Executable doesn't exist")) return null;
-            throw e;
+            var missing = missingChromium(e.getMessage());
+            if (missing == null) throw e;
+            return new Launch(null, missing);
         }
     }
 
-    /** {@link #launchOrNull}, skipping the calling test when there is no Chromium to launch. */
+    // The path is the build this Playwright pins, so a cache holding only other revisions says which one it lacks.
+    private static final Pattern MISSING_EXECUTABLE = Pattern.compile("Executable doesn't exist at [^\\r\\n]+");
+
+    /** The skip reason for a launch that found no Chromium executable, or null for any other launch failure. */
+    static @Nullable String missingChromium(@Nullable String launchFailure) {
+        if (launchFailure == null) return null;
+        var m = MISSING_EXECUTABLE.matcher(launchFailure);
+        return m.find() ? "Playwright's Chromium is not installed: " + m.group() : null;
+    }
+
+    /** {@link #launch(Playwright, List)}, skipping the calling test when there is no Chromium to launch. */
     static Browser launchOrSkip(Playwright playwright) {
-        var launched = launchOrNull(playwright);
-        Assumptions.assumeTrue(launched != null, "Playwright Chromium is not installed");
-        return launched;
+        return launchOrSkip(playwright, List.of());
     }
 
     /** {@link #launchOrSkip(Playwright)} with Chromium launch arguments. */
     static Browser launchOrSkip(Playwright playwright, List<String> args) {
-        var browser = launchOrNull(playwright, args);
-        Assumptions.assumeTrue(browser != null, "Playwright Chromium is not installed");
-        return browser;
+        var launched = launch(playwright, args);
+        Assumptions.assumeTrue(launched.browser() != null, launched.missing());
+        return launched.browser();
     }
 
     @AfterAll
@@ -180,8 +193,7 @@ class JevRunTest extends UnitTest {
     }
 
     private static void requireBrowser() {
-        Assumptions.assumeTrue(isPlaywrightTestEnabled() && browser != null,
-                "JCLAW_PLAYWRIGHT_TEST is not set, or Playwright Chromium is not installed");
+        Assumptions.assumeTrue(browser != null, noBrowser);
     }
 
     // --- the stand-in for Jev ----------------------------------------------------------------
@@ -598,6 +610,37 @@ class JevRunTest extends UnitTest {
             assertEquals("The goal gives no value for this field; nothing typed. Put every value to enter in the goal",
                     e.getMessage(), "the object is complete, so the goal-lacks-it guidance must survive");
         }
+    }
+
+    // --- the skip reason (no browser) --------------------------------------------------------
+
+    @Test
+    void aMissingBuildSkipsNamingTheExecutablePlaywrightLookedFor() {
+        var shell = "/Users/op/Library/Caches/ms-playwright/chromium_headless_shell-1248/"
+                + "chrome-headless-shell-mac-arm64/chrome-headless-shell";
+        var failure = """
+                Error {
+                  message='Executable doesn't exist at %s
+                ╔════════════════════════════════════════════════════════╗
+                ║ Looks like Playwright was just installed or updated.   ║
+                ╚════════════════════════════════════════════════════════╝
+                  name='Error
+                  stack='Error: Executable doesn't exist at %s
+                    at executablePathOrDie (coreBundle.js:34527:19)
+                }""".formatted(shell, shell);
+        assertEquals("Playwright's Chromium is not installed: Executable doesn't exist at " + shell,
+                missingChromium(failure));
+        assertEquals("Playwright's Chromium is not installed: Executable doesn't exist at /Volumes/Data Drive/pw/"
+                        + "chromium_headless_shell-1248/chrome-headless-shell",
+                missingChromium("Error {\n  message='Executable doesn't exist at /Volumes/Data Drive/pw/"
+                        + "chromium_headless_shell-1248/chrome-headless-shell\r\n╔══╗"));
+    }
+
+    @Test
+    void aLaunchFailureThatIsNotAMissingBuildIsNoSkip() {
+        assertNull(missingChromium("Error {\n  message='Browser closed.\n==== Browser output: ====\n}"));
+        assertNull(missingChromium(""));
+        assertNull(missingChromium(null));
     }
 
     // --- the text-helper contract (no browser) ------------------------------------------------
