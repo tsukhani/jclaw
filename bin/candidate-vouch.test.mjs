@@ -139,29 +139,33 @@ test("the CLI exits 2 without asking Jenkins for a sha that is not a full one or
   });
 });
 
-// The real pre-push hook, policy guard and vouch script in a scratch repository, with ./jclaw.sh and ./gradlew stubbed
-// to log how they were called: the suites they run are the boundary, and what the hook decides is under test.
+// The real pre-push hook, policy guard, vouch script and factory frontend gate in a scratch repository, with ./jclaw.sh
+// and ./gradlew stubbed to log how they were called: the suites they run are the boundary, and what the hook decides is
+// under test. With tracking, main tracks origin/main and the backend selection, which reads compiled test classes the
+// scratch repository has none of, is stubbed to select nothing.
 const STUB = `#!/bin/sh
-echo "$(basename "$0") $*" >> "$STUB_LOG"
+echo "$(basename "$0") $*\${JCLAW_TEST_FRONTEND:+ (JCLAW_TEST_FRONTEND=$JCLAW_TEST_FRONTEND)}" >> "$STUB_LOG"
 [ "$1" = check ] && exit "\${STUB_CHECK_RC:-0}"
 exit 0
 `;
 
-const inReleaseRepo = (respond, body) => withJenkins(respond, async ({ config, dir, seen }) => {
+const inReleaseRepo = (respond, body, { tracking = false } = {}) => withJenkins(respond, async ({ config, dir, seen }) => {
   const stubLog = join(dir, "stub.log");
   const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", JCLAW_CLAUDE_JSON: config,
     STUB_LOG: stubLog };
-  delete env.JCLAW_SKIP_TESTS;
+  for (const k of ["JCLAW_SKIP_TESTS", "JCLAW_TEST_BACKEND", "JCLAW_TEST_FRONTEND"]) delete env[k];
   const git = (cwd, ...args) => spawnSync("git", args, { cwd, env, encoding: "utf8" });
   const work = join(dir, "work");
   git(dir, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(dir, "init", "-q", "-b", "main", work);
   for (const [k, v] of [["user.name", "t"], ["user.email", "t@example.invalid"], ["commit.gpgsign", "false"],
     ["core.hooksPath", ".githooks"]]) git(work, "config", k, v);
-  for (const d of [".githooks", "bin", "conf", "frontend"]) mkdirSync(join(work, d));
+  for (const d of [".githooks", ".sandcastle", "bin", "conf", "frontend"]) mkdirSync(join(work, d));
   copyFileSync(join(ROOT, ".githooks", "pre-push"), join(work, ".githooks", "pre-push"));
+  for (const f of ["frontend-gate.ts", "package.json"]) copyFileSync(join(ROOT, ".sandcastle", f), join(work, ".sandcastle", f));
   for (const f of ["policy-guard.mjs", "candidate-vouch.mjs"]) copyFileSync(join(ROOT, "bin", f), join(work, "bin", f));
   writeFileSync(join(work, "bin", "ok.test.mjs"), 'import { test } from "node:test";\ntest("ok", () => {});\n');
+  if (tracking) writeFileSync(join(work, "bin", "select-tests.mjs"), 'console.log("NONE");\n');
   for (const f of ["jclaw.sh", "gradlew"]) {
     writeFileSync(join(work, f), STUB);
     chmodSync(join(work, f), 0o755);
@@ -171,9 +175,12 @@ const inReleaseRepo = (respond, body) => withJenkins(respond, async ({ config, d
   git(work, "add", "-A");
   git(work, "commit", "-q", "-m", "Release v1.0.0");
   git(work, "remote", "add", "origin", join(dir, "origin.git"));
-  spawnSync("git", ["push", "-q", "origin", "HEAD"], { cwd: work, env: { ...env, JCLAW_SKIP_TESTS: "1" } });
+  spawnSync("git", ["push", "-q", ...(tracking ? ["-u"] : []), "origin", "HEAD"], { cwd: work, env: { ...env, JCLAW_SKIP_TESTS: "1" } });
   const commit = (message, files) => {
-    for (const [path, text] of Object.entries(files)) writeFileSync(join(work, path), text);
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(work, path)), { recursive: true });
+      writeFileSync(join(work, path), text);
+    }
     git(work, "add", "-A");
     git(work, "commit", "-q", "-m", message);
     return git(work, "rev-parse", "HEAD").stdout.trim();
@@ -193,7 +200,7 @@ const inReleaseRepo = (respond, body) => withJenkins(respond, async ({ config, d
 const BUMP = { "conf/application.conf": "application.name=t\napplication.version=1.0.1\n" };
 const testedAs = (sha, extra = {}) => candidate({ displayName: `#1418 candidate ${sha.slice(0, 12)}`, description: `tested ${sha}`,
   ...extra });
-const EVERY_TEST = ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test"];
+const EVERY_TEST = ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava", "jclaw.sh test (JCLAW_TEST_FRONTEND=1)"];
 
 test("the release commit a green candidate tested runs only the fast checks and the bin/ tests, and says why", async () => {
   let builds = [];
@@ -226,6 +233,71 @@ test("over a candidate whose range touched neither the frontend nor bin/, only t
     strictEqual(pushed.lines.includes("[jclaw pre-push] Running the bin/ script tests..."), false);
     deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only"]);
   });
+});
+
+test("over a candidate whose range touched only chrome-extension/, the fast checks take in the frontend", async () => {
+  let builds = [];
+  await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed }) => {
+    commit("feat: an extension change", { "chrome-extension/background.js": "b\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    builds = [testedAs(release)];
+    const pushed = await push();
+    strictEqual(pushed.code, 0, pushed.lines.join("\n"));
+    deepStrictEqual(stubbed(), ["jclaw.sh check"]);
+  });
+});
+
+const scopedRun = (release, frontend) => [
+  `[jclaw pre-push] No green candidate vouches for ${release} (no green candidate build tested it): running the tests.`,
+  "[jclaw pre-push] Running the fast checks...",
+  "[jclaw pre-push] Compiling the tests...",
+  `[jclaw pre-push] Backend: nothing the change reaches; frontend checks: ${frontend}; bin/ tests: skipped. Jenkins runs the Java suite.`,
+  `[jclaw pre-push] Testing ${release} before push...`,
+  "[jclaw pre-push] Tests passed — proceeding with push.",
+];
+
+test("without a candidate, a push that changes only chrome-extension/ runs the frontend checks", async () => {
+  await inReleaseRepo(json({ builds: [] }), async ({ commit, push, stubbed }) => {
+    commit("feat: an extension change", { "chrome-extension/background.js": "b\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    const pushed = await push();
+    strictEqual(pushed.code, 0, pushed.lines.join("\n"));
+    deepStrictEqual(pushed.lines, scopedRun(release, "run"));
+    deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava",
+      "jclaw.sh test (JCLAW_TEST_FRONTEND=1)"]);
+  }, { tracking: true });
+});
+
+test("without a candidate, a push outside every frontend input, though one path shares an input's prefix, skips the frontend checks", async () => {
+  await inReleaseRepo(json({ builds: [] }), async ({ commit, push, stubbed }) => {
+    commit("feat: a backend change", { "conf/routes": "GET / x\n", "chrome-extension-old/a.js": "a\n" });
+    const release = commit("Release v1.0.1", BUMP);
+    const pushed = await push();
+    strictEqual(pushed.code, 0, pushed.lines.join("\n"));
+    deepStrictEqual(pushed.lines, scopedRun(release, "skipped"));
+    deepStrictEqual(stubbed(), ["jclaw.sh check --backend-only", "gradlew --quiet compileTestJava",
+      "jclaw.sh test (JCLAW_TEST_FRONTEND=0)"]);
+  }, { tracking: true });
+});
+
+test("a factory gate whose FRONTEND_INPUTS the hook cannot read, or that lists none, runs the frontend checks, and says so", async () => {
+  for (const gate of ["export const FRONTEND_INPUTS = [\n", "export const OTHER = [\"frontend\"];\n", "export const FRONTEND_INPUTS = [];\n"]) {
+    let builds = [];
+    await inReleaseRepo((req, res) => json({ builds })(req, res), async ({ commit, push, stubbed }) => {
+      commit("feat: a backend change", { "conf/routes": "GET / x\n", ".sandcastle/frontend-gate.ts": gate });
+      const release = commit("Release v1.0.1", BUMP);
+      builds = [testedAs(release)];
+      const pushed = await push();
+      strictEqual(pushed.code, 0, pushed.lines.join("\n"));
+      deepStrictEqual(pushed.lines, [
+        "[jclaw pre-push] .sandcastle/frontend-gate.ts gave no FRONTEND_INPUTS, so the frontend checks run whatever the push changed.",
+        `[jclaw pre-push] Candidate build #1418 passed ${release} whole: skipping the backend and frontend tests.`,
+        "[jclaw pre-push] Running the fast checks...",
+        "[jclaw pre-push] Checks passed — proceeding with push.",
+      ], gate);
+      deepStrictEqual(stubbed(), ["jclaw.sh check"], gate);
+    });
+  }
 });
 
 test("with no green candidate for the commit, or Jenkins down, the push runs every test as before", async () => {

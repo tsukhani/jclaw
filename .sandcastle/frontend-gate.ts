@@ -14,6 +14,8 @@ const PREPARE = `${IN} pnpm install --frozen-lockfile > /tmp/fe-prepare.log 2>&1
 export const STATIC_CHECKS = ["stylelint", "lint", "typecheck"];
 // The SPA's own tree, the user guide (sections.ts imports each page raw, and guide.page.test.ts pins its anchors),
 // the llms-full.txt builder llms-txt.test.ts imports, and the extension the chrome-extension tests load.
+// .githooks/pre-push imports this file with plain node, whose type stripping takes only erasable syntax, and outside
+// the factory, where .sandcastle/node_modules may not exist: so it imports no package and keeps to erasable TypeScript.
 export const FRONTEND_INPUTS = ["frontend", "docs/user-guide", "bin/llms-full.mjs", "chrome-extension"];
 const NOT_RUN = "frontend checks not run: the branch changes nothing under frontend/, docs/user-guide/ or chrome-extension/, nor bin/llms-full.mjs";
 

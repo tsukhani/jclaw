@@ -154,8 +154,27 @@ run_bin_tests() {
     fi
 }
 
-# The inputs the factory's frontend gate watches (.sandcastle/frontend-gate.ts FRONTEND_INPUTS).
-frontend_inputs='^(frontend/|docs/user-guide/|bin/llms-full\.mjs$)'
+# The inputs are the factory gate's own FRONTEND_INPUTS, read rather than copied so the two cannot disagree. Without a
+# readable list, every push runs the frontend checks.
+frontend_inputs=()
+if gate_inputs=$(node -e '
+    import(require("node:url").pathToFileURL(process.argv[1]).href).then(({ FRONTEND_INPUTS: inputs }) => {
+      if (!Array.isArray(inputs) || !inputs.every((p) => typeof p === "string" && /^\S+$/.test(p))) process.exit(1);
+      console.log(inputs.join(" "));
+    })' "$repo_root/.sandcastle/frontend-gate.ts" 2>/dev/null); then
+    read -r -a frontend_inputs <<< "$gate_inputs"
+fi
+if [[ ${#frontend_inputs[@]} -eq 0 ]]; then
+    echo "[jclaw pre-push] .sandcastle/frontend-gate.ts gave no FRONTEND_INPUTS, so the frontend checks run whatever the push changed."
+fi
+
+# The inputs go to git as pathspecs, as the gate passes them, so a path matches by the same rules in both.
+frontend_changed() {
+    local hits
+    [[ ${#frontend_inputs[@]} -gt 0 ]] || return 0
+    hits=$(git diff --name-only "$1" -- "${frontend_inputs[@]}") || return 0
+    [[ -n "$hits" ]]
+}
 
 # The release commit a green /release-check candidate build tested (JF-444, JF-448): Jenkins ran the whole backend
 # suite and the frontend tests on this very commit, so only what Jenkins never runs is run here, the fast checks and
@@ -167,7 +186,7 @@ if [[ -n "$pushed_sha" ]]; then
         bin_changed=1
         if [[ -n "$pushed_over" && "$pushed_over" != "$zero_sha" ]] \
                 && changed=$(git diff --name-only "$pushed_over...$current_sha" 2>/dev/null); then
-            grep -qE "$frontend_inputs" <<< "$changed" || frontend=""
+            frontend_changed "$pushed_over...$current_sha" || frontend=""
             grep -qE '^bin/' <<< "$changed" || bin_changed=0
         fi
         fast_checks "$frontend"
@@ -203,7 +222,7 @@ if base=$(git rev-parse --verify --quiet "@{u}") && command -v node >/dev/null 2
     # A here-string, not a pipe: under pipefail, grep -q exiting at its first match fails the pipeline with git's
     # SIGPIPE.
     changed=$(git diff --name-only "$base...HEAD")
-    if ! grep -qE "$frontend_inputs" <<< "$changed"; then
+    if ! frontend_changed "$base...HEAD"; then
         run_frontend=0
     fi
     if ! grep -qE '^bin/' <<< "$changed"; then
