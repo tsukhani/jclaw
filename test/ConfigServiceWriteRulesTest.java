@@ -228,12 +228,6 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
-    void aNegativeTokenCoalesceSizeIsRefused() {
-        assertRefused("chat.stream.token_coalesce_chars must be a whole number of characters; 0 sends every "
-                + "token at once.", utils.TokenCoalescer.CONFIG_KEY, "-1");
-    }
-
-    @Test
     void theSummarizeTokenCapMustBeAWholeNumberOfZeroOrMore() {
         var expected = "chat.compaction.triggerTokens must be a whole number of tokens; 0 turns the token cap off.";
         for (var value : List.of("-1", "150k", "1.5", "")) {

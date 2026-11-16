@@ -53,7 +53,6 @@ import utils.ErrorRendering;
 import utils.HttpFactories;
 import utils.SsrfGuard;
 import utils.StartupErrorTemplates;
-import utils.TokenCoalescer;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -411,7 +410,6 @@ public class ConfigService {
             under(VoiceSettings.PREFIX, VoiceSettings::rejectionFor),
             // A zero timeout expires an approval prompt before anyone can answer it.
             atLeast(DangerousActionGate.APPROVAL_TIMEOUT_KEY, 1, " must be a whole number of seconds, at least 1."),
-            atLeast(TokenCoalescer.CONFIG_KEY, 0, " must be a whole number of characters; 0 sends every token at once."),
             // A typo would read as the default, or as off for the switch, without a word.
             atLeast(SessionCompactor.TRIGGER_TOKENS_KEY, 0, " must be a whole number of tokens; 0 turns the token cap off."),
             (key, value) -> key.equals(SessionCompactor.TRIGGER_PERCENT_KEY) && !isIntBetween(value, 0, 100)

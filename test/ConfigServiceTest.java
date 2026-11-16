@@ -155,6 +155,20 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void aSavedTokenCoalescingSizeIsDeletedAtBoot() {
+        var key = "chat.stream.token_coalesce_chars";
+        ConfigService.set(key, "16");
+        try {
+            DefaultConfigJob.deleteRetiredKeys();
+
+            Tx.run(() -> assertNull(Config.findByKey(key)));
+            assertNull(ConfigService.get(key));
+        } finally {
+            ConfigService.delete(key);
+        }
+    }
+
+    @Test
     void theOllamaDecisionAddressIsScreenedLikeAProviderUrl() {
         // JCLAW-1336. Only rejectionFor is asked, so nothing here stores an address another class could read.
         var key = OllamaDecision.BASE_URL_KEY;
@@ -389,7 +403,7 @@ class ConfigServiceTest extends UnitTest {
             assertTrue(ConfigService.isSensitive(key), key);
         }
         for (var key : new String[] {
-                "telegram.keyboardScope", "chat.stream.token_coalesce_chars", "chat.compactionReserveTokens",
+                "telegram.keyboardScope", "tools.maskTokenShapes", "chat.compactionReserveTokens",
                 "memory.autocapture.maxTokens", "auth.password.breach-check.enabled", "certificate.key.file",
                 "web_scrape.proxy.username", "TOKENIZERS_PARALLELISM", "NODE_ENV", ""}) {
             assertFalse(ConfigService.isSensitive(key), key);
@@ -596,13 +610,6 @@ class ConfigServiceTest extends UnitTest {
         assertNotNull(ConfigService.setWithSideEffects(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY, "0"));
         assertNull(ConfigService.get(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY),
                 "the rejected value must not be persisted");
-    }
-
-    @Test
-    void setWithSideEffectsRejectsANegativeTokenCoalesceSize() {
-        assertNotNull(ConfigService.setWithSideEffects(utils.TokenCoalescer.CONFIG_KEY, "-1"));
-        // The default: chat streaming tests running beside this one read the key.
-        assertNull(ConfigService.setWithSideEffects(utils.TokenCoalescer.CONFIG_KEY, "0"));
     }
 
     @Test

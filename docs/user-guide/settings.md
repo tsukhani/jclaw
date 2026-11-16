@@ -62,10 +62,6 @@ OkHttp dispatcher concurrency caps for outbound LLM calls:
 
 Auto-tuned at first start; transiently bumped during loadtest if `--concurrency` would otherwise saturate. Changes apply live.
 
-### Chat streaming
-
-`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models, at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
-
 ## Uploads
 
 Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies: images, audio, or everything else.

@@ -14,7 +14,7 @@ describe('isSensitiveKey', () => {
   })
 
   it.each([
-    'telegram.keyboardScope', 'chat.stream.token_coalesce_chars', 'chat.compactionReserveTokens',
+    'telegram.keyboardScope', 'tools.maskTokenShapes', 'chat.compactionReserveTokens',
     'memory.autocapture.maxTokens', 'auth.password.breach-check.enabled', 'certificate.key.file',
     'web_scrape.proxy.username', 'TOKENIZERS_PARALLELISM', 'NODE_ENV', '',
   ])('%s is not', (key) => {

@@ -23,7 +23,6 @@ import play.mvc.With;
 import services.AgentService;
 import services.AttachmentService;
 import services.CompactionProgress;
-import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
@@ -34,7 +33,6 @@ import utils.ApiResponses;
 import utils.InactivityTimer;
 import utils.JsonArgs;
 import utils.LatencyTrace;
-import utils.TokenCoalescer;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -634,18 +632,6 @@ public class ApiChatController extends Controller {
         // FIRST_TOKEN marking is handled inside AgentRunner now.
         var firstToken = new AtomicBoolean(true);
 
-        // JCLAW-200: optional steady-state token coalescer. Each SSE write
-        // triggers a Netty resumeChunkedTransfer + flush (~25 ms/chunk on
-        // loopback), so chat.stream.token_coalesce_chars > 0 buffers tokens
-        // and emits one frame per ~N chars of accumulated content. Default
-        // 0 = current per-token behavior. First token always emits
-        // immediately; only steady-state tokens batch.
-        final int coalesceChars = Math.max(0, ConfigService.getInt(TokenCoalescer.CONFIG_KEY, 0));
-        var tokenCoalescer = new TokenCoalescer(coalesceChars,
-                s -> sendChunkFrame(sse, TurnFrames.Chunk.TOKEN, s));
-        var reasoningCoalescer = new TokenCoalescer(coalesceChars,
-                s -> sendChunkFrame(sse, TurnFrames.Chunk.REASONING, s));
-
         // JCLAW-661: bridge this SSE to any acp coding run spawned during the turn.
         // Register the callbacks under the resolved conversation id (known only once
         // onInit fires) so SubagentSpawnTool can promote them onto the run's id, and
@@ -673,13 +659,14 @@ public class ApiChatController extends Controller {
                         // HashMap allocation isn't worth the pre-built-frame
                         // dance the steady-state path uses.
                         sse.send(TurnFrames.firstToken(token));
-                    } else {
-                        tokenCoalescer.accept(token);
+                    } else if (!token.isEmpty()) {
+                        // A cut-off reply that is already whole closes with an empty token.
+                        sendChunkFrame(sse, TurnFrames.Chunk.TOKEN, token);
                     }
                 },
                 reasoning -> {
                     idle.touch();
-                    reasoningCoalescer.accept(reasoning);
+                    if (!reasoning.isEmpty()) sendChunkFrame(sse, TurnFrames.Chunk.REASONING, reasoning);
                 },
                 status -> {
                     idle.touch();
@@ -690,19 +677,12 @@ public class ApiChatController extends Controller {
                     sse.send(TurnFrames.toolCall(ev));
                 },
                 content -> {
-                    // JCLAW-200: drain coalescer buffers before the terminal
-                    // frame so any tail tokens reach the client. No-op when
-                    // coalescing is disabled (buffers stay empty).
-                    tokenCoalescer.drain();
-                    reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), bridgeRef.get());
                     close.finished().set(true);
                     sse.send(TurnFrames.complete(content));
                     sse.close();
                 },
                 error -> {
-                    tokenCoalescer.drain();
-                    reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), bridgeRef.get());
                     close.finished().set(true);
                     // JCLAW-1133: the raw throwable text goes only to the EventLogger line below.

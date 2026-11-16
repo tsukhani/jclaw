@@ -73,7 +73,7 @@ jclaw/
 │   ├── utils/                    # Cross-cutting utilities (~62).
 │   │   ├── HttpFactories         # Single OkHttp 5 provisioning (llmStreaming/llmSingleShot/general).
 │   │   ├── SsrfGuard, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace
-│   │   └── VirtualThreads, WebhookUtil, TokenCoalescer
+│   │   └── VirtualThreads, WebhookUtil
 │   ├── com/aspose/words/         # Tiny PDFBox-backed shim satisfying Cobalt's Aspose static link (JCLAW-451).
 │   ├── slash/                    # Slash-command dispatcher (Commands.java: /new, /reset, /compact, /model, …).
 │   └── views/                    # Groovy templates (only Application + error pages — SPA handles UI).

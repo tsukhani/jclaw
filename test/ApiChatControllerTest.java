@@ -992,6 +992,47 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aChatStreamSendsEachTokenInAFrameOfItsOwnEvenWithAnOldTokenCoalescingRowStored() throws Exception {
+        login();
+        try (var model = streamingTokens("It ", "is ", "now.")) {
+            var chat = seedWebChat(model);
+            commitInFreshTx(() -> {
+                ConfigService.set("chat.stream.token_coalesce_chars", "1000");
+                return null;
+            });
+            try {
+                var response = POST("/api/chat/stream", "application/json", turnBody(chat, "What time is it?"));
+
+                assertIsOk(response);
+                assertEquals(List.of("It ", "is ", "now."), tokenFrames(response));
+            } finally {
+                awaitIdle(chat.conversationId());
+                commitInFreshTx(() -> {
+                    ConfigService.delete("chat.stream.token_coalesce_chars");
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
+    void theEmptyTokenACutOffReplyClosesWithSendsNoFrameOnTheChatStream() throws Exception {
+        login();
+        try (var model = HeldModel.replying(_ -> CUT_OFF_TOOL_CALL)) {
+            var chat = seedWebChat(model);
+            try {
+                var response = POST("/api/chat/stream", "application/json", turnBody(chat, "Fetch the page."));
+
+                assertIsOk(response);
+                assertEquals(List.of("Partial", "Partial"), tokenFrames(response),
+                        "the round's token and its resend's, and none for the empty token the cut-off reply closes with");
+            } finally {
+                awaitIdle(chat.conversationId());
+            }
+        }
+    }
+
+    @Test
     void aTurnStartedWithNoConversationCreatesOneAndAnswersItsId() throws Exception {
         login();
         try (var model = HeldModel.answering()) {
@@ -2149,6 +2190,41 @@ class ApiChatControllerTest extends FunctionalTest {
                 "arguments":"{\\"task\\":\\"write it\\",\\"runtime\\":\\"acp\\"}"}}]},
                 "finish_reason":"tool_calls"}],
                 "usage":{"prompt_tokens":100,"completion_tokens":5,"total_tokens":105}}""";
+    }
+
+    /** Stopped at the output limit while writing a tool call, each time it is asked. */
+    private static final String CUT_OFF_TOOL_CALL = """
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"Partial",
+            "tool_calls":[{"id":"call_cut","type":"function","function":{"name":"web_fetch",
+            "arguments":"{\\"url\\":\\"https://exa"}}]},
+            "finish_reason":"length"}],
+            "usage":{"prompt_tokens":100,"completion_tokens":4096,"total_tokens":4196}}""";
+
+    /** A model whose streamed reply arrives as one delta per token. */
+    private static HeldModel streamingTokens(String... tokens) throws IOException {
+        return new HeldModel((model, exchange, request) -> {
+            var sse = new StringBuilder();
+            for (var token : tokens) {
+                sse.append("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":")
+                        .append(new com.google.gson.Gson().toJson(token)).append("}}]}\n\n");
+            }
+            sse.append("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":3,\"total_tokens\":123}}\n\n"
+                    + "data: [DONE]\n\n");
+            var body = sse.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+    }
+
+    /** The content of each token frame the chat stream {@code response} carried, in order. */
+    private static List<String> tokenFrames(play.mvc.Http.Response response) {
+        return getContent(response).lines().filter(l -> l.startsWith("data: "))
+                .map(l -> JsonParser.parseString(l.substring("data: ".length())).getAsJsonObject())
+                .filter(f -> "token".equals(f.get("type").getAsString()))
+                .map(f -> f.get("content").getAsString()).toList();
     }
 
     /** The contents of the status frames among {@code frames} that name {@code nonce}, in order. */

@@ -59,7 +59,6 @@ public final class ConfigKeyCatalog {
             chat.pruneToolResultsEveryTurns
             chat.pruneToolResultsMinChars
             chat.pruneToolResultsProtectRecent
-            chat.stream.token_coalesce_chars
             chat.summarySegmentsApplied
             chat.truncateToolResultsKeepHeadChars
             chat.truncateToolResultsKeepTailChars
@@ -339,6 +338,7 @@ public final class ConfigKeyCatalog {
     /** Exact keys only: a pattern here would delete every row it matched at boot. */
     static final String RETIRED = """
             chat.compaction.onToolRound
+            chat.stream.token_coalesce_chars
             decision.baseten.models
             decision.laya.models
             decision.ollama.models

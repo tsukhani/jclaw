@@ -6,7 +6,7 @@ import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import type { ApiErrorTemplate } from '~/types/api'
 
-/** Rows for DB-backed settings that had no Settings surface: Voice Mode, chat streaming, approval timeout. */
+/** Rows for DB-backed settings that had no Settings surface: Voice Mode, approval timeout. */
 
 type Body = { key?: string, value?: string }
 
@@ -142,10 +142,11 @@ describe('Settings page — rows for other DB-backed settings', () => {
     stubEndpoints()
   })
 
-  it('shows token coalescing on the Performance panel', async () => {
+  it('offers no token coalescing on the Performance panel', async () => {
     const component = await mountSettingsSection('performance')
 
-    expect(row(component, 'chat.stream.token_coalesce_chars').text()).toContain('0')
+    expect(row(component, 'chat.stream.token_coalesce_chars').exists()).toBe(false)
+    expect(component.findAll('h2').map(h => h.text())).toEqual(['Runtime', 'Performance'])
   })
 
   it('shows the approval prompt timeout on the Tool Approvals panel', async () => {
