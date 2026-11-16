@@ -205,16 +205,18 @@ public final class TelegramReactionNotifier {
                 ownerTelegramUserId, reaction.chatType(), chatId, null);
         EventLogger.info(LOG_CATEGORY, agent.name, LOG_SOURCE,
                 "Reaction notification (mode=%s): %s".formatted(mode, eventText));
-        // JF-148: bound as TelegramInboundTurn binds a message, so the owner's own reaction runs as the owner's turn.
+        // Bound as TelegramInboundTurn binds a message: the owner's own reaction runs as the owner's turn (JF-148),
+        // and the reactor is its sender, so their /stop in a group reaches it (JF-237).
         final boolean ownerInitiated = ownerTelegramUserId.equals(reaction.reactorId());
         Thread.ofVirtual().name("telegram-reaction").start(() -> {
             try {
-                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                        () -> DangerousActionGate.withSender(reaction.reactorId(), () -> {
                     AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
                             (_, response) -> TelegramChannel.forToken(botToken).sendText(
                                     chatId, response, agent));
                     return null;
-                });
+                }));
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,
                         "Reaction dispatch error: %s".formatted(e.getMessage()));

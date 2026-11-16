@@ -5,6 +5,7 @@ import agents.ToolContext;
 import agents.ToolRegistry;
 import channels.ChannelStreamingSink;
 import channels.TelegramChannel;
+import channels.TelegramReactionNotifier;
 import channels.TelegramStreamingSink;
 import channels.WhatsAppStreamingSink;
 import com.google.gson.JsonParser;
@@ -525,6 +526,57 @@ class ChannelTurnStopTest extends UnitTest {
         streamInGroup(convo, groupText("/stop", "Ada", "42"), reply, "42", false);
 
         assertEquals(List.of("seal Nothing to stop."), reply.events());
+    }
+
+    @Test
+    void inATelegramGroupTheReactorsStopStopsTheTurnTheirReactionStartedAndAnotherMembersIsRefused()
+            throws Exception {
+        var convo = seedConversation("telegram", provider, GROUP);
+        var token = "channel-stop-reaction-" + System.nanoTime();
+        var reached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        first = exchange -> {
+            reached.countDown();
+            release.await(30, TimeUnit.SECONDS);
+            LlmReplyFixture.send(exchange, FINAL_REPLY);
+        };
+        var memberReply = new RecordingSink();
+        var reactorReply = new RecordingSink();
+        try (var telegram = new MockTelegramServer()) {
+            telegram.start();
+            TelegramChannel.installForTest(token, telegram.telegramUrl());
+            try {
+                assertEquals(TelegramReactionNotifier.NOTIFY_OWN, TelegramReactionNotifier.reactionNotifyMode(),
+                        "test precondition: the default policy, under which a reaction to the bot's message runs");
+                TelegramChannel.forToken(token).recordSentForTest(GROUP, 5);
+                var reaction = new TelegramReactionNotifier.ReactionDelta(GROUP, "supergroup", 5, "7", "@bea",
+                        List.of("👍"), List.of());
+                onFreshThread(() -> TelegramReactionNotifier.handleReaction(convo.agent, token, "99", reaction));
+                assertTrue(reached.await(30, TimeUnit.SECONDS), "test precondition: the reaction's turn runs");
+                try {
+                    streamInGroup(convo, groupText("/stop", "Ada", "42"), memberReply, "42", false);
+
+                    assertEquals(List.of("seal In group chats, you can only stop a reply to your own message."),
+                            memberReply.events());
+                    assertTrue(ConversationQueue.isBusy(convo.id), "the reaction's turn keeps running");
+
+                    streamInGroup(convo, groupText("/stop", "Bea", "7"), reactorReply, "7", false);
+                } finally {
+                    release.countDown();
+                }
+                awaitIdle(convo.id);
+                // A turn the stop missed sends its reply after it lets the conversation go; unawaited, the send
+                // would find the token's client cleared and go to the real Telegram API.
+                if (!List.of("seal Stopped.").equals(reactorReply.events())) awaitSentTexts(telegram, 1);
+
+                assertEquals(List.of("seal Stopped."), reactorReply.events());
+                assertEquals(List.of("user [reaction] @bea reacted 👍 to message 5.",
+                        "assistant " + ConversationService.STOP_MARKER_CONTENT), rows(convo.id));
+            } finally {
+                release.countDown();
+                TelegramChannel.clearForTest(token);
+            }
+        }
     }
 
     private static void streamInGroup(Conversation convo, String text, ChannelStreamingSink sink, String senderId,
