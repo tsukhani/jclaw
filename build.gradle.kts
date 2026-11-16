@@ -406,10 +406,6 @@ dependencies {
     // runs on framework/lib's kotlin-stdlib.
     implementation("com.hp.jipp:jipp-core:0.7.18")
 
-    // JF-324: the skill-secrets proxy's per-start CA and leaf certificates. Declared, though Cobalt
-    // already brings this version, so a Cobalt bump cannot take the proxy's certificates with it.
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
-
     // jsoup runs ahead of the 1.23.2 that Tika 4.2.0's parent POM pins for
     // its parser modules.
     implementation("org.jsoup:jsoup:1.24.1")
