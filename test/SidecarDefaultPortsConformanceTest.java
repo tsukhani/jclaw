@@ -90,9 +90,9 @@ class SidecarDefaultPortsConformanceTest extends UnitTest {
     @Test
     void worktreeTestServersNeverTakeASidecarDefaultPort() throws IOException {
         var script = Files.readString(Path.of(Play.applicationPath.getAbsolutePath(), "jclaw.sh"));
-        var band = Pattern.compile("if \\(\\( port >= (\\d+) && port <= (\\d+) \\)\\)").matcher(script);
+        var band = Pattern.compile("(?:if|while) \\(\\( port >= (\\d+) && port <= (\\d+) \\)\\)").matcher(script);
         assertTrue(band.find(), "jclaw.sh's ensure_play_test_port no longer skips the sidecar ports: restore its "
-                + "`if (( port >= LO && port <= HI ))` skip, or update this test's pattern to the new form");
+                + "`while (( port >= LO && port <= HI ))` skip, or update this test's pattern to the new form");
         int lo = Integer.parseInt(band.group(1));
         int hi = Integer.parseInt(band.group(2));
         var ports = scan().ports();
