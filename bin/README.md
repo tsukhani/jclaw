@@ -26,6 +26,7 @@ trees. Nothing here ships in a `play dist` tarball.
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
 | `sign-release.sh` | Signs `SHA256SUMS` and `IMAGE_DIGEST` in the Release stage |
+| `upgrade-rehearsal.sh` | A candidate's upgrade rehearsal: the last release, seeded, upgraded to the candidate's bundle — see below |
 | `verify-debug-stripped.sh` | Fails the Package stage when a shipped zip's classes keep a LocalVariableTable |
 
 ## diagnostics.mjs
@@ -274,3 +275,47 @@ unless it skips hooks. Not checked: a `sed` into a skill, Codex's `apply_patch` 
 pid -1 (every process), a `jclaw.sh` a shell runs after options of its own (`bash -x jclaw.sh stop`) or through
 `source`, and a `pkill` option after the pattern, which GNU's option ordering accepts on Linux. If the guard itself
 fails, the hook refuses only calls that mention what it guards, and the ref layer refuses the push.
+
+## upgrade-rehearsal.sh
+
+```bash
+bin/upgrade-rehearsal.sh dist/jclaw-bundle.zip   # as the candidate build's Upgrade Rehearsal stage runs it
+```
+
+The test database is created fresh for every run (`%test.jpa.ddl=create`), so the suite never applies a schema
+change to populated rows, which is where a new NOT NULL column without `@ColumnDefault` fails. Every candidate
+build therefore upgrades a populated install, the way users upgrade (JF-450):
+
+1. **The last published release.** It downloads that GitHub Release's `jclaw-bundle.zip` with `gh` and checks it
+   against the release's `SHA256SUMS`.
+2. **Its install, booted.** It unzips the bundle into a scratch directory and starts it on the first free port from
+   19400.
+3. **Invented data, never a copy of the live instance's.** It sets an admin password, made up for the run and never
+   printed, then creates:
+   - an agent, a prompt and a config key, through the release's own API;
+   - three conversations, each opened with `/new` and holding two chat turns. A stand-in OpenAI-compatible provider,
+     a Python server the script starts on loopback, answers each turn with fixed text. So the turns run through the
+     release's own chat code, and nothing sweeps them away afterwards, as the load test's cleanup would.
+
+   What the API reads back of all of it is the snapshot.
+4. **The release's own upgrade.** That release's `jclaw.sh upgrade` installs the candidate's bundle, through
+   `JCLAW_UPGRADE_ASSET_URL`. It stops the install, backs up the database, swaps the tree and boots the candidate,
+   rolling back if the candidate does not answer. The installed `jclaw.sh` must then be the candidate's, so the swap
+   is proven even when the two carry the same version.
+5. **The checks.** The candidate must report its version on `/api/status`. Its boot must log no failed schema
+   change: Hibernate logs one and boots on regardless. The snapshot must read back unchanged.
+
+A failure names the step and the evidence: the log line of a failed schema change, else the failed boot's first
+error, or the difference in what read back. The scratch install, its processes and the stand-in provider go when the
+script exits. `JCLAW_REHEARSAL_REPO` names another repository to take the release from.
+
+It took 36 s on the Jenkins host on 2026-11-16, upgrading v1.0.19 to candidate #1424's bundle: 25 s to download, boot
+and seed, and 11 s to upgrade. A bundle with a planted `@Column(nullable = false)` and no default failed it, naming
+`Error executing DDL "alter table if exists agent add column … not null" … NULL not allowed`.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The release upgraded to the candidate and read back everything it stored |
+| 1 | A step failed, named with its evidence |
+| 2 | Not given a bundle that exists |
+

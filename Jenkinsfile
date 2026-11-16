@@ -564,6 +564,20 @@ pipeline {
             }
         }
 
+        stage('Upgrade Rehearsal') {
+            // The test database is created fresh for every run, so nothing else applies a release's schema change to
+            // populated rows: the last published release, seeded with invented data, is upgraded to this candidate's
+            // bundle by that release's own `jclaw.sh upgrade`, and must read the data back unchanged (JF-450).
+            when {
+                expression { params.CANDIDATE }
+            }
+            steps {
+                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                    sh 'bin/upgrade-rehearsal.sh dist/jclaw-bundle.zip'
+                }
+            }
+        }
+
         stage('Candidate Image') {
             // The image a release publishes is this one, by digest: built and booted here, where a failure costs
             // nothing, rather than built for the first time by the RELEASE build (JF-449).
