@@ -19,6 +19,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `candidate-vouch.test.mjs` | Its tests, the hook's candidate skip among them: `node --test bin/candidate-vouch.test.mjs` |
 | `replay-candidate.mjs` | Starts a `/release-check` candidate build with the candidate's own Jenkinsfile — see below |
 | `replay-candidate.test.mjs` | Its tests: `node --test bin/replay-candidate.test.mjs` |
+| `playwright-chromium.mjs` | Whether the Chromium build the Java Playwright pins is installed, for `./jclaw.sh test`'s live-browser gate — see below |
+| `playwright-chromium.test.mjs` | Its tests, the gate's lines among them: `node --test bin/playwright-chromium.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
 | `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
 | `eslint.config.mjs` | ESLint's recommended rules for these scripts, which `./jclaw.sh check` runs; it loads ESLint from `frontend/`'s dependencies |
@@ -137,6 +139,25 @@ suite is Jenkins' job: anything further than the selected depth is caught there.
 `--rules` prints the rule checks alone, for `./jclaw.sh check-arch`, and needs no compiled classes.
 
 Exit 0 printed a selection; exit 2 means there were no compiled classes, or git or jdeps failed.
+
+## playwright-chromium.mjs
+
+```bash
+node bin/playwright-chromium.mjs   # Playwright 1.64.0's Chromium 1248 is installed in ~/Library/Caches/ms-playwright
+```
+
+`./jclaw.sh test` turns the live-browser tests on only when this prints 0 (JF-452). The pinned revisions come from
+`driver/package/browsers.json` in the Playwright `driver` jar of the version `gradle.lockfile` resolves, read from the
+Gradle cache (`GRADLE_USER_HOME`, else `~/.gradle`) with `unzip`. The build is installed when `chromium`,
+`chromium_headless_shell` and `ffmpeg` each hold `INSTALLATION_COMPLETE` at those revisions under
+`PLAYWRIGHT_BROWSERS_PATH`, else Playwright's macOS or Linux cache: `BrowserSetup.chromiumInstalledAt`'s rule, by
+which the browser tool decides whether to install. Another revision does not count, since only the pinned one
+launches.
+
+It prints one line. Exit 0 means the build is installed. Exit 1 means it is not, and the line names the cache's
+complete headless-shell revisions, if any; `./gradlew playwrightInstall` installs it. Exit 2 means it cannot tell:
+no lockfile, no driver line, the jar not yet in the Gradle cache, `unzip` failing, a `browsers.json` that pins no
+Chromium, or `PLAYWRIGHT_BROWSERS_PATH=0`. Anything but 0 leaves the live-browser tests skipped.
 
 ## ghcr-prune.mjs
 

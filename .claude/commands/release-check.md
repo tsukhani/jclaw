@@ -98,7 +98,7 @@ Reject anything else with a clear message; do not guess. `/deploy` reads the ver
     case "$sel" in NONE) scope=none ;; ALL) scope=all ;; *) scope=$sel ;; esac
     JCLAW_TEST_BACKEND="$scope" JCLAW_TEST_FRONTEND=0 ./jclaw.sh test > logs/release-check-local.log 2>&1
     ```
-    Its summary says whether Playwright's Chromium was found, and so whether the live-browser classes ran. The frontend run is the candidate's.
+    Its first line says whether the Chromium build the Java Playwright pins is installed, and so whether the live-browser classes ran (JF-452). When it names that build as not installed, run `./gradlew playwrightInstall` and this step again before reporting the Mac run. The frontend run is the candidate's.
 13. Wait for the candidate without polling: it takes about 30 minutes (Build, Test, Sonar, Package and the image). Start a background `sleep 1500`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
 
 **Report**

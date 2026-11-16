@@ -723,6 +723,15 @@ dependencies {
 
 val strippedPrecompiledDir = layout.buildDirectory.dir("proguard/precompiled-java")
 
+// ./jclaw.sh test runs the live-browser tests only once this build is installed (JF-452). The frontend's
+// @playwright/test pins a build of its own, so its install does not stand in for this one.
+tasks.register<JavaExec>("playwrightInstall") {
+    description = "Install the Chromium build the Java Playwright pins, as the browser tool does"
+    classpath = files(configurations.named("runtimeClasspath"))
+    mainClass.set("com.microsoft.playwright.CLI")
+    args("install", "chromium")
+}
+
 val cleanStrippedPrecompiled = tasks.register<Delete>("cleanStrippedPrecompiled") {
     delete(strippedPrecompiledDir)
 }

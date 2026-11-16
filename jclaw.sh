@@ -5595,18 +5595,16 @@ do_test() {
 
     # JCLAW-1277: the live-browser tests run wherever Playwright's headless Chromium is installed, so this
     # gate and the pre-push hook that calls it run the same tests. An explicit JCLAW_PLAYWRIGHT_TEST=0 opts out.
+    # Only the build the Java Playwright pins launches, so another cached revision does not count (JF-452).
     if [[ -z "${JCLAW_PLAYWRIGHT_TEST:-}" ]]; then
-        local pw_cache="${PLAYWRIGHT_BROWSERS_PATH:-}"
-        if [[ -z "$pw_cache" ]]; then
-            if [[ "$(uname -s)" == "Darwin" ]]; then pw_cache="${HOME:-}/Library/Caches/ms-playwright"
-            else pw_cache="${XDG_CACHE_HOME:-${HOME:-}/.cache}/ms-playwright"; fi
-        fi
-        if compgen -G "$pw_cache/chromium_headless_shell-*" >/dev/null; then
-            export JCLAW_PLAYWRIGHT_TEST=1
-            echo "==> Playwright Chromium found in $pw_cache — running the live-browser tests too."
-        else
-            echo "==> No Playwright headless Chromium in $pw_cache — the live-browser tests stay skipped."
-        fi
+        local pw_state pw_rc=0
+        pw_state=$(node "$SCRIPT_DIR/bin/playwright-chromium.mjs" 2>&1) || pw_rc=$?
+        case "$pw_rc" in
+            0) export JCLAW_PLAYWRIGHT_TEST=1
+               echo "==> ${pw_state}: running the live-browser tests too." ;;
+            1) echo "==> ${pw_state}: the live-browser tests stay skipped. ./gradlew playwrightInstall installs it." ;;
+            *) echo "==> Cannot tell whether Playwright's Chromium is installed (${pw_state}): the live-browser tests stay skipped." ;;
+        esac
     fi
 
     # The pre-push hook narrows the run (bin/select-tests.mjs): JCLAW_TEST_BACKEND is "none" or a -Ptests
