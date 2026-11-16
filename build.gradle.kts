@@ -6,7 +6,7 @@ import org.gradle.process.CommandLineArgumentProvider
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.5.0.8588"
-    id("com.diffplug.spotless") version "8.10.4"
+    id("com.diffplug.spotless") version "8.11.0"
     id("net.ltgt.errorprone") version "5.1.1"
 }
 
