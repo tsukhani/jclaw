@@ -5,6 +5,7 @@ import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { sectionGroups } from '~/components/settings/sections'
+import { maskedAsRead } from './config-mask'
 
 /**
  * Settings > Decision Providers (JCLAW-1302): JEV's card holds the TypeSafe key both consumers
@@ -64,8 +65,7 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, o
         setResponseStatus(event, 403)
         return { error: 'invalid_request', message: 'decision.jev.apiKey must be printable ASCII with no spaces.' }
       }
-      // The API masks a key on read, as ConfigService.maskValue does; a blank one stays blank.
-      stored.set(body.key, body.key.endsWith('apiKey') && body.value ? `${body.value.slice(0, 4)}****` : body.value)
+      stored.set(body.key, maskedAsRead(body.key, body.value))
       opts.onSave?.(body)
       return { status: 'ok' }
     },
@@ -210,7 +210,7 @@ describe('Settings page — Decision Providers', () => {
 
   it('saving the key editor untouched cancels rather than storing a blank key', async () => {
     baseEndpoints()
-    stored.set('decision.jev.apiKey', 'ts-s****')
+    stored.set('decision.jev.apiKey', '****')
     const component = await mountDecisionProviders()
 
     await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
@@ -828,7 +828,7 @@ describe('Settings page — Decision Providers', () => {
     })
 
     it('Remove sends a blank key, and the card then reads needs API key', async () => {
-      stored.set('decision.baseten.apiKey', 'bt-s****')
+      stored.set('decision.baseten.apiKey', '****')
       baseEndpoints()
       const component = await mountDecisionProviders()
       expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('configured')

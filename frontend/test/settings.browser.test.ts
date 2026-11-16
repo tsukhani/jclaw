@@ -5,6 +5,7 @@ import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { sectionGroups } from '~/components/settings/sections'
+import { maskedAsRead } from './config-mask'
 
 /**
  * The Browser settings panel (JCLAW-1274): the engine radios, the TypeSafe warning that only Jev
@@ -48,8 +49,7 @@ function baseEndpoints(opts: { failSaves?: boolean } = {}) {
         setResponseStatus(event, 502)
         return '<html><body>Bad Gateway</body></html>'
       }
-      // The API masks a key on read, as ConfigService.maskValue does.
-      stored.set(body.key, body.key.endsWith('apiKey') ? `${body.value.slice(0, 4)}****` : body.value)
+      stored.set(body.key, maskedAsRead(body.key, body.value))
       return { status: 'ok' }
     },
   })
@@ -134,7 +134,7 @@ describe('Settings page — Browser', () => {
   it('with a key set in Decision Providers, Jev needs no pointer', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
-    stored.set('decision.jev.apiKey', 'ts-s****')
+    stored.set('decision.jev.apiKey', '****')
     const component = await mountBrowser()
 
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(true)
@@ -144,7 +144,7 @@ describe('Settings page — Browser', () => {
   it('switching back to Playwright hides the warning and leaves the stored key alone', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
-    stored.set('decision.jev.apiKey', 'ts-s****')
+    stored.set('decision.jev.apiKey', '****')
     const component = await mountBrowser()
 
     await component.find('#browser-engine-playwright').setValue(true)
@@ -152,7 +152,7 @@ describe('Settings page — Browser', () => {
 
     expect(posted).toEqual([{ key: 'browser.engine', value: 'playwright' }])
     expect(deleted).toEqual([])
-    expect(stored.get('decision.jev.apiKey')).toBe('ts-s****')
+    expect(stored.get('decision.jev.apiKey')).toBe('****')
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
   })
 

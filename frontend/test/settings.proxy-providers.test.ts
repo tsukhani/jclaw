@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { maskedAsRead } from './config-mask'
 
 /**
  * Settings > Proxy Providers (JCLAW-1323): the DataImpulse and Manual cards compose the
@@ -31,11 +32,8 @@ function endpoints(opts: { refuse?: string, test?: Record<string, unknown>, test
   registerEndpoint('/api/providers', () => [])
   registerEndpoint('/api/config', {
     method: 'GET',
-    // The API masks a secret on every read, as ConfigService.maskValue does.
     handler: () => ({
-      entries: [...stored].map(([key, value]) => ({
-        key, value: key.endsWith('password') && value.length > 4 ? `${value.slice(0, 4)}****` : value, updatedAt: '2026-09-28T00:00:00Z',
-      })),
+      entries: [...stored].map(([key, value]) => ({ key, value: maskedAsRead(key, value), updatedAt: '2026-09-28T00:00:00Z' })),
     }),
   })
   registerEndpoint('/api/config', {
@@ -206,7 +204,7 @@ describe('Settings page — Proxy Providers', () => {
     expect(inputValue(component, '#proxy-dataimpulse-minutes')).toBe('45')
     expect(component.find('[data-testid="proxy-dataimpulse-residential-password-field"]').text()).toBe('••••••••')
     expect(component.find('#proxy-dataimpulse-mobile-password').exists()).toBe(true)
-    expect(component.html()).not.toContain('abcd')
+    expect(component.html()).not.toContain('****')
 
     await component.find('[aria-label="Edit DataImpulse Residential password"]').trigger('click')
     const password = component.find('#proxy-dataimpulse-residential-password')
