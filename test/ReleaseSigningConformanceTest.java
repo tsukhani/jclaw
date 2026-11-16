@@ -103,4 +103,21 @@ class ReleaseSigningConformanceTest extends UnitTest {
         assertTrue(Pattern.compile("gh release upload [^\\n]*dist/IMAGE_DIGEST\\.sig").matcher(jenkinsfile).find(),
                 "the Release stage no longer attaches IMAGE_DIGEST.sig: list dist/IMAGE_DIGEST.sig in its `gh release upload`");
     }
+
+    @Test
+    void theReleaseStagePublishesTheCandidatesFilesAndBuildsNone() throws IOException {
+        var jenkinsfile = read("Jenkinsfile");
+        int start = jenkinsfile.indexOf("stage('Release')");
+        int end = jenkinsfile.indexOf("stage('Publish Dev Container')");
+        assertTrue(start >= 0 && end > start, "the Jenkinsfile no longer has a Release stage ahead of Publish Dev Container");
+        var release = jenkinsfile.substring(start, end);
+        assertTrue(release.contains("shasum -a 256 -c PACKAGE_SUMS"),
+                "the Release stage no longer checks its zips against the sums the candidate build recorded (JF-449)");
+        assertTrue(release.contains("docker buildx imagetools create") && release.contains("dist/CANDIDATE_IMAGE"),
+                "the Release stage no longer copies the candidate's image by digest (JF-449)");
+        assertFalse(release.contains("docker buildx build"),
+                "the Release stage builds an image again, so the published one is not the image the candidate booted");
+        assertFalse(release.contains("gradlew"),
+                "the Release stage packages again, so the published zips are not the ones the candidate tested");
+    }
 }

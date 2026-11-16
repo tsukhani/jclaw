@@ -1,15 +1,14 @@
-// Shared prelude for the two GHCR-publishing stages (Release and Publish Dev
-// Container), which previously carried byte-identical inline copies. Must be
-// called from inside a withCredentials block that binds GH_TOKEN.
-//
-// A build with both RELEASE and PUBLISH_DEVCONTAINER set runs this twice. That
-// is deliberate rather than latched: every step here is idempotent, and the
-// repeat costs ~2s (see the binfmt note below) — cheaper than the script-scope
-// gymnastics a CPS-safe latch would need.
+// Prelude for the Publish Dev Container stage, the one stage that builds an
+// image and pushes it to GHCR. Must be called from inside a withCredentials
+// block that binds GH_TOKEN.
 def dockerPrelude() {
-    sh '''
-        echo "$GH_TOKEN" | docker login ghcr.io -u tsukhani --password-stdin
+    sh 'echo "$GH_TOKEN" | docker login ghcr.io -u tsukhani --password-stdin'
+    qemuPrelude()
+    sh 'docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder'
+}
 
+def qemuPrelude() {
+    sh '''
         # Register QEMU user-mode emulation via binfmt_misc on the Jenkins
         # host so BuildKit can run arm64 binaries (e.g. the arm64 runtime
         # stage's apt-get) during the cross-arch build. Docker Engine updates
@@ -21,8 +20,30 @@ def dockerPrelude() {
         # arm64, riscv64, and the less-common platforms; trim if you want to
         # lock down the allowed target set.
         docker run --privileged --rm tonistiigi/binfmt --install all
+    '''
+}
 
-        docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
+// The registry a candidate's image waits in until its release copies it to GHCR (JF-449): a container on this host,
+// published on 127.0.0.1 alone, so nothing off the host can pull an unreleased image, and its storage is this disk
+// rather than GHCR's quota for private packages. The builder that pushes to it runs on the host network to reach
+// it, over the plain HTTP a localhost registry serves. Every step is idempotent, so each build that needs it calls it.
+def candidateRegistry() {
+    sh '''
+        if ! docker inspect jclaw-candidate-registry > /dev/null 2>&1; then
+            docker run -d --name jclaw-candidate-registry --restart unless-stopped \
+                -p 127.0.0.1:5000:5000 -e REGISTRY_STORAGE_DELETE_ENABLED=true \
+                -v jclaw-candidate-registry:/var/lib/registry \
+                registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e > /dev/null
+        fi
+        docker start jclaw-candidate-registry > /dev/null
+        for i in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:5000/v2/ && break; sleep 1; done
+        if ! docker buildx inspect jclaw-candidate-builder > /dev/null 2>&1; then
+            config=$(mktemp)
+            printf '[registry."localhost:5000"]\\n  http = true\\n' > "$config"
+            docker buildx create --name jclaw-candidate-builder --driver docker-container \
+                --driver-opt network=host --buildkitd-config "$config" > /dev/null
+            rm -f "$config"
+        fi
     '''
 }
 
@@ -52,10 +73,10 @@ pipeline {
             numToKeepStr: '20',
             artifactNumToKeepStr: '5'
         ))
-        // Ceiling, not a target: the longest legitimate run is a RELEASE build
-        // whose arm64 image stage compiles the whole bundle under QEMU
-        // emulation. Without this a hung `play autotest` or a wedged BuildKit
-        // step pins an executor indefinitely.
+        // Ceiling, not a target: the longest legitimate run is a candidate,
+        // the whole suite and then an image whose arm64 stage compiles the
+        // whole bundle under QEMU emulation. Without this a hung `play
+        // autotest` or a wedged BuildKit step pins an executor indefinitely.
         timeout(time: 120, unit: 'MINUTES')
         // This agent has no per-build test-port isolation: PLAY_TEST_PORT is
         // seeded into certs/.env by `./jclaw.sh init-worktree` via the
@@ -92,6 +113,8 @@ pipeline {
 
     environment {
         PLAY_HOME = '/opt/play1'
+        // A candidate's image waits here, on this host alone, until its release copies it by digest (JF-449).
+        CANDIDATE_IMAGE = 'localhost:5000/jclaw-candidate'
         // PNPM_HOME on PATH: get.pnpm.io's installer appends to a shell rc, and
         // every `sh` step here is a fresh non-login shell that never reads one.
         // Without this the Setup stage installs pnpm and the next step cannot
@@ -460,7 +483,11 @@ pipeline {
 
         stage('Package') {
             // A candidate packages too: a zip that fails to build or keeps its debug info would otherwise first fail
-            // in the release commit's build, after the version is spent.
+            // in the release commit's build, after the version is spent. A RELEASE build packages nothing: it
+            // publishes its candidate's zips (JF-449).
+            when {
+                expression { !params.RELEASE }
+            }
             steps {
                 // ONE Gradle invocation, both packaging tasks. This is load-
                 // bearing, not style: playDist and playBundle each declare
@@ -528,8 +555,67 @@ pipeline {
                 // Both zips ride the same archiveArtifacts call, so the bundle
                 // falls under the job's artifact retention
                 // (artifactNumToKeepStr: '5' in options.buildDiscarder) exactly
-                // like the dist — latest builds only, unversioned filenames.
-                archiveArtifacts artifacts: 'dist/jclaw.zip, dist/jclaw-bundle.zip', fingerprint: true
+                // like the dist — latest builds only, unversioned filenames. A
+                // green candidate keeps its build until /deploy finds it
+                // superseded, and its release checks its copies against the
+                // sums archived here.
+                sh '( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip > PACKAGE_SUMS )'
+                archiveArtifacts artifacts: 'dist/jclaw.zip, dist/jclaw-bundle.zip, dist/PACKAGE_SUMS', fingerprint: true
+            }
+        }
+
+        stage('Candidate Image') {
+            // The image a release publishes is this one, by digest: built and booted here, where a failure costs
+            // nothing, rather than built for the first time by the RELEASE build (JF-449).
+            when {
+                expression { params.CANDIDATE }
+            }
+            steps {
+                script {
+                    qemuPrelude()
+                    candidateRegistry()
+                    // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tag is idempotent.
+                    retry(2) {
+                        sh """
+                            docker buildx build \\
+                                --builder jclaw-candidate-builder \\
+                                --provenance=false \\
+                                --platform linux/amd64,linux/arm64 \\
+                                -t ${env.CANDIDATE_IMAGE}:${env.BUILD_COMMIT.substring(0, 12)} \\
+                                --metadata-file dist/image-metadata.json \\
+                                --push .
+                        """
+                    }
+                }
+                // The digest comes from buildx's record of this push, never from a tag, which anyone who can push
+                // can move.
+                sh '''
+                    digest=$(jq -er '."containerimage.digest"' dist/image-metadata.json)
+                    printf '%s@%s\\n' "$CANDIDATE_IMAGE" "$digest" > dist/CANDIDATE_IMAGE
+                '''
+                // The amd64 image, the one this host runs natively, must boot and report the candidate's version.
+                sh '''
+                    image=$(cat dist/CANDIDATE_IMAGE)
+                    name="jclaw-smoke-$BUILD_NUMBER"
+                    docker rm -f "$name" > /dev/null 2>&1 || true
+                    docker run -d --name "$name" --platform linux/amd64 -p 127.0.0.1::9000 "$image" > /dev/null
+                    trap 'docker rm -f "$name" > /dev/null 2>&1 || true' EXIT
+                    port=$(docker port "$name" 9000/tcp | head -n 1 | sed 's/.*://')
+                    status=""
+                    for i in $(seq 1 90); do
+                        status=$(curl -fsS "http://127.0.0.1:$port/api/status" 2>/dev/null) && break
+                        status=""
+                        [ "$(docker inspect -f '{{.State.Running}}' "$name")" = true ] || break
+                        sleep 2
+                    done
+                    if ! printf '%s' "$status" | jq -e --arg v "$APP_VERSION" '.status == "ok" and .applicationVersion == $v' > /dev/null 2>&1; then
+                        echo "The candidate image did not report ok for $APP_VERSION within 180 s; /api/status answered: ${status:-nothing}. Its log:" >&2
+                        docker logs "$name" 2>&1 | tail -n 60 >&2
+                        exit 1
+                    fi
+                    echo "The candidate image boots and reports $APP_VERSION: $image"
+                '''
+                archiveArtifacts artifacts: 'dist/CANDIDATE_IMAGE', fingerprint: true
             }
         }
 
@@ -545,7 +631,50 @@ pipeline {
                     if (open > 0) {
                         error("Sonar shows ${open} open issue(s), listed above: ${version} is not released while any is open.")
                     }
-                    echo "Creating release: ${version}"
+
+                    // A release publishes what its candidate build tested, never a rebuild: that build's zips,
+                    // checked against the sums it archived, and its image, by digest (JF-449). The builds share
+                    // this host, so the files are read from the candidate's archive, and all of it is checked
+                    // before anything is published.
+                    def candidateName = "candidate ${env.BUILD_COMMIT.substring(0, 12)}".toString()
+                    def candidateBuild = null
+                    def b = currentBuild.previousBuild
+                    while (b != null && candidateBuild == null) {
+                        if (b.result == 'SUCCESS' && b.description == "tested ${env.BUILD_COMMIT}".toString()
+                                && (b.displayName ?: '').endsWith(candidateName)) {
+                            candidateBuild = b.number
+                        }
+                        b = b.previousBuild
+                    }
+                    if (candidateBuild == null) {
+                        error("No green candidate build tested ${env.BUILD_COMMIT}, so there are no tested files to publish: " +
+                              "${version} can be released only from a /release-check candidate (JF-449).")
+                    }
+                    env.CANDIDATE_BUILD = "${candidateBuild}".toString()
+                    sh '''
+                        src="$JENKINS_HOME/jobs/$JOB_NAME/builds/$CANDIDATE_BUILD/archive/dist"
+                        for f in jclaw.zip jclaw-bundle.zip PACKAGE_SUMS CANDIDATE_IMAGE; do
+                            if [ ! -f "$src/$f" ]; then
+                                echo "Candidate build #$CANDIDATE_BUILD has no $f, so there is no tested $f to publish." >&2
+                                exit 1
+                            fi
+                        done
+                        rm -rf dist && mkdir dist
+                        cp "$src/jclaw.zip" "$src/jclaw-bundle.zip" "$src/PACKAGE_SUMS" "$src/CANDIDATE_IMAGE" dist/
+                        if ! ( cd dist && shasum -a 256 -c PACKAGE_SUMS ); then
+                            echo "The file marked FAILED above is not the one candidate build #$CANDIDATE_BUILD tested." >&2
+                            exit 1
+                        fi
+                    '''
+                    candidateRegistry()
+                    sh '''
+                        image=$(cat dist/CANDIDATE_IMAGE)
+                        if ! docker buildx imagetools inspect --builder jclaw-candidate-builder "$image" > /dev/null; then
+                            echo "Candidate build #$CANDIDATE_BUILD's image $image is gone from the candidate registry." >&2
+                            exit 1
+                        fi
+                    '''
+                    echo "Creating release: ${version} from candidate build #${env.CANDIDATE_BUILD}"
 
                     // No local `git tag` here: /deploy pushes the signed tag once
                     // the release commit's build has passed, and --verify-tag
@@ -631,26 +760,28 @@ pipeline {
                         // attestation anywhere, so dropping it keeps the
                         // manifest index clean. Flip back to `=true` if
                         // supply-chain requirements emerge.
-                        dockerPrelude()
-                        // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tags is idempotent.
-                        retry(2) {
-                            sh """
-                                docker buildx build \\
-                                    --provenance=false \\
-                                    --platform linux/amd64,linux/arm64 \\
-                                    -t ghcr.io/tsukhani/jclaw:${version} \\
-                                    -t ghcr.io/tsukhani/jclaw:latest \\
-                                    --metadata-file dist/image-metadata.json \\
-                                    --push .
-                            """
-                        }
+                        // The candidate's image, copied by digest: a copy of one index under new tags keeps its
+                        // digest, and the check below holds the published tag to it.
+                        sh '''
+                            echo "$GH_TOKEN" | docker login ghcr.io -u tsukhani --password-stdin
+                            docker buildx imagetools create --builder jclaw-candidate-builder \
+                                -t "ghcr.io/tsukhani/jclaw:v$APP_VERSION" \
+                                -t ghcr.io/tsukhani/jclaw:latest \
+                                "$(cat dist/CANDIDATE_IMAGE)"
+                        '''
 
                         // Whoever holds the push credential can repoint a tag; nobody can change what a
                         // digest names. So the digest goes on the release, signed, for a pull by digest.
-                        // It is read from buildx's record of this push, not asked of the registry by tag,
-                        // which would sign whatever the tag pointed at by then.
+                        // It is the candidate's, from buildx's record of the push it tested, not asked of
+                        // the registry by tag, which would sign whatever the tag pointed at by then.
                         sh '''
-                            digest=$(jq -er '."containerimage.digest"' dist/image-metadata.json)
+                            digest=$(sed 's/.*@//' dist/CANDIDATE_IMAGE)
+                            published=$(docker buildx imagetools inspect "ghcr.io/tsukhani/jclaw:v$APP_VERSION" \
+                                --format '{{json .Manifest}}' | jq -er .digest)
+                            if [ "$published" != "$digest" ]; then
+                                echo "ghcr.io/tsukhani/jclaw:v$APP_VERSION names $published, not the tested $digest." >&2
+                                exit 1
+                            fi
                             printf 'v%s  ghcr.io/tsukhani/jclaw@%s\\n' "$APP_VERSION" "$digest" > dist/IMAGE_DIGEST
                         '''
                         withCredentials([file(credentialsId: 'jclaw-release-signing-key', variable: 'SIGNING_KEY')]) {
@@ -739,6 +870,27 @@ pipeline {
                             node bin/ghcr-prune.mjs --apply
                         '''
 
+                        // A candidate's image lives as long as its kept build: /deploy un-keeps the builds no
+                        // release will publish, and the registry frees their layers once nothing tags them.
+                        script {
+                            def kept = []
+                            def k = currentBuild.previousBuild
+                            while (k != null) {
+                                def name = k.displayName ?: ''
+                                if (k.keepLog && name ==~ /.*candidate [0-9a-f]{12}/) {
+                                    kept << name.substring(name.length() - 12)
+                                }
+                                k = k.previousBuild
+                            }
+                            env.KEPT_CANDIDATES = kept.join(',')
+                        }
+                        sh '''
+                            echo "Pruning candidate images no kept candidate build needs..."
+                            node bin/candidate-registry.mjs prune --keep "$KEPT_CANDIDATES"
+                            docker exec jclaw-candidate-registry registry garbage-collect --delete-untagged \
+                                /etc/distribution/config.yml > /dev/null
+                        '''
+
                         // Prune BuildKit cache older than 30 days. The Release
                         // stage uses `docker buildx` with the docker-container
                         // driver, which stores per-platform layer cache inside
@@ -754,9 +906,11 @@ pipeline {
                         // an otherwise-green release UNSTABLE.
                         sh '''
                             echo "Pruning BuildKit cache older than 30 days..."
-                            docker buildx prune --builder jclaw-builder \
-                                --filter 'until=720h' \
-                                --force || true
+                            for builder in jclaw-builder jclaw-candidate-builder; do
+                                docker buildx prune --builder "$builder" \
+                                    --filter 'until=720h' \
+                                    --force || true
+                            done
                         '''
                     }
                 }
@@ -770,6 +924,11 @@ pipeline {
             // its commit passed the whole suite in the build it read it from.
             script {
                 currentBuild.description = "tested ${env.BUILD_COMMIT}"
+                // Its zips and image are what its release publishes, so the build outlives the job's retention
+                // until /deploy un-keeps it (bin/candidate-keep.mjs).
+                if (params.CANDIDATE) {
+                    currentBuild.keepLog = true
+                }
             }
         }
         cleanup {

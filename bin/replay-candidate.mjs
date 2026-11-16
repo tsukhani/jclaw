@@ -44,6 +44,23 @@ async function call(url, init) {
   return fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
 }
 
+/**
+ * The headers a form POST to Jenkins needs: the Authorization header, and the crumb with the session cookie it was
+ * issued under, since Jenkins checks the crumb against that session. A Jenkins with CSRF protection off issues none.
+ */
+export async function postHeaders(jenkins) {
+  const auth = { Authorization: jenkins.authorization };
+  const crumbed = await call(`${jenkins.base}/crumbIssuer/api/json`, { headers: auth });
+  const headers = { ...auth, "Content-Type": "application/x-www-form-urlencoded" };
+  if (crumbed.ok) {
+    const crumb = await crumbed.json();
+    headers[crumb.crumbRequestField] = crumb.crumb;
+    const cookie = crumbed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    if (cookie) headers.Cookie = cookie;
+  }
+  return headers;
+}
+
 /** 0 when Jenkins took the replay, 2 when it did not or could not be asked. */
 async function run(sha, configPath, cwd) {
   if (!SHA.test(sha ?? "")) return { code: 2, message: "give the release commit's full sha" };
@@ -73,14 +90,7 @@ async function run(sha, configPath, cwd) {
     if (!listed.ok) return { code: 2, message: `Jenkins answered ${listed.status} for the builds` };
     const base = replayBase((await listed.json()).builds);
     if (!base) return { code: 2, message: "no finished build without RELEASE or PUBLISH_DEVCONTAINER to replay" };
-    const crumbed = await call(`${jenkins.base}/crumbIssuer/api/json`, { headers: auth });
-    const headers = { ...auth, "Content-Type": "application/x-www-form-urlencoded" };
-    if (crumbed.ok) {
-      const crumb = await crumbed.json();
-      headers[crumb.crumbRequestField] = crumb.crumb;
-      const cookie = crumbed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-      if (cookie) headers.Cookie = cookie;
-    }
+    const headers = await postHeaders(jenkins);
     const replayed = await call(`${jenkins.base}/job/${JOB}/${base.number}/replay/run`, {
       method: "POST", headers, body: new URLSearchParams({ json: JSON.stringify({ mainScript: script }) }),
     });

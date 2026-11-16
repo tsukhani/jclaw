@@ -11,6 +11,10 @@ trees. Nothing here ships in a `play dist` tarball.
 | `select-tests.test.mjs` | Its tests: `node --test bin/select-tests.test.mjs` |
 | `policy-guard.mjs` | Enforces AGENTS.md's Policy block for Claude Code, Codex and `.githooks/pre-push` — see below |
 | `policy-guard.test.mjs` | Its tests: `node --test bin/policy-guard.test.mjs` |
+| `candidate-keep.mjs` | Un-keeps the green `/release-check` candidate builds no release will publish — see below |
+| `candidate-keep.test.mjs` | Its tests: `node --test bin/candidate-keep.test.mjs` |
+| `candidate-registry.mjs` | Deletes from the Jenkins host's candidate registry the images of builds no longer kept — see below |
+| `candidate-registry.test.mjs` | Its tests: `node --test bin/candidate-registry.test.mjs` |
 | `candidate-vouch.mjs` | Whether a green `/release-check` candidate build tested a commit, for `.githooks/pre-push` — see below |
 | `candidate-vouch.test.mjs` | Its tests, the hook's candidate skip among them: `node --test bin/candidate-vouch.test.mjs` |
 | `replay-candidate.mjs` | Starts a `/release-check` candidate build with the candidate's own Jenkinsfile — see below |
@@ -154,6 +158,38 @@ refuses, because nothing then says what to keep. A Release whose image is alread
 | --- | --- |
 | 0 | Finished, or nothing to delete |
 | 1 | Refused or stopped, and the reason is printed. A failed delete stops the run, and earlier deletions stand |
+
+## candidate-keep.mjs
+
+```bash
+node bin/candidate-keep.mjs --keep <full sha>   # un-keep every kept candidate build but this commit's
+node bin/candidate-keep.mjs --drop <full sha>   # un-keep this commit's candidate build alone
+```
+
+A green candidate build keeps itself (`currentBuild.keepLog`), because a GitHub Release of its version publishes its
+archived zips and its image, and the job otherwise keeps only the last 5 builds' files (JF-449). `/deploy` runs
+`--keep` with the release commit once both pushes succeeded, since every other candidate is then superseded, and
+`--drop` once the release's GitHub Release is published; `/release-check` runs `--drop` for a green candidate whose
+check failed on the Mac. A candidate is a build whose display name ends `candidate <first 12 of sha>`.
+
+It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and posts each `toggleLogKeep` with the crumb and
+session that `replay-candidate.mjs`'s `postHeaders` gets. Jenkins only toggles, so it toggles only builds it has just
+listed as kept. Exit 0 named each build it un-kept, or said there was none; exit 2 means a malformed argument, a
+config without the server, a refusal (the builds named before it stay un-kept) or a Jenkins that is down.
+
+## candidate-registry.mjs
+
+```bash
+node bin/candidate-registry.mjs prune --keep <short sha>[,<short sha>…]   # as the Cleanup Old Releases stage runs it
+```
+
+A candidate's image waits in `jclaw-candidate-registry`, a `registry:3` container on the Jenkins host bound to
+`127.0.0.1:5000`, so nothing off the host can pull an unreleased image and it uses no GHCR storage. The Release stage
+copies it to GHCR by digest. The Cleanup stage names the kept candidate builds and this deletes every other tag's
+manifest, by the digest the registry gives for it; the registry's `garbage-collect` then frees the layers nothing
+tags. `JCLAW_CANDIDATE_REGISTRY` points it at another registry. Exit 0 deleted each doomed image or found none,
+including a registry that never took a candidate; exit 1 means a malformed argument, or a request the registry
+refused or never answered, and stops the run.
 
 ## candidate-vouch.mjs
 
