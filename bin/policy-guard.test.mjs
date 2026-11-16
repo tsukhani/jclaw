@@ -15,7 +15,8 @@ import { REASONS, commandVerdict, hookVerdict, refsVerdict } from "./policy-guar
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GUARD = join(ROOT, "bin", "policy-guard.mjs");
 
-const RELEASE = { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true, releaseOverMain: true };
+const RELEASE = { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true, releaseOverMain: true,
+  version: "0.19.79" };
 const SHA = "c".repeat(40);
 const ARGV = "/usr/bin/java -cp /repo/precompiled:/Users/x/.gradle/caches/a.jar play.server.Server";
 const ctx = (state = RELEASE, pid = "4242", argv = ARGV) => ({
@@ -49,14 +50,16 @@ const CASES = [
   ["git push origin --delete renovate/pnpm-11.x", null],
   // /release-check's candidate and its cleanup
   [CANDIDATE_CLEANUP, null],
-  [`/usr/bin/git push origin ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`, null],
+  [`/usr/bin/git push origin ${SHA}:refs/heads/candidate/v0.19.79-rc.1`, null],
+  ["/usr/bin/git push origin --delete candidate/v0.19.79-rc.1", null],
   [`/usr/bin/git push origin --delete candidate/${SHA.slice(0, 12)}`, null],
-  [`git push github ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`, "push"],
+  [`git push github ${SHA}:refs/heads/candidate/v0.19.79-rc.1`, "push"],
+  [`git push origin ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`, "push"],
   [`git push origin ${SHA}:refs/heads/candidate/deadbeef`, "push"],
-  [`git push origin HEAD:refs/heads/candidate/${SHA.slice(0, 12)}`, "push"],
-  [`git push --force origin ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`, "push"],
+  ["git push origin HEAD:refs/heads/candidate/v0.19.79-rc.1", "push"],
+  [`git push --force origin ${SHA}:refs/heads/candidate/v0.19.79-rc.1`, "push"],
   ["git push origin --delete candidate/feature", "push"],
-  [`git push github --delete candidate/${SHA.slice(0, 12)}`, "push"],
+  ["git push github --delete candidate/v0.19.79-rc.1", "push"],
   // other pushes
   ["git push", "push"],
   ["git push origin main", "push"],
@@ -233,13 +236,25 @@ test("a release commit pushed by name must be a release, on main, named in full"
 });
 
 test("a candidate is pushed only from main in the main checkout, and only a release commit made over main", () => {
-  const command = `git push origin ${SHA}:refs/heads/candidate/${SHA.slice(0, 12)}`;
+  const command = `git push origin ${SHA}:refs/heads/candidate/v0.19.79-rc.1`;
   const releaseCommit = { ...RELEASE, onMain: false };
   deepStrictEqual(commandVerdict(command, ctx(releaseCommit)), null);
+  deepStrictEqual(commandVerdict(`git push origin ${SHA}:refs/heads/candidate/v0.19.79-rc.12`, ctx(releaseCommit)), null);
   deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, subject: "feat: main's own commit" })), refused("push"));
   deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, releaseOverMain: false })), refused("push"));
   deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, branch: "side" })), refused("push"));
   deepStrictEqual(commandVerdict(command, ctx({ ...releaseCommit, mainCheckout: false })), refused("push"));
+});
+
+test("a candidate branch names the version its commit carries and an attempt from 1, never the commit", () => {
+  const releaseCommit = { ...RELEASE, onMain: false };
+  for (const name of ["v0.19.80-rc.1", "v0.19.7-rc.1", "v0.19.79-rc.0", "v0.19.79-rc.01", "v0.19.79-rc", "0.19.79-rc.1",
+    "v0.19.79", SHA.slice(0, 12), SHA]) {
+    deepStrictEqual(commandVerdict(`git push origin ${SHA}:refs/heads/candidate/${name}`, ctx(releaseCommit)),
+      refused("push"), name);
+  }
+  deepStrictEqual(commandVerdict(`git push origin ${SHA}:refs/heads/candidate/v0.19.79-rc.1`,
+    ctx({ ...releaseCommit, version: "" })), refused("push"), "a commit whose version cannot be read");
 });
 
 test("the named commit is the one judged, not HEAD", () => {
@@ -312,8 +327,9 @@ test("the hook prints Claude Code's deny decision with the rule's reason, and no
   strictEqual(denied.stdout, `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse",
     permissionDecision: "deny", permissionDecisionReason: "Pushing is /deploy's job (AGENTS.md Policy): stop at the "
     + "local commit and report its hash. The guard passes only a \"Release vX.Y.Z\" commit on main pushed to origin or "
-    + "github as HEAD or by its full sha, a version tag pushed alone, /release-check's candidate/<sha> branch on origin "
-    + "for a release commit over main, and the deletion of renovate/* and candidate/* branches."
+    + "github as HEAD or by its full sha, a version tag pushed alone, /release-check's candidate/v<version>-rc.<N> "
+    + "branch on origin for a release commit over main that carries that version, and the deletion of renovate/* and "
+    + "candidate/* branches."
     } })}\n`);
   const allowed = run({ tool_name: "Bash", tool_input: { command: "git status" }, cwd: ROOT });
   strictEqual(allowed.status, 0);
@@ -383,12 +399,12 @@ test("refsVerdict passes /deploy's and /renovate's refs and refuses every other"
     no("refs/tags/v1.0.0-rc1"));
 });
 
-test("refsVerdict passes a candidate branch named for its release commit, on origin, created once and never moved", () => {
+test("refsVerdict passes a candidate branch named for its commit's version, on origin, created once and never moved", () => {
   const zero = "0".repeat(40);
   const sha = "a".repeat(40);
-  const ref = `refs/heads/candidate/${sha.slice(0, 12)}`;
+  const ref = "refs/heads/candidate/v1.0.1-rc.2";
   const onMain = () => ({ branch: "main", subject: "Release v1.0.1", mainCheckout: true, onMain: false,
-    releaseOverMain: true, fastForward: true });
+    releaseOverMain: true, version: "1.0.1", fastForward: true });
   const no = { ...refused("push"), ref };
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", onMain), null);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${sha}\n`, "origin", onMain), null);
@@ -397,8 +413,12 @@ test("refsVerdict passes a candidate branch named for its release commit, on ori
   deepStrictEqual(refsVerdict(`(delete) ${zero} ${ref} ${sha}\n`, "github", onMain), no);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${"b".repeat(40)}\n`, "origin", onMain), no);
   deepStrictEqual(refsVerdict(`HEAD ${sha} ${ref} ${zero}\n`, "origin", onMain), no);
-  const other = `refs/heads/candidate/${"b".repeat(12)}`;
-  deepStrictEqual(refsVerdict(`${sha} ${sha} ${other} ${zero}\n`, "origin", onMain), { ...refused("push"), ref: other });
+  for (const other of ["refs/heads/candidate/v1.0.2-rc.2", `refs/heads/candidate/${sha.slice(0, 12)}`,
+    "refs/heads/candidate/v1.0.1-rc.0"]) {
+    deepStrictEqual(refsVerdict(`${sha} ${sha} ${other} ${zero}\n`, "origin", onMain), { ...refused("push"), ref: other });
+  }
+  const oldName = `refs/heads/candidate/${sha.slice(0, 12)}`;
+  deepStrictEqual(refsVerdict(`(delete) ${zero} ${oldName} ${sha}\n`, "origin", onMain), null);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), releaseOverMain: false })), no);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), subject: "feat: x" })), no);
   deepStrictEqual(refsVerdict(`${sha} ${sha} ${ref} ${zero}\n`, "origin", () => ({ ...onMain(), mainCheckout: false })), no);
@@ -489,7 +509,7 @@ const releaseCommitOverMain = (work, git, files = {}) => {
 test("a candidate push goes out without the local tests, which its Jenkins build runs, and its branch can be deleted", () => {
   inScratchRepo(({ scratch, work, git, env }) => {
     const sha = releaseCommitOverMain(work, git);
-    const branch = `candidate/${sha.slice(0, 12)}`;
+    const branch = "candidate/v0.0.1-rc.1";
     const { JCLAW_SKIP_TESTS: _, ...tested } = env;
     const push = spawnSync("git", ["push", "origin", `${sha}:refs/heads/${branch}`], { cwd: work, env: tested, encoding: "utf8" });
     strictEqual(push.status, 0, push.stderr);
@@ -497,6 +517,9 @@ test("a candidate push goes out without the local tests, which its Jenkins build
       "[jclaw pre-push] Push only creates candidate/* branches, which their Jenkins build tests: nothing to test here.");
     strictEqual(git(scratch, "--git-dir=origin.git", "rev-parse", branch).stdout.trim(), sha);
     strictEqual(git(work, "push", "github", `${sha}:refs/heads/${branch}`).status, 1);
+    const another = releaseCommitOverMain(work, git, { "conf/application.conf": "application.version=0.0.1\n# again\n" });
+    strictEqual(git(work, "push", "origin", `${another}:refs/heads/${branch}`).status, 1, "a candidate branch never moves");
+    strictEqual(git(scratch, "--git-dir=origin.git", "rev-parse", branch).stdout.trim(), sha);
     strictEqual(git(work, "push", "origin", "--delete", branch).status, 0);
     strictEqual(git(scratch, "--git-dir=origin.git", "branch", "--list", branch).stdout.trim(), "");
   });
@@ -505,11 +528,15 @@ test("a candidate push goes out without the local tests, which its Jenkins build
 test("through git itself, a candidate that is main's own commit, or carries more than the version bump, is refused", () => {
   inScratchRepo(({ scratch, work, git }) => {
     const head = git(work, "rev-parse", "HEAD").stdout.trim();
-    const mainsOwn = git(work, "push", "origin", `${head}:refs/heads/candidate/${head.slice(0, 12)}`);
+    const mainsOwn = git(work, "push", "origin", `${head}:refs/heads/candidate/v0.0.1-rc.1`);
     strictEqual(mainsOwn.status, 1);
-    strictEqual(mainsOwn.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/candidate/${head.slice(0, 12)}: ${REASONS.push}`);
+    strictEqual(mainsOwn.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/candidate/v0.0.1-rc.1: ${REASONS.push}`);
     const widened = releaseCommitOverMain(work, git, { "bin/extra.mjs": "export {};\n" });
-    strictEqual(git(work, "push", "origin", `${widened}:refs/heads/candidate/${widened.slice(0, 12)}`).status, 1);
+    strictEqual(git(work, "push", "origin", `${widened}:refs/heads/candidate/v0.0.1-rc.1`).status, 1);
+    const bumped = releaseCommitOverMain(work, git);
+    const misnamed = git(work, "push", "origin", `${bumped}:refs/heads/candidate/v0.0.2-rc.1`);
+    strictEqual(misnamed.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/candidate/v0.0.2-rc.1: ${REASONS.push}`);
+    strictEqual(git(work, "push", "origin", `${bumped}:refs/heads/candidate/${bumped.slice(0, 12)}`).status, 1);
     strictEqual(git(scratch, "--git-dir=origin.git", "branch", "--list", "candidate/*").stdout.trim(), "");
   });
 });

@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { buildRecord, keptCandidates, nextRc } from "./candidate-builds.mjs";
+import { buildRecord, keptCandidates } from "./candidate-builds.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(ROOT, "bin", "candidate-builds.mjs");
@@ -70,14 +70,6 @@ test("the kept candidates are the twelve-character commits their kept builds tes
   deepStrictEqual(keptCandidates(builds), [REL.slice(0, 12), OLD.slice(0, 12)]);
   deepStrictEqual(keptCandidates(builds, REL), [OLD.slice(0, 12)], "a release build leaves out the candidate it published");
   deepStrictEqual(keptCandidates(builds, "c".repeat(40)), [REL.slice(0, 12), OLD.slice(0, 12)]);
-});
-
-test("the next rc of a version is one past the highest its candidate builds were named, failed ones too", () => {
-  const job = "JClaw-candidate";
-  deepStrictEqual(nextRc([], "1.0.22"), 1);
-  deepStrictEqual(nextRc([{ job, displayName: "v1.0.22-rc.1", result: "FAILURE" }, { job, displayName: "v1.0.22-rc.3" },
-    { job, displayName: "v1.0.21-rc.7" }, { job, displayName: "v1.0.220-rc.9" }, { job, displayName: "#5" },
-    { job: "JClaw", displayName: "v1.0.22-rc.8" }], "1.0.22"), 4);
 });
 
 const withHome = (jobs, body) => {
@@ -154,10 +146,9 @@ test("kept answers 2 rather than an empty list when no job's builds can be read,
 
 test("a bad argument answers 2 without reading anything", () => {
   for (const args of [[], ["green"], ["green", REL.slice(0, 12)], ["kept", "extra"], ["kept", "--except"],
-    ["kept", "--except", REL.slice(0, 12)], ["kept", "--keep", REL], ["both", REL], ["next-rc"], ["next-rc", "v1.0.22"],
-    ["next-rc", "1.0"]]) {
+    ["kept", "--except", REL.slice(0, 12)], ["kept", "--keep", REL], ["both", REL], ["next-rc", "1.0.22"]]) {
     deepStrictEqual(cli(args, "/nonexistent"),
-      { code: 2, stdout: "", stderr: "give green <full sha>, kept [--except <full sha>], or next-rc <x.y.z>\n" }, args.join(" "));
+      { code: 2, stdout: "", stderr: "give green <full sha> or kept [--except <full sha>]\n" }, args.join(" "));
   }
 });
 
@@ -171,18 +162,13 @@ test("the Jenkinsfile finds candidate builds through this script, never by walki
   strictEqual(jenkinsfile.includes('src="$JENKINS_HOME/jobs/$CANDIDATE_JOB/builds/$CANDIDATE_BUILD/archive/dist"'), true);
 });
 
-test("next-rc reads the candidate job's records, and answers 1 for a version with none", () => {
-  withHome({ "JClaw-candidate": { 1: record({ description: `tested ${OLD}`, displayName: "v1.0.21-rc.1" }),
-    2: record({ result: "FAILURE", displayName: "v1.0.22-rc.1" }) } }, (home) => {
-    deepStrictEqual(cli(["next-rc", "1.0.22"], home), { code: 0, stdout: "2\n", stderr: "" });
-    deepStrictEqual(cli(["next-rc", "1.0.23"], home), { code: 0, stdout: "1\n", stderr: "" });
-  });
-});
-
-test("a candidate names itself by its rc, a vouched push build skips Package, and the open-issue check opens no Sonar env", () => {
+test("a candidate takes its name from its branch, a vouched push build skips Package, and the open-issue check opens no Sonar env", () => {
   const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
-  strictEqual(jenkinsfile.includes("node bin/candidate-builds.mjs next-rc ${env.APP_VERSION}"), true);
-  strictEqual(jenkinsfile.includes('currentBuild.displayName = "v${env.APP_VERSION}-rc.${rc}"'), true);
+  strictEqual(jenkinsfile.includes("node bin/candidate-builds.mjs next-rc"), false, "the branch is the label's one source");
+  strictEqual(jenkinsfile.includes("def label = params.CANDIDATE_BRANCH.substring('candidate/'.length())"), true);
+  strictEqual(jenkinsfile.includes("currentBuild.displayName = label"), true);
+  strictEqual(jenkinsfile.includes("if (!label.startsWith(\"v${env.APP_VERSION}-rc.\".toString())) {"), true);
+  strictEqual(jenkinsfile.includes("if (!branch.matches('candidate/v\\\\d+\\\\.\\\\d+\\\\.\\\\d+-rc\\\\.[1-9]\\\\d*')) {"), true);
   strictEqual(/currentBuild\.displayName = "#/.test(jenkinsfile), false, "no candidate is named for its commit");
   const pack = jenkinsfile.slice(jenkinsfile.indexOf("stage('Package')"), jenkinsfile.indexOf("stage('Upgrade Rehearsal')"));
   strictEqual(pack.includes("expression { !params.RELEASE && !env.TESTED_CANDIDATE }"), true);

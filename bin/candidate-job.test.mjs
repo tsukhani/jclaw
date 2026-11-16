@@ -63,7 +63,7 @@ ${description}  <keepDependencies>false</keepDependencies>
 const BRANCH_PARAMETER = `
         <hudson.model.StringParameterDefinition>
           <name>CANDIDATE_BRANCH</name>
-          <description>candidate/&lt;the first 12 of CANDIDATE&gt;: the branch this job checks out, which /release-check sets with CANDIDATE (JF-453)</description>
+          <description>candidate/v&lt;version&gt;-rc.&lt;N&gt;: the branch this job checks out and names its build after, which /release-check sets with CANDIDATE (JF-453, JF-471)</description>
           <trim>false</trim>
         </hudson.model.StringParameterDefinition>`;
 const DESCRIPTION = "  <description>Release candidates (JF-453). /release-check starts each build with CANDIDATE and "

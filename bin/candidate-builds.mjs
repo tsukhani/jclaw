@@ -11,7 +11,6 @@ import { JOBS } from "./candidate-keep.mjs";
 import { testedCommit, vouchingBuild } from "./candidate-vouch.mjs";
 
 const SHA = /^[0-9a-f]{40}$/;
-const VERSION = /^\d+\.\d+\.\d+$/;
 const ENTITIES = { lt: "<", gt: ">", amp: "&", quot: "\"", apos: "'" };
 const FIELDS = new Set(["result", "description", "displayName", "keepLog"]);
 
@@ -77,27 +76,15 @@ export function keptCandidates(builds, except) {
     .filter((sha) => sha && sha !== except).map((sha) => sha.slice(0, 12));
 }
 
-/**
- * The rc number the next candidate of {@code version} takes: one past the highest that version's candidate builds
- * were named, failed ones too, so a number is never reused once a build has shown it (JF-465).
- */
-export function nextRc(builds, version) {
-  const named = new RegExp(`^v${version.replaceAll(".", "\\.")}-rc\\.(\\d+)$`);
-  return 1 + Math.max(0, ...builds.filter((b) => b.job === JOBS[0])
-    .map((b) => Number((b.displayName ?? "").match(named)?.[1] ?? 0)));
-}
-
 /** 0 and the answer, 1 when no green candidate tested the commit, 2 when the records cannot be read. */
 export function run(args, home) {
   const kept = args[0] === "kept" && (args.length === 1 || (args.length === 3 && args[1] === "--except" && SHA.test(args[2])));
   const green = args[0] === "green" && args.length === 2 && SHA.test(args[1]);
-  const rc = args[0] === "next-rc" && args.length === 2 && VERSION.test(args[1]);
-  if (!kept && !green && !rc) return { code: 2, out: "give green <full sha>, kept [--except <full sha>], or next-rc <x.y.z>" };
+  if (!kept && !green) return { code: 2, out: "give green <full sha> or kept [--except <full sha>]" };
   if (!home) return { code: 2, out: "JENKINS_HOME is not set, so there are no build records to read" };
   const builds = records(home);
   if (!builds) return { code: 2, out: `no builds of ${JOBS.join(" or ")} under ${home}/jobs` };
   if (kept) return { code: 0, out: keptCandidates(builds, args[2]).join(",") };
-  if (rc) return { code: 0, out: `${nextRc(builds, args[1])}` };
   const build = vouchingBuild(builds, args[1]);
   return build ? { code: 0, out: `${build.job} ${build.number}` } : { code: 1, out: `no green candidate build tested ${args[1]}` };
 }

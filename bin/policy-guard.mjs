@@ -15,11 +15,13 @@ const REMOTES = new Set(["origin", "github"]);
 const RELEASE = /^Release v\d+\.\d+\.\d+$/;
 const VERSION_TAG = /^refs\/tags\/v\d+\.\d+\.\d+$/;
 const NAMED_COMMIT = /^([0-9a-f]{40}):refs\/heads\/main$/;
-// /release-check names a candidate branch for its release commit, so the name alone says which commit Jenkins tests
-// (JF-441, JF-448).
-const CANDIDATE_PUSH = /^([0-9a-f]{40}):refs\/heads\/candidate\/([0-9a-f]{7,40})$/;
-const CANDIDATE_BRANCH = /^(?:refs\/heads\/)?candidate\/[0-9a-f]{7,40}$/;
-const CANDIDATE_REF = /^refs\/heads\/candidate\/([0-9a-f]{7,40})$/;
+// /release-check names a candidate branch for the version its release commit carries and the attempt (JF-441, JF-448,
+// JF-471). Branches named for their commit, as before JF-471, may still be deleted.
+const CANDIDATE_PUSH = /^([0-9a-f]{40}):refs\/heads\/candidate\/v(\d+\.\d+\.\d+)-rc\.[1-9]\d*$/;
+const CANDIDATE_NAME = String.raw`candidate\/(?:v\d+\.\d+\.\d+-rc\.[1-9]\d*|[0-9a-f]{7,40})`;
+const CANDIDATE_BRANCH = new RegExp(String.raw`^(?:refs\/heads\/)?${CANDIDATE_NAME}$`);
+const CANDIDATE_DELETE_REF = new RegExp(String.raw`^refs\/heads\/${CANDIDATE_NAME}$`);
+const CANDIDATE_REF = /^refs\/heads\/candidate\/v(\d+\.\d+\.\d+)-rc\.[1-9]\d*$/;
 const STOPS = new Set(["restart", "stop", "restore", "repair", "compact", "reset", "upgrade", "uninstall"]);
 const APPROVAL = "JCLAW_OPERATOR_APPROVED";
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
@@ -38,7 +40,8 @@ const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
     + "a \"Release vX.Y.Z\" commit on main pushed to origin or github as HEAD or by its full sha, a version tag pushed "
-    + "alone, /release-check's candidate/<sha> branch on origin for a release commit over main, and the deletion of "
+    + "alone, /release-check's candidate/v<version>-rc.<N> branch on origin for a release commit over main that carries "
+    + "that version, and the deletion of "
     + "renovate/* and candidate/* branches.",
   noVerify: "Skipping git hooks is refused (AGENTS.md Policy): fix what the hook reports, then commit again.",
   hooksPath: "Changing core.hooksPath skips the repository's hooks (AGENTS.md Policy): leave it at .githooks.",
@@ -327,7 +330,7 @@ function pushAllowed(rest, state) {
       return s.branch === "main" && s.mainCheckout && s.onMain && RELEASE.test(s.subject);
     }
     const candidate = rest[0] === "origin" ? rest[1].match(CANDIDATE_PUSH) : null;
-    if (candidate && candidate[1].startsWith(candidate[2])) return releaseCandidate(state(candidate[1]));
+    if (candidate) return releaseCandidate(state(candidate[1]), candidate[2]);
   }
   // The names usually arrive through xargs, where only the ref layer sees them.
   return rest[0] === "origin" && rest[1] === "--delete"
@@ -335,9 +338,10 @@ function pushAllowed(rest, state) {
 }
 
 // /release-check's release commit, made over main's HEAD and not yet on main: the push of main that follows a green
-// candidate fast-forwards main to this very commit, so nothing else may ride on it (JF-448).
-function releaseCandidate(s) {
-  return s.branch === "main" && s.mainCheckout && RELEASE.test(s.subject) && s.releaseOverMain;
+// candidate fast-forwards main to this very commit, so nothing else may ride on it (JF-448). Its branch names the
+// version the commit carries, which its build takes as its name (JF-471).
+function releaseCandidate(s, version) {
+  return s.branch === "main" && s.mainCheckout && RELEASE.test(s.subject) && s.releaseOverMain && s.version === version;
 }
 
 function stashesUntracked(rest) {
@@ -519,7 +523,7 @@ export function commandVerdict(line, ctx) {
 
 /**
  * The refusal for git's pre-push ref lines, or null. `state(sha, remoteSha)` → {branch, subject, mainCheckout, onMain,
- * releaseOverMain, fastForward}.
+ * releaseOverMain, version, fastForward}.
  */
 export function refsVerdict(text, remote, state) {
   for (const line of text.split("\n")) {
@@ -532,14 +536,14 @@ export function refsVerdict(text, remote, state) {
 
 function refAllowed(localRef, localSha, remoteRef, remoteSha, remote, state) {
   if (/^0+$/.test(localSha)) {
-    return remote === "origin" && (remoteRef.startsWith("refs/heads/renovate/") || CANDIDATE_REF.test(remoteRef));
+    return remote === "origin" && (remoteRef.startsWith("refs/heads/renovate/") || CANDIDATE_DELETE_REF.test(remoteRef));
   }
   const candidate = remoteRef.match(CANDIDATE_REF);
   if (candidate) {
-    // Created once at its commit and never moved, so a candidate's name always says what Jenkins tested.
-    if (remote !== "origin" || localRef !== localSha || !localSha.startsWith(candidate[1])) return false;
+    // Created once and never moved, so its build tests the commit it was made for, and its number is never reused.
+    if (remote !== "origin" || localRef !== localSha) return false;
     if (!/^0+$/.test(remoteSha) && remoteSha !== localSha) return false;
-    return releaseCandidate(state(localSha, remoteSha));
+    return releaseCandidate(state(localSha, remoteSha), candidate[1]);
   }
   if (!REMOTES.has(remote)) return false;
   if (VERSION_TAG.test(remoteRef)) return localRef === remoteRef;
@@ -578,16 +582,24 @@ function releaseOverMain(dir, rev) {
   }
 }
 
+function releaseVersion(dir, rev) {
+  try {
+    return git(dir, "show", `${rev}:conf/application.conf`).match(/^application\.version=(\S+)$/m)?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function gitState(dir, rev = "HEAD") {
   try {
     const gitDir = git(dir, "rev-parse", "--path-format=absolute", "--git-dir");
     const common = git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir");
-    // A getter, so the PreToolUse layer runs the diff only for a candidate push.
+    // Getters, so the PreToolUse layer runs the diff and reads the version only for a candidate push.
     return { branch: git(dir, "rev-parse", "--abbrev-ref", "HEAD"), subject: git(dir, "log", "-1", "--format=%s", rev),
       mainCheckout: gitDir === common, onMain: isAncestor(dir, rev, "refs/heads/main"), common,
-      get releaseOverMain() { return releaseOverMain(dir, rev); } };
+      get releaseOverMain() { return releaseOverMain(dir, rev); }, get version() { return releaseVersion(dir, rev); } };
   } catch {
-    return { branch: "", subject: "", mainCheckout: false, onMain: false, releaseOverMain: false, common: "" };
+    return { branch: "", subject: "", mainCheckout: false, onMain: false, releaseOverMain: false, version: "", common: "" };
   }
 }
 

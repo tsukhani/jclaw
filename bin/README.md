@@ -21,6 +21,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `candidate-builds.test.mjs` | Its tests: `node --test bin/candidate-builds.test.mjs` |
 | `candidate-job.mjs` | Creates or updates the `JClaw-candidate` Jenkins job from the `JClaw` job's config — see below |
 | `candidate-job.test.mjs` | Its tests: `node --test bin/candidate-job.test.mjs` |
+| `candidate-rc.mjs` | The rc number `/release-check` names its next candidate branch with — see below |
+| `candidate-rc.test.mjs` | Its tests: `node --test bin/candidate-rc.test.mjs` |
 | `jira-release.mjs` | Records a release in Jira for `/deploy`: the tickets it ships, the release as their Fix Version, Done — see below |
 | `jira-release.test.mjs` | Its tests: `node --test bin/jira-release.test.mjs` |
 | `playwright-chromium.mjs` | Whether the Chromium build the Java Playwright pins is installed, for `./jclaw.sh test`'s live-browser gate — see below |
@@ -249,14 +251,12 @@ a config without the server, a refusal or a Jenkins that is down. Anything but 0
 node bin/candidate-builds.mjs green <full sha>   # prints "JClaw-candidate 3": the green candidate build of the commit
 node bin/candidate-builds.mjs kept               # prints the kept candidates' first 12 of sha, comma-separated
 node bin/candidate-builds.mjs kept --except <full sha>   # the same, less that commit's candidate
-node bin/candidate-builds.mjs next-rc 1.0.22     # prints 2 when v1.0.22-rc.1 is that version's highest candidate
 ```
 
 Candidates build in `JClaw-candidate` (JF-453), and the Jenkinsfile's sandbox cannot walk another job's builds, so
 the `JClaw` job's builds read these records on the host they share. Setup asks `green` whether a candidate tested the
 pushed commit, and skips Test and Sonar if one did. The Release stage asks it for the build whose archived zips it
-publishes. Cleanup asks `kept --except` the published commit which candidates' images the registry keeps, and a candidate's Setup asks `next-rc`
-for the number in its name, one past the highest that version's candidates were named, failed ones included. It reads each
+publishes. Cleanup asks `kept --except` the published commit which candidates' images the registry keeps. It reads each
 `$JENKINS_HOME/jobs/<job>/builds/<n>/build.xml`, newest first, in `JClaw-candidate` and then in `JClaw`, which built the
 candidates before JF-453. It takes a record's own `result`, `description`, `displayName` and `keepLog`, never the
 descriptions its parameters nest, and judges `green` by `candidate-vouch.mjs`'s rule.
@@ -279,13 +279,30 @@ node bin/candidate-job.mjs --apply   # creates JClaw-candidate, or updates it wh
 - its own description.
 
 So a candidate build runs the release commit's own Jenkinsfile, with no replay. The Bitbucket plugin posts the
-build's status on that commit, under `refs/heads/candidate/<first 12>`. The plugin posts on the commit its SCM checked
+build's status on that commit, under `refs/heads/candidate/v<version>-rc.<N>`, and the build takes that label as its
+name (JF-471). The plugin posts on the commit its SCM checked
 out. `JClaw`'s webhook builds only when polling, against the checkouts of its last successful build, finds a change.
 A candidate checked out in `JClaw` would therefore put its result on `main`'s head, and a candidate checked out there
 without `main` would leave `/deploy`'s push with no build (JF-453). Rerun with `--apply` after a change to `JClaw`'s
 SCM or parameters. It refuses a config of any other shape rather than guess. It reads Jenkins' URL and header as
 `candidate-vouch.mjs` does. Exit 0 said what it did or would do; exit 2 means a malformed argument, a config without
 the server, a refusal, or a `JClaw` config of another shape.
+
+## candidate-rc.mjs
+
+```bash
+node bin/candidate-rc.mjs 1.0.22   # prints 3 when v1.0.22-rc.2 is the highest that version's candidates have taken
+```
+
+`/release-check` names its candidate branch `candidate/v<version>-rc.<N>` before it pushes, and the build takes that
+label as its name, so the two never disagree (JF-471). N is one past the highest rc of the version among the
+`JClaw-candidate` builds' names, which it asks Jenkins for, and among the `candidate/*` branches on `origin`, which
+`git ls-remote` lists from the working directory. Failed attempts count: a build is named once its Setup runs, and
+`/release-check` keeps a branch whose build never started, so no number is used twice. It reads Jenkins' URL and
+header as `candidate-vouch.mjs` does.
+
+Exit 0 printed the number. Exit 2 means a malformed version, a config without the jenkins server, or a Jenkins or an
+`origin` that could not be asked, and `/release-check` stops rather than guess a number.
 
 ## jira-release.mjs
 
@@ -342,7 +359,9 @@ Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.
 `main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, the deletion of `renovate/*`
 and `candidate/*` branches on `origin`, and `/release-check`'s candidate: its `Release vX.Y.Z` commit, whose one
 parent is on `main` and which changes only `conf/application.conf`, pushed from the main checkout on `main` by its full
-SHA to `origin`'s `candidate/<a prefix of that SHA>`, which the ref layer lets be created but never moved (JF-448). `pre-push` runs no tests for a push of candidates alone, since their Jenkins build runs the whole suite. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
+SHA to `origin`'s `candidate/v<version>-rc.<N>`, where the version is the one that commit's `conf/application.conf`
+carries, which the ref layer lets be created but never moved, so its build tests the commit it was made for (JF-448,
+JF-471). A deletion also takes a branch named for its commit, the form before JF-471. `pre-push` runs no tests for a push of candidates alone, since their Jenkins build runs the whole suite. The ref layer also requires a fast-forward of the remote's `main`, so a forced push cannot roll it
 back. `/deploy` pushes by SHA, so a commit another session lands between its two pushes goes out in neither. `pre-push`
 tests the checkout, so a named commit that is not HEAD passes only if it was already tested.
 

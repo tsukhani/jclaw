@@ -43,7 +43,7 @@ Contributors' pull requests are merged on GitHub (CONTRIBUTING.md), so `github/m
 
 **Preflight: the release commit a green candidate tested**
 
-`/release-check` made the signed `Release vX.Y.Z` commit over `main`'s HEAD and pushed it to `candidate/<its first 12>` on `origin`, where Jenkins ran the whole suite and Sonar on it, passing only when Sonar showed 0 open issues. Find it among the candidate branches by its parent:
+`/release-check` made the signed `Release vX.Y.Z` commit over `main`'s HEAD and pushed it to `candidate/v<version>-rc.<N>` on `origin` (JF-471), where Jenkins ran the whole suite and Sonar on it, passing only when Sonar showed 0 open issues. Find it among the candidate branches by its parent:
 
 ```bash
 /usr/bin/git fetch -q origin

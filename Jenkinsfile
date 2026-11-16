@@ -98,8 +98,8 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
-        string(name: 'CANDIDATE', defaultValue: '', description: 'A release commit /release-check pushed to candidate/<sha>: JClaw-candidate tests, analyses and packages it as the version it carries, and releases nothing (JF-441, JF-448, JF-453)')
-        string(name: 'CANDIDATE_BRANCH', defaultValue: '', description: 'candidate/<the first 12 of CANDIDATE>: the branch JClaw-candidate checks out, which /release-check sets with CANDIDATE (JF-453)')
+        string(name: 'CANDIDATE', defaultValue: '', description: 'A release commit /release-check pushed to candidate/v<version>-rc.<N>: JClaw-candidate tests, analyses and packages it as the version it carries, and releases nothing (JF-441, JF-448, JF-453)')
+        string(name: 'CANDIDATE_BRANCH', defaultValue: '', description: 'candidate/v<version>-rc.<N>: the branch JClaw-candidate checks out and names its build after, which /release-check sets with CANDIDATE (JF-453, JF-471)')
         booleanParam(name: 'PUBLISH_DEVCONTAINER', defaultValue: false, description: 'Check to build and push .devcontainer/Dockerfile to ghcr.io/tsukhani/jclaw-devcontainer (independent of RELEASE; rerun only when .devcontainer/ changes)')
     }
 
@@ -172,9 +172,9 @@ pipeline {
                         if (!params.CANDIDATE.matches('[0-9a-f]{40}')) {
                             error("CANDIDATE is a full commit sha, not '${params.CANDIDATE}'.")
                         }
-                        def branch = "candidate/${params.CANDIDATE.substring(0, 12)}".toString()
-                        if (params.CANDIDATE_BRANCH != branch) {
-                            error("CANDIDATE_BRANCH is ${branch} for this CANDIDATE, not '${params.CANDIDATE_BRANCH}'.")
+                        def branch = params.CANDIDATE_BRANCH
+                        if (!branch.matches('candidate/v\\d+\\.\\d+\\.\\d+-rc\\.[1-9]\\d*')) {
+                            error("CANDIDATE_BRANCH is candidate/v<version>-rc.<N>, not '${branch}'.")
                         }
                         def head = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
                         if (head != params.CANDIDATE) {
@@ -229,11 +229,15 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     env.BUILD_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                    // A label only: lookups read the commit from the `tested <sha>` record, and the artifact reports
+                    // The branch is the label's one source, so a build and its branch never disagree (JF-471). A
+                    // label only: lookups read the commit from the `tested <sha>` record, and the artifact reports
                     // the plain version (JF-465).
                     if (params.CANDIDATE) {
-                        def rc = sh(returnStdout: true, script: "node bin/candidate-builds.mjs next-rc ${env.APP_VERSION} || true").trim()
-                        if (rc ==~ /\d+/) currentBuild.displayName = "v${env.APP_VERSION}-rc.${rc}"
+                        def label = params.CANDIDATE_BRANCH.substring('candidate/'.length())
+                        if (!label.startsWith("v${env.APP_VERSION}-rc.".toString())) {
+                            error("${params.CANDIDATE_BRANCH} names another version than the ${env.APP_VERSION} its commit carries.")
+                        }
+                        currentBuild.displayName = label
                     }
                     // A RELEASE build of a commit that already passed the whole
                     // suite skips Test and Sonar: Package needs only Build's
