@@ -630,10 +630,12 @@ class JevRunTest extends UnitTest {
                 }""".formatted(shell, shell);
         assertEquals("Playwright's Chromium is not installed: Executable doesn't exist at " + shell,
                 missingChromium(failure));
-        assertEquals("Playwright's Chromium is not installed: Executable doesn't exist at /Volumes/Data Drive/pw/"
-                        + "chromium_headless_shell-1248/chrome-headless-shell",
-                missingChromium("Error {\n  message='Executable doesn't exist at /Volumes/Data Drive/pw/"
-                        + "chromium_headless_shell-1248/chrome-headless-shell\r\n╔══╗"));
+        var dataDrive = "/Volumes/Data Drive/pw/chromium_headless_shell-1248/chrome-headless-shell";
+        assertEquals("Playwright's Chromium is not installed: Executable doesn't exist at " + dataDrive,
+                missingChromium("""
+                        Error {
+                          message='Executable doesn't exist at %s\r
+                        ╔══╗""".formatted(dataDrive)));
     }
 
     @Test
