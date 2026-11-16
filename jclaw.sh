@@ -2392,15 +2392,30 @@ ensure_play_test_port() {
     # cksum (POSIX) over the worktree's canonical path, modulo 800,
     # offset to 9100-9899. 9000 is the dev server's default; 9100 is the
     # conf default for %test.http.port; >=9900 leaves headroom for other
-    # local tooling. Collision probability with N worktrees is
-    # ~N(N-1)/1600 — negligible at typical use (under 1% for 4 worktrees).
-    # Collisions are recoverable by editing certs/.env manually.
+    # local tooling. With N worktrees open, two derive the same port with
+    # odds of about N(N-1)/1600, 2-6% for the 6 to 10 this clone often
+    # has, and a shared port shows only as unrelated failures in both
+    # test runs (JF-395), so a taken value steps to the next free one.
     local worktree_path
     worktree_path=$(/usr/bin/git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")
-    local port
+    local taken=" " line other_port
+    while IFS= read -r line; do
+        [[ "$line" == "worktree "* && -f "${line#worktree }/certs/.env" ]] || continue
+        other_port=$(awk -F= '$1 == "PLAY_TEST_PORT" { print $2; exit }' "${line#worktree }/certs/.env")
+        if [[ -n "$other_port" ]]; then taken="$taken$other_port "; fi
+    done < <(/usr/bin/git -C "$SCRIPT_DIR" worktree list --porcelain 2>/dev/null || true)
+    local port tries=0
     port=$(printf '%s' "$worktree_path" | cksum | awk '{print 9100 + ($1 % 800)}')
-    # The sidecars' default ports: a test server there stops the live instance starting that sidecar.
-    if (( port >= 9527 && port <= 9533 )); then port=$((port + 7)); fi
+    # 9527-9533 are the sidecars' default ports: a test server there stops the live instance starting that sidecar.
+    while (( port >= 9527 && port <= 9533 )) || [[ "$taken" == *" $port "* ]] \
+            || lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if (( tries >= 800 )); then
+            echo "    No free PLAY_TEST_PORT in 9100-9899: set one in $env_file by hand."
+            return 1
+        fi
+        port=$(( port == 9899 ? 9100 : port + 1 ))
+    done
     {
         echo ""
         echo "# Per-worktree HTTP port for \`play autotest\`. Derived from this"
