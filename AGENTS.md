@@ -119,7 +119,7 @@ Each guide holds one subsystem's rules with their reasons, and only the agent wo
 
 - JDK 25+ (Zulu recommended).
 - `play` in PATH: the fork at github.com/tsukhani/play1.
-- Node.js 24.11+ or 26+, enforced by `./jclaw.sh`: Nuxt 4.5's `engines` range above this project's 24 floor, which excludes 25. The dev container and CI ship 26.
+- Node.js 24.15+ or 26+, enforced by `./jclaw.sh`: Nuxt 4.6's `engines` range above this project's 24 floor, which excludes 25. The dev container and CI ship 26.
 - pnpm 12+, installed standalone, never via corepack: [frontend](docs/agents/frontend-toolchain.md).
 
 ## graphify

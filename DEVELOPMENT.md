@@ -29,7 +29,7 @@ development machine, run JClaw from source, test it, and find your way around th
 Building from source needs more than running a bundle:
 
 - **JDK 25+** (Zulu recommended)
-- **Node.js** 24.11+ or 26+
+- **Node.js** 24.15+ or 26+, the range Nuxt 4.6 accepts above this project's Node 24 floor
 - **pnpm** 12+, installed standalone rather than through corepack
 - the **`play` CLI** from the [Abundent Play 1.x fork](https://github.com/tsukhani/play1)
 

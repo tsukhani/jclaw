@@ -2716,10 +2716,11 @@ check_java_modules() {
 # SPA build (npx nuxi generate). pnpm no longer needs it — pnpm 12 is a native
 # binary — but Nuxt and vitest still run on Node.
 #
-# The accepted range mirrors Nuxt's `engines` intersected with AGENTS.md's 24+
-# floor — re-check it on a Nuxt bump. Node 25 is absent because Nuxt omits it.
+# The accepted range mirrors Nuxt's `engines` (4.6.4: ^22.22.3 || ^24.15.0 ||
+# >=26.0.0) intersected with AGENTS.md's 24+ floor — re-check it on a Nuxt
+# bump. Node 25 is absent because Nuxt omits it.
 check_node() {
-    local requirement="Node.js 24.11+ or 26+"
+    local requirement="Node.js 24.15+ or 26+"
     if ! command -v node >/dev/null 2>&1; then
         echo "Error: node not found. ${requirement} is required."
         echo "       Install from https://nodejs.org/ (or use nvm/fnm/asdf)."
@@ -2733,7 +2734,7 @@ check_node() {
         echo "Error: could not read a version from 'node -v' output '${node_version}'."
         exit 1
     fi
-    if [[ "$node_major" -eq 24 && "$node_minor" -ge 11 ]] || [[ "$node_major" -ge 26 ]]; then
+    if [[ "$node_major" -eq 24 && "$node_minor" -ge 15 ]] || [[ "$node_major" -ge 26 ]]; then
         return 0
     fi
     echo "Error: Node ${node_version} found, but ${requirement} is required."
