@@ -21,6 +21,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `candidate-builds.test.mjs` | Its tests: `node --test bin/candidate-builds.test.mjs` |
 | `candidate-job.mjs` | Creates or updates the `JClaw-candidate` Jenkins job from the `JClaw` job's config — see below |
 | `candidate-job.test.mjs` | Its tests: `node --test bin/candidate-job.test.mjs` |
+| `jira-release.mjs` | Records a release in Jira for `/deploy`: the tickets it ships, the release as their Fix Version, Done — see below |
+| `jira-release.test.mjs` | Its tests: `node --test bin/jira-release.test.mjs` |
 | `playwright-chromium.mjs` | Whether the Chromium build the Java Playwright pins is installed, for `./jclaw.sh test`'s live-browser gate — see below |
 | `playwright-chromium.test.mjs` | Its tests, the gate's lines among them: `node --test bin/playwright-chromium.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
@@ -276,6 +278,28 @@ without `main` would leave `/deploy`'s push with no build (JF-453). Rerun with `
 SCM or parameters. It refuses a config of any other shape rather than guess. It reads Jenkins' URL and header as
 `candidate-vouch.mjs` does. Exit 0 said what it did or would do; exit 2 means a malformed argument, a config without
 the server, a refusal, or a `JClaw` config of another shape.
+
+## jira-release.mjs
+
+```bash
+node bin/jira-release.mjs tickets v1.0.20 <REL>                    # JF-453 JF-462: the keys the range's subjects name
+node bin/jira-release.mjs record v1.0.21 2026-11-17 "<description>" JF-453 JF-462
+node bin/jira-release.mjs done v1.0.21 JF-453 JF-462               # each in Review with that Fix Version goes to Done
+```
+
+`/deploy` runs it once a release is tagged (JF-462), so Jira says which release shipped each ticket and nothing that
+shipped waits in Review. `tickets` prints the `JF-<n>` keys the commit subjects of a range name, each once, in number
+order. It reads subjects alone, since a ticket's commits put its key in the subject, while a body can name any
+ticket. `record` creates the version, released and dated, when Jira has none by that name. It then adds it to each
+ticket's Fix Versions, with an add rather than a set, so a ticket keeps the release it first shipped in. `done` moves
+each ticket in Review that carries the version to Done, by whichever transition Jira offers to Done. It leaves any
+other ticket as it is, a key passed by mistake included.
+
+It calls Jira's REST API with the `JIRA_URL` and `JIRA_PERSONAL_TOKEN` of the `jira-confluence` MCP server in
+`~/.claude.json` (`JCLAW_CLAUDE_JSON` names another file), so it holds no secret of its own, and it never prints the
+token. That server's own create-version call fails on this Jira. Exit 0 did everything asked. Exit 2 means a
+malformed argument, a range git cannot read, a config without the server, or a refusal, which stops the run after
+the lines for what it did.
 
 ## policy-guard.mjs
 
