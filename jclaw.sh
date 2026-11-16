@@ -5553,7 +5553,9 @@ do_e2e() {
     # whose rc was never re-sourced cannot see.
     check_pnpm
     echo "==> Reconciling the Playwright browser build..."
-    (cd "$SCRIPT_DIR/frontend" && pnpm exec playwright install chromium) || return 1
+    # An install deletes every browser build no live .links entry names, and the Java Playwright's entry
+    # points at a driver it unpacked to a temp directory, so this removed the build its tests pin (JF-463).
+    (cd "$SCRIPT_DIR/frontend" && PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm exec playwright install chromium) || return 1
 
     wait_for_e2e_target "$base" || return 1
 

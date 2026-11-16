@@ -730,6 +730,8 @@ tasks.register<JavaExec>("playwrightInstall") {
     classpath = files(configurations.named("runtimeClasspath"))
     mainClass.set("com.microsoft.playwright.CLI")
     args("install", "chromium")
+    // Its install would delete the builds of other Playwrights whose .links entry has gone stale (JF-463).
+    environment("PLAYWRIGHT_SKIP_BROWSER_GC", "1")
 }
 
 val cleanStrippedPrecompiled = tasks.register<Delete>("cleanStrippedPrecompiled") {

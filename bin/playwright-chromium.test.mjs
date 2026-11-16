@@ -218,3 +218,59 @@ test("./jclaw.sh test says so when it cannot tell, and leaves an explicit JCLAW_
     s.done();
   }
 });
+
+// JF-463: a Playwright install deletes every browser build no live .links entry names. The Java driver's entry points
+// at a temp directory it unpacked, so the frontend's install in `./jclaw.sh e2e` removed the build the Java tests pin.
+const FRONTEND_PLAYWRIGHT = join(ROOT, "frontend", "node_modules", ".bin", "playwright");
+
+function gcScratch() {
+  const dir = mkdtempSync(join(tmpdir(), "playwright-gc-"));
+  for (const folder of ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254",
+    "chromium_headless_shell-1254", "ffmpeg-1013"]) {
+    mkdirSync(join(dir, folder));
+    writeFileSync(join(dir, folder, "INSTALLATION_COMPLETE"), "");
+    writeFileSync(join(dir, folder, "DEPENDENCIES_VALIDATED"), "");
+  }
+  mkdirSync(join(dir, ".links"));
+  writeFileSync(join(dir, ".links", "java-driver"), join(dir, "unpacked-and-gone", "package"));
+  return dir;
+}
+
+function frontendInstall(dir, extra) {
+  const env = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: dir, PLAYWRIGHT_DOWNLOAD_HOST: "http://127.0.0.1:9", ...extra };
+  delete env.CI;
+  if (!extra.PLAYWRIGHT_SKIP_BROWSER_GC) delete env.PLAYWRIGHT_SKIP_BROWSER_GC;
+  return spawnSync(FRONTEND_PLAYWRIGHT, ["install", "chromium"], { env, encoding: "utf8", timeout: 60_000 });
+}
+
+const present = (dir) => ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254"]
+  .filter((folder) => spawnSync("test", ["-d", join(dir, folder)]).status === 0);
+
+test("a frontend Playwright install deletes the Java build a stale link names, unless PLAYWRIGHT_SKIP_BROWSER_GC is set",
+  { skip: spawnSync("test", ["-x", FRONTEND_PLAYWRIGHT]).status !== 0 && "frontend/node_modules is not installed" }, () => {
+    const cleaned = gcScratch();
+    const kept = gcScratch();
+    try {
+      const plain = frontendInstall(cleaned, {});
+      strictEqual(plain.status, 0, plain.stdout + plain.stderr);
+      deepStrictEqual(present(cleaned), ["chromium-1254"]);
+      strictEqual(plain.stdout.includes(`Removing unused browser at ${join(cleaned, "chromium-1248")}`), true, plain.stdout);
+
+      const skipped = frontendInstall(kept, { PLAYWRIGHT_SKIP_BROWSER_GC: "1" });
+      strictEqual(skipped.status, 0, skipped.stdout + skipped.stderr);
+      deepStrictEqual(present(kept), ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254"]);
+      strictEqual(skipped.stdout.includes("Removing unused browser"), false, skipped.stdout);
+    } finally {
+      rmSync(cleaned, { recursive: true, force: true });
+      rmSync(kept, { recursive: true, force: true });
+    }
+  });
+
+test("the developer installs, e2e's reconcile and playwrightInstall, skip the deletion", () => {
+  const jclaw = readFileSync(join(ROOT, "jclaw.sh"), "utf8");
+  strictEqual(jclaw.includes('(cd "$SCRIPT_DIR/frontend" && PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm exec playwright install chromium)'), true);
+  strictEqual((jclaw.match(/playwright install/g) ?? []).length, 1, "every install in jclaw.sh is the one above");
+  const gradle = readFileSync(join(ROOT, "build.gradle.kts"), "utf8");
+  const task = gradle.slice(gradle.indexOf('tasks.register<JavaExec>("playwrightInstall")'));
+  strictEqual(task.slice(0, task.indexOf("\n}\n")).includes('environment("PLAYWRIGHT_SKIP_BROWSER_GC", "1")'), true);
+});
