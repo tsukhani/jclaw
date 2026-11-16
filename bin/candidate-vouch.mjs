@@ -44,14 +44,30 @@ export async function postHeaders(jenkins, contentType = "application/x-www-form
   return headers;
 }
 
+/** The job that built candidates before JF-453 gave them one of their own, beside push builds of the same commits. */
+export const LEGACY_JOB = "JClaw";
+const TESTED = /^tested ([0-9a-f]{40})$/;
+
 /**
- * The build that vouches for {@code sha}: a finished, successful candidate build of it, which ran the whole suite
- * and Sonar on its tree. Its description is the record the Jenkinsfile writes; a push build of the same commit, which
- * may itself have skipped its tests on a candidate's word, does not count.
+ * The commit a candidate build tested, from the `tested <sha>` its success writes, or null. Every build of the
+ * candidate job is a candidate, so its name is only a label (JF-465). In the legacy JClaw job a push build writes the
+ * same record, possibly having skipped its tests on a candidate's word, so there only a build named
+ * `candidate <first 12>` counts.
+ */
+export function testedCommit(build, job) {
+  const sha = (build?.description ?? "").match(TESTED)?.[1];
+  if (!sha) return null;
+  if (job === LEGACY_JOB && !(build.displayName ?? "").endsWith(`candidate ${sha.slice(0, 12)}`)) return null;
+  return sha;
+}
+
+/**
+ * The build that vouches for {@code sha}: a finished, successful candidate build of it, which ran the whole suite and
+ * Sonar on its tree. A build without a {@code job} is one of the candidate job's.
  */
 export function vouchingBuild(builds, sha) {
   return (builds ?? []).find((b) => b.result === "SUCCESS" && b.building === false
-    && b.description === `tested ${sha}` && (b.displayName ?? "").endsWith(`candidate ${sha.slice(0, 12)}`)) ?? null;
+    && testedCommit(b, b.job) === sha) ?? null;
 }
 
 /** 0 and the build's name when one vouches, 1 when none does, 2 when Jenkins could not be asked. */

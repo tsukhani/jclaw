@@ -16,19 +16,28 @@ const SCRIPT = join(resolve(dirname(fileURLToPath(import.meta.url))), "candidate
 const AUTH = "Basic dXNlcjp0b2tlbg==";
 const REL = "a".repeat(40);
 const OLD = "b".repeat(40);
-const kept = (number, sha, keepLog = true) => ({ number, displayName: `#${number} candidate ${sha.slice(0, 12)}`, keepLog });
+// A candidate job's build carries an rc label (JF-465); a legacy JClaw candidate is named for its commit.
+const kept = (number, sha, keepLog = true) => ({ number, displayName: `v1.0.${number}-rc.1`, description: `tested ${sha}`, keepLog });
+const legacyKept = (number, sha, keepLog = true) => ({ number, displayName: `#${number} candidate ${sha.slice(0, 12)}`,
+  description: `tested ${sha}`, keepLog });
 
-test("--keep un-keeps every kept candidate but the release's, and touches no other build", () => {
-  const builds = [kept(1426, REL), kept(1424, OLD), kept(1423, "c".repeat(40), false),
-    { number: 1425, displayName: "#1425", keepLog: true }, { number: 1422, displayName: "#1422 candidate", keepLog: true }];
-  deepStrictEqual(toUnkeep(builds, { keep: REL }).map((b) => b.number), [1424]);
+test("--keep un-keeps every kept candidate but the release's, by the commit it tested, and touches no other build", () => {
+  const builds = [kept(3, REL), kept(2, OLD), kept(1, "c".repeat(40), false), { number: 4, displayName: "v1.0.4-rc.1", keepLog: true },
+    { number: 5, displayName: "v1.0.5-rc.1", description: `tested ${OLD.slice(0, 12)}`, keepLog: true }];
+  deepStrictEqual(toUnkeep(builds, { keep: REL }, "JClaw-candidate").map((b) => b.number), [2]);
+});
+
+test("in the legacy JClaw job only a kept build named for its commit is a candidate", () => {
+  const builds = [legacyKept(1426, OLD), { number: 1427, displayName: "#1427", description: `tested ${OLD}`, keepLog: true },
+    kept(1428, OLD)];
+  deepStrictEqual(toUnkeep(builds, { keep: REL }, "JClaw").map((b) => b.number), [1426]);
 });
 
 test("--drop un-keeps the build of that commit alone, and nothing when it is not kept", () => {
-  const builds = [kept(1426, REL), kept(1424, OLD)];
-  deepStrictEqual(toUnkeep(builds, { drop: OLD }).map((b) => b.number), [1424]);
-  deepStrictEqual(toUnkeep([kept(1424, OLD, false)], { drop: OLD }), []);
-  deepStrictEqual(toUnkeep(undefined, { drop: OLD }), []);
+  const builds = [kept(3, REL), kept(2, OLD)];
+  deepStrictEqual(toUnkeep(builds, { drop: OLD }, "JClaw-candidate").map((b) => b.number), [2]);
+  deepStrictEqual(toUnkeep([kept(2, OLD, false)], { drop: OLD }, "JClaw-candidate"), []);
+  deepStrictEqual(toUnkeep(undefined, { drop: OLD }, "JClaw-candidate"), []);
 });
 
 const withJenkins = async (handle, body) => {
@@ -75,14 +84,14 @@ const jenkins = ({ candidates = [], legacy = [], toggle = 302 }) => (req, res) =
 
 test("the CLI un-keeps each chosen build in either job, with the crumb and its session, names it, and exits 0", async () => {
   const candidates = [kept(3, REL), kept(2, OLD)];
-  const legacy = [kept(1426, "d".repeat(40)), kept(1424, "e".repeat(40), false)];
+  const legacy = [legacyKept(1426, "d".repeat(40)), legacyKept(1424, "e".repeat(40), false)];
   await withJenkins(jenkins({ candidates, legacy }), async ({ config, seen }) => {
     deepStrictEqual(await cli(["--keep", REL], config), { code: 0, stderr: "",
-      stdout: `Un-kept JClaw-candidate #2 (#2 candidate ${OLD.slice(0, 12)})\n`
+      stdout: "Un-kept JClaw-candidate #2 (v1.0.2-rc.1)\n"
         + `Un-kept JClaw #1426 (#1426 candidate ${"d".repeat(12)})\n` });
     deepStrictEqual(seen.map((s) => `${s.method} ${s.url}`), [
-      "GET /job/JClaw-candidate/api/json?tree=builds[number,displayName,keepLog]",
-      "GET /job/JClaw/api/json?tree=builds[number,displayName,keepLog]",
+      "GET /job/JClaw-candidate/api/json?tree=builds[number,displayName,description,keepLog]",
+      "GET /job/JClaw/api/json?tree=builds[number,displayName,description,keepLog]",
       "GET /crumbIssuer/api/json",
       "POST /job/JClaw-candidate/2/toggleLogKeep",
       "POST /job/JClaw/1426/toggleLogKeep",

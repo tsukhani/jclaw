@@ -195,9 +195,13 @@ node bin/candidate-keep.mjs --drop <full sha>   # un-keep this commit's candidat
 A green candidate build keeps itself (`currentBuild.keepLog`), because a GitHub Release of its version publishes its
 archived zips and its image, and the job otherwise keeps only the last 5 builds' files (JF-449). `/deploy` runs
 `--keep` with the release commit once both pushes succeeded, since every other candidate is then superseded, and
-`--drop` once the release's GitHub Release is published; `/release-check` runs `--drop` for a green candidate whose
-check failed on the Mac. A candidate is a build whose display name ends `candidate <first 12 of sha>`, in the
-`JClaw-candidate` job or, for one built before JF-453 gave candidates that job, in `JClaw`.
+`--drop` once the release's GitHub Release is published. By then that RELEASE build has deleted the candidate's zips
+and its registry image, now on the release and in GHCR, so `--drop` hands only the build's record (its log, test
+results and sums) to the job's retention (JF-465); `/release-check` runs `--drop` for a green candidate whose
+check failed on the Mac. Every build of the `JClaw-candidate` job is a candidate, and its commit is the full sha in
+the `tested <sha>` its success writes. Builds of `JClaw` from before JF-453 gave candidates that job count only when
+also named `candidate <first 12 of sha>`, since push builds there write the same record (`candidate-vouch.mjs`'s
+`testedCommit`, JF-465).
 
 It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and posts each `toggleLogKeep` with the crumb and
 session that `candidate-vouch.mjs`'s `postHeaders` gets. Jenkins only toggles, so it toggles only builds it has just
@@ -212,8 +216,8 @@ node bin/candidate-registry.mjs prune --keep <short sha>[,<short sha>…]   # as
 
 A candidate's image waits in `jclaw-candidate-registry`, a `registry:3` container on the Jenkins host bound to
 `127.0.0.1:5000`, so nothing off the host can pull an unreleased image and it uses no GHCR storage. The Release stage
-copies it to GHCR by digest. The Cleanup stage names the kept candidate builds and this deletes every other tag's
-manifest, by the digest the registry gives for it; the registry's `garbage-collect` then frees the layers nothing
+copies it to GHCR by digest. The Cleanup stage names the kept candidate builds, less the one it has just published
+(`kept --except`), and this deletes every other tag's manifest, by the digest the registry gives for it; the registry's `garbage-collect` then frees the layers nothing
 tags. `JCLAW_CANDIDATE_REGISTRY` points it at another registry. Exit 0 deleted each doomed image or found none,
 including a registry that never took a candidate; exit 1 means a malformed argument, or a request the registry
 refused or never answered, and stops the run.
@@ -226,8 +230,8 @@ node bin/candidate-vouch.mjs <full sha>   # prints the vouching build, such as #
 
 The pre-push hook asks it about the commit `/deploy` pushes to `main`, which is the release commit `/release-check`
 made and its candidate build tested (JF-444, JF-448). A finished, successful build of the `JClaw-candidate` job vouches when its
-description reads `tested <sha>` and its display name ends `candidate <first 12 of sha>`, the record a candidate build
-writes. A push build of the same commit does not count, since it may itself have skipped its tests on a candidate's
+description reads `tested <sha>`, the record a candidate build writes; its name, such as `v1.0.22-rc.2`, is only a
+label (JF-465). A push build of the same commit does not count, since it may itself have skipped its tests on a candidate's
 word, and neither does a candidate of the commit's parent: the shipped commit is the one tested. When a build
 vouches, the hook runs only what Jenkins never runs, `./jclaw.sh check` (with the frontend gates when a frontend
 input changed) and the `bin/` tests (when a `bin/` file changed), and skips the backend classes and the frontend
@@ -243,12 +247,15 @@ a config without the server, a refusal or a Jenkins that is down. Anything but 0
 ```bash
 node bin/candidate-builds.mjs green <full sha>   # prints "JClaw-candidate 3": the green candidate build of the commit
 node bin/candidate-builds.mjs kept               # prints the kept candidates' first 12 of sha, comma-separated
+node bin/candidate-builds.mjs kept --except <full sha>   # the same, less that commit's candidate
+node bin/candidate-builds.mjs next-rc 1.0.22     # prints 2 when v1.0.22-rc.1 is that version's highest candidate
 ```
 
 Candidates build in `JClaw-candidate` (JF-453), and the Jenkinsfile's sandbox cannot walk another job's builds, so
 the `JClaw` job's builds read these records on the host they share. Setup asks `green` whether a candidate tested the
 pushed commit, and skips Test and Sonar if one did. The Release stage asks it for the build whose archived zips it
-publishes. Cleanup asks `kept` which candidates' images the registry keeps. It reads each
+publishes. Cleanup asks `kept --except` the published commit which candidates' images the registry keeps, and a candidate's Setup asks `next-rc`
+for the number in its name, one past the highest that version's candidates were named, failed ones included. It reads each
 `$JENKINS_HOME/jobs/<job>/builds/<n>/build.xml`, newest first, in `JClaw-candidate` and then in `JClaw`, which built the
 candidates before JF-453. It takes a record's own `result`, `description`, `displayName` and `keepLog`, never the
 descriptions its parameters nest, and judges `green` by `candidate-vouch.mjs`'s rule.

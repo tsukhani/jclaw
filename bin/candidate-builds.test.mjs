@@ -3,13 +3,13 @@
 
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { buildRecord, keptCandidates } from "./candidate-builds.mjs";
+import { buildRecord, keptCandidates, nextRc } from "./candidate-builds.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(ROOT, "bin", "candidate-builds.mjs");
@@ -62,10 +62,22 @@ test("entities in a name or a description are decoded", () => {
   strictEqual(buildRecord(record({ displayName: "#5 &lt;b&gt; &amp; &quot;c&quot;" })).displayName, "#5 <b> & \"c\"");
 });
 
-test("the kept candidates are the twelve-character commits their kept builds are named for", () => {
-  const builds = [{ displayName: `#3 candidate ${REL.slice(0, 12)}`, keepLog: true },
-    { displayName: `#2 candidate ${OLD.slice(0, 12)}`, keepLog: false }, { displayName: "#1427", keepLog: true }];
-  deepStrictEqual(keptCandidates(builds), [REL.slice(0, 12)]);
+test("the kept candidates are the twelve-character commits their kept builds tested, whatever their names", () => {
+  const builds = [{ job: "JClaw-candidate", displayName: "v1.0.22-rc.2", description: `tested ${REL}`, keepLog: true },
+    { job: "JClaw-candidate", displayName: "v1.0.22-rc.1", description: `tested ${OLD}`, keepLog: false },
+    { job: "JClaw", displayName: "#1427", description: `tested ${OLD}`, keepLog: true },
+    { job: "JClaw", displayName: `#1426 candidate ${OLD.slice(0, 12)}`, description: `tested ${OLD}`, keepLog: true }];
+  deepStrictEqual(keptCandidates(builds), [REL.slice(0, 12), OLD.slice(0, 12)]);
+  deepStrictEqual(keptCandidates(builds, REL), [OLD.slice(0, 12)], "a release build leaves out the candidate it published");
+  deepStrictEqual(keptCandidates(builds, "c".repeat(40)), [REL.slice(0, 12), OLD.slice(0, 12)]);
+});
+
+test("the next rc of a version is one past the highest its candidate builds were named, failed ones too", () => {
+  const job = "JClaw-candidate";
+  deepStrictEqual(nextRc([], "1.0.22"), 1);
+  deepStrictEqual(nextRc([{ job, displayName: "v1.0.22-rc.1", result: "FAILURE" }, { job, displayName: "v1.0.22-rc.3" },
+    { job, displayName: "v1.0.21-rc.7" }, { job, displayName: "v1.0.220-rc.9" }, { job, displayName: "#5" },
+    { job: "JClaw", displayName: "v1.0.22-rc.8" }], "1.0.22"), 4);
 });
 
 const withHome = (jobs, body) => {
@@ -92,9 +104,9 @@ const cli = (args, home) => {
   return { code: run.status, stdout: run.stdout, stderr: run.stderr };
 };
 
-test("green names the candidate job's build of the commit, not a push build of it", () => {
+test("green names the candidate job's build of the commit by its tested commit, not its name, and never a push build", () => {
   withHome({
-    "JClaw-candidate": { 3: candidate(3, REL), 2: candidate(2, OLD) },
+    "JClaw-candidate": { 3: record({ description: `tested ${REL}`, displayName: "v1.0.22-rc.2" }), 2: candidate(2, OLD) },
     JClaw: { 1427: record({ description: `tested ${REL}`, displayName: "#1427" }) },
   }, (home) => {
     deepStrictEqual(cli(["green", REL], home), { code: 0, stdout: "JClaw-candidate 3\n", stderr: "" });
@@ -112,7 +124,8 @@ test("green answers 1 when only a failed, a running or another commit's candidat
   withHome({ "JClaw-candidate": {
     4: candidate(4, REL, { result: "FAILURE" }),
     5: candidate(5, REL, { result: null }),
-    6: record({ description: `tested ${REL}`, displayName: `#6 candidate ${OLD.slice(0, 12)}` }),
+    6: candidate(6, OLD),
+    7: record({ description: `tested ${REL.slice(0, 12)}`, displayName: "v1.0.22-rc.3" }),
   } }, (home) => {
     deepStrictEqual(cli(["green", REL], home), { code: 1, stdout: "", stderr: `no green candidate build tested ${REL}\n` });
   });
@@ -126,6 +139,8 @@ test("kept lists both jobs' kept candidates, the candidate job's first and newes
   }, (home) => {
     deepStrictEqual(cli(["kept"], home),
       { code: 0, stdout: `${REL.slice(0, 12)},${"b".repeat(12)},${OLD.slice(0, 12)}\n`, stderr: "" });
+    deepStrictEqual(cli(["kept", "--except", REL], home),
+      { code: 0, stdout: `${"b".repeat(12)},${OLD.slice(0, 12)}\n`, stderr: "" });
   });
 });
 
@@ -138,8 +153,11 @@ test("kept answers 2 rather than an empty list when no job's builds can be read,
 });
 
 test("a bad argument answers 2 without reading anything", () => {
-  for (const args of [[], ["green"], ["green", REL.slice(0, 12)], ["kept", "extra"], ["both", REL]]) {
-    deepStrictEqual(cli(args, "/nonexistent"), { code: 2, stdout: "", stderr: "give green <full sha> or kept\n" }, args.join(" "));
+  for (const args of [[], ["green"], ["green", REL.slice(0, 12)], ["kept", "extra"], ["kept", "--except"],
+    ["kept", "--except", REL.slice(0, 12)], ["kept", "--keep", REL], ["both", REL], ["next-rc"], ["next-rc", "v1.0.22"],
+    ["next-rc", "1.0"]]) {
+    deepStrictEqual(cli(args, "/nonexistent"),
+      { code: 2, stdout: "", stderr: "give green <full sha>, kept [--except <full sha>], or next-rc <x.y.z>\n" }, args.join(" "));
   }
 });
 
@@ -147,6 +165,72 @@ test("the Jenkinsfile finds candidate builds through this script, never by walki
   const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
   strictEqual(jenkinsfile.match(/node bin\/candidate-builds\.mjs green /g)?.length, 2, "Setup's skip and the Release stage");
   strictEqual(jenkinsfile.match(/node bin\/candidate-builds\.mjs kept/g)?.length, 1, "Cleanup's kept images");
+  strictEqual(jenkinsfile.includes("node bin/candidate-builds.mjs kept --except ${env.BUILD_COMMIT}"), true,
+    "the release build prunes the image it has just copied to GHCR");
   strictEqual(/\.previousBuild\b/.test(jenkinsfile), false, "a walk of previousBuild sees only the job it runs in");
   strictEqual(jenkinsfile.includes('src="$JENKINS_HOME/jobs/$CANDIDATE_JOB/builds/$CANDIDATE_BUILD/archive/dist"'), true);
+});
+
+test("next-rc reads the candidate job's records, and answers 1 for a version with none", () => {
+  withHome({ "JClaw-candidate": { 1: record({ description: `tested ${OLD}`, displayName: "v1.0.21-rc.1" }),
+    2: record({ result: "FAILURE", displayName: "v1.0.22-rc.1" }) } }, (home) => {
+    deepStrictEqual(cli(["next-rc", "1.0.22"], home), { code: 0, stdout: "2\n", stderr: "" });
+    deepStrictEqual(cli(["next-rc", "1.0.23"], home), { code: 0, stdout: "1\n", stderr: "" });
+  });
+});
+
+test("a candidate names itself by its rc, a vouched push build skips Package, and the open-issue check opens no Sonar env", () => {
+  const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
+  strictEqual(jenkinsfile.includes("node bin/candidate-builds.mjs next-rc ${env.APP_VERSION}"), true);
+  strictEqual(jenkinsfile.includes('currentBuild.displayName = "v${env.APP_VERSION}-rc.${rc}"'), true);
+  strictEqual(/currentBuild\.displayName = "#/.test(jenkinsfile), false, "no candidate is named for its commit");
+  const pack = jenkinsfile.slice(jenkinsfile.indexOf("stage('Package')"), jenkinsfile.indexOf("stage('Upgrade Rehearsal')"));
+  strictEqual(pack.includes("expression { !params.RELEASE && !env.TESTED_CANDIDATE }"), true);
+  const check = jenkinsfile.slice(jenkinsfile.indexOf("def sonarOpenIssues()"), jenkinsfile.indexOf("pipeline {"));
+  strictEqual(check.includes("withSonarQubeEnv"), false);
+  strictEqual(check.includes("withCredentials([string(credentialsId: 'Sonar', variable: 'SONAR_TOKEN')])"), true);
+});
+
+// The Cleanup stage's block, run as Jenkins runs it (sh -xe), against a stub gh that lists the release's assets.
+const zipCleanup = (assets, ghExit = 0) => {
+  const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
+  const at = jenkinsfile.indexOf("for f in jclaw.zip jclaw-bundle.zip; do");
+  const block = jenkinsfile.slice(jenkinsfile.lastIndexOf("sh '''", at) + 6, jenkinsfile.indexOf("'''", at));
+  const home = mkdtempSync(join(tmpdir(), "candidate-zips-"));
+  try {
+    const dist = join(home, "jobs", "JClaw-candidate", "builds", "3", "archive", "dist");
+    mkdirSync(dist, { recursive: true });
+    for (const f of ["jclaw.zip", "jclaw-bundle.zip", "PACKAGE_SUMS", "CANDIDATE_IMAGE"]) writeFileSync(join(dist, f), f);
+    const bin = join(home, "stub-bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "${join(home, "gh-calls")}"\nprintf '${assets.join("\\n")}\\n'\nexit ${ghExit}\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const run = spawnSync("/bin/sh", ["-e", "-c", block], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`,
+      JENKINS_HOME: home, APP_VERSION: "1.0.22", CANDIDATE_JOB: "JClaw-candidate", CANDIDATE_BUILD: "3" } });
+    return { code: run.status, stdout: run.stdout, stderr: run.stderr, left: readdirSync(dist).sort(),
+      calls: readFileSync(join(home, "gh-calls"), "utf8").trim().split("\n") };
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+};
+
+test("once the release lists both zips, the candidate build's copies go and its sums and image record stay", () => {
+  const { code, stdout, stderr, left, calls } = zipCleanup(["jclaw.zip", "jclaw-bundle.zip", "SHA256SUMS", "SHA256SUMS.sig"]);
+  deepStrictEqual({ code, stderr, left }, { code: 0, stderr: "", left: ["CANDIDATE_IMAGE", "PACKAGE_SUMS"] });
+  strictEqual(stdout, "Deleted jclaw.zip from candidate build JClaw-candidate #3: v1.0.22 holds it now.\n"
+    + "Deleted jclaw-bundle.zip from candidate build JClaw-candidate #3: v1.0.22 holds it now.\n");
+  deepStrictEqual(calls, Array(2).fill("release view v1.0.22 --repo tsukhani/jclaw --json assets --jq .assets[].name"));
+});
+
+test("a zip the release does not list, or lists only as part of a longer name, keeps the candidate's copy", () => {
+  const { code, stdout, stderr, left } = zipCleanup(["jclaw.zip", "jclaw-bundle.zip.sig"]);
+  deepStrictEqual({ code, left }, { code: 0, left: ["CANDIDATE_IMAGE", "PACKAGE_SUMS", "jclaw-bundle.zip"] });
+  strictEqual(stdout, "Deleted jclaw.zip from candidate build JClaw-candidate #3: v1.0.22 holds it now.\n");
+  strictEqual(stderr, "v1.0.22 lists no jclaw-bundle.zip, so candidate build JClaw-candidate #3 keeps its copy.\n");
+});
+
+test("when GitHub cannot be asked, both zips stay", () => {
+  const { code, stdout, left } = zipCleanup([], 1);
+  deepStrictEqual({ code, stdout, left },
+    { code: 0, stdout: "", left: ["CANDIDATE_IMAGE", "PACKAGE_SUMS", "jclaw-bundle.zip", "jclaw.zip"] });
 });

@@ -7,24 +7,23 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { jenkinsFrom, postHeaders } from "./candidate-vouch.mjs";
+import { jenkinsFrom, LEGACY_JOB, postHeaders, testedCommit } from "./candidate-vouch.mjs";
 
 // JClaw holds the candidates built before JF-453 gave them a job of their own, and a later release un-keeps them too.
-export const JOBS = ["JClaw-candidate", "JClaw"];
+export const JOBS = ["JClaw-candidate", LEGACY_JOB];
 const TIMEOUT_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
 const USAGE = "give --keep <full sha> to un-keep every other candidate, or --drop <full sha> to un-keep that one";
-const CANDIDATE = /candidate ([0-9a-f]{12})$/;
 
 /**
- * The kept candidate builds to un-keep: with {@code keep}, every one but the build of that commit, which the release
- * on main still needs; with {@code drop}, the build of that commit alone.
+ * The kept candidate builds of {@code job} to un-keep: with {@code keep}, every one but the build of that commit,
+ * which the release on main still needs; with {@code drop}, the build of that commit alone.
  */
-export function toUnkeep(builds, { keep, drop }) {
+export function toUnkeep(builds, { keep, drop }, job) {
   return (builds ?? []).filter((b) => {
-    const short = (b.displayName ?? "").match(CANDIDATE)?.[1];
-    if (b.keepLog !== true || !short) return false;
-    return keep ? short !== keep.slice(0, 12) : short === drop.slice(0, 12);
+    const sha = b.keepLog === true ? testedCommit(b, job) : null;
+    if (!sha) return false;
+    return keep ? sha !== keep : sha === drop;
   });
 }
 
@@ -51,10 +50,10 @@ async function run(args, configPath) {
   try {
     const doomed = [];
     for (const job of JOBS) {
-      const listed = await call(`${jenkins.base}/job/${job}/api/json?tree=builds[number,displayName,keepLog]`,
+      const listed = await call(`${jenkins.base}/job/${job}/api/json?tree=builds[number,displayName,description,keepLog]`,
         { headers: { Authorization: jenkins.authorization } });
       if (!listed.ok) return { code: 2, lines: [`Jenkins answered ${listed.status} for ${job}'s builds`] };
-      doomed.push(...toUnkeep((await listed.json()).builds, choice).map((build) => ({ job, build })));
+      doomed.push(...toUnkeep((await listed.json()).builds, choice, job).map((build) => ({ job, build })));
     }
     if (doomed.length === 0) return { code: 0, lines: ["No kept candidate build to un-keep."] };
     const headers = await postHeaders(jenkins);

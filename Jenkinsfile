@@ -51,13 +51,15 @@ def candidateRegistry() {
 // is no GitHub Release while any is open, so a candidate must leave none and the Release stage refuses while one is
 // (JF-441). Accepted issues and false positives are resolved, so they do not count. Call it once the analysis it
 // judges has been processed: waitForQualityGate waits for that.
+// Its token and host are those of the "SonarQube" server Jenkins is configured with, bound directly: withSonarQubeEnv
+// looks for an analysis's report-task.txt when its block ends, and warns when, as here, none ran (JF-465).
 def sonarOpenIssues() {
     def open = 0
-    withSonarQubeEnv('SonarQube') {
+    withCredentials([string(credentialsId: 'Sonar', variable: 'SONAR_TOKEN')]) {
         open = Integer.parseInt(sh(returnStdout: true, script: '''
             set +x
-            body=$(curl -fsS -u "${SONAR_TOKEN:-$SONAR_AUTH_TOKEN}:" \
-                "$SONAR_HOST_URL/api/issues/search?componentKeys=abundent:jclaw&issueStatuses=OPEN,CONFIRMED&ps=100")
+            body=$(curl -fsS -u "$SONAR_TOKEN:" \
+                "https://sonar.abundent.com/api/issues/search?componentKeys=abundent:jclaw&issueStatuses=OPEN,CONFIRMED&ps=100")
             printf '%s' "$body" | jq -r '.issues[] | "  \\(.rule) \\(.component | sub("^abundent:jclaw:"; "")):\\(.line // "-") \\(.message)"' >&2
             printf '%s' "$body" | jq -er '.paging.total'
         ''').trim())
@@ -178,7 +180,6 @@ pipeline {
                         if (head != params.CANDIDATE) {
                             error("${branch} holds ${head}, not ${params.CANDIDATE}: a candidate branch is created once and never moved.")
                         }
-                        currentBuild.displayName = "#${env.BUILD_NUMBER} candidate ${params.CANDIDATE.substring(0, 12)}"
                     } else if (env.JOB_NAME == 'JClaw-candidate') {
                         error('JClaw-candidate builds only /release-check candidates: start it with CANDIDATE and CANDIDATE_BRANCH.')
                     }
@@ -228,6 +229,12 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     env.BUILD_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    // A label only: lookups read the commit from the `tested <sha>` record, and the artifact reports
+                    // the plain version (JF-465).
+                    if (params.CANDIDATE) {
+                        def rc = sh(returnStdout: true, script: "node bin/candidate-builds.mjs next-rc ${env.APP_VERSION} || true").trim()
+                        if (rc ==~ /\d+/) currentBuild.displayName = "v${env.APP_VERSION}-rc.${rc}"
+                    }
                     // A RELEASE build of a commit that already passed the whole
                     // suite skips Test and Sonar: Package needs only Build's
                     // output, and the rerun let a flaky test fail the release
@@ -498,9 +505,10 @@ pipeline {
         stage('Package') {
             // A candidate packages too: a zip that fails to build or keeps its debug info would otherwise first fail
             // in the release commit's build, after the version is spent. A RELEASE build packages nothing: it
-            // publishes its candidate's zips (JF-449).
+            // publishes its candidate's zips (JF-449). Nor does the push of a release commit a candidate tested, whose
+            // zips no release would use (JF-465).
             when {
-                expression { !params.RELEASE }
+                expression { !params.RELEASE && !env.TESTED_CANDIDATE }
             }
             steps {
                 // ONE Gradle invocation, both packaging tasks. This is load-
@@ -892,11 +900,30 @@ pipeline {
                             node bin/ghcr-prune.mjs --apply
                         '''
 
+                        // The release is the zips' home now, so the candidate's staging copies go, each once the
+                        // release lists it. The build keeps its log, test results, PACKAGE_SUMS and CANDIDATE_IMAGE
+                        // as the record of what tested the release, until the job's retention takes it. A RELEASE
+                        // build of this version run again refuses at the Release stage's check, before touching
+                        // the published release (JF-465).
+                        sh '''
+                            dist="$JENKINS_HOME/jobs/$CANDIDATE_JOB/builds/$CANDIDATE_BUILD/archive/dist"
+                            for f in jclaw.zip jclaw-bundle.zip; do
+                                if gh release view "v$APP_VERSION" --repo tsukhani/jclaw --json assets --jq '.assets[].name' | grep -qxF "$f"; then
+                                    rm -f "$dist/$f"
+                                    echo "Deleted $f from candidate build $CANDIDATE_JOB #$CANDIDATE_BUILD: v$APP_VERSION holds it now."
+                                else
+                                    echo "v$APP_VERSION lists no $f, so candidate build $CANDIDATE_JOB #$CANDIDATE_BUILD keeps its copy." >&2
+                                fi
+                            done
+                        '''
+
                         // A candidate's image lives as long as its kept build: /deploy un-keeps the builds no
                         // release will publish, and the registry frees their layers once nothing tags them. The
-                        // kept builds are in the candidate job, so their records are read on this host.
+                        // kept builds are in the candidate job, so their records are read on this host. The one this
+                        // build published is in GHCR now, though /deploy un-keeps it only after this build (JF-465).
                         script {
-                            env.KEPT_CANDIDATES = sh(returnStdout: true, script: 'node bin/candidate-builds.mjs kept').trim()
+                            env.KEPT_CANDIDATES = sh(returnStdout: true,
+                                script: "node bin/candidate-builds.mjs kept --except ${env.BUILD_COMMIT}").trim()
                         }
                         sh '''
                             echo "Pruning candidate images no kept candidate build needs..."

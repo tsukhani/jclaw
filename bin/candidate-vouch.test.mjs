@@ -41,11 +41,22 @@ test("only a finished, green candidate build of the commit vouches for it", () =
   deepStrictEqual(vouchingBuild([candidate({ number: 1419, description: "tested " + "b".repeat(40) }), candidate()], SHA),
     candidate());
   for (const over of [{ result: "FAILURE" }, { result: null, building: true }, { building: true },
-    { description: `tested ${"b".repeat(40)}` }, { displayName: "#1420" }, { displayName: "#1418 candidate bbbbbbbbbbbb" }]) {
+    { description: `tested ${"b".repeat(40)}` }, { description: `tested ${SHA.slice(0, 12)}` }, { description: null }]) {
     strictEqual(vouchingBuild([candidate(over)], SHA), null, JSON.stringify(over));
   }
   strictEqual(vouchingBuild([], SHA), null);
   strictEqual(vouchingBuild(undefined, SHA), null);
+});
+
+test("a candidate job's build vouches whatever its name, and a legacy JClaw build only when named for the commit", () => {
+  for (const displayName of ["v1.0.22-rc.2", "#7", undefined]) {
+    deepStrictEqual(vouchingBuild([candidate({ displayName })], SHA), candidate({ displayName }), String(displayName));
+  }
+  const legacy = candidate({ job: "JClaw" });
+  deepStrictEqual(vouchingBuild([legacy], SHA), legacy);
+  for (const displayName of ["#1427", "#1418 candidate bbbbbbbbbbbb", "v1.0.20-rc.1"]) {
+    strictEqual(vouchingBuild([candidate({ job: "JClaw", displayName })], SHA), null, displayName);
+  }
 });
 
 const withJenkins = async (respond, body) => {
