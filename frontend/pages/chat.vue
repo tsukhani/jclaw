@@ -504,7 +504,19 @@ function onModelPicked(key: string) {
 // belongs to a different agent's list, or entering read-only subagent-
 // transcript mode when the target belongs to a subagent (which isn't in
 // the dropdown).
+// The addresses this page's own replaces asked for, oldest first, that the route has not shown yet. One can reach the
+// route after the page has moved on, as New Chat's does when a conversation opens before the router settles; read as
+// the operator navigating, it started a second New Chat that left the conversation with no stream (JF-474). Showing
+// an address drops it and the older ones its replace overtook, and a navigation the page never asked for drops all.
+const ownAddresses: string[] = []
+
 watch(() => route.query.conversation, async (raw) => {
+  const own = ownAddresses.indexOf(String(raw ?? ''))
+  if (own >= 0) {
+    ownAddresses.splice(0, own + 1)
+    return
+  }
+  ownAddresses.length = 0
   const id = raw ? Number(raw) : null
   // The sidebar's Chats link points at a bare /chat, so leaving a conversation
   // reaches this page as a dropped query on a component that never unmounts.
@@ -525,6 +537,7 @@ watch(() => route.query.conversation, async (raw) => {
 // The address follows the open conversation, so a reload or a copied link reopens it; replace keeps it out of history.
 watch(selectedConvoId, (id) => {
   if (String(id ?? '') === String(route.query.conversation ?? '')) return
+  ownAddresses.push(String(id ?? ''))
   // A replace that fails leaves only the address stale; it must not surface as an unhandled rejection.
   router.replace({ query: { ...route.query, conversation: id ?? undefined } }).catch(() => undefined)
 })

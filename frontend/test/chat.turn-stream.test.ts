@@ -1434,4 +1434,51 @@ describe('Chat page — every turn renders from the conversation stream (JF-202)
       ['/api/conversations/5/stream', true],
     ])
   })
+
+  // A page's own address change can reach the route after the page has moved on. A route.afterEach hook runs after the
+  // route changes and before the page's watchers do, the gap a loaded run leaves (JF-474).
+  it('a conversation opened as New Chat\'s address change lands stays open, with its stream and its address', async () => {
+    serveConversation(5, [row(1, 'user', 'kept open')])
+    serveConversation(6, [row(1, 'user', 'left')])
+    serveQueue(5)
+    serveQueue(6)
+    const { component } = await openConversation(6)
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('6'))
+    let opening: Promise<void> | undefined
+    onTestFinished(useRouter().afterEach((to) => {
+      if (to.query.conversation === undefined && !opening) opening = vmOf(component).loadConversation(5)
+    }))
+
+    await component.find('button[title="New conversation"]').trigger('click')
+    await vi.waitFor(() => expect(opening).toBeDefined())
+    await opening
+    await flushPromises()
+
+    expect(vmOf(component).messages.map(m => m.content)).toEqual(['kept open'])
+    expect(openStreamsOn(5).map(s => s.url)).toEqual(['/api/conversations/5/stream'])
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('5'))
+  })
+
+  it('New Chat clicked as a conversation\'s address change lands stays a new chat', async () => {
+    serveConversation(5, [row(1, 'user', 'left behind')])
+    serveConversation(6, [row(1, 'user', 'first')])
+    serveQueue(5)
+    serveQueue(6)
+    const { component } = await openConversation(6)
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBe('6'))
+    let clicked: Promise<void> | undefined
+    onTestFinished(useRouter().afterEach((to) => {
+      if (to.query.conversation === '5' && !clicked) clicked = component.find('button[title="New conversation"]').trigger('click')
+    }))
+
+    await vmOf(component).loadConversation(5)
+    await vi.waitFor(() => expect(clicked).toBeDefined())
+    await clicked
+    await flushPromises()
+
+    await vi.waitFor(() => expect(useRouter().currentRoute.value.query.conversation).toBeUndefined())
+    await flushPromises()
+    expect(vmOf(component).messages).toEqual([])
+    expect(openStreamsOn(5)).toEqual([])
+  })
 })
