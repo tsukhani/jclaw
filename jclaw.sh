@@ -420,10 +420,11 @@ EOF
 # True if the argument is a recognized subcommand. Used by the help-routing
 # logic so that `./jclaw.sh help <cmd>` falls back to the top-level banner
 # when <cmd> is unknown rather than blowing up — and so the parser can
-# distinguish the per-command help path from the bare-help path.
+# distinguish the per-command help path from the bare-help path. It names
+# exactly the commands usage_for has an arm for (CommandHelpScriptTest).
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|check|check-arch|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|scrapetest|grapheval|evals|diagnostics|check|check-arch|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
