@@ -29,15 +29,18 @@ public final class AtomicDirSwap {
 
     /**
      * Shared staging spine: create the staging directory, let {@code populate} fill it, then
-     * atomically swap it into {@code targetDir}, backing up any existing target. On any failure the
-     * partially-built staging directory is removed and the cause is rethrown as an
-     * {@link IOException}; an {@link UncheckedIOException} from {@code populate} is unwrapped to its
-     * cause so callers see the underlying I/O error.
+     * atomically swap it into {@code targetDir}, backing up any existing target. Anything already at
+     * {@code stagingDir}, a link included, fails the call with {@link java.nio.file.FileAlreadyExistsException}
+     * and is left as it is. On any later failure the partially-built staging directory is
+     * removed and the cause is rethrown as an {@link IOException}; an {@link UncheckedIOException} from
+     * {@code populate} is unwrapped to its cause so callers see the underlying I/O error.
      */
     public static void stageAndSwap(Path targetDir, Path stagingDir, Path backupDir,
                                     boolean replacing, StagingPopulator populate) throws IOException {
+        var parent = stagingDir.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.createDirectory(stagingDir);
         try {
-            Files.createDirectories(stagingDir);
             populate.populate(stagingDir);
             atomicSwap(targetDir, stagingDir, backupDir, replacing);
         } catch (IOException | RuntimeException e) {

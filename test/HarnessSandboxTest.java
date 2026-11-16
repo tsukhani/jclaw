@@ -1082,8 +1082,9 @@ class HarnessSandboxTest extends UnitTest {
 
     /** The production argv creates each before hiding it, as the test below shows for one. */
     @Test
-    void jclawsOwnSecretFoldersAreTheBackupsAndTheFilesSkillUpdatesKept() {
-        assertEquals(List.of(DatabaseService.backupsDir(), KeptSkillFiles.root()), HarnessSandbox.ownSecretFolders());
+    void jclawsOwnSecretFoldersAreTheBackupsTheFilesSkillUpdatesKeptAndTheFolderSkillCopiesAreBuiltIn() {
+        assertEquals(List.of(DatabaseService.backupsDir(), KeptSkillFiles.root(), services.WorkspaceFiles.skillStagingRoot()),
+                HarnessSandbox.ownSecretFolders());
     }
 
     /**

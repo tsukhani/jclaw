@@ -10,7 +10,9 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
   `/private/var/folders` and `/dev`;
   deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`, and
   reads and writes of JClaw's `data/`, `certs/`, `conf/`, `logs/`, backup and kept-skill-files
-  directories (`utils.SandboxHiddenRoots`), reopening a write root or allowance beneath one.
+  directories and of the workspace root's `.skill-staging/`, where JClaw builds an agent's copy of a
+  skill before renaming it into place (JF-406) (`utils.SandboxHiddenRoots`), reopening a write root or
+  allowance beneath one.
 - **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`, then a tmpfs
   over each of those JClaw directories: the visible
   filesystem is built from nothing, so secrets are *absent* rather than merely denied. Mount

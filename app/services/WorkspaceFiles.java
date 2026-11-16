@@ -66,6 +66,16 @@ public final class WorkspaceFiles {
         return Path.of(root);
     }
 
+    /**
+     * Where an agent's new copy of a skill is built before it moves into the agent's {@code skills/} folder (JF-406):
+     * in the workspace root, so the move is a rename even where the root is a mount of its own (Docker's volume), and
+     * in no agent's workspace, since no agent's name starts with a dot. Every sandbox hides it
+     * ({@link utils.SandboxHiddenRoots}), so no agent's shell can write into a copy while JClaw fills it.
+     */
+    public static Path skillStagingRoot() {
+        return workspaceRoot().toAbsolutePath().normalize().resolve(".skill-staging");
+    }
+
     /** Recursive byte size of the workspace root as last counted; see {@link WorkspaceSizeGauge}. */
     public static WorkspaceSizeGauge.Reading workspaceSize() {
         return sizeGauge.read();

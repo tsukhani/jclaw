@@ -16,6 +16,7 @@ import utils.AppClock;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -101,8 +102,9 @@ public class SkillPromotionService {
     }
 
     /**
-     * Copy a global skill into the agent's workspace using atomic staging.
-     * Assumes tool validation and malware scanning have already passed. Replacing
+     * Copy a global skill into the agent's workspace: the new copy is built in a folder of its own under
+     * {@link WorkspaceFiles#skillStagingRoot}, where no agent's shell can write while JClaw fills it, and renamed into
+     * place (JF-406). Assumes tool validation and malware scanning have already passed. Replacing
      * a copy first copies what {@link KeptSkillFiles#select} picks in it to the
      * kept files, and the new copy holds what the registry ships plus those same
      * files where it ships nothing or a credentials/ placeholder (JF-405).
@@ -112,9 +114,6 @@ public class SkillPromotionService {
         var agentSkillsDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var targetDir = agentSkillsDir.resolve(skillName);
         var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_FILE_NAME));
-
-        var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + AppClock.now().toEpochMilli());
-        var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + AppClock.now().toEpochMilli());
 
         AtomicDirSwap.StagingPopulator copyRegistry = staging -> {
             try (var walk = Files.walk(globalDir)) {
@@ -147,16 +146,29 @@ public class SkillPromotionService {
                         .formatted(carried.size(), skillName, String.join(", ", carried)));
             }
         };
-        // The swap deletes the old copy, with whatever the operator put in it (JF-352): take that out first.
-        var kept = replacing
-                ? KeptSkillFiles.copyOut(WorkspaceFiles.workspaceOwner(agent), skillName, targetDir, globalDir)
-                : null;
+        Files.createDirectories(agentSkillsDir);
+        var work = newStagingFolder(skillName);
         try {
-            AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, populate);
-        } catch (IOException | RuntimeException e) {
-            // A backup still on disk means the old copy had already left its place, so what was kept stays.
-            if (kept != null && !Files.exists(backupDir, LinkOption.NOFOLLOW_LINKS)) KeptSkillFiles.discard(kept);
-            throw e;
+            // The swap deletes the old copy, with whatever the operator put in it (JF-352): take that out first.
+            var kept = replacing
+                    ? KeptSkillFiles.copyOut(WorkspaceFiles.workspaceOwner(agent), skillName, targetDir, globalDir)
+                    : null;
+            var backupDir = work.resolve("old");
+            try {
+                AtomicDirSwap.stageAndSwap(targetDir, work.resolve("new"), backupDir, replacing, populate);
+            } catch (IOException | RuntimeException e) {
+                // A backup still here means the old copy had left its place and could not go back, so what was kept stays.
+                if (Files.exists(backupDir, LinkOption.NOFOLLOW_LINKS)) {
+                    EventLogger.warn(EVENT_CATEGORY_SKILLS, agent.name, null,
+                            "The old copy of skill %s could not be put back after the update failed and is removed%s"
+                                    .formatted(skillName, kept == null ? "" : "; the files kept from it stay"));
+                } else if (kept != null) {
+                    KeptSkillFiles.discard(kept);
+                }
+                throw e;
+            }
+        } finally {
+            removeStagingFolder(work);
         }
         // Refresh the skill cache now the swap is visible — stageAndSwap is generic,
         // so the orchestrator owns this policy.
@@ -171,6 +183,30 @@ public class SkillPromotionService {
         // the threat model. Runs after the swap, so a sync failure leaves the
         // installed skill in place (staging is already gone).
         syncAgentAllowlistFromRegistry(agent, skillName);
+    }
+
+    /**
+     * A new folder of this copy's own in {@link WorkspaceFiles#skillStagingRoot}, for the new copy and the old one's
+     * backup. A staging root that is anything but a plain folder, a link included, refuses the copy.
+     */
+    private static Path newStagingFolder(String skillName) throws IOException {
+        var root = WorkspaceFiles.skillStagingRoot();
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                Files.createDirectory(root);
+            } catch (FileAlreadyExistsException e) {
+                if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) throw e;
+            }
+        }
+        return Files.createTempDirectory(root, skillName + "-");
+    }
+
+    private static void removeStagingFolder(Path work) {
+        try {
+            AtomicDirSwap.deleteRecursive(work);
+        } catch (IOException | UncheckedIOException e) {
+            EventLogger.warn(EVENT_CATEGORY_SKILLS, "Could not remove the staging folder " + work + ": " + e.getMessage());
+        }
     }
 
     /**

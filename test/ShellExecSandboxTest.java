@@ -782,6 +782,35 @@ class ShellExecSandboxTest extends UnitTest {
         }
     }
 
+    /**
+     * JF-406: the folder an agent's new copy of a skill is built in sits in the workspace root, which the Main Agent's
+     * fence lets it write, and no agent's shell may write there, the Main Agent's included.
+     */
+    @Test
+    void noAgentsShellCanWriteWhereSkillCopiesAreBuilt() throws IOException {
+        assumeWorkingSandbox();
+        ConfigService.set("shell.allowlist", "mkdir");
+        var staging = services.WorkspaceFiles.skillStagingRoot();
+        Files.createDirectories(staging);
+        var tag = UUID.randomUUID().toString().substring(0, 8);
+        var beside = services.WorkspaceFiles.workspaceRoot().toAbsolutePath().resolve("jf406-" + tag);
+        var probes = new ArrayList<Path>();
+        try {
+            for (var who : List.of(main(), agent)) {
+                var probe = staging.resolve(who.name + "-" + tag);
+                probes.add(probe);
+                var result = run(who, "mkdir " + probe);
+                assertFalse(Files.exists(probe, java.nio.file.LinkOption.NOFOLLOW_LINKS), who.name + ": " + result);
+            }
+            var control = run(main(), "mkdir " + beside);
+            assertEquals(0, control.get("exitCode").getAsInt(), "the fence still lets main write the workspace root: " + control);
+            assertTrue(Files.isDirectory(beside));
+        } finally {
+            Files.deleteIfExists(beside);
+            for (var probe : probes) Files.deleteIfExists(probe);
+        }
+    }
+
     /** macOS runs no setuid program inside a sandbox, so the fence lets these two read-only viewers run outside it. */
     @Test
     @EnabledOnOs(OS.MAC)

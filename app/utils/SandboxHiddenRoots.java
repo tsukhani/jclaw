@@ -3,6 +3,7 @@ package utils;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.KeptSkillFiles;
+import services.WorkspaceFiles;
 import services.database.DatabaseService;
 
 import java.io.IOException;
@@ -30,7 +31,9 @@ public final class SandboxHiddenRoots {
      * {@code data/}, {@code certs/}, {@code conf/} and {@code logs/} under the application root
      * and under the working directory, which H2's {@code ./data/jclaw} resolves against, plus the
      * backup directory and the folder of {@link KeptSkillFiles}, the credentials skill updates kept,
-     * either of which an operator may move out of {@code data/}. Canonical, because Seatbelt matches
+     * either of which an operator may move out of {@code data/}, and the folder in the workspace root
+     * where JClaw builds an agent's copy of a skill ({@link WorkspaceFiles#skillStagingRoot}), which
+     * holds the credentials an update carries over. Canonical, because Seatbelt matches
      * after symlink resolution. A root nested in another is kept, so
      * {@link #beneath} sees the default {@code data/backups}.
      */
@@ -45,6 +48,7 @@ public final class SandboxHiddenRoots {
         }
         roots.add(canonical(DatabaseService.backupsDir()));
         roots.add(canonical(KeptSkillFiles.root()));
+        roots.add(canonical(WorkspaceFiles.skillStagingRoot()));
         return List.copyOf(roots);
     }
 

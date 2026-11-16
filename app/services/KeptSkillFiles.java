@@ -175,7 +175,7 @@ public final class KeptSkillFiles {
             boolean replace = intoNewCopy && Files.exists(to, LinkOption.NOFOLLOW_LINKS);
             if (replace && !(underCredentials(Path.of(path)) && Files.isRegularFile(to, LinkOption.NOFOLLOW_LINKS))) continue;
             Files.createDirectories(folder);
-            // The new copy is staged in the agent's workspace too: never write through a folder it made a link.
+            // No agent can write either target (JF-406), so this only stops a link out of it however one got there.
             if (!folder.toRealPath().startsWith(realTarget)) continue;
             if (replace) Files.delete(to);
             try (var in = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {

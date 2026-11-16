@@ -1164,9 +1164,12 @@ public final class HarnessSandbox {
         return List.copyOf(roots);
     }
 
-    /** JClaw's own secret folders, which may not exist yet: the backups and the files skill updates kept. */
+    /**
+     * JClaw's own secret folders, which may not exist yet: the backups, the files skill updates kept and the folder
+     * skill copies are built in.
+     */
     public static List<Path> ownSecretFolders() {
-        return List.of(DatabaseService.backupsDir(), KeptSkillFiles.root());
+        return List.of(DatabaseService.backupsDir(), KeptSkillFiles.root(), WorkspaceFiles.skillStagingRoot());
     }
 
     /**

@@ -2001,7 +2001,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
         var body = getContent(response);
         assertEquals(500, (int) response.status, body);
-        assertTrue(body.matches("Failed to copy skill: " + java.util.regex.Pattern.quote(old.toString()) + "\\.copying-\\d+/credentials"),
+        assertTrue(body.matches("Failed to copy skill: "
+                        + java.util.regex.Pattern.quote(services.WorkspaceFiles.skillStagingRoot().toString()) + "/nas-\\d+/new/credentials"),
                 body);
         assertEquals(List.of("SKILL.md", "credentials/nas.env"), filesOf(old));
         assertEquals(skillMd, Files.readString(old.resolve("SKILL.md")), "the old copy is still in place");
