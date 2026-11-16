@@ -3,6 +3,7 @@ package controllers;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import java.util.List;
 import java.util.Locale;
 
 import static utils.GsonHolder.GSON;
@@ -41,6 +42,28 @@ public final class AppPwa {
                 icon.addProperty("sizes", "any");
                 icon.addProperty("type", "image/svg+xml");
             }
+            icons.add(icon);
+        }
+        m.add("icons", icons);
+        return GSON.toJson(m);
+    }
+
+    /** JClaw's own manifest, named by the build so the SPA holds no copy of the name. */
+    public static String siteManifestJson(String productName) {
+        var m = new JsonObject();
+        m.addProperty("name", productName);
+        m.addProperty("short_name", productName);
+        // Without one Chrome refuses to install, reporting start-url-not-valid.
+        m.addProperty("start_url", "/");
+        m.addProperty("display", "standalone");
+        m.addProperty("theme_color", "#ffffff");
+        m.addProperty("background_color", "#ffffff");
+        var icons = new JsonArray();
+        for (var size : List.of("192x192", "512x512")) {
+            var icon = new JsonObject();
+            icon.addProperty("src", "/android-chrome-" + size + ".png");
+            icon.addProperty("sizes", size);
+            icon.addProperty("type", "image/png");
             icons.add(icon);
         }
         m.add("icons", icons);

@@ -17,7 +17,7 @@ export default defineNuxtConfig({
   // labels aren't blank, and the full RealFaviconGenerator link set so
   // iOS home-screen, Android PWA, and desktop browser tabs all resolve
   // their native sizes. Favicon files live in `public/` (served as-is
-  // at the site root — see public/site.webmanifest).
+  // at the site root); the backend builds /site.webmanifest.
   app: {
     head: {
       htmlAttrs: { lang: 'en' },
@@ -58,6 +58,10 @@ export default defineNuxtConfig({
     devProxy: {
       '/api': {
         target: `${backendUrl}/api`,
+        changeOrigin: true,
+      },
+      '/site.webmanifest': {
+        target: `${backendUrl}/site.webmanifest`,
         changeOrigin: true,
       },
     },

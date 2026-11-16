@@ -535,6 +535,9 @@ GET     /_nuxt/{<.+>path}                       Application.nuxtAsset
 # while /apps (no slash) stays the SPA listing page.
 GET     /apps/{<.+>path}                        Application.appAsset
 
+# The SPA's manifest is built from the product name /api/status reports, so the frontend holds no copy of it.
+GET     /site.webmanifest                       Application.siteManifest
+
 # SPA catch-all — serves index.html for all frontend routes (must be after API routes)
 GET     /{<(?!api/|public/|_nuxt/|apps/).+>path}      Application.spa
 

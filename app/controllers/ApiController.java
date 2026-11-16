@@ -65,7 +65,7 @@ public class ApiController extends Controller {
 
     private static final String BUILD = "free";
     // Constant rather than application.name: no config value may decide what a build calls itself.
-    private static final String PRODUCT_NAME = "JClaw";
+    static final String PRODUCT_NAME = "JClaw";
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")

@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http.Response;
 import play.test.FunctionalTest;
@@ -139,6 +140,25 @@ class ApplicationControllerTest extends FunctionalTest {
                 response.getHeader("Cache-Control"),
                 "content-hashed chunks must cache for a year; if this reads 'no-cache' "
                         + "the harness is rewriting headers and the shell tests are vacuous");
+    }
+
+    @Test
+    void siteManifestNamesTheBuildStatusReportsAndStartsAtTheRoot() {
+        String productName = JsonParser.parseString(getContent(GET("/api/status")))
+                .getAsJsonObject().get("productName").getAsString();
+        assertFalse(productName.isEmpty(), "an empty name is what kept Chrome from installing the app");
+
+        Response response = GET("/site.webmanifest");
+        assertIsOk(response);
+        assertContentType("application/manifest+json", response);
+        assertEquals("no-cache", response.getHeader("Cache-Control"));
+        var expected = JsonParser.parseString("""
+                {"name":"%1$s","short_name":"%1$s","start_url":"/","display":"standalone",
+                 "theme_color":"#ffffff","background_color":"#ffffff",
+                 "icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},
+                          {"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}]}
+                """.formatted(productName));
+        assertEquals(expected, JsonParser.parseString(getContent(response)));
     }
 
     @Test

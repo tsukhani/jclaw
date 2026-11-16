@@ -125,6 +125,12 @@ public class Application extends Controller {
                 ? ApiAppsController.readApp(appDir.toPath()) : null;
     }
 
+    public static void siteManifest() {
+        response.setHeader(CACHE_CONTROL, NO_CACHE);
+        response.contentType = AppPwa.MANIFEST_CONTENT_TYPE;
+        renderText(AppPwa.siteManifestJson(ApiController.PRODUCT_NAME));
+    }
+
     /**
      * SPA catch-all: serves static files from the Nuxt build if they exist,
      * otherwise falls back to index.html for client-side routing.
