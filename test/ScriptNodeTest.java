@@ -365,8 +365,9 @@ class ScriptNodeTest extends UnitTest {
         var capped = run(ScriptNode.command(requireNode(), 32), ScriptNode.stdin(script));
         assertEquals(134, capped.exit(), "Node aborts on SIGABRT: " + capped.err());
         assertEquals("", capped.out());
-        assertTrue(capped.err().lines().anyMatch(
-                        l -> l.equals("FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory")),
+        // Node 24.22.1 printed "Reached heap limit"; 26.13.1 always prints this line for the same script and cap.
+        assertTrue(capped.err().lines().anyMatch(l -> l.equals(
+                        "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory")),
                 capped.err());
     }
 

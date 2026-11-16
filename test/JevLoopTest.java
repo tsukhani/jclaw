@@ -523,7 +523,7 @@ class JevLoopTest extends UnitTest {
         }
 
         @Override
-        public JsonObject send(String method, JsonObject args) {
+        public JsonObject send(String method, JsonObject args, CDPSession.SendOptions options) {
             var response = new JsonObject();
             switch (method) {
                 case "Runtime.evaluate" -> {

@@ -26,7 +26,7 @@ public final class ScriptNode {
 
     public static final String HEAP_KEY = "script.nodeHeapMb";
     public static final int DEFAULT_HEAP_MB = 256;
-    // Measured on Node 24.22.1: 8 MB still starts, 4 MB aborts before any script runs.
+    // Measured on Node 24.22.1 and 26.13.1: 8 MB still starts, 4 MB aborts before any script runs.
     public static final int MIN_HEAP_MB = 16;
 
     public enum Source { NODEJS_PATH, MANAGED_DRIVER, DOWNLOADED }
