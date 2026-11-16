@@ -50,7 +50,7 @@ head=$(/usr/bin/git rev-parse HEAD)
   while read -r b; do [ "$(/usr/bin/git rev-parse "$b^" 2>/dev/null)" = "$head" ] && /usr/bin/git log -1 --format='%H %s' "$b"; done
 ```
 
-Each line is a release commit over this `HEAD`: its full SHA is `<REL>` and its subject names the version. Then find its build among the newest 30 of `JClaw` (`mcp__jenkins__getJob` with `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <REL's first 12>`, `result` is `SUCCESS`, and `description` is `tested <REL>`.
+Each line is a release commit over this `HEAD`: its full SHA is `<REL>` and its subject names the version. Then find its build among the newest 30 of `JClaw-candidate`, where candidates build (JF-453) (`mcp__jenkins__getJob` with `jobFullName: "JClaw-candidate"` and `tree: "builds[number,result,displayName,description]{0,30}"`): `displayName` ends `candidate <REL's first 12>`, `result` is `SUCCESS`, and `description` is `tested <REL>`.
 
 - **One line, with a green build:** that commit is the release. `/usr/bin/git status --porcelain -- conf/application.conf` must print nothing, or the fast-forward fails. Other uncommitted work stays out of the release, so name it in the report.
 - **Several lines:** a check ran more than once over this `HEAD`. Use the one with a green build; if more than one has, ask which.

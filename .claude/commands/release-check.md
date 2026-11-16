@@ -86,11 +86,7 @@ Reject anything else with a clear message; do not guess. `/deploy` reads the ver
     /usr/bin/git push origin <REL>:refs/heads/candidate/<REL's first 12>
     ```
     The guard passes this form only: a `Release vX.Y.Z` commit whose one parent is on `main` and which changes only `conf/application.conf`, pushed from the main checkout on `main` to `origin`, on a branch named for that commit, created once and never moved. The pre-push hook skips the local tests, which the candidate build and step 12 run. This branch is what keeps the commit once the worktree is gone.
-11. **Start the build.** A triggered build runs the Jenkinsfile on Bitbucket's `main`, so first ask whether the release commit changes it: `/usr/bin/git diff --quiet origin/main <REL> -- Jenkinsfile`.
-    - **Unchanged** (exit 0): `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"CANDIDATE": "<REL>"}`, then follow the queue item (`mcp__jenkins__getQueueItem`) to its build number.
-    - **Changed:** `node bin/replay-candidate.mjs <REL>`. It replays a recent build with the commit's own Jenkinsfile, so the change runs here rather than first in the release's push build, and touches no parameter defaults. Find the build among the newest by its name.
-
-    Either way the build names itself `#<n> candidate <REL's first 12>` and is analysed as the version the commit carries.
+11. **Start the build** in the `JClaw-candidate` job: `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw-candidate"` and `parameters: {"CANDIDATE": "<REL>", "CANDIDATE_BRANCH": "candidate/<REL's first 12>"}`, then follow the queue item (`mcp__jenkins__getQueueItem`) to its build number. That job checks out the candidate branch, so the build runs the release commit's own Jenkinsfile and its Bitbucket status lands on that commit (JF-453). It names itself `#<n> candidate <REL's first 12>` and is analysed as the version the commit carries. If Jenkins has no such job, `node bin/candidate-job.mjs --apply` creates it from the `JClaw` job.
 12. **Meanwhile, run on this Mac the tests the candidate cannot** (JF-447): the live-browser classes, which only `./jclaw.sh test` turns on, and the macOS sides of tests that branch on the OS, since Jenkins runs on Linux. It is the backend classes `bin/select-tests.mjs` picks from the range since `origin/main`, run in the worktree, so the Mac tests the release commit itself. Wait until `jcmd -l | grep playAutotest | grep -v -e -Ptests=` and `pgrep -fl '[.]githooks/pre-push'` print nothing, then run it in the background, redirected to a file and never piped:
     ```bash
     ./gradlew --quiet compileTestJava
@@ -99,7 +95,7 @@ Reject anything else with a clear message; do not guess. `/deploy` reads the ver
     JCLAW_TEST_BACKEND="$scope" JCLAW_TEST_FRONTEND=0 ./jclaw.sh test > logs/release-check-local.log 2>&1
     ```
     Its first line says whether the Chromium build the Java Playwright pins is installed, and so whether the live-browser classes ran (JF-452). When it names that build as not installed, run `./gradlew playwrightInstall` and this step again before reporting the Mac run. The frontend run is the candidate's.
-13. Wait for the candidate without polling: it takes about 30 minutes (Build, Test, Sonar, Package and the image). Start a background `sleep 1500`, then check every five minutes with `mcp__jenkins__getBuild` (`tree: "number,building,result,displayName,description"`) until `building` is false.
+13. Wait for the candidate without polling: it takes about 30 minutes (Build, Test, Sonar, Package and the image). Start a background `sleep 1500`, then check every five minutes with `mcp__jenkins__getBuild` (`jobFullName: "JClaw-candidate"`, `tree: "number,building,result,displayName,description"`) until `building` is false.
 
 **Report**
 
@@ -110,7 +106,7 @@ Reject anything else with a clear message; do not guess. `/deploy` reads the ver
 
 **Notes**
 
-- A triggered build runs the Jenkinsfile on Bitbucket's `main`, which is why step 11 replays a release commit that changes it. `bin/README.md` has the replay's contract.
+- Candidates build in `JClaw-candidate`, never in `JClaw`: the Bitbucket plugin posts a build's status on the commit its SCM checked out, and `JClaw`'s webhook starts a build only when polling against its last successful build's checkouts finds a change, so those must stay `main`'s (JF-453). `JClaw`'s Jenkinsfile refuses a candidate. `bin/README.md` § candidate-job.mjs has the job's shape.
 - A candidate whose Sonar analysis does not finish fails, where a push build would only turn UNSTABLE: an unverified candidate must not let the release skip Sonar.
 - The candidate's image waits in a registry on the Jenkins host, bound to `127.0.0.1`, so nothing off that host can pull an unreleased image, and it costs no GHCR storage. The Cleanup stage of a GitHub Release deletes the images of candidate builds no longer kept.
 - `/deploy` deletes the candidate branches its release supersedes, after both of its pushes succeed.

@@ -59,57 +59,62 @@ const cli = (args, config) => new Promise((settle) => {
   child.on("close", (code) => settle({ code, stdout, stderr }));
 });
 
-const jenkins = ({ builds, toggle = 302 }) => (req, res) => {
-  if (req.url.startsWith("/job/JClaw/api/json")) {
+// The candidate job's builds, and the older JClaw job's, which held candidates before JF-453.
+const jenkins = ({ candidates = [], legacy = [], toggle = 302 }) => (req, res) => {
+  if (req.url.startsWith("/job/JClaw-candidate/api/json") || req.url.startsWith("/job/JClaw/api/json")) {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ builds }));
+    res.end(JSON.stringify({ builds: req.url.startsWith("/job/JClaw-candidate/") ? candidates : legacy }));
   } else if (req.url === "/crumbIssuer/api/json") {
     res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": "JSESSIONID.x=abc; Path=/; HttpOnly" });
     res.end(JSON.stringify({ crumbRequestField: "Jenkins-Crumb", crumb: "c-123" }));
   } else {
-    res.writeHead(toggle, { Location: "/job/JClaw/" });
+    res.writeHead(toggle, { Location: "/job/JClaw-candidate/" });
     res.end();
   }
 };
 
-test("the CLI un-keeps each chosen build with the crumb and its session, names it, and exits 0", async () => {
-  const builds = [kept(1426, REL), kept(1424, OLD), kept(1420, "d".repeat(40))];
-  await withJenkins(jenkins({ builds }), async ({ config, seen }) => {
+test("the CLI un-keeps each chosen build in either job, with the crumb and its session, names it, and exits 0", async () => {
+  const candidates = [kept(3, REL), kept(2, OLD)];
+  const legacy = [kept(1426, "d".repeat(40)), kept(1424, "e".repeat(40), false)];
+  await withJenkins(jenkins({ candidates, legacy }), async ({ config, seen }) => {
     deepStrictEqual(await cli(["--keep", REL], config), { code: 0, stderr: "",
-      stdout: `Un-kept #1424 (#1424 candidate ${OLD.slice(0, 12)})\nUn-kept #1420 (#1420 candidate ${"d".repeat(12)})\n` });
+      stdout: `Un-kept JClaw-candidate #2 (#2 candidate ${OLD.slice(0, 12)})\n`
+        + `Un-kept JClaw #1426 (#1426 candidate ${"d".repeat(12)})\n` });
     deepStrictEqual(seen.map((s) => `${s.method} ${s.url}`), [
+      "GET /job/JClaw-candidate/api/json?tree=builds[number,displayName,keepLog]",
       "GET /job/JClaw/api/json?tree=builds[number,displayName,keepLog]",
       "GET /crumbIssuer/api/json",
-      "POST /job/JClaw/1424/toggleLogKeep",
-      "POST /job/JClaw/1420/toggleLogKeep",
+      "POST /job/JClaw-candidate/2/toggleLogKeep",
+      "POST /job/JClaw/1426/toggleLogKeep",
     ]);
-    strictEqual(seen[2].headers.authorization, AUTH);
-    strictEqual(seen[2].headers["jenkins-crumb"], "c-123");
-    strictEqual(seen[2].headers.cookie, "JSESSIONID.x=abc");
+    strictEqual(seen[3].headers.authorization, AUTH);
+    strictEqual(seen[3].headers["jenkins-crumb"], "c-123");
+    strictEqual(seen[3].headers.cookie, "JSESSIONID.x=abc");
   });
 });
 
 test("with nothing kept to un-keep the CLI says so, posts nothing, and exits 0", async () => {
-  await withJenkins(jenkins({ builds: [kept(1426, REL), kept(1424, OLD, false)] }), async ({ config, seen }) => {
+  await withJenkins(jenkins({ candidates: [kept(3, REL), kept(2, OLD, false)] }), async ({ config, seen }) => {
     deepStrictEqual(await cli(["--keep", REL], config), { code: 0, stdout: "No kept candidate build to un-keep.\n", stderr: "" });
     strictEqual(seen.some((s) => s.method === "POST"), false);
   });
 });
 
 test("a refused un-keep stops the run with exit 2, after naming what it did un-keep", async () => {
-  const builds = [kept(1426, REL), kept(1424, OLD)];
-  await withJenkins(jenkins({ builds, toggle: 403 }), async ({ config, seen }) => {
+  const candidates = [kept(3, REL), kept(2, OLD)];
+  await withJenkins(jenkins({ candidates, toggle: 403 }), async ({ config, seen }) => {
     deepStrictEqual(await cli(["--drop", OLD], config), { code: 2, stdout: "",
-      stderr: "Jenkins answered 403 to un-keeping #1424\n" });
+      stderr: "Jenkins answered 403 to un-keeping JClaw-candidate #2\n" });
     strictEqual(seen.filter((s) => s.method === "POST").length, 1);
   });
 });
 
 test("the CLI exits 2 when Jenkins refuses the listing or is not there", async () => {
   await withJenkins((req, res) => { res.writeHead(503); res.end(); }, async ({ config }) => {
-    deepStrictEqual(await cli(["--keep", REL], config), { code: 2, stdout: "", stderr: "Jenkins answered 503 for the builds\n" });
+    deepStrictEqual(await cli(["--keep", REL], config), { code: 2, stdout: "",
+      stderr: "Jenkins answered 503 for JClaw-candidate's builds\n" });
   });
-  await withJenkins(jenkins({ builds: [] }), async ({ config, dir }) => {
+  await withJenkins(jenkins({}), async ({ config, dir }) => {
     const away = join(dir, "away.json");
     writeFileSync(away, JSON.stringify({ mcpServers: { jenkins: { args: ["http://127.0.0.1:9/mcp-server/mcp",
       "--header", `Authorization:${AUTH}`] } } }));
@@ -121,7 +126,7 @@ test("the CLI exits 2 when Jenkins refuses the listing or is not there", async (
 });
 
 test("the CLI exits 2 without asking Jenkins for a bad argument or a config it cannot read", async () => {
-  await withJenkins(jenkins({ builds: [] }), async ({ config, dir, seen }) => {
+  await withJenkins(jenkins({}), async ({ config, dir, seen }) => {
     const usage = "give --keep <full sha> to un-keep every other candidate, or --drop <full sha> to un-keep that one\n";
     for (const args of [[], ["--keep"], ["--keep", REL.slice(0, 12)], ["--both", REL], ["--keep", REL, "extra"]]) {
       deepStrictEqual(await cli(args, config), { code: 2, stdout: "", stderr: usage }, args.join(" "));

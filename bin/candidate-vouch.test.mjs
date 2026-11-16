@@ -83,7 +83,7 @@ const json = (payload) => (req, res) => {
 test("the CLI prints the vouching build and exits 0, asking for the job's last 30 builds with the header", async () => {
   await withJenkins(json({ builds: [candidate()] }), async ({ config, seen }) => {
     deepStrictEqual(await cli([SHA], config), { code: 0, stdout: "#1418\n", stderr: "" });
-    deepStrictEqual(seen, [{ url: "/job/JClaw/api/json?tree=builds[number,result,building,displayName,description]{0,30}",
+    deepStrictEqual(seen, [{ url: "/job/JClaw-candidate/api/json?tree=builds[number,result,building,displayName,description]{0,30}",
       authorization: AUTH }]);
   });
 });

@@ -17,8 +17,10 @@ trees. Nothing here ships in a `play dist` tarball.
 | `candidate-registry.test.mjs` | Its tests: `node --test bin/candidate-registry.test.mjs` |
 | `candidate-vouch.mjs` | Whether a green `/release-check` candidate build tested a commit, for `.githooks/pre-push` — see below |
 | `candidate-vouch.test.mjs` | Its tests, the hook's candidate skip among them: `node --test bin/candidate-vouch.test.mjs` |
-| `replay-candidate.mjs` | Starts a `/release-check` candidate build with the candidate's own Jenkinsfile — see below |
-| `replay-candidate.test.mjs` | Its tests: `node --test bin/replay-candidate.test.mjs` |
+| `candidate-builds.mjs` | The green and the kept candidate builds, read from the build records on the Jenkins host, for the Jenkinsfile — see below |
+| `candidate-builds.test.mjs` | Its tests: `node --test bin/candidate-builds.test.mjs` |
+| `candidate-job.mjs` | Creates or updates the `JClaw-candidate` Jenkins job from the `JClaw` job's config — see below |
+| `candidate-job.test.mjs` | Its tests: `node --test bin/candidate-job.test.mjs` |
 | `playwright-chromium.mjs` | Whether the Chromium build the Java Playwright pins is installed, for `./jclaw.sh test`'s live-browser gate — see below |
 | `playwright-chromium.test.mjs` | Its tests, the gate's lines among them: `node --test bin/playwright-chromium.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
@@ -192,10 +194,11 @@ A green candidate build keeps itself (`currentBuild.keepLog`), because a GitHub 
 archived zips and its image, and the job otherwise keeps only the last 5 builds' files (JF-449). `/deploy` runs
 `--keep` with the release commit once both pushes succeeded, since every other candidate is then superseded, and
 `--drop` once the release's GitHub Release is published; `/release-check` runs `--drop` for a green candidate whose
-check failed on the Mac. A candidate is a build whose display name ends `candidate <first 12 of sha>`.
+check failed on the Mac. A candidate is a build whose display name ends `candidate <first 12 of sha>`, in the
+`JClaw-candidate` job or, for one built before JF-453 gave candidates that job, in `JClaw`.
 
 It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and posts each `toggleLogKeep` with the crumb and
-session that `replay-candidate.mjs`'s `postHeaders` gets. Jenkins only toggles, so it toggles only builds it has just
+session that `candidate-vouch.mjs`'s `postHeaders` gets. Jenkins only toggles, so it toggles only builds it has just
 listed as kept. Exit 0 named each build it un-kept, or said there was none; exit 2 means a malformed argument, a
 config without the server, a refusal (the builds named before it stay un-kept) or a Jenkins that is down.
 
@@ -220,7 +223,7 @@ node bin/candidate-vouch.mjs <full sha>   # prints the vouching build, such as #
 ```
 
 The pre-push hook asks it about the commit `/deploy` pushes to `main`, which is the release commit `/release-check`
-made and its candidate build tested (JF-444, JF-448). A finished, successful build of the `JClaw` job vouches when its
+made and its candidate build tested (JF-444, JF-448). A finished, successful build of the `JClaw-candidate` job vouches when its
 description reads `tested <sha>` and its display name ends `candidate <first 12 of sha>`, the record a candidate build
 writes. A push build of the same commit does not count, since it may itself have skipped its tests on a candidate's
 word, and neither does a candidate of the commit's parent: the shipped commit is the one tested. When a build
@@ -233,24 +236,46 @@ names another file), so it needs no secret of its own, and gives up after 10 sec
 1 means no green candidate build tested the commit; exit 2 means it could not ask, for a sha that is not a full one,
 a config without the server, a refusal or a Jenkins that is down. Anything but 0 runs every test as before.
 
-## replay-candidate.mjs
+## candidate-builds.mjs
 
 ```bash
-node bin/replay-candidate.mjs <full sha>   # replayed #1422 as candidate 0123456789ab for v1.0.20
+node bin/candidate-builds.mjs green <full sha>   # prints "JClaw-candidate 3": the green candidate build of the commit
+node bin/candidate-builds.mjs kept               # prints the kept candidates' first 12 of sha, comma-separated
 ```
 
-A candidate build that `/release-check` triggers runs the Jenkinsfile on Bitbucket's `main`, so a candidate that
-changes the Jenkinsfile would first run the change in the release's own build (JF-445). This replays the newest
-finished build that neither releases nor publishes the dev container, with the candidate's Jenkinsfile as its script.
-In that script every read of `params.CANDIDATE` is replaced by the release commit's sha, so candidate mode runs
-whatever parameters the replayed build carries, and the job's parameter definitions and defaults stay as they are.
-The build is analysed as the version the commit carries, which the printed line names. It refuses a Jenkinsfile with
-no candidate mode, or one that reads another candidate parameter, such as the `CANDIDATE_VERSION` of a Jenkinsfile
-from before JF-448.
+Candidates build in `JClaw-candidate` (JF-453), and the Jenkinsfile's sandbox cannot walk another job's builds, so
+the `JClaw` job's builds read these records on the host they share. Setup asks `green` whether a candidate tested the
+pushed commit, and skips Test and Sonar if one did. The Release stage asks it for the build whose archived zips it
+publishes. Cleanup asks `kept` which candidates' images the registry keeps. It reads each
+`$JENKINS_HOME/jobs/<job>/builds/<n>/build.xml`, newest first, in `JClaw-candidate` and then in `JClaw`, which built the
+candidates before JF-453. It takes a record's own `result`, `description`, `displayName` and `keepLog`, never the
+descriptions its parameters nest, and judges `green` by `candidate-vouch.mjs`'s rule.
 
-It reads Jenkins' URL and header as `candidate-vouch.mjs` does, and sends the replay with the crumb and session
-Jenkins issues. Exit 0 printed the replayed build; exit 2 means nothing was replayed: a malformed sha, no Jenkinsfile
-or no `application.version` at the commit, no build fit to replay, a config without the server, or a refusal.
+Exit 0 printed the answer; `green` exits 1 when no green candidate tested the commit. Exit 2 means a malformed
+argument, no `JENKINS_HOME`, or no job's builds to list. `kept` then answers nothing rather than an empty list, which
+would prune every candidate image.
+
+## candidate-job.mjs
+
+```bash
+node bin/candidate-job.mjs           # says what it would create or update, and writes nothing
+node bin/candidate-job.mjs --apply   # creates JClaw-candidate, or updates it when it exists
+```
+
+`JClaw-candidate` is the `JClaw` job's pipeline, with four changes:
+- no Bitbucket webhook trigger;
+- its definition checks out `refs/heads/${CANDIDATE_BRANCH}`;
+- a `CANDIDATE_BRANCH` parameter, declared before the first build expands it;
+- its own description.
+
+So a candidate build runs the release commit's own Jenkinsfile, with no replay. The Bitbucket plugin posts the
+build's status on that commit, under `refs/heads/candidate/<first 12>`. The plugin posts on the commit its SCM checked
+out. `JClaw`'s webhook builds only when polling, against the checkouts of its last successful build, finds a change.
+A candidate checked out in `JClaw` would therefore put its result on `main`'s head, and a candidate checked out there
+without `main` would leave `/deploy`'s push with no build (JF-453). Rerun with `--apply` after a change to `JClaw`'s
+SCM or parameters. It refuses a config of any other shape rather than guess. It reads Jenkins' URL and header as
+`candidate-vouch.mjs` does. Exit 0 said what it did or would do; exit 2 means a malformed argument, a config without
+the server, a refusal, or a `JClaw` config of another shape.
 
 ## policy-guard.mjs
 

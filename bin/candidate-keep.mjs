@@ -7,10 +7,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { jenkinsFrom } from "./candidate-vouch.mjs";
-import { postHeaders } from "./replay-candidate.mjs";
+import { jenkinsFrom, postHeaders } from "./candidate-vouch.mjs";
 
-const JOB = "JClaw";
+// JClaw holds the candidates built before JF-453 gave them a job of their own, and a later release un-keeps them too.
+export const JOBS = ["JClaw-candidate", "JClaw"];
 const TIMEOUT_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
 const USAGE = "give --keep <full sha> to un-keep every other candidate, or --drop <full sha> to un-keep that one";
@@ -49,20 +49,23 @@ async function run(args, configPath) {
   const call = (url, init = {}) => fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
   const lines = [];
   try {
-    const listed = await call(`${jenkins.base}/job/${JOB}/api/json?tree=builds[number,displayName,keepLog]`,
-      { headers: { Authorization: jenkins.authorization } });
-    if (!listed.ok) return { code: 2, lines: [`Jenkins answered ${listed.status} for the builds`] };
-    const doomed = toUnkeep((await listed.json()).builds, choice);
+    const doomed = [];
+    for (const job of JOBS) {
+      const listed = await call(`${jenkins.base}/job/${job}/api/json?tree=builds[number,displayName,keepLog]`,
+        { headers: { Authorization: jenkins.authorization } });
+      if (!listed.ok) return { code: 2, lines: [`Jenkins answered ${listed.status} for ${job}'s builds`] };
+      doomed.push(...toUnkeep((await listed.json()).builds, choice).map((build) => ({ job, build })));
+    }
     if (doomed.length === 0) return { code: 0, lines: ["No kept candidate build to un-keep."] };
     const headers = await postHeaders(jenkins);
-    for (const build of doomed) {
+    for (const { job, build } of doomed) {
       // Jenkins only toggles, so each build is one it just listed as kept.
-      const toggled = await call(`${jenkins.base}/job/${JOB}/${build.number}/toggleLogKeep`, { method: "POST", headers });
+      const toggled = await call(`${jenkins.base}/job/${job}/${build.number}/toggleLogKeep`, { method: "POST", headers });
       if (toggled.status !== 302 && toggled.status !== 303 && !toggled.ok) {
-        lines.push(`Jenkins answered ${toggled.status} to un-keeping #${build.number}`);
+        lines.push(`Jenkins answered ${toggled.status} to un-keeping ${job} #${build.number}`);
         return { code: 2, lines };
       }
-      lines.push(`Un-kept #${build.number} (${build.displayName})`);
+      lines.push(`Un-kept ${job} #${build.number} (${build.displayName})`);
     }
     return { code: 0, lines };
   } catch (error) {

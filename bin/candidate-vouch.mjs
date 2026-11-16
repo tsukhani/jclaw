@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const JOB = "JClaw";
+const JOB = "JClaw-candidate";
 const TIMEOUT_MS = 10_000;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -24,6 +24,24 @@ export function jenkinsFrom(claudeJson) {
   const colon = header.indexOf(":");
   if (colon < 0 || header.slice(0, colon).trim().toLowerCase() !== "authorization") return null;
   return { base: url.replace(/\/mcp-server\/mcp\/?$/, ""), authorization: header.slice(colon + 1).trim() };
+}
+
+/**
+ * The headers a POST to Jenkins needs: the Authorization header, and the crumb with the session cookie it was issued
+ * under, since Jenkins checks the crumb against that session. A Jenkins with CSRF protection off issues none.
+ */
+export async function postHeaders(jenkins, contentType = "application/x-www-form-urlencoded") {
+  const auth = { Authorization: jenkins.authorization };
+  const crumbed = await fetch(`${jenkins.base}/crumbIssuer/api/json`,
+    { headers: auth, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+  const headers = { ...auth, "Content-Type": contentType };
+  if (crumbed.ok) {
+    const crumb = await crumbed.json();
+    headers[crumb.crumbRequestField] = crumb.crumb;
+    const cookie = crumbed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    if (cookie) headers.Cookie = cookie;
+  }
+  return headers;
 }
 
 /**

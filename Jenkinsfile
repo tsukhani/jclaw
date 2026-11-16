@@ -86,6 +86,9 @@ pipeline {
         // port. Overlapping builds would also share the jclaw-builder buildx
         // instance, ~/.gradle, and any live Gradle daemon.
         disableConcurrentBuilds()
+        // JClaw-candidate runs this Jenkinsfile too, and disableConcurrentBuilds holds within one job only, so both
+        // jobs take this lock (Lockable Resources plugin) for the reasons above (JF-453).
+        lock(resource: 'jclaw-build')
         // Requires the Timestamper plugin. Purely diagnostic — drop this line
         // if the plugin isn't installed on the controller.
         timestamps()
@@ -93,7 +96,8 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
-        string(name: 'CANDIDATE', defaultValue: '', description: 'A release commit /release-check pushed to candidate/<sha>: test, analyse and package it as the version it carries, and release nothing (JF-441, JF-448)')
+        string(name: 'CANDIDATE', defaultValue: '', description: 'A release commit /release-check pushed to candidate/<sha>: JClaw-candidate tests, analyses and packages it as the version it carries, and releases nothing (JF-441, JF-448, JF-453)')
+        string(name: 'CANDIDATE_BRANCH', defaultValue: '', description: 'candidate/<the first 12 of CANDIDATE>: the branch JClaw-candidate checks out, which /release-check sets with CANDIDATE (JF-453)')
         booleanParam(name: 'PUBLISH_DEVCONTAINER', defaultValue: false, description: 'Check to build and push .devcontainer/Dockerfile to ghcr.io/tsukhani/jclaw-devcontainer (independent of RELEASE; rerun only when .devcontainer/ changes)')
     }
 
@@ -152,21 +156,31 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
-                // A candidate build tests the commit /release-check names, not main: the job fetches every branch, so
-                // the candidate is already in the clone, and it is checked out before anything installs from it.
+                // A candidate builds in JClaw-candidate, whose SCM checks out the candidate's own branch: the Bitbucket
+                // plugin posts a build's status on the commit its SCM checked out, and JClaw's webhook polls against
+                // its last successful build's checkouts, which must stay main's (JF-453).
                 script {
                     if (params.CANDIDATE) {
+                        if (env.JOB_NAME != 'JClaw-candidate') {
+                            error("A candidate builds in JClaw-candidate, not ${env.JOB_NAME}: start that job with CANDIDATE and CANDIDATE_BRANCH.")
+                        }
                         if (params.RELEASE || params.PUBLISH_DEVCONTAINER) {
                             error('A candidate build tests and analyses only: untick RELEASE and PUBLISH_DEVCONTAINER.')
                         }
                         if (!params.CANDIDATE.matches('[0-9a-f]{40}')) {
                             error("CANDIDATE is a full commit sha, not '${params.CANDIDATE}'.")
                         }
-                        if (sh(returnStatus: true, script: "git cat-file -e ${params.CANDIDATE}^{commit}") != 0) {
-                            error("Commit ${params.CANDIDATE} is not in this clone: push it to candidate/${params.CANDIDATE.substring(0, 12)} on origin first.")
+                        def branch = "candidate/${params.CANDIDATE.substring(0, 12)}".toString()
+                        if (params.CANDIDATE_BRANCH != branch) {
+                            error("CANDIDATE_BRANCH is ${branch} for this CANDIDATE, not '${params.CANDIDATE_BRANCH}'.")
                         }
-                        sh "git checkout --force --detach ${params.CANDIDATE}"
+                        def head = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                        if (head != params.CANDIDATE) {
+                            error("${branch} holds ${head}, not ${params.CANDIDATE}: a candidate branch is created once and never moved.")
+                        }
                         currentBuild.displayName = "#${env.BUILD_NUMBER} candidate ${params.CANDIDATE.substring(0, 12)}"
+                    } else if (env.JOB_NAME == 'JClaw-candidate') {
+                        error('JClaw-candidate builds only /release-check candidates: start it with CANDIDATE and CANDIDATE_BRANCH.')
                     }
                 }
                 sh 'java -version'
@@ -227,13 +241,13 @@ pipeline {
                     // skipped its tests on a candidate's word.
                     env.TESTED_CANDIDATE = ''
                     if (!params.RELEASE && !params.CANDIDATE) {
-                        def b = currentBuild.previousBuild
-                        for (int i = 0; i < 30 && b != null && !env.TESTED_CANDIDATE; i++) {
-                            if (b.result == 'SUCCESS' && b.description == tested
-                                    && (b.displayName ?: '').endsWith("candidate ${env.BUILD_COMMIT.substring(0, 12)}".toString())) {
-                                env.TESTED_CANDIDATE = "#${b.number}".toString()
-                            }
-                            b = b.previousBuild
+                        // Candidates build in another job, whose builds the sandbox cannot walk, so their records are
+                        // read on this host (bin/candidate-builds.mjs prints "<job> <number>", or nothing).
+                        def found = sh(returnStdout: true,
+                                       script: "node bin/candidate-builds.mjs green ${env.BUILD_COMMIT} || true").trim()
+                        if (found) {
+                            def (job, number) = found.tokenize(' ')
+                            env.TESTED_CANDIDATE = "${job} #${number}".toString()
                         }
                     }
                     env.ALREADY_TESTED = (releaseOfTested || env.TESTED_CANDIDATE) ? 'true' : 'false'
@@ -650,33 +664,27 @@ pipeline {
                     // checked against the sums it archived, and its image, by digest (JF-449). The builds share
                     // this host, so the files are read from the candidate's archive, and all of it is checked
                     // before anything is published.
-                    def candidateName = "candidate ${env.BUILD_COMMIT.substring(0, 12)}".toString()
-                    def candidateBuild = null
-                    def b = currentBuild.previousBuild
-                    while (b != null && candidateBuild == null) {
-                        if (b.result == 'SUCCESS' && b.description == "tested ${env.BUILD_COMMIT}".toString()
-                                && (b.displayName ?: '').endsWith(candidateName)) {
-                            candidateBuild = b.number
-                        }
-                        b = b.previousBuild
-                    }
-                    if (candidateBuild == null) {
+                    def found = sh(returnStdout: true,
+                                   script: "node bin/candidate-builds.mjs green ${env.BUILD_COMMIT} || true").trim()
+                    if (!found) {
                         error("No green candidate build tested ${env.BUILD_COMMIT}, so there are no tested files to publish: " +
                               "${version} can be released only from a /release-check candidate (JF-449).")
                     }
-                    env.CANDIDATE_BUILD = "${candidateBuild}".toString()
+                    def (candidateJob, candidateBuild) = found.tokenize(' ')
+                    env.CANDIDATE_JOB = candidateJob
+                    env.CANDIDATE_BUILD = candidateBuild
                     sh '''
-                        src="$JENKINS_HOME/jobs/$JOB_NAME/builds/$CANDIDATE_BUILD/archive/dist"
+                        src="$JENKINS_HOME/jobs/$CANDIDATE_JOB/builds/$CANDIDATE_BUILD/archive/dist"
                         for f in jclaw.zip jclaw-bundle.zip PACKAGE_SUMS CANDIDATE_IMAGE; do
                             if [ ! -f "$src/$f" ]; then
-                                echo "Candidate build #$CANDIDATE_BUILD has no $f, so there is no tested $f to publish." >&2
+                                echo "Candidate build $CANDIDATE_JOB #$CANDIDATE_BUILD has no $f, so there is no tested $f to publish." >&2
                                 exit 1
                             fi
                         done
                         rm -rf dist && mkdir dist
                         cp "$src/jclaw.zip" "$src/jclaw-bundle.zip" "$src/PACKAGE_SUMS" "$src/CANDIDATE_IMAGE" dist/
                         if ! ( cd dist && shasum -a 256 -c PACKAGE_SUMS ); then
-                            echo "The file marked FAILED above is not the one candidate build #$CANDIDATE_BUILD tested." >&2
+                            echo "The file marked FAILED above is not the one candidate build $CANDIDATE_JOB #$CANDIDATE_BUILD tested." >&2
                             exit 1
                         fi
                     '''
@@ -684,11 +692,11 @@ pipeline {
                     sh '''
                         image=$(cat dist/CANDIDATE_IMAGE)
                         if ! docker buildx imagetools inspect --builder jclaw-candidate-builder "$image" > /dev/null; then
-                            echo "Candidate build #$CANDIDATE_BUILD's image $image is gone from the candidate registry." >&2
+                            echo "Candidate build $CANDIDATE_JOB #$CANDIDATE_BUILD's image $image is gone from the candidate registry." >&2
                             exit 1
                         fi
                     '''
-                    echo "Creating release: ${version} from candidate build #${env.CANDIDATE_BUILD}"
+                    echo "Creating release: ${version} from candidate build ${env.CANDIDATE_JOB} #${env.CANDIDATE_BUILD}"
 
                     // No local `git tag` here: /deploy pushes the signed tag once
                     // the release commit's build has passed, and --verify-tag
@@ -885,18 +893,10 @@ pipeline {
                         '''
 
                         // A candidate's image lives as long as its kept build: /deploy un-keeps the builds no
-                        // release will publish, and the registry frees their layers once nothing tags them.
+                        // release will publish, and the registry frees their layers once nothing tags them. The
+                        // kept builds are in the candidate job, so their records are read on this host.
                         script {
-                            def kept = []
-                            def k = currentBuild.previousBuild
-                            while (k != null) {
-                                def name = k.displayName ?: ''
-                                if (k.keepLog && name ==~ /.*candidate [0-9a-f]{12}/) {
-                                    kept << name.substring(name.length() - 12)
-                                }
-                                k = k.previousBuild
-                            }
-                            env.KEPT_CANDIDATES = kept.join(',')
+                            env.KEPT_CANDIDATES = sh(returnStdout: true, script: 'node bin/candidate-builds.mjs kept').trim()
                         }
                         sh '''
                             echo "Pruning candidate images no kept candidate build needs..."
