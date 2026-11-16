@@ -1,20 +1,22 @@
 ---
 name: deploy
-description: Fast-forward main to the release commit /release-check made and its candidate build tested, push it to both git remotes (origin + github), tag the version once its Jenkins build passes, record it in Jira as the Fix Version of the tickets it ships and move them to Done, and, given release, publish it as a GitHub Release.
+description: Ship a release end to end without a question. Unless a green /release-check candidate already tested a release commit over main's HEAD, run /release-check's steps to make and test one; then fast-forward main to it, push it to both git remotes (origin + github), tag the version once its Jenkins build passes, record it in Jira as the Fix Version of the tickets it ships and move them to Done, and, given release, publish it as a GitHub Release.
 category: Release
 tags: [release, version, git, deploy]
-argument-hint: "[release]"
+argument-hint: "[patch | minor | major | x.y.z] [release]"
 ---
 
 **Deploy Workflow**
 
-Ship the release commit `/release-check` made and tested: fast-forward `main` to it, push it to both remotes, and tag it once Jenkins has built it green. The commit that goes out is the commit the candidate build and the Mac run tested, by sha (JF-448), so nothing is bumped or committed here. Use `/usr/bin/git` for every git invocation (per project convention).
+Ship the release commit a `/release-check` candidate tested: fast-forward `main` to it, push it to both remotes, and tag it once Jenkins has built it green. When no green candidate has tested one over `main`'s HEAD, this command first runs `/release-check`'s steps in this session to make and test it. The commit that goes out is the commit the candidate build and the Mac run tested, by sha (JF-448), so nothing past the release commit is bumped or committed here.
+
+It runs to the end without a question (JF-466): typing `/deploy` is the operator's yes for one release, and `release` their choice of a GitHub Release too. It stops only where nothing can safely ship, and each stop ends the run with step 12's report, naming the step that stopped it; what it had not yet published stays unpublished. Hard rules lists the stops. Use `/usr/bin/git` for every git invocation (per project convention).
 
 **Arguments**
 
-`$ARGUMENTS` may be `release`, which also publishes the tagged version as a GitHub Release (step 10). Without it nothing is released. Whether to release is the operator's call: offer both forms, and never add `release` they did not give (AGENTS.md Policy). Say, too, that a release is best chosen now: Sonar keeps one result for the project, so a RELEASE build run after the next `/release-check` is judged by that check's analysis of newer code, and its open issues refuse this version.
+`$ARGUMENTS` holds up to two words, in either order: a version argument (`patch`, `minor`, `major` or `x.y.z`, with `/release-check`'s meaning), and `release`, which also publishes the tagged version as a GitHub Release (step 10). Without `release` nothing is published on GitHub, and an agent never adds it: whether to release is the operator's call, made by typing it (AGENTS.md Policy). Without it, the report says that a GitHub Release of this version run later is judged by the newest Sonar analysis, so one run after the next check is refused over that check's open issues.
 
-The version is the one the release commit carries, chosen when `/release-check` ran. A version argument (`patch`, `minor`, `major` or `x.y.z`, with `/release-check`'s meaning) is used only on the path without a candidate (preflight 2); given alongside a tested release commit, it must name that commit's version, or stop. Reject anything else with a clear message; do not guess.
+The version is the one the release commit carries. A green candidate the preflight finds brings its own: with no version argument it ships as it is, and with one it counts only when it carries that version, so the check runs again for the version asked. When this command runs the check, it passes the version argument on, and none means the next patch. Reject anything else with a clear message; do not guess.
 
 ---
 
@@ -37,7 +39,7 @@ Contributors' pull requests are merged on GitHub (CONTRIBUTING.md), so `github/m
   ```bash
   /usr/bin/git merge --no-ff -S -m "Merge GitHub's main: <the pull requests it brings in>" github/main
   ```
-  On a conflict, run `/usr/bin/git merge --abort` and stop, with nothing committed, and report the conflicting files. Resolving a contributor's conflict is the user's call, never a release step's. A merge moves `main` past the release commit's parent, so stop after it and run `/release-check` again: its notes then name each contributor's change. `/release-check` runs this preflight on its own for the same reason.
+  On a conflict, run `/usr/bin/git merge --abort` and stop, with nothing committed, and report the conflicting files. Resolving a contributor's conflict is the user's call, never a release step's. A merge moves `main` past any candidate's parent, so the next preflight finds none and runs the check over the merge, whose notes then name each contributor's change. `/release-check` run alone asks for this preflight first for the same reason.
 
 **Preflight: the release commit a green candidate tested**
 
@@ -53,8 +55,10 @@ head=$(/usr/bin/git rev-parse HEAD)
 Each line is a release commit over this `HEAD`: its full SHA is `<REL>` and its subject names the version. Then find its build among the newest 30 of `JClaw-candidate`, where candidates build (JF-453) (`mcp__jenkins__getJob` with `jobFullName: "JClaw-candidate"` and `tree: "builds[number,result,displayName,description]{0,30}"`): `result` is `SUCCESS` and `description` is `tested <REL>`. Its `displayName`, such as `v1.0.22-rc.2`, is the label the report and the Jira version name (JF-465).
 
 - **One line, with a green build:** that commit is the release. `/usr/bin/git status --porcelain -- conf/application.conf` must print nothing, or the fast-forward fails. Other uncommitted work stays out of the release, so name it in the report.
-- **Several lines:** a check ran more than once over this `HEAD`. Use the one with a green build; if more than one has, ask which.
-- **None, or no green build:** run `/release-check` first, and go on only once it passes. A commit landing on `main` after a check leaves its release commit over an older `HEAD`, so it is no longer found here and needs a new check. Deploy without a candidate only on the user's explicit yes, which covers this release only: make the release commit as `/release-check` steps 4 to 8 do, remove its worktree, and go on with that commit as `<REL>`. Its push build then runs Test and Sonar itself, and a red one spends the version. Without a candidate there are no tested files to publish, so that version can never be a GitHub Release.
+- **Several lines:** a check ran more than once over this `HEAD`. Use one with a green build, of the version asked if a version argument was given, and of those the newest build's.
+- **None, no green build, or none of the version asked:** run the check here. Run `/release-check` in this session with this command's version argument; its step 15 then removes its worktree and hands its release commit back as `<REL>` instead of offering `/deploy`, since the operator chose by typing this command. It takes about 30 minutes, the candidate build and the Mac run side by side. When the check fails, its step 14 has already dropped the release commit, with `main` and both remotes as they were: stop, with what failed in the report. A commit landing on `main` after a check leaves its release commit over an older `HEAD`, so it is no longer found here and the check runs again.
+
+  If Jenkins cannot be reached, the check cannot run: stop. Deploy without a candidate only when the operator's own message asks for it, which covers that release only: make the release commit as `/release-check` steps 4 to 8 do, remove its worktree, and go on with that commit as `<REL>`. Its push build then runs Test and Sonar itself, and a red one spends the version. Without a candidate there are no tested files to publish, so that version can never be a GitHub Release.
 
 **Preflight: every commit either remote would receive is signed, and committed by you**
 
@@ -72,7 +76,7 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 **Phase 1: Fast-forward `main` to the release commit**
 
 1. Confirm the main checkout is on `main` (`/usr/bin/git rev-parse --abbrev-ref HEAD`); releases go out only from `main`.
-2. `/usr/bin/git merge --ff-only <REL>`, then check that `/usr/bin/git rev-parse HEAD` prints `<REL>`. The commit changes only `conf/application.conf`, so the checkout moves by that one line. If git refuses because `main` has moved, another session committed since the check: nothing changed, so run `/release-check` again; it makes a new release commit for the same version.
+2. `/usr/bin/git merge --ff-only <REL>`, then check that `/usr/bin/git rev-parse HEAD` prints `<REL>`. The commit changes only `conf/application.conf`, so the checkout moves by that one line. If git refuses because `main` has moved, another session committed since the check: nothing changed, so run the check again over the new `HEAD`, as the candidate preflight does, which makes a new release commit for the same version. Do it once: if `main` moves again before that commit's fast-forward, stop.
 
 **Phase 2: Push the release commit to both remotes**
 
@@ -136,12 +140,12 @@ The tag waits for the release commit's own push build: a version whose build fai
 
     **With `release`, start the GitHub Release once both tag pushes succeeded:** `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw"` and `parameters: {"RELEASE": true}`, then wait for it as in step 9; it skips Test, Sonar and Package for the tagged commit, and copies the candidate's image rather than building one. Its Release stage refuses while Sonar shows an open issue, and publishes the files and image the candidate build tested, never a rebuild: it refuses a version with no green candidate, or a file that does not match the sum the candidate recorded (JF-449). On `SUCCESS`, the release is at `https://github.com/tsukhani/jclaw/releases/tag/v<NEW_VERSION>`, and its candidate build is no longer needed: `node bin/candidate-keep.mjs --drop <REL>`. That build has already deleted the candidate's zips and its registry image, and `--drop` hands what is left, its log and test results, to Jenkins' retention (JF-465). On any other result, report the failing stage. The tag stands either way, and a later RELEASE build can publish the version. Without `release`, start nothing.
 11. **On any other result** (`FAILURE`, `ABORTED`, `UNSTABLE`), create no tag yet, record nothing in Jira, so the release's tickets stay in Review, and report the failing stage (`mcp__jenkins__searchBuildLog`; `mcp__jenkins__getTestResults` when Test ran).
-    - **A candidate tested this commit:** the push build ran only stages the candidate passed on the same commit, so look for a cause outside it, and name it: a controller restart (`Resuming build … after Jenkins restart`, then `script returned exit code -1`), a full disk, a lost agent. Once it is named, rebuild (`mcp__jenkins__rebuildBuild`), check that the new build's `lastBuiltRevision.SHA1` is `<REL>`, and wait and tag as in steps 9 and 10. The version is not spent.
+    - **A candidate tested this commit:** the push build ran only stages the candidate passed on the same commit, so look for a cause outside it, and name it: a controller restart (`Resuming build … after Jenkins restart`, then `script returned exit code -1`), a full disk, a lost agent. Once it is named, rebuild (`mcp__jenkins__rebuildBuild`), check that the new build's `lastBuiltRevision.SHA1` is `<REL>`, and wait and tag as in steps 9 and 10. The version is not spent. If no such cause can be named, or the rebuild fails too, stop: the version stays untagged, and the report names the failing stage.
     - **No candidate, or the cause is in the commit:** the version is spent. Its release commit stays on `main` untagged, and the next `/release-check` bumps past it; that release's notes still start from the last published Release, so nothing is lost. Never tag a later commit with this version.
 
 **Phase 4: Report**
 
-12. Summarize in one message: the version, the release commit's hash, the candidate build that tested it (or the user's yes to go without one), both push destinations with their reported ref updates, the push build and its result (and any rebuild, with its cause), the tag (or why there is none), the Jira version with the tickets it recorded, those moved to Done and the follow-ups filed, the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 7 deleted and the local branches step 8 deleted, if any, the worktrees step 8 listed, and any uncommitted work the preflight found, which did not ship. Example:
+12. Summarize in one message: the version, the release commit's hash, the candidate build that tested it with its rc label, and whether this run made it, with which classes ran on the Mac (or the operator's request to go without one), both push destinations with their reported ref updates, the push build and its result (and any rebuild, with its cause), the tag (or why there is none), the Jira version with the tickets it recorded, those moved to Done and the follow-ups filed, the GitHub Release and its build when `release` was given, the Renovate and candidate branches step 7 deleted and the local branches step 8 deleted, if any, the worktrees step 8 listed, and any uncommitted work the preflight found, which did not ship. Close it with the release notes in full, the release commit's body as GitHub shows it, and their link (the GitHub Release, else the commit on `github.com/tsukhani/jclaw`): they went public with the push, and the operator reads them here first. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed), the commit candidate build #1373 tested. Jenkins build #1374 passed; tagged `v0.7.6` (signed).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d`, then tag `v0.7.6`
@@ -158,6 +162,7 @@ The tag waits for the release commit's own push build: a version whose build fai
 
 **Hard rules**
 
+- Ask nothing between the command and the report (JF-466). The run stops, with step 12's report, only at: GitHub commits without a sign-off, or a contributor's merge conflict; a commit that is unsigned or committed by someone else; uncommitted changes to `conf/application.conf`; a red check, the candidate's open Sonar issues among them, or a red Mac run; `main` moving a second time; a missing remote or a refused push; a push build red for a cause in the commit or for none that can be named; Jenkins out of reach. What the run had not yet published stays unpublished, and the report says what is left to do.
 - Never use `--force`, `--force-with-lease`, `--no-verify`, or any flag that bypasses hooks, signing, or history.
 - Never amend, recreate or add to the release commit: what ships is the commit the candidate tested, by sha.
 - Never push to `main` with `--force` even if a hook rejects; report the hook failure and let the user decide.
