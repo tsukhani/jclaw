@@ -7,6 +7,7 @@ import org.jspecify.annotations.Nullable;
 import services.ChromeBridge;
 import services.ChromeBridgePolicy;
 import services.PersonaFileApprovals;
+import utils.SandboxHiddenRoots;
 import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
@@ -17,9 +18,10 @@ import java.util.Map;
 
 /**
  * Puts one file from the agent's own workspace into a file input in a tab of the JClaw group. The path is
- * resolved by the same guard as every other workspace file tool, so nothing outside the workspace can be
- * sent, and the persona files that hold the operator's private context never leave it. A tool of its own, so
- * a standing grant for clicks cannot cover sending a file.
+ * resolved by the same guard as every other workspace file tool and refused unless it lands inside the
+ * workspace, so nothing outside it can be sent, even by the Main Agent with global paths allowed, and the
+ * persona files that hold the operator's private context never leave it. A tool of its own, so a standing
+ * grant for clicks cannot cover sending a file.
  */
 public class ChromeUploadTool implements ToolRegistry.Tool {
 
@@ -108,16 +110,20 @@ public class ChromeUploadTool implements ToolRegistry.Tool {
         if (tab == null || ref == null || !args.has(ARG_PATH)) {
             return ChromeControlTool.ERROR + "upload needs a tabId, a ref and a path.";
         }
+        var path = args.get(ARG_PATH).getAsString();
         var resolved = FsPaths.resolveTargetPath(args, agent, "upload");
         if (resolved.error() != null) return ChromeControlTool.ERROR + resolved.resolvedError().whatBroke();
-        if (WorkspacePathGuard.isInSkillCredentials(resolved.resolvedWorkspace(), resolved.resolvedTarget())) {
-            return ChromeControlTool.ERROR
-                    + ToolErrorTemplates.fsCredentials(args.get(ARG_PATH).getAsString()).whatBroke();
-        }
+        var workspace = SandboxHiddenRoots.canonical(resolved.resolvedWorkspace());
         var file = resolved.resolvedTarget().toAbsolutePath().normalize();
+        if (!file.startsWith(workspace)) {
+            return ChromeControlTool.ERROR + "'" + path + "' is outside your workspace, and chrome_upload sends only"
+                    + " files inside it, even with global paths allowed.";
+        }
+        if (WorkspacePathGuard.isInSkillCredentials(resolved.resolvedWorkspace(), resolved.resolvedTarget())) {
+            return ChromeControlTool.ERROR + ToolErrorTemplates.fsCredentials(path).whatBroke();
+        }
         var name = file.getFileName();
         if (name == null || !Files.isRegularFile(file)) return ChromeControlTool.ERROR + "that is not a file in your workspace.";
-        var workspace = resolved.resolvedWorkspace().toAbsolutePath().normalize();
         if (PersonaFileApprovals.isPersonaFile(name.toString()) && workspace.equals(file.getParent())) {
             return ChromeControlTool.ERROR + "persona files are never uploaded.";
         }

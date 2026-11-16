@@ -9,6 +9,7 @@ import services.AgentService;
 import services.ChromeBridgePolicy;
 import services.ConfigService;
 import tools.ChromeUploadTool;
+import utils.SandboxHiddenRoots;
 import utils.SsrfGuard;
 
 import java.io.RandomAccessFile;
@@ -23,6 +24,7 @@ import static com.google.gson.JsonParser.parseString;
 class ChromeUploadToolTest extends UnitTest {
 
     private static final Map<String, String> HOSTS = Map.of("example.com", "93.184.216.34", "evil.com", "1.1.1.1");
+    private static final String GLOBAL_PATHS = "agent.main.shell.allowGlobalPaths";
 
     private final ChromeUploadTool tool = new ChromeUploadTool();
     private Agent agent;
@@ -51,8 +53,43 @@ class ChromeUploadToolTest extends UnitTest {
     }
 
     private String run(String path) {
-        var args = "{\"tabId\":7,\"ref\":\"e5\",\"path\":\"" + path + "\"}";
-        return SsrfGuard.callWithHostsForTest(HOSTS, () -> tool.execute(args, agent));
+        return run(agent, path);
+    }
+
+    private String run(Agent as, String path) {
+        var args = new JsonObject();
+        args.addProperty("tabId", 7);
+        args.addProperty("ref", "e5");
+        args.addProperty("path", path);
+        return SsrfGuard.callWithHostsForTest(HOSTS, () -> tool.execute(args.toString(), as));
+    }
+
+    private static Agent mainAgent() {
+        var main = new Agent();
+        main.name = "main";
+        return main;
+    }
+
+    private static String outsideRefusal(String path) {
+        return "Error: '" + path + "' is outside your workspace, and chrome_upload sends only files inside it,"
+                + " even with global paths allowed.";
+    }
+
+    /** {@code body} as the main agent with its global-paths toggle on and example.com on its list. */
+    private static void withGlobalPathsForMain(ChromeBridgeSync.ThrowingBody body) throws Exception {
+        ShellSandboxSync.acquire();
+        try {
+            ConfigService.set(GLOBAL_PATHS, "true");
+            ConfigService.set(ChromeBridgePolicy.key("main", ChromeBridgePolicy.ALLOWED_SITES), "example.com");
+            body.run();
+        } finally {
+            try {
+                ConfigService.delete(GLOBAL_PATHS);
+                ConfigService.delete(ChromeBridgePolicy.key("main", ChromeBridgePolicy.ALLOWED_SITES));
+            } finally {
+                ShellSandboxSync.release();
+            }
+        }
     }
 
     @Test
@@ -84,6 +121,77 @@ class ChromeUploadToolTest extends UnitTest {
                 assertTrue(run(path).startsWith("Error: "), path);
                 assertTrue(fake.sent.isEmpty(), path);
             }
+        });
+    }
+
+    @Test
+    void withGlobalPathsOnTheMainAgentStillAttachesAWorkspaceFileByItsRelativeOrAbsolutePath() throws Exception {
+        var own = Files.createDirectories(SandboxHiddenRoots.canonical(AgentService.workspacePath("main")));
+        var name = "jf431-" + UUID.randomUUID() + ".txt";
+        var file = Files.writeString(own.resolve(name), "hello");
+        try {
+            withGlobalPathsForMain(() -> {
+                var fake = onAllowedTab();
+                ChromeBridgeSync.with(fake, () -> {
+                    assertEquals("Attached " + name + " to e5.", run(mainAgent(), name));
+                    assertEquals("Attached " + name + " to e5.", run(mainAgent(), file.toString()));
+                    assertEquals(List.of(file.toString(), file.toString()), fake.sent.stream()
+                            .filter(m -> m.get("action").getAsString().equals("upload"))
+                            .map(m -> m.get("path").getAsString()).toList());
+                });
+            });
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    void withGlobalPathsOnTheMainAgentIsRefusedAnAbsolutePathOutsideItsWorkspace() throws Exception {
+        var outside = SandboxHiddenRoots.canonical(Files.createTempFile("jf431-outside-", ".txt"));
+        try {
+            Files.writeString(outside, "secret");
+            withGlobalPathsForMain(() -> {
+                var fake = onAllowedTab();
+                ChromeBridgeSync.with(fake, () -> {
+                    assertEquals(outsideRefusal(outside.toString()), run(mainAgent(), outside.toString()));
+                    assertTrue(fake.sent.isEmpty());
+                });
+            });
+        } finally {
+            Files.deleteIfExists(outside);
+        }
+    }
+
+    @Test
+    void withGlobalPathsOnTheMainAgentIsRefusedAHomeRelativePathOutsideItsWorkspace() throws Exception {
+        var name = "jclaw-jf431-" + UUID.randomUUID() + ".txt";
+        var home = Path.of(System.getProperty("user.home"), name);
+        try {
+            Files.writeString(home, "secret");
+            withGlobalPathsForMain(() -> {
+                var fake = onAllowedTab();
+                ChromeBridgeSync.with(fake, () -> {
+                    assertEquals(outsideRefusal("~/" + name), run(mainAgent(), "~/" + name));
+                    assertTrue(fake.sent.isEmpty());
+                });
+            });
+        } finally {
+            Files.deleteIfExists(home);
+        }
+    }
+
+    @Test
+    void withGlobalPathsOnTheMainAgentIsRefusedADotDotEscapeIntoAnotherWorkspace() throws Exception {
+        Files.writeString(workspace.resolve("secret.txt"), "theirs");
+        var relative = "../" + agent.name + "/secret.txt";
+        var absolute = SandboxHiddenRoots.canonical(AgentService.workspacePath("main")) + "/" + relative;
+        withGlobalPathsForMain(() -> {
+            var fake = onAllowedTab();
+            ChromeBridgeSync.with(fake, () -> {
+                assertEquals("Error: Path '" + relative + "' escapes the workspace.", run(mainAgent(), relative));
+                assertEquals(outsideRefusal(absolute), run(mainAgent(), absolute));
+                assertTrue(fake.sent.isEmpty());
+            });
         });
     }
 
