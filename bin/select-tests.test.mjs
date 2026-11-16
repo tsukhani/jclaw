@@ -5,7 +5,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { classOfPath, dependents, isRuleCheck, outerClass, parseJdeps, routesOf, select } from "./select-tests.mjs";
+import { classOfPath, dependents, isRuleCheck, outerClass, parseJdeps, readTestSources, routesOf, select } from "./select-tests.mjs";
 
 const JDEPS = `build/classes/java/test -> build/classes/java/main
    MemoryToolTest                                     -> tools.MemoryTool                                   main
@@ -89,10 +89,60 @@ test("application.conf runs the whole suite unless only its version line changed
   strictEqual(select(change, graph(), true).mode, "none");
 });
 
-test("frontend, docs and harness changes need no backend test", () => {
+const READS_DECISION_MODELS = 'Files.readString(Path.of(root, "frontend/utils/decision-models.ts"))';
+
+test("a frontend file selects the backend tests that name it, plus the rule checks", () => {
+  const g = graph({ BasetenDecisionTest: READS_DECISION_MODELS, LayaDecisionTest: READS_DECISION_MODELS });
+  deepStrictEqual(select([{ status: "M", path: "frontend/utils/decision-models.ts" }], g, false), {
+    mode: "some",
+    tests: ["ArchitectureTest", "BasetenDecisionTest", "LayaDecisionTest", "SpaBuildInputsConformanceTest"],
+    fullBecause: [],
+    reasons: {
+      ArchitectureTest: "rule check",
+      BasetenDecisionTest: "names frontend/utils/decision-models.ts",
+      LayaDecisionTest: "names frontend/utils/decision-models.ts",
+      SpaBuildInputsConformanceTest: "rule check",
+    },
+  });
+});
+
+test("frontend, docs and harness files no test names need no backend test", () => {
   const r = select([{ status: "M", path: "frontend/pages/chat.vue" }, { status: "M", path: "docs/user-guide/memory.md" },
-    { status: "M", path: ".sandcastle/main.ts" }, { status: "M", path: "README.md" }], graph(), false);
+    { status: "M", path: ".sandcastle/main.ts" }, { status: "M", path: "README.md" }],
+  graph({ BasetenDecisionTest: READS_DECISION_MODELS }), false);
   deepStrictEqual(r, { mode: "none", tests: [], fullBecause: [], reasons: {} });
+});
+
+test("a docs Markdown file selects the tests that name its path, not those naming only its file name", () => {
+  const g = graph({ PlainTest: 'Path.of(root, "docs/user-guide/agents.md")', MemoryToolTest: 'workspace.resolve("agents.md")' });
+  deepStrictEqual(select([{ status: "M", path: "docs/user-guide/agents.md" }], g, false).reasons, {
+    ArchitectureTest: "rule check",
+    PlainTest: "names docs/user-guide/agents.md",
+    SpaBuildInputsConformanceTest: "rule check",
+  });
+});
+
+test("a .sandcastle script selects the tests that name its path or its distinctive file name", () => {
+  const g = graph({ PlainTest: 'new File(root, ".sandcastle/install-agent.sh")', MemoryToolTest: 'command.endsWith("install-agent.sh")' });
+  deepStrictEqual(select([{ status: "M", path: ".sandcastle/install-agent.sh" }], g, false).reasons, {
+    ArchitectureTest: "rule check",
+    MemoryToolTest: "names .sandcastle/install-agent.sh",
+    PlainTest: "names .sandcastle/install-agent.sh",
+    SpaBuildInputsConformanceTest: "rule check",
+  });
+});
+
+test("in this tree, a change to a frontend, docs or .sandcastle file selects the backend tests that read it", () => {
+  const sources = readTestSources();
+  const g = { edges: new Map(), tests: [...sources.keys()], testSources: sources, routes: "" };
+  for (const [path, reader] of [
+    ["frontend/utils/decision-models.ts", "BasetenDecisionTest"],
+    ["frontend/utils/decision-models.ts", "LayaDecisionTest"],
+    ["docs/user-guide/agents.md", "JclawApiPermissionMatrixTest"],
+    [".sandcastle/install-agent.sh", "ApiFactoryControllerTest"],
+  ]) {
+    strictEqual(select([{ status: "M", path }], g, false).reasons[reader], `names ${path}`, `${path} selects ${reader}`);
+  }
 });
 
 test("another file selects the tests that name it", () => {

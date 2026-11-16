@@ -188,7 +188,8 @@ class JclawApiPermissionMatrixTest extends FunctionalTest {
 
     /** The guide table's rows as {@code what | you | main | custom}, read from the Agents page. */
     private static List<String> guideRows() throws IOException {
-        var lines = Files.readAllLines(Path.of(Play.applicationPath.getAbsolutePath(), "docs", "user-guide", "agents.md"));
+        // One string, so bin/select-tests.mjs finds this test when the page changes.
+        var lines = Files.readAllLines(Path.of(Play.applicationPath.getAbsolutePath(), "docs/user-guide/agents.md"));
         int start = lines.indexOf(SECTION_HEADING);
         assertTrue(start >= 0, "the Agents page has no heading " + SECTION_HEADING);
         var rows = new ArrayList<String>();

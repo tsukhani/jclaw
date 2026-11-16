@@ -31,8 +31,6 @@ export const isRuleCheck = (test) => ALWAYS.includes(test) || test.endsWith(ALWA
 // A change to any of these reaches tests no class graph shows.
 const FULL_PATHS = [/^conf\/(?!application\.conf$)/, /^build\.gradle\.kts$/, /^settings\.gradle\.kts$/, /^gradle\.lockfile$/,
   /^\.play-version$/, /^gradle\//, /^lib\//, /^app\/(?!.*\.java$)/];
-// No backend test reads these; the frontend gate and the harness's own checks cover them.
-const NO_BACKEND = [/^frontend\//, /^docs\//, /^\.sandcastle\//, /^[^/]+\.md$/, /^\.github\//, /^_bmad/];
 
 /** The top-level class a jdeps name belongs to: inner and anonymous classes count as their outer class. */
 export function outerClass(name) {
@@ -109,7 +107,6 @@ export function select(changes, graph, versionOnlyConf, maxDepth = Infinity) {
     if (!reasons.has(test)) reasons.set(test, why);
   };
   for (const { status, path } of changes) {
-    if (NO_BACKEND.some((re) => re.test(path))) continue;
     if (path === "conf/application.conf") {
       if (!versionOnlyConf) fullBecause.push(path);
       continue;
@@ -123,8 +120,9 @@ export function select(changes, graph, versionOnlyConf, maxDepth = Infinity) {
       if (status !== "D") changedClasses.add(cls);
       continue;
     }
-    // Any other file (jclaw.sh, bin/, sidecar/, evals/, archunit_store/): the tests that name it. A bare file name
-    // counts only when it is distinctive; README.md and SKILL.md are named by tests about other files.
+    // Any other file (jclaw.sh, bin/, sidecar/, evals/, archunit_store/, frontend/, docs/, .sandcastle/): the tests
+    // that name it. A bare file name counts only when it is distinctive; README.md and SKILL.md are named by tests
+    // about other files.
     const base = path.split("/").pop();
     const byName = base.includes(".") && base.length > 8 && !base.endsWith(".md");
     for (const [test, source] of graph.testSources) {
@@ -172,13 +170,17 @@ function testClassNames() {
     .map((f) => f.slice(0, -".java".length));
 }
 
+/** Each test class under test/, by name, with its source. */
+export function readTestSources() {
+  return new Map(testClassNames().map((t) => [t, readFileSync(join(PROJECT_ROOT, "test", `${t}.java`), "utf8")]));
+}
+
 function loadGraph() {
   if (!existsSync(MAIN_CLASSES) || !existsSync(TEST_CLASSES)) fail("no compiled classes: run ./gradlew compileJava compileTestJava first");
   const edges = parseJdeps(jdeps(MAIN_CLASSES) + jdeps(TEST_CLASSES));
-  const tests = testClassNames();
-  const testSources = new Map(tests.map((t) => [t, readFileSync(join(PROJECT_ROOT, "test", `${t}.java`), "utf8")]));
+  const testSources = readTestSources();
   const routes = readFileSync(join(PROJECT_ROOT, "conf", "routes"), "utf8");
-  return { edges, tests, testSources, routes };
+  return { edges, tests: [...testSources.keys()], testSources, routes };
 }
 
 /** Whether conf/application.conf changed only in its application.version line and its comments. */

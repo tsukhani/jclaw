@@ -126,14 +126,15 @@ node bin/select-tests.mjs --base main --json       # the selection with a reason
 It needs compiled classes (`./gradlew compileJava compileTestJava`): it reads the class graph with `jdeps`, which
 takes about a second. It prints one of three things:
 
-- **`NONE`**: nothing in the change reaches a backend test. Examples are frontend, docs, `.sandcastle/` and root
-  `*.md` files, or an `application.conf` edit to the version line or comments only.
+- **`NONE`**: nothing in the change reaches a backend test, as with a frontend or docs file no test names, or an
+  `application.conf` edit to the version line or comments only.
 - **`ALL`**: the change touches something no class graph can follow: `conf/` other than `application.conf`, the
   build files, `.play-version`, `lib/`, or a non-Java file under `app/`.
 - **A comma-separated class list**, made of:
   - every test class within `--depth` hops (default 2) above a changed `app/` or `test/` class;
   - for a changed controller, the tests that call its `conf/routes` paths over HTTP;
-  - for any other changed file, the tests whose source names it;
+  - for any other changed file, `frontend/`, `docs/` and `.sandcastle/` ones included, the tests whose source
+    names it;
   - the rule checks: `ArchitectureTest`, `CapabilityRulesTest`, `WallClockDisciplineTest` and every
     `*ConformanceTest`.
 
