@@ -140,6 +140,14 @@ public final class CodeCompressor implements ContentCompressor {
         return count;
     }
 
+    /**
+     * Whether content carries a hint {@link #signalLineCount} counts. {@link ContentTypeDetector} asks
+     * this rather than {@link #detectLanguage}, which answers {@code CSHARP} for a lone {@code using} line.
+     */
+    static boolean hasLanguageHint(String code) {
+        return LANGUAGE_HINTS.stream().anyMatch(hint -> hint.matcher(code).find());
+    }
+
     public static Language detectLanguage(String code) {
         if (code == null || code.isBlank()) return Language.UNKNOWN;
         if (CSHARP_USING.matcher(code).find() || CSHARP_NAMESPACE.matcher(code).find()) return Language.CSHARP;

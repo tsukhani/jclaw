@@ -55,7 +55,7 @@ public final class ContentTypeDetector {
     }
 
     private static boolean isCode(String content) {
-        if (CodeCompressor.detectLanguage(content) == CodeCompressor.Language.UNKNOWN) return false;
+        if (!CodeCompressor.hasLanguageHint(content)) return false;
         if (isMarkdown(content)) return false;
         return CodeCompressor.signalLineCount(content) >= MIN_CODE_SIGNAL_LINES
                 || content.lines().filter(line -> !line.isBlank()).count() <= SNIPPET_LINES;

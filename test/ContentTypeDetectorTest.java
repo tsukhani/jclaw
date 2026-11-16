@@ -82,6 +82,24 @@ class ContentTypeDetectorTest extends UnitTest {
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect(oneDeclaration));
     }
 
+    @ParameterizedTest(name = "text: {0}")
+    @ValueSource(strings = {
+            "using System;\nConsole.WriteLine(\"hi\");",
+            "using static System.Math;\nConsole.WriteLine(Abs(-1));",
+            "namespace Acme.Core;\nConsole.WriteLine(\"hi\");",
+    })
+    void aShortCSharpSnippetWithNoOtherDeclarationIsText(String snippet) {
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect(snippet));
+    }
+
+    @Test
+    void csharpDirectivesCountAsSnippetLinesButNotAsSignals() {
+        var fiveLines = "using System;\nusing System.Linq;\nusing System.Text;\nusing System.IO;\npublic class Episodes {}";
+
+        assertEquals(ContentType.CODE, ContentTypeDetector.detect(fiveLines));
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect("using System.Net;\n" + fiveLines));
+    }
+
     private static final String FENCED_DOCUMENT = """
             The worker reads its settings once at startup, so a change needs a restart.
 
