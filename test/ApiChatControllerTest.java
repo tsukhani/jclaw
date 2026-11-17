@@ -2208,9 +2208,13 @@ class ApiChatControllerTest extends FunctionalTest {
                 sse.append("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":")
                         .append(new com.google.gson.Gson().toJson(token)).append("}}]}\n\n");
             }
-            sse.append("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
-                    + "\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":3,\"total_tokens\":123}}\n\n"
-                    + "data: [DONE]\n\n");
+            sse.append("""
+                    data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],\
+                    "usage":{"prompt_tokens":120,"completion_tokens":3,"total_tokens":123}}
+
+                    data: [DONE]
+
+                    """);
             var body = sse.toString().getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, body.length);
