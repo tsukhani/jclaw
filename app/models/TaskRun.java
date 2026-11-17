@@ -26,11 +26,10 @@ import java.time.Instant;
  * time is the audit trail.
  *
  * <p>{@link #completedAt} is nullable: a row whose status is still
- * {@code RUNNING} has no completion yet, and a fire that died mid-execution
- * (JVM crash before db-scheduler's heartbeat reconciliation) may have a
- * RUNNING status indefinitely until db-scheduler's dead-execution detection
- * reschedules and we leave the dead TaskRun in place as an audit record
- * (with completedAt set to the recovery time by the recovery path).
+ * {@code RUNNING} has no completion yet. A fire a stop of JClaw cut off
+ * keeps RUNNING until the next start's {@code BootConsistencyCheck} closes it
+ * FAILED, with completedAt set then and the reason in {@link #error}; the
+ * fire is not run again (JF-355).
  *
  * <p>Part of JCLAW-21's Tasks foundation. Schema is managed by Hibernate
  * auto-DDL ({@code jpa.ddl=update}); no separate migration file required.

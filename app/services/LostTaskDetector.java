@@ -19,11 +19,11 @@ import java.util.List;
  *
  * <h2>Design A: visibility-only</h2>
  * Per the ticket, this detector deliberately does <em>not</em> touch
- * db-scheduler's {@code scheduled_tasks} row. db-scheduler owns the
- * recovery path; we only mirror its "this fire is dead" signal into
+ * db-scheduler's {@code scheduled_tasks} row. {@link TaskDeadExecutionHandler}
+ * owns what happens to it; we only mirror its "this fire is dead" signal into
  * the operator-facing Task status pill at a shorter threshold so the
  * UI distinguishes "running" from "stranded by an unclean shutdown"
- * roughly 60 s before db-scheduler's own re-fire kicks in.
+ * roughly 60 s before db-scheduler declares the row dead.
  *
  * <h2>Why direct JDBC instead of {@code SchedulerClient.getCurrentlyExecuting}</h2>
  * {@code getCurrentlyExecuting()} returns this JVM's in-memory set of
@@ -48,13 +48,13 @@ import java.util.List;
  * </ul>
  *
  * <h2>Recovery flow</h2>
- * Operators see LOST roughly 60 s after the crash. db-scheduler's
- * own dead-execution detection runs at {@code heartbeatInterval ×
- * missedHeartbeatsLimit = 30 s × 4 = 120 s} and re-fires the row;
- * the next fire transitions {@code LOST → RUNNING → COMPLETED/FAILED}
- * without operator intervention. Operators wanting to pre-empt the
- * auto-recovery use {@code /api/tasks/{id}/retry} which flips
- * LOST to PENDING/ACTIVE and registers a fresh row immediately.
+ * Operators see LOST roughly 60 s after the crash, unless the boot sweep
+ * has already closed the task. A fire a stop of JClaw cut off is not run
+ * again (JF-355, {@link RestartCutOff}): db-scheduler's dead-execution
+ * detection, at {@code heartbeatInterval × missedHeartbeatsLimit = 30 s × 4 = 120 s},
+ * hands the row to {@link TaskDeadExecutionHandler}, which moves a recurring
+ * task to its next occurrence and ends a one-shot task FAILED. Operators who
+ * want the run anyway use {@code /api/tasks/{id}/retry}, which requeues it.
  */
 public final class LostTaskDetector {
 

@@ -3,9 +3,11 @@ package jobs;
 import com.github.kagkarlsson.scheduler.SchedulerClient;
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import play.jobs.Job;
 import services.EventLogger;
 import services.LostTaskDetector;
+import services.RestartCutOff;
 import services.TaskExecutionHandler;
 import services.TaskRunRegistry;
 import services.TaskSchedulingService;
@@ -38,18 +40,17 @@ import java.util.Set;
  *
  * <p><b>What this does NOT cover:</b>
  * <ul>
- *   <li>Tasks in {@link Task.Status#RUNNING} — db-scheduler's
- *   built-in dead-execution detection still handles the actual
- *   re-fire (30 s heartbeat × 4 misses = 120 s before declared
- *   dead, per {@link DbSchedulerBootstrapJob}). JCLAW-258 layered
- *   a visibility step on top: the boot sweep also runs
- *   {@link LostTaskDetector#detect()} so any RUNNING Task whose
- *   {@code scheduled_tasks.last_heartbeat} is older than 60 s is
- *   reconciled to {@link Task.Status#LOST} immediately on restart,
- *   rather than the operator seeing a stale RUNNING pill for up
- *   to the next periodic detector tick. Both of those need the row:
- *   JCLAW-1103 added {@link #reconcileStrandedRunning} for a RUNNING
- *   Task that has lost it, which neither can see.</li>
+ *   <li>Re-firing a Task in {@link Task.Status#RUNNING}: a fire a stop of
+ *   JClaw cut off never runs again (JF-355, {@link RestartCutOff}). This
+ *   sweep closes the run it left and its Task; the row it left picked is
+ *   {@link services.TaskDeadExecutionHandler}'s once db-scheduler declares
+ *   it dead (30 s heartbeat × 4 misses = 120 s, per
+ *   {@link DbSchedulerBootstrapJob}). JCLAW-258's visibility step still
+ *   runs first: {@link LostTaskDetector#detect()} reconciles any RUNNING
+ *   Task whose {@code scheduled_tasks.last_heartbeat} is older than 60 s
+ *   to {@link Task.Status#LOST}. Both need the row: JCLAW-1103 added
+ *   {@link #reconcileStrandedRunning} for a RUNNING Task that has lost
+ *   it, which neither can see.</li>
  *
  *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELLED)
  *   — they shouldn't have rows in {@code scheduled_tasks} and we
@@ -168,39 +169,46 @@ public class BootConsistencyCheck extends Job<Void> {
      * and skipped — this is what makes the sweep safe to run alongside
      * db-scheduler's first poll without racing a freshly-opened run to FAILED.
      *
+     * <p>Each run's Task is closed with it as {@link RestartCutOff} says, unless a fire of it is live on
+     * this node: it is not run again.
+     *
      * @param bootCutoff cutoff instant; runs started before it are considered orphaned
      * @return number of run rows flipped to FAILED
      */
     public static int reconcileOrphanedRuns(Instant bootCutoff) {
-        return Tx.run(() -> {
+        var endedOneShots = new ArrayList<TaskRun>();
+        int count = Tx.run(() -> {
             var now = AppClock.now();
-            int count = 0;
+            int closed = 0;
             for (Object o : TaskRun.find("status = ?1 and startedAt < ?2",
                     TaskRun.Status.RUNNING, bootCutoff).fetch()) {
                 var run = (TaskRun) o;
                 run.status = TaskRun.Status.FAILED;
                 run.completedAt = now;
                 run.durationMs = Duration.between(run.startedAt, now).toMillis();
-                if (run.error == null || run.error.isBlank()) {
-                    run.error = "Run orphaned by a JVM restart/crash before completion; "
-                            + "reconciled to FAILED at startup.";
-                }
+                if (run.error == null || run.error.isBlank()) run.error = RestartCutOff.runError(run.task);
                 run.save();
-                count++;
+                // JF-355: the task goes with its run, before reArmOrphans below would arm a one-shot again.
+                if (!TaskRunRegistry.isTaskActive(run.task.id) && RestartCutOff.close(run.task)) endedOneShots.add(run);
+                closed++;
             }
-            if (count > 0) {
-                EventLogger.info("task", null, null,
-                        "BootConsistencyCheck: reconciled %d orphaned RUNNING task_run row(s) to FAILED"
-                                .formatted(count));
-            }
-            return count;
+            return closed;
         });
+        for (var run : endedOneShots) RestartCutOff.announce(run.task, run);
+        if (count > 0) {
+            EventLogger.info("task", null, null,
+                    ("BootConsistencyCheck: closed %d task run(s) a stop of JClaw cut off, %d of them one-shot tasks"
+                            + " that end FAILED instead of running again")
+                            .formatted(count, endedOneShots.size()));
+        }
+        return count;
     }
 
     /**
-     * Return Tasks stuck in {@link Task.Status#RUNNING} with no
-     * {@code scheduled_tasks} row to their alive state, so the caller's re-arm
-     * pass registers a fresh row for them.
+     * Settle Tasks stuck in {@link Task.Status#RUNNING} with no
+     * {@code scheduled_tasks} row: a recurring one returns to its alive state, so the
+     * caller's re-arm pass registers a fresh row for it, and a one-shot one ends as
+     * {@link RestartCutOff} says, since its fire already started.
      *
      * <p>No other sweep can see this state: {@link LostTaskDetector} reads
      * staleness <em>off</em> the row, so a missing row reads as healthy, and the
@@ -218,10 +226,11 @@ public class BootConsistencyCheck extends Job<Void> {
      *                         reconciled. Production passes {@code now -
      *                         STALE_THRESHOLD}; tests pass an explicit instant so
      *                         the assertion doesn't ride on wall-clock drift.
-     * @return number of Tasks returned to an alive state
+     * @return number of Tasks settled
      */
     public static int reconcileStrandedRunning(Set<String> alreadyScheduled, Instant staleBefore) {
-        return Tx.run(() -> {
+        var endedOneShots = new ArrayList<Task>();
+        int reconciled = Tx.run(() -> {
             int count = 0;
             for (var task : Task.findByStatus(Task.Status.RUNNING)) {
                 if (alreadyScheduled.contains(task.id.toString())
@@ -231,17 +240,29 @@ public class BootConsistencyCheck extends Job<Void> {
                     continue;
                 }
                 long strandedSeconds = Duration.between(task.updatedAt, AppClock.now()).toSeconds();
-                task.transitionTo(Task.initialStatusFor(task.type));
-                task.save();
+                // A one-shot task enters RUNNING only when its fire starts, so one stranded here was cut off,
+                // and arming it again would run it twice (JF-355). A recurring task re-arms for its next fire.
+                if (RestartCutOff.isRecurring(task)) {
+                    task.transitionTo(Task.initialStatusFor(task.type));
+                    task.save();
+                } else if (RestartCutOff.close(task)) {
+                    endedOneShots.add(task);
+                }
                 EventLogger.warn("task",
                         task.agent != null ? task.agent.name : null, null,
                         ("BootConsistencyCheck: Task '%s' (id=%d) stranded in RUNNING with no schedule "
-                                + "row for %ds; returned to %s for re-arm")
+                                + "row for %ds; now %s")
                                 .formatted(task.name, task.id, strandedSeconds, task.status));
                 count++;
             }
             return count;
         });
+        for (var task : endedOneShots) RestartCutOff.announce(task, latestRun(task.id));
+        return reconciled;
+    }
+
+    private static @Nullable TaskRun latestRun(Long taskId) {
+        return Tx.run(() -> (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", taskId).first());
     }
 
     /**

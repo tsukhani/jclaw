@@ -102,6 +102,7 @@ public final class TaskExecutionHandler {
     public static CustomTask<Void> buildTask() {
         return Tasks.custom(TASK_NAME, Void.class)
                 .onFailure(new JClawFailureHandler())
+                .onDeadExecution(new TaskDeadExecutionHandler())
                 .execute((inst, _) -> {
             String instanceId = inst.getId();
             Long jclawTaskId = parseTaskId(instanceId);
@@ -138,14 +139,12 @@ public final class TaskExecutionHandler {
                         ? scheduleNextIfRecurring(jclawTask) : dropThenReArmIfResumed(jclawTask);
             }
 
-            // JCLAW-803: dedup guard. db-scheduler revives a fire it believes
-            // dead (heartbeat stalled after a restart) and re-fires the row
-            // while the original may still be running on this JVM. Without this
+            // JCLAW-803: dedup guard. TaskDeadExecutionHandler revives a fire whose
+            // heartbeat stalled while it is still running on this JVM. Without this
             // gate every revive opens a fresh concurrent fire, piling up zombie
             // agent loops. Claim the Task id atomically; if a live fire already
-            // holds it here, skip the body but still re-arm the schedule. A
-            // RUNNING row orphaned by a crashed prior JVM is not claimed here,
-            // so it is still re-fired normally on recovery.
+            // holds it here, skip the body but still re-arm the schedule. A row a
+            // stopped JVM left is not revived at all (JF-355).
             if (!TaskRunRegistry.tryClaimTask(jclawTaskId)) {
                 EventLogger.warn("task",
                         jclawTask.agent != null ? jclawTask.agent.name : null, null,

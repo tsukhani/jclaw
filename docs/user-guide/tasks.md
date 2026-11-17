@@ -68,7 +68,7 @@ The output itself goes only where the task's delivery sends it, never into the c
 
 An error message can hold private details, so the notice shows one only in a chat that just you read, with any key in it hidden. In a group chat, the notice says the reason is on the Tasks page. Only the agent that owns the task, or `main`, is told how its run ended. If two chats ask about the same run, the first one to ask is told.
 
-A paused task does not run, so the agent is told that straight away instead of waiting. If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts the run short, or it fails and will be retried, the notice comes when the task's next run ends.
+A paused task does not run, so the agent is told that straight away instead of waiting. If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts a one-off task's run short, the notice says so once JClaw is back. If a restart cuts a recurring task's run short, or a run fails and will be retried, the notice comes when the task's next run ends.
 
 ### Cancel vs delete
 
@@ -120,9 +120,9 @@ Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks co
 | `PENDING`   | One-shot (`IMMEDIATE` / `SCHEDULED`) waiting to fire.                                                          |
 | `ACTIVE`    | Recurring (`CRON` / `INTERVAL`) in steady state, waiting for its next cadence.                                |
 | `RUNNING`   | Mid-fire right now.                                                                                            |
-| `LOST`      | Was `RUNNING` but the scheduler's heartbeat went stale. JClaw auto-recovers the underlying job shortly.       |
+| `LOST`      | Was `RUNNING` when its heartbeat went stale, usually because JClaw stopped mid-run. The run is not started again: a one-off ends `FAILED` and a recurring task waits for its next time. |
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
-| `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one, unless its schedule has no next fire (a malformed cron, say). |
+| `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error, or whose run a restart cut off. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one, unless its schedule has no next fire (a malformed cron, say). |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
 | `PAUSED`    | Shown in place of `PENDING` or `ACTIVE` while the schedule is suspended, by you or by JClaw after failed runs (the reason then shows under the task's name). Display-only. Pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
@@ -138,7 +138,8 @@ failure      RUNNING ──▶ PENDING/ACTIVE               (transient: retry on
              RUNNING ──▶ FAILED ──▶ (Retry) ──▶ PENDING  (one-shot: permanent / retries used up)
              RUNNING ──▶ ACTIVE                       (recurring: permanent / retries used up — next occurrence)
 
-crash        RUNNING ──▶ LOST ──▶ (auto re-fire) ──▶ RUNNING ──▶ …
+restart      RUNNING ──▶ FAILED ──▶ (Retry) ──▶ PENDING  (one-shot: the cut-off run is not started again)
+             RUNNING ──▶ ACTIVE                       (recurring: next occurrence)
 
 operator     PENDING/ACTIVE ──▶ CANCELLED ──▶ (runNow / re-enable) ──▶ PENDING/ACTIVE
 ```
@@ -149,7 +150,7 @@ The transitions, one by one:
 - **Success.** A one-shot ends `COMPLETED`; it has served its purpose. A recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
 - **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff: `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
 - **Permanent failure.** A non-recoverable error, or a reached retry cap, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when this happens. If you set `pauseAfterFailedOccurrences` at **Settings → Tasks**, a recurring task whose scheduled runs fail that many times in a row is paused instead. You get one alert that says so, and the task stays paused until you resume it. A run that completes starts the count again.
-- **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after about 1 minute so you can see it stalled, then the scheduler automatically re-fires it (about 2 minutes): `LOST → RUNNING → COMPLETED/FAILED`, with no action from you. **Retry** skips the wait.
+- **Restart or crash.** If JClaw stops while a task is running, for a restart, an upgrade or a crash, that run is not started again, so nothing it already did, such as a message it sent, happens twice. When JClaw is back, a one-off task ends `FAILED` with the reason, and the chat waiting on the run and your [alerts](/guide#settings-alerts) say so; click **Retry** to run it again. A recurring task waits for its next time. Until JClaw notices, the task may show `RUNNING`, or `LOST` after about a minute.
 - **Time limits.** Two limits are set at **Settings → Tasks**. A fire that does nothing for `fireIdleSeconds` seconds (default `600`, ten minutes) is cancelled. Work done by any subagent it started that is still running counts, and so does a shell command that is still running. So a busy fire keeps going. No fire runs longer than `fireMaxDurationSeconds` seconds (default `1800`, 30 minutes), however busy. `0` turns either limit off.
 - **What a cancel stops.** Cancelling a fire, by hand or through a limit, also stops the subagents it started. The tool the fire is running stops too (a running shell command is ended). Then the fire stops at its next safe point, the top of a model round or between tool calls.
 - **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state. The recurring schedule is left intact.

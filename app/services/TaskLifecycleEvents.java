@@ -48,8 +48,8 @@ import java.util.Map;
  *       "channel broken".</li>
  *   <li>{@link #LOST} — emitted by {@link LostTaskDetector} when a
  *       RUNNING TaskRun's db-scheduler heartbeat goes stale past
- *       the threshold. Visibility-only; db-scheduler's own
- *       dead-execution recovery later re-fires the row.</li>
+ *       the threshold. Visibility-only; {@link TaskDeadExecutionHandler}
+ *       later settles the row without running the fire again.</li>
  * </ul>
  *
  * <h2>Why a separate helper class</h2>

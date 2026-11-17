@@ -114,12 +114,21 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             return;
         }
 
+        // JF-355: a fire that fails while JClaw stops was cut off, and an interrupted call reads as
+        // transient, so deciding here would retry it from the start after boot. Leave the row as it is:
+        // TaskDeadExecutionHandler and the boot sweep end it as RestartCutOff says.
+        if (EventLogger.isShuttingDown()) {
+            // play.Logger, not EventLogger: H2's exit hook may already have closed the database.
+            Logger.warn("JClawFailureHandler: task %d failed while JClaw was stopping (%s); not retried, the next "
+                    + "start closes it as cut off", jclawTaskId, throwable != null ? throwable.toString() : "no cause");
+            return;
+        }
         // JCLAW-1144: every branch below writes to the database -- decide() mutates the Task
         // row, and reschedule/stop rewrite the scheduled_tasks row. When db-scheduler
         // interrupts its executor threads at shutdown, an interrupt inside H2 file I/O closes
         // the store for every caller, so all of this fails and escapes as "Failed while
-        // completing execution". Contain it: the execution row is left untouched and
-        // db-scheduler's dead-execution detection re-fires it on the next boot.
+        // completing execution". Contain it: the execution row is left untouched for
+        // TaskDeadExecutionHandler on the next boot, which does not run it again.
         try {
             Decision decision = decide(jclawTaskId, throwable);
             switch (decision) {
@@ -133,8 +142,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             if (!EventLogger.isShuttingDown()) throw e;
             // play.Logger, not EventLogger: this path exists because the DB is unreachable.
             Logger.warn("JClawFailureHandler: task %d outcome not recorded during shutdown (%s); "
-                    + "db-scheduler will re-fire the execution on the next boot",
-                    jclawTaskId, e.toString());
+                    + "the next start closes it as cut off", jclawTaskId, e.toString());
         }
     }
 

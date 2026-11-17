@@ -195,6 +195,17 @@ public final class OperatorAlerts {
                 .formatted(taskName, agentLabel(agentName), reason, shorten(error), NEXT_RUN.format(next));
     }
 
+    /** Called when a restart cut off a one-shot task's run, which then never runs again (JF-355). */
+    public static void onTaskCutOff(Task task, @Nullable String agentName) {
+        announceTask(cutOffAlert(task.name, agentName));
+    }
+
+    public static String cutOffAlert(String taskName, @Nullable String agentName) {
+        return ("JClaw alert: task '%s'%s was cut off when JClaw stopped, before its run finished. It does not run again"
+                + " on its own, so nothing it already did is repeated. Retry it from the Tasks page to run it again.")
+                .formatted(taskName, agentLabel(agentName));
+    }
+
     /** Sent in place of {@link #onOccurrenceFailed} when the failed occurrence paused the task. */
     public static void onTaskPaused(Task task, @Nullable String agentName, int failedRuns, String reason, String error) {
         announceTask(pauseAlert(task.name, agentName, failedRuns, reason, error));

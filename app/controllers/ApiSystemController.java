@@ -38,9 +38,9 @@ public class ApiSystemController extends Controller {
 
     private static final String READ_STATUS = "read the restart and upgrade status";
     private static final String RESTART = "restart the instance";
-    static final String TASK_FIRE_REFUSAL = "A scheduled task can't restart JClaw: the restart cuts the task's run "
-            + "off, and the scheduler runs it again once JClaw is back, which would restart JClaw again. Ask for the "
-            + "restart in a conversation instead.";
+    static final String TASK_FIRE_REFUSAL = "A scheduled task can't restart JClaw: the restart cuts the task's own "
+            + "run off before it finishes, and a run a restart cuts off does not run again. Ask for the restart in a "
+            + "conversation instead.";
 
     /**
      * @param available          whether a restart can be performed at all —

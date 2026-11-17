@@ -384,7 +384,8 @@ public final class TaskExecutor {
             // cancellation, not a failure for JClawFailureHandler to classify.
             var timeoutNote = TaskFireDeadline.timeoutNote(sink.taskRunId());
             boolean timedOut = timeoutNote != null;
-            // The operator's cancel endpoint announces its own cancel; a shutdown's goes unannounced.
+            if (!timedOut && EventLogger.isShuttingDown()) return leaveForNextBoot(task, sink, "a shutdown's cancel");
+            // The operator's cancel endpoint announces its own cancel.
             sink.onCancelled(timeoutNote != null ? timeoutNote : "Cancelled by operator", timedOut);
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
@@ -397,6 +398,8 @@ public final class TaskExecutor {
                                     : "cancelled by operator"));
             return false;
         } catch (RuntimeException e) {
+            // An interrupted model or tool call reads as transient, so rethrowing would retry the whole fire.
+            if (EventLogger.isShuttingDown()) return leaveForNextBoot(task, sink, e.toString());
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             sink.onFailure(msg);
             // NB: we do NOT emit TASK_FAILED here. Whether this failure is
@@ -406,6 +409,18 @@ public final class TaskExecutor {
             // handler emits TASK_FAILED only when its Decision is Fail.
             throw e;
         }
+    }
+
+    /**
+     * A fire a shutdown ended (JF-355): its run and task stay RUNNING, unwritten, since H2's exit hook
+     * may already have closed the database, and the next boot's {@code BootConsistencyCheck} closes
+     * them as {@link RestartCutOff} says. The fire is not retried.
+     */
+    private static boolean leaveForNextBoot(Task task, TaskRunSink sink, String cause) {
+        EventLogger.info("task", task.agent != null ? task.agent.name : null, null,
+                "TaskExecutor.runTask: task run %d cut off by JClaw stopping (%s); the next start closes it, not run again"
+                        .formatted(sink.taskRunId(), cause));
+        return false;
     }
 
     /**

@@ -335,7 +335,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
-    void mainIsRefusedTheRestartFromAScheduledTaskSoItsRerunCannotRestartJClawAgain() {
+    void mainIsRefusedTheRestartFromAScheduledTaskSinceTheRestartWouldCutOffItsOwnRun() {
         // A task fire runs on an unsaved conversation, so jclaw_api names none.
         var main = mainWithAConversation();
 
@@ -343,8 +343,8 @@ class ApiSystemControllerTest extends FunctionalTest {
                 "application/json", "{}"));
 
         assertEquals(409, resp.status.intValue());
-        assertEquals("A scheduled task can't restart JClaw: the restart cuts the task's run off, and the scheduler "
-                + "runs it again once JClaw is back, which would restart JClaw again. Ask for the restart in a "
+        assertEquals("A scheduled task can't restart JClaw: the restart cuts the task's own run off before it "
+                + "finishes, and a run a restart cuts off does not run again. Ask for the restart in a "
                 + "conversation instead.", json(resp).get("message").getAsString());
         assertEquals(0, spawned.size(), "a refused restart spawns nothing");
     }

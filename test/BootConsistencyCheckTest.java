@@ -4,8 +4,10 @@ import com.github.kagkarlsson.scheduler.task.Execution;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import jobs.BootConsistencyCheck;
 import models.Agent;
+import models.MessageRole;
 import models.Task;
 import models.TaskRun;
+import models.TaskRunMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,7 +16,11 @@ import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
+import services.OperatorAlerts;
+import services.RestartCutOff;
+import services.TaskDeadExecutionHandler;
 import services.TaskExecutionHandler;
+import services.TaskExecutor;
 import services.TaskRunRegistry;
 
 import java.lang.reflect.Method;
@@ -283,6 +289,90 @@ class BootConsistencyCheckTest extends UnitTest {
                 "a run left RUNNING by a prior scheduler generation (same JVM) must be reconciled");
     }
 
+    // === JF-355: a fire a restart cut off is not run again ===
+
+    @Test
+    void aOneShotCutOffBeforeItDidAnythingEndsFailedAndIsNotArmedAgain() {
+        var task = persistTask("jf355-before-anything", Task.Status.RUNNING);
+        var runId = persistRun(task, Instant.now().minusSeconds(30), TaskRun.Status.RUNNING, null);
+
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> BootConsistencyCheck.sweep(stub.proxy(), Instant.now()));
+        commitAndReopen();
+
+        assertCutOffOneShot(task.id, runId, alerts, "jf355-before-anything");
+    }
+
+    @Test
+    void aOneShotCutOffAfterItSentAMessageEndsTheSameWayAndIsNotArmedAgain() {
+        var task = persistTask("jf355-after-send", Task.Status.RUNNING);
+        var runId = persistRun(task, Instant.now().minusSeconds(30), TaskRun.Status.RUNNING, null);
+        sentAMessage((TaskRun) TaskRun.findById(runId));
+        assertTrue(TaskExecutor.deliveredViaMessageTool(runId), "the fixture is a run that had already sent a message");
+
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> BootConsistencyCheck.sweep(stub.proxy(), Instant.now()));
+        commitAndReopen();
+
+        assertCutOffOneShot(task.id, runId, alerts, "jf355-after-send");
+    }
+
+    @Test
+    void aRecurringTaskCutOffWaitsForItsNextOccurrence() {
+        var task = persistRecurringTask("jf355-recurring", Task.Status.RUNNING);
+        var runId = persistRun(task, Instant.now().minusSeconds(30), TaskRun.Status.RUNNING, null);
+        // Its row survives the stop, still picked, until db-scheduler declares it dead.
+        stub.scheduledIds.add(task.id.toString());
+
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> BootConsistencyCheck.sweep(stub.proxy(), Instant.now()));
+        commitAndReopen();
+
+        var run = (TaskRun) TaskRun.findById(runId);
+        assertEquals(TaskRun.Status.FAILED, run.status);
+        assertEquals(RestartCutOff.RECURRING_ERROR, run.error);
+        assertEquals(Task.Status.ACTIVE, ((Task) Task.findById(task.id)).status);
+        assertTrue(stub.schedules.isEmpty(), "nothing arms it to run now; got " + stub.schedules.size() + " call(s)");
+        assertEquals(List.of(), alertsNaming(alerts, "jf355-recurring"), "a recurring task's next run reports instead");
+
+        var before = Instant.now();
+        var decision = TaskDeadExecutionHandler.decide(task.id, false);
+        var at = assertInstanceOf(TaskDeadExecutionHandler.Decision.NextOccurrence.class, decision).at();
+        assertFalse(at.isBefore(before.plusSeconds(1800)),
+                "its dead row moves on to the next occurrence, not now: " + at + " vs " + before);
+    }
+
+    private void assertCutOffOneShot(Long taskId, Long runId, List<String> alerts, String name) {
+        var run = (TaskRun) TaskRun.findById(runId);
+        assertEquals(TaskRun.Status.FAILED, run.status);
+        assertEquals(RestartCutOff.ONE_SHOT_ERROR, run.error);
+        var task = (Task) Task.findById(taskId);
+        assertEquals(Task.Status.FAILED, task.status, "the one-shot ends, so the re-arm pass skips it");
+        assertEquals(RestartCutOff.ONE_SHOT_ERROR, task.lastError);
+        assertTrue(stub.schedules.isEmpty(), "nothing arms it to run again; got " + stub.schedules.size() + " call(s)");
+        assertEquals(List.of(OperatorAlerts.cutOffAlert(name, agent.name)), alertsNaming(alerts, name));
+    }
+
+    /** Concurrent test classes may raise task alerts too, so each test reads only its own task's. */
+    private static List<String> alertsNaming(List<String> alerts, String taskName) {
+        return alerts.stream().filter(a -> a.contains("'" + taskName + "'")).toList();
+    }
+
+    /** A delivering {@code message} call and its successful result, as TaskRunSink writes them. */
+    private static void sentAMessage(TaskRun run) {
+        var call = new TaskRunMessage();
+        call.taskRun = run;
+        call.turnIndex = 0;
+        call.role = MessageRole.ASSISTANT;
+        call.toolCalls = "{\"id\":\"functions.message:1\",\"type\":\"function\",\"function\":{\"name\":\"message\","
+                + "\"arguments\":\"{\\\"action\\\":\\\"send\\\"}\"}}";
+        call.save();
+        var answer = new TaskRunMessage();
+        answer.taskRun = run;
+        answer.turnIndex = 1;
+        answer.role = MessageRole.TOOL;
+        answer.toolResults = "functions.message:1";
+        answer.content = "{\"action\":\"sent\",\"channel\":\"slack\",\"target\":\"#ops\"}";
+        answer.save();
+    }
+
     // === Helpers ===
 
     /** A job's register arms when its transaction commits; the test's transaction stands in for it. */
@@ -354,13 +444,18 @@ class BootConsistencyCheckTest extends UnitTest {
     }
 
     @Test
-    void strandedRunningOneShotReturnsToPending() {
+    void strandedRunningOneShotEndsFailedInsteadOfRunningAgain() {
+        // JF-355: a one-shot enters RUNNING only when its fire starts, so arming it again would run it twice.
         var task = persistTask("jclaw1103-oneshot", Task.Status.RUNNING);
 
-        BootConsistencyCheck.reconcileStrandedRunning(Set.of(), Instant.now().plusSeconds(60));
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() ->
+                BootConsistencyCheck.reconcileStrandedRunning(Set.of(), Instant.now().plusSeconds(60)));
 
-        assertEquals(Task.Status.PENDING, ((Task) Task.findById(task.id)).status,
-                "a one-shot returns to PENDING, not ACTIVE");
+        var reloaded = (Task) Task.findById(task.id);
+        assertEquals(Task.Status.FAILED, reloaded.status, "a stranded one-shot ends instead of returning to PENDING");
+        assertEquals(RestartCutOff.ONE_SHOT_ERROR, reloaded.lastError);
+        assertEquals(List.of(OperatorAlerts.cutOffAlert("jclaw1103-oneshot", agent.name)),
+                alertsNaming(alerts, "jclaw1103-oneshot"));
     }
 
     @Test

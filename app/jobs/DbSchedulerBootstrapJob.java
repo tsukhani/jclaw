@@ -181,7 +181,8 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 // JCLAW-258: shorten heartbeat from db-scheduler's default to
                 // 30 s so a crash-interrupted fire surfaces faster. 30 s × 4
                 // missed = 120 s before db-scheduler declares an execution
-                // dead and re-fires it; LostTaskDetector flips the visible
+                // dead and hands it to TaskDeadExecutionHandler, which does
+                // not run a cut-off fire again (JF-355); LostTaskDetector flips the visible
                 // Task.status to LOST at the 60 s mark (2 missed heartbeats),
                 // so operator visibility consistently leads scheduler
                 // recovery by roughly 60 s. Floor of missedHeartbeatsLimit
