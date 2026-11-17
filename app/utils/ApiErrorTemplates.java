@@ -86,6 +86,18 @@ public final class ApiErrorTemplates {
                 "Install the skill on the agent, then switch it on again.");
     }
 
+    /** Deleting an agent's skill that holds values, unconfirmed or confirmed against an outdated preview (JF-356). */
+    public static final String SKILL_REMOVAL_UNCONFIRMED = "skill_removal_unconfirmed";
+
+    /** Sent under the wire code {@code conflict}, whose own row is about a clash with an existing record. */
+    public static ErrorTemplate skillRemovalUnconfirmed() {
+        return new ErrorTemplate(SKILL_REMOVAL_UNCONFIRMED,
+                "The skill was not deleted: what deleting it removes or moves was not confirmed, or has changed since it was shown.",
+                "A skill that holds secrets, settings, key files or saved state is deleted only with the plan its removal "
+                        + "preview gave, and a value added or a skill switched since then changes that plan.",
+                "Delete the skill again, read what it removes and moves, and confirm.");
+    }
+
     private static final String LENGTH_RULE_CHECK =
             "Length is the only rule — there are no composition requirements.";
 

@@ -1059,6 +1059,22 @@ public final class SkillSecrets {
         return out;
     }
 
+    /**
+     * Move secret {@code name}, its value, hosts and rule, from skill {@code from} to skill {@code to}, which declares
+     * it, so deleting {@code from} leaves the skills that read it by name working (JF-356). False when {@code from}
+     * holds no such secret or {@code to} already holds one.
+     */
+    public static boolean moveToSkill(Agent owner, String from, String name, String to) {
+        SkillSecret row = SkillSecret.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, from, name).first();
+        if (row == null || SkillSecret.count("agent = ?1 AND skillName = ?2 AND name = ?3", owner, to, name) > 0) return false;
+        row.skillName = to;
+        row.save();
+        EventLogger.info(LOG_CATEGORY, owner.name, null, "Secret %s moved from skill %s to %s, which declares it"
+                .formatted(name, from, to));
+        afterWrite();
+        return true;
+    }
+
     /** Delete every secret of a skill the operator removes from the agent, as its credentials folder goes with it. */
     public static int deleteForSkill(Agent owner, String skill) {
         int deleted = SkillSecret.delete("agent = ?1 AND skillName = ?2", owner, skill);

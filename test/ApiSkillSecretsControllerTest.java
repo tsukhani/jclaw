@@ -85,6 +85,12 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         return PUT(base() + "/" + secret, "application/json", json);
     }
 
+    /** Delete demo from the agent as the page does, confirming the plan its removal preview showed (JF-356). */
+    private Http.Response deleteDemo() {
+        var plan = json(GET("/api/agents/" + agentId + "/skills/demo/removal")).get("plan").getAsString();
+        return DELETE("/api/agents/" + agentId + "/skills/demo/delete?plan=" + plan);
+    }
+
     private static JsonObject json(Http.Response response) {
         return JsonParser.parseString(getContent(response)).getAsJsonObject();
     }
@@ -1046,7 +1052,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             try (var grant = running(stub, "echo $API_KEY")) {
                 assertSent(grant, stub, "API_KEY", VALUE);
 
-                assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+                assertIsOk(deleteDemo());
 
                 assertNoLongerGiven(grant, stub, "API_KEY");
             }
@@ -1330,7 +1336,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
         Files.writeString(state.resolve("session.txt"), "x\n");
         Files.createDirectories(AgentService.workspacePath(agentName).resolve("skill-state/other"));
 
-        assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+        assertIsOk(deleteDemo());
 
         assertEquals(0L, (long) commitInFreshTx(() -> models.SkillSetting.count("agent.id = ?1", agentId)));
         assertEquals(false, Files.exists(state));
@@ -1347,7 +1353,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             Files.createDirectories(outside.resolve("demo"));
             Files.writeString(outside.resolve("demo/keep.txt"), "keep\n");
             Files.createSymbolicLink(workspace.resolve("skill-state"), outside);
-            assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+            assertIsOk(deleteDemo());
             assertEquals("keep\n", Files.readString(outside.resolve("demo/keep.txt")), "the state root was a link");
 
             Files.delete(workspace.resolve("skill-state"));
@@ -1357,7 +1363,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
             Files.writeString(workspace.resolve("notes/keep.txt"), "keep\n");
             Files.createDirectories(workspace.resolve("skill-state"));
             Files.createSymbolicLink(workspace.resolve("skill-state/demo"), workspace.resolve("notes"));
-            assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+            assertIsOk(deleteDemo());
             assertEquals("keep\n", Files.readString(workspace.resolve("notes/keep.txt")), "the skill's state folder was a link");
         } finally {
             agents.SkillLoader.clearCache();
@@ -1415,7 +1421,7 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
     @Test
     void removingTheSkillFromTheAgentDeletesItsSecrets() {
         assertIsOk(put("API_KEY", "{\"value\":\"v\",\"hosts\":[\"a.example.com\"]}"));
-        assertIsOk(DELETE("/api/agents/" + agentId + "/skills/demo/delete"));
+        assertIsOk(deleteDemo());
         assertEquals(0, rows());
     }
 

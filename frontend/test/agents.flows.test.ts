@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import type { H3Event } from 'h3'
 import { defineComponent, h } from 'vue'
 import Agents from '~/pages/agents/[[name]].vue'
@@ -819,6 +819,96 @@ describe('Agents page — skill toggle round-trips', () => {
     await vi.waitFor(() => expect(skillPut).not.toBeNull())
 
     expect(skillPut).toEqual({ enabled: false })
+  })
+})
+
+describe('Agents page — switching off a skill other skills need warns first (JF-356)', () => {
+  afterEach(() => {
+    const { _state, _resolve } = useConfirm()
+    if (_state.open) _resolve(false)
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+  })
+
+  function dialogMessage() {
+    return (document.body.querySelector('[role="dialog"] p.whitespace-pre-line')?.textContent ?? '').trim()
+  }
+
+  function dialogButton(label: string) {
+    return [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(b => b.textContent?.trim() === label)
+  }
+
+  function skillPutEndpoint() {
+    const puts: unknown[] = []
+    registerEndpoint('/api/agents/2/skills/web-search', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        puts.push(await readBody(event))
+        return { name: 'web-search', enabled: false, status: 'ok', stops: [] }
+      },
+    })
+    return puts
+  }
+
+  function removalPreview(stops: { skill: string, names: string[] }[]) {
+    registerEndpoint('/api/agents/2/skills/web-search/removal', () => ({
+      secrets: [{ name: 'SEARCH_API_KEY', movesTo: null, usedBy: stops.map(s => s.skill) }], settings: [], savedState: false,
+      credentialFiles: [], keptFiles: 0,
+      asks: true, plan: '0123456789abcdef', stopsIfSwitchedOff: stops,
+    }))
+  }
+
+  async function clickDisable(component: VueWrapper) {
+    await openHelperEdit(component)
+    const toggle = component.findAll('button').find(b => b.attributes('title') === 'Disable skill')
+    await toggle!.trigger('click')
+    await flushPromises()
+  }
+
+  it('names the skills that stop, and switches off once confirmed', async () => {
+    const puts = skillPutEndpoint()
+    removalPreview([{ skill: 'web-summary', names: ['SEARCH_API_KEY'] }])
+    setupAgentsApi()
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+
+    await clickDisable(component)
+
+    await vi.waitFor(() => expect(dialogMessage()).toBe('Switching \'web-search\' off stops a skill that needs a value it'
+      + ' holds:\nweb-summary needs SEARCH_API_KEY.\n\nNothing is deleted. Switch \'web-search\' on again and it runs again.'))
+    expect(puts).toEqual([])
+    dialogButton('Switch off')!.click()
+    await vi.waitFor(() => expect(puts).toEqual([{ enabled: false }]))
+  })
+
+  it('cancelling the warning leaves the skill on', async () => {
+    const puts = skillPutEndpoint()
+    removalPreview([{ skill: 'web-summary', names: ['SEARCH_API_KEY'] }])
+    setupAgentsApi()
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+
+    await clickDisable(component)
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(puts).toEqual([])
+    expect(component.findAll('button').some(b => b.attributes('title') === 'Disable skill')).toBe(true)
+  })
+
+  it('a skill no other skill needs switches off without a warning', async () => {
+    const puts = skillPutEndpoint()
+    removalPreview([])
+    setupAgentsApi()
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+
+    await clickDisable(component)
+
+    await vi.waitFor(() => expect(puts).toEqual([{ enabled: false }]))
+    expect(dialogButton('Switch off')).toBeUndefined()
   })
 })
 

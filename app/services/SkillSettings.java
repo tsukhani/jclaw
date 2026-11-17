@@ -105,6 +105,18 @@ public final class SkillSettings {
         return out;
     }
 
+    /** As {@link SkillSecrets#moveToSkill}, for setting {@code name}. */
+    public static boolean moveToSkill(Agent owner, String from, String name, String to) {
+        SkillSetting row = SkillSetting.find("agent = ?1 AND skillName = ?2 AND name = ?3", owner, from, name).first();
+        if (row == null || SkillSetting.count("agent = ?1 AND skillName = ?2 AND name = ?3", owner, to, name) > 0) return false;
+        row.skillName = to;
+        row.save();
+        SkillLoader.clearCache();
+        EventLogger.info(LOG_CATEGORY, owner.name, null, "Setting %s moved from skill %s to %s, which declares it"
+                .formatted(name, from, to));
+        return true;
+    }
+
     /** Delete every setting of a skill the operator removes from the agent, as its secrets go with it. */
     public static int deleteForSkill(Agent owner, String skill) {
         int deleted = SkillSetting.delete("agent = ?1 AND skillName = ?2", owner, skill);

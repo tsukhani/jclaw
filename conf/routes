@@ -232,6 +232,7 @@ GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
 GET     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.readAgentSkillFile
 GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSkillFiles
+GET     /api/agents/{id}/skills/{name}/removal   ApiSkillsController.removalPreview
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
 # JF-352: an update keeps the operator's files of the old copy outside the workspace.

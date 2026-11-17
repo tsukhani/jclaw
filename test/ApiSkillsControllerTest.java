@@ -2087,6 +2087,13 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals("keep\n", Files.readString(victim));
     }
 
+    /** Delete the skill at {@code base} as the page does, confirming the plan its removal preview showed (JF-356). */
+    private play.mvc.Http.Response deleteConfirmed(String base) {
+        var plan = com.google.gson.JsonParser.parseString(getContent(GET(base + "/removal"))).getAsJsonObject()
+                .get("plan").getAsString();
+        return DELETE(base + "/delete?plan=" + plan);
+    }
+
     @Test
     void removingTheSkillFromTheAgentDeletesItsKeptFiles() throws Exception {
         login();
@@ -2097,7 +2104,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertIsOk(POST(base + "/copy", "application/json", "{}"));
         assertEquals(1, keptOf(GET(base + "/kept")).size());
 
-        assertIsOk(DELETE(base + "/delete"));
+        assertIsOk(deleteConfirmed(base));
 
         assertEquals("{\"kept\":[]}", getContent(GET(base + "/kept")));
         assertFalse(Files.exists(KeptSkillFiles.root().resolve(id)), "nothing is left for the agent");
@@ -2181,7 +2188,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
         Files.setPosixFilePermissions(folder, PosixFilePermissions.fromString("---------"));
         try {
             var events = services.EventLogger.captureMatchingForTest(e -> "keep-remove-fails".equals(e.agentId()),
-                    seen -> assertIsOk(DELETE(base + "/delete")));
+                    seen -> assertIsOk(deleteConfirmed(base)));
 
             assertFalse(Files.exists(copyOf("keep-remove-fails", "gamma")), "the skill's folder is still removed");
             var warnings = events.stream().filter(e -> "WARN".equals(e.level())).map(services.EventLogger.Captured::message).toList();

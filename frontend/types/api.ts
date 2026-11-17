@@ -827,6 +827,35 @@ export interface SkillUpdatePreview {
   keeps: string[]
 }
 
+/** A secret or setting an agent's skill holds (JF-356): where a delete moves it, and the agent's other skills that declare it. */
+export interface SkillRemovalValue {
+  name: string
+  /** The skill a delete moves it to; null when no other skill declares it and the delete removes it. */
+  movesTo: string | null
+  usedBy: string[]
+}
+
+/** A switched-on skill that stops when the skill is switched off, and the names it needs from it. */
+export interface SkillRemovalStop {
+  skill: string
+  names: string[]
+}
+
+/** GET /api/agents/:id/skills/:name/removal (JF-356): what deleting or switching off the agent's skill does. */
+export interface SkillRemovalPreview {
+  secrets: SkillRemovalValue[]
+  settings: SkillRemovalValue[]
+  /** Whether the skill's skill-state/ folder holds anything, such as a session or a cookie jar. */
+  savedState: boolean
+  /** The files with content in the skill's own credentials/ folder, where skills kept keys before the secrets store. */
+  credentialFiles: string[]
+  keptFiles: number
+  /** Whether the delete asks first; it then needs `plan`, and is refused when anything changed since. */
+  asks: boolean
+  plan: string
+  stopsIfSwitchedOff: SkillRemovalStop[]
+}
+
 /**
  * Where a skill that holds a value another skill needs stands (JF-374): `offered` (for a sign-in holder, its sign-in has
  * not run yet), `switchedOff`, `notOffered` (switched on, but a tool it needs is off or it is withheld for a value of

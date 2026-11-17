@@ -264,7 +264,7 @@ class SkillNameIsOneFolderTest extends FunctionalTest {
             for (var enabled : List.of(false, true)) {
                 var response = PUT(base + "/linked", "application/json", "{\"enabled\":" + enabled + "}");
                 assertStatus(200, response);
-                assertEquals("{\"name\":\"linked\",\"enabled\":" + enabled + ",\"status\":\"ok\"}", getContent(response));
+                assertEquals("{\"name\":\"linked\",\"enabled\":" + enabled + ",\"status\":\"ok\",\"stops\":[]}", getContent(response));
                 assertEquals(enabled, listedSkill(base, "linked").get("enabled").getAsBoolean());
             }
             // The limit: the switch takes the folder's name, and its files stay refused.

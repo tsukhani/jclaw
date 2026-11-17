@@ -24,6 +24,7 @@ import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
 import services.SkillExporter;
 import services.SkillPromotionService;
+import services.SkillRemoval;
 import services.SkillSecrets;
 import services.SkillSettings;
 import services.Tx;
@@ -141,7 +142,26 @@ public class ApiSkillsController extends Controller {
 
     public record SkillToggleRequest(boolean enabled) {}
 
-    public record SkillToggleResponse(String name, boolean enabled, String status) {}
+    /** {@code stops}: on a switch-off, the agent's switched-on skills that stop because they need a value this one holds (JF-356). */
+    public record SkillToggleResponse(String name, boolean enabled, String status, List<SkillRemovalStop> stops) {}
+
+    /**
+     * A value an agent's skill holds (JF-356): {@code movesTo}, the skill a delete moves it to, absent when the delete
+     * removes it; {@code usedBy}, every other skill of the agent that declares it.
+     */
+    public record SkillRemovalValue(String name, @Nullable String movesTo, List<String> usedBy) {}
+
+    /** A switched-on skill that stops when the skill is switched off, and the names it needs from it. */
+    public record SkillRemovalStop(String skill, List<String> names) {}
+
+    /**
+     * What deleting an agent's skill removes and moves, and what switching it off stops (JF-356). {@code credentialFiles}:
+     * the files with content in the skill's own credentials/ folder. {@code asks}: the delete needs {@code plan}, which
+     * names this exact outcome, and is refused when anything changed since it was shown.
+     */
+    public record SkillRemovalPreview(List<SkillRemovalValue> secrets, List<SkillRemovalValue> settings, boolean savedState,
+                                      List<String> credentialFiles, int keptFiles, boolean asks, String plan,
+                                      List<SkillRemovalStop> stopsIfSwitchedOff) {}
 
     public record SkillCopyResponse(String name, String status, boolean replaced) {}
 
@@ -624,6 +644,7 @@ public class ApiSkillsController extends Controller {
                     ApiErrorTemplates.skillNotInstalled());
         }
 
+        var stops = enabled ? List.<SkillRemovalStop>of() : stopViews(SkillRemoval.of(agent, name).stopsIfSwitchedOff());
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
         if (config == null) {
             config = new AgentSkillConfig();
@@ -636,7 +657,7 @@ public class ApiSkillsController extends Controller {
         // a switched-off skill's secrets flowing. After the commit: a scan before it would re-cache the old row for 30 s.
         SecretGrants.reconcileAfterCommit(agent);
 
-        renderJSON(gson.toJson(new SkillToggleResponse(name, enabled, "ok")));
+        renderJSON(gson.toJson(new SkillToggleResponse(name, enabled, "ok", stops)));
     }
 
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
@@ -827,13 +848,42 @@ public class ApiSkillsController extends Controller {
         readSkillFileFrom(dir, filePath);
     }
 
+    /** GET /api/agents/{id}/skills/{name}/removal — What deleting or switching off an agent's skill would do. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRemovalPreview.class)))
+    @Operation(summary = "Before an agent's skill is deleted or switched off: the secrets and settings it holds and where a delete moves each one, the files in its credentials/ folder, its kept files and saved state, the plan a delete must confirm, and the skills a switch-off would stop")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "names the secrets and settings an agent's skills hold")
+    public static void removalPreview(Long id, String name) {
+        Agent agent = AgentService.findById(id);
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
+        if (!Files.isDirectory(dir)) notFound();
+        renderJSON(gson.toJson(removalView(SkillRemoval.of(agent, name))));
+    }
+
+    private static SkillRemovalPreview removalView(SkillRemoval.Impact impact) {
+        var secrets = new ArrayList<SkillRemovalValue>();
+        var settings = new ArrayList<SkillRemovalValue>();
+        for (var v : impact.values()) {
+            (v.kind() == SkillRemoval.Kind.SECRET ? secrets : settings).add(new SkillRemovalValue(v.name(), v.movesTo(), v.usedBy()));
+        }
+        return new SkillRemovalPreview(secrets, settings, impact.savedState(), impact.credentialFiles(), impact.keptFiles(),
+                impact.asks(), impact.plan(), stopViews(impact.stopsIfSwitchedOff()));
+    }
+
+    private static List<SkillRemovalStop> stopViews(List<SkillRemoval.Stop> stops) {
+        return stops.stream().map(stop -> new SkillRemovalStop(stop.skill(), stop.names())).toList();
+    }
+
     /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
-    @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
+    @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants. A skill that holds secrets, settings, files in its credentials/ folder, kept files or saved state needs ?plan= from its removal preview; each value another skill declares moves to it instead of being deleted")
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "deletes any agent's workspace skill and revokes its shell-allowlist grants")
-    public static void deleteAgentSkill(Long id, String name) {
+    public static void deleteAgentSkill(Long id, String name, @Nullable String plan) {
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -842,11 +892,19 @@ public class ApiSkillsController extends Controller {
         }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
+        var impact = SkillRemoval.of(agent, name);
+        // A secret's value cannot be recovered and a move changes another skill, so the operator sees both first.
+        if (impact.asks() && !impact.plan().equals(plan)) {
+            ApiResponses.errorWithTemplate(409, ApiResponses.CONFLICT, ("Skill '%s' holds secrets, settings, key files or"
+                    + " saved state, and what deleting it does was not confirmed or has changed since it was shown: review it"
+                    + " again and confirm.").formatted(name), ApiErrorTemplates.skillRemovalUnconfirmed());
+        }
         // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
         // the workspace copy — if the filesystem delete fails halfway we'd rather
         // have a stale directory without grants than the inverse. The revoke is
         // idempotent, so a retry after a transient failure is safe.
         SkillPromotionService.revokeAgentAllowlist(agent, name);
+        SkillRemoval.move(agent, name, impact);
         SkillSecrets.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
         SkillSettings.deleteForSkill(WorkspaceFiles.workspaceOwner(agent), name);
         var owner = WorkspaceFiles.workspaceOwner(agent);

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { readMultipartFormData, setResponseStatus } from 'h3'
+import { getQuery, readMultipartFormData, setResponseStatus } from 'h3'
 import { defineComponent, h } from 'vue'
 import Skills from '~/pages/skills/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
@@ -1096,5 +1096,136 @@ describe('Skills page — an update names what it needs and keeps (JF-352)', () 
     await dropped
 
     expect(calls.copied).toBe(false)
+  })
+})
+
+describe('Skills page — deleting a skill that holds values asks first (JF-356)', () => {
+  const ConfirmHarness = defineComponent({
+    setup() {
+      return () => h('div', [h(Skills), h(ConfirmDialog)])
+    },
+  })
+
+  const holding = {
+    secrets: [
+      { name: 'RADARR_API_KEY', movesTo: 'radarr-library', usedBy: ['radarr-delete', 'radarr-library'] },
+      { name: 'RADARR_WEBHOOK', movesTo: null, usedBy: [] },
+    ],
+    settings: [{ name: 'TRANSMISSION_URL', movesTo: 'sonarr', usedBy: ['sonarr'] }],
+    savedState: true,
+    credentialFiles: ['credentials/radarr.key'],
+    keptFiles: 2,
+    asks: true,
+    plan: '0123456789abcdef',
+    stopsIfSwitchedOff: [],
+  }
+
+  /** Each delete the page sends, as the plan it carried, or 'no plan'. */
+  function deleteEndpoint() {
+    const calls: string[] = []
+    registerEndpoint('/api/agents/1/skills/web-search/delete', {
+      method: 'DELETE',
+      handler: (event) => {
+        calls.push(String(getQuery(event).plan ?? 'no plan'))
+        return { status: 'ok' }
+      },
+    })
+    return calls
+  }
+
+  function dialogMessage() {
+    return (document.body.querySelector('[role="dialog"] p.whitespace-pre-line')?.textContent ?? '').trim()
+  }
+
+  function dialogButton(text: string) {
+    return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => (b.textContent ?? '').trim() === text)
+  }
+
+  /**
+   * The trash button on agent 1's one skill row, which the page shows on hover. The row is found by position: an
+   * earlier case in this file can leave the row's display name as its own fixture's, while the delete goes by folder.
+   */
+  async function clickDelete(component: VueWrapper) {
+    const rows = () => component.findAll('div.group\\/skill')
+    await vi.waitFor(() => expect(rows().length).toBe(1))
+    await rows()[0]!.find('button[title="Delete skill"]').trigger('click')
+    await flushPromises()
+  }
+
+  it('names what moves and what is deleted, and deletes with the plan it showed once confirmed', async () => {
+    const calls = deleteEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/removal', () => holding)
+    setupApi()
+    const component = await mountSuspended(ConfirmHarness)
+    await flushPromises()
+
+    await clickDelete(component)
+
+    expect(dialogMessage()).toBe('Delete \'web-search\' from this agent?\n\n'
+      + 'These values move to another skill that uses them, so nothing that needs them stops:\n'
+      + 'The secret RADARR_API_KEY moves to radarr-library, which radarr-delete also uses.\n'
+      + 'The setting TRANSMISSION_URL moves to sonarr.\n\n'
+      + 'This value is deleted, as no other skill uses it. A secret\'s value cannot be recovered.\n'
+      + 'The secret RADARR_WEBHOOK.\n\n'
+      + 'This file in its credentials folder, which may hold a key, is deleted too: credentials/radarr.key.\n\n'
+      + 'What the skill saved, such as a sign-in session or cookies, is deleted too.\n\n'
+      + 'The 2 files kept from its earlier updates are deleted too.')
+    expect(calls).toEqual([])
+    dialogButton('Delete')!.click()
+    await vi.waitFor(() => expect(calls).toEqual(['0123456789abcdef']))
+  })
+
+  it('cancelling the dialog deletes nothing', async () => {
+    const calls = deleteEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/removal', () => holding)
+    setupApi()
+    const component = await mountSuspended(ConfirmHarness)
+    await flushPromises()
+
+    await clickDelete(component)
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(calls).toEqual([])
+  })
+
+  it('a skill that holds nothing is deleted without a dialog or a plan, as before', async () => {
+    const calls = deleteEndpoint()
+    registerEndpoint('/api/agents/1/skills/web-search/removal', () => ({
+      secrets: [], settings: [], savedState: false, credentialFiles: [], keptFiles: 0, asks: false, plan: 'fedcba9876543210',
+      stopsIfSwitchedOff: [],
+    }))
+    setupApi()
+    const component = await mountSuspended(ConfirmHarness)
+    await flushPromises()
+
+    await clickDelete(component)
+
+    await vi.waitFor(() => expect(calls).toEqual(['no plan']))
+    expect(dialogButton('Delete')).toBeUndefined()
+  })
+
+  it('a refused delete says why on the page', async () => {
+    registerEndpoint('/api/agents/1/skills/web-search/delete', {
+      method: 'DELETE',
+      handler: (event) => {
+        setResponseStatus(event, 409)
+        return { code: 'conflict', message: 'Skill \'web-search\' holds secrets, settings, key files or saved state, and what'
+          + ' deleting it does was not confirmed or has changed since it was shown: review it again and confirm.' }
+      },
+    })
+    registerEndpoint('/api/agents/1/skills/web-search/removal', () => holding)
+    setupApi()
+    const component = await mountSuspended(ConfirmHarness)
+    await flushPromises()
+
+    await clickDelete(component)
+    dialogButton('Delete')!.click()
+
+    await vi.waitFor(() => expect(component.text()).toContain('Skill \'web-search\' holds secrets, settings, key files or saved'
+      + ' state, and what deleting it does was not confirmed or has changed since it was shown: review it again and confirm.'))
   })
 })

@@ -26,10 +26,12 @@ import type {
   SkillFile,
   SkillFileContent,
   SkillFilesResponse,
+  SkillRemovalPreview,
   SkillToolRef,
   SkillUpdatePreview,
 } from '~/types/api'
 import { signInClause, signInGroups } from '~/utils/sign-in-holders'
+import { removalWarning } from '~/utils/skill-removal'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -1055,9 +1057,35 @@ async function editAgentSkill(agentId: number, skill: AgentSkill) {
   }
 }
 
+/**
+ * JF-356: a skill that holds secrets, settings or saved state is deleted only once the operator has seen what goes and
+ * what moves to another skill, and the delete carries the plan they saw, which the server refuses if anything changed.
+ */
 async function deleteAgentSkill(agentId: number, skill: Skill | AgentSkill) {
   const name = (skill.folderName as string) || skill.name
-  if (await mutateSkill(`/api/agents/${agentId}/skills/${name}/delete`, { method: 'DELETE' }) === null) return
+  let preview: SkillRemovalPreview
+  try {
+    preview = await $fetch<SkillRemovalPreview>(`/api/agents/${agentId}/skills/${encodeURIComponent(name)}/removal`)
+  }
+  catch (err) {
+    showDragError(apiErrorDetails(err).message)
+    return
+  }
+  let path = `/api/agents/${agentId}/skills/${name}/delete`
+  if (preview.asks) {
+    const confirmed = await confirm({
+      title: 'Delete skill',
+      message: removalWarning(name, preview),
+      confirmText: 'Delete',
+      variant: 'danger',
+    })
+    if (!confirmed) return
+    path += `?plan=${encodeURIComponent(preview.plan)}`
+  }
+  if (!await dragSave.attempt(() => $fetch(path, { method: 'DELETE' }))) {
+    showDragError(dragSave.saveError.value!.message)
+    return
+  }
   editing.value = null
   editingAgentId.value = null
   skillFiles.value = []

@@ -27,6 +27,7 @@ import {
   withSentinels,
 } from '~/utils/injection-highlight'
 import { lineDiff } from '~/utils/line-diff'
+import { switchOffWarning } from '~/utils/skill-removal'
 import type { ToolDetail } from '~/composables/useToolMeta'
 import type {
   Agent,
@@ -43,6 +44,8 @@ import type {
   PersonaFinding,
   PromptBreakdown,
   PromptBreakdownEntry,
+  SkillRemovalPreview,
+  SkillRemovalStop,
   WorkspaceFileContent,
   WorkspaceScanResponse,
 } from '~/types/api'
@@ -1562,9 +1565,27 @@ async function reloadSkillState(agentId: number) {
   await loadEffectiveAllowlist(agentId)
 }
 
+/**
+ * JF-356: switching off a skill whose values other switched-on skills need stops them, so the operator sees which first.
+ * A preview that fails does not hold the switch-off back: it deletes nothing, and turning a skill off must stay possible.
+ */
+async function confirmSwitchOff(agentId: number, skill: AgentSkill): Promise<boolean> {
+  let stops: SkillRemovalStop[]
+  try {
+    stops = (await $fetch<SkillRemovalPreview>(`/api/agents/${agentId}/skills/${encodeURIComponent(skill.name)}/removal`))
+      .stopsIfSwitchedOff
+  }
+  catch {
+    return true
+  }
+  if (!stops.length) return true
+  return confirm({ title: 'Switch off skill', message: switchOffWarning(skill.name, stops), confirmText: 'Switch off' })
+}
+
 async function toggleSkill(skill: AgentSkill) {
   if (!editing.value || skillDisabledTools(skill).length) return
   const agentId = editing.value.id
+  if (skill.enabled && !await confirmSwitchOff(agentId, skill)) return
   savingSkills.value = true
   skillsError.value = null
   if (await saveSkillEnabled(skill, !skill.enabled)) await reloadSkillState(agentId)
