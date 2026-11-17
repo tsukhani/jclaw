@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.3.7"
+  version: "1.4.0"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -29,7 +29,7 @@ Every skill MUST follow this layout:
 ### Rules
 
 - **Binaries are ONLY allowed in the `tools/` folder.** No binaries in the root folder.
-- A skill folder holds no settings or credentials file. Everything a skill needs to reach a service is declared in its `## Secrets` section (see Secrets); a key, token or password NEVER goes in any file.
+- A skill folder holds no settings or credentials file. Everything a skill needs to reach a service is declared in its `## Secrets` section (see Secrets); a key, token or password NEVER goes in any file. A `credentials/` folder is only something an older skill may still read: refactor it into the Secrets section, never create one.
 - The `references/` folder may ONLY contain text files, one level deep: a reference file never points to another reference file.
 - The skill root folder may ONLY contain `SKILL.md` and the two subfolders.
 - Skill names must be kebab-case (e.g., `web-scraper`, `slack-notifier`), at most 64 characters, and the same as the folder name.
@@ -117,12 +117,17 @@ Every skill MUST include a `jclaw-icon` entry under `metadata` — a single emoj
    - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`{skill-name}/\` at the root of the agent's workspace (e.g., \`my-skill/\`).`
    - Count the characters: a draft over 18,000 is split into `references/` as the SKILL.md size limit section describes.
    - **Leave the `version` entry out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. Set an explicit `version` only when the user asks to promote the skill forward; before you do, read `skills/skill-creator/references/versioning.md` with the filesystem tool's readFile.
-5. **Create** the skill using the filesystem tool:
+5. **Check the draft before you save it**, with `skills/skill-creator/references/secrets.md` section 7 read first. Save only a draft that passes all four; fix one that fails and check it again:
+   - Every `$NAME`, `${NAME}` and environment variable that SKILL.md's commands and the `tools/` scripts read is declared in the `secrets` block, and each name that reads as a key, token or password is a secret, never a setting.
+   - No file of the skill holds a key, token or password, and nothing reads one from a file, a `credentials/` folder or `skill-state/`. The one exception, until the secrets proxy holds cookies, is a cookie jar under `skill-state/{skill-name}/`.
+   - A session key a sign-in returns is a `renewed` secret with a suggested capture rule, and no step saves it to a file.
+   - The skill's folder holds `SKILL.md` and nothing but `tools/` and `references/` beside it.
+6. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
    - Write `skills/{skill-name}/SKILL.md` with `writeFile` (brand-new files use `writeFile`; existing files should use `editFile` — see the Refactoring section).
    - If binary tools are needed, create `tools/` with documentation. Every binary dropped here MUST also appear in `jclaw-commands`, and every name in `jclaw-commands` MUST correspond to a file in `tools/`.
    - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/references/notes.md` / ... / `*** End Patch`.
-6. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist. If it declares secrets or settings, name each one and tell the user to fill it in in the skill's Secrets panel on the Skills page.
+7. **Confirm** creation. Tell the user the declared `jclaw-tools` and `jclaw-commands` lists so they can verify. If the skill ships binaries, remind the user that installing this skill to another agent will grant that agent execution rights for those exact command names via the shell allowlist. If it declares secrets or settings, name each one and tell the user to fill it in in the skill's Secrets panel on the Skills page.
 
 ### Rules for the `jclaw-tools` entry
 
@@ -158,7 +163,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
 3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
 5. **Update the SKILL.md with `editFile`, not `writeFile`.** For any refactor that touches an existing SKILL.md, use `editFile` with a batch of `{oldText, newText}` entries. This is dramatically more efficient than rewriting the whole file and is also the only way to edit a skill body that would exceed your output token budget as a single `writeFile` argument. Each `oldText` must appear exactly once in the file — include enough surrounding context (a surrounding line or two) to guarantee uniqueness. For cross-file refactors (e.g., moving a binary from the skill root into `tools/` AND updating SKILL.md to reference the new path), use `applyPatch` to do both changes atomically in one tool call. Leave the `version` entry alone by default — the filesystem tool auto-bumps the patch component on every material write. **Only set an explicit `version` when the user asks to promote the skill forward**; in that case read `skills/skill-creator/references/versioning.md` first and include the `version: "X.Y.Z"` edit in the same batch. The filesystem tool response will quote the final version — report it to the user.
-6. **Verify** the final structure matches the standard layout.
+6. **Verify** the final structure matches the standard layout, and run the four checks of Creating a New Skill step 5 on the result.
 7. **Report** what was changed and quote the new version as reported by the filesystem tool.
 
 ## Example

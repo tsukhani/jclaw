@@ -2,6 +2,10 @@
 
 A skill's folder holds only SKILL.md, references/ and tools/: never an API key, token or password, and never a settings file. The operator fills in each value the skill needs, in the skill's Secrets panel on the Skills page. This file says how a skill declares those values and uses them.
 
+Contents: how a secret reaches a command; 1. the `## Secrets` section; 2. `$NAME` in commands; 3. settings; 4. renewed
+secrets; 5. what a skill saves between runs; 6. telling the user; 7. checking the draft before saving it; refactoring a
+skill that keeps values in a file.
+
 ## How a secret reaches a command
 
 - A shell command gets a secret when it names it, as `$NAME` or `${NAME}`, or when it runs in the skill's folder or names it, as `skills/{skill-name}/`. A command started in the background gets none.
@@ -132,6 +136,24 @@ Keep only secrets there. JClaw masks what it finds in that folder wherever a too
 ## 6. Tell the user
 
 When you confirm the skill, name each secret and setting and say where it goes: "Open the skill from this agent's column on the Skills page and fill in each one in its Secrets panel; give each secret the host of your service." For a renewed secret, ask the user to add it with its hosts and check its capture rule, the secret its sign-in sends included; it needs no value. Never ask for a value, and never offer to add one yourself.
+
+## 7. Check the draft before saving it
+
+Run these over the whole draft, SKILL.md and every file under `tools/`, before you write it, and again after each fix.
+
+**What it reads.** List every name it takes from the environment:
+- in a shell command or script: `$NAME`, `${NAME}`, `${NAME:-x}`, and `printenv NAME`;
+- in Python: `os.environ["NAME"]`, `os.environ.get("NAME")`, `os.getenv("NAME")`;
+- in Node: `process.env.NAME` and `process.env["NAME"]`; in Ruby: `ENV["NAME"]` and `ENV.fetch("NAME")`; in Go: `os.Getenv("NAME")`.
+Each one must be on a line of the `secrets` block. A name with a part such as `KEY`, `PASS`, `TOKEN`, `SECRET`, `PWD`, `COOKIE`, `AUTH` or `SESSION` is a secret (section 3), whatever the line says. `HOME`, `PATH`, `TMPDIR` and the like, which every command has, need no line.
+
+**Where a value comes from.** Nothing may read a key, token or password from a file: no `cat`, `jq`, `source`, `open(...)`, `readFileSync`, dotenv loader or config parser aimed at a credentials file, a `credentials/` folder, a `.env` or `.netrc` file, or `skill-state/`. The one exception, until JClaw's secrets proxy holds cookies for a skill, is a cookie jar the skill reads and writes under `skill-state/{skill-name}/` (section 5). No file of the skill holds a value either: an example in SKILL.md is a placeholder such as `api.example.com`, never a real key.
+
+**A sign-in.** A step that signs in and keeps what comes back is a `renewed` secret with a suggested rule (section 4). A step that writes that key to a file is a fault, `skill-state/` included.
+
+**The folder.** `SKILL.md` at the root, and beside it only `tools/` and `references/`: no `credentials/`, no other folder, no other file.
+
+A draft that fails any of these is fixed before it is saved: never save it and fix it afterwards, as an agent offered the half-made skill could run it.
 
 ## Refactoring a skill that keeps values in a file
 
