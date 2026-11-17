@@ -22,7 +22,7 @@ JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - Reads use Nuxt's auto-imported `useFetch` / `$fetch`, with `fetchParsed` in `frontend/composables/useApiParsed.ts` for schema-validated reads (JCLAW-287); writes go through `useApiMutation` or `useSaveAttempt`, and the lint fails a bare write `$fetch`
-- Package manager: **pnpm 12+**, pinned in `frontend/package.json`'s `packageManager` field. To bump the pin: `cd frontend && pnpm self-update <version>`, then commit `frontend/package.json` **and** `frontend/pnpm-lock.yaml` — the lockfile carries the new binaries' integrity. The reasons, and the Node 25+ test flag: [frontend-toolchain.md](frontend-toolchain.md).
+- Package manager: **pnpm 12+**, pinned in `frontend/package.json`'s `packageManager` field to the version the play1 fork names. After a `.play-version` bump, `play pnpm-sync` moves the pin, and `frontend/package.json` and `frontend/pnpm-lock.yaml` are committed together. The reasons, and the Node 25+ test flag: [frontend-toolchain.md](frontend-toolchain.md).
 
 ## Fork and production start
 

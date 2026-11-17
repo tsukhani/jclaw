@@ -2023,7 +2023,7 @@ validate_pnpm_pin() {
         echo "       and the lockfile's package-manager integrity has nothing to check"
         echo "       against — refusing to launch."
         echo ""
-        echo "       Fix with: cd frontend && pnpm self-update <version>"
+        echo "       Fix with: play pnpm-sync"
         exit 1
     fi
 

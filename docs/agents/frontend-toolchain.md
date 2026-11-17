@@ -8,7 +8,7 @@ Two layers keep it honest:
 1. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` that pins pnpm while `frontend/pnpm-lock.yaml` carries no `packageManagerDependencies` block — the block's absence is what would silently disable the gate.
 2. `./jclaw.sh start` (dev and prod) resolves the pin before any pnpm step and hard-fails when it is missing.
 
-To bump the pin: `cd frontend && pnpm self-update <version>`, then commit `frontend/package.json` **and** `frontend/pnpm-lock.yaml` — the lockfile carries the new binaries' integrity.
+**The pin follows the play1 fork.** Each fork release names one pnpm version, and `play dist` and `play bundle` warn while `frontend/package.json` pins another (PF-207). After a `.play-version` bump, run `play pnpm-sync` from the repo root: it writes the fork's version into the pin and runs `pnpm install`, which records the new binaries' integrity in `frontend/pnpm-lock.yaml`. Commit `frontend/package.json` **and** `frontend/pnpm-lock.yaml` together. Never bump the pin on its own: a newer pnpm needed sooner is bumped in the fork, through its Renovate PR, then `/renovate` and `/deploy` there.
 
 **Node 25+ and the test suite.** Node 25 enabled its own Web Storage API by default, and that partial implementation shadows jsdom's: `localStorage` lands undefined and 93 specs fail on what looks like a jsdom bug. `frontend/vitest.config.ts` sets `--no-webstorage` via `NODE_OPTIONS`, gated on the running Node major because Node 24 rejects the flag outright. Keep the gate while anything still builds on Node 24 — CI is on `node-26` now, but local clones and older checkouts are not, and an ungated flag is a hard `node: bad option` failure there. Tracking: vitest-dev/vitest#8757.
 
