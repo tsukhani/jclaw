@@ -112,7 +112,7 @@ final class SecretCapture {
     static @Nullable SecretCapture forRequest(SecretGrant grant, String host, int port, Request request, Sent sent) {
         if (!grant.forAgent()) return null;
         var forHost = SecretGrants.renewable(grant).stream()
-                .filter(r -> SecretGrant.allows(r.hosts(), host, port)).toList();
+                .filter(r -> SecretGrant.allowsHost(r.hosts(), host, port)).toList();
         if (forHost.isEmpty()) return null;
         var readings = UrlPaths.readings(request.url().encodedPath());
         var onPath = forHost.stream()

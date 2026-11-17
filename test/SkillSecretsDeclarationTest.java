@@ -26,6 +26,19 @@ class SkillSecretsDeclarationTest extends UnitTest {
         assertEquals(java.util.List.of("api.example.com", "b.example.com:8443"), declared.getFirst().exampleHosts());
     }
 
+    /** JF-375: a skill may suggest the path its secret is bound to, as an example the operator still has to enter. */
+    @Test
+    void anExampleMaySuggestThePathASecretIsBoundTo() {
+        var declared = SkillSecrets.declaredIn("""
+                ```secrets
+                BACKOFFICE_PASSWORD=api.example.com/v1//sessions/current, api.example.com:8443/v1/sessions/   # sign-in
+                ```
+                """);
+        assertEquals(java.util.List.of("api.example.com/v1/sessions/current", "api.example.com:8443/v1/sessions/"),
+                declared.getFirst().exampleHosts());
+        assertEquals(false, found("BACKOFFICE_PASSWORD=api.example.com/v1/sessions/current\n"));
+    }
+
     @Test
     void anExampleHostWithNoDotHoldsMoreUnlessItIsLocalhostAndEachExampleIsJudged() {
         assertEquals(true, found("API_KEY=apiserver\n"));

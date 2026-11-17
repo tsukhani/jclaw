@@ -3,6 +3,7 @@ package services.secrets;
 import com.google.errorprone.annotations.MustBeClosed;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.Nullable;
+import utils.UrlPaths;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,26 +28,90 @@ import java.util.function.Function;
  */
 public final class SecretGrant implements AutoCloseable {
 
-    /** One secret as this run holds it. {@code hosts} are lowercase, each a name with an optional {@code :port}. */
+    /**
+     * One secret as this run holds it. {@code hosts} are as the store keeps them: a lowercase name with an optional
+     * {@code :port}, and an optional path the secret is bound to (JF-375), which ends in {@code /} to take what lies below.
+     */
     public record Binding(String skill, String name, String value, List<String> hosts, String placeholder) {
 
-        /** Whether a request to {@code host} on {@code port} may carry this secret; a host without a port means 443. */
-        public boolean allows(String host, int port) {
-            return SecretGrant.allows(hosts, host, port);
+        /** Whether a request to {@code where} may carry this secret: a host without a port means 443. */
+        public boolean allows(Destination where) {
+            return SecretGrant.allows(hosts, where);
+        }
+
+        /** Whether any of its entries binds it to a path, so it may never stand in a request's path. */
+        public boolean pathBound() {
+            return hosts.stream().anyMatch(entry -> entry.indexOf('/') >= 0);
         }
     }
 
-    /** Whether {@code hosts}, as a secret stores them, name {@code host} on {@code port}; no port means 443. */
-    static boolean allows(List<String> hosts, String host, int port) {
+    /**
+     * Where a request goes: its host and port, and its encoded path as the server receives it, or null while the stand-in
+     * being written is part of that very path, where no path-bound secret may go.
+     */
+    public record Destination(String host, int port, @Nullable String path) {
+
+        /** As the proxy's refusal names it: its path too when the secret is bound to paths. */
+        public String describe(boolean withPath) {
+            var authority = port == 443 ? host : host + ":" + port;
+            return !withPath || path == null ? authority : authority + path;
+        }
+    }
+
+    /** Whether {@code hosts}, as a secret stores them, name {@code host} on {@code port}, whatever path an entry names. */
+    static boolean allowsHost(List<String> hosts, String host, int port) {
         var bare = host.toLowerCase(Locale.ROOT);
         for (var entry : hosts) {
-            var colon = entry.lastIndexOf(':');
-            if (colon < 0 ? port == 443 && entry.equals(bare)
-                    : entry.substring(0, colon).equals(bare) && entry.substring(colon + 1).equals(String.valueOf(port))) {
-                return true;
-            }
+            if (Entry.of(entry).names(bare, port)) return true;
         }
         return false;
+    }
+
+    /** Whether {@code hosts} let a secret go to {@code where}: an entry with no path lets it go anywhere on its host. */
+    static boolean allows(List<String> hosts, Destination where) {
+        var bare = where.host().toLowerCase(Locale.ROOT);
+        for (var raw : hosts) {
+            var entry = Entry.of(raw);
+            if (!entry.names(bare, where.port())) continue;
+            if (entry.path() == null) return true;
+            if (where.path() != null && entry.reaches(where.path())) return true;
+        }
+        return false;
+    }
+
+    /** One stored entry: a host, a port or null for 443, and a normalized path or null; {@code prefix} when it ended in {@code /}. */
+    private record Entry(String host, @Nullable String port, @Nullable String path, boolean prefix) {
+
+        static Entry of(String stored) {
+            var slash = stored.indexOf('/');
+            var authority = slash < 0 ? stored : stored.substring(0, slash);
+            var path = slash < 0 ? null : stored.substring(slash);
+            var colon = authority.lastIndexOf(':');
+            var host = colon < 0 ? authority : authority.substring(0, colon);
+            var port = colon < 0 ? null : authority.substring(colon + 1);
+            if (path == null) return new Entry(host, port, null, false);
+            boolean prefix = path.endsWith("/");
+            var bare = prefix && path.length() > 1 ? path.substring(0, path.length() - 1) : path;
+            return new Entry(host, port, bare, prefix);
+        }
+
+        boolean names(String bareHost, int requestPort) {
+            return host.equals(bareHost) && (port == null ? requestPort == 443 : port.equals(String.valueOf(requestPort)));
+        }
+
+        /**
+         * Whether a request to {@code encodedPath} reaches this entry's path, compared as JF-374's capture rule compares
+         * its own (case, {@code ;} parameters and a format suffix aside), so whatever the capture takes as the sign-in
+         * the password reaches. A path a server could read more than one way, as with an escaped slash, never matches.
+         */
+        boolean reaches(String encodedPath) {
+            var readings = UrlPaths.readings(encodedPath);
+            if (readings.forms().isEmpty() || readings.ambiguous() || path == null) return false;
+            if (!prefix) return UrlPaths.matches(readings, path);
+            var root = UrlPaths.forMatching(path);
+            if (root.equals("/")) return true;
+            return readings.forms().stream().allMatch(form -> form.equals(root) || form.startsWith(root + "/"));
+        }
     }
 
     /**

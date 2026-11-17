@@ -133,6 +133,16 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
                 "a sealed value opens in its own column only");
     }
 
+    /** JF-375: an entry may bind the secret to a path on its host, or with a final / to everything below one. */
+    @Test
+    void aHostEntryCanBindASecretToAPathOrToEverythingBelowOne() {
+        var saved = put("NAS_PASSWORD", "{\"value\":\"" + VALUE + "\",\"hosts\":[\"NAS.example.com/V1//Sessions/./current\","
+                + "\"nas.example.com:8443/v1/sessions/\",\"nas.example.com/\",\"nas.example.com/V1/Sessions/current\"]}");
+        assertIsOk(saved);
+        assertEquals("[\"nas.example.com/V1/Sessions/current\",\"nas.example.com:8443/v1/sessions/\",\"nas.example.com/\"]",
+                json(saved).get("hosts").toString(), "the host in lower case, the path as written but normalized, each once");
+    }
+
     @Test
     void replacingOnlyTheHostsKeepsTheValueAndANewValueReplacesIt() {
         assertIsOk(put("NAS_PASSWORD", "{\"value\":\"" + VALUE + "\",\"hosts\":[\"nas.example.com\"]}"));
@@ -178,11 +188,17 @@ class ApiSkillSecretsControllerTest extends FunctionalTest {
                 "400 invalid_request Add at least one host the secret may be sent to."});
         cases.add(new String[] {"API_KEY", "{\"value\":\"v\",\"hosts\":[\" \"]}",
                 "400 invalid_request Add at least one host the secret may be sent to."});
-        for (var bad : List.of("https://nas.example.com", "*.example.com", "nas.example.com/login", "user@nas.example.com",
-                "[::1]:443")) {
+        for (var bad : List.of("https://nas.example.com", "*.example.com", "user@nas.example.com", "[::1]:443")) {
             cases.add(new String[] {"API_KEY", "{\"value\":\"v\",\"hosts\":[\"" + bad + "\"]}",
                     "400 invalid_request '" + bad + "' is not a host: give the name alone, such as api.example.com or"
-                            + " api.example.com:8443, with no https://, path or *."});
+                            + " api.example.com:8443, with an optional path such as api.example.com/v1/sessions/current,"
+                            + " and no https:// or *."});
+        }
+        for (var bad : List.of("nas.example.com/v1/a%2Fb", "nas.example.com/v1?next=1", "nas.example.com/v1\\\\x")) {
+            cases.add(new String[] {"API_KEY", "{\"value\":\"v\",\"hosts\":[\"" + bad + "\"]}",
+                    "400 invalid_request '" + bad.replace("\\\\", "\\") + "' has a path JClaw cannot read the one way a"
+                            + " service would: give it as the service receives it, such as /v1/sessions/current, with no"
+                            + " query, encoded slash or backslash."});
         }
         cases.add(new String[] {"API_KEY", "{\"value\":\"v\",\"hosts\":[\"nas.example.com:70000\"]}",
                 "400 invalid_request 'nas.example.com:70000' has no valid port."});

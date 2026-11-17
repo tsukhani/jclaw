@@ -1086,34 +1086,53 @@ public final class SkillSecrets {
     }
 
     /**
-     * The hosts as stored: trimmed, lowercase, without a trailing dot, each once, in the order given. Refuses anything
-     * but a bare host name or IPv4 address with an optional port: no scheme, path, wildcard or user.
+     * The hosts as stored: trimmed, the host lowercase and without a trailing dot, each entry once, in the order given.
+     * Each is a host name or IPv4 address with an optional port and an optional path the secret is bound to (JF-375):
+     * no scheme, wildcard, user or query.
      */
     public static List<String> normalizeHosts(List<String> raw) {
         if (raw.isEmpty()) throw new Refused("Add at least one host the secret may be sent to.");
         var out = new LinkedHashSet<String>();
         for (var entry : raw) {
-            var host = entry.strip().toLowerCase(Locale.ROOT);
-            if (host.isEmpty()) continue;
+            var stripped = entry.strip();
+            if (stripped.isEmpty()) continue;
+            var slash = stripped.indexOf('/');
+            var host = (slash < 0 ? stripped : stripped.substring(0, slash)).toLowerCase(Locale.ROOT);
+            var path = slash < 0 ? "" : boundPath(stripped, stripped.substring(slash));
             String port = null;
             var withPort = WITH_PORT.matcher(host);
             if (withPort.matches()) {
                 host = withPort.group(1);
                 port = withPort.group(2);
                 int number = Integer.parseInt(port);
-                if (number < 1 || number > 65_535) throw new Refused("'%s' has no valid port.".formatted(entry.strip()));
+                if (number < 1 || number > 65_535) throw new Refused("'%s' has no valid port.".formatted(stripped));
                 port = String.valueOf(number);
             }
             if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
             if (host.length() > MAX_HOST_CHARS || !HOST_NAME.matcher(host).matches()) {
                 throw new Refused(("'%s' is not a host: give the name alone, such as api.example.com or"
-                        + " api.example.com:8443, with no https://, path or *.").formatted(entry.strip()));
+                        + " api.example.com:8443, with an optional path such as api.example.com/v1/sessions/current,"
+                        + " and no https:// or *.").formatted(stripped));
             }
-            out.add(port == null ? host : host + ":" + port);
+            out.add((port == null ? host : host + ":" + port) + path);
         }
         if (out.isEmpty()) throw new Refused("Add at least one host the secret may be sent to.");
         if (out.size() > MAX_HOSTS) throw new Refused("A secret may name at most %d hosts.".formatted(MAX_HOSTS));
         return List.copyOf(out);
+    }
+
+    /**
+     * A host entry's path as stored (JF-375): normalized as {@link UrlPaths#normalize} writes it, keeping the {@code /}
+     * it ends in, which binds the secret to everything below it too. One with no single reading, or a query, is refused.
+     */
+    private static String boundPath(String entry, String path) {
+        var normalized = path.contains("?") ? null : UrlPaths.normalize(path);
+        if (normalized == null) {
+            throw new Refused(("'%s' has a path JClaw cannot read the one way a service would: give it as the service"
+                    + " receives it, such as /v1/sessions/current, with no query, encoded slash or backslash.")
+                    .formatted(entry));
+        }
+        return path.endsWith("/") && !normalized.equals("/") ? normalized + "/" : normalized;
     }
 
     private static Listing listing(SkillSecret row) {

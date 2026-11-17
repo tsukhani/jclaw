@@ -79,14 +79,14 @@ final class PlaceholderRewriter {
         }
     }
 
-    /** {@code text} with each placeholder replaced and counted in {@code replaced}; the request goes to {@code host}:{@code port}. */
-    static String substitute(String text, SecretGrant grant, String host, int port, Encoding encoding, Replaced replaced)
-            throws Refused {
+    /** {@code text} with each placeholder replaced and counted in {@code replaced}; the request goes to {@code where}. */
+    static String substitute(String text, SecretGrant grant, SecretGrant.Destination where, Encoding encoding,
+                             Replaced replaced) throws Refused {
         if (!text.contains(SecretGrants.PLACEHOLDER_PREFIX)) return text;
         var in = text.getBytes(StandardCharsets.ISO_8859_1);
         var out = new ByteArrayOutputStream(in.length + 64);
         try {
-            new Substituter(grant, host, port, encoding, replaced).feed(in, in.length, true, out);
+            new Substituter(grant, where, encoding, replaced).feed(in, in.length, true, out);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -94,7 +94,7 @@ final class PlaceholderRewriter {
     }
 
     /** An {@code Authorization: Basic} value with placeholders inside its encoded credentials replaced and counted. */
-    static String substituteBasic(String headerValue, SecretGrant grant, String host, int port, Replaced replaced)
+    static String substituteBasic(String headerValue, SecretGrant grant, SecretGrant.Destination where, Replaced replaced)
             throws Refused {
         var trimmed = headerValue.strip();
         if (!trimmed.regionMatches(true, 0, "Basic ", 0, 6)) return headerValue;
@@ -109,7 +109,7 @@ final class PlaceholderRewriter {
         var out = new ByteArrayOutputStream();
         try {
             var bytes = credentials.getBytes(StandardCharsets.UTF_8);
-            new Substituter(grant, host, port, Encoding.RAW, replaced).feed(bytes, bytes.length, true, out);
+            new Substituter(grant, where, Encoding.RAW, replaced).feed(bytes, bytes.length, true, out);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -122,15 +122,13 @@ final class PlaceholderRewriter {
      */
     static final class Substituter {
         private final SecretGrant grant;
-        private final String host;
-        private final int port;
+        private final SecretGrant.Destination where;
         private final Encoding encoding;
         private final Replaced replaced;
 
-        Substituter(SecretGrant grant, String host, int port, Encoding encoding, Replaced replaced) {
+        Substituter(SecretGrant grant, SecretGrant.Destination where, Encoding encoding, Replaced replaced) {
             this.grant = grant;
-            this.host = host;
-            this.port = port;
+            this.where = where;
             this.encoding = encoding;
             this.replaced = replaced;
         }
@@ -176,9 +174,13 @@ final class PlaceholderRewriter {
                 throw new Refused("it carries a secret placeholder this command was not given, or one whose command"
                         + " has ended");
             }
-            if (!binding.allows(host, port)) {
+            if (where.path() == null && binding.pathBound()) {
+                throw new Refused("secret %s is bound to a path, so it cannot stand in the request's path itself"
+                        .formatted(binding.name()));
+            }
+            if (!binding.allows(where)) {
                 throw new Refused("secret %s may be sent only to %s, not to %s".formatted(binding.name(),
-                        String.join(", ", binding.hosts()), port == 443 ? host : host + ":" + port));
+                        String.join(", ", binding.hosts()), where.describe(binding.pathBound())));
             }
             var value = binding.value();
             var bytes = switch (encoding) {

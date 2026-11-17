@@ -217,8 +217,17 @@ public final class SecretProxy {
     private void forward(SecretGrant grant, String host, int port, Head head, InputStream in, OutputStream out)
             throws IOException, PlaceholderRewriter.Refused {
         var replaced = new PlaceholderRewriter.Replaced();
-        var target = PlaceholderRewriter.substitute(head.target(), grant, host, port, PlaceholderRewriter.Encoding.PERCENT,
-                replaced);
+        // A secret bound to a path is checked against the path the service receives (JF-375), so the path is settled
+        // first, with no path-bound secret in it, and every other stand-in is checked against it as OkHttp sends it.
+        var raw = head.target();
+        int query = raw.indexOf('?');
+        var path = PlaceholderRewriter.substitute(query < 0 ? raw : raw.substring(0, query), grant,
+                new SecretGrant.Destination(host, port, null), PlaceholderRewriter.Encoding.PERCENT, replaced);
+        var sentPath = upstreamUrl(host, port, text(path));
+        if (sentPath == null) throw new PlaceholderRewriter.Refused(NOT_A_PATH);
+        var where = new SecretGrant.Destination(host, port, sentPath.encodedPath());
+        var target = query < 0 ? path : path + PlaceholderRewriter.substitute(raw.substring(query), grant, where,
+                PlaceholderRewriter.Encoding.PERCENT, replaced);
         var headers = new Headers.Builder();
         String contentType = null;
         for (var h : head.headers()) {
@@ -227,9 +236,9 @@ public final class SecretProxy {
             if (NOT_FORWARDED.contains(lower)) continue;
             var value = h[1];
             if (lower.equals("authorization")) {
-                value = PlaceholderRewriter.substituteBasic(value, grant, host, port, replaced);
+                value = PlaceholderRewriter.substituteBasic(value, grant, where, replaced);
             }
-            value = PlaceholderRewriter.substitute(value, grant, host, port, PlaceholderRewriter.Encoding.HEADER, replaced);
+            value = PlaceholderRewriter.substitute(value, grant, where, PlaceholderRewriter.Encoding.HEADER, replaced);
             if (lower.equals("content-type")) contentType = value;
             headers.addUnsafeNonAscii(name, text(value));
         }
@@ -237,7 +246,7 @@ public final class SecretProxy {
             out.write("HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
         }
-        var body = body(grant, host, port, head, in, contentType, replaced);
+        var body = body(grant, where, head, in, contentType, replaced);
         var url = upstreamUrl(host, port, text(target));
         if (url == null) throw new PlaceholderRewriter.Refused(NOT_A_PATH);
         var request = new Request.Builder().url(url).headers(headers.build()).method(head.method(), body.body()).build();
@@ -320,7 +329,7 @@ public final class SecretProxy {
     private record Body(@Nullable RequestBody body, byte @Nullable [] sent) {}
 
     /** The request body, rewritten, each stand-in counted in {@code replaced}: whole when it is small, streamed when it is long. */
-    private static Body body(SecretGrant grant, String host, int port, Head head, InputStream in,
+    private static Body body(SecretGrant grant, SecretGrant.Destination where, Head head, InputStream in,
                              @Nullable String contentType, PlaceholderRewriter.Replaced replaced)
             throws IOException, PlaceholderRewriter.Refused {
         var transfer = head.header("transfer-encoding");
@@ -343,11 +352,11 @@ public final class SecretProxy {
         var first = readUpTo(source, BUFFERED_BODY_LIMIT + 1);
         if (first.length <= BUFFERED_BODY_LIMIT) {
             var out = new ByteArrayOutputStream(first.length + 64);
-            new PlaceholderRewriter.Substituter(grant, host, port, encoding, replaced).feed(first, first.length, true, out);
+            new PlaceholderRewriter.Substituter(grant, where, encoding, replaced).feed(first, first.length, true, out);
             return new Body(RequestBody.create(out.toByteArray(), media), first);
         }
         return new Body(new StreamingBody(media, first, source,
-                new PlaceholderRewriter.Substituter(grant, host, port, encoding, replaced)), null);
+                new PlaceholderRewriter.Substituter(grant, where, encoding, replaced)), null);
     }
 
     /**
