@@ -8,6 +8,7 @@ import services.WorkspaceFiles.WorkspaceEntry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
@@ -17,6 +18,11 @@ import java.util.stream.Stream;
  * agent directory under {@code workspace-test} so concurrent test classes cannot collide.
  */
 class WorkspaceListingTest extends UnitTest {
+
+    private static final long T0 = 1_700_000_000_000L;
+    private static final long T1 = T0 + 1_000;
+    private static final long T2 = T0 + 2_000;
+    private static final long T3 = T0 + 3_000;
 
     private String agentName;
     private Path root;
@@ -36,6 +42,10 @@ class WorkspaceListingTest extends UnitTest {
                 try { Files.delete(p); } catch (IOException _) { /* best-effort */ }
             });
         }
+    }
+
+    private void touch(String relative, long millis) throws IOException {
+        Files.setLastModifiedTime(root.resolve(relative), FileTime.fromMillis(millis));
     }
 
     private static WorkspaceEntry find(List<WorkspaceEntry> entries, String name) {
@@ -63,6 +73,50 @@ class WorkspaceListingTest extends UnitTest {
         assertEquals("data/nested/a.bin", aBin.path(), "paths are root-relative with forward slashes");
         assertEquals("file", aBin.kind());
         assertNull(aBin.children(), "a file carries no children");
+    }
+
+    @Test
+    void aFileCarriesItsOwnLastModifiedTime() throws IOException {
+        Files.writeString(root.resolve("notes.md"), "plain");
+        touch("notes.md", T1);
+
+        var notes = find(WorkspaceFiles.listWorkspace(agentName).entries(), "notes.md");
+
+        assertEquals(T1, notes.modified());
+    }
+
+    @Test
+    void aFolderCarriesTheNewestChangeAnywhereUnderIt() throws IOException {
+        Files.createDirectories(root.resolve("data/nested"));
+        Files.writeString(root.resolve("data/b.txt"), "hello");
+        Files.writeString(root.resolve("data/nested/a.bin"), "abc");
+        touch("data/b.txt", T1);
+        touch("data/nested/a.bin", T3);
+        // After the writes, which move each folder's own time.
+        touch("data/nested", T0);
+        touch("data", T0);
+
+        var data = find(WorkspaceFiles.listWorkspace(agentName).entries(), "data");
+
+        assertEquals(T3, data.modified(), "a file two levels down is the folder's newest change");
+        assertEquals(T3, find(data.children(), "nested").modified());
+        assertEquals(T1, find(data.children(), "b.txt").modified());
+    }
+
+    @Test
+    void aFolderWhoseOwnTimeIsNewestCarriesItsOwn() throws IOException {
+        Files.createDirectories(root.resolve("data"));
+        Files.createDirectories(root.resolve("empty"));
+        Files.writeString(root.resolve("data/b.txt"), "hello");
+        touch("data/b.txt", T1);
+        touch("data", T2);
+        touch("empty", T0);
+
+        var entries = WorkspaceFiles.listWorkspace(agentName).entries();
+
+        assertEquals(T2, find(entries, "data").modified(),
+                "a folder's own time counts, as when an entry was deleted from it after its files changed");
+        assertEquals(T0, find(entries, "empty").modified(), "an empty folder carries its own time");
     }
 
     @Test

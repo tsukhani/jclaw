@@ -124,9 +124,12 @@ public final class WorkspaceFiles {
 
     /**
      * One node of a workspace listing. {@code path} is root-relative with forward slashes;
-     * {@code children} is non-null for a directory only.
+     * {@code children} is non-null for a directory only. {@code modified} is epoch
+     * milliseconds: a file's last-modified time, and for a directory the newest of its own
+     * and every entry's under it, since a directory's own time moves only when an entry
+     * directly in it is added, removed or renamed.
      */
-    public record WorkspaceEntry(String path, String name, String kind, long size,
+    public record WorkspaceEntry(String path, String name, String kind, long size, long modified,
                                  @SerializedName("protected") boolean isProtected,
                                  @Nullable List<WorkspaceEntry> children) {}
 
@@ -167,13 +170,17 @@ public final class WorkspaceFiles {
                     continue; // vanished mid-walk
                 }
                 var name = child.getFileName().toString();
+                var modified = attrs.lastModifiedTime().toMillis();
                 if (attrs.isDirectory()) {
                     var nested = listDirectory(root, child);
                     var size = nested.stream().mapToLong(WorkspaceEntry::size).sum();
-                    entries.add(new WorkspaceEntry(relative, name, "dir", size, false, nested));
+                    var newest = nested.stream().mapToLong(WorkspaceEntry::modified).max().orElse(modified);
+                    entries.add(new WorkspaceEntry(relative, name, "dir", size, Math.max(modified, newest),
+                            false, nested));
                 } else {
                     var isProtected = dir.equals(root) && PROTECTED_ROOT_FILES.contains(name);
-                    entries.add(new WorkspaceEntry(relative, name, "file", attrs.size(), isProtected, null));
+                    entries.add(new WorkspaceEntry(relative, name, "file", attrs.size(), modified, isProtected,
+                            null));
                 }
             }
         }

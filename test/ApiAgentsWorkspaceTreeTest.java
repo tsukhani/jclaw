@@ -11,6 +11,9 @@ import services.AgentService;
 import services.Tx;
 import services.WorkspaceFiles;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -120,6 +123,25 @@ class ApiAgentsWorkspaceTreeTest extends FunctionalTest {
         var todo = entryNamed(notes.getAsJsonArray("children"), "todo.txt");
         assertEquals("notes/todo.txt", todo.get("path").getAsString());
         assertEquals(2, entryNamed(entries, ".hidden").get("size").getAsLong(), "dotfiles are listed");
+    }
+
+    @Test
+    void eachEntryCarriesWhenItLastChangedAndAFolderTheNewestChangeUnderIt() throws IOException {
+        login();
+        var agent = createAgent(uniqueName("modified"));
+        WorkspaceFiles.writeWorkspaceFile(agent.name, "notes/todo.txt", "todo");
+        var root = WorkspaceFiles.workspacePath(agent.name);
+        Files.setLastModifiedTime(root.resolve("notes/todo.txt"), FileTime.fromMillis(1_700_000_003_000L));
+        Files.setLastModifiedTime(root.resolve("notes"), FileTime.fromMillis(1_700_000_000_000L));
+
+        var response = GET("/api/agents/" + agent.id + "/workspace-tree");
+
+        assertIsOk(response);
+        var entries = JsonParser.parseString(getContent(response)).getAsJsonObject().getAsJsonArray("entries");
+        var notes = entryNamed(entries, "notes");
+        assertEquals(1_700_000_003_000L, notes.get("modified").getAsLong());
+        assertEquals(1_700_000_003_000L,
+                entryNamed(notes.getAsJsonArray("children"), "todo.txt").get("modified").getAsLong());
     }
 
     @Test

@@ -125,9 +125,10 @@ JClaw also checks these files for prompt injection each time you open the agent.
 
 Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace. That includes whatever the agent has written, not only the five files above:
 
-- **Tree and sizes**: folders expand in place, and every row shows its size (a folder's is everything under it). The header shows the workspace **Total**. Folders, text files, and other files each get their own color and icon.
+- **Tree, sizes and dates**: folders expand in place, and every row shows when it last changed (**Modified**) and its **Size**. A folder's size is everything under it, and its date is the newest change anywhere under it. On a narrow screen the **Modified** column is hidden. The header shows the workspace **Total**. Folders, text files, and other files each get their own color and icon.
+- **Sort**: click **Name**, **Modified** or **Size** above the tree to sort by that column, and click it again to reverse the order. The first click sorts names A to Z, dates newest first, and sizes largest first. Sorting orders the entries inside each folder, and folders always stay above files. The tree starts sorted by name.
 - **Filter**: the filter bar narrows the tree to the entries whose name matches, and keeps open the folders that lead to them. A very large tree shows its first 1,000 rows.
-- **Auto-refresh**: the tree reloads every 10 seconds while the tab is visible, so a file a running agent writes shows up on its own.
+- **Auto-refresh**: the tree reloads every 10 seconds while the tab is visible, so a file a running agent writes shows up on its own. It waits while the pointer or keyboard focus is in the list, so a row never moves just as you click it, and reloads as soon as you move away.
 - **Download**: a file downloads as itself; a folder downloads as a zip.
 - **Back up**: in the panel header, downloads the whole workspace as one zip, Standing Orders included.
 - **Delete**: the trash icon asks for an inline **Confirm**. A folder goes with everything in it. A symlink is removed without touching what it points to. The five files above are the Standing Orders. They are marked **protected** and cannot be deleted. Edit them in the tabs instead.

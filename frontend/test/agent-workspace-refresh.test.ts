@@ -9,8 +9,9 @@ import type { WorkspaceListing } from '~/types/api'
 /**
  * The workspace tree refreshes on its own.
  *
- * Three guarantees: a file a running agent writes reaches the screen within the interval,
- * a tab nobody is looking at costs nothing, and a slow older reply never repaints the tree.
+ * Four guarantees: a file a running agent writes reaches the screen within the interval,
+ * a tab nobody is looking at costs nothing, a slow older reply never repaints the tree, and
+ * no refresh moves a row while the pointer or keyboard focus is in the list.
  */
 const REFRESH_MS = 10_000
 
@@ -22,6 +23,7 @@ function listingOf(...names: string[]): WorkspaceListing {
       name,
       kind: 'file' as const,
       size: 1024,
+      modified: 1_763_380_800_000,
       protected: false,
       children: null,
     })),
@@ -183,6 +185,79 @@ describe('AgentWorkspaceManager auto-refresh', () => {
     expect(component.text()).not.toContain('Loading…')
     await settle()
     expect(component.text()).not.toContain('Loading…')
+    component.unmount()
+  })
+
+  it('makes no refresh while the pointer is over the list, and catches up when it leaves', async () => {
+    let calls = 0
+    registerEndpoint('/api/agents/62/workspace-tree', () => {
+      calls += 1
+      return calls === 1 ? listingOf('notes.md') : listingOf('notes.md', 'report.pdf')
+    })
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 62 } })
+    await settle()
+    const list = component.find('[data-testid="workspace-scroll"]')
+
+    await list.trigger('pointerenter')
+    vi.advanceTimersByTime(REFRESH_MS * 3)
+    await settle()
+    expect(calls).toBe(1)
+    expect(component.find('[data-testid="ws-row-report.pdf"]').exists()).toBe(false)
+
+    await list.trigger('pointerleave')
+    await settle()
+    expect(calls).toBe(2)
+    expect(component.find('[data-testid="ws-row-report.pdf"]').exists()).toBe(true)
+    component.unmount()
+  })
+
+  it('pauses while keyboard focus is in the list, also as focus moves between its rows, and resumes when it leaves', async () => {
+    let calls = 0
+    registerEndpoint('/api/agents/63/workspace-tree', () => {
+      calls += 1
+      return listingOf('notes.md', 'report.pdf')
+    })
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 63 } })
+    await settle()
+    const list = component.find('[data-testid="workspace-scroll"]')
+    const otherRowLink = component.find('[data-testid="ws-download-report.pdf"]').element
+
+    await list.trigger('focusin')
+    await list.trigger('focusout', { relatedTarget: otherRowLink })
+    vi.advanceTimersByTime(REFRESH_MS * 2)
+    await settle()
+    expect(calls).toBe(1)
+
+    await list.trigger('focusout', { relatedTarget: null })
+    await settle()
+    expect(calls).toBe(2)
+    component.unmount()
+  })
+
+  it('drops a refresh that was already on its way when the pointer arrived', async () => {
+    const inFlight = deferred()
+    let seen = 0
+    registerEndpoint('/api/agents/64/workspace-tree', () => {
+      seen += 1
+      if (seen === 1) return listingOf('notes.md')
+      return seen === 2 ? inFlight.promise : listingOf('notes.md', 'report.pdf', 'later.txt')
+    })
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 64 } })
+    await settle()
+    vi.advanceTimersByTime(REFRESH_MS)
+    await settle()
+    expect(seen).toBe(2)
+
+    const list = component.find('[data-testid="workspace-scroll"]')
+    await list.trigger('pointerenter')
+    inFlight.resolve(listingOf('notes.md', 'report.pdf'))
+    await settle()
+    expect(component.find('[data-testid="ws-row-report.pdf"]').exists()).toBe(false)
+
+    await list.trigger('pointerleave')
+    await settle()
+    expect(seen).toBe(3)
+    expect(component.find('[data-testid="ws-row-later.txt"]').exists()).toBe(true)
     component.unmount()
   })
 })

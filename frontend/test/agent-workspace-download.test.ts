@@ -19,12 +19,13 @@ const listing: WorkspaceListing = {
       name: 'downloads',
       kind: 'dir',
       size: 1024,
+      modified: 1_763_380_800_000,
       protected: false,
       children: [
-        { path: 'downloads/report #1.pdf', name: 'report #1.pdf', kind: 'file', size: 1024, protected: false, children: null },
+        { path: 'downloads/report #1.pdf', name: 'report #1.pdf', kind: 'file', size: 1024, modified: 1_763_380_800_000, protected: false, children: null },
       ],
     },
-    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 512, protected: true, children: null },
+    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 512, modified: 1_763_380_800_000, protected: true, children: null },
   ],
 }
 

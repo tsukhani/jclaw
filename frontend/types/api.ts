@@ -955,6 +955,8 @@ export interface WorkspaceEntry {
   name: string
   kind: 'file' | 'dir'
   size: number
+  /** Epoch ms: a file's last change; a folder's newest change, its own or anything's under it. */
+  modified: number
   protected: boolean
   children: WorkspaceEntry[] | null
 }

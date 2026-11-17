@@ -21,13 +21,14 @@ const full: WorkspaceListing = {
       name: 'downloads',
       kind: 'dir',
       size: 1024,
+      modified: 1_763_380_800_000,
       protected: false,
       children: [
-        { path: 'downloads/report.pdf', name: 'report.pdf', kind: 'file', size: 1024, protected: false, children: null },
+        { path: 'downloads/report.pdf', name: 'report.pdf', kind: 'file', size: 1024, modified: 1_763_380_800_000, protected: false, children: null },
       ],
     },
-    { path: 'notes.txt', name: 'notes.txt', kind: 'file', size: 511, protected: false, children: null },
-    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 1, protected: true, children: null },
+    { path: 'notes.txt', name: 'notes.txt', kind: 'file', size: 511, modified: 1_763_380_800_000, protected: false, children: null },
+    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 1, modified: 1_763_380_800_000, protected: true, children: null },
   ],
 }
 

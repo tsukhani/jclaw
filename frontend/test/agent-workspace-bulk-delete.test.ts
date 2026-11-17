@@ -13,11 +13,11 @@ import type { WorkspaceEntry, WorkspaceListing } from '~/types/api'
  * out for them; under a filter, "select all" stops at the entries that match by their own name.
  */
 function file(path: string, size = 512, isProtected = false): WorkspaceEntry {
-  return { path, name: path.split('/').pop()!, kind: 'file', size, protected: isProtected, children: null }
+  return { path, name: path.split('/').pop()!, kind: 'file', size, modified: 1_763_380_800_000, protected: isProtected, children: null }
 }
 
 function dir(path: string, children: WorkspaceEntry[]): WorkspaceEntry {
-  return { path, name: path.split('/').pop()!, kind: 'dir', size: children.reduce((n, c) => n + c.size, 0), protected: false, children }
+  return { path, name: path.split('/').pop()!, kind: 'dir', size: children.reduce((n, c) => n + c.size, 0), modified: 1_763_380_800_000, protected: false, children }
 }
 
 const LISTING: WorkspaceListing = {

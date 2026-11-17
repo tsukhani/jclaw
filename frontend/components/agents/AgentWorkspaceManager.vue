@@ -10,6 +10,7 @@ import { ArchiveBoxArrowDownIcon, ArrowDownTrayIcon, CheckCircleIcon, ChevronRig
 import { CheckIcon, DocumentIcon, DocumentTextIcon, FolderIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
+import { formatDateTime } from '~/utils/schedule'
 import { workspaceEntryStyle } from '~/utils/workspace-files'
 
 const props = defineProps<{ agentId: number | null }>()
@@ -40,6 +41,8 @@ async function load(options?: { silent?: boolean }) {
   try {
     const data = await $fetch<WorkspaceListing>(`/api/agents/${id}/workspace-tree`)
     if (!latest.isCurrent(token)) return
+    // A poll already in flight when the pointer or focus arrived is dropped, as poll() skips one.
+    if (silent && inList.value) return
     listing.value = data
     error.value = null
   }
@@ -67,8 +70,26 @@ const REFRESH_MS = 10_000
 let timer: ReturnType<typeof setInterval> | null = null
 
 // Skipped mid-delete: a listing read before the latest DELETE landed would put the entry back.
+// Skipped while the pointer or keyboard focus is in the list, so a refresh under a sort by
+// Modified or Size never moves a row, and its buttons, out from under a click.
 function poll() {
-  if (!progress.value) void load({ silent: true })
+  if (!progress.value && !inList.value) void load({ silent: true })
+}
+
+const pointerInList = ref(false)
+const focusInList = ref(false)
+const inList = computed(() => pointerInList.value || focusInList.value)
+
+// Leaving the list catches up at once rather than waiting out the rest of the interval.
+function onPointerLeave() {
+  pointerInList.value = false
+  if (!inList.value) poll()
+}
+
+function onFocusOut(event: FocusEvent) {
+  if ((event.currentTarget as Element).contains(event.relatedTarget as Node | null)) return
+  focusInList.value = false
+  if (!inList.value) poll()
 }
 
 function startPolling() {
@@ -143,6 +164,47 @@ function toggle(path: string) {
   openDirs.value[path] = !isOpen(path)
 }
 
+type SortKey = 'name' | 'modified' | 'size'
+const sortBy = ref<SortKey>('name')
+const sortDir = ref<'asc' | 'desc'>('asc')
+
+// The first click sorts the way an operator scans each column: A to Z, newest, largest.
+function toggleSort(key: SortKey) {
+  if (sortBy.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  sortBy.value = key
+  sortDir.value = key === 'name' ? 'asc' : 'desc'
+}
+
+function sortArrow(key: SortKey) {
+  if (sortBy.value !== key) return ''
+  return sortDir.value === 'asc' ? '↑' : '↓'
+}
+
+function ariaSort(key: SortKey) {
+  if (sortBy.value !== key) return 'none'
+  return sortDir.value === 'asc' ? 'ascending' : 'descending'
+}
+
+// The server sends each folder's folders first and each group A to Z, so that order is Name A to Z
+// as it stands; a stable sort keeps it among entries of equal size or time.
+function ordered(entries: WorkspaceEntry[]): WorkspaceEntry[] {
+  const key = sortBy.value
+  if (key === 'name' && sortDir.value === 'asc') return entries
+  const dirs = entries.filter(entry => entry.kind === 'dir')
+  const files = entries.filter(entry => entry.kind !== 'dir')
+  if (key === 'name') return [...dirs.reverse(), ...files.reverse()]
+  const sign = sortDir.value === 'asc' ? 1 : -1
+  const by = (a: WorkspaceEntry, b: WorkspaceEntry) => sign * (a[key] - b[key])
+  return [...dirs.sort(by), ...files.sort(by)]
+}
+
+function modifiedLabel(entry: WorkspaceEntry) {
+  return formatDateTime(new Date(entry.modified).toISOString())
+}
+
 // A filtered folder is shown open, since collapsing it would hide the very match that keeps it visible.
 function isShownOpen(path: string) {
   return query.value ? true : isOpen(path)
@@ -153,7 +215,7 @@ function isShownOpen(path: string) {
 // large subtree's rows is quadratic and can overflow the call stack.
 function appendMatching(entries: WorkspaceEntry[], depth: number, q: string, out: Row[]): number {
   let added = 0
-  for (const entry of entries) {
+  for (const entry of ordered(entries)) {
     const mark = out.length
     out.push({ entry, depth })
     const below = entry.kind === 'dir' && entry.children ? appendMatching(entry.children, depth + 1, q, out) : 0
@@ -174,7 +236,7 @@ const allRows = computed<Row[]>(() => {
     return out
   }
   const walk = (list: WorkspaceEntry[], depth: number) => {
-    for (const entry of list) {
+    for (const entry of ordered(list)) {
       out.push({ entry, depth })
       if (entry.kind === 'dir' && entry.children && isOpen(entry.path)) walk(entry.children, depth + 1)
     }
@@ -764,91 +826,179 @@ watch(() => props.agentId, () => {
     >
       <!-- A bounded viewport: the page keeps its shape however large the workspace grows. -->
       <div
+        role="table"
+        aria-label="Workspace files"
         class="max-h-[32rem] overflow-y-auto border-t border-border"
         data-testid="workspace-scroll"
+        @pointerenter="pointerInList = true"
+        @pointerleave="onPointerLeave"
+        @focusin="focusInList = true"
+        @focusout="onFocusOut"
       >
+        <div
+          role="row"
+          class="sticky top-0 z-10 flex items-center gap-2 pl-3 pr-3 py-1 border-b border-border bg-surface-elevated text-xs text-fg-muted"
+          data-testid="workspace-columns"
+        >
+          <span
+            role="columnheader"
+            class="flex-1 min-w-0 max-sm:min-w-36"
+            :aria-sort="ariaSort('name')"
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 border-0 bg-transparent p-0 hover:text-fg-strong transition-colors"
+              :class="sortBy === 'name' ? 'text-fg-strong' : ''"
+              data-testid="workspace-sort-name"
+              @click="toggleSort('name')"
+            >
+              Name <span
+                v-if="sortArrow('name')"
+                aria-hidden="true"
+              >{{ sortArrow('name') }}</span>
+            </button>
+          </span>
+          <span
+            role="columnheader"
+            class="w-48 shrink-0 text-right max-sm:hidden"
+            :aria-sort="ariaSort('modified')"
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 border-0 bg-transparent p-0 hover:text-fg-strong transition-colors"
+              :class="sortBy === 'modified' ? 'text-fg-strong' : ''"
+              data-testid="workspace-sort-modified"
+              @click="toggleSort('modified')"
+            >
+              Modified <span
+                v-if="sortArrow('modified')"
+                aria-hidden="true"
+              >{{ sortArrow('modified') }}</span>
+            </button>
+          </span>
+          <span
+            role="columnheader"
+            class="w-20 shrink-0 text-right"
+            :aria-sort="ariaSort('size')"
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 border-0 bg-transparent p-0 hover:text-fg-strong transition-colors"
+              :class="sortBy === 'size' ? 'text-fg-strong' : ''"
+              data-testid="workspace-sort-size"
+              @click="toggleSort('size')"
+            >
+              Size <span
+                v-if="sortArrow('size')"
+                aria-hidden="true"
+              >{{ sortArrow('size') }}</span>
+            </button>
+          </span>
+          <span
+            role="columnheader"
+            class="min-w-12 shrink-0"
+          ><span class="sr-only">Actions</span></span>
+        </div>
         <div
           v-for="row in rows"
           :key="row.entry.path"
+          role="row"
           class="flex max-sm:flex-wrap items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
           :class="progress?.current === row.entry.path ? 'opacity-50' : ''"
           :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
           :data-testid="`ws-row-${row.entry.path}`"
         >
-          <template v-if="selecting">
-            <input
-              v-if="!row.entry.protected"
-              type="checkbox"
-              class="w-3.5 h-3.5 shrink-0 accent-red-500 cursor-pointer disabled:cursor-default"
-              :checked="isTicked(row.entry.path)"
-              :disabled="!!progress || isCovered(row.entry.path)"
-              :title="isCovered(row.entry.path) ? 'Deleted with its folder' : undefined"
-              :aria-label="`Select ${row.entry.name}`"
-              :data-testid="`ws-select-${row.entry.path}`"
-              @change="toggleEntry(row.entry)"
+          <span
+            role="cell"
+            class="flex items-center gap-2 min-w-0 max-sm:min-w-36 flex-1"
+          >
+            <template v-if="selecting">
+              <input
+                v-if="!row.entry.protected"
+                type="checkbox"
+                class="w-3.5 h-3.5 shrink-0 accent-red-500 cursor-pointer disabled:cursor-default"
+                :checked="isTicked(row.entry.path)"
+                :disabled="!!progress || isCovered(row.entry.path)"
+                :title="isCovered(row.entry.path) ? 'Deleted with its folder' : undefined"
+                :aria-label="`Select ${row.entry.name}`"
+                :data-testid="`ws-select-${row.entry.path}`"
+                @change="toggleEntry(row.entry)"
+              >
+              <span
+                v-else
+                class="w-3.5 shrink-0"
+                aria-hidden="true"
+              />
+            </template>
+            <button
+              v-if="row.entry.kind === 'dir'"
+              type="button"
+              class="flex items-center gap-1.5 min-w-0 flex-1 text-left text-fg-primary bg-transparent border-0"
+              :aria-expanded="isShownOpen(row.entry.path)"
+              @click="toggle(row.entry.path)"
             >
+              <ChevronRightIcon
+                class="w-3 h-3 shrink-0 text-fg-muted transition-transform"
+                :class="isShownOpen(row.entry.path) ? 'rotate-90' : ''"
+                aria-hidden="true"
+              />
+              <FolderIcon
+                class="w-4 h-4 shrink-0"
+                :class="STYLE_CLASS.dir"
+                aria-hidden="true"
+              />
+              <span
+                class="truncate text-sm font-mono"
+                :class="STYLE_CLASS.dir"
+                data-kind="dir"
+              >{{ row.entry.name }}</span>
+            </button>
             <span
               v-else
-              class="w-3.5 shrink-0"
-              aria-hidden="true"
-            />
-          </template>
-          <button
-            v-if="row.entry.kind === 'dir'"
-            type="button"
-            class="flex items-center gap-1.5 min-w-0 max-sm:min-w-36 flex-1 text-left text-fg-primary bg-transparent border-0"
-            :aria-expanded="isShownOpen(row.entry.path)"
-            @click="toggle(row.entry.path)"
-          >
-            <ChevronRightIcon
-              class="w-3 h-3 shrink-0 text-fg-muted transition-transform"
-              :class="isShownOpen(row.entry.path) ? 'rotate-90' : ''"
-              aria-hidden="true"
-            />
-            <FolderIcon
-              class="w-4 h-4 shrink-0"
-              :class="STYLE_CLASS.dir"
-              aria-hidden="true"
-            />
+              class="flex items-center gap-1.5 min-w-0 flex-1 text-fg-primary"
+            >
+              <span
+                class="w-3 shrink-0"
+                aria-hidden="true"
+              />
+              <component
+                :is="styleOf(row.entry) === 'text' ? DocumentTextIcon : DocumentIcon"
+                class="w-4 h-4 shrink-0"
+                :class="STYLE_CLASS[styleOf(row.entry)]"
+                aria-hidden="true"
+              />
+              <span
+                class="truncate text-sm font-mono"
+                :class="STYLE_CLASS[styleOf(row.entry)]"
+                :data-kind="styleOf(row.entry)"
+              >{{ row.entry.name }}</span>
+            </span>
+
             <span
-              class="truncate text-sm font-mono"
-              :class="STYLE_CLASS.dir"
-              data-kind="dir"
-            >{{ row.entry.name }}</span>
-          </button>
-          <span
-            v-else
-            class="flex items-center gap-1.5 min-w-0 max-sm:min-w-36 flex-1 text-fg-primary"
-          >
-            <span
-              class="w-3 shrink-0"
-              aria-hidden="true"
-            />
-            <component
-              :is="styleOf(row.entry) === 'text' ? DocumentTextIcon : DocumentIcon"
-              class="w-4 h-4 shrink-0"
-              :class="STYLE_CLASS[styleOf(row.entry)]"
-              aria-hidden="true"
-            />
-            <span
-              class="truncate text-sm font-mono"
-              :class="STYLE_CLASS[styleOf(row.entry)]"
-              :data-kind="styleOf(row.entry)"
-            >{{ row.entry.name }}</span>
+              v-if="row.entry.protected"
+              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-muted text-fg-muted"
+              title="A Standing Orders file: listed, never deleted"
+              :data-testid="`ws-protected-${row.entry.path}`"
+            >protected</span>
           </span>
 
           <span
-            v-if="row.entry.protected"
-            class="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-muted text-fg-muted"
-            title="A Standing Orders file: listed, never deleted"
-            :data-testid="`ws-protected-${row.entry.path}`"
-          >protected</span>
+            role="cell"
+            class="w-48 shrink-0 text-right text-xs font-mono tabular-nums text-fg-muted max-sm:hidden"
+            :data-testid="`ws-modified-${row.entry.path}`"
+          >{{ modifiedLabel(row.entry) }}</span>
 
-          <span class="shrink-0 text-xs font-mono tabular-nums text-fg-muted">{{ formatSize(row.entry.size) }}</span>
-
-          <!-- (3) Per-row actions area: download, then delete. -->
           <span
-            class="flex items-center gap-1 shrink-0"
+            role="cell"
+            class="w-20 shrink-0 text-right text-xs font-mono tabular-nums text-fg-muted"
+            :data-testid="`ws-size-${row.entry.path}`"
+          >{{ formatSize(row.entry.size) }}</span>
+
+          <!-- (3) Per-row actions area: download, then delete. Its minimum width keeps the
+               columns above lined up on rows that show no delete button. -->
+          <span
+            role="cell"
+            class="flex items-center gap-1 min-w-12 shrink-0"
             :data-testid="`ws-actions-${row.entry.path}`"
           >
             <a

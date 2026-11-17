@@ -15,7 +15,7 @@ import type { WorkspaceListing } from '~/types/api'
 const listing: WorkspaceListing = {
   total: 1536,
   entries: [
-    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 1536, protected: true, children: null },
+    { path: 'AGENT.md', name: 'AGENT.md', kind: 'file', size: 1536, modified: 1_763_380_800_000, protected: true, children: null },
   ],
 }
 
