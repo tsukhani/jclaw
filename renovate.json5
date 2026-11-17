@@ -64,8 +64,8 @@
   // ones config:recommended would otherwise enable by default. 'gradle' +
   // 'gradle-wrapper' cover build.gradle.kts and gradle-wrapper.properties
   // (the entire Java dependency tree, plus Gradle itself); 'npm' covers
-  // frontend/package.json including the pnpm pin in `packageManager`
-  // (the gap that triggered switching from Dependabot); 'dockerfile' +
+  // frontend/package.json, all but its pnpm pin in `packageManager`, which
+  // follows the play1 fork (its rule below); 'dockerfile' +
   // 'docker-compose' cover the prod + devcontainer images.
   enabledManagers: [
     "gradle",
@@ -220,8 +220,17 @@
       matchDepNames: ["tsukhani/play1"],
       automerge: false,
       prBodyNotes: [
-        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging, then rewrite `gradle.lockfile` (`./gradlew dependencies --write-locks`): a library the fork starts or stops shipping changes the locked graph.",
+        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging, then rewrite `gradle.lockfile` (`./gradlew dependencies --write-locks`): a library the fork starts or stops shipping changes the locked graph. Then run `play pnpm-sync` and commit `frontend/package.json` with `frontend/pnpm-lock.yaml`: the pnpm pin follows the fork.",
       ],
+    },
+
+    // The pnpm pin in frontend/package.json follows the play1 fork's (PF-207): `play pnpm-sync`
+    // moves it after a .play-version bump, and a pin moved alone makes play dist and play bundle warn.
+    {
+      matchManagers: ["npm"],
+      matchDepTypes: ["packageManager"],
+      matchDepNames: ["pnpm"],
+      enabled: false,
     },
   ],
 

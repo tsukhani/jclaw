@@ -113,7 +113,7 @@ Each guide holds one subsystem's rules with their reasons, and only the agent wo
 - [Property-based tests](docs/agents/property-tests.md) — before writing a jqwik `@Property`. Every one lives in `test/PropertyBasedTest.java`, with `tries` pinned and the generated inputs in the assertion message.
 - [Evals](docs/agents/evals.md) — before editing `evals/` or running a capture. Suites are edited in place; `--capture` executes tools for real, so run it only against `__evaltest__`.
 - [Diagnostics](docs/agents/diagnostics.md) — before driving a repair loop from `./jclaw.sh diagnostics`. `[]` is a clean tree, and exit 2 means the harness failed, not the build.
-- [Frontend](docs/agents/frontend-toolchain.md) — before editing `frontend/` or `docs/user-guide/`, or changing the pnpm pin. An API write goes through `useApiMutation().mutate` or `useSaveAttempt().attempt`, never a bare `$fetch`.
+- [Frontend](docs/agents/frontend-toolchain.md) — before editing `frontend/` or `docs/user-guide/`, or moving the pnpm pin, which follows the play1 fork through `play pnpm-sync`. An API write goes through `useApiMutation().mutate` or `useSaveAttempt().attempt`, never a bare `$fetch`.
 
 ## Prerequisites
 
