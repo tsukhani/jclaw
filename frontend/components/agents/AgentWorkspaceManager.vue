@@ -6,8 +6,8 @@
  * and the Standing Orders editor beside it stays the only write path. A sub-agent shows
  * its root agent's shared workspace, because that is the directory it writes into.
  */
-import { ArchiveBoxArrowDownIcon, ArrowDownTrayIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
-import { DocumentIcon, DocumentTextIcon, FolderIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/20/solid'
+import { ArchiveBoxArrowDownIcon, ArrowDownTrayIcon, CheckCircleIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { CheckIcon, DocumentIcon, DocumentTextIcon, FolderIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
 import { workspaceEntryStyle } from '~/utils/workspace-files'
@@ -66,9 +66,14 @@ defineExpose({ reload: load })
 const REFRESH_MS = 10_000
 let timer: ReturnType<typeof setInterval> | null = null
 
+// Skipped mid-delete: a listing read before the latest DELETE landed would put the entry back.
+function poll() {
+  if (!progress.value) void load({ silent: true })
+}
+
 function startPolling() {
   if (timer) return
-  timer = setInterval(() => void load({ silent: true }), REFRESH_MS)
+  timer = setInterval(poll, REFRESH_MS)
 }
 
 function stopPolling() {
@@ -83,7 +88,7 @@ function onVisibility() {
     return
   }
   // Catch up on what changed while the tab was away rather than waiting out a whole interval.
-  void load({ silent: true })
+  poll()
   startPolling()
 }
 
@@ -215,17 +220,257 @@ function deleteLabel(entry: WorkspaceEntry) {
     : `Delete ${entry.name}`
 }
 
-async function confirmDelete(path: string) {
+function deleteUrl(id: number, path: string) {
+  return `/api/agents/${id}/workspace-tree/${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
+// The run in flight or the last one, entry by entry, so the operator sees each one go and what is left.
+type RunState = 'queued' | 'deleting' | 'deleted' | 'failed'
+interface DeleteRun { seq: number, active: boolean, items: Array<{ entry: WorkspaceEntry, state: RunState }> }
+const run = shallowRef<DeleteRun | null>(null)
+let runSeq = 0
+const runLog = ref<HTMLElement | null>(null)
+
+const progress = computed(() => {
+  const current = run.value
+  if (!current?.active) return null
+  return {
+    done: current.items.filter(item => item.state === 'deleted').length,
+    total: current.items.length,
+    current: current.items.find(item => item.state === 'deleting')?.entry.path ?? '',
+  }
+})
+
+const notice = computed(() => {
+  const finished = run.value
+  if (!finished || finished.active) return null
+  const deleted = finished.items.filter(item => item.state === 'deleted').map(item => item.entry)
+  const failed = finished.items.find(item => item.state === 'failed')
+  // With nothing deleted, the error alert alone says what happened.
+  if (failed) return deleted.length ? `Deleted ${deleted.length} of ${finished.items.length}; stopped at ${displayPath(failed.entry)}.` : null
+  return deleted.length === 1 ? `Deleted ${displayPath(deleted[0]!)}.` : `Deleted ${countPhrase(deleted)}.`
+})
+
+const RUN_STATE_LABEL: Record<RunState, string> = { queued: 'waiting', deleting: 'deleting…', deleted: 'deleted', failed: 'failed' }
+
+function runStateLabel(state: RunState, active: boolean) {
+  return state === 'queued' && !active ? 'not deleted' : RUN_STATE_LABEL[state]
+}
+
+// Keeps the entry in flight in view inside the log's own scroll box, without scrolling the page.
+function scrollLogToCurrent() {
+  const box = runLog.value
+  const current = box?.querySelector<HTMLElement>('[data-state="deleting"]')
+  if (box && current) box.scrollTop = current.offsetTop - box.clientHeight / 2
+}
+
+// Drops `path` and its size from every folder above it and from the total, so the list shows the
+// delete at once; the re-read after the run then replaces it with the server's view.
+function withoutEntry(tree: WorkspaceListing, path: string): WorkspaceListing {
+  let removed = 0
+  const prune = (list: WorkspaceEntry[]): WorkspaceEntry[] => {
+    const out: WorkspaceEntry[] = []
+    for (const entry of list) {
+      if (entry.path === path) {
+        removed = entry.size
+        continue
+      }
+      if (entry.children && path.startsWith(`${entry.path}/`)) {
+        const children = prune(entry.children)
+        out.push({ ...entry, children, size: entry.size - removed })
+      }
+      else {
+        out.push(entry)
+      }
+    }
+    return out
+  }
+  const entries = prune(tree.entries)
+  return { ...tree, entries, total: tree.total - removed }
+}
+
+function plural(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+function countPhrase(entries: WorkspaceEntry[]) {
+  const folders = entries.filter(entry => entry.kind === 'dir').length
+  const files = entries.length - folders
+  return [files ? plural(files, 'file') : '', folders ? plural(folders, 'folder') : ''].filter(Boolean).join(' and ')
+}
+
+function displayPath(entry: WorkspaceEntry) {
+  return entry.kind === 'dir' ? `${entry.path}/` : entry.path
+}
+
+// One at a time, stopping at the first refusal, so the alert names the entry that failed and
+// everything after it stays ticked for a retry.
+async function runDeletes(id: number, entries: WorkspaceEntry[]) {
+  const seq = ++runSeq
+  run.value = { seq, active: true, items: entries.map(entry => ({ entry, state: 'queued' as RunState })) }
+  // An agent switch drops the run, and its remaining requests then mark nothing.
+  const mark = (index: number, state: RunState) => {
+    const current = run.value
+    if (current?.seq !== seq) return
+    run.value = { ...current, items: current.items.map((item, i) => i === index ? { ...item, state } : item) }
+  }
+  const deleted: WorkspaceEntry[] = []
+  for (const [index, entry] of entries.entries()) {
+    mark(index, 'deleting')
+    void nextTick(scrollLogToCurrent)
+    if (await mutate(deleteUrl(id, entry.path), { method: 'DELETE' }) === null) {
+      mark(index, 'failed')
+      break
+    }
+    mark(index, 'deleted')
+    deleted.push(entry)
+    if (props.agentId !== id) continue
+    if (listing.value) listing.value = withoutEntry(listing.value, entry.path)
+    if (selected.value.has(entry.path)) untick(entry.path)
+  }
+  if (run.value?.seq === seq) run.value = { ...run.value, active: false }
+  if (props.agentId !== id) return
+  // Before the re-read, which takes seconds on a large workspace: the run is over now.
+  if (deleted.length === entries.length) stopSelecting()
+  if (deleted.length) await load()
+}
+
+function dismissRun() {
+  if (!run.value?.active) run.value = null
+}
+
+async function confirmDelete(entry: WorkspaceEntry) {
   const id = props.agentId
   if (!id) return
-  const encoded = path.split('/').map(encodeURIComponent).join('/')
-  const ack = await mutate(`/api/agents/${id}/workspace-tree/${encoded}`, { method: 'DELETE' })
+  await runDeletes(id, [entry])
   pendingDelete.value = null
-  if (ack) await load()
+}
+
+// (4) Bulk delete: tick entries, then delete them in one confirmed run.
+const { confirm } = useConfirm()
+const selectAllId = useId()
+const selecting = ref(false)
+// Keyed by path, and never holding an entry under a held folder: the folder's DELETE takes it,
+// and a second DELETE for it would 404 and stop the run. So the size is the count of requests.
+const selected = shallowRef(new Map<string, WorkspaceEntry>())
+
+function hasHeldAncestor(path: string, held: Map<string, WorkspaceEntry>) {
+  for (let i = path.indexOf('/'); i !== -1; i = path.indexOf('/', i + 1)) {
+    if (held.has(path.slice(0, i))) return true
+  }
+  return false
+}
+
+function isCovered(path: string) {
+  return hasHeldAncestor(path, selected.value)
+}
+
+function isTicked(path: string) {
+  return selected.value.has(path) || isCovered(path)
+}
+
+function startSelecting() {
+  pendingDelete.value = null
+  run.value = null
+  selected.value = new Map()
+  selecting.value = true
+}
+
+function stopSelecting() {
+  selecting.value = false
+  selected.value = new Map()
+}
+
+function withEntries(entries: WorkspaceEntry[]) {
+  const next = new Map(selected.value)
+  for (const entry of entries) next.set(entry.path, entry)
+  for (const path of next.keys()) {
+    if (hasHeldAncestor(path, next)) next.delete(path)
+  }
+  return next
+}
+
+// The operator's own change to the ticks retires a finished run's log, bringing the tally back.
+function setSelection(next: Map<string, WorkspaceEntry>) {
+  selected.value = next
+  dismissRun()
+}
+
+function untick(path: string) {
+  const next = new Map(selected.value)
+  next.delete(path)
+  setSelection(next)
+}
+
+function toggleEntry(entry: WorkspaceEntry) {
+  if (selected.value.has(entry.path)) untick(entry.path)
+  else setSelection(withEntries([entry]))
+}
+
+// Under a filter, only rows that match by their own name: a folder shown just to lead to a match
+// would take every file inside it that does not match.
+const selectableRows = computed(() => rows.value.filter(row =>
+  !row.entry.protected && (!query.value || row.entry.name.toLowerCase().includes(query.value))))
+const allTicked = computed(() =>
+  selectableRows.value.length > 0 && selectableRows.value.every(row => isTicked(row.entry.path)))
+const someTicked = computed(() => !allTicked.value && selectableRows.value.some(row => isTicked(row.entry.path)))
+
+function toggleAll() {
+  setSelection(allTicked.value ? new Map() : withEntries(selectableRows.value.map(row => row.entry)))
+}
+
+// Every tick, listed: one can sit in a collapsed folder or outside the filter, and still goes.
+const shownPaths = computed(() => new Set(rows.value.map(row => row.entry.path)))
+const tally = computed(() => [...selected.value.values()].map(entry => ({ entry, shown: shownPaths.value.has(entry.path) })))
+const hiddenTicks = computed(() => tally.value.filter(item => !item.shown).length)
+
+// What leaves the tree, through a delete or another writer, leaves the selection. A run prunes
+// its own deletes as it goes, which spares a walk of the whole tree per entry.
+watch(listing, (next) => {
+  if (progress.value || !selected.value.size) return
+  const present = new Set<string>()
+  const walk = (list: WorkspaceEntry[]) => {
+    for (const entry of list) {
+      present.add(entry.path)
+      if (entry.children) walk(entry.children)
+    }
+  }
+  walk(next?.entries ?? [])
+  const kept = new Map([...selected.value].filter(([path]) => present.has(path)))
+  if (kept.size !== selected.value.size) selected.value = kept
+})
+
+const SUMMARY_NAMES = 10
+
+function deleteSummary(entries: WorkspaceEntry[]) {
+  const folders = entries.filter(entry => entry.kind === 'dir').length
+  const files = entries.length - folders
+  const parts: string[] = []
+  if (files) parts.push(plural(files, 'file'))
+  if (folders) parts.push(`${plural(folders, 'folder')} with everything in ${folders === 1 ? 'it' : 'them'}`)
+  const names = entries.slice(0, SUMMARY_NAMES).map(displayPath)
+  if (entries.length > SUMMARY_NAMES) names.push(`…and ${entries.length - SUMMARY_NAMES} more`)
+  return `Permanently delete ${parts.join(' and ')}? This cannot be undone.\n\n${names.join('\n')}`
+}
+
+async function deleteSelected() {
+  const id = props.agentId
+  const entries = [...selected.value.values()]
+  if (!id || !entries.length) return
+  const ok = await confirm({
+    title: 'Delete from the workspace',
+    message: deleteSummary(entries),
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  await runDeletes(id, entries)
 }
 
 watch(() => props.agentId, () => {
   pendingDelete.value = null
+  run.value = null
+  stopSelecting()
 })
 </script>
 
@@ -244,20 +489,55 @@ watch(() => props.agentId, () => {
         >Loading…</span>
       </div>
       <div class="flex items-center gap-3">
-        <a
-          v-if="listing"
-          :href="backupHref"
-          download
-          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
-          title="Download the whole workspace as a zip, Standing Orders included"
-          data-testid="workspace-backup"
-        >
-          <ArchiveBoxArrowDownIcon
-            class="w-4 h-4"
-            aria-hidden="true"
-          />
-          Back up
-        </a>
+        <template v-if="listing && selecting">
+          <button
+            type="button"
+            class="px-2 py-0.5 border border-input bg-transparent text-xs text-fg-muted hover:text-fg-strong disabled:opacity-40 transition-colors"
+            :disabled="!!progress"
+            data-testid="workspace-select-cancel"
+            @click="stopSelecting"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="px-2 py-0.5 border-0 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors"
+            :disabled="!selected.size || !!progress"
+            data-testid="workspace-delete-selected"
+            @click="deleteSelected"
+          >
+            {{ progress ? 'Deleting…' : `Delete ${selected.size || ''}`.trim() }}
+          </button>
+        </template>
+        <template v-else-if="listing">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 border-0 bg-transparent p-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-40 transition-colors"
+            title="Tick several files and folders, then delete them together"
+            :disabled="!!progress"
+            data-testid="workspace-select"
+            @click="startSelecting"
+          >
+            <CheckCircleIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+            Select
+          </button>
+          <a
+            :href="backupHref"
+            download
+            class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
+            title="Download the whole workspace as a zip, Standing Orders included"
+            data-testid="workspace-backup"
+          >
+            <ArchiveBoxArrowDownIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+            Back up
+          </a>
+        </template>
         <span
           v-if="listing"
           class="text-xs font-mono tabular-nums text-fg-muted"
@@ -280,7 +560,7 @@ watch(() => props.agentId, () => {
           v-model="filter"
           type="search"
           aria-label="Filter files and folders"
-          class="w-full rounded border border-border bg-transparent px-2.5 py-1.5 pr-8 text-sm text-fg-primary placeholder:text-fg-muted"
+          class="w-full rounded border border-border bg-transparent px-2.5 py-1.5 pr-8 text-sm text-fg-primary placeholder:text-fg-muted [&::-webkit-search-cancel-button]:appearance-none"
           placeholder="Filter files and folders…"
           autocomplete="off"
           data-testid="workspace-filter"
@@ -299,6 +579,163 @@ watch(() => props.agentId, () => {
           />
         </button>
       </div>
+      <label
+        v-if="selecting"
+        :for="selectAllId"
+        class="mt-2 flex w-fit items-center gap-2 text-xs text-fg-muted cursor-pointer"
+      >
+        <input
+          :id="selectAllId"
+          type="checkbox"
+          class="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+          :checked="allTicked"
+          :indeterminate="someTicked"
+          :disabled="!selectableRows.length || !!progress"
+          data-testid="workspace-select-all"
+          @change="toggleAll"
+        >
+        {{ query ? 'Select all matching' : 'Select all' }}
+      </label>
+    </div>
+
+    <div
+      class="px-4 text-xs text-fg-muted"
+      :class="run ? 'pb-2' : ''"
+    >
+      <div class="flex items-start gap-2">
+        <div
+          role="status"
+          class="min-w-0 flex-1"
+          data-testid="workspace-delete-status"
+        >
+          <p
+            v-if="progress"
+            class="flex items-center gap-2 min-w-0"
+          >
+            <span
+              class="inline-block w-3 h-3 shrink-0 border-2 border-current border-t-transparent rounded-full animate-spin"
+              aria-hidden="true"
+            />
+            <span class="truncate">
+              {{ progress.total > 1 ? `Deleting ${progress.done + 1} of ${progress.total}:` : 'Deleting' }}
+              <span class="font-mono">{{ progress.current }}</span>
+            </span>
+          </p>
+          <p v-else-if="notice">
+            {{ notice }}
+          </p>
+        </div>
+        <button
+          v-if="run && !run.active"
+          type="button"
+          class="shrink-0 border-0 bg-transparent p-0 text-xs text-fg-muted underline hover:text-fg-strong"
+          data-testid="workspace-delete-dismiss"
+          @click="dismissRun"
+        >
+          Dismiss
+        </button>
+      </div>
+      <div
+        v-if="progress && progress.total > 1"
+        class="mt-1.5 h-1 bg-muted overflow-hidden"
+        aria-hidden="true"
+      >
+        <div
+          class="h-full bg-red-600 transition-[width]"
+          :style="{ width: `${(progress.done / progress.total) * 100}%` }"
+        />
+      </div>
+    </div>
+
+    <!-- The run's log: each entry with its state, kept after the run so the operator can check it. -->
+    <ul
+      v-if="run && run.items.length > 1"
+      ref="runLog"
+      class="relative mx-4 mb-2 max-h-40 overflow-y-auto border border-border py-1"
+      data-testid="workspace-delete-log"
+    >
+      <li
+        v-for="item in run.items"
+        :key="item.entry.path"
+        class="flex items-center gap-2 px-2 py-0.5 text-xs"
+        :data-state="item.state"
+        :data-testid="`ws-log-${item.entry.path}`"
+      >
+        <span
+          v-if="item.state === 'deleting'"
+          class="inline-block w-3 h-3 shrink-0 border-2 border-current border-t-transparent rounded-full animate-spin text-fg-muted"
+          aria-hidden="true"
+        />
+        <CheckIcon
+          v-else-if="item.state === 'deleted'"
+          class="w-3 h-3 shrink-0 text-emerald-700 dark:text-emerald-400"
+          aria-hidden="true"
+        />
+        <XMarkIcon
+          v-else-if="item.state === 'failed'"
+          class="w-3 h-3 shrink-0 text-danger"
+          aria-hidden="true"
+        />
+        <span
+          v-else
+          class="w-3 shrink-0"
+          aria-hidden="true"
+        />
+        <span
+          class="truncate font-mono"
+          :class="item.state === 'deleted' ? 'text-fg-muted line-through' : 'text-fg-primary'"
+        >{{ displayPath(item.entry) }}</span>
+        <span
+          class="ml-auto shrink-0"
+          :class="item.state === 'failed' ? 'text-danger' : 'text-fg-muted'"
+          data-role="state"
+        >{{ runStateLabel(item.state, run.active) }}</span>
+      </li>
+    </ul>
+    <div
+      v-else-if="selecting && selected.size"
+      class="mx-4 mb-2 border border-border"
+      data-testid="workspace-selection"
+    >
+      <!-- Every tick, listed, so one hidden by the filter or a collapsed folder is never a surprise. -->
+      <p
+        class="px-2 pt-1.5 pb-1 text-xs text-fg-muted"
+        data-testid="workspace-selection-summary"
+      >
+        {{ selected.size }} selected{{ hiddenTicks ? `, ${hiddenTicks} hidden from the list below` : '' }}
+      </p>
+      <ul class="max-h-40 overflow-y-auto pb-1">
+        <li
+          v-for="item in tally"
+          :key="item.entry.path"
+          class="flex items-center gap-2 px-2 py-0.5 text-xs"
+          :data-testid="`ws-tally-${item.entry.path}`"
+        >
+          <span class="truncate font-mono text-fg-primary">{{ displayPath(item.entry) }}</span>
+          <span
+            v-if="item.entry.kind === 'dir'"
+            class="shrink-0 text-fg-muted"
+          >with everything in it</span>
+          <span
+            v-if="!item.shown"
+            class="shrink-0 rounded px-1 bg-muted text-[10px] uppercase tracking-wide text-fg-muted"
+            title="Filtered out, or inside a collapsed folder"
+          >hidden</span>
+          <button
+            type="button"
+            class="ml-auto shrink-0 border-0 bg-transparent p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-40"
+            :aria-label="`Untick ${displayPath(item.entry)}`"
+            :disabled="!!progress"
+            :data-testid="`ws-untick-${item.entry.path}`"
+            @click="untick(item.entry.path)"
+          >
+            <XMarkIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </li>
+      </ul>
     </div>
 
     <ApiErrorAlert
@@ -334,9 +771,28 @@ watch(() => props.agentId, () => {
           v-for="row in rows"
           :key="row.entry.path"
           class="flex max-sm:flex-wrap items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
+          :class="progress?.current === row.entry.path ? 'opacity-50' : ''"
           :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
           :data-testid="`ws-row-${row.entry.path}`"
         >
+          <template v-if="selecting">
+            <input
+              v-if="!row.entry.protected"
+              type="checkbox"
+              class="w-3.5 h-3.5 shrink-0 accent-red-500 cursor-pointer disabled:cursor-default"
+              :checked="isTicked(row.entry.path)"
+              :disabled="!!progress || isCovered(row.entry.path)"
+              :title="isCovered(row.entry.path) ? 'Deleted with its folder' : undefined"
+              :aria-label="`Select ${row.entry.name}`"
+              :data-testid="`ws-select-${row.entry.path}`"
+              @change="toggleEntry(row.entry)"
+            >
+            <span
+              v-else
+              class="w-3.5 shrink-0"
+              aria-hidden="true"
+            />
+          </template>
           <button
             v-if="row.entry.kind === 'dir'"
             type="button"
@@ -408,14 +864,25 @@ watch(() => props.agentId, () => {
                 aria-hidden="true"
               />
             </a>
-            <template v-if="!row.entry.protected">
+            <span
+              v-if="progress?.current === row.entry.path"
+              class="inline-flex items-center gap-1 text-xs text-fg-muted"
+              :data-testid="`ws-deleting-${row.entry.path}`"
+            >
+              <span
+                class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"
+                aria-hidden="true"
+              />
+              Deleting…
+            </span>
+            <template v-else-if="!row.entry.protected && !selecting">
               <template v-if="pendingDelete === row.entry.path">
                 <button
                   type="button"
                   class="rounded border border-border bg-transparent px-1.5 py-0.5 text-xs text-danger"
                   :aria-label="`Confirm: ${deleteLabel(row.entry)}`"
                   :data-testid="`ws-delete-confirm-${row.entry.path}`"
-                  @click="confirmDelete(row.entry.path)"
+                  @click="confirmDelete(row.entry)"
                 >Confirm</button>
                 <button
                   type="button"
@@ -428,9 +895,10 @@ watch(() => props.agentId, () => {
               <button
                 v-else
                 type="button"
-                class="border-0 bg-transparent p-0.5 text-fg-muted hover:text-danger"
+                class="border-0 bg-transparent p-0.5 text-fg-muted hover:text-danger disabled:opacity-40"
                 :aria-label="deleteLabel(row.entry)"
                 :title="deleteLabel(row.entry)"
+                :disabled="!!progress"
                 :data-testid="`ws-delete-${row.entry.path}`"
                 @click="pendingDelete = row.entry.path"
               >
