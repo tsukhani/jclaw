@@ -8,8 +8,11 @@ import utils.WorkspacePathGuard;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.lang.ScopedValue.CallableOp;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -18,12 +21,19 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -31,7 +41,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -60,6 +72,12 @@ public final class KeptSkillFiles {
     private static final String DQ_ESCAPED = "\"\\$`";
     private static final char BYTE_ORDER_MARK = (char) 0xFEFF;
 
+    private static final ScopedValue<Consumer<String>> BEFORE_OPEN_FOR_TEST = ScopedValue.newInstance();
+    public static final String FILE_CHANGED = "Did not keep %s of skill %s's old copy: it stopped being a regular file while it was read";
+    public static final String PATH_CHANGED =
+            "Did not keep %s of skill %s's old copy: a folder on its path stopped being a real folder while it was read";
+    private static final String FOLDER_CHANGED = "Did not read %s of skill %s's old copy: it stopped being a real folder while it was read";
+
     /** One kept file as the panel lists it: never its content. {@code id} names it to the routes. */
     public record Kept(String id, String path, long size, Instant keptAt) {}
 
@@ -75,23 +93,41 @@ public final class KeptSkillFiles {
     /**
      * The files of {@code oldCopy} an update keeps, as slash-separated paths in order: each regular file under its
      * {@code credentials/} folder, and each file {@code X} beside an {@code X.example} in either copy, unless {@code newVersion} ships
-     * the same bytes at that path. A link is never kept or followed, the old copy's own folder included.
+     * the same bytes at that path. A link is never kept or followed, the old copy's own folder included: the agent
+     * can write its copy while this reads it, so every folder is opened through the handle of the one above it.
      */
     public static List<String> select(Path oldCopy, Path newVersion) throws IOException {
-        if (!Files.isDirectory(oldCopy, LinkOption.NOFOLLOW_LINKS)) return List.of();
         var out = new TreeSet<String>();
-        try (var walk = Files.walk(oldCopy)) {
-            for (var file : (Iterable<Path>) walk::iterator) {
-                if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) continue;
-                var relative = oldCopy.relativize(file);
-                if (!underCredentials(relative) && !besideItsExample(file, newVersion.resolve(relative.toString()))) continue;
-                if (shipsTheSame(newVersion.resolve(relative.toString()), file)) continue;
-                out.add(slashed(relative));
-            }
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
+        try (var copy = openOldCopy(oldCopy)) {
+            if (copy != null) collect(copy, Path.of(""), newVersion, String.valueOf(oldCopy.getFileName()), out);
         }
         return List.copyOf(out);
+    }
+
+    private static void collect(SecureDirectoryStream<Path> dir, Path relativeDir, Path newVersion, String skill,
+                                TreeSet<String> out) throws IOException {
+        var names = new ArrayList<Path>();
+        for (var entry : dir) names.add(entry.getFileName());
+        for (var name : names) {
+            var relative = relativeDir.resolve(name.toString());
+            var attributes = attributes(dir, name);
+            if (attributes == null) continue;
+            if (attributes.isDirectory()) {
+                try (var folder = openFolder(dir, name, FOLDER_CHANGED.formatted(slashed(relative), skill))) {
+                    if (folder != null) collect(folder, relative, newVersion, skill, out);
+                }
+                continue;
+            }
+            if (!attributes.isRegularFile()) continue;
+            var shipped = newVersion.resolve(relative.toString());
+            if (!underCredentials(relative) && !besideItsExample(dir, name, shipped)) continue;
+            if (Files.isRegularFile(shipped, LinkOption.NOFOLLOW_LINKS) && Files.size(shipped) == attributes.size()) {
+                try (var in = openFile(dir, name, FILE_CHANGED.formatted(slashed(relative), skill))) {
+                    if (in == null || sameBytes(shipped, in)) continue;
+                }
+            }
+            out.add(slashed(relative));
+        }
     }
 
     // Any letter case, as the routes that mask a skill's credentials judge the folder.
@@ -99,15 +135,83 @@ public final class KeptSkillFiles {
         return relative.getNameCount() > 1 && relative.getName(0).toString().equalsIgnoreCase(CREDENTIALS_DIR);
     }
 
-    /** {@code shipped} is where the new version would put {@code file}, whose example may ship only there. */
-    private static boolean besideItsExample(Path file, Path shipped) {
-        var name = file.getFileName() + EXAMPLE_SUFFIX;
-        return Files.isRegularFile(file.resolveSibling(name), LinkOption.NOFOLLOW_LINKS)
-                || Files.isRegularFile(shipped.resolveSibling(name), LinkOption.NOFOLLOW_LINKS);
+    /** {@code shipped} is where the new version would put the file {@code name} in {@code dir}, whose example may ship only there. */
+    private static boolean besideItsExample(SecureDirectoryStream<Path> dir, Path name, Path shipped) {
+        var example = name + EXAMPLE_SUFFIX;
+        var attributes = attributes(dir, Path.of(example));
+        return (attributes != null && attributes.isRegularFile())
+                || Files.isRegularFile(shipped.resolveSibling(example), LinkOption.NOFOLLOW_LINKS);
     }
 
-    private static boolean shipsTheSame(Path shipped, Path file) throws IOException {
-        return Files.isRegularFile(shipped, LinkOption.NOFOLLOW_LINKS) && Files.mismatch(shipped, file) == -1L;
+    private static boolean sameBytes(Path shipped, InputStream old) throws IOException {
+        try (var library = Files.newInputStream(shipped, LinkOption.NOFOLLOW_LINKS)) {
+            var a = new byte[8192];
+            var b = new byte[8192];
+            while (true) {
+                int n = library.readNBytes(a, 0, a.length);
+                int m = old.readNBytes(b, 0, b.length);
+                if (n != m || !Arrays.equals(a, 0, n, b, 0, m)) return false;
+                if (n < a.length) return true;
+            }
+        }
+    }
+
+    /**
+     * {@code oldCopy} opened as a folder handle, never through a link at it; null when it is no longer a real folder.
+     * The folders above it are the workspace's, which JClaw made. A platform that cannot open a folder relative to a
+     * handle refuses, so the caller refuses the update rather than read the copy through paths an agent can redirect.
+     */
+    private static @Nullable SecureDirectoryStream<Path> openOldCopy(Path oldCopy) throws IOException {
+        var name = oldCopy.getFileName();
+        var parent = oldCopy.toAbsolutePath().getParent();
+        if (name == null || parent == null || !Files.isDirectory(oldCopy, LinkOption.NOFOLLOW_LINKS)) return null;
+        try (var above = Files.newDirectoryStream(parent)) {
+            if (!(above instanceof SecureDirectoryStream<Path> secure)) {
+                throw new IOException("Cannot read skill %s's old copy without following links on this platform, so its files cannot be kept"
+                        .formatted(name));
+            }
+            return openFolder(secure, name, "Kept nothing of skill %s's old copy: its folder stopped being a real folder while it was read"
+                    .formatted(name));
+        }
+    }
+
+    /**
+     * The folder {@code name} in {@code dir}, opened without following a link; null, logging {@code skipped}, when it
+     * stopped being a real folder since it was listed. Any other failure is thrown, as an unreadable folder refuses the update.
+     */
+    private static @Nullable SecureDirectoryStream<Path> openFolder(SecureDirectoryStream<Path> dir, Path name, String skipped)
+            throws IOException {
+        try {
+            return dir.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException e) {
+            var now = attributes(dir, name);
+            if (now != null && now.isDirectory()) throw e;
+            EventLogger.warn(LOG_CATEGORY, skipped);
+            return null;
+        }
+    }
+
+    /** The regular file {@code name} in {@code dir}, opened without following a link; null, logging {@code skipped}, when it stopped being one. */
+    private static @Nullable InputStream openFile(SecureDirectoryStream<Path> dir, Path name, String skipped) throws IOException {
+        try {
+            return Channels.newInputStream(dir.newByteChannel(name, Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)));
+        } catch (IOException e) {
+            var now = attributes(dir, name);
+            if (now != null && now.isRegularFile()) throw e;
+            EventLogger.warn(LOG_CATEGORY, skipped);
+            return null;
+        }
+    }
+
+    /** What {@code name} in {@code dir} is, never through a link, POSIX attributes where the platform has them; null when unreadable. */
+    private static @Nullable BasicFileAttributes attributes(SecureDirectoryStream<Path> dir, Path name) {
+        try {
+            var posix = dir.getFileAttributeView(name, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+            if (posix != null) return posix.readAttributes();
+            return dir.getFileAttributeView(name, BasicFileAttributeView.class, LinkOption.NOFOLLOW_LINKS).readAttributes();
+        } catch (IOException _) {
+            return null;
+        }
     }
 
     private static String slashed(Path relative) {
@@ -152,41 +256,71 @@ public final class KeptSkillFiles {
 
     /**
      * Copy each of {@code paths} from {@code oldCopy} to the same path under {@code target}, never through a link, and
-     * return the paths copied. {@code intoNewCopy} skips a path that already exists there, bar a regular file under
+     * return the paths copied. Each file is opened through folder handles from the old copy down, so a folder the agent
+     * swaps for a link while this runs redirects nothing; a path that stopped being a file or a folder is skipped and
+     * logged. {@code intoNewCopy} skips a path that already exists there, bar a regular file under
      * {@code credentials/}, and keeps each file's permissions, since the file stays where a skill reads it.
      */
     private static List<String> copySelected(Path oldCopy, List<String> paths, Path target, boolean intoNewCopy)
             throws IOException {
         var copied = new ArrayList<String>();
-        var realOld = oldCopy.toRealPath();
         var realTarget = target.toRealPath();
-        var posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
-        for (var path : paths) {
-            var source = oldCopy.resolve(path);
-            // The agent can write its copy while this reads it: a file, or a folder above it, that became a link
-            // since the walk is skipped rather than followed.
-            if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS) || !source.toRealPath().startsWith(realOld)) {
-                continue;
+        var skill = String.valueOf(oldCopy.getFileName());
+        try (var copy = openOldCopy(oldCopy)) {
+            if (copy == null) return copied;
+            for (var path : paths) {
+                var to = target.resolve(path);
+                // Promotion blanks every value under credentials/, so the library's file there is only a placeholder.
+                boolean replace = intoNewCopy && Files.exists(to, LinkOption.NOFOLLOW_LINKS);
+                if (replace && !(underCredentials(Path.of(path)) && Files.isRegularFile(to, LinkOption.NOFOLLOW_LINKS))) continue;
+                var destination = new Destination(to, realTarget, replace, intoNewCopy);
+                if (copyFile(copy, List.of(path.split("/")), path, skill, destination)) copied.add(path);
             }
-            var to = target.resolve(path);
-            var folder = to.getParent();
-            if (folder == null) continue;
-            // Promotion blanks every value under credentials/, so the library's file there is only a placeholder.
-            boolean replace = intoNewCopy && Files.exists(to, LinkOption.NOFOLLOW_LINKS);
-            if (replace && !(underCredentials(Path.of(path)) && Files.isRegularFile(to, LinkOption.NOFOLLOW_LINKS))) continue;
-            Files.createDirectories(folder);
-            // No agent can write either target (JF-406), so this only stops a link out of it however one got there.
-            if (!folder.toRealPath().startsWith(realTarget)) continue;
-            if (replace) Files.delete(to);
-            try (var in = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {
-                Files.copy(in, to);
-            }
-            if (intoNewCopy && posix) {
-                Files.setPosixFilePermissions(to, Files.getPosixFilePermissions(source, LinkOption.NOFOLLOW_LINKS));
-            }
-            copied.add(path);
         }
         return copied;
+    }
+
+    /** Where {@link #copyFile} writes a kept file, whether it replaces the file there, and whether it keeps the mode bits. */
+    private record Destination(Path to, Path realTarget, boolean replace, boolean keepPermissions) {}
+
+    /** Copy the file at {@code segments} below {@code dir} to its destination, one folder handle at a time. */
+    private static boolean copyFile(SecureDirectoryStream<Path> dir, List<String> segments, String path, String skill,
+                                    Destination destination) throws IOException {
+        var name = Path.of(segments.getFirst());
+        if (segments.size() > 1) {
+            try (var folder = openFolder(dir, name, PATH_CHANGED.formatted(path, skill))) {
+                return folder != null && copyFile(folder, segments.subList(1, segments.size()), path, skill, destination);
+            }
+        }
+        var attributes = attributes(dir, name);
+        if (attributes == null || !attributes.isRegularFile()) {
+            EventLogger.warn(LOG_CATEGORY, FILE_CHANGED.formatted(path, skill));
+            return false;
+        }
+        if (BEFORE_OPEN_FOR_TEST.isBound()) BEFORE_OPEN_FOR_TEST.get().accept(path);
+        var to = destination.to();
+        try (var in = openFile(dir, name, FILE_CHANGED.formatted(path, skill))) {
+            if (in == null) return false;
+            var folder = to.getParent();
+            if (folder == null) return false;
+            Files.createDirectories(folder);
+            // No agent can write either target (JF-406), so this only stops a link out of it however one got there.
+            if (!folder.toRealPath().startsWith(destination.realTarget())) return false;
+            if (destination.replace()) Files.delete(to);
+            Files.copy(in, to);
+        }
+        if (destination.keepPermissions() && attributes instanceof PosixFileAttributes posix) {
+            Files.setPosixFilePermissions(to, posix.permissions());
+        }
+        return true;
+    }
+
+    /**
+     * Run {@code body} with {@code beforeOpen} called with each kept path just before its file is opened, once every
+     * check on it has passed, so a test can swap the copy's files for links where a race would.
+     */
+    public static <T, X extends Throwable> T callWithOpenHookForTest(Consumer<String> beforeOpen, CallableOp<T, X> body) throws X {
+        return ScopedValue.where(BEFORE_OPEN_FOR_TEST, beforeOpen).call(body);
     }
 
     private static Path newFolder(Path skillDir) throws IOException {

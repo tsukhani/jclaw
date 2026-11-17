@@ -2,6 +2,7 @@ package services;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.ScopedValue.CallableOp;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -19,7 +20,23 @@ import java.util.Comparator;
  */
 public final class AtomicDirSwap {
 
+    private static final ScopedValue<MoveHook> BEFORE_MOVE_FOR_TEST = ScopedValue.newInstance();
+
     private AtomicDirSwap() {}
+
+    /** A move {@link #atomicSwap} is about to make, which a test can fail by throwing. */
+    @FunctionalInterface
+    public interface MoveHook {
+        void beforeMove(Path from, Path to) throws IOException;
+    }
+
+    /**
+     * Run {@code body} with {@code beforeMove} called before each move {@link #atomicSwap} makes, so a test can fail
+     * the step after the old target left for its backup, which no file permission can reach alone.
+     */
+    public static <T, X extends Throwable> T callWithMoveHookForTest(MoveHook beforeMove, CallableOp<T, X> body) throws X {
+        return ScopedValue.where(BEFORE_MOVE_FOR_TEST, beforeMove).call(body);
+    }
 
     /** A {@link Path}-consuming step that fills a freshly-created staging directory. */
     @FunctionalInterface
@@ -59,19 +76,24 @@ public final class AtomicDirSwap {
     public static void atomicSwap(Path targetDir, Path stagingDir, Path backupDir,
                                   boolean replacing) throws IOException {
         if (replacing) {
-            Files.move(targetDir, backupDir);
+            move(targetDir, backupDir);
         }
         try {
-            Files.move(stagingDir, targetDir);
+            move(stagingDir, targetDir);
         } catch (IOException swapEx) {
             if (replacing && Files.isDirectory(backupDir)) {
-                try { Files.move(backupDir, targetDir); } catch (IOException _) { /* best-effort rollback; original swap error rethrown below */ }
+                try { move(backupDir, targetDir); } catch (IOException _) { /* best-effort rollback; original swap error rethrown below */ }
             }
             throw swapEx;
         }
         if (replacing && Files.isDirectory(backupDir)) {
             deleteRecursive(backupDir);
         }
+    }
+
+    private static void move(Path from, Path to) throws IOException {
+        if (BEFORE_MOVE_FOR_TEST.isBound()) BEFORE_MOVE_FOR_TEST.get().beforeMove(from, to);
+        Files.move(from, to);
     }
 
     /** Recursively delete {@code dir}, best-effort per entry; a no-op when it does not exist. */

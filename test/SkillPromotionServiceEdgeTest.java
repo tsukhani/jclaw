@@ -10,13 +10,17 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import services.AtomicDirSwap;
+import services.EventLogger;
 import services.KeptSkillFiles;
 import services.NotificationBus;
 import services.SkillPromotionService;
 import services.Tx;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
@@ -25,7 +29,9 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * Edge coverage for {@code SkillPromotionService} complementing
@@ -579,6 +585,175 @@ class SkillPromotionServiceEdgeTest extends UnitTest {
         } finally {
             SkillPromotionService.deleteRecursive(outside);
         }
+    }
+
+    // ==================== JF-389: the old copy changing while it is copied, and a swap with no way back ====================
+
+    /** An update that a test calls from a lambda with no checked exceptions. */
+    private static void update(Agent agent, String skill) {
+        try {
+            SkillPromotionService.copyToAgentWorkspace(agent, skill);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Run once, at the first file {@code path}: what an agent's shell does to its own copy while JClaw reads it. */
+    private static Consumer<String> onceAt(String path, ThrowingRunnable swap) {
+        var done = new AtomicBoolean();
+        return opened -> {
+            if (!opened.equals(path) || !done.compareAndSet(false, true)) return;
+            try {
+                swap.run();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws IOException;
+    }
+
+    private static List<String> messagesStartingWith(List<EventLogger.Captured> logged, String prefix) {
+        return logged.stream().map(EventLogger.Captured::message).filter(m -> m.startsWith(prefix)).toList();
+    }
+
+    @Test
+    void aFolderSwappedForALinkJustBeforeItsFileIsOpenedKeepsTheOperatorsFileNotTheOneOutside() throws Exception {
+        var agent = agentWithOldCopy("keep-swap-folder", "gamma");
+        var copy = agentCopy(agent, "gamma");
+        write(copy.resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf389\n");
+        var outside = Files.createTempDirectory("jf389-outside-");
+        var aside = Files.createTempDirectory("jf389-aside-");
+        try {
+            Files.writeString(outside.resolve("gamma-api-key.txt"), "not the skill's\n");
+
+            KeptSkillFiles.callWithOpenHookForTest(onceAt("credentials/gamma-api-key.txt", () -> {
+                Files.move(copy.resolve("credentials"), aside.resolve("credentials"));
+                Files.createSymbolicLink(copy.resolve("credentials"), outside);
+            }), () -> {
+                update(agent, "gamma");
+                return null;
+            });
+
+            assertEquals(Map.of("credentials/gamma-api-key.txt", "sk-gamma-fake-jf389\n"), keptFiles(agent, "gamma"),
+                    "the file read is the one the checks passed, through the folder handle already open");
+            assertEquals(List.of("SKILL.md"), filesIn(agentCopy(agent, "gamma")),
+                    "the carry-over finds a link where the folder was and follows it nowhere");
+            assertEquals("not the skill's\n", Files.readString(outside.resolve("gamma-api-key.txt")));
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+            SkillPromotionService.deleteRecursive(aside);
+        }
+    }
+
+    @Test
+    void aFileSwappedForALinkJustBeforeItIsOpenedIsNotKeptAndTheSkipIsLogged() throws Exception {
+        var agent = agentWithOldCopy("keep-swap-file", "gamma");
+        var copy = agentCopy(agent, "gamma");
+        write(copy.resolve("credentials/a.txt"), "first\n");
+        write(copy.resolve("credentials/b.txt"), "second\n");
+        var outside = Files.createTempDirectory("jf389-outside-");
+        try {
+            Files.writeString(outside.resolve("secret.txt"), "not the skill's\n");
+
+            var logged = EventLogger.captureForTest(() -> KeptSkillFiles.callWithOpenHookForTest(
+                    onceAt("credentials/b.txt", () -> {
+                        Files.delete(copy.resolve("credentials/b.txt"));
+                        Files.createSymbolicLink(copy.resolve("credentials/b.txt"), outside.resolve("secret.txt"));
+                    }), () -> {
+                        update(agent, "gamma");
+                        return null;
+                    }));
+
+            assertEquals(Map.of("credentials/a.txt", "first\n"), keptFiles(agent, "gamma"));
+            assertEquals(List.of("SKILL.md", "credentials/a.txt"), filesIn(agentCopy(agent, "gamma")));
+            assertEquals(List.of(KeptSkillFiles.FILE_CHANGED.formatted("credentials/b.txt", "gamma")),
+                    messagesStartingWith(logged, "Did not keep"));
+            assertEquals("Did not keep credentials/b.txt of skill gamma's old copy: it stopped being a regular file while it"
+                    + " was read", KeptSkillFiles.FILE_CHANGED.formatted("credentials/b.txt", "gamma"));
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+        }
+    }
+
+    @Test
+    void aFolderSwappedForALinkBeforeItsFileIsReachedKeepsNothingFromItAndTheSkipIsLogged() throws Exception {
+        var agent = agentWithOldCopy("keep-swap-subfolder", "gamma");
+        var copy = agentCopy(agent, "gamma");
+        write(copy.resolve("credentials/a.txt"), "first\n");
+        write(copy.resolve("credentials/sub/b.txt"), "second\n");
+        var outside = Files.createTempDirectory("jf389-outside-");
+        var aside = Files.createTempDirectory("jf389-aside-");
+        try {
+            Files.writeString(outside.resolve("b.txt"), "not the skill's\n");
+
+            var logged = EventLogger.captureForTest(() -> KeptSkillFiles.callWithOpenHookForTest(
+                    onceAt("credentials/a.txt", () -> {
+                        Files.move(copy.resolve("credentials/sub"), aside.resolve("sub"));
+                        Files.createSymbolicLink(copy.resolve("credentials/sub"), outside);
+                    }), () -> {
+                        update(agent, "gamma");
+                        return null;
+                    }));
+
+            assertEquals(Map.of("credentials/a.txt", "first\n"), keptFiles(agent, "gamma"));
+            assertEquals(List.of(KeptSkillFiles.PATH_CHANGED.formatted("credentials/sub/b.txt", "gamma")),
+                    messagesStartingWith(logged, "Did not keep"));
+            assertEquals("Did not keep credentials/sub/b.txt of skill gamma's old copy: a folder on its path stopped being"
+                    + " a real folder while it was read", KeptSkillFiles.PATH_CHANGED.formatted("credentials/sub/b.txt", "gamma"));
+        } finally {
+            SkillPromotionService.deleteRecursive(outside);
+            SkillPromotionService.deleteRecursive(aside);
+        }
+    }
+
+    @Test
+    void aSwapThatFailsAfterTheOldCopyLeftAndCannotGoBackKeepsWhatWasKeptAndListsIt() throws Exception {
+        var agent = agentWithOldCopy("keep-no-way-back", "gamma");
+        var target = agentCopy(agent, "gamma");
+        write(target.resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf389\n");
+
+        var logged = EventLogger.captureForTest(() -> {
+            var thrown = Assertions.assertThrows(UncheckedIOException.class, () -> AtomicDirSwap.callWithMoveHookForTest(
+                    (from, to) -> {
+                        if (to.equals(target)) throw new IOException("no space left on device (test)");
+                    }, () -> {
+                        update(agent, "gamma");
+                        return null;
+                    }));
+            assertEquals("no space left on device (test)", thrown.getCause().getMessage());
+        });
+
+        assertFalse(Files.exists(target, LinkOption.NOFOLLOW_LINKS), "the old copy left its place and could not go back");
+        assertEquals(Map.of("credentials/gamma-api-key.txt", "sk-gamma-fake-jf389\n"), keptFiles(agent, "gamma"));
+        assertEquals(List.of("The old copy of skill gamma could not be put back after the update failed and is removed;"
+                + " the files kept from it stay"), messagesStartingWith(logged, "The old copy of skill gamma"));
+    }
+
+    @Test
+    void aSwapThatFailsAfterTheOldCopyLeftPutsItBackAndRemovesWhatWasKept() throws Exception {
+        var agent = agentWithOldCopy("keep-put-back", "gamma");
+        var target = agentCopy(agent, "gamma");
+        write(target.resolve("credentials/gamma-api-key.txt"), "sk-gamma-fake-jf389\n");
+
+        var thrown = Assertions.assertThrows(UncheckedIOException.class, () -> AtomicDirSwap.callWithMoveHookForTest(
+                (from, to) -> {
+                    if (to.equals(target) && from.getFileName().toString().equals("new")) {
+                        throw new IOException("no space left on device (test)");
+                    }
+                }, () -> {
+                    update(agent, "gamma");
+                    return null;
+                }));
+
+        assertEquals("no space left on device (test)", thrown.getCause().getMessage());
+        assertEquals("sk-gamma-fake-jf389\n", Files.readString(target.resolve("credentials/gamma-api-key.txt")));
+        assertTrue(Files.readString(target.resolve("SKILL.md")).contains("version: 1.0.0"), "the old copy is back");
+        assertEquals(Map.of(), keptFiles(agent, "gamma"), "the old copy holds them, so the kept files go");
+        assertFalse(Files.exists(KeptSkillFiles.root().resolve(String.valueOf(agent.id))));
     }
 
     @Test
