@@ -134,7 +134,7 @@ Everything on this instance (conversations, agents, tasks, memories, config) liv
 
 ### The health strip
 
-The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words.
+The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), how much a **compaction would free**, **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words, and under that the line that sets when the panel flags a compaction (see [Compaction](#settings-compaction)).
 
 | Verdict | What it means |
 |---------|---------------|
@@ -179,6 +179,16 @@ JClaw shows Repair prominently when the verdict is Attention or Critical. Repair
 
 Everything a repair creates stays in `data/` (the damaged file, its trace, the recovery script and dump) because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
 
+### Compaction
+
+H2 does not make its data file smaller when rows change or are deleted. It writes the new data somewhere else in the file, and uses the old space again later. In normal running, about a fifth of the file is unused space. A compaction rewrites the file with only its live data, so the file gets smaller, and so does every backup taken after it.
+
+The health strip shows **Compaction would free** with an estimate. JClaw works it out from H2's own figures for the open file, and it is usually within a few percent of what a compaction then frees.
+
+The panel flags a compaction when it would free at least half the file and at least 100 MB. The top of the panel then shows **Space to reclaim**, with the size and the share it would free, and a **Compact** button. The share is what decides, because a healthy file of any size has about a fifth unused: the flag stays off in normal running and comes on when something has left the file mostly unused. The minimum keeps a small file from asking for a restart to free a few MB. To change either value, click **flag at 50% of the file and 100 MB** under the health strip's reason, enter the share and the minimum, and press **Save**. A share of 0 turns the flag off. A minimum of 0 lets the share decide alone.
+
+JClaw never compacts on its own: not on a schedule, and not when it starts or restarts. A compaction stops the instance and starts it again, so you choose when, with **Compact** or `jclaw compact`. How a compaction runs is described under [Encrypted credentials](#settings-encrypted-credentials).
+
 ### Encrypted credentials
 
 JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, the secret values of each MCP server, and the secrets you store for an agent's skills. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.
@@ -203,7 +213,7 @@ jclaw backup                     # online through the running instance, or from 
 jclaw backup --list              # what is in data/backups/, marking the backups that hold credentials in plaintext
 jclaw restore <zip | backup id>  # validate, stop, swap, start
 jclaw repair                     # stop, recover, rebuild, verify, compact, start; then offer cleanup
-jclaw compact                    # stop, remove the old credential copies from the data file, start
+jclaw compact                    # stop, rewrite the data file with its live data alone, start
 jclaw db-clean                   # delete what the last successful repair left behind
 jclaw db-status                  # the health strip as text
 ```

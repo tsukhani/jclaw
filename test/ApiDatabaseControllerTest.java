@@ -11,6 +11,7 @@ import play.test.FunctionalTest;
 import services.RestartService;
 import services.database.CredentialCopies;
 import services.database.DatabaseService;
+import services.database.DatabaseSize;
 import services.database.H2Maintenance;
 
 import java.nio.charset.StandardCharsets;
@@ -57,6 +58,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         DatabaseService.dataDirForTest = null;
         DatabaseService.backupsDirForTest = null;
         DatabaseService.probeForTest = null;
+        DatabaseSize.fileStatsForTest = null;
     }
 
     private void login() {
@@ -130,6 +132,65 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         assertFalse(json.get("cleanupAvailable").getAsBoolean());
         assertTrue(json.get("cleanupUnavailableReason").getAsString().contains("No repair"));
         assertTrue(json.get("maintenanceAvailable").getAsBoolean());
+    }
+
+    @Test
+    void statusSaysWhatACompactionWouldFreeAndFlagsItOnlyPastTheShareAndTheFloor() {
+        login();
+        DatabaseSize.fileStatsForTest = () -> new DatabaseSize.FileStats(556_109_824, 95, 78);
+        var json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertEquals(144_032_445, json.get("reclaimableBytes").getAsLong());
+        assertEquals(DatabaseSize.DEFAULT_FLAG_AT_PERCENT, json.get("compactionFlagAtPercent").getAsInt());
+        assertEquals(DatabaseSize.DEFAULT_FLAG_AT_MB, json.get("compactionFlagAtMb").getAsInt());
+        assertFalse(json.get("compactionFlagged").getAsBoolean(), "26% unused is under half the file");
+
+        DatabaseSize.fileStatsForTest = () -> new DatabaseSize.FileStats(1_746_000_000, 100, 21);
+        json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertEquals(1_379_340_000, json.get("reclaimableBytes").getAsLong());
+        assertTrue(json.get("compactionFlagged").getAsBoolean(), "79% unused, and over 100 MB");
+    }
+
+    @Test
+    void theShareAndFloorSetThroughConfigAreTheOnesTheStatusFlagsAt() {
+        login();
+        DatabaseSize.fileStatsForTest = () -> new DatabaseSize.FileStats(556_109_824, 95, 78);
+        assertIsOk(POST("/api/config", "application/json", """
+                {"key": "db.compaction.flagAtPercent", "value": "25"}
+                """));
+        var json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertEquals(25, json.get("compactionFlagAtPercent").getAsInt());
+        assertTrue(json.get("compactionFlagged").getAsBoolean(), "26% unused is over 25%, and 137 MB over 100 MB");
+
+        assertIsOk(POST("/api/config", "application/json", """
+                {"key": "db.compaction.flagAtMb", "value": "200"}
+                """));
+        json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertEquals(200, json.get("compactionFlagAtMb").getAsInt());
+        assertFalse(json.get("compactionFlagged").getAsBoolean(), "137 MB is under the 200 MB floor");
+
+        assertEquals(403, POST("/api/config", "application/json", """
+                {"key": "db.compaction.flagAtPercent", "value": "101"}
+                """).status.intValue());
+        json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertEquals(25, json.get("compactionFlagAtPercent").getAsInt(), "a refused write stores nothing");
+    }
+
+    @Test
+    void aDatabaseThatReportsNoFileFiguresStillAnswersTheStatus() {
+        login();
+        DatabaseSize.fileStatsForTest = () -> null;
+        var response = GET("/api/system/database");
+        assertIsOk(response);
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertTrue(json.get("reclaimableBytes") == null || json.get("reclaimableBytes").isJsonNull());
+        assertFalse(json.get("compactionFlagged").getAsBoolean());
+    }
+
+    @Test
+    void theInMemoryTestDatabaseItselfReportsNoFileFigures() {
+        login();
+        var json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        assertTrue(json.get("reclaimableBytes") == null || json.get("reclaimableBytes").isJsonNull());
     }
 
     @Test

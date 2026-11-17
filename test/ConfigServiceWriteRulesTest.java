@@ -12,6 +12,7 @@ import services.OperatorAlerts;
 import services.PrivilegedConfig;
 import services.SessionCompactor;
 import services.database.DatabaseService;
+import services.database.DatabaseSize;
 import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
 import services.decision.LayaDecision;
@@ -404,6 +405,16 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         assertRefused("db.backup.retention must be at least 1.", DatabaseService.KEY_RETENTION, "0");
         assertRefusedAsOwnerSays(DatabaseService.rejectionFor(DatabaseService.KEY_SCHEDULE, "noon"),
                 DatabaseService.KEY_SCHEDULE, "noon");
+    }
+
+    @Test
+    void theCompactionFlagKeysAnswerTheirOwnersRule() {
+        assertRefusedAsOwnerSays(DatabaseSize.rejectionFor(DatabaseSize.KEY_FLAG_AT_PERCENT, "101"),
+                DatabaseSize.KEY_FLAG_AT_PERCENT, "101");
+        assertRefusedAsOwnerSays(DatabaseSize.rejectionFor(DatabaseSize.KEY_FLAG_AT_MB, "-1"),
+                DatabaseSize.KEY_FLAG_AT_MB, "-1");
+        assertAccepted(DatabaseSize.KEY_FLAG_AT_PERCENT, "0");
+        assertAccepted(DatabaseSize.KEY_FLAG_AT_MB, "0");
     }
 
     @Test

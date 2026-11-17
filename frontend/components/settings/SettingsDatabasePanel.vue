@@ -84,6 +84,13 @@ interface DatabaseStatus {
   credentials?: { due: 'PLAINTEXT' | 'PREVIOUS_SECRET' | null, encryptedAt: string | null, compactedAt: string | null }
   /** The raw data-file copies `jclaw.sh upgrade` keeps beside the backups. */
   upgradeCopies?: BackupInfo[]
+  /** What a compaction would free, by H2's own figures; null when the database reports none (JF-495). */
+  reclaimableBytes?: number | null
+  /** db.compaction.flagAtPercent: the share of the file a compaction must free to flag, 0 for never. */
+  compactionFlagAtPercent?: number
+  /** db.compaction.flagAtMb: the least it must free as well, 0 for no minimum. */
+  compactionFlagAtMb?: number
+  compactionFlagged?: boolean
 }
 
 const { confirm } = useConfirm()
@@ -312,11 +319,23 @@ const statusLine = computed(() => {
 })
 
 const compactionDue = computed(() => status.value?.credentials?.due ?? null)
+const compactionFlagged = computed(() => status.value?.compactionFlagged === true)
+
+const spaceReason = computed(() => {
+  const s = status.value
+  if (s?.reclaimableBytes == null) return ''
+  const share = s.dataFileBytes > 0 ? ` (${Math.round(s.reclaimableBytes / s.dataFileBytes * 100)}%)` : ''
+  return `Compaction would free about ${formatSize(s.reclaimableBytes)} of the ${formatSize(s.dataFileBytes)} file${share}.`
+})
 
 async function compact() {
+  const gains: string[] = []
+  const reclaimable = status.value?.reclaimableBytes
+  if (reclaimable != null) gains.push(`freeing about ${formatSize(reclaimable)}`)
+  if (compactionDue.value) gains.push('removing the old copies of the stored credentials')
   const ok = await confirm({
     title: 'Compact the database',
-    message: 'Rewrites the data file with only its live data, which removes the old copies of the stored credentials. '
+    message: `Rewrites the data file with only its live data${gains.length ? `, ${gains.join(' and ')}` : ''}. `
       + 'The file is replaced only once the copy matches it row for row. JClaw restarts; this page reconnects on its own.',
     confirmText: 'Compact',
   })
@@ -428,6 +447,36 @@ async function turnOffSchedule() {
   if (await writeConfig('db.backup.schedule', '')) scheduleDraft.value = ''
 }
 
+const editingFlagAt = ref(false)
+const flagAtPercentDraft = ref('')
+const flagAtMbDraft = ref('')
+
+function startFlagAtEdit() {
+  editingFlagAt.value = true
+  failure.value = null
+  flagAtPercentDraft.value = String(status.value?.compactionFlagAtPercent ?? 50)
+  flagAtMbDraft.value = String(status.value?.compactionFlagAtMb ?? 100)
+}
+
+/** Writes only what changed, the share first, and stops at the first refusal so its message stays on screen. */
+async function saveFlagAt() {
+  const writes: Array<[string, string, number | undefined]> = [
+    ['db.compaction.flagAtPercent', String(flagAtPercentDraft.value).trim(), status.value?.compactionFlagAtPercent],
+    ['db.compaction.flagAtMb', String(flagAtMbDraft.value).trim(), status.value?.compactionFlagAtMb],
+  ]
+  for (const [key, value, stored] of writes) {
+    if (value !== String(stored) && !(await writeConfig(key, value))) return
+  }
+  editingFlagAt.value = false
+}
+
+const flagAtLabel = computed(() => {
+  const percent = status.value?.compactionFlagAtPercent ?? 50
+  const mb = status.value?.compactionFlagAtMb ?? 100
+  if (percent <= 0) return 'never flag'
+  return mb > 0 ? `flag at ${percent}% of the file and ${mb} MB` : `flag at ${percent}% of the file`
+})
+
 /** How long a finished restore or repair stays on screen, measured from when it started. */
 const LAST_OP_WINDOW_MS = 15 * 60 * 1000
 
@@ -477,19 +526,20 @@ const lastOp = computed(() => {
       copy of that file with your backups, because restored without it, every credential has to be entered again.
     </p>
 
-    <!-- Compaction: only while the data file still holds old copies of the credentials, or just after one ran. -->
+    <!-- Compaction: while the data file holds old copies of the credentials or would free the flag's amount,
+         or just after one ran. Nothing compacts unless the operator presses Compact. -->
     <div
-      v-if="compactionDue || (lastOp && lastOp.panel === 'compact')"
+      v-if="compactionDue || compactionFlagged || (lastOp && lastOp.panel === 'compact')"
       class="bg-surface-elevated border"
-      :class="compactionDue ? 'border-amber-500/70' : 'border-border'"
+      :class="compactionDue || compactionFlagged ? 'border-amber-500/70' : 'border-border'"
       data-testid="db-compaction"
     >
       <div
-        v-if="compactionDue"
+        v-if="compactionDue || compactionFlagged"
         class="px-4 py-2.5 flex items-center justify-between gap-4"
       >
         <div class="min-w-0">
-          <span class="text-sm font-medium text-fg-strong">Old credential copies</span>
+          <span class="text-sm font-medium text-fg-strong">{{ compactionDue ? 'Old credential copies' : 'Space to reclaim' }}</span>
           <div
             class="text-xs text-fg-muted mt-0.5"
             data-testid="db-compaction-reason"
@@ -498,9 +548,12 @@ const lastOp = computed(() => {
               The data file still holds the plaintext the stored credentials had before they were encrypted.
               Until it is compacted, anyone with a copy of the file can read them, and so can anyone with a backup taken now.
             </template>
-            <template v-else>
+            <template v-else-if="compactionDue">
               The data file still holds copies of the stored credentials encrypted with the previous secret.
               Compact it so they go with that secret.
+            </template>
+            <template v-if="compactionFlagged">
+              {{ spaceReason }}
             </template>
             <template v-if="status && !status.maintenanceAvailable">
               {{ status.maintenanceUnavailableReason }}
@@ -520,7 +573,7 @@ const lastOp = computed(() => {
       <div
         v-if="lastOp && lastOp.panel === 'compact'"
         class="px-4 py-2 text-xs"
-        :class="[compactionDue ? 'border-t border-border' : '',
+        :class="[compactionDue || compactionFlagged ? 'border-t border-border' : '',
                  lastOp.failed ? 'text-red-700 dark:text-red-400' : lastOp.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted']"
         data-testid="db-last-op"
       >
@@ -556,6 +609,18 @@ const lastOp = computed(() => {
             </dt>
             <dd class="text-fg-strong">
               {{ sizeLine }}
+            </dd>
+          </div>
+          <div
+            v-if="status.reclaimableBytes != null"
+            class="flex gap-1.5"
+            data-testid="db-reclaimable"
+          >
+            <dt class="text-fg-muted">
+              Compaction would free
+            </dt>
+            <dd class="text-fg-strong">
+              about {{ formatSize(status.reclaimableBytes) }}
             </dd>
           </div>
           <div class="flex gap-1.5">
@@ -620,6 +685,55 @@ const lastOp = computed(() => {
         <template v-if="status.firstCorruptionAt">
           First read failure in the window: {{ when(status.firstCorruptionAt) }}.
         </template>
+      </div>
+      <!-- db.compaction.flagAtPercent and flagAtMb: a compaction flags the panel above once it would free both. -->
+      <div
+        v-if="status"
+        class="px-4 py-2 border-t border-border flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+        data-testid="db-compaction-flag"
+      >
+        <span class="font-mono text-fg-muted">compaction</span>
+        <template v-if="editingFlagAt">
+          <span class="text-fg-muted">flag once it would free</span>
+          <input
+            v-model="flagAtPercentDraft"
+            type="number"
+            min="0"
+            max="100"
+            aria-label="Share of the file a compaction must free to flag it, in percent"
+            class="w-16 px-2 py-0.5 bg-muted border border-input text-fg-strong font-mono focus:outline-hidden"
+            @keydown.enter="saveFlagAt"
+            @keydown.escape="editingFlagAt = false"
+          >
+          <span class="text-fg-muted">% of the file and at least</span>
+          <input
+            v-model="flagAtMbDraft"
+            type="number"
+            min="0"
+            aria-label="Least a compaction must free to flag it, in MB"
+            class="w-24 px-2 py-0.5 bg-muted border border-input text-fg-strong font-mono focus:outline-hidden"
+            @keydown.enter="saveFlagAt"
+            @keydown.escape="editingFlagAt = false"
+          >
+          <span class="text-fg-muted">MB</span>
+          <button
+            class="text-emerald-700 dark:text-emerald-400"
+            @click="saveFlagAt"
+          >
+            Save
+          </button>
+        </template>
+        <button
+          v-else
+          class="text-fg-primary hover:underline"
+          title="Flag a compaction once it would free this share of the file and this much; a share of 0 never flags"
+          @click="startFlagAtEdit"
+        >
+          {{ flagAtLabel }}
+        </button>
+        <span class="text-fg-muted">
+          JClaw never compacts on its own: a compaction restarts it, so you choose when.
+        </span>
       </div>
     </div>
 

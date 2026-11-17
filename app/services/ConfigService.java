@@ -34,6 +34,7 @@ import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.browser.ScriptNode;
 import services.database.DatabaseService;
+import services.database.DatabaseSize;
 import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
 import services.decision.LayaDecision;
@@ -454,6 +455,7 @@ public class ConfigService {
             configuredProvider(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY),
             // JCLAW-1165: a schedule that never fires or a retention of zero is silent at read.
             under("db.backup.", DatabaseService::rejectionFor),
+            under("db.compaction.", DatabaseSize::rejectionFor),
             // JCLAW-34: a collector URL or sampler ratio that cannot take effect is refused
             // here, where the write happens, rather than logged at the next export.
             under(OtelConfig.KEY_PREFIX, OtelConfig::rejectionFor),

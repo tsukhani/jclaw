@@ -71,6 +71,8 @@ public final class ConfigKeyCatalog {
             db.backup.dir
             db.backup.retention
             db.backup.schedule
+            db.compaction.flagAtMb
+            db.compaction.flagAtPercent
             decision.baseten.apiKey
             decision.jev.apiKey
             decision.laya.apiKey

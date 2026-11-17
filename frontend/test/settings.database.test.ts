@@ -523,6 +523,113 @@ describe('Settings → Database — the credentials\' old copies (JCLAW-1455)', 
   })
 })
 
+describe('Settings → Database — what a compaction would free (JF-495)', () => {
+  const rule = { compactionFlagAtPercent: 50, compactionFlagAtMb: 100 }
+  const bloated = { ...rule, dataFileBytes: 1_746_000_000, reclaimableBytes: 1_379_340_000 }
+
+  it('shows the estimate in the strip and flags nothing while it is under the rule', async () => {
+    status = healthy({ ...rule, reclaimableBytes: 144_032_445, compactionFlagged: false })
+    const c = await mount()
+    expect(c.find('[data-testid="db-reclaimable"] dt').text()).toBe('Compaction would free')
+    expect(c.find('[data-testid="db-reclaimable"] dd').text()).toBe('about 137.4 MB')
+    expect(c.find('[data-testid="db-compaction"]').exists()).toBe(false)
+    const flagRow = c.find('[data-testid="db-compaction-flag"]')
+    expect(flagRow.find('button').text()).toBe('flag at 50% of the file and 100 MB')
+    expect(flagRow.find('span:last-child').text())
+      .toBe('JClaw never compacts on its own: a compaction restarts it, so you choose when.')
+  })
+
+  it('leaves the figure out when the database reports none', async () => {
+    status = healthy({ ...rule, reclaimableBytes: null, compactionFlagged: false })
+    const c = await mount()
+    expect(c.find('[data-testid="db-reclaimable"]').exists()).toBe(false)
+  })
+
+  it('flags the space once the backend says it passed the rule, and hands the compaction off once confirmed', async () => {
+    status = healthy({ ...bloated, compactionFlagged: true })
+    const c = await mount()
+    const panel = c.find('[data-testid="db-compaction"]')
+    expect(panel.classes()).toContain('border-amber-500/70')
+    expect(panel.text()).toContain('Space to reclaim')
+    expect(c.find('[data-testid="db-compaction-reason"]').text())
+      .toBe('Compaction would free about 1.3 GB of the 1.6 GB file (79%).')
+
+    await c.find('[data-testid="db-compact"]').trigger('click')
+    await settle()
+    expect(document.querySelector('[role="dialog"]')?.textContent)
+      .toContain('Rewrites the data file with only its live data, freeing about 1.3 GB.')
+    dialogButton('Compact')!.click()
+    await settle()
+    expect(posts).toEqual([{ url: '/api/system/database/compact', body: {} }])
+  })
+
+  it('shows no panel for the same estimate while the backend has not flagged it', async () => {
+    status = healthy({ ...bloated, compactionFlagAtMb: 2000, compactionFlagged: false })
+    const c = await mount()
+    expect(c.find('[data-testid="db-compaction"]').exists()).toBe(false)
+    expect(c.find('[data-testid="db-reclaimable"] dt').text()).toBe('Compaction would free')
+    expect(c.find('[data-testid="db-reclaimable"] dd').text()).toBe('about 1.3 GB')
+  })
+
+  it('gives both reasons when old credential copies are due as well', async () => {
+    status = healthy({
+      ...bloated,
+      compactionFlagged: true,
+      credentials: { due: 'PLAINTEXT', encryptedAt: '2026-10-16T01:00:00Z', compactedAt: null },
+    })
+    const c = await mount()
+    expect(c.find('[data-testid="db-compaction"]').text()).toContain('Old credential copies')
+    const reason = c.find('[data-testid="db-compaction-reason"]').text()
+    expect(reason).toContain('still holds the plaintext')
+    expect(reason).toContain('Compaction would free about 1.3 GB of the 1.6 GB file (79%).')
+
+    await c.find('[data-testid="db-compact"]').trigger('click')
+    await settle()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Rewrites the data file with only its live data, freeing about 1.3 GB and removing the old copies of the stored credentials.')
+  })
+
+  it('saves a changed share and floor as ordinary config writes', async () => {
+    status = healthy({ ...rule, reclaimableBytes: 144_032_445, compactionFlagged: false })
+    const c = await mount()
+    await c.findAll('button').find(b => b.text() === 'flag at 50% of the file and 100 MB')!.trigger('click')
+    const percent = c.find('input[aria-label="Share of the file a compaction must free to flag it, in percent"]')
+    const mb = c.find('input[aria-label="Least a compaction must free to flag it, in MB"]')
+    expect((percent.element as HTMLInputElement).value).toBe('50')
+    expect((mb.element as HTMLInputElement).value).toBe('100')
+    await percent.setValue('40')
+    await mb.setValue('250')
+    await mb.trigger('keydown.enter')
+    await settle()
+    expect(posts).toEqual([
+      { url: '/api/config', body: { key: 'db.compaction.flagAtPercent', value: '40' } },
+      { url: '/api/config', body: { key: 'db.compaction.flagAtMb', value: '250' } },
+    ])
+  })
+
+  it('writes only the value that changed', async () => {
+    status = healthy({ ...rule, reclaimableBytes: 144_032_445, compactionFlagged: false })
+    const c = await mount()
+    await c.findAll('button').find(b => b.text() === 'flag at 50% of the file and 100 MB')!.trigger('click')
+    const mb = c.find('input[aria-label="Least a compaction must free to flag it, in MB"]')
+    await mb.setValue('0')
+    await mb.trigger('keydown.enter')
+    await settle()
+    expect(posts).toEqual([{ url: '/api/config', body: { key: 'db.compaction.flagAtMb', value: '0' } }])
+  })
+
+  it('reads a share of 0 as never flagging, and a floor of 0 as the share alone', async () => {
+    status = healthy({ ...bloated, compactionFlagAtPercent: 0, compactionFlagged: false })
+    const never = await mount()
+    expect(never.findAll('button').some(b => b.text() === 'never flag')).toBe(true)
+
+    status = healthy({ ...bloated, compactionFlagAtMb: 0, compactionFlagged: true })
+    clearNuxtData()
+    const shareAlone = await mount()
+    expect(shareAlone.findAll('button').some(b => b.text() === 'flag at 50% of the file')).toBe(true)
+  })
+})
+
 /** A failed save must say whether the server refused the value or was never reached (JCLAW-1219). */
 describe('Settings → Database — a config save that fails', () => {
   /** The /api/config POST handler the rest of this file relies on, put back after an override. */

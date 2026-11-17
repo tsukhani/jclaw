@@ -122,7 +122,9 @@ public final class DatabaseService {
                          boolean cleanupAvailable, @Nullable String cleanupUnavailableReason,
                          @Nullable LastOperation lastOperation,
                          boolean maintenanceAvailable, @Nullable String maintenanceUnavailableReason,
-                         CredentialCopiesView credentials, List<BackupInfo> upgradeCopies) {}
+                         CredentialCopiesView credentials, List<BackupInfo> upgradeCopies,
+                         @Nullable Long reclaimableBytes, int compactionFlagAtPercent, int compactionFlagAtMb,
+                         boolean compactionFlagged) {}
 
     private DatabaseService() {}
 
@@ -579,6 +581,9 @@ public final class DatabaseService {
         var maintenance = RestartService.unavailableReason();
         var scheduledAt = lastScheduledAt;
         var first = health.trace().firstAt();
+        var stats = DatabaseSize.fileStats();
+        var flagAtPercent = DatabaseSize.flagAtPercent();
+        var flagAtMb = DatabaseSize.flagAtMb();
         return new Status(health.verdict().name(), health.reason(),
                 sizeOf(data.resolve(H2Maintenance.DATA_FILE)), sizeOf(data.resolve(H2Maintenance.TRACE_FILE)),
                 sizeOf(data.resolve(H2Maintenance.PRE_RESTORE_FILE)),
@@ -592,7 +597,9 @@ public final class DatabaseService {
                 manifest, cleanupReason == null, cleanupReason,
                 lastOperation(),
                 maintenance == null, maintenance,
-                credentialCopies(), listUpgradeCopies());
+                credentialCopies(), listUpgradeCopies(),
+                stats == null ? null : stats.reclaimableBytes(), flagAtPercent, flagAtMb,
+                DatabaseSize.flagged(stats, flagAtPercent, flagAtMb));
     }
 
     static long sizeOf(Path path) {
