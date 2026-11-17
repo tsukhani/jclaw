@@ -61,15 +61,16 @@
   commitMessageAction: "bump",
 
   // enabledManagers is an allowlist — managers not listed don't run, even
-  // ones config:recommended would otherwise enable by default. 'gradle' +
-  // 'gradle-wrapper' cover build.gradle.kts and gradle-wrapper.properties
-  // (the entire Java dependency tree, plus Gradle itself); 'npm' covers
+  // ones config:recommended would otherwise enable by default. 'gradle'
+  // covers build.gradle.kts (the entire Java dependency tree). The Gradle
+  // wrapper follows the play1 fork's (PF-216, `play gradle-sync`), so
+  // 'gradle-wrapper' stays off: this runner cannot run ./gradlew, so its
+  // bumps left distributionSha256Sum stale (JF-484); 'npm' covers
   // frontend/package.json, all but its pnpm pin in `packageManager`, which
   // follows the play1 fork (its rule below); 'dockerfile' +
   // 'docker-compose' cover the prod + devcontainer images.
   enabledManagers: [
     "gradle",
-    "gradle-wrapper",
     "npm",
     "dockerfile",
     "docker-compose",
@@ -189,17 +190,11 @@
     // runs ./gradlew only when the admin config's allowedUnsafeExecutions lists
     // gradleWrapper, and its container has no /opt/play1 for
     // settings.gradle.kts. Until /renovate rewrites the lock, the branch fails
-    // to resolve. Plugin bumps leave the lock alone but wait with them;
-    // gradle-wrapper patches still auto-merge.
+    // to resolve. Plugin bumps leave the lock alone but wait with them.
     // Must sit after the catch-all because Renovate evaluates packageRules
     // in order, last match wins.
     {
       matchManagers: ["gradle"],
-      automerge: false,
-    },
-    {
-      matchManagers: ["gradle-wrapper"],
-      matchUpdateTypes: ["minor"],
       automerge: false,
     },
 
@@ -220,7 +215,7 @@
       matchDepNames: ["tsukhani/play1"],
       automerge: false,
       prBodyNotes: [
-        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging, then rewrite `gradle.lockfile` (`./gradlew dependencies --write-locks`): a library the fork starts or stops shipping changes the locked graph. Then run `play pnpm-sync` and commit `frontend/package.json` with `frontend/pnpm-lock.yaml`: the pnpm pin follows the fork.",
+        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging, then rewrite `gradle.lockfile` (`./gradlew dependencies --write-locks`): a library the fork starts or stops shipping changes the locked graph. Then run `play gradle-sync` and `play pnpm-sync`, and commit what they change (`gradle/wrapper/`, `gradlew`, `gradlew.bat`, `frontend/package.json`, `frontend/pnpm-lock.yaml`): the Gradle wrapper and the pnpm pin follow the fork.",
       ],
     },
 
