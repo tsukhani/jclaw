@@ -206,6 +206,20 @@ public final class OperatorAlerts {
                 .formatted(taskName, agentLabel(agentName));
     }
 
+    /** Called when a restart cut off one run of a recurring task, which waits for its next occurrence (JF-355). */
+    public static void onOccurrenceCutOff(Task task, @Nullable String agentName, @Nullable Instant next) {
+        announceTask(occurrenceCutOffAlert(task.name, agentName,
+                next != null ? next.atZone(TimezoneResolver.resolve(task)) : null));
+    }
+
+    public static String occurrenceCutOffAlert(String taskName, @Nullable String agentName,
+                                               @Nullable ZonedDateTime next) {
+        return ("JClaw alert: task '%s'%s was cut off when JClaw stopped, before its run finished. That run is not"
+                + " repeated, so nothing it already did happens twice. It runs again at %s.")
+                .formatted(taskName, agentLabel(agentName),
+                        next != null ? NEXT_RUN.format(next) : "its next scheduled time");
+    }
+
     /** Sent in place of {@link #onOccurrenceFailed} when the failed occurrence paused the task. */
     public static void onTaskPaused(Task task, @Nullable String agentName, int failedRuns, String reason, String error) {
         announceTask(pauseAlert(task.name, agentName, failedRuns, reason, error));

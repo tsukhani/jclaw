@@ -8,6 +8,7 @@ import services.OperatorAlerts;
 import services.RestartCutOff;
 import services.TaskDeadExecutionHandler;
 import services.TaskDeadExecutionHandler.Decision;
+import services.TimezoneResolver;
 
 import java.time.Instant;
 import java.util.List;
@@ -84,22 +85,52 @@ class TaskDeadExecutionHandlerTest extends UnitTest {
     }
 
     @Test
-    void aRecurringTaskMovesOnToItsNextOccurrenceInsteadOfRunningNow() {
-        var task = recurring("jf355-recurring", Task.Status.RUNNING);
+    void aRecurringTaskMovesOnToItsNextOccurrenceInsteadOfRunningNowAndSaysSo() {
+        var task = recurring("jf355-dead-recurring", Task.Status.RUNNING, Instant.now());
+
+        var before = Instant.now();
+        var decision = new Decision[1];
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> decision[0] = TaskDeadExecutionHandler.decide(task.id, false));
+        var after = Instant.now();
+
+        var at = assertInstanceOf(Decision.NextOccurrence.class, decision[0]).at();
+        assertFalse(at.isBefore(before.plusSeconds(1800)), "next occurrence, not now: " + at);
+        assertFalse(at.isAfter(after.plusSeconds(1800)), "one interval out: " + at);
+        var reloaded = (Task) Task.findById(task.id);
+        assertEquals(Task.Status.ACTIVE, reloaded.status);
+        assertEquals(List.of(OperatorAlerts.occurrenceCutOffAlert("jf355-dead-recurring", agent.name,
+                        at.atZone(TimezoneResolver.resolve(reloaded)))),
+                alertsNaming(alerts, "jf355-dead-recurring"));
+    }
+
+    @Test
+    void aRecurringTaskTheBootSweepClosedFiresWhenItsAlertSaidWithoutASecondAlert() {
+        var announced = Instant.parse("2099-01-01T09:00:00Z");
+        var task = recurring("jf355-swept-recurring", Task.Status.ACTIVE, announced);
+
+        var decision = new Decision[1];
+        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> decision[0] = TaskDeadExecutionHandler.decide(task.id, false));
+
+        assertEquals(new Decision.NextOccurrence(announced), decision[0]);
+        assertEquals(List.of(), alertsNaming(alerts, "jf355-swept-recurring"));
+    }
+
+    @Test
+    void aRecurringTaskWhoseRecordedNextRunHasPassedMovesOnFromNow() {
+        var task = recurring("jf355-stale-recurring", Task.Status.ACTIVE, Instant.now().minusSeconds(3600));
 
         var before = Instant.now();
         var decision = TaskDeadExecutionHandler.decide(task.id, false);
         var after = Instant.now();
 
         var at = assertInstanceOf(Decision.NextOccurrence.class, decision).at();
-        assertFalse(at.isBefore(before.plusSeconds(1800)), "next occurrence, not now: " + at);
+        assertFalse(at.isBefore(before.plusSeconds(1800)), "one interval from now, not the past time: " + at);
         assertFalse(at.isAfter(after.plusSeconds(1800)), "one interval out: " + at);
-        assertEquals(Task.Status.ACTIVE, ((Task) Task.findById(task.id)).status);
     }
 
     @Test
     void aCancelledRecurringTaskIsRemoved() {
-        var task = recurring("jf355-cancelled", Task.Status.CANCELLED);
+        var task = recurring("jf355-cancelled", Task.Status.CANCELLED, Instant.now());
 
         assertEquals(new Decision.Stop(), TaskDeadExecutionHandler.decide(task.id, false));
         assertEquals(Task.Status.CANCELLED, ((Task) Task.findById(task.id)).status);
@@ -122,7 +153,7 @@ class TaskDeadExecutionHandlerTest extends UnitTest {
         return t;
     }
 
-    private Task recurring(String name, Task.Status status) {
+    private Task recurring(String name, Task.Status status, Instant nextRunAt) {
         var t = new Task();
         t.agent = agent;
         t.name = name;
@@ -130,7 +161,7 @@ class TaskDeadExecutionHandlerTest extends UnitTest {
         t.type = Task.Type.INTERVAL;
         t.intervalSeconds = 1800L;
         t.status = status;
-        t.nextRunAt = Instant.now();
+        t.nextRunAt = nextRunAt;
         t.save();
         return t;
     }

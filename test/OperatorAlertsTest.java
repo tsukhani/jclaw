@@ -106,6 +106,31 @@ class OperatorAlertsTest extends UnitTest {
     }
 
     @Test
+    void aOneShotTaskARestartCutOffSaysItDoesNotRunAgainAndCanBeRetried() {
+        assertEquals("JClaw alert: task 'Send invoices' (agent main) was cut off when JClaw stopped, before its run"
+                        + " finished. It does not run again on its own, so nothing it already did is repeated. Retry it"
+                        + " from the Tasks page to run it again.",
+                OperatorAlerts.cutOffAlert("Send invoices", "main"));
+        assertEquals("JClaw alert: task 't' was cut off when JClaw stopped, before its run finished. It does not run"
+                        + " again on its own, so nothing it already did is repeated. Retry it from the Tasks page to run"
+                        + " it again.",
+                OperatorAlerts.cutOffAlert("t", null));
+    }
+
+    @Test
+    void aRecurringTaskARestartCutOffSaysWhenItRunsAgain() {
+        var next = ZonedDateTime.of(2026, 12, 25, 9, 0, 0, 0, ZoneId.of("UTC"));
+
+        assertEquals("JClaw alert: task 'Pay salaries' (agent main) was cut off when JClaw stopped, before its run"
+                        + " finished. That run is not repeated, so nothing it already did happens twice. It runs again"
+                        + " at 2026-12-25 09:00 UTC.",
+                OperatorAlerts.occurrenceCutOffAlert("Pay salaries", "main", next));
+        assertEquals("JClaw alert: task 't' was cut off when JClaw stopped, before its run finished. That run is not"
+                        + " repeated, so nothing it already did happens twice. It runs again at its next scheduled time.",
+                OperatorAlerts.occurrenceCutOffAlert("t", null, null));
+    }
+
+    @Test
     void aPausedTaskNamesTheTaskTheErrorAndThatItWaitsToBeResumed() {
         var text = OperatorAlerts.pauseAlert("Morning briefing", "main", 3, "retries exhausted", "read timed out");
 

@@ -176,7 +176,7 @@ public class BootConsistencyCheck extends Job<Void> {
      * @return number of run rows flipped to FAILED
      */
     public static int reconcileOrphanedRuns(Instant bootCutoff) {
-        var endedOneShots = new ArrayList<TaskRun>();
+        var closedRuns = new ArrayList<TaskRun>();
         int count = Tx.run(() -> {
             var now = AppClock.now();
             int closed = 0;
@@ -189,17 +189,18 @@ public class BootConsistencyCheck extends Job<Void> {
                 if (run.error == null || run.error.isBlank()) run.error = RestartCutOff.runError(run.task);
                 run.save();
                 // JF-355: the task goes with its run, before reArmOrphans below would arm a one-shot again.
-                if (!TaskRunRegistry.isTaskActive(run.task.id) && RestartCutOff.close(run.task)) endedOneShots.add(run);
+                if (!TaskRunRegistry.isTaskActive(run.task.id) && RestartCutOff.close(run.task)) closedRuns.add(run);
                 closed++;
             }
             return closed;
         });
-        for (var run : endedOneShots) RestartCutOff.announce(run.task, run);
+        for (var run : closedRuns) RestartCutOff.announce(run.task, run);
         if (count > 0) {
+            long recurring = closedRuns.stream().filter(r -> RestartCutOff.isRecurring(r.task)).count();
             EventLogger.info("task", null, null,
-                    ("BootConsistencyCheck: closed %d task run(s) a stop of JClaw cut off, %d of them one-shot tasks"
-                            + " that end FAILED instead of running again")
-                            .formatted(count, endedOneShots.size()));
+                    ("BootConsistencyCheck: closed %d task run(s) a stop of JClaw cut off, none run again: %d one-shot"
+                            + " task(s) end FAILED, %d recurring task(s) wait for their next occurrence")
+                            .formatted(count, closedRuns.size() - recurring, recurring));
         }
         return count;
     }

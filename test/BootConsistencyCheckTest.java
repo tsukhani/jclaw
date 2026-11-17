@@ -22,6 +22,7 @@ import services.TaskDeadExecutionHandler;
 import services.TaskExecutionHandler;
 import services.TaskExecutor;
 import services.TaskRunRegistry;
+import services.TimezoneResolver;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -316,27 +317,41 @@ class BootConsistencyCheckTest extends UnitTest {
     }
 
     @Test
-    void aRecurringTaskCutOffWaitsForItsNextOccurrence() {
+    void aRecurringTaskCutOffWaitsForItsNextOccurrenceAndSaysSo() {
         var task = persistRecurringTask("jf355-recurring", Task.Status.RUNNING);
         var runId = persistRun(task, Instant.now().minusSeconds(30), TaskRun.Status.RUNNING, null);
         // Its row survives the stop, still picked, until db-scheduler declares it dead.
         stub.scheduledIds.add(task.id.toString());
 
-        var alerts = OperatorAlerts.captureTaskAlertsForTest(() -> BootConsistencyCheck.sweep(stub.proxy(), Instant.now()));
+        var before = Instant.now();
+        var alerts = new ArrayList<String>();
+        var logged = EventLogger.captureForTest(() -> alerts.addAll(
+                OperatorAlerts.captureTaskAlertsForTest(() -> BootConsistencyCheck.sweep(stub.proxy(), Instant.now()))));
+        var after = Instant.now();
         commitAndReopen();
 
         var run = (TaskRun) TaskRun.findById(runId);
         assertEquals(TaskRun.Status.FAILED, run.status);
         assertEquals(RestartCutOff.RECURRING_ERROR, run.error);
-        assertEquals(Task.Status.ACTIVE, ((Task) Task.findById(task.id)).status);
+        var closed = (Task) Task.findById(task.id);
+        assertEquals(Task.Status.ACTIVE, closed.status);
         assertTrue(stub.schedules.isEmpty(), "nothing arms it to run now; got " + stub.schedules.size() + " call(s)");
-        assertEquals(List.of(), alertsNaming(alerts, "jf355-recurring"), "a recurring task's next run reports instead");
+        assertFalse(closed.nextRunAt.isBefore(before.plusSeconds(1800)), "one interval out: " + closed.nextRunAt);
+        assertFalse(closed.nextRunAt.isAfter(after.plusSeconds(1800)), "one interval out: " + closed.nextRunAt);
+        assertEquals(List.of(OperatorAlerts.occurrenceCutOffAlert("jf355-recurring", agent.name,
+                        closed.nextRunAt.atZone(TimezoneResolver.resolve(closed)))),
+                alertsNaming(alerts, "jf355-recurring"),
+                "a monthly task would otherwise wait a month with only its run history to say so");
+        assertEquals(List.of("Task 'jf355-recurring' failed (cut off by a restart): " + RestartCutOff.RECURRING_ERROR),
+                logged.stream().map(EventLogger.Captured::message).filter(m -> m.startsWith("Task 'jf355-recurring' failed"))
+                        .toList(),
+                "TASK_FAILED reports the run to a chat waiting on it now, not at the next occurrence");
 
-        var before = Instant.now();
-        var decision = TaskDeadExecutionHandler.decide(task.id, false);
-        var at = assertInstanceOf(TaskDeadExecutionHandler.Decision.NextOccurrence.class, decision).at();
-        assertFalse(at.isBefore(before.plusSeconds(1800)),
-                "its dead row moves on to the next occurrence, not now: " + at + " vs " + before);
+        // db-scheduler declares the row dead two minutes on: it fires when the alert said, and nothing more is said.
+        var decision = new TaskDeadExecutionHandler.Decision[1];
+        var later = OperatorAlerts.captureTaskAlertsForTest(() -> decision[0] = TaskDeadExecutionHandler.decide(task.id, false));
+        assertEquals(new TaskDeadExecutionHandler.Decision.NextOccurrence(closed.nextRunAt), decision[0]);
+        assertEquals(List.of(), alertsNaming(later, "jf355-recurring"));
     }
 
     private void assertCutOffOneShot(Long taskId, Long runId, List<String> alerts, String name) {

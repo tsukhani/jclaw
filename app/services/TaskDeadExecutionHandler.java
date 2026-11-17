@@ -59,14 +59,14 @@ public final class TaskDeadExecutionHandler implements DeadExecutionHandler<Void
 
     /**
      * Decide what to do with a task's dead row, closing the task as {@link RestartCutOff} says when a
-     * stopped JVM left it, and announcing a one-shot task that ends.
+     * stopped JVM left it, and announcing a task it closes.
      *
      * @param taskId    the JClaw task the row fires
      * @param liveHere  whether a fire of the task is running on this node
      */
     public static Decision decide(Long taskId, boolean liveHere) {
         if (liveHere) return new Decision.Revive();
-        record Outcome(Decision decision, @Nullable String agentName, @Nullable Task endedOneShot,
+        record Outcome(Decision decision, @Nullable String agentName, @Nullable Task closed,
                        @Nullable TaskRun latestRun) {}
         var outcome = Tx.run(() -> {
             var task = (Task) Task.findById(taskId);
@@ -77,14 +77,14 @@ public final class TaskDeadExecutionHandler implements DeadExecutionHandler<Void
             if (!RestartCutOff.isRecurring(task) && task.status == Task.Status.PENDING) {
                 return new Outcome(new Decision.Revive(), agentName, null, null);
             }
-            boolean ended = RestartCutOff.close(task);
-            var latest = ended ? (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", taskId).first() : null;
+            boolean closed = RestartCutOff.close(task);
+            var latest = closed ? (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", taskId).first() : null;
             Instant next = RestartCutOff.isRecurring(task) && task.status == Task.Status.ACTIVE
-                    ? TaskSchedulingService.nextOccurrence(task) : null;
+                    ? RestartCutOff.nextOccurrence(task) : null;
             return new Outcome(next != null ? new Decision.NextOccurrence(next) : new Decision.Stop(),
-                    agentName, ended ? task : null, latest);
+                    agentName, closed ? task : null, latest);
         });
-        if (outcome.endedOneShot() != null) RestartCutOff.announce(outcome.endedOneShot(), outcome.latestRun());
+        if (outcome.closed() != null) RestartCutOff.announce(outcome.closed(), outcome.latestRun());
         EventLogger.info("task", outcome.agentName(), null, describe(taskId, outcome.decision()));
         return outcome.decision();
     }
