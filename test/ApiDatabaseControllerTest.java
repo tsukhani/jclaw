@@ -194,6 +194,79 @@ class ApiDatabaseControllerTest extends FunctionalTest {
     }
 
     @Test
+    void growthIsEmptyBeforeTheFirstSample() {
+        login();
+        var json = JsonParser.parseString(getContent(GET("/api/system/database/growth"))).getAsJsonObject();
+        assertTrue(json.get("sampledOn") == null || json.get("sampledOn").isJsonNull());
+        assertEquals(0, json.getAsJsonArray("tables").size());
+        assertEquals(0, json.getAsJsonArray("fileTrend").size());
+    }
+
+    @Test
+    void growthComparesTheNewestSampleWithTheDayBefore() {
+        login();
+        var today = java.time.LocalDate.parse("2026-11-17");
+        commitInFreshTx(() -> {
+            seedSample(today.minusDays(1), 550_000_000L, 420_000_000L, 250_000_000L, 74_000L);
+            seedSample(today, 564_826_112L, 432_430_871L, 259_326_923L, 75_226L);
+            return null;
+        });
+
+        var json = JsonParser.parseString(getContent(GET("/api/system/database/growth"))).getAsJsonObject();
+        assertEquals("2026-11-17", json.get("sampledOn").getAsString());
+        assertEquals("2026-11-16", json.get("historySince").getAsString());
+        assertEquals(564_826_112L, json.getAsJsonObject("file").get("fileBytes").getAsLong());
+        assertEquals(432_430_871L - 259_326_923L, json.get("otherLiveBytes").getAsLong());
+        var message = json.getAsJsonArray("tables").get(0).getAsJsonObject();
+        assertEquals("MESSAGE", message.get("name").getAsString());
+        assertEquals(259_326_923L, message.get("bytes").getAsLong());
+        assertEquals(9_326_923L, message.getAsJsonObject("day").get("bytes").getAsLong());
+        assertEquals(1_226L, message.getAsJsonObject("day").get("rows").getAsLong());
+        assertTrue(message.get("week") == null || message.get("week").isJsonNull());
+        assertEquals(2, message.getAsJsonArray("trend").size());
+        assertEquals("2026-11-16", json.getAsJsonArray("fileTrend").get(0).getAsJsonObject().get("day").getAsString());
+    }
+
+    private static void seedSample(java.time.LocalDate day, long fileBytes, long liveBytes, long messageBytes,
+                                   long messageRows) {
+        var file = new models.DatabaseFileSample();
+        file.sampledOn = day;
+        file.takenAt = day.atTime(1, 0).toInstant(java.time.ZoneOffset.UTC);
+        file.fileBytes = fileBytes;
+        file.liveBytes = liveBytes;
+        file.reclaimableBytes = fileBytes - liveBytes;
+        file.save();
+        var table = new models.DatabaseTableSample();
+        table.sampledOn = day;
+        table.tableName = "MESSAGE";
+        table.bytes = messageBytes;
+        table.rowCount = messageRows;
+        table.save();
+    }
+
+    private static <T> T commitInFreshTx(java.util.function.Supplier<T> block) {
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(services.Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) {
+            throw new IllegalStateException(err.get());
+        }
+        return ref.get();
+    }
+
+    @Test
     void aFailedProbeReadsCritical() {
         login();
         DatabaseService.probeForTest = () -> "The database has been closed";

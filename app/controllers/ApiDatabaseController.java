@@ -9,6 +9,7 @@ import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.RestartService;
+import services.database.DatabaseGrowth;
 import services.database.DatabaseService;
 import services.database.H2Maintenance;
 import utils.ApiResponses;
@@ -57,6 +58,13 @@ public class ApiDatabaseController extends Controller {
             return;
         }
         renderJSON(GSON.toJson(status));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DatabaseGrowth.Growth.class)))
+    @Operation(summary = "Each table's size and rows, and their change over a day, a week and 30 days, from the daily samples")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "operator maintenance plumbing -- the database's own layout")
+    public static void growth() {
+        renderJSON(GSON.toJson(DatabaseGrowth.growth()));
     }
 
     @ApiResponse(responseCode = "201", content = @Content(schema = @Schema(implementation = DatabaseService.BackupInfo.class)))

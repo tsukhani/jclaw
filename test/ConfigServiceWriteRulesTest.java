@@ -11,6 +11,7 @@ import services.ConfigService;
 import services.OperatorAlerts;
 import services.PrivilegedConfig;
 import services.SessionCompactor;
+import services.database.DatabaseGrowth;
 import services.database.DatabaseService;
 import services.database.DatabaseSize;
 import services.decision.BasetenDecision;
@@ -415,6 +416,13 @@ class ConfigServiceWriteRulesTest extends UnitTest {
                 DatabaseSize.KEY_FLAG_AT_MB, "-1");
         assertAccepted(DatabaseSize.KEY_FLAG_AT_PERCENT, "0");
         assertAccepted(DatabaseSize.KEY_FLAG_AT_MB, "0");
+    }
+
+    @Test
+    void theSizeHistoryRetentionAnswersItsOwnersRule() {
+        assertRefusedAsOwnerSays(DatabaseGrowth.rejectionFor(DatabaseGrowth.KEY_RETENTION, "-1"),
+                DatabaseGrowth.KEY_RETENTION, "-1");
+        assertAccepted(DatabaseGrowth.KEY_RETENTION, "0");
     }
 
     @Test

@@ -73,6 +73,7 @@ public final class ConfigKeyCatalog {
             db.backup.schedule
             db.compaction.flagAtMb
             db.compaction.flagAtPercent
+            db.sizeHistory.retentionDays
             decision.baseten.apiKey
             decision.jev.apiKey
             decision.laya.apiKey

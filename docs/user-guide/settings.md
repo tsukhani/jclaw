@@ -189,6 +189,16 @@ The panel flags a compaction when it would free at least half the file and at le
 
 JClaw never compacts on its own: not on a schedule, and not when it starts or restarts. A compaction stops the instance and starts it again, so you choose when, with **Compact** or `jclaw compact`. How a compaction runs is described under [Encrypted credentials](#settings-encrypted-credentials).
 
+### Where the space goes
+
+Below the health strip, **Where the space goes** shows what the data file holds and how each part has grown. Once a day, shortly after it starts and then in each new day, JClaw records the size and the number of rows of every table, and the size of the file. The table compares the newest of these with older ones.
+
+Each row is a table, largest first, with its **Size**, its **Share** of the data file, its **Rows**, and how much it grew or shrank over the last **1 day**, **7 days** and **30 days**, with the change in rows beneath. A dash means JClaw has no record that old yet. **Trend** draws the table's size over the last 30 days. The ten largest tables are listed by name; the rest are added up in one row, which you can click to list them. After the tables come **Indexes and other**, the live data no table's size counts, which is mostly indexes, and **Free space a compaction would remove**. Together with the tables they add up to **The data file**, the last row.
+
+Above the table, a chart shows the last 30 days of the file's size (solid) against its live data (dashed). The gap between the two lines is the free space a compaction would remove. If the gap widens quickly, something is leaving the file mostly unused (see [Compaction](#settings-compaction)).
+
+The history starts the day JClaw first records it, so the 7-day and 30-day columns fill in over the following month. JClaw keeps a year of it. The history is part of the database, so restoring a backup brings back the history the backup holds, and the days after it go. A compaction keeps it.
+
 ### Encrypted credentials
 
 JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, the secret values of each MCP server, and the secrets you store for an agent's skills. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.

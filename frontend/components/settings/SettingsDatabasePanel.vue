@@ -6,6 +6,7 @@
 import { formatDateTime } from '~/utils/schedule'
 import { ArrowDownTrayIcon, ArrowPathIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { formatSize } from '~/utils/format'
+import SettingsDatabaseGrowth from './SettingsDatabaseGrowth.vue'
 
 interface BackupInfo {
   id: string
@@ -736,6 +737,8 @@ const lastOp = computed(() => {
         </span>
       </div>
     </div>
+
+    <SettingsDatabaseGrowth :timezone="status?.timezone ?? null" />
 
     <!-- Backups -->
     <div class="bg-surface-elevated border border-border">

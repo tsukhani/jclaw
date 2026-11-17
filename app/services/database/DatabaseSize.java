@@ -131,7 +131,7 @@ public final class DatabaseSize {
         };
     }
 
-    private static boolean wholeNumberUpTo(@Nullable String value, int max) {
+    static boolean wholeNumberUpTo(@Nullable String value, int max) {
         try {
             var n = Integer.parseInt(value == null ? "" : value.trim());
             return n >= 0 && n <= max;

@@ -111,6 +111,11 @@ const repairManifest = {
 }
 
 registerEndpoint('/api/system/database', { method: 'GET', handler: () => status })
+// The growth table has its own file (settings.database-growth.test.ts); here it only needs an answer.
+registerEndpoint('/api/system/database/growth', {
+  method: 'GET',
+  handler: () => ({ sampledOn: null, takenAt: null, historySince: null, file: null, otherLiveBytes: null, tables: [], fileTrend: [] }),
+})
 for (const url of ['/api/system/database/backups', '/api/system/database/restore?id=jclaw-20260908T120000Z.zip', '/api/system/database/repair', '/api/system/database/repair/clean', '/api/system/database/compact', '/api/config']) {
   registerEndpoint(url, {
     method: 'POST',

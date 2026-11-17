@@ -23,7 +23,7 @@ import java.util.function.Supplier;
  * backup, restore or delete against the shared database. Same idiom as
  * {@code ApiToolsControllerOperatorOnlyTest.MISSING_SKILL}.
  *
- * <p><b>Why the positive control matters.</b> Seven 403s in a row are also what a broken auth
+ * <p><b>Why the positive control matters.</b> A run of 403s is also what a broken auth
  * layer produces. The last case logs in as the operator and reads the same controller, so the
  * refusals above are shown to be about the principal and not about the route being dead.
  */
@@ -70,6 +70,13 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
         // that far — which is the point, since a restore replaces every table at once.
         var resp = asAgent(() -> POST(agentRequest(), "/api/system/database/restore",
                 "application/json", "{}"));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
+    @Test
+    void agentPrincipalCannotReadWhereTheDatabaseGrows() {
+        // Ungated, this route answers 200 with every table's name and size.
+        var resp = asAgent(() -> GET(agentRequest(), "/api/system/database/growth"));
         assertRefusedAsOperatorOnly(resp);
     }
 
