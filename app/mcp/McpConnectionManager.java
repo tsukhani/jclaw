@@ -1066,7 +1066,7 @@ public final class McpConnectionManager {
         var cfg = JsonParser.parseString(server.configJson).getAsJsonObject();
         return switch (server.transport) {
             case STDIO -> {
-                var command = stringList(cfg, "command", "args");
+                var command = McpServerFence.argv(server, stringList(cfg, "command", "args"));
                 var env = stringMap(cfg, "env");
                 yield new McpStdioTransport(server.name, command, env);
             }

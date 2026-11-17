@@ -106,12 +106,20 @@ class McpProtocolFallbackTest extends UnitTest {
     @BeforeEach
     void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
+        // Real stdio servers, fenced on a host with a sandbox and refused on one without (JF-396): the fence is
+        // McpServerFenceTest's to test, these the MCP machinery's.
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         EventLogger.clear();
         ToolRegistrySync.publishForTest(List.of());
         McpConnectionManager.setBackoff(50, 200);
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(10));
         log = temp("mcp-log-", ".txt");
+    }
+
+    @AfterEach
+    void releaseSandbox() {
+        ShellSandboxSync.release();
     }
 
     @AfterEach

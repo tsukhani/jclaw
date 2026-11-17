@@ -119,6 +119,9 @@ class McpConnectionManagerTest extends UnitTest {
     @BeforeEach
     void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
+        // Real stdio servers, fenced on a host with a sandbox and refused on one without (JF-396): the fence is
+        // McpServerFenceTest's to test, these the MCP machinery's.
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         EventLogger.clear();
         // Clear out any tools other tests may have registered.
@@ -127,6 +130,11 @@ class McpConnectionManagerTest extends UnitTest {
         McpConnectionManager.setBackoff(50, 200);
         fixturePath = Files.createTempFile("mcp-cm-fixture-", ".js");
         Files.writeString(fixturePath, FIXTURE_SCRIPT);
+    }
+
+    @AfterEach
+    void releaseSandbox() {
+        ShellSandboxSync.release();
     }
 
     @AfterEach

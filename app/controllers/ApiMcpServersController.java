@@ -14,6 +14,7 @@ import mcp.CallToolResult;
 import mcp.McpAppPage;
 import mcp.McpConnectionManager;
 import mcp.McpElicitations;
+import mcp.McpServerFence;
 import mcp.McpToolAdapter;
 import mcp.McpViewTools;
 import models.Agent;
@@ -31,6 +32,7 @@ import utils.ApiResponses;
 import utils.JsonArgs;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,7 +76,11 @@ public class ApiMcpServersController extends Controller {
                                    Boolean offerViewToolsEverywhere,
                                    String transport, String command, List<String> args,
                                    Map<String, String> env, String url,
-                                   Map<String, String> headers, String protocol) {}
+                                   Map<String, String> headers, String protocol,
+                                   /** JF-396, operator-only: start this STDIO server without the Main Agent's fence. */
+                                   Boolean runUnfenced,
+                                   /** JF-396, operator-only: files in JClaw's own folders this STDIO server may read. */
+                                   List<String> fenceReadable) {}
 
     public record ViewCallRequest(Long conversationId, String server, String tool, Map<String, Object> arguments) {}
 
@@ -98,6 +104,8 @@ public class ApiMcpServersController extends Controller {
     private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
     private static final String KEY_VIEW_TOOLS_EVERYWHERE = "offerViewToolsEverywhere";
     private static final String KEY_PROTOCOL = "protocol";
+    private static final String KEY_RUN_UNFENCED = "runUnfenced";
+    private static final String KEY_FENCE_READABLE = "fenceReadable";
     /** The extra key on a 400 that names the form field it is about. */
     private static final String KEY_FIELD = "field";
 
@@ -154,6 +162,7 @@ public class ApiMcpServersController extends Controller {
         requireOperatorForViewToolsChange(false, viewToolsEverywhere);
         row.offerViewToolsEverywhere = Boolean.TRUE.equals(viewToolsEverywhere);
         row.transport = transport;
+        applyFence(row, body);
         var protocol = readProtocol(body);
         if (protocol != null) row.protocol = protocol;
         restoreMaskedSecrets(body, McpServerService.TransportConfig.empty());
@@ -220,10 +229,12 @@ public class ApiMcpServersController extends Controller {
             // `transport` but carries a new `command` rewrites what an existing STDIO server
             // executes, which is the same authority as creating one.
             requireMainForStdio(row.transport);
+            requireOperatorWhileFenceLoosened(row);
             restoreMaskedSecrets(body, priorConfig);
             row.configJson = McpServerService.mergeConfigJson(row.transport, row.configJson, body);
             row.probeTimedOutAt = null;
         }
+        applyFence(row, body);
         try {
             McpServerService.validate(row);
         } catch (IllegalArgumentException e) {
@@ -474,6 +485,61 @@ public class ApiMcpServersController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
             throw ApiResponses.unreachable();
         }
+    }
+
+    /**
+     * JF-396: the operator's two loosenings of the fence a stdio server starts behind. Each is the operator's alone to
+     * change, an unchanged echo being no change, applies to a stdio server only, and a listed file must be one the fence
+     * hides and never the key file.
+     */
+    private static void applyFence(McpServer row, JsonObject body) {
+        var unfenced = readRunUnfenced(body);
+        var readable = readFenceReadable(body);
+        var refusal = McpServerFence.changeRefusal(RequestPrincipal.isAgentOriginated(), row, unfenced, readable);
+        if (refusal != null) ApiResponses.error(403, ApiResponses.OPERATOR_ONLY, refusal);
+        boolean loosens = Boolean.TRUE.equals(unfenced) || readable != null && !readable.isEmpty();
+        if (loosens && row.transport != McpServer.Transport.STDIO) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ("%s and %s apply to a STDIO server only: JClaw starts"
+                    + " no process for an HTTP one.").formatted(KEY_RUN_UNFENCED, KEY_FENCE_READABLE));
+        }
+        if (unfenced != null) row.runUnfenced = unfenced;
+        if (readable != null) row.fenceReadable = readable.isEmpty() ? null : String.join("\n", readable);
+    }
+
+    private static void requireOperatorWhileFenceLoosened(McpServer row) {
+        var refusal = McpServerFence.startChangeRefusal(RequestPrincipal.isAgentOriginated(), row);
+        if (refusal != null) ApiResponses.error(403, ApiResponses.OPERATOR_ONLY, refusal);
+    }
+
+    private static @Nullable Boolean readRunUnfenced(JsonObject body) {
+        var el = body.get(KEY_RUN_UNFENCED);
+        if (el == null || el.isJsonNull()) return null;
+        if (!el.isJsonPrimitive() || !el.getAsJsonPrimitive().isBoolean()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, KEY_RUN_UNFENCED + " must be true or false");
+        }
+        return el.getAsBoolean();
+    }
+
+    /** The body's read list, stripped and each path once, or null when it carries none; a path the fence cannot list is a 400. */
+    private static @Nullable List<String> readFenceReadable(JsonObject body) {
+        var el = body.get(KEY_FENCE_READABLE);
+        if (el == null || el.isJsonNull()) return null;
+        if (!el.isJsonArray()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, KEY_FENCE_READABLE + " must be a list of file paths");
+        }
+        var paths = new ArrayList<String>();
+        for (var item : el.getAsJsonArray()) {
+            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, KEY_FENCE_READABLE + " must be a list of file paths");
+            }
+            paths.add(item.getAsString());
+        }
+        var normalized = McpServerFence.normalize(paths);
+        for (var path : normalized) {
+            var rejection = McpServerFence.readableRejection(path);
+            if (rejection != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
+        }
+        return normalized;
     }
 
     /** Which channels see a server's view tools is the operator's to change; an unchanged echo is no change. */

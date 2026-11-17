@@ -1330,6 +1330,10 @@ export interface McpServer {
   enabled: boolean
   /** Offer the server's tools that link a view on every turn, not only a top-level web-chat one. */
   offerViewToolsEverywhere?: boolean
+  /** JF-396: the operator lets this STDIO server start without the Main Agent's fence. */
+  runUnfenced?: boolean
+  /** JF-396: files in JClaw's own folders this STDIO server may read through the fence. */
+  fenceReadable?: string[]
   transport: 'STDIO' | 'HTTP'
   /** STDIO only: subprocess executable. Empty for HTTP rows. */
   command: string | null

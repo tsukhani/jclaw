@@ -67,6 +67,9 @@ class McpServerServiceTest extends UnitTest {
     @BeforeEach
     void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
+        // Real stdio servers, fenced on a host with a sandbox and refused on one without (JF-396): the fence is
+        // McpServerFenceTest's to test, these the MCP machinery's.
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         EventLogger.clear();
         ToolRegistrySync.publishForTest(List.of());  // JCLAW-894: under the registry lock
@@ -76,6 +79,11 @@ class McpServerServiceTest extends UnitTest {
         // Shrink the manager's first-attempt handshake timeout so the
         // failure-path test resolves in seconds, not the production 120 s.
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(5));
+    }
+
+    @AfterEach
+    void releaseSandbox() {
+        ShellSandboxSync.release();
     }
 
     @AfterEach

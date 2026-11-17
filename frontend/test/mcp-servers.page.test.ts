@@ -423,6 +423,53 @@ describe('MCP Servers page', () => {
     expect(putBody!.offerViewToolsEverywhere).toBe(false)
   })
 
+  it('sends a new STDIO server fenced, with no files to read, unless the operator says otherwise (JF-396)', async () => {
+    setupApi([])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Add server')
+
+    const unfenced = c.find('input[data-testid="mcp-run-unfenced"]')
+    expect(unfenced.element.closest('label')!.textContent!.trim())
+      .toBe('Run without the fence, for a program that cannot run in a sandbox, such as Chrome')
+    expect((unfenced.element as HTMLInputElement).checked).toBe(false)
+    await c.find('input[placeholder="github"]').setValue('chrome-devtools')
+    await c.find('input[placeholder="npx"]').setValue('npx')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(posted).toBeTruthy())
+    expect(posted!.runUnfenced).toBe(false)
+    expect(posted!.fenceReadable).toEqual([])
+
+    posted = null
+    await clickText(c, 'Add server')
+    await c.find('input[placeholder="github"]').setValue('workspace')
+    await c.find('input[placeholder="npx"]').setValue('uvx')
+    await c.find('textarea[data-testid="mcp-fence-readable"]').setValue('/srv/jclaw/certs/google.json\n\n  /srv/jclaw/data/x.json  ')
+    await c.find('input[data-testid="mcp-run-unfenced"]').setValue(true)
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(posted).toBeTruthy())
+    expect(posted!.runUnfenced).toBe(true)
+    expect(posted!.fenceReadable).toEqual(['/srv/jclaw/certs/google.json', '/srv/jclaw/data/x.json'])
+  })
+
+  it('shows a server\'s stored fence settings in its edit form and sends them changed (JF-396)', async () => {
+    setupApi([server({ runUnfenced: true, fenceReadable: ['/srv/jclaw/certs/google.json'] })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    const box = c.find('#edit-1-run-unfenced')
+    const list = c.find('#edit-1-fence-readable')
+    expect((box.element as HTMLInputElement).checked).toBe(true)
+    expect((list.element as HTMLTextAreaElement).value).toBe('/srv/jclaw/certs/google.json')
+    await box.setValue(false)
+    await list.setValue('')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.runUnfenced).toBe(false)
+    expect(putBody!.fenceReadable).toEqual([])
+  })
+
   it('flips a server\'s enabled flag without sending the rest of the form', async () => {
     setupApi([server()])
     const c = await mountSuspended(McpServers)

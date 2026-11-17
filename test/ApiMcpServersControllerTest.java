@@ -36,9 +36,17 @@ class ApiMcpServersControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setUp() {
+        // Real stdio servers, fenced on a host with a sandbox and refused on one without (JF-396): the fence is
+        // McpServerFenceTest's to test, these the MCP machinery's.
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
         McpConnectionManager.shutdown();
+    }
+
+    @AfterEach
+    void releaseSandbox() {
+        ShellSandboxSync.release();
     }
 
     @AfterEach
@@ -1440,6 +1448,109 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             assertEquals(403, refused.status.intValue());
             assertEquals("This endpoint is operator-only; an agent principal cannot call it.", body(refused).get("message").getAsString());
         }
+    }
+
+    // ==================== JF-396: the fence a STDIO server starts behind ====================
+
+    /** A file the fence hides, under the kept-skill-files folder the test profile keeps apart from the live one. */
+    private static java.nio.file.Path hiddenFile() throws java.io.IOException {
+        var dir = services.KeptSkillFiles.root().resolve("jf396-" + UUID.randomUUID());
+        java.nio.file.Files.createDirectories(dir);
+        var file = dir.resolve("service-account.json");
+        java.nio.file.Files.writeString(file, "{\"type\":\"fake-jf396\"}\n");
+        return file;
+    }
+
+    private static String messageOf(Http.Response response) {
+        return JsonParser.parseString(getContent(response)).getAsJsonObject().get("message").getAsString();
+    }
+
+    @Test
+    void theOperatorsFenceSettingsRoundTripAndAServerAddedAgainStartsWithNone() throws Exception {
+        login();
+        var file = hiddenFile();
+        try {
+            var made = created("{\"name\":\"workspace\",\"enabled\":false,\"transport\":\"STDIO\",\"command\":\"/bin/true\","
+                    + "\"runUnfenced\":true,\"fenceReadable\":[\" " + file + " \",\"" + file + "\",\"\"]}");
+            assertEquals("true [\"" + file + "\"]", made.get("runUnfenced") + " " + made.get("fenceReadable"),
+                    "stored stripped, each path once");
+            var id = made.get("id").getAsLong();
+            awaitCommitted(() -> file.toString().equals(McpServer.<McpServer>findById(id).fenceReadable), "the column never held it");
+            var listed = JsonParser.parseString(getContent(GET("/api/mcp-servers"))).getAsJsonArray().get(0).getAsJsonObject();
+            assertEquals("true [\"" + file + "\"]", listed.get("runUnfenced") + " " + listed.get("fenceReadable"),
+                    "the list the edit form loads from carries both");
+
+            var renamed = JsonParser.parseString(getContent(PUT("/api/mcp-servers/" + id, "application/json",
+                    "{\"name\":\"workspace-mcp\"}"))).getAsJsonObject();
+            assertEquals("true [\"" + file + "\"]", renamed.get("runUnfenced") + " " + renamed.get("fenceReadable"),
+                    "a PUT that omits them keeps them");
+
+            assertIsOk(DELETE("/api/mcp-servers/" + id));
+            var again = created("{\"name\":\"workspace-mcp\",\"enabled\":false,\"transport\":\"STDIO\",\"command\":\"/bin/true\"}");
+            assertEquals("false []", again.get("runUnfenced") + " " + again.get("fenceReadable"),
+                    "the settings were the deleted server's, not its name's");
+
+            var cleared = JsonParser.parseString(getContent(PUT("/api/mcp-servers/" + again.get("id").getAsLong(),
+                    "application/json", "{\"runUnfenced\":true,\"fenceReadable\":[\"" + file + "\"]}"))).getAsJsonObject();
+            assertEquals("true [\"" + file + "\"]", cleared.get("runUnfenced") + " " + cleared.get("fenceReadable"));
+            var emptied = JsonParser.parseString(getContent(PUT("/api/mcp-servers/" + again.get("id").getAsLong(),
+                    "application/json", "{\"runUnfenced\":false,\"fenceReadable\":[]}"))).getAsJsonObject();
+            assertEquals("false []", emptied.get("runUnfenced") + " " + emptied.get("fenceReadable"));
+        } finally {
+            services.SkillPromotionService.deleteRecursive(file.getParent());
+        }
+    }
+
+    @Test
+    void aReadListTheFenceCannotOpenAndAMistypedSettingAreRefused() {
+        login();
+        var id = created("{\"name\":\"fenced\",\"enabled\":false,\"transport\":\"STDIO\",\"command\":\"/bin/true\"}")
+                .get("id").getAsLong();
+        var keyFile = play.Play.applicationPath.toPath().resolve("certs/.env");
+        var cases = new java.util.LinkedHashMap<String, String>();
+        cases.put("{\"fenceReadable\":[\"tmp/key.json\"]}", "'tmp/key.json' is not an absolute path: give the file's full path.");
+        cases.put("{\"fenceReadable\":[\"" + keyFile + "\"]}",
+                "'" + keyFile + "' holds the key every stored credential is encrypted under, so no MCP server may read it.");
+        cases.put("{\"fenceReadable\":\"" + keyFile + "\"}", "fenceReadable must be a list of file paths");
+        cases.put("{\"fenceReadable\":[1]}", "fenceReadable must be a list of file paths");
+        cases.put("{\"runUnfenced\":\"yes\"}", "runUnfenced must be true or false");
+        cases.forEach((body, refused) -> {
+            var response = PUT("/api/mcp-servers/" + id, "application/json", body);
+            assertEquals(400, response.status.intValue(), body);
+            assertEquals(refused, messageOf(response), body);
+        });
+        var stored = commitInFreshTx(() -> McpServer.<McpServer>findById(id));
+        assertEquals("false null", stored.runUnfenced + " " + stored.fenceReadable, "nothing refused was stored");
+    }
+
+    @Test
+    void theFenceSettingsApplyToAStdioServerOnly() {
+        login();
+        var refused = "runUnfenced and fenceReadable apply to a STDIO server only: JClaw starts no process for an HTTP one.";
+        var create = POST("/api/mcp-servers", "application/json",
+                "{\"name\":\"remote\",\"enabled\":false,\"transport\":\"HTTP\",\"url\":\"http://127.0.0.1:1/mcp\",\"runUnfenced\":true}");
+        assertEquals(400, create.status.intValue());
+        assertEquals(refused, messageOf(create));
+        assertNull(commitInFreshTx(() -> McpServer.findByName("remote")));
+        var id = createHttpServer("remote", "http://127.0.0.1:1/mcp", false);
+        var update = PUT("/api/mcp-servers/" + id, "application/json", "{\"runUnfenced\":false,\"fenceReadable\":[]}");
+        assertIsOk(update);
+    }
+
+    @Test
+    void whereTheFenceCannotStartAStdioServerIsNotStartedAndItsErrorSaysWhy() {
+        login();
+        tools.HarnessSandbox.setCustomAgentOverrideForTest(
+                tools.HarnessSandbox.CustomAgentOverride.unavailable("bwrap cannot create namespaces here (test)"));
+        var id = created("{\"name\":\"nosandbox\",\"enabled\":true,\"transport\":\"STDIO\",\"command\":\"/bin/cat\"}")
+                .get("id").getAsLong();
+        var expected = "transport build failed: The fence every STDIO server starts behind cannot start here: bwrap cannot"
+                + " create namespaces here (test). JClaw starts this server only behind it, unless the operator switches"
+                + " Run without the fence on for it.";
+        awaitCommitted(() -> expected.equals(McpConnectionManager.lastError("nosandbox")),
+                () -> "lastError: " + McpConnectionManager.lastError("nosandbox"));
+        var view = JsonParser.parseString(getContent(GET("/api/mcp-servers/" + id))).getAsJsonObject();
+        assertEquals("ERROR " + expected, view.get("status").getAsString() + " " + view.get("lastError").getAsString());
     }
 
     // ==================== helpers ====================

@@ -106,6 +106,21 @@ it shares `/tmp` and the PID namespace with the host. Another process's environm
 `ps -E` prints none for a same-user process (measured).
 `ShellExecSandboxTest` pins both platform forms and probes the real one on the host.
 
+**Every stdio MCP server starts behind the same fence (JF-396).** The operator and the Main Agent both add servers, so
+an unfenced server would be the Main Agent's route around its shell's fence. Both places that start one, the
+connection manager and the Test probe, build its argv through `mcp.McpServerFence.argv`, which calls
+`HarnessSandbox.wrapMcpServer`: the `MainFence` above, plus the files the operator lists in the server's
+`fenceReadable`, opened read-only after their folder is hidden (a Seatbelt `subpath` that names the file, a bwrap
+`--ro-bind` over the tmpfs). A listed path must lie in one of the hidden folders and never be `certs/.env`, which holds
+the key every stored credential is encrypted under; the list is checked again at every start. `runUnfenced` starts the
+server as it is, for a program that cannot run in a sandbox: on macOS, Chrome's own child-process sandbox cannot start
+inside any Seatbelt profile, even a bare `(allow default)`, which is the `browser` tool's verdict below, measured again
+on chrome-devtools-mcp 1.13.0 (2026-11-17), while peekaboo and computer-use keep screen capture and accessibility under
+the fence. Only the operator sets either, and while either holds only the operator changes the server's transport,
+command, arguments or environment (`McpServerFence.changeRefusal`, `startChangeRefusal`). It fails closed: where no
+sandbox starts, the server does not start, and its error says why. `McpServerFenceTest` pins the profile and the argv
+with a listed file, and probes a real run on the host.
+
 **A script runs in a sandbox of its own (JF-380).** `tools.ScriptProcess.start` is the one place a script's
 interpreter is started, and it always goes through `HarnessSandbox.wrapScript`: for every agent, `main` included,
 whatever `shell.sandbox` and `shell.sandbox.network` say, because a script reaches the world only through JClaw's tools.

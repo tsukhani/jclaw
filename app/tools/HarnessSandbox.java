@@ -452,8 +452,9 @@ public final class HarnessSandbox {
      * @param writable the agents' workspaces, writable inside the read-only checkout
      * @param hidden   JClaw's secret folders, neither readable nor writable: {@link SandboxHiddenRoots#current()}
      *                 but {@code conf/}, which holds no secret
-     * @param readable folders inside a hidden one that stay readable, never writable: the backup folder, which the
-     *                 operator's backup task uploads (JF-325)
+     * @param readable paths inside a hidden one that stay readable, never writable: the backup folder, which the
+     *                 operator's backup task uploads (JF-325), and for a stdio MCP server the files the operator lists
+     *                 for it (JF-396)
      * @param jvmPid   JClaw's own process, whose memory holds what {@code hidden} keeps off disk: the fenced shell
      *                 attaches to any JVM but this one
      */
@@ -477,6 +478,14 @@ public final class HarnessSandbox {
             return new MainFence(List.copyOf(readOnly), SandboxHiddenRoots.canonical(workspaceRoot.toPath()), hidden,
                     List.of(backups), ProcessHandle.current().pid());
         }
+
+        /** This fence with {@code more} paths readable, never writable, after the ones it has. */
+        public MainFence withReadable(List<Path> more) {
+            if (more.isEmpty()) return this;
+            var all = new ArrayList<>(readable);
+            all.addAll(more);
+            return new MainFence(readOnly, writable, hidden, List.copyOf(all), jvmPid);
+        }
     }
 
     /**
@@ -488,12 +497,28 @@ public final class HarnessSandbox {
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
     public static List<String> wrapMainFence(List<String> argv, File workspaceRoot) {
+        return wrapFenced(argv, workspaceRoot, List.of());
+    }
+
+    /**
+     * Wrap a stdio MCP server's command in the Main Agent's fence (JF-396): the operator and the Main Agent both add
+     * servers, so an unfenced one would be the Main Agent's route around {@link #wrapMainFence}. {@code readable} are
+     * the files inside JClaw's hidden folders the operator lets this server read, canonical; they stay read-only. It
+     * fails closed as {@link #wrapMainFence} does, and honours {@link #setCustomAgentOverrideForTest} the same way.
+     *
+     * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
+     */
+    public static List<String> wrapMcpServer(List<String> argv, File workspaceRoot, List<Path> readable) {
+        return wrapFenced(argv, workspaceRoot, readable);
+    }
+
+    private static List<String> wrapFenced(List<String> argv, File workspaceRoot, List<Path> extraReadable) {
         var override = Objects.requireNonNull(CUSTOM_AGENT_OVERRIDE.get());
         if (override == CustomAgentOverride.PASSTHROUGH) return argv;
         if (override.unavailableReason() != null) throw new SandboxUnavailableException(override.unavailableReason());
         var ready = availability();
         if (!ready.available()) throw new SandboxUnavailableException(ready.reason());
-        var fence = MainFence.current(workspaceRoot);
+        var fence = MainFence.current(workspaceRoot).withReadable(extraReadable);
         if (ready.mechanism().equals(BWRAP)) {
             // A tmpfs needs its mount point, so only the secret folders that exist are hidden.
             var present = new MainFence(fence.readOnly(), fence.writable(),

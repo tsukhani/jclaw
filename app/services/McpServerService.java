@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import mcp.McpClient;
 import mcp.McpConnectionManager;
 import mcp.McpEraDetection;
+import mcp.McpServerFence;
 import mcp.McpToolDef;
 import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
@@ -97,7 +98,11 @@ public final class McpServerService {
                        @Nullable Integer protocolGeneration,
                        /** When JClaw itself moved the server to HANDSHAKE, and why; null once the operator sets it. */
                        @Nullable String protocolSwitchedAt,
-                       @Nullable String protocolSwitchReason) {
+                       @Nullable String protocolSwitchReason,
+                       /** JF-396: the operator lets this stdio server start without the Main Agent's fence. */
+                       boolean runUnfenced,
+                       /** JF-396: the files in JClaw's own folders this stdio server may read through the fence. */
+                       List<String> fenceReadable) {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
@@ -144,7 +149,9 @@ public final class McpServerService {
                     row.protocolVersion,
                     row.protocolVersion != null ? McpClient.generation(row.protocolVersion) : null,
                     row.protocolSwitchedAt != null ? row.protocolSwitchedAt.toString() : null,
-                    row.protocolSwitchReason);
+                    row.protocolSwitchReason,
+                    row.runUnfenced,
+                    row.fenceReadableFiles());
         }
 
         /** {@link #of} sees one row; only the caller holding the whole list can spot a twin. */
@@ -152,7 +159,7 @@ public final class McpServerService {
             return new View(id, name, enabled, requiresApproval, offerViewToolsEverywhere, transport, command, args, env,
                     url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
                     toolCount, tools, createdAt, updatedAt, original, protocol, protocolVersion,
-                    protocolGeneration, protocolSwitchedAt, protocolSwitchReason);
+                    protocolGeneration, protocolSwitchedAt, protocolSwitchReason, runUnfenced, fenceReadable);
         }
     }
 
@@ -170,14 +177,15 @@ public final class McpServerService {
                           @Nullable String createdAt, @Nullable String updatedAt,
                           @Nullable String duplicateOf, String protocol,
                           @Nullable String protocolVersion, @Nullable Integer protocolGeneration,
-                          @Nullable String protocolSwitchedAt, @Nullable String protocolSwitchReason) {
+                          @Nullable String protocolSwitchedAt, @Nullable String protocolSwitchReason,
+                          boolean runUnfenced, List<String> fenceReadable) {
 
         static Summary of(View v) {
             return new Summary(v.id(), v.name(), v.enabled(), v.requiresApproval(), v.offerViewToolsEverywhere(),
                     v.transport(), v.command(), v.args(), v.env(), v.url(), v.headers(), v.status(), v.lastError(),
                     v.lastConnectedAt(), v.lastDisconnectedAt(), v.toolCount(), v.createdAt(), v.updatedAt(),
                     v.duplicateOf(), v.protocol(), v.protocolVersion(), v.protocolGeneration(), v.protocolSwitchedAt(),
-                    v.protocolSwitchReason());
+                    v.protocolSwitchReason(), v.runUnfenced(), v.fenceReadable());
         }
     }
 
@@ -591,7 +599,7 @@ public final class McpServerService {
                 var argv = new ArrayList<String>();
                 argv.add(cfg.command());
                 argv.addAll(cfg.args());
-                yield new McpStdioTransport(row.name, argv, cfg.env());
+                yield new McpStdioTransport(row.name, McpServerFence.argv(row, argv), cfg.env());
             }
             case HTTP -> new McpStreamableHttpTransport(row.name, URI.create(cfg.url()), cfg.headers());
         };

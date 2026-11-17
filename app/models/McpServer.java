@@ -12,6 +12,7 @@ import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -105,6 +106,22 @@ public class McpServer extends TimestampedModel {
     @ColumnDefault("true")
     public boolean offerViewToolsEverywhere = false;
 
+    /**
+     * JF-396: start this stdio server without the Main Agent's fence, for a program that cannot run inside a sandbox,
+     * such as Chrome's. Only the operator sets it, and while it is on only the operator changes how the server starts.
+     */
+    @Column(name = "run_unfenced", nullable = false)
+    @ColumnDefault("false")
+    public boolean runUnfenced = false;
+
+    /**
+     * JF-396: files inside JClaw's hidden folders this stdio server may read through the fence, one absolute path a
+     * line, such as a service account's key file under {@code certs/}. Only the operator sets it, and while it holds
+     * one only the operator changes how the server starts. A server deleted and added again starts with none.
+     */
+    @Column(name = "fence_readable", columnDefinition = "TEXT")
+    public String fenceReadable;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
     public Transport transport;
@@ -168,6 +185,12 @@ public class McpServer extends TimestampedModel {
 
     public static List<McpServer> findEnabled() {
         return McpServer.find("enabled = true ORDER BY name").fetch();
+    }
+
+    /** {@link #fenceReadable} as a list, empty when it holds none. */
+    public List<String> fenceReadableFiles() {
+        if (fenceReadable == null || fenceReadable.isBlank()) return List.of();
+        return Arrays.stream(fenceReadable.split("\n")).map(String::strip).filter(p -> !p.isEmpty()).toList();
     }
 
     public static McpServer findByName(String name) {

@@ -269,6 +269,10 @@ When you click **Add server**, you pick one:
 | **Command**               | Executable path. Example: `npx`.                                                    |
 | **Arguments (one per line)** | One argument per line. Example: `-y` then `@modelcontextprotocol/server-postgres`. |
 | **Environment variables** | Key/value pairs added to the subprocess environment (for API keys, DB URLs, etc.).  |
+| **Files in JClaw's own folders it may read (one per line)** | Only for a server that needs a file JClaw keeps to itself, such as a service account's key file in `certs/`. Give each file's full path. |
+| **Run without the fence** | Only for a program that cannot run in a sandbox, such as chrome-devtools, whose Chrome needs its own. |
+
+Every STDIO server runs behind the same fence as the Main Agent's commands: it can use the network, your home folder and the rest of your computer, but it cannot read JClaw's own folders (`data/`, `certs/`, `logs/` and the files kept from skill updates) or change JClaw's program files. If a server needs a file from one of those folders, list it under **Files in JClaw's own folders it may read**; it can then read that file, never change it. JClaw refuses a path outside those folders, since the server can read it already, and it always refuses `certs/.env`, which holds the key every stored credential is encrypted under. **Run without the fence** starts the server with nothing hidden. On a Mac, chrome-devtools needs it, because Chrome cannot start its own sandbox inside another one. Only you can set either: the Main Agent cannot. While a server may read such files or runs without the fence, only you can change its command, arguments, environment or transport. Where the fence cannot start on your computer, a STDIO server does not start, and its error on this page says why.
 
 ### HTTP configuration
 

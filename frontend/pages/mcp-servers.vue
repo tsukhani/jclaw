@@ -18,6 +18,9 @@ interface FormState {
   name: string
   enabled: boolean
   offerViewToolsEverywhere: boolean
+  // JF-396: the operator's two loosenings of the fence a STDIO server starts behind.
+  runUnfenced: boolean
+  fenceReadableRaw: string
   transport: TransportKind
   command: string
   argsRaw: string
@@ -112,6 +115,8 @@ function blankForm(): FormState {
     name: '',
     enabled: true,
     offerViewToolsEverywhere: false,
+    runUnfenced: false,
+    fenceReadableRaw: '',
     transport: 'STDIO',
     command: '',
     argsRaw: '',
@@ -144,6 +149,8 @@ function formFromServer(s: McpServerSummary): FormState {
     name: s.name,
     enabled: s.enabled,
     offerViewToolsEverywhere: s.offerViewToolsEverywhere ?? false,
+    runUnfenced: s.runUnfenced ?? false,
+    fenceReadableRaw: (s.fenceReadable ?? []).join('\n'),
     transport: s.transport,
     command: s.command || '',
     argsRaw: (s.args || []).join('\n'),
@@ -201,6 +208,8 @@ function buildPayload(form: FormState) {
     base.command = form.command.trim()
     base.args = form.argsRaw.split('\n').map(s => s.trim()).filter(s => s.length > 0)
     base.env = rowsToMap(form.envRows, form.savedEnvKeys)
+    base.runUnfenced = form.runUnfenced
+    base.fenceReadable = form.fenceReadableRaw.split('\n').map(s => s.trim()).filter(s => s.length > 0)
   }
   else {
     base.url = form.url.trim()
@@ -558,6 +567,32 @@ function removeHeaderRow(i: number) {
               Add env var
             </button>
           </fieldset>
+          <label
+            :for="`${formId}-fence-readable`"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">Files in JClaw's own folders it may read (one per line)</span>
+            <textarea
+              :id="`${formId}-fence-readable`"
+              v-model="editing.fenceReadableRaw"
+              rows="2"
+              placeholder="/path/to/jclaw/certs/service-account.json"
+              data-testid="mcp-fence-readable"
+              class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+            />
+          </label>
+          <label
+            :for="`${formId}-run-unfenced`"
+            class="flex items-center gap-2"
+          >
+            <input
+              :id="`${formId}-run-unfenced`"
+              v-model="editing.runUnfenced"
+              type="checkbox"
+              data-testid="mcp-run-unfenced"
+            >
+            <span class="text-xs text-fg-muted">Run without the fence, for a program that cannot run in a sandbox, such as Chrome</span>
+          </label>
         </div>
 
         <div
@@ -1113,6 +1148,32 @@ function removeHeaderRow(i: number) {
                         Add env var
                       </button>
                     </fieldset>
+                    <label
+                      :for="`edit-${server.id}-fence-readable`"
+                      class="block"
+                    >
+                      <span class="block text-xs text-fg-muted mb-1">Files in JClaw's own folders it may read (one per line)</span>
+                      <textarea
+                        :id="`edit-${server.id}-fence-readable`"
+                        v-model="editing.fenceReadableRaw"
+                        rows="2"
+                        placeholder="/path/to/jclaw/certs/service-account.json"
+                        data-testid="mcp-fence-readable"
+                        class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                      />
+                    </label>
+                    <label
+                      :for="`edit-${server.id}-run-unfenced`"
+                      class="flex items-center gap-2"
+                    >
+                      <input
+                        :id="`edit-${server.id}-run-unfenced`"
+                        v-model="editing.runUnfenced"
+                        type="checkbox"
+                        data-testid="mcp-run-unfenced"
+                      >
+                      <span class="text-xs text-fg-muted">Run without the fence, for a program that cannot run in a sandbox, such as Chrome</span>
+                    </label>
                   </div>
 
                   <div

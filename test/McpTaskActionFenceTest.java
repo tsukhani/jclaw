@@ -77,6 +77,9 @@ class McpTaskActionFenceTest extends UnitTest {
     @BeforeEach
     void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
+        // Real stdio servers, fenced on a host with a sandbox and refused on one without (JF-396): the fence is
+        // McpServerFenceTest's to test, these the MCP machinery's.
+        ShellSandboxSync.acquireUnconfined();
         Fixtures.deleteDatabase();
         ToolRegistrySync.publishForTest(List.of());
         McpConnectionManager.setBackoff(50, 200);
@@ -108,6 +111,11 @@ class McpTaskActionFenceTest extends UnitTest {
     private static void commit() {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
+    }
+
+    @AfterEach
+    void releaseSandbox() {
+        ShellSandboxSync.release();
     }
 
     @AfterEach
