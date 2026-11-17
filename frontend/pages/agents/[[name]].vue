@@ -3292,6 +3292,7 @@ const agentKinds = [
           v-if="workspaceScanShown"
           class="px-4 py-2 border-b border-border text-xs space-y-1"
           role="status"
+          data-testid="workspace-scan-status"
         >
           <p
             v-if="workspaceScanError"
