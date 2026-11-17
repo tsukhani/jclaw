@@ -86,6 +86,12 @@ function onPointerLeave() {
   if (!inList.value) poll()
 }
 
+// Only keyboard focus pauses: a click focuses its button too, and that focus outlives the pointer,
+// so counting it would stop the refresh until the operator clicks somewhere else.
+function onFocusIn(event: FocusEvent) {
+  focusInList.value = (event.target as Element).matches(':focus-visible')
+}
+
 function onFocusOut(event: FocusEvent) {
   if ((event.currentTarget as Element).contains(event.relatedTarget as Node | null)) return
   focusInList.value = false
@@ -832,7 +838,7 @@ watch(() => props.agentId, () => {
         data-testid="workspace-scroll"
         @pointerenter="pointerInList = true"
         @pointerleave="onPointerLeave"
-        @focusin="focusInList = true"
+        @focusin="onFocusIn"
         @focusout="onFocusOut"
       >
         <div

@@ -217,20 +217,46 @@ describe('AgentWorkspaceManager auto-refresh', () => {
       calls += 1
       return listingOf('notes.md', 'report.pdf')
     })
-    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 63 } })
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 63 }, attachTo: document.body })
     await settle()
-    const list = component.find('[data-testid="workspace-scroll"]')
-    const otherRowLink = component.find('[data-testid="ws-download-report.pdf"]').element
+    const notesLink = component.find('[data-testid="ws-download-notes.md"]').element as HTMLElement
+    const reportLink = component.find('[data-testid="ws-download-report.pdf"]').element as HTMLElement
 
-    await list.trigger('focusin')
-    await list.trigger('focusout', { relatedTarget: otherRowLink })
+    notesLink.focus()
+    reportLink.focus()
     vi.advanceTimersByTime(REFRESH_MS * 2)
     await settle()
     expect(calls).toBe(1)
 
-    await list.trigger('focusout', { relatedTarget: null })
+    reportLink.blur()
     await settle()
     expect(calls).toBe(2)
+    component.unmount()
+  })
+
+  it('keeps refreshing once the pointer leaves, though a click left focus on a row\'s button', async () => {
+    let calls = 0
+    registerEndpoint('/api/agents/65/workspace-tree', () => {
+      calls += 1
+      return listingOf('notes.md', 'report.pdf')
+    })
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 65 }, attachTo: document.body })
+    await settle()
+    const list = component.find('[data-testid="workspace-scroll"]')
+    const link = component.find('[data-testid="ws-download-notes.md"]').element as HTMLElement
+    // jsdom matches :focus-visible on any focus; a browser does not on the focus a mouse click gives.
+    const matches = link.matches.bind(link)
+    link.matches = ((selector: string) => selector === ':focus-visible' ? false : matches(selector)) as typeof link.matches
+
+    await list.trigger('pointerenter')
+    link.focus()
+    await list.trigger('pointerleave')
+    await settle()
+    expect(calls).toBe(2)
+
+    vi.advanceTimersByTime(REFRESH_MS)
+    await settle()
+    expect(calls).toBe(3)
     component.unmount()
   })
 
