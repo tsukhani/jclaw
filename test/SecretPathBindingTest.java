@@ -143,7 +143,7 @@ class SecretPathBindingTest extends UnitTest {
     }
 
     @Test
-    void theQueryAHeaderBasicAuthAndAFormBodyAreEachCheckedAgainstThePath() throws Exception {
+    void theQueryAHeaderBasicAuthAndAFormBodyAreEachCheckedAgainstThePath() {
         var password = standIn("PASSWORD");
         var basic = "Authorization: Basic " + Base64.getEncoder().encodeToString(("admin:" + password)
                 .getBytes(StandardCharsets.UTF_8)) + "\r\n";

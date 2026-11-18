@@ -1148,7 +1148,7 @@ describe('Skills page — deleting a skill that holds values asks first (JF-356)
    */
   async function clickDelete(component: VueWrapper) {
     const rows = () => component.findAll('div.group\\/skill')
-    await vi.waitFor(() => expect(rows().length).toBe(1))
+    await vi.waitFor(() => expect(rows()).toHaveLength(1))
     await rows()[0]!.find('button[title="Delete skill"]').trigger('click')
     await flushPromises()
   }

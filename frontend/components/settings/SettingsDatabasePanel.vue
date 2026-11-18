@@ -334,9 +334,10 @@ async function compact() {
   const reclaimable = status.value?.reclaimableBytes
   if (reclaimable != null) gains.push(`freeing about ${formatSize(reclaimable)}`)
   if (compactionDue.value) gains.push('removing the old copies of the stored credentials')
+  const gained = gains.length ? `, ${gains.join(' and ')}` : ''
   const ok = await confirm({
     title: 'Compact the database',
-    message: `Rewrites the data file with only its live data${gains.length ? `, ${gains.join(' and ')}` : ''}. `
+    message: `Rewrites the data file with only its live data${gained}. `
       + 'The file is replaced only once the copy matches it row for row. JClaw restarts; this page reconnects on its own.',
     confirmText: 'Compact',
   })

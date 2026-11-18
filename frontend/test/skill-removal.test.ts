@@ -39,6 +39,22 @@ describe('removalWarning', () => {
         + 'What the skill saved, such as a sign-in session or cookies, is deleted too.\n\n'
         + 'The file kept from its earlier updates is deleted too.')
   })
+
+  it('names several moving values, one another skill also uses and one no other skill uses', () => {
+    expect(removalWarning('radarr', {
+      ...none,
+      secrets: [{ name: 'RADARR_API_KEY', movesTo: 'radarr-delete', usedBy: ['radarr-delete', 'sonarr'] }],
+      settings: [{ name: 'TRANSMISSION_URL', movesTo: 'sonarr', usedBy: ['sonarr'] }],
+    })).toBe('Delete \'radarr\' from this agent?\n\n'
+      + 'These values move to another skill that uses them, so nothing that needs them stops:\n'
+      + 'The secret RADARR_API_KEY moves to radarr-delete, which sonarr also uses.\n'
+      + 'The setting TRANSMISSION_URL moves to sonarr.')
+  })
+
+  it('counts several kept files', () => {
+    expect(removalWarning('demo', { ...none, keptFiles: 2 }))
+      .toBe('Delete \'demo\' from this agent?\n\nThe 2 files kept from its earlier updates are deleted too.')
+  })
 })
 
 describe('switchOffWarning', () => {
