@@ -7,7 +7,7 @@ plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.5.0.8588"
     id("com.diffplug.spotless") version "8.11.0"
-    id("net.ltgt.errorprone") version "5.1.1"
+    id("net.ltgt.errorprone") version "5.2.0"
 }
 
 // JCLAW-1149: nullness enforcement. Play's own ECJ compile inside the fork cannot host a
