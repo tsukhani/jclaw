@@ -9,7 +9,7 @@ export type Snapshot = {
   labels: string[];
   comments: { author: string; body: string }[];
   parent?: { key: string; summary: string; description: string; labels: string[] };
-  // done: the blocker no longer holds the story, being Done or, for Jira, landed on main.
+  // done: the blocker no longer holds the story, being Done or, for Jira, in Review with its work on main.
   blockedBy: { key: string; status: string; done: boolean }[];
   updated: string;
   fetchedAt: string;

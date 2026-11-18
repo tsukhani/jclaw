@@ -366,18 +366,22 @@ check("a Blocks link with an inward issue is a blocker, Done or not; an outward 
   [{ key: "JCLAW-1377", status: "To Do", done: false }, { key: "JCLAW-1365", status: "Done", done: true }, { key: "JF-170", status: "In Progress", done: false }]);
 check("…and a blocker's own blockers are the open ones, another project's included",
   [openBlockersOf(links, nothingLanded), openBlockersOf(undefined, nothingLanded)], [["JCLAW-1377", "JF-170"], []]);
-// Done waits for a release (JF-504), so a blocker whose work is on main clears whatever its status (JF-505).
+// Done waits for a release (JF-504), so a blocker in Review whose work is on main clears (JF-505); one still In
+// Progress holds even when a first commit naming it has landed, since its work may not all be there yet.
 const inReview = [link("Blocks", "inwardIssue", "JF-501", "Review", "indeterminate"),
-  link("Blocks", "inwardIssue", "JF-502", "Review", "indeterminate"), link("Blocks", "inwardIssue", "JF-503", "Done", "done")];
+  link("Blocks", "inwardIssue", "JF-502", "Review", "indeterminate"), link("Blocks", "inwardIssue", "JF-503", "Done", "done"),
+  link("Blocks", "inwardIssue", "JF-504", "In Progress", "indeterminate")];
 const lookedUp: string[] = [];
 const onMain = (key: string) => {
   lookedUp.push(key);
-  return key === "JF-501";
+  return key === "JF-501" || key === "JF-504";
 };
-check("a blocker in Review whose work landed on main clears, one that has not holds, and a Done one is never looked up",
+check("a blocker in Review whose work landed on main clears, one that has not holds, one In Progress holds though its work "
+  + "landed, and only those in Review are looked up",
   [blockersOf(inReview, onMain).map((b) => [b.key, b.done]), openBlockersOf(inReview, onMain), blockedReason(blockersOf(inReview, onMain)),
     [...new Set(lookedUp)]],
-  [[["JF-501", true], ["JF-502", false], ["JF-503", true]], ["JF-502"], "blocked by JF-502 (Review)", ["JF-501", "JF-502"]]);
+  [[["JF-501", true], ["JF-502", false], ["JF-503", true], ["JF-504", false]], ["JF-502", "JF-504"],
+    "blocked by JF-502 (Review), JF-504 (In Progress)", ["JF-501", "JF-502"]]);
 
 const MERGE = "project = JF AND labels = afk AND status = Review";
 check("with no afk-merge epic, a story merges by its own label, and one already merged never again", mergeJql([]),

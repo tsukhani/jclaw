@@ -48,7 +48,7 @@ LaunchAgent `com.jclaw.factory` keeps it running through `run.sh`, which reinsta
 lockfile changes. Every two minutes it:
 
 1. Polls Jira for To Do stories that carry `afk` or sit in an epic that does (see [A whole epic](#a-whole-epic)),
-   keeping those whose blockers are Done or have landed on `main`, and GitHub for open issues you labelled `afk` (see
+   keeping those whose blockers are Done or in Review with their work on `main`, and GitHub for open issues you labelled `afk` (see
    [GitHub issues](#github-issues)).
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files, decide whether
    it needs BMAD, and decline one that should not be built at all. A story waits while its files overlap a branch awaiting review or a story already running.
@@ -171,10 +171,12 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
 Label an epic `afk` and every To Do story in it that is in the active sprint becomes a candidate, with no label of its
 own. The epic itself need not be in the sprint.
 
-The order comes from the stories, not the epic. A story starts only once every story that blocks it has landed on
-`main` or is Done, so link the stories with Blocks to set the order. Done waits for the release that ships a story
-(JF-504), so the factory reads `main` itself: a blocker has landed once the factory's merge commit for it is there,
-once `main` holds its `agent/<KEY>` branch, or, with no such branch left, once a commit subject on `main` names its key. Stories with no link between them may run at the same
+The order comes from the stories, not the epic. A story starts only once every story that blocks it is Done, or is in
+Review with its work on `main`, so link the stories with Blocks to set the order. Done waits for the release that
+ships a story (JF-504), so the factory reads `main` itself: a blocker has landed once the factory's merge commit for
+it is there, once `main` holds its `agent/<KEY>` branch, or, with no such branch left, once a commit subject on `main`
+names its key. A blocker still In Progress holds whatever has landed, since a story built over several commits is
+named by its first: move it to Review once all its work is on `main`. Stories with no link between them may run at the same
 time, in board rank order, as far as `FACTORY_MAX_PARALLEL` and the file-overlap plan allow. A chain therefore costs one
 review and merge per link. Blocks links between epics are not read.
 

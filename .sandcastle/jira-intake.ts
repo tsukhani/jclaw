@@ -35,16 +35,20 @@ export const notCandidate = async (s: { labels: string[]; status: string }, epic
 export const unblocked = (fields: { status: { name: string }; labels: string[] }): boolean =>
   fields.status.name === "In Progress" && !fields.labels.includes("afk-blocked");
 
+// Whether a blocker no longer holds a story: Done, or in Review with `landed` finding its work on main. Done waits for a
+// release (JF-505), while the story it blocks needs only the blocker's code on main. Review, not In Progress, says
+// that code is all there: a story built over several commits is named by its first long before its last.
+export const cleared = (key: string, status: { name: string; statusCategory: { key: string } }, landed: (key: string) => boolean): boolean =>
+  status.statusCategory.key === "done" || (status.name === "Review" && landed(key));
+
 // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B". Jira's payload is read field by field.
-// A blocker is done once it is Done or `landed` finds its work on main: Done waits for a release (JF-505), while the
-// story it blocks needs only the blocker's code on main to start from.
 export const blockersOf = (links: any[] | undefined, landed: (key: string) => boolean): Snapshot["blockedBy"] =>
   (links ?? [])
     .filter((l: any) => l.type.name === "Blocks" && l.inwardIssue)
     .map((l: any) => ({
       key: l.inwardIssue.key,
       status: l.inwardIssue.fields.status.name,
-      done: l.inwardIssue.fields.status.statusCategory.key === "done" || landed(l.inwardIssue.key),
+      done: cleared(l.inwardIssue.key, l.inwardIssue.fields.status, landed),
     }));
 
 // The keys of the stories that block issue A and are not done.

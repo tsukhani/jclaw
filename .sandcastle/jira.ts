@@ -1,7 +1,7 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { PROJECT, blockersOf, inReviewJql, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
+import { PROJECT, blockersOf, cleared, inReviewJql, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, REPO_ROOT, STATE, readEnvFile } from "./paths.ts";
 import { FOUND_LABEL, findingLocation, findingSummary, type Finding } from "./brief.ts";
 import { landedOn } from "./merge.ts";
@@ -53,7 +53,7 @@ export const blocker = async (key: string): Promise<Blocker> => {
     key,
     summary: f.summary,
     status: f.status.name,
-    done: f.status.statusCategory.key === "done" || landed(key),
+    done: cleared(key, f.status, landed),
     reason: await notCandidate({ labels: f.labels ?? [], status: f.status.name }, epicLabels),
     blockedBy: openBlockersOf(f.issuelinks, landed),
   };
