@@ -1,34 +1,37 @@
-# Property-based tests (jqwik)
+# Property-based tests (jetCheck)
 
-Every jqwik `@Property` in the backend lives in **one class**, `test/PropertyBasedTest.java`. That
-is a hard constraint, not a style preference: the play1 fork runs pure unit-test classes on a
-16-way parallel lane and gives each class its own `LauncherFactory.create()`, while jqwik's engine
-keeps process-global mutable state (`StoreRepository.current` is a plain static). Two
-property-bearing classes executing at the same time corrupt each other. Measured on jqwik 1.10.1:
-four property classes run together failed two runs in three, with `ConcurrentModificationException`,
-a `StoreRepository` NPE, `CannotFindArbitraryException` and `IllegalArgumentException: List length
-= -1` — all spurious, none reproducible when the classes run alone. The same properties gathered
-into one class passed five consecutive runs against 13-, 61- and 101-class slices. Lifting the
-constraint needs a change in the fork: `TestEngine` would have to run property-bearing classes on
-the serial (`D:`) lane, or `FirePhoque` would need a third lane for them.
+A property is an ordinary JUnit `@Test` that calls jetCheck through `PropertyInputs.check(iterations,
+generator, property)` in `test/PropertyInputs.java`. Each subject has its own `<Subject>PropertyTest`
+class (`SafeTokenPropertyTest`, `ApplyPatchPropertyTest`, `AbsoluteDatesPropertyTest`, …). jetCheck
+keeps no static mutable state and prints nothing under `silent()`, which `check` sets, so a property
+class runs on the fork's parallel lane like any other pure class, and one that needs a workspace
+agent runs on the database lane like any other. jqwik, which jetCheck replaced (JF-500), forced every
+property into one class because its engine kept process-global state, and it printed a line
+addressed to AI agents on every run.
 
 **Reach for a property when the invariant is easier to state than the examples are to enumerate** —
 a round trip (`render → parse → apply` reproduces the input), an idempotence (`f(f(x)) == f(x)`), a
 bound that must hold for every input (no chunk exceeds the API's cap), or an order that must survive
 a transformation. **Reach for an example test for everything else**: a specific edge case, an exact
 error string, a regression a ticket named, or anything with fixtures. Properties and examples are
-complements — `UnifiedPatchParserTest`, `TelegramOutboundPlannerTest` and `UtilsFilenamesTest` still
+complements — `FileSystemToolsPatchTest`, `TelegramOutboundPlannerTest` and `UtilsFilenamesTest`
 own the named cases and the error messages; the properties cover the arithmetic between them.
 
-Two mechanics the fork forces:
-
-- **Pin `tries` and write the wall-time budget next to the annotation.** The suite's critical path
-  is what everyone pays; an unpinned property silently grows it. The current set costs ~290 ms.
-- **Put the generated inputs in the assertion's message supplier.** jqwik publishes its sample
-  report through JUnit Platform reporting entries, and the fork's `TestEngine.Listener` does not
-  implement `reportingEntryPublished` — it records `Throwable.getMessage()` and nothing else. A
-  message supplier is therefore the only route a shrunk counterexample has into `test-result`. It
-  works well: a deliberately falsified `n < 500` reported `falsified at n=500`, the exact boundary.
-
-`play autotest` writes jqwik's failure database to `.jqwik-database` at the repo root on every run;
-it is gitignored.
+- **Pin the iteration count and write its cost next to the call.** The suite's critical path is what
+  everyone pays, and an unpinned count silently grows it. The current 14 cost about 1.1 s of method
+  time together, spread over parallel classes.
+- **Keep the count well under the number of distinct inputs.** jetCheck never repeats an input, and
+  throws `CannotSatisfyCondition` when it cannot find a new one, so 40 draws from 24 photo counts
+  fails. Check a domain of a few dozen values with a plain loop over all of it, as
+  `TelegramOutboundPlannerPropertyTest` does.
+- **Put the generated input in the assertion's message supplier.** The fork's `PlayJUnitExtension`
+  reports a failure's root cause, which is the assertion jetCheck caught at the shrunk input, so that
+  message is all that reaches `test-result`; `check` appends jetCheck's replay data to it. Generate
+  several inputs as one record (`Generator.from(env -> new Case(env.generate(a), env.generate(b)))`),
+  so the input prints as one value.
+- **A failed property is not retried.** jetCheck keeps no failure database and draws new inputs on
+  every run, so a rerun of a red property can pass with the bug still there. Before rerunning, copy
+  the input from `test-result` into an example test in the subject's example class. To step through
+  the exact failure, run the test locally with the `Replay:` line from its message,
+  `PropertyChecker.customized().rechecking("<data>").forAll(generator, …)`, in place of `check`.
+  jetCheck marks `rechecking` deprecated; it is a debugging aid and never belongs in a commit.

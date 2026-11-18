@@ -386,14 +386,12 @@ dependencies {
     // test class references it), so its presence in the dist is inert.
     implementation("com.tngtech.archunit:archunit:1.5.1")
 
-    // JCLAW-1154: jqwik — property-based testing for the pure parsers and planners
-    // (test/PropertyBasedTest). `implementation` for the same reason as ArchUnit above:
+    // jetCheck: the property checker the test/*PropertyTest classes call from ordinary
+    // tests. `implementation` for the same reason as ArchUnit above:
     // playAutotest builds its classpath from sourceSets.main.runtimeClasspath, so a
     // testImplementation dep is invisible to the fork's runner; never loaded at runtime,
-    // so its presence in the dist is inert. It asks for junit-platform 1.14.4 and runs
-    // on the fork's 6.1.3.
-    implementation("net.jqwik:jqwik-api:1.10.2")
-    runtimeOnly("net.jqwik:jqwik-engine:1.10.2")
+    // and the bundle leaves it out (see playBundle below).
+    implementation("org.jetbrains:jetCheck:0.3.0")
 
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
@@ -785,7 +783,7 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // driver-bundle is Node.js for all five Playwright platforms (~194 MB, near half the bundle).
 // A bundle install, and the Docker image built from the bundle, downloads its one platform's
 // official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
-// ArchUnit, jqwik and MockWebServer are `implementation` only so the fork's test runner sees
+// ArchUnit, jetCheck and MockWebServer are `implementation` only so the fork's test runner sees
 // them (see their declarations); no app/ class loads one.
 // sherpa-onnx's native-lib jar is the build host's platform only, so a bundle for no named target
 // drops it and fetches its own host's on first use (services.voice.SherpaNative, JF-188). Docker
@@ -798,7 +796,7 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // frameworkLib, so filtering each keeps a jar out of both.
 tasks.named<play.gradle.PlayBundleTask>("playBundle") {
     val forOneTarget = (findProperty("targetArch") as String?)?.isNotBlank() == true
-    val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jqwik-api-", "jqwik-engine-", "mockwebserver3-") +
+    val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jetCheck-", "mockwebserver3-") +
         if (forOneTarget) emptyList() else listOf("sherpa-onnx-native-lib-")
     val excludedFrameworkJarPrefixes = listOf(
         "junit-jupiter-", "junit-platform-", "hamcrest-", "opentest4j-", "apiguardian-api-", "ecj-", "ivy-",
