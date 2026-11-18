@@ -224,6 +224,19 @@ test("a push of HEAD needs the exact release subject", () => {
   }
 });
 
+test("a version tag passes only on the release commit of its own version, on main", () => {
+  const seen = [];
+  const tagged = (over) => ({ ...ctx(), state: (_dir, rev) => { seen.push(rev); return { ...RELEASE, ...over }; } });
+  for (const remote of ["origin", "github"]) {
+    deepStrictEqual(commandVerdict(`/usr/bin/git push ${remote} "refs/tags/v0.19.79"`, tagged({})), null, remote);
+  }
+  deepStrictEqual(seen, ["refs/tags/v0.19.79^{commit}", "refs/tags/v0.19.79^{commit}"]);
+  for (const subject of ["feat: unreleased work", "Release v0.19.80", "Release v0.19.79 hotfix"]) {
+    deepStrictEqual(commandVerdict("git push github refs/tags/v0.19.79", tagged({ subject })), refused("push"), subject);
+  }
+  deepStrictEqual(commandVerdict("git push github refs/tags/v0.19.79", tagged({ onMain: false })), refused("push"));
+});
+
 test("a release commit pushed by name must be a release, on main, named in full", () => {
   const command = `git push github ${SHA}:refs/heads/main`;
   deepStrictEqual(commandVerdict(command, ctx({ ...RELEASE, subject: "feat: a peer's work" })), refused("push"));
@@ -327,7 +340,7 @@ test("the hook prints Claude Code's deny decision with the rule's reason, and no
   strictEqual(denied.stdout, `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse",
     permissionDecision: "deny", permissionDecisionReason: "Pushing is /deploy's job (AGENTS.md Policy): stop at the "
     + "local commit and report its hash. The guard passes only a \"Release vX.Y.Z\" commit on main pushed to origin or "
-    + "github as HEAD or by its full sha, a version tag pushed alone, /release-check's candidate/v<version>-rc.<N> "
+    + "github as HEAD or by its full sha, its vX.Y.Z tag pushed alone, /release-check's candidate/v<version>-rc.<N> "
     + "branch on origin for a release commit over main that carries that version, and the deletion of renovate/* and "
     + "candidate/* branches."
     } })}\n`);
@@ -397,6 +410,28 @@ test("refsVerdict passes /deploy's and /renovate's refs and refuses every other"
     no("refs/heads/renovate/x"));
   deepStrictEqual(refsVerdict(line("refs/tags/v1.0.0-rc1", "refs/tags/v1.0.0-rc1"), "origin", release),
     no("refs/tags/v1.0.0-rc1"));
+});
+
+test("refsVerdict passes a version tag only on the release commit of its own version, on main", () => {
+  const zero = "0".repeat(40);
+  const tagObject = "d".repeat(40);
+  const ref = "refs/tags/v0.19.79";
+  const seen = [];
+  const at = (over) => (sha) => {
+    seen.push(sha);
+    return { branch: "main", subject: "Release v0.19.79", mainCheckout: true, onMain: true, fastForward: true, ...over };
+  };
+  const line = `${ref} ${tagObject} ${ref} ${zero}\n`;
+  deepStrictEqual(refsVerdict(line, "origin", at({})), null);
+  deepStrictEqual(refsVerdict(line, "github", at({})), null);
+  deepStrictEqual(seen, [`${tagObject}^{commit}`, `${tagObject}^{commit}`]);
+  const no = { ...refused("push"), ref };
+  for (const subject of ["feat: unreleased work", "Release v0.19.80", "Release v0.19.79 hotfix"]) {
+    deepStrictEqual(refsVerdict(line, "github", at({ subject })), no, subject);
+  }
+  deepStrictEqual(refsVerdict(line, "origin", at({ onMain: false })), no);
+  deepStrictEqual(refsVerdict(line, "fork", at({})), no);
+  deepStrictEqual(refsVerdict(`refs/tags/v0.19.78 ${tagObject} ${ref} ${zero}\n`, "origin", at({})), no);
 });
 
 test("refsVerdict passes a candidate branch named for its commit's version, on origin, created once and never moved", () => {
@@ -489,6 +524,40 @@ test("through git itself, the pre-push hook lets /deploy's pushes out and refuse
     git(work, "worktree", "add", "-q", "-b", "side", join(scratch, "wt"));
     strictEqual(git(join(scratch, "wt"), "push", "origin", "main").status, 1);
     strictEqual(git(work, "push", "origin", "HEAD").status, 0);
+  });
+});
+
+test("through git itself, a version tag goes out only on main's release commit of its own version", () => {
+  inScratchRepo(({ scratch, work, git }) => {
+    const hook = (command) => spawnSync("node", [GUARD, "hook"],
+      { input: JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd: work }), encoding: "utf8" }).stdout;
+    const refusedTag = (tag) => {
+      const push = git(work, "push", "origin", `refs/tags/${tag}`);
+      strictEqual(push.status, 1, tag);
+      strictEqual(push.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/tags/${tag}: ${REASONS.push}`);
+      strictEqual(JSON.parse(hook(`/usr/bin/git push github "refs/tags/${tag}"`)).hookSpecificOutput
+        .permissionDecisionReason, REASONS.push, tag);
+    };
+    git(work, "tag", "v0.0.7");
+    git(work, "tag", "-a", "v0.0.8", "-m", "Release v0.0.8");
+    refusedTag("v0.0.7");
+    refusedTag("v0.0.8");
+
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.1");
+    git(work, "tag", "-a", "v0.0.2", "-m", "Release v0.0.2");
+    refusedTag("v0.0.2");
+
+    git(work, "checkout", "-q", "-b", "side");
+    git(work, "commit", "-q", "--allow-empty", "-m", "Release v0.0.3");
+    git(work, "tag", "-a", "v0.0.3", "-m", "Release v0.0.3");
+    git(work, "checkout", "-q", "main");
+    refusedTag("v0.0.3");
+    strictEqual(git(scratch, "--git-dir=origin.git", "tag", "--list").stdout, "");
+
+    git(work, "tag", "v0.0.1");
+    strictEqual(hook('/usr/bin/git push origin "refs/tags/v0.0.1"'), "");
+    strictEqual(git(work, "push", "origin", "refs/tags/v0.0.1").status, 0);
+    strictEqual(git(scratch, "--git-dir=origin.git", "tag", "--list").stdout, "v0.0.1\n");
   });
 });
 

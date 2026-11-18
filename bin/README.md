@@ -356,7 +356,7 @@ The command layer refuses:
   prefix on the operator's yes; nothing stops it adding the prefix unasked, so this catches forgetting.
 
 Both layers pass only a commit on `main` whose subject is exactly `Release vX.Y.Z`, pushed from the main checkout on
-`main` to `origin` or `github` as `HEAD` or by its full SHA, a version tag pushed alone, the deletion of `renovate/*`
+`main` to `origin` or `github` as `HEAD` or by its full SHA, that commit's own `vX.Y.Z` tag pushed alone (JF-503), the deletion of `renovate/*`
 and `candidate/*` branches on `origin`, and `/release-check`'s candidate: its `Release vX.Y.Z` commit, whose one
 parent is on `main` and which changes only `conf/application.conf`, pushed from the main checkout on `main` by its full
 SHA to `origin`'s `candidate/v<version>-rc.<N>`, where the version is the one that commit's `conf/application.conf`

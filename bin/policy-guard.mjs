@@ -39,7 +39,7 @@ const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_
 
 export const REASONS = {
   push: "Pushing is /deploy's job (AGENTS.md Policy): stop at the local commit and report its hash. The guard passes only "
-    + "a \"Release vX.Y.Z\" commit on main pushed to origin or github as HEAD or by its full sha, a version tag pushed "
+    + "a \"Release vX.Y.Z\" commit on main pushed to origin or github as HEAD or by its full sha, its vX.Y.Z tag pushed "
     + "alone, /release-check's candidate/v<version>-rc.<N> branch on origin for a release commit over main that carries "
     + "that version, and the deletion of "
     + "renovate/* and candidate/* branches.",
@@ -322,7 +322,7 @@ function skipsHooks(sub, rest) {
 
 function pushAllowed(rest, state) {
   if (rest.length === 2 && REMOTES.has(rest[0])) {
-    if (VERSION_TAG.test(rest[1])) return true;
+    if (VERSION_TAG.test(rest[1])) return releaseTag(state(`${rest[1]}^{commit}`), rest[1]);
     // /deploy names its release commit, so a commit another session lands between the two pushes goes out in neither.
     const rev = rest[1] === "HEAD" ? "HEAD" : rest[1].match(NAMED_COMMIT)?.[1];
     if (rev) {
@@ -342,6 +342,12 @@ function pushAllowed(rest, state) {
 // version the commit carries, which its build takes as its name (JF-471).
 function releaseCandidate(s, version) {
   return s.branch === "main" && s.mainCheckout && RELEASE.test(s.subject) && s.releaseOverMain && s.version === version;
+}
+
+// A tag carries its commit's history to the remote, so only the release commit /deploy tags, already on main, may go
+// out under its own version's tag (JF-503). The commit is peeled from the tag, which an annotated tag's ref line names.
+function releaseTag(s, tagRef) {
+  return s.onMain && s.subject === `Release ${tagRef.slice("refs/tags/".length)}`;
 }
 
 function stashesUntracked(rest) {
@@ -546,7 +552,9 @@ function refAllowed(localRef, localSha, remoteRef, remoteSha, remote, state) {
     return releaseCandidate(state(localSha, remoteSha), candidate[1]);
   }
   if (!REMOTES.has(remote)) return false;
-  if (VERSION_TAG.test(remoteRef)) return localRef === remoteRef;
+  if (VERSION_TAG.test(remoteRef)) {
+    return localRef === remoteRef && releaseTag(state(`${localSha}^{commit}`, remoteSha), remoteRef);
+  }
   if (remoteRef !== "refs/heads/main") return false;
   const s = state(localSha, remoteSha);
   // git names the local ref as the refspec spelled it: `git push origin HEAD` arrives as HEAD, a named commit as its sha.
