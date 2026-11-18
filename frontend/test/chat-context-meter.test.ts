@@ -82,8 +82,8 @@ describe('ChatContextMeter — filling toward the summary point', () => {
     })
 
     expect(component.find('[data-testid="context-readout"]').text()).toBe('28,204 / 150.0k')
-    expect(component.find('[data-testid="context-bar"]').attributes('style'))
-      .toContain(`width: ${(28_204 / 150_000) * 100}%`)
+    // 28,204 / 150,000 as CSS serializes it, to six significant digits.
+    expect(component.find('[data-testid="context-bar"]').attributes('style')).toContain('width: 18.8027%')
     expect(text('context-percent')).toBe('19% full')
     expect(text('context-summary')).toBe('The agent rereads this conversation every time it answers: 28,204 tokens right now. '
       + 'At about 150,000, JClaw summarizes the oldest messages to make room.')

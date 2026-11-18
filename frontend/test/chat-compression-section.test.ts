@@ -391,7 +391,7 @@ describe('ChatCompressionSection', () => {
 
     expect(bars()).toEqual([
       ['exec', 'width: 50%;', '1 of 2 · 50%'],
-      ['web_fetch', 'width: 33.33333333333333%;', '1 of 3 · 33%'],
+      ['web_fetch', 'width: 33.3333%;', '1 of 3 · 33%'],
       ['jclaw_api', 'width: 0%;', '0 of 1 · 0%'],
     ])
 

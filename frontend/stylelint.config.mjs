@@ -42,10 +42,6 @@ export default {
     'selector-pseudo-class-no-unknown': [true, {
       ignorePseudoClasses: ['deep', 'slotted', 'global'],
     }],
-    // Compact one-liner rules (e.g. `.x { color: red; background: blue; }`)
-    // are an intentional style choice in the prose-chat palette — splitting
-    // them adds vertical bulk without improving scanability.
-    'declaration-block-single-line-max-declarations': null,
     // `.foo { structure } … .foo { palette }` is a deliberate pattern: layout
     // rules are declared once, then light/dark palette overrides re-open the
     // selector with color-only declarations. Flagging this as "duplicate"
