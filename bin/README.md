@@ -23,7 +23,7 @@ trees. Nothing here ships in a `play dist` tarball.
 | `candidate-job.test.mjs` | Its tests: `node --test bin/candidate-job.test.mjs` |
 | `candidate-rc.mjs` | The rc number `/release-check` names its next candidate branch with — see below |
 | `candidate-rc.test.mjs` | Its tests: `node --test bin/candidate-rc.test.mjs` |
-| `jira-release.mjs` | Records a release in Jira for `/deploy`: the tickets it ships, the release as their Fix Version, Done — see below |
+| `jira-release.mjs` | Records a release in Jira for `/deploy`: the tickets it ships, the release as their Fix Version, Done; closes a ticket no commit names, and audits which are out of step — see below |
 | `jira-release.test.mjs` | Its tests: `node --test bin/jira-release.test.mjs` |
 | `playwright-chromium.mjs` | Whether the Chromium build the Java Playwright pins is installed, for `./jclaw.sh test`'s live-browser gate — see below |
 | `playwright-chromium.test.mjs` | Its tests, the gate's lines among them: `node --test bin/playwright-chromium.test.mjs` |
@@ -310,6 +310,8 @@ Exit 0 printed the number. Exit 2 means a malformed version, a config without th
 node bin/jira-release.mjs tickets v1.0.20 <REL>                    # JF-453 JF-462: the keys the range's subjects name
 node bin/jira-release.mjs record v1.0.21 2026-11-17 "<description>" JF-453 JF-462
 node bin/jira-release.mjs done v1.0.21 JF-453 JF-462               # each in Review with that Fix Version goes to Done
+node bin/jira-release.mjs close JF-411 "Folded into JF-410."        # one no commit names: the reason, then Done
+node bin/jira-release.mjs audit                                    # the tickets out of step since the last v* tag
 ```
 
 `/deploy` runs it once a release is tagged (JF-462), so Jira says which release shipped each ticket and nothing that
@@ -320,11 +322,21 @@ ticket's Fix Versions, with an add rather than a set, so a ticket keeps the rele
 each ticket in Review that carries the version to Done, by whichever transition Jira offers to Done. It leaves any
 other ticket as it is, a key passed by mistake included.
 
+`close` and `audit` keep Done meaning released (JF-504), since the policy guard refuses a Jira MCP move of a JF ticket
+to Done. `close` is the other way there, for a ticket that ships no code: a spike, a duplicate, a verification task, a
+won't-do. It refuses when a commit subject on a local or remote-tracking branch names the key, since that ticket
+reaches Done at its release; otherwise it posts the reason as a comment, then moves the ticket to Done, and leaves one
+already Done. `audit` changes nothing. From the last `v*` tag before `HEAD`, or the ref given, it lists each key the
+range's subjects name that is not in Review (To Do, In Progress, Done with no released Fix Version, or missing from
+Jira), and each JF ticket in Review the range does not name, whether a release already carries it or not. A Done
+ticket a release carries may be named again by a follow-up commit. `/release-check` runs it and reports what it lists.
+
 It calls Jira's REST API with the `JIRA_URL` and `JIRA_PERSONAL_TOKEN` of the `jira-confluence` MCP server in
 `~/.claude.json` (`JCLAW_CLAUDE_JSON` names another file), so it holds no secret of its own, and it never prints the
-token. That server's own create-version call fails on this Jira. Exit 0 did everything asked. Exit 2 means a
-malformed argument, a range git cannot read, a config without the server, or a refusal, which stops the run after
-the lines for what it did.
+token. That server's own create-version call fails on this Jira. Exit 0 did everything asked, or found everything in
+step. Exit 1 is `close` refusing, with Jira not asked, or `audit` listing a ticket. Exit 2 means a malformed argument,
+a range or branches git cannot read, no `v*` tag for `audit` to start from, a config without the server, or a refusal
+from Jira, which stops the run after the lines for what it did.
 
 ## policy-guard.mjs
 
@@ -344,6 +356,9 @@ The command layer refuses:
 - **`git push`**, except the forms below;
 - **skipping hooks**: `--no-verify`, `git commit -n`, any change to `core.hooksPath`, and `JCLAW_SKIP_TESTS`;
 - **`git stash` with untracked files**;
+- **a Jira MCP move of a JF ticket to Done**: the transition tool moves one only to To Do (11), In Progress (21) or
+  Review (41), and refuses any other id, so a renumbered workflow fails closed. Done goes through `jira-release.mjs`
+  (JF-504);
 - **stopping the instance**: the `jclaw.sh` subcommands the Policy block names, run directly or through the `jclaw`
   shim (`jclaw.cmd` on Windows), which reaches the test install too; `kill` aimed at the pid in `server.pid` or at
   ports 9000 or 9443; and `pkill` or `killall` that names `server.pid` or those ports, whose pattern matches `java` or,

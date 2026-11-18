@@ -4,7 +4,7 @@
 
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -324,7 +324,29 @@ test("the server's command line is read only for a pkill -f its name does not se
   strictEqual(reads, 1);
 });
 
-test("hookVerdict reads Bash commands only, and lets every edit through, an imported skill's included", () => {
+test("a Jira MCP transition moves a JF ticket only to To Do, In Progress or Review", () => {
+  const c = ctx();
+  const move = (issue_key, transition_id, tool_name = "mcp__jira-confluence__jira_transition_issue") =>
+    hookVerdict({ tool_name, tool_input: { issue_key, transition_id } }, c);
+  for (const id of ["11", "21", "41", 41, " 41 "]) deepStrictEqual(move("JF-504", id), null, String(id));
+  for (const id of ["31", 31, "51", "", undefined]) deepStrictEqual(move("JF-504", id), refused("done"), String(id));
+  deepStrictEqual(move("JF-504", "31", "jira-confluence__jira_transition_issue"), refused("done"));
+  for (const key of ["JLS-20", "JCLAW-1413"]) deepStrictEqual(move(key, "31"), null, key);
+  deepStrictEqual(move(" jf-504", "31"), refused("done"));
+  deepStrictEqual(hookVerdict({ tool_name: "mcp__jira-confluence__jira_get_transitions",
+    tool_input: { issue_key: "JF-504" } }, c), null);
+});
+
+test("Claude Code hands the Jira transition tool to the guard, and a guard that fails on one refuses it", () => {
+  const settings = JSON.parse(readFileSync(join(ROOT, ".claude", "settings.json"), "utf8"));
+  const guarded = settings.hooks.PreToolUse.filter((h) => h.hooks.some((x) => x.command.includes("policy-guard.mjs")));
+  strictEqual(guarded.some((h) => new RegExp(`^(?:${h.matcher})$`).test("mcp__jira-confluence__jira_transition_issue")), true);
+  const truncated = '{"tool_name":"mcp__jira-confluence__jira_transition_issue","tool_input":{"issue_key":"JF-504"';
+  const run = spawnSync("node", [GUARD, "hook"], { input: truncated, encoding: "utf8" });
+  strictEqual(JSON.parse(run.stdout).hookSpecificOutput.permissionDecision, "deny");
+});
+
+test("hookVerdict reads Bash commands and Jira transitions, and lets every edit through, an imported skill's included", () => {
   const c = ctx();
   deepStrictEqual(hookVerdict({ tool_name: "Bash", tool_input: { command: "git push" } }, c), refused("push"));
   deepStrictEqual(hookVerdict({ tool_name: "Write", tool_input: { file_path: "/repo/skills/git/a.md" } }, c), null);

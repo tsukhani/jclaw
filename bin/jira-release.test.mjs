@@ -14,7 +14,8 @@ import { jiraFrom, ticketKeys } from "./jira-release.mjs";
 
 const SCRIPT = join(resolve(dirname(fileURLToPath(import.meta.url))), "jira-release.mjs");
 const TOKEN = "stand-in-token-123";
-const USAGE = "give tickets <from> <to>, record <vX.Y.Z> <YYYY-MM-DD> <description> [<key>…], or done <vX.Y.Z> <key>…\n";
+const USAGE = "give tickets <from> <to>, record <vX.Y.Z> <YYYY-MM-DD> <description> [<key>…], done <vX.Y.Z> <key>…, "
+  + "close <key> <reason>, or audit [<from>]\n";
 
 test("the keys are the JF tickets the subjects name, each once, in number order", () => {
   deepStrictEqual(ticketKeys([
@@ -176,7 +177,8 @@ test("a malformed argument or a config without the server answers 2 without aski
     for (const args of [[], ["done"], ["done", "JF-1"], ["done", "v1.0.21"], ["done", "v1.0.21", "JF-1x"],
       ["done", "v1.0.21", "JCLAW-12"], ["record", "1.0.21", "2026-11-17", "d"],
       ["record", "v1.0.21", "17-11-2026", "d"], ["record", "v1.0.21", "2026-11-17", " "], ["record", "v1.0.21", "2026-11-17"],
-      [...RECORD, "jf-1"], ["tickets", "v1.0.20"], ["undo", "JF-1"]]) {
+      [...RECORD, "jf-1"], ["tickets", "v1.0.20"], ["undo", "JF-1"], ["close"], ["close", "JF-1"], ["close", "JF-1", " "],
+      ["close", "JCLAW-12", "a duplicate"], ["close", "JF-1", "a", "duplicate"], ["audit", "v1.0.20", "HEAD"]]) {
       deepStrictEqual(await cli(args, config), { code: 2, stdout: "", stderr: USAGE }, args.join(" "));
     }
     strictEqual(seen.length, 0);
@@ -187,23 +189,217 @@ test("a malformed argument or a config without the server answers 2 without aski
   });
 });
 
-test("tickets lists the keys in the subjects of the range's commits, and a range git cannot read answers 2", async () => {
+// A scratch repository holding one commit that names no ticket, so every range and branch walk has a start.
+const inRepo = async (body) => {
   const repo = mkdtempSync(join(tmpdir(), "jira-release-repo-"));
   const git = (...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8",
     env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.test", GIT_COMMITTER_NAME: "t",
       GIT_COMMITTER_EMAIL: "t@example.test" } });
+  const commit = (...messages) => git("commit", "-q", "--allow-empty", "--no-gpg-sign", ...messages.flatMap((m) => ["-m", m]));
+  const tag = (name) => git("-c", "tag.gpgSign=false", "tag", name);
+  // A commit on no branch, under the ref given, so a test can place one where a branch walk does or does not look.
+  const refTo = (ref, subject) => {
+    const sha = git("commit-tree", "--no-gpg-sign", "-p", "HEAD", "-m", subject, "HEAD^{tree}").stdout.trim();
+    git("update-ref", ref, sha);
+  };
   try {
     git("init", "-q");
-    git("commit", "-q", "--allow-empty", "--no-gpg-sign", "-m", "feat: the old release's work (JF-440)");
-    git("-c", "tag.gpgSign=false", "tag", "v1.0.20");
-    git("commit", "-q", "--allow-empty", "--no-gpg-sign", "-m", "fix: a fix (JF-453)", "-m", "The body names JF-17, which is not shipped here.");
-    git("commit", "-q", "--allow-empty", "--no-gpg-sign", "-m", "feat: a story (JF-462, JF-453)");
-    git("commit", "-q", "--allow-empty", "--no-gpg-sign", "-m", "Release v1.0.21");
+    commit("chore: start");
+    await body({ repo, git, commit, tag, refTo });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+};
+
+test("tickets lists the keys in the subjects of the range's commits, and a range git cannot read answers 2", async () => {
+  await inRepo(async ({ repo, commit, tag }) => {
+    commit("feat: the old release's work (JF-440)");
+    tag("v1.0.20");
+    commit("fix: a fix (JF-453)", "The body names JF-17, which is not shipped here.");
+    commit("feat: a story (JF-462, JF-453)");
+    commit("Release v1.0.21");
     deepStrictEqual(await cli(["tickets", "v1.0.20", "HEAD"], "/nonexistent", repo), { code: 0, stdout: "JF-453 JF-462\n", stderr: "" });
     const bad = await cli(["tickets", "v9.9.9", "HEAD"], "/nonexistent", repo);
     strictEqual(bad.code, 2);
     strictEqual(bad.stderr.startsWith("git log v9.9.9..HEAD failed: "), true, bad.stderr);
+  });
+});
+
+test("close refuses with exit 1, asking Jira nothing, when a commit on a branch or a remote-tracking branch names it", async () => {
+  await withJira(() => [200, {}], async ({ config, seen }) => {
+    await inRepo(async ({ repo, git, commit, refTo }) => {
+      commit("feat: a story (JF-389)");
+      commit("fix: its follow-up (JF-389)");
+      git("checkout", "-q", "-b", "side");
+      commit("fix: on a branch (JF-410)");
+      git("checkout", "-q", "-");
+      refTo("refs/remotes/origin/feature", "chore: from origin (JF-420)");
+      for (const [key, subject] of [["JF-389", "fix: its follow-up (JF-389)"], ["JF-410", "fix: on a branch (JF-410)"],
+        ["JF-420", "chore: from origin (JF-420)"]]) {
+        deepStrictEqual(await cli(["close", key, "Folded into JF-1."], config, repo), { code: 1, stderr: "",
+          stdout: `${key}: not closed, since "${subject}" names it: /deploy moves it to Done when a release ships it.\n` }, key);
+      }
+      strictEqual(seen.length, 0);
+    });
+  });
+});
+
+const toDo = [200, { fields: { status: { name: "To Do" } } }];
+
+test("close posts the reason and then moves a ticket no branch names to Done, and leaves one already Done", async () => {
+  const jira = (method, url) => {
+    if (method === "GET" && url.endsWith("?fields=status")) {
+      return url.includes("JF-432") ? [200, { fields: { status: { name: "Done" } } }] : toDo;
+    }
+    if (method === "GET") return [200, transitions];
+    return url.endsWith("/comment") ? [201, { id: "1" }] : [204];
+  };
+  await withJira(jira, async ({ config, seen }) => {
+    await inRepo(async ({ repo, commit, refTo }) => {
+      commit("feat: a story (JF-389)");
+      refTo("refs/stash", "WIP on main: a stash is no branch (JF-431)");
+      deepStrictEqual(await cli(["close", "JF-431", "Folded into JF-410."], config, repo),
+        { code: 0, stderr: "", stdout: "JF-431: To Do to Done, with the reason posted.\n" });
+      deepStrictEqual(seen.filter((s) => s.method === "POST"), [
+        { method: "POST", url: "/rest/api/2/issue/JF-431/comment", auth: `Bearer ${TOKEN}`,
+          body: { body: "Closed without a release, since no commit names JF-431: Folded into JF-410." } },
+        { method: "POST", url: "/rest/api/2/issue/JF-431/transitions", auth: `Bearer ${TOKEN}`, body: { transition: { id: "31" } } },
+      ]);
+      seen.length = 0;
+      deepStrictEqual(await cli(["close", "JF-432", "A duplicate of JF-410."], config, repo),
+        { code: 0, stderr: "", stdout: "JF-432: left as Done.\n" });
+      deepStrictEqual(seen.map((s) => `${s.method} ${s.url}`), ["GET /rest/api/2/issue/JF-432?fields=status"]);
+    });
+  });
+});
+
+test("close stops with exit 2 when Jira refuses the reason or the move, or git cannot read the branches", async () => {
+  await withJira((method) => (method === "GET" ? toDo : [403]), async ({ config, seen }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["close", "JF-431", "A duplicate."], config, repo),
+        { code: 2, stdout: "", stderr: "Jira answered 403 to posting the reason on JF-431\n" });
+      strictEqual(seen.some((s) => s.url.includes("/transitions")), false);
+    });
+  });
+  const jira = (method, url) => {
+    if (url.endsWith("/comment")) return [201, {}];
+    if (method === "POST") return [400];
+    return url.endsWith("?fields=status") ? toDo : [200, transitions];
+  };
+  await withJira(jira, async ({ config }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["close", "JF-431", "A duplicate."], config, repo),
+        { code: 2, stdout: "", stderr: "Jira answered 400 to moving JF-431 to Done\n" });
+    });
+  });
+  await withJira(() => [404], async ({ config }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["close", "JF-431", "A duplicate."], config, repo),
+        { code: 2, stdout: "", stderr: "Jira answered 404 for JF-431\n" });
+    });
+  });
+  const notRepo = mkdtempSync(join(tmpdir(), "jira-release-plain-"));
+  try {
+    const out = await cli(["close", "JF-431", "A duplicate."], "/nonexistent", notRepo);
+    strictEqual(out.code, 2);
+    strictEqual(out.stderr.startsWith("git log --branches --remotes failed: "), true, out.stderr);
   } finally {
-    rmSync(repo, { recursive: true, force: true });
+    rmSync(notRepo, { recursive: true, force: true });
   }
+});
+
+const REVIEW_SEARCH = `/rest/api/2/search?jql=${encodeURIComponent("project = JF AND status = Review ORDER BY key ASC")}`
+  + "&fields=fixVersions&startAt=";
+const auditJira = (fields, pages) => (method, url) => {
+  if (url.startsWith("/rest/api/2/search")) return [200, pages[Number(url.match(/startAt=(\d+)/)[1])]];
+  const key = url.match(/JF-\d+/)[0];
+  return fields[key] ? [200, { fields: fields[key] }] : [404, { errorMessages: ["Issue Does Not Exist"] }];
+};
+
+test("audit lists each ticket named since the last version tag that is not in Review, and each in Review none names", async () => {
+  const fields = {
+    "JF-440": { status: { name: "Done" }, fixVersions: [{ name: "v1.0.20", released: true }] },
+    "JF-450": { status: { name: "Review" }, fixVersions: [] },
+    "JF-451": { status: { name: "In Progress" }, fixVersions: [] },
+    "JF-452": { status: { name: "To Do" }, fixVersions: [] },
+    "JF-453": { status: { name: "Done" }, fixVersions: [] },
+    "JF-454": { status: { name: "Done" }, fixVersions: [{ name: "v1.3", released: false }] },
+  };
+  const review = { 0: { startAt: 0, total: 3, issues: [
+    { key: "JF-450", fields: { fixVersions: [] } },
+    { key: "JF-460", fields: { fixVersions: [{ name: "v1.0.19", released: true }, { name: "v1.0.20", released: true }] } },
+    { key: "JF-461", fields: { fixVersions: [{ name: "v1.3", released: false }] } },
+  ] } };
+  await withJira(auditJira(fields, review), async ({ config, seen }) => {
+    await inRepo(async ({ repo, commit, tag }) => {
+      commit("feat: the old release's work (JF-440)");
+      tag("v1.0.20");
+      for (const subject of ["feat: a (JF-450)", "fix: b (JF-451)", "feat: c (JF-452, JF-453)", "chore: d (JF-454)",
+        "fix: a follow-up to a released ticket (JF-440)", "feat: e (JF-455)"]) commit(subject);
+      deepStrictEqual(await cli(["audit"], config, repo), { code: 1, stderr: "", stdout: [
+        "JF-451: In Progress, though a commit since v1.0.20 names it.",
+        "JF-452: To Do, though a commit since v1.0.20 names it.",
+        "JF-453: Done, though no release carries the commit since v1.0.20 that names it.",
+        "JF-454: Done, though no release carries the commit since v1.0.20 that names it.",
+        "JF-455: named by a commit since v1.0.20, but Jira has no such ticket.",
+        "JF-460: in Review, though v1.0.19, v1.0.20 released it.",
+        "JF-461: in Review, though no commit since v1.0.20 names it.",
+      ].map((line) => `${line}\n`).join("") });
+      strictEqual(seen.every((s) => s.method === "GET"), true, "audit changes nothing");
+      deepStrictEqual(seen.filter((s) => s.url.startsWith("/rest/api/2/search")).map((s) => s.url), [`${REVIEW_SEARCH}0&maxResults=100`]);
+    });
+  });
+});
+
+test("audit answers 0 when every ticket is in step, reads every page of Review, and starts from the ref it is given", async () => {
+  const fields = {
+    "JF-450": { status: { name: "Review" }, fixVersions: [] },
+    "JF-451": { status: { name: "In Progress" }, fixVersions: [] },
+    "JF-456": { status: { name: "Review" }, fixVersions: [] },
+  };
+  const review = {
+    0: { startAt: 0, total: 2, issues: [{ key: "JF-450", fields: { fixVersions: [] } }] },
+    1: { startAt: 1, total: 2, issues: [{ key: "JF-456", fields: { fixVersions: [] } }] },
+  };
+  await withJira(auditJira(fields, review), async ({ config, seen }) => {
+    await inRepo(async ({ repo, commit, tag }) => {
+      commit("fix: b (JF-451)");
+      tag("v1.0.20");
+      commit("feat: a (JF-450)");
+      commit("feat: f (JF-456)");
+      deepStrictEqual(await cli(["audit"], config, repo), { code: 0, stderr: "",
+        stdout: "Every ticket named since v1.0.20 is in Review, and every ticket in Review is named since then.\n" });
+      deepStrictEqual(seen.filter((s) => s.url.startsWith("/rest/api/2/search")).map((s) => s.url),
+        [`${REVIEW_SEARCH}0&maxResults=100`, `${REVIEW_SEARCH}1&maxResults=100`]);
+      deepStrictEqual(await cli(["audit", "HEAD~3"], config, repo),
+        { code: 1, stderr: "", stdout: "JF-451: In Progress, though a commit since HEAD~3 names it.\n" });
+    });
+  });
+});
+
+test("audit answers 2 when no version tag precedes HEAD, git cannot read the range, or Jira cannot be asked", async () => {
+  await inRepo(async ({ repo }) => {
+    const untagged = await cli(["audit"], "/nonexistent", repo);
+    strictEqual(untagged.code, 2);
+    strictEqual(untagged.stderr.startsWith("no version tag to start from: "), true, untagged.stderr);
+    const bad = await cli(["audit", "v9.9.9"], "/nonexistent", repo);
+    strictEqual(bad.code, 2);
+    strictEqual(bad.stderr.startsWith("git log v9.9.9..HEAD failed: "), true, bad.stderr);
+  });
+  const review = { 0: { startAt: 0, total: 0, issues: [] } };
+  await withJira((method, url) => (url.startsWith("/rest/api/2/search") ? [503] : [200, { fields: { status: { name: "Review" } } }]),
+    async ({ config }) => {
+      await inRepo(async ({ repo, commit, tag }) => {
+        tag("v1.0.20");
+        commit("feat: a (JF-450)");
+        deepStrictEqual(await cli(["audit"], config, repo), { code: 2, stdout: "", stderr: "Jira answered 503 for the tickets in Review\n" });
+      });
+    });
+  await withJira((method, url) => (url.startsWith("/rest/api/2/search") ? [200, review[0]] : [500]), async ({ config }) => {
+    await inRepo(async ({ repo, commit, tag }) => {
+      tag("v1.0.20");
+      commit("feat: a (JF-450)");
+      deepStrictEqual(await cli(["audit"], config, repo), { code: 2, stdout: "", stderr: "Jira answered 500 for JF-450\n" });
+    });
+  });
 });

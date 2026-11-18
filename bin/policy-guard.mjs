@@ -33,7 +33,7 @@ const RESERVED = new Set(["if", "then", "else", "elif", "fi", "do", "done", "whi
 // ends the command string.
 const SPACE = String.raw`(?:[ \t]|\\t)+`;
 const WORD = String.raw`(?:[^\s|;&\\"]|\\[^nt])+`;
-const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|jclaw\.cmd|kill`
+const TRIGGER = new RegExp(String.raw`push|no-verify|stash|hookspath|JCLAW_SKIP_TESTS|jclaw\.sh|jclaw\.cmd|kill|jira_transition_issue`
   + String.raw`|(?:(?<![\w.-])|(?<=\\[nt]))jclaw(?:\\?["'])?(?:${SPACE}${WORD})*?${SPACE}(?:\\?["'])?`
   + `(?:${[...STOPS].join("|")})\\b`, "i");
 
@@ -54,9 +54,23 @@ export const REASONS = {
     + "loads, so it would stop JClaw along with whatever it targets (AGENTS.md Policy). To clean up other processes, "
     + "list them with pgrep -fl and kill those by pid or with a narrower pattern. Only to stop JClaw itself, ask the "
     + `operator in chat, and once they approve, rerun the same command prefixed with ${APPROVAL}=1.`,
+  done: "A JF ticket reaches Done only through bin/jira-release.mjs (AGENTS.md Policy): /deploy's done moves each "
+    + "ticket a release ships, and node bin/jira-release.mjs close <key> \"<reason>\" closes one no commit names, such "
+    + "as a spike, a duplicate or a verification task. Through this tool a JF ticket moves only to To Do, In Progress "
+    + "or Review.",
 };
 
 const deny = (rule, reason = REASONS[rule]) => ({ rule, reason });
+
+// JF's workflow ids for To Do, In Progress and Review. Done, and any id this does not know, is refused, so a renumbered
+// workflow fails closed.
+const JF_MOVES = new Set(["11", "21", "41"]);
+const JIRA_TRANSITION = /jira_transition_issue$/;
+
+function transitionVerdict(input) {
+  if (!/^JF-\d+$/i.test(String(input.issue_key ?? "").trim())) return null;
+  return JF_MOVES.has(String(input.transition_id ?? "").trim()) ? null : deny("done");
+}
 
 // ─── Shell parsing ───
 
@@ -637,7 +651,8 @@ function liveContext(cwd) {
 /** The refusal for a PreToolUse event, or null. */
 export function hookVerdict(event, ctx = liveContext(event.cwd ?? process.cwd())) {
   const input = event.tool_input ?? {};
-  return event.tool_name === "Bash" ? commandVerdict(input.command ?? "", ctx) : null;
+  if (event.tool_name === "Bash") return commandVerdict(input.command ?? "", ctx);
+  return JIRA_TRANSITION.test(event.tool_name ?? "") ? transitionVerdict(input) : null;
 }
 
 function main(argv) {
