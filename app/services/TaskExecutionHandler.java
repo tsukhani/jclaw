@@ -404,9 +404,10 @@ public final class TaskExecutionHandler {
      * sweep reschedules it.
      */
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
-        return (_, executionOperations) -> {
+        return (complete, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
-            rescheduleNext(task, () -> TaskSchedulingService.nextOccurrence(task), "CRON", "");
+            Instant due = complete.getExecution().executionTime;
+            rescheduleNext(task, () -> TaskSchedulingService.nextOccurrenceAfterFire(task, due), "CRON", "");
         };
     }
 }

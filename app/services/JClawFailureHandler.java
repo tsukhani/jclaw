@@ -32,9 +32,9 @@ import java.time.Instant;
  * <h2>Why policy is in its own static method</h2>
  * db-scheduler's {@link ExecutionOperations} is a concrete class
  * with a non-trivial constructor ({@code TaskRepository},
- * {@code SchedulerListeners}, {@code Execution}), so the integration
+ * {@code SchedulerListeners}, {@code Execution}, {@code Clock}), so the integration
  * surface is awkward to stub from a unit test. The retry-vs-fail
- * decision lives in {@link #decide(Long, Throwable)} which takes
+ * decision lives in {@link #decide(Long, Throwable, Instant)} which takes
  * primitives and returns a {@link Decision} record; the
  * {@link #onFailure} method is then a thin shell that translates
  * the decision into the right
@@ -130,7 +130,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         // completing execution". Contain it: the execution row is left untouched for
         // TaskDeadExecutionHandler on the next boot, which does not run it again.
         try {
-            Decision decision = decide(jclawTaskId, throwable);
+            Decision decision = decide(jclawTaskId, throwable, executionComplete.getExecution().executionTime);
             switch (decision) {
                 case Decision.Reschedule r ->
                         executionOps.reschedule(executionComplete, r.nextRunAt());
@@ -158,13 +158,15 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * transaction. Returns silently with a Fail decision when the
      * Task row can't be loaded (rare — implies someone deleted the
      * Task between the fire start and the failure surface).
+     *
+     * @param due when the failed fire was due, which a CRON task's next occurrence counts from; null counts from now
      */
-    public static Decision decide(Long jclawTaskId, @Nullable Throwable throwable) {
+    public static Decision decide(Long jclawTaskId, @Nullable Throwable throwable, @Nullable Instant due) {
         boolean isTransient = TransientErrorClassifier.isTransient(throwable);
         String errorMessage = describeError(throwable);
         int pauseAfter = ConfigService.getInt(PAUSE_AFTER_KEY, 0);
 
-        var outcome = Tx.run(() -> mutateAndDecide(jclawTaskId, isTransient, errorMessage, pauseAfter));
+        var outcome = Tx.run(() -> mutateAndDecide(jclawTaskId, isTransient, errorMessage, pauseAfter, due));
         if (outcome == null) {
             EventLogger.warn("task", null, null,
                     "JClawFailureHandler: Task id %d disappeared mid-fire; failing"
@@ -226,7 +228,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * when the Task row is gone.
      */
     private static @Nullable DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage,
-                                                           int pauseAfter) {
+                                                           int pauseAfter, @Nullable Instant due) {
         var task = (Task) Task.findById(jclawTaskId);
         if (task == null) return null;
 
@@ -258,7 +260,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         String reason = isTransient ? "retries exhausted" : "permanent error";
         var runForLifecycle =
                 (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first();
-        Instant next = task.status == Task.Status.CANCELLED ? null : TaskSchedulingService.nextOccurrence(task);
+        Instant next = task.status == Task.Status.CANCELLED ? null : TaskSchedulingService.nextOccurrenceAfterFire(task, due);
         if (next != null) {
             task.retryCount = 0;
             task.lastError = errorMessage;

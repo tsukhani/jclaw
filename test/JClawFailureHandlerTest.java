@@ -7,9 +7,12 @@ import play.test.UnitTest;
 import services.JClawFailureHandler;
 import services.JClawFailureHandler.Decision;
 import services.Tx;
+import utils.AppClock;
 
 import java.net.SocketTimeoutException;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 /**
  * Coverage for {@link JClawFailureHandler#decide}. Drives the retry
@@ -50,7 +53,7 @@ class JClawFailureHandlerTest extends UnitTest {
         var transientErr = new SocketTimeoutException("read");
 
         var before = Instant.now();
-        var decision = JClawFailureHandler.decide(task.id, transientErr);
+        var decision = JClawFailureHandler.decide(task.id, transientErr, null);
         var after = Instant.now();
 
         assertInstanceOf(Decision.Reschedule.class, decision);
@@ -78,7 +81,7 @@ class JClawFailureHandlerTest extends UnitTest {
         for (int i = 0; i < expected.length; i++) {
             var task = persistTask(agent, i, 10);
             var before = Instant.now();
-            var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException("x"));
+            var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException("x"), null);
             assertInstanceOf(Decision.Reschedule.class, decision,
                     "position " + i + " should reschedule");
             var r = (Decision.Reschedule) decision;
@@ -93,7 +96,7 @@ class JClawFailureHandlerTest extends UnitTest {
         var task = persistTask(agent, 0, 3);
         var permanent = new RuntimeException("HTTP 401 Unauthorized");
 
-        var decision = JClawFailureHandler.decide(task.id, permanent);
+        var decision = JClawFailureHandler.decide(task.id, permanent, null);
 
         assertInstanceOf(Decision.Fail.class, decision);
         var fresh = (Task) Tx.run(() -> Task.findById(task.id));
@@ -108,7 +111,7 @@ class JClawFailureHandlerTest extends UnitTest {
         var task = persistTask(agent, 2, 2);
         var transientErr = new SocketTimeoutException("read");
 
-        var decision = JClawFailureHandler.decide(task.id, transientErr);
+        var decision = JClawFailureHandler.decide(task.id, transientErr, null);
         assertInstanceOf(Decision.Fail.class, decision);
         var fresh = (Task) Tx.run(() -> Task.findById(task.id));
         assertEquals(Task.Status.FAILED, fresh.status,
@@ -121,17 +124,17 @@ class JClawFailureHandlerTest extends UnitTest {
         // though the backoff array has 5 entries.
         var task = persistTask(agent, 0, 1);
         assertInstanceOf(Decision.Reschedule.class,
-                JClawFailureHandler.decide(task.id, new SocketTimeoutException("x")));
+                JClawFailureHandler.decide(task.id, new SocketTimeoutException("x"), null));
 
         // After retryCount became 1, another transient should now FAIL
         // because budget=min(1,5)=1 and currentRetry=1 is at-budget.
-        var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException("x"));
+        var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException("x"), null);
         assertInstanceOf(Decision.Fail.class, decision);
     }
 
     @Test
     void missingTaskRowFailsCleanly() {
-        var decision = JClawFailureHandler.decide(999_999L, new SocketTimeoutException("x"));
+        var decision = JClawFailureHandler.decide(999_999L, new SocketTimeoutException("x"), null);
         assertInstanceOf(Decision.Fail.class, decision);
         // Doesn't throw, doesn't leave anything in a bad state — just
         // logs a warn and returns the Fail decision so the
@@ -141,7 +144,7 @@ class JClawFailureHandlerTest extends UnitTest {
     @Test
     void nullThrowableCountsAsPermanent() {
         var task = persistTask(agent, 0, 3);
-        var decision = JClawFailureHandler.decide(task.id, null);
+        var decision = JClawFailureHandler.decide(task.id, null, null);
         assertInstanceOf(Decision.Fail.class, decision,
                 "null throwable: no signal to retry on → fail");
         var fresh = (Task) Tx.run(() -> Task.findById(task.id));
@@ -152,7 +155,7 @@ class JClawFailureHandlerTest extends UnitTest {
     @Test
     void transientUsesExceptionClassNameWhenMessageIsNull() {
         var task = persistTask(agent, 0, 3);
-        var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException());
+        var decision = JClawFailureHandler.decide(task.id, new SocketTimeoutException(), null);
         assertInstanceOf(Decision.Reschedule.class, decision);
         var fresh = (Task) Tx.run(() -> Task.findById(task.id));
         // No message → fall back to the simple class name as the
@@ -170,6 +173,41 @@ class JClawFailureHandlerTest extends UnitTest {
         a.enabled = true;
         a.save();
         return a;
+    }
+
+    // JF-506: 01:30 EDT on 2026-11-01 is the first of that day's two 01:30s in New York; the second is at 06:30Z.
+    private static final Instant FIRST_0130 = Instant.parse("2026-11-01T05:30:00Z");
+
+    @Test
+    void aCronTaskThatFailsAtATimeTheClocksGoBackOverMovesToTheNextDayNotTheRepeat() {
+        var task = persistCronTask(agent, "0 30 1 * * *", "America/New_York");
+
+        var decision = AppClock.callWith(Clock.fixed(FIRST_0130.plusSeconds(5), ZoneOffset.UTC),
+                () -> JClawFailureHandler.decide(task.id, new RuntimeException("HTTP 401 Unauthorized"), FIRST_0130));
+
+        var next = assertInstanceOf(Decision.NextOccurrence.class, decision);
+        assertEquals(Instant.parse("2026-11-02T06:30:00Z"), next.nextRunAt());
+    }
+
+    @Test
+    void aCronFailureWhoseDueTimeIsUnknownCountsItsNextOccurrenceFromNow() {
+        var task = persistCronTask(agent, "0 30 1 * * *", "America/New_York");
+
+        var decision = AppClock.callWith(Clock.fixed(FIRST_0130.plusSeconds(5), ZoneOffset.UTC),
+                () -> JClawFailureHandler.decide(task.id, new RuntimeException("HTTP 401 Unauthorized"), null));
+
+        var next = assertInstanceOf(Decision.NextOccurrence.class, decision);
+        assertEquals(Instant.parse("2026-11-01T06:30:00Z"), next.nextRunAt());
+    }
+
+    private Task persistCronTask(Agent agent, String cron, String timezone) {
+        var t = persistTask(agent, 0, 0);
+        t.type = Task.Type.CRON;
+        t.status = Task.Status.RUNNING;
+        t.cronExpression = cron;
+        t.timezone = timezone;
+        t.save();
+        return t;
     }
 
     private Task persistTask(Agent agent, int retryCount, int maxRetries) {

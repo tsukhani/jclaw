@@ -21,10 +21,13 @@ import services.ConfigService;
 import services.EventLogger;
 import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
+import utils.AppClock;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -193,6 +196,31 @@ class TaskExecutionHandlerTest extends UnitTest {
                 "next CRON tick should fall within the next minute; got " + deltaSeconds + "s");
         assertTrue(next.when.isAfter(before.minusSeconds(1)),
                 "next CRON tick should be in the future relative to the call site");
+    }
+
+    @Test
+    void aCronFireAtATimeTheClocksGoBackOverSchedulesTheNextDayNotTheRepeat() throws Exception {
+        startLlmServer(simpleResponse("cron-done"));
+        configureProvider();
+
+        var agent = createAgent("cron-clocks-back-agent");
+        var task = persistTask(agent, "ClocksBackTask", "Tick.",
+                Task.Type.CRON, null, "0 30 1 * * *", null);
+        task.timezone = "America/New_York";
+        task.save();
+        commitAndReopen();
+
+        var handler = driveFireCaptureHandler(task.id);
+        JPA.em().clear();
+
+        // 01:30 EDT on 2026-11-01, the first of that day's two 01:30s; the second is at 06:30Z.
+        var due = Instant.parse("2026-11-01T05:30:00Z");
+        var ops = new RecordingExecutionOperations(new Execution(due, instance(task.id)));
+        var complete = ExecutionComplete.success(ops.execution(), due, due.plusSeconds(5));
+        AppClock.runWith(Clock.fixed(due.plusSeconds(5), ZoneOffset.UTC), () -> handler.complete(complete, ops));
+
+        assertEquals(List.of(Instant.parse("2026-11-02T06:30:00Z")),
+                stub.schedules.stream().map(s -> s.when).toList());
     }
 
     // === CRON cancelled-skip ===

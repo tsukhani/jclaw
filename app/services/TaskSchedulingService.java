@@ -345,7 +345,7 @@ public final class TaskSchedulingService {
 
     /**
      * When a recurring task fires next, counted from now: null for a one-shot, or when its schedule
-     * yields no next fire. The one rule for a completed occurrence and a failed one alike.
+     * yields no next fire. A fire that completed or failed counts with {@link #nextOccurrenceAfterFire}.
      */
     public static @Nullable Instant nextOccurrence(Task task) {
         return switch (task.type) {
@@ -355,6 +355,18 @@ public final class TaskSchedulingService {
                     ? AppClock.now().plusSeconds(task.intervalSeconds) : null;
             case IMMEDIATE, SCHEDULED -> null;
         };
+    }
+
+    /**
+     * When a recurring task fires next after a fire due at {@code due} completed or failed: a CRON task counts from
+     * that due time ({@link JClawCronUtils#nextExecutionAfterFire}); an INTERVAL task, or a fire whose due time is
+     * unknown, counts from now. The one rule for a completed occurrence and a failed one alike.
+     */
+    public static @Nullable Instant nextOccurrenceAfterFire(Task task, @Nullable Instant due) {
+        if (task.type == Task.Type.CRON && due != null) {
+            return JClawCronUtils.nextExecutionAfterFire(task.cronExpression, TimezoneResolver.resolve(task), due);
+        }
+        return nextOccurrence(task);
     }
 
     private static @Nullable Instant computeCronFirstFire(Task task) {

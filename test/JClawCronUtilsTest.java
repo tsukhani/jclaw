@@ -1,7 +1,9 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.JClawCronUtils;
+import utils.AppClock;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -130,5 +132,58 @@ class JClawCronUtilsTest extends UnitTest {
         assertNotNull(next);
         assertTrue(next.getEpochSecond() > nowEpoch,
                 "next execution must be strictly in the future");
+    }
+
+    // JF-506: the fire after one that was due at a given time. America/New_York's 2026 clock changes: on 2026-11-01
+    // it goes from 02:00 EDT back to 01:00 EST, so 01:30 happens at 05:30Z and again at 06:30Z; on 2026-03-08 it
+    // goes from 02:00 EST to 03:00 EDT, so 02:30 never happens that day.
+    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+
+    private static Instant afterFire(String expr, ZoneId zone, String due, String now) {
+        return AppClock.callWith(Clock.fixed(Instant.parse(now), ZoneOffset.UTC),
+                () -> JClawCronUtils.nextExecutionAfterFire(expr, zone, Instant.parse(due)));
+    }
+
+    @Test
+    void aFireAtATimeTheClocksGoBackOverIsFollowedByTheNextDayNotByItsRepeat() {
+        assertEquals(Instant.parse("2026-11-02T06:30:00Z"),
+                afterFire("0 30 1 * * *", NEW_YORK, "2026-11-01T05:30:00Z", "2026-11-01T05:30:05Z"));
+    }
+
+    @Test
+    void aTimeTheClocksSkipRunsAtTheChange() {
+        assertEquals(Instant.parse("2026-03-08T07:00:00Z"),
+                afterFire("0 30 2 * * *", NEW_YORK, "2026-03-07T07:30:00Z", "2026-03-07T07:30:05Z"));
+    }
+
+    @Test
+    void aZoneWithoutClockChangesRunsAtTheSameTimeTheNextDay() {
+        assertEquals(Instant.parse("2026-11-02T01:00:00Z"),
+                afterFire(CRON_9_AM_DAILY, ZoneId.of("Asia/Kuala_Lumpur"), "2026-11-01T01:00:00Z",
+                        "2026-11-01T01:00:05Z"));
+    }
+
+    @Test
+    void aNextFireFromTheDueTimeThatIsStillAheadIsKept() {
+        assertEquals(Instant.parse("2026-11-18T11:00:00Z"),
+                afterFire("0 0 * * * *", ZoneOffset.UTC, "2026-11-18T10:00:00Z", "2026-11-18T10:59:59Z"));
+    }
+
+    @Test
+    void aFireThatRanUntilItsNextFireCountsFromNow() {
+        assertEquals(Instant.parse("2026-11-18T12:00:00Z"),
+                afterFire("0 0 * * * *", ZoneOffset.UTC, "2026-11-18T10:00:00Z", "2026-11-18T11:00:00Z"));
+    }
+
+    @Test
+    void aFireThatRanPastItsNextFireCountsFromNow() {
+        assertEquals(Instant.parse("2026-11-18T12:00:00Z"),
+                afterFire("0 0 * * * *", ZoneOffset.UTC, "2026-11-18T10:00:00Z", "2026-11-18T11:30:00Z"));
+    }
+
+    @Test
+    void aBlankOrInvalidExpressionHasNoFireAfterAFire() {
+        assertNull(afterFire("", NEW_YORK, "2026-11-01T05:30:00Z", "2026-11-01T05:30:05Z"));
+        assertNull(afterFire("not a cron", NEW_YORK, "2026-11-01T05:30:00Z", "2026-11-01T05:30:05Z"));
     }
 }

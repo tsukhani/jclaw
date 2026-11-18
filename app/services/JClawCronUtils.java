@@ -62,13 +62,29 @@ public final class JClawCronUtils {
      * (the same behavior as the no-zone constructor).
      */
     public static @Nullable Instant nextExecution(String expr, @Nullable ZoneId zone) {
+        return nextExecutionAfter(expr, zone, AppClock.now());
+    }
+
+    /**
+     * The fire after the one due at {@code due}, counted from {@code due} itself, or from now once that next fire is
+     * already past (a fire that ran long, a scheduler that was down). {@link CronSchedule} matches a local time the
+     * clocks go back over only once when asked from that time: counted from the moment a fire finished, it returns the
+     * repeat, and a task in that hour runs twice that day (JF-506). db-scheduler 17.1 counts its own recurring tasks
+     * the same way.
+     */
+    public static @Nullable Instant nextExecutionAfterFire(String expr, @Nullable ZoneId zone, Instant due) {
+        Instant fromDue = nextExecutionAfter(expr, zone, due);
+        Instant now = AppClock.now();
+        return fromDue == null || fromDue.isAfter(now) ? fromDue : nextExecutionAfter(expr, zone, now);
+    }
+
+    private static @Nullable Instant nextExecutionAfter(String expr, @Nullable ZoneId zone, Instant after) {
         if (expr == null || expr.isBlank()) return null;
         try {
             var schedule = zone != null
                     ? new CronSchedule(expr, zone)
                     : new CronSchedule(expr);
-            return schedule.getNextExecutionTime(
-                    ExecutionComplete.simulatedSuccess(AppClock.now()));
+            return schedule.getNextExecutionTime(ExecutionComplete.simulatedSuccess(after));
         } catch (RuntimeException _) {
             // Bad expression — caller logs and skips via null check.
             return null;

@@ -133,7 +133,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
         var task = recurringTask("flaky-sync");
 
         var decision = AppClock.callWith(FIXED_NOW,
-                () -> JClawFailureHandler.decide(task.id, new SocketTimeoutException("read timed out")));
+                () -> JClawFailureHandler.decide(task.id, new SocketTimeoutException("read timed out"), null));
 
         assertInstanceOf(Decision.Reschedule.class, decision);
         var fresh = reload(task.id);
@@ -148,7 +148,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
         setRetryCount(task.id, 3);
 
         var decision = AppClock.callWith(FIXED_NOW,
-                () -> JClawFailureHandler.decide(task.id, new SocketTimeoutException("read timed out")));
+                () -> JClawFailureHandler.decide(task.id, new SocketTimeoutException("read timed out"), null));
 
         assertInstanceOf(Decision.NextOccurrence.class, decision);
         var fresh = reload(task.id);
@@ -195,7 +195,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
         });
 
         var alerts = alertsFor("one-off", () -> {
-            var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(task.id, new RuntimeException(ERROR)));
+            var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(task.id, new RuntimeException(ERROR), null));
             assertInstanceOf(Decision.Fail.class, decision);
         });
 
@@ -263,7 +263,7 @@ class JClawFailureHandlerPauseTest extends UnitTest {
 
     /** One scheduled run that fails for good: a permanent error ends it without a retry. */
     private static void failOccurrence(Long taskId, Throwable error) {
-        var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(taskId, error));
+        var decision = AppClock.callWith(FIXED_NOW, () -> JClawFailureHandler.decide(taskId, error, null));
         assertInstanceOf(Decision.NextOccurrence.class, decision);
     }
 
