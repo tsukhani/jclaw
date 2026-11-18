@@ -10,7 +10,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { fileFinding, filedFindings, jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
-import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, landedOn, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, blockedReason, waitingOn, type About } from "./board.ts";
@@ -692,8 +692,9 @@ const reconcile = async (candidates: Snapshot[], unread: Set<Tracker>) => {
     try {
       if (await tracker.done(key)) {
         const sha = landedAs(CHECKOUT, key) ?? null;
-        // Labels first: if that fails the story stays in review and the next poll tries again.
-        await tracker.settled(key, sha !== null);
+        // Labels first: if that fails the story stays in review and the next poll tries again. A fast-forward leaves no
+        // merge commit, and it landed all the same.
+        await tracker.settled(key, sha !== null || landedOn(CHECKOUT, key));
         board.set(key, { state: "merged", sha, by: "operator" });
       }
       lastSaid.delete(`done ${key}`);

@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { GITHUB_ENV_FILE, REPO_ROOT, STATE, readEnvFile } from "./paths.ts";
-import type { Snapshot, Tracker } from "./tracker.ts";
+import { settleLabels, type Snapshot, type Tracker } from "./tracker.ts";
 
 const API = "https://api.github.com";
 const HEADER = "### AFK factory";
@@ -107,10 +107,6 @@ const repositoryOf = (configured: string | undefined): string | undefined => {
 // Landed: closed, or labelled afk-merged, which stays on until /deploy closes the issue or the reporter confirms.
 export const issueLanded = (issue: { state: string; labels: { name: string }[] }): boolean =>
   issue.state === "closed" || issue.labels.some((l) => l.name === "afk-merged");
-
-// A story finished outside the factory keeps no in-flight label, and is marked merged only if it landed.
-export const settleLabels = (landed: boolean): { remove: string[]; add: string[] } =>
-  ({ remove: ["afk-running", "afk-review"], add: landed ? ["afk-merged"] : [] });
 
 export const githubTracker = (): Tracker | undefined => {
   // Only from FACTORY_HOME/github.env, never .env, which the gateway mounts: no container ever holds the token.

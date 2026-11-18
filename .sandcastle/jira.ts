@@ -1,11 +1,11 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
+import { PROJECT, blockersOf, inReviewJql, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, REPO_ROOT, STATE, readEnvFile } from "./paths.ts";
 import { FOUND_LABEL, findingLocation, findingSummary, type Finding } from "./brief.ts";
 import { landedOn } from "./merge.ts";
-import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
+import { settleLabels, type Blocker, type Snapshot, type Tracker } from "./tracker.ts";
 
 // The checkout the factory merges into, which main.ts calls CHECKOUT.
 const landed = (key: string) => landedOn(REPO_ROOT, key);
@@ -83,8 +83,7 @@ export const mergeQueue = async (): Promise<string[]> => {
 
 // afk stories awaiting human review: their branches are unmerged, so no new story may change the same files yet.
 export const inReview = async (): Promise<string[]> => {
-  const jql = `project = ${PROJECT} AND labels = afk AND status = Review`;
-  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
+  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(inReviewJql)}&fields=summary&maxResults=100`);
   return found.issues.map((issue: { key: string }) => issue.key);
 };
 
@@ -189,9 +188,13 @@ export const jira: Tracker = {
   started: async (key) => {
     await transitionTo(key, "In Progress");
     await addLabel(key, "afk-running");
+    // Set by an earlier offer the operator sent back.
+    await removeLabel(key, "afk-review");
   },
+  // Review also holds a story merged and waiting for a release (JF-505), so afk-review names the operator's queue.
   reviewing: async (key) => {
     await transitionTo(key, "Review");
+    await addLabel(key, "afk-review");
     await removeLabel(key, "afk-running");
   },
   blocked: async (key) => {
@@ -206,12 +209,19 @@ export const jira: Tracker = {
     await transitionTo(key, "To Do");
     await removeLabel(key, "afk-running");
   },
-  // Done waits for the release that ships it (JF-504): /deploy's bin/jira-release.mjs moves it there.
-  merged: async () => {},
+  // Done waits for the release that ships it (JF-504): /deploy's bin/jira-release.mjs moves it there. afk-merged keeps
+  // the story, still in Review, out of the merge queue.
+  merged: async (key) => {
+    await addLabel(key, "afk-merged");
+    await removeLabel(key, "afk-review");
+  },
   afterMerge: "The story stays in Review: /deploy ships it and moves it to Done when a release carries it.",
   done: async (key) => landed(key) || (await api(`/rest/api/2/issue/${key}?fields=status`)).fields.status.statusCategory.key === "done",
-  // The status is the state here, and reviewing() already dropped afk-running.
-  settled: async () => {},
+  settled: async (key, landed) => {
+    const { remove, add } = settleLabels(landed);
+    for (const label of add) await addLabel(key, label);
+    for (const label of remove) await removeLabel(key, label);
+  },
   comment: async (key, body) => {
     await comment(key, body);
   },

@@ -67,6 +67,11 @@ export interface Tracker {
   mergeMessage(key: string): string | undefined;
 }
 
+// A story finished outside the factory keeps no in-flight label, and is marked merged only if it landed. Both sources
+// label it so: GitHub has no statuses, and Jira's Review holds a story both before and after it is merged (JF-505).
+export const settleLabels = (landed: boolean): { remove: string[]; add: string[] } =>
+  ({ remove: ["afk-running", "afk-review"], add: landed ? ["afk-merged"] : [] });
+
 // A story back in the queue after the factory offered it for review was sent back: the reviewer's comments since the
 // last offer are the feedback ("" when there are none), skipping the factory's own. undefined means it was never offered.
 export const rejectionFeedback = (s: Snapshot, header: string): string | undefined => {

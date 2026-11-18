@@ -55,4 +55,8 @@ export const openBlockersOf = (links: any[] | undefined, landed: (key: string) =
 export const mergeJql = (mergeEpics: string[]): string =>
   `project = ${PROJECT} AND labels = afk AND status = Review ` +
   `AND ${mergeEpics.length > 0 ? `(labels = afk-merge OR "Epic Link" in (${mergeEpics.join(", ")}))` : "labels = afk-merge"} ` +
-  'AND labels not in (no-afk-merge) ORDER BY rank';
+  'AND labels not in (no-afk-merge, afk-merged) ORDER BY rank';
+
+// Stories whose branch waits for the operator's review. A merged story also stays in Review until a release (JF-505),
+// labelled afk-merged.
+export const inReviewJql = `project = ${PROJECT} AND labels = afk AND status = Review AND labels not in (afk-merged)`;

@@ -77,7 +77,9 @@ lockfile changes. Every two minutes it:
      Done included, is not filed again. Findings from a GitHub issue are filed in Jira too, since an issue on the
      public mirror would publish a defect nobody has read yet. A filed story is in no sprint, so the factory builds
      it only once you plan it into one.
-4. Copies `agent/<KEY>` into your checkout, moves the ticket to Review and posts the brief.
+4. Copies `agent/<KEY>` into your checkout, moves the ticket to Review labelled `afk-review` and posts the brief.
+   Review also holds stories already merged and waiting for a release, so your review queue is the stories in
+   Review labelled `afk-review`; once one lands on `main`, by you or the factory, the label becomes `afk-merged`.
 5. Merges a story in review that you labelled `afk-merge` (see [Auto-merge](#auto-merge)).
 
 **Why it is necessary.** Everything that needs trust or judgement stays out of the model's hands. The agent never sees
@@ -186,7 +188,8 @@ review and merge per link. Blocks links between epics are not read.
 Label a story `afk-merge`, or its epic, and once it is in Review the factory merges it the way you would. It rebases
 `agent/<KEY>` onto your checkout's `main` with every commit re-signed and committed as you, the only committer GitHub
 verifies your key for; the agent stays the author. It merges it with a signed merge commit, leaves the story in
-Review for `/deploy` to move to Done when a release carries it, and deletes the branch in your checkout and in its
+Review labelled `afk-merged` in place of `afk-review`, which keeps it out of the merge queue, for `/deploy` to move
+to Done when a release carries it, and deletes the branch in your checkout and in its
 clone. It never pushes, so `/deploy` still ships
 it. The label works before the story is built or after, and `no-afk-merge` exempts one story of a labelled epic.
 
@@ -350,7 +353,8 @@ Jira user.
   The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
   re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
   `git merge --no-ff agent/<KEY>`. Leave the story in Review: the merge on `main` is what lets the stories it blocks
-  start, and `/deploy` moves it to Done when a release carries it. Then delete the branch in both places, since the factory's clone keeps its own copy:
+  start, the factory's next poll swaps its `afk-review` for `afk-merged`, and `/deploy` moves it to Done when a
+  release carries it. Then delete the branch in both places, since the factory's clone keeps its own copy:
   `git branch -d agent/<KEY>` and `git -C ~/.jclaw-factory/jclaw branch -D agent/<KEY>` (the re-sign gave the merged
   commits new hashes, so the clone's copy needs `-D`). Or label it `afk-merge` and the factory does all of this (see
   [Auto-merge](#auto-merge)).

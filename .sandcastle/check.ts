@@ -11,13 +11,13 @@ import { BLOCKER_LIMIT, nextBlockers, outsideBlockers } from "./blockers.ts";
 import { Brief, fileFindings, findingLocation, findingSummary, preExistingSection, type Finding, type FindingsTracker } from "./brief.ts";
 import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
-import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
-import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
+import { issueLanded, ownerApplied, vetIssue, type Issue } from "./github.ts";
+import { blockersOf, inReviewJql, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, landedOn, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { HERE, REPO_ROOT } from "./paths.ts";
 import { TRUST_BOUNDARY, bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths } from "./plan.ts";
-import { overruled, rejectionFeedback, type Blocker, type Snapshot } from "./tracker.ts";
+import { overruled, rejectionFeedback, settleLabels, type Blocker, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -380,9 +380,12 @@ check("a blocker in Review whose work landed on main clears, one that has not ho
   [[["JF-501", true], ["JF-502", false], ["JF-503", true]], ["JF-502"], "blocked by JF-502 (Review)", ["JF-501", "JF-502"]]);
 
 const MERGE = "project = JF AND labels = afk AND status = Review";
-check("with no afk-merge epic, a story merges by its own label", mergeJql([]), `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge) ORDER BY rank`);
+check("with no afk-merge epic, a story merges by its own label, and one already merged never again", mergeJql([]),
+  `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge, afk-merged) ORDER BY rank`);
 check("an afk-merge epic's stories merge with the labelled ones", mergeJql(["JCLAW-538"]),
-  `${MERGE} AND (labels = afk-merge OR "Epic Link" in (JCLAW-538)) AND labels not in (no-afk-merge) ORDER BY rank`);
+  `${MERGE} AND (labels = afk-merge OR "Epic Link" in (JCLAW-538)) AND labels not in (no-afk-merge, afk-merged) ORDER BY rank`);
+check("a story in review is one whose branch waits for the operator, not one merged and waiting for a release", inReviewJql,
+  `${MERGE} AND labels not in (afk-merged)`);
 const merged = (who: string, at: string) => ({ __typename: "LabeledEvent", createdAt: at, actor: { login: who }, label: { name: "afk-merge" } });
 check("afk-merge counts when the owner applied it last", ownerApplied(issue({ timelineItems: { nodes: [merged("stranger", BEFORE), merged(OWNER, LATER)] } }), OWNER, "afk-merge"), true);
 check("afk-merge from anyone else does not", ownerApplied(issue({ timelineItems: { nodes: [merged(OWNER, BEFORE), merged("stranger", LATER)] } }), OWNER, "afk-merge"), false);
@@ -885,15 +888,25 @@ fs.rmSync(sandbox, { recursive: true, force: true });
 const jiraHome = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-jira-check-"));
 const asked: string[] = [];
 const stub = http.createServer((req, res) => {
-  asked.push(`${req.method} ${req.url}`);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ fields: { status: { name: "Review", statusCategory: { key: "indeterminate" } } } }));
+  let body = "";
+  req.on("data", (d) => (body += d));
+  req.on("end", () => {
+    asked.push(`${req.method} ${req.url}${body ? ` ${body}` : ""}`);
+    const transitions = { transitions: [{ id: "21", to: { name: "In Progress" } }, { id: "41", to: { name: "Review" } }] };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(req.method === "GET" && req.url?.endsWith("/transitions") ? transitions
+      : { fields: { status: { name: "Review", statusCategory: { key: "indeterminate" } } } }));
+  });
 });
 await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
 fs.writeFileSync(path.join(jiraHome, "jira.env"), `JIRA_URL=http://127.0.0.1:${(stub.address() as { port: number }).port}\nJIRA_PERSONAL_TOKEN=stand-in\n`);
 const tracker = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
   const { jira } = await import(${JSON.stringify(path.join(HERE, "jira.ts"))});
+  await jira.started("JF-5");
+  await jira.reviewing("JF-2");
   await jira.merged("JF-1");
+  await jira.settled("JF-3", true);
+  await jira.settled("JF-4", false);
   process.stdout.write(JSON.stringify({ afterMerge: jira.afterMerge, landed: await jira.done("JF-504"), open: await jira.done("JF-999999") }));
 `], { cwd: HERE, env: { ...process.env, FACTORY_HOME: jiraHome } });
 let trackerOut = "";
@@ -908,8 +921,18 @@ const said = (() => {
     return trackerOut;
   }
 })();
-check("a story the factory merges stays in Review, with Jira asked nothing; one landed on main is done without asking Jira, "
-  + "and one that has not landed is asked about", said,
+check("one landed on main is done without asking Jira, and one that has not landed is asked about", said,
   { afterMerge: "The story stays in Review: /deploy ships it and moves it to Done when a release carries it.", landed: true, open: false });
-check("…so the only request the tracker sent was the status of the story that has not landed", asked, ["GET /rest/api/2/issue/JF-999999?fields=status"]);
+const label = (key: string, op: "add" | "remove", name: string) => `PUT /rest/api/2/issue/${key} {"update":{"labels":[{"${op}":"${name}"}]}}`;
+const moveTo = (key: string, id: string) =>
+  [`GET /rest/api/2/issue/${key}/transitions`, `POST /rest/api/2/issue/${key}/transitions {"transition":{"id":"${id}"}}`];
+check("a claimed story sheds afk-review, an offered one gains it, a merged one stays in Review and swaps it for afk-merged, "
+  + "and one finished by hand is marked merged only if it landed", asked, [
+  ...moveTo("JF-5", "21"), label("JF-5", "add", "afk-running"), label("JF-5", "remove", "afk-review"),
+  ...moveTo("JF-2", "41"), label("JF-2", "add", "afk-review"), label("JF-2", "remove", "afk-running"),
+  label("JF-1", "add", "afk-merged"), label("JF-1", "remove", "afk-review"),
+  label("JF-3", "add", "afk-merged"), label("JF-3", "remove", "afk-running"), label("JF-3", "remove", "afk-review"),
+  label("JF-4", "remove", "afk-running"), label("JF-4", "remove", "afk-review"),
+  "GET /rest/api/2/issue/JF-999999?fields=status",
+]);
 fs.rmSync(jiraHome, { recursive: true, force: true });
