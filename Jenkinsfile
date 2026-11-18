@@ -929,11 +929,16 @@ pipeline {
                             env.KEPT_CANDIDATES = sh(returnStdout: true,
                                 script: "node bin/candidate-builds.mjs kept --except ${env.BUILD_COMMIT}").trim()
                         }
+                        // garbage-collect deletes layers from disk but not from the running registry's in-memory
+                        // blob cache, which then answers 200 with no data for them: the next candidate's push skips
+                        // them and its smoke boot fails on `unexpected EOF` (JF-508). The restart drops that cache.
                         sh '''
                             echo "Pruning candidate images no kept candidate build needs..."
                             node bin/candidate-registry.mjs prune --keep "$KEPT_CANDIDATES"
                             docker exec jclaw-candidate-registry registry garbage-collect --delete-untagged \
                                 /etc/distribution/config.yml > /dev/null
+                            docker restart jclaw-candidate-registry > /dev/null
+                            for i in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:5000/v2/ && break; sleep 1; done
                         '''
 
                         // Prune BuildKit cache older than 30 days. The Release

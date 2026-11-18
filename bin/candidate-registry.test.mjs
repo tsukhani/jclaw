@@ -3,6 +3,7 @@
 
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -122,4 +123,14 @@ test("a registry that is not there exits 1, and bad arguments are refused before
     }
     deepStrictEqual(seen, []);
   });
+});
+
+test("a GitHub Release's cleanup restarts the registry after its garbage-collect, and waits until it answers again", () => {
+  const jenkinsfile = readFileSync(join(dirname(SCRIPT), "..", "Jenkinsfile"), "utf8");
+  const gc = jenkinsfile.indexOf("docker exec jclaw-candidate-registry registry garbage-collect --delete-untagged");
+  strictEqual(gc > 0, true, "the cleanup garbage-collects the candidate registry");
+  const step = jenkinsfile.slice(gc, jenkinsfile.indexOf("'''", gc));
+  const restart = step.indexOf("docker restart jclaw-candidate-registry > /dev/null");
+  strictEqual(restart > 0, true, "the cleanup restarts the registry after its garbage-collect: " + step);
+  strictEqual(step.indexOf("curl -fsS -o /dev/null http://127.0.0.1:5000/v2/") > restart, true, step);
 });
