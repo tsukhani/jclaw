@@ -36,17 +36,20 @@ export const unblocked = (fields: { status: { name: string }; labels: string[] }
   fields.status.name === "In Progress" && !fields.labels.includes("afk-blocked");
 
 // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B". Jira's payload is read field by field.
-export const blockersOf = (links: any[] | undefined): Snapshot["blockedBy"] =>
+// A blocker is done once it is Done or `landed` finds its work on main: Done waits for a release (JF-505), while the
+// story it blocks needs only the blocker's code on main to start from.
+export const blockersOf = (links: any[] | undefined, landed: (key: string) => boolean): Snapshot["blockedBy"] =>
   (links ?? [])
     .filter((l: any) => l.type.name === "Blocks" && l.inwardIssue)
     .map((l: any) => ({
       key: l.inwardIssue.key,
       status: l.inwardIssue.fields.status.name,
-      done: l.inwardIssue.fields.status.statusCategory.key === "done",
+      done: l.inwardIssue.fields.status.statusCategory.key === "done" || landed(l.inwardIssue.key),
     }));
 
-// The keys of the stories that block issue A and are not Done.
-export const openBlockersOf = (links: any[] | undefined): string[] => blockersOf(links).filter((b) => !b.done).map((b) => b.key);
+// The keys of the stories that block issue A and are not done.
+export const openBlockersOf = (links: any[] | undefined, landed: (key: string) => boolean): string[] =>
+  blockersOf(links, landed).filter((b) => !b.done).map((b) => b.key);
 
 // Stories in review the factory may merge: labelled `afk-merge` themselves or through their epic, unless `no-afk-merge`.
 export const mergeJql = (mergeEpics: string[]): string =>

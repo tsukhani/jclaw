@@ -2,6 +2,7 @@
 // merge queries, the board and the blockers it lists, model-API overloads, the frontend gate against a scripted shell,
 // and auto-merge, which lands branches between throwaway repos with real signing. `pnpm run check`.
 import * as fs from "node:fs";
+import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
@@ -12,9 +13,9 @@ import { checkFirst, checkGate } from "./check-gate.ts";
 import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { issueLanded, ownerApplied, settleLabels, vetIssue, type Issue } from "./github.ts";
 import { blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked } from "./jira-intake.ts";
-import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, landedOn, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
-import { REPO_ROOT } from "./paths.ts";
+import { HERE, REPO_ROOT } from "./paths.ts";
 import { TRUST_BOUNDARY, bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, trustBoundaryPaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Blocker, type Snapshot } from "./tracker.ts";
 
@@ -360,10 +361,23 @@ const link = (type: string, side: "inwardIssue" | "outwardIssue", key: string, s
 const links = [link("Blocks", "outwardIssue", "JCLAW-1346", "To Do", "new"), link("Blocks", "inwardIssue", "JCLAW-1377", "To Do", "new"),
   link("Blocks", "inwardIssue", "JCLAW-1365", "Done", "done"), link("Relates", "inwardIssue", "JCLAW-9", "To Do", "new"),
   link("Blocks", "inwardIssue", "JF-170", "In Progress", "indeterminate")];
-check("a Blocks link with an inward issue is a blocker, Done or not; an outward one or another link type is not", blockersOf(links),
+const nothingLanded = () => false;
+check("a Blocks link with an inward issue is a blocker, Done or not; an outward one or another link type is not", blockersOf(links, nothingLanded),
   [{ key: "JCLAW-1377", status: "To Do", done: false }, { key: "JCLAW-1365", status: "Done", done: true }, { key: "JF-170", status: "In Progress", done: false }]);
-check("…and a blocker's own blockers are the open ones, another project's included", [openBlockersOf(links), openBlockersOf(undefined)],
-  [["JCLAW-1377", "JF-170"], []]);
+check("…and a blocker's own blockers are the open ones, another project's included",
+  [openBlockersOf(links, nothingLanded), openBlockersOf(undefined, nothingLanded)], [["JCLAW-1377", "JF-170"], []]);
+// Done waits for a release (JF-504), so a blocker whose work is on main clears whatever its status (JF-505).
+const inReview = [link("Blocks", "inwardIssue", "JF-501", "Review", "indeterminate"),
+  link("Blocks", "inwardIssue", "JF-502", "Review", "indeterminate"), link("Blocks", "inwardIssue", "JF-503", "Done", "done")];
+const lookedUp: string[] = [];
+const onMain = (key: string) => {
+  lookedUp.push(key);
+  return key === "JF-501";
+};
+check("a blocker in Review whose work landed on main clears, one that has not holds, and a Done one is never looked up",
+  [blockersOf(inReview, onMain).map((b) => [b.key, b.done]), openBlockersOf(inReview, onMain), blockedReason(blockersOf(inReview, onMain)),
+    [...new Set(lookedUp)]],
+  [[["JF-501", true], ["JF-502", false], ["JF-503", true]], ["JF-502"], "blocked by JF-502 (Review)", ["JF-501", "JF-502"]]);
 
 const MERGE = "project = JF AND labels = afk AND status = Review";
 check("with no afk-merge epic, a story merges by its own label", mergeJql([]), `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge) ORDER BY rank`);
@@ -827,4 +841,75 @@ write(path.join(sandbox, "held"), "base.txt", "if (true) return text;\n");
 const dirtyHeld = leftoverChanges(mirror, "agent/T-8");
 check("a clean or absent worktree leaves nothing; an edited one names its files",
   [cleanHeld, leftoverChanges(mirror, "agent/T-7"), dirtyHeld?.files, dirtyHeld?.path.endsWith("held")], [undefined, undefined, ["base.txt"], true]);
+
+// Whether a story's work is on the checkout's main, which Done no longer says (JF-505). A story's commits name its key,
+// as the agent writes them; `story` above names only the file, as a branch whose commits name nothing would.
+const named = (repo: string, ...messages: string[]) => g(repo, "commit", "--quiet", "--allow-empty", ...messages.flatMap((m) => ["-m", m]));
+const keyedStory = (key: string, file: string) => {
+  g(clone, "fetch", "--quiet", "origin", "main");
+  g(clone, "branch", "--quiet", "-f", `agent/${key}`, "origin/main");
+  g(clone, "checkout", "--quiet", `agent/${key}`);
+  write(clone, file, `${key}\n`);
+  g(clone, "add", file);
+  g(clone, "commit", "--quiet", "-m", `${key}: add ${file}`);
+  g(clone, "checkout", "--quiet", "--detach");
+  g(checkout, "fetch", "--quiet", clone, `agent/${key}:agent/${key}`);
+};
+keyedStory("T-20", "twenty.txt");
+named(checkout, "T-21: an earlier attempt");
+keyedStory("T-21", "twentyone.txt");
+check("a story whose branch waits for review has not landed, even when an earlier commit on main names it",
+  [landedOn(checkout, "T-20"), landedOn(checkout, "T-21")], [false, false]);
+check("the factory's own landing has landed", landedOn(checkout, "T-1"), true);
+keyedStory("T-22", "twentytwo.txt");
+g(checkout, "merge", "--quiet", "--ff-only", "agent/T-22");
+const ffWhileBranched = landedOn(checkout, "T-22");
+g(checkout, "branch", "--quiet", "-D", "agent/T-22");
+check("an operator's fast-forward has landed, with its branch still there and after it is deleted, by the subjects naming the key",
+  [ffWhileBranched, landedOn(checkout, "T-22")], [true, true]);
+keyedStory("T-23", "twentythree.txt");
+g(checkout, "merge", "--quiet", "--no-ff", "--no-edit", "agent/T-23");
+g(checkout, "branch", "--quiet", "-D", "agent/T-23");
+story("T-24", "twentyfour.txt", "twentyfour\n");
+g(checkout, "branch", "--quiet", "-D", "agent/T-24");
+check("an operator's merge commit has landed; a branch deleted unmerged, whose commits name nothing on main, has not",
+  [landedOn(checkout, "T-23"), landedOn(checkout, "T-24")], [true, false]);
+named(checkout, "fix: a change made by hand (T-270)");
+named(checkout, "chore: unrelated", "The body names T-26, which is not this commit's ticket.");
+check("with no branch, a subject on main naming the key lands it, but not a longer key or a body that names it",
+  [landedOn(checkout, "T-270"), landedOn(checkout, "T-27"), landedOn(checkout, "T-26")], [true, false, false]);
 fs.rmSync(sandbox, { recursive: true, force: true });
+
+// The Jira tracker itself, in a child whose FACTORY_HOME holds a jira.env for a local stub, so no check reaches Jira. Its
+// checkout is this repository, where the subjects on main name JF-504 and no agent/JF-504 branch exists.
+const jiraHome = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-jira-check-"));
+const asked: string[] = [];
+const stub = http.createServer((req, res) => {
+  asked.push(`${req.method} ${req.url}`);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ fields: { status: { name: "Review", statusCategory: { key: "indeterminate" } } } }));
+});
+await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
+fs.writeFileSync(path.join(jiraHome, "jira.env"), `JIRA_URL=http://127.0.0.1:${(stub.address() as { port: number }).port}\nJIRA_PERSONAL_TOKEN=stand-in\n`);
+const tracker = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+  const { jira } = await import(${JSON.stringify(path.join(HERE, "jira.ts"))});
+  await jira.merged("JF-1");
+  process.stdout.write(JSON.stringify({ afterMerge: jira.afterMerge, landed: await jira.done("JF-504"), open: await jira.done("JF-999999") }));
+`], { cwd: HERE, env: { ...process.env, FACTORY_HOME: jiraHome } });
+let trackerOut = "";
+tracker.stdout.on("data", (d) => (trackerOut += d));
+tracker.stderr.on("data", (d) => (trackerOut += d));
+await new Promise((resolve) => tracker.on("exit", resolve));
+await new Promise((resolve) => stub.close(resolve));
+const said = (() => {
+  try {
+    return JSON.parse(trackerOut);
+  } catch {
+    return trackerOut;
+  }
+})();
+check("a story the factory merges stays in Review, with Jira asked nothing; one landed on main is done without asking Jira, "
+  + "and one that has not landed is asked about", said,
+  { afterMerge: "The story stays in Review: /deploy ships it and moves it to Done when a release carries it.", landed: true, open: false });
+check("…so the only request the tracker sent was the status of the story that has not landed", asked, ["GET /rest/api/2/issue/JF-999999?fields=status"]);
+fs.rmSync(jiraHome, { recursive: true, force: true });

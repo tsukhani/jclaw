@@ -2,9 +2,13 @@
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
 import { PROJECT, blockersOf, intakeJql, mergeJql, notCandidate, openBlockersOf, ownsKey, unblocked as unblockedStory } from "./jira-intake.ts";
-import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
+import { JIRA_ENV_FILE, REPO_ROOT, STATE, readEnvFile } from "./paths.ts";
 import { FOUND_LABEL, findingLocation, findingSummary, type Finding } from "./brief.ts";
+import { landedOn } from "./merge.ts";
 import type { Blocker, Snapshot, Tracker } from "./tracker.ts";
+
+// The checkout the factory merges into, which main.ts calls CHECKOUT.
+const landed = (key: string) => landedOn(REPO_ROOT, key);
 
 // Only from FACTORY_HOME/jira.env, never .env, which the gateway mounts: no container ever holds the Jira token.
 const env = readEnvFile(JIRA_ENV_FILE);
@@ -34,7 +38,7 @@ export const snapshot = async (key: string): Promise<Snapshot> => {
     labels: f.labels ?? [],
     comments: (f.comment?.comments ?? []).map((c: any) => ({ author: c.author?.displayName ?? "unknown", body: c.body })),
     parent: epic ? { key: epicKey!, summary: epic.summary, description: epic.description ?? "", labels: epic.labels ?? [] } : undefined,
-    blockedBy: blockersOf(f.issuelinks),
+    blockedBy: blockersOf(f.issuelinks, landed),
     updated: f.updated,
     fetchedAt: new Date().toISOString(),
   };
@@ -49,9 +53,9 @@ export const blocker = async (key: string): Promise<Blocker> => {
     key,
     summary: f.summary,
     status: f.status.name,
-    done: f.status.statusCategory.key === "done",
+    done: f.status.statusCategory.key === "done" || landed(key),
     reason: await notCandidate({ labels: f.labels ?? [], status: f.status.name }, epicLabels),
-    blockedBy: openBlockersOf(f.issuelinks),
+    blockedBy: openBlockersOf(f.issuelinks, landed),
   };
 };
 
@@ -202,10 +206,10 @@ export const jira: Tracker = {
     await transitionTo(key, "To Do");
     await removeLabel(key, "afk-running");
   },
-  merged: async (key) => {
-    await transitionTo(key, "Done");
-  },
-  done: async (key) => (await api(`/rest/api/2/issue/${key}?fields=status`)).fields.status.statusCategory.key === "done",
+  // Done waits for the release that ships it (JF-504): /deploy's bin/jira-release.mjs moves it there.
+  merged: async () => {},
+  afterMerge: "The story stays in Review: /deploy ships it and moves it to Done when a release carries it.",
+  done: async (key) => landed(key) || (await api(`/rest/api/2/issue/${key}?fields=status`)).fields.status.statusCategory.key === "done",
   // The status is the state here, and reviewing() already dropped afk-running.
   settled: async () => {},
   comment: async (key, body) => {

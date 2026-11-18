@@ -522,7 +522,7 @@ const land = async (key: string): Promise<void> => {
   if (earlier && !gitIn(REPO, "branch", "--list", `agent/${key}`)) {
     board.set(key, { state: "merged", sha: earlier, by: "factory" });
     await tracker.merged(key);
-    await tracker.comment(key, `${tracker.header}: merged\nMerged earlier as ${m.code(earlier.slice(0, 8))}, in your checkout and not pushed; the factory stopped before it could mark the story.`);
+    await tracker.comment(key, `${tracker.header}: merged\nMerged earlier as ${m.code(earlier.slice(0, 8))}, in your checkout and not pushed; the factory stopped before it finished. ${tracker.afterMerge}`);
     return console.log(`[${key} merge] already merged as ${earlier.slice(0, 8)}; marked`);
   }
   const changed = changedOn(key);
@@ -563,7 +563,7 @@ const land = async (key: string): Promise<void> => {
     const tested = landed.regated
       ? `Main had moved since the branch was built, so the gate ran again on the rebased branch (${gates.join("; ")}).`
       : "Main had not moved since the branch was built, so the gate in the review comment covers this exact tree.";
-    await tracker.comment(key, `${tracker.header}: merged\nRebased onto main with every commit re-signed, then merged as ${m.code(landed.merge.slice(0, 8))} with a signed merge commit, in your checkout and not pushed. ${tested} Its branches are deleted; /deploy ships it.`);
+    await tracker.comment(key, `${tracker.header}: merged\nRebased onto main with every commit re-signed, then merged as ${m.code(landed.merge.slice(0, 8))} with a signed merge commit, in your checkout and not pushed. ${tested} Its branches are deleted. ${tracker.afterMerge}`);
     console.log(`[${key} merge] merged as ${landed.merge.slice(0, 8)}${landed.regated ? " after a re-gate" : ""}`);
   } catch (error) {
     if (error instanceof MergeRefused && !error.permanent) {
@@ -592,8 +592,8 @@ const wait = (stories: Snapshot[], reason: string) => {
 // Starts as many stories as there are free slots, returning their runs.
 const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   const free = LIMIT - running.size;
-  // A story runs only once every blocker is Done, which must mean merged: its branch then comes off a main that already
-  // holds the blocker's code in whatever form it landed, so no branch reaches the reviewer carrying another story's commits.
+  // A story runs only once every blocker is done, Done or landed on main (JF-505): its branch then comes off a main that
+  // already holds the blocker's code in whatever form it landed, so no branch reaches the reviewer carrying another story's commits.
   const unblocked: Snapshot[] = [];
   const { ready, held } = overloads.split(candidates.filter((c) => !running.has(c.key)), new Date());
   for (const { story, until } of held) {

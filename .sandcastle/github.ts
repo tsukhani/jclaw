@@ -236,6 +236,7 @@ export const githubTracker = (): Tracker | undefined => {
       await addLabel(key, "afk-merged");
       await removeLabel(key, "afk-review");
     },
+    afterMerge: "/deploy ships it.",
     done: async (key) => issueLanded(await api(`${issuesPath}/${number(key)}`)),
     settled: async (key, landed) => {
       const { remove, add } = settleLabels(landed);

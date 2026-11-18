@@ -48,7 +48,7 @@ LaunchAgent `com.jclaw.factory` keeps it running through `run.sh`, which reinsta
 lockfile changes. Every two minutes it:
 
 1. Polls Jira for To Do stories that carry `afk` or sit in an epic that does (see [A whole epic](#a-whole-epic)),
-   keeping those whose blockers are Done, and GitHub for open issues you labelled `afk` (see
+   keeping those whose blockers are Done or have landed on `main`, and GitHub for open issues you labelled `afk` (see
    [GitHub issues](#github-issues)).
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files, decide whether
    it needs BMAD, and decline one that should not be built at all. A story waits while its files overlap a branch awaiting review or a story already running.
@@ -155,7 +155,7 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
      │                                                                                   ▼
      └──────────────────────────────── Review ◄───────────────────── brief posted on the ticket
                                           │
-                you merge it and mark it Done, or label it afk-merge and the factory does
+     you merge it, or label it afk-merge and the factory does; it stays in Review until a release
 ```
 
 - **When it fails:** a story the factory gives up on gets the `afk-blocked` label and a comment saying why. Remove the
@@ -169,8 +169,10 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
 Label an epic `afk` and every To Do story in it that is in the active sprint becomes a candidate, with no label of its
 own. The epic itself need not be in the sprint.
 
-The order comes from the stories, not the epic. A story starts only once every story that blocks it is Done, which
-means merged, so link the stories with Blocks to set the order. Stories with no link between them may run at the same
+The order comes from the stories, not the epic. A story starts only once every story that blocks it has landed on
+`main` or is Done, so link the stories with Blocks to set the order. Done waits for the release that ships a story
+(JF-504), so the factory reads `main` itself: a blocker has landed once the factory's merge commit for it is there,
+once `main` holds its `agent/<KEY>` branch, or, with no such branch left, once a commit subject on `main` names its key. Stories with no link between them may run at the same
 time, in board rank order, as far as `FACTORY_MAX_PARALLEL` and the file-overlap plan allow. A chain therefore costs one
 review and merge per link. Blocks links between epics are not read.
 
@@ -183,8 +185,9 @@ review and merge per link. Blocks links between epics are not read.
 
 Label a story `afk-merge`, or its epic, and once it is in Review the factory merges it the way you would. It rebases
 `agent/<KEY>` onto your checkout's `main` with every commit re-signed and committed as you, the only committer GitHub
-verifies your key for; the agent stays the author. It merges it with a signed merge commit, moves
-the story to Done, and deletes the branch in your checkout and in its clone. It never pushes, so `/deploy` still ships
+verifies your key for; the agent stays the author. It merges it with a signed merge commit, leaves the story in
+Review for `/deploy` to move to Done when a release carries it, and deletes the branch in your checkout and in its
+clone. It never pushes, so `/deploy` still ships
 it. The label works before the story is built or after, and `no-afk-merge` exempts one story of a labelled epic.
 
 - **When `main` moved** since the branch was built, the gate runs again on the rebased branch in a sandbox first.
@@ -346,8 +349,8 @@ Jira user.
   and review any listed under "(!) Trust boundary" against [trust](../docs/agents/trust.md).
   The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
   re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
-  `git merge --no-ff agent/<KEY>`. Mark the story Done only once it is merged, because Done is what lets the stories it
-  blocks start. Then delete the branch in both places, since the factory's clone keeps its own copy:
+  `git merge --no-ff agent/<KEY>`. Leave the story in Review: the merge on `main` is what lets the stories it blocks
+  start, and `/deploy` moves it to Done when a release carries it. Then delete the branch in both places, since the factory's clone keeps its own copy:
   `git branch -d agent/<KEY>` and `git -C ~/.jclaw-factory/jclaw branch -D agent/<KEY>` (the re-sign gave the merged
   commits new hashes, so the clone's copy needs `-D`). Or label it `afk-merge` and the factory does all of this (see
   [Auto-merge](#auto-merge)).
@@ -417,7 +420,7 @@ other, never a partial one. `FACTORY_PLAN_ONLY` writes nothing.
 | `review` | | Offered for review, awaiting a human |
 | `blocked` | `reason` | The factory gave up, or would not start it (a won't-do verdict, or a GitHub issue edited after its label) |
 | `refused` | `reason` | Auto-merge refused it; it stays in review |
-| `merged` | `sha`, `by` | `by` is `factory` for an auto-merge, or `operator` when a story in review turned Done by hand. `sha` is the merge commit, or null when no `Merge branch 'agent/<KEY>'` commit is on `main` |
+| `merged` | `sha`, `by` | `by` is `factory` for an auto-merge, or `operator` when a story in review landed on `main` by hand or turned Done. `sha` is the merge commit, or null when no `Merge branch 'agent/<KEY>'` commit is on `main` |
 
 A story leaves the list 14 days after it reached `merged` or `blocked`, and a waiting story leaves as soon as it is no
 longer a candidate. The file holds only the fields above: never ticket text, comments or a credential.

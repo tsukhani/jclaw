@@ -9,6 +9,7 @@ export type Snapshot = {
   labels: string[];
   comments: { author: string; body: string }[];
   parent?: { key: string; summary: string; description: string; labels: string[] };
+  // done: the blocker no longer holds the story, being Done or, for Jira, landed on main.
   blockedBy: { key: string; status: string; done: boolean }[];
   updated: string;
   fetchedAt: string;
@@ -52,7 +53,10 @@ export interface Tracker {
   unblocked?(key: string): Promise<boolean>;
   // The factory merged the story's branch into the checkout's main.
   merged(key: string): Promise<void>;
-  // The story is Done (Jira) or closed or labelled afk-merged (GitHub), by whoever moved it.
+  // The sentence the merge comment ends with: what becomes of the story now.
+  readonly afterMerge: string;
+  // The story's work is finished, by whoever finished it: for Jira, Done or landed on the checkout's main, since Done
+  // waits for a release (JF-505); for GitHub, closed or labelled afk-merged.
   done(key: string): Promise<boolean>;
   // The operator finished the story outside the factory; landed is whether its branch reached main.
   settled(key: string, landed: boolean): Promise<void>;

@@ -84,6 +84,20 @@ export type Landed = { merge: string; regated: boolean };
 export const landedAs = (checkout: string, key: string): string | undefined =>
   gitOrUndefined(checkout, "log", "-1", "--format=%H", `--grep=^Merge branch 'agent/${key}'$`, "refs/heads/main") || undefined;
 
+// Whether `key`'s work is on the checkout's main, which Done no longer says, since Done waits for the release that ships
+// it (JF-504, JF-505). While the story's branch exists it alone decides, so a commit an earlier attempt left on main
+// does not land a branch still in review; once it is gone, a subject on main naming the key does, as an agent's do.
+export const landedOn = (checkout: string, key: string): boolean => {
+  if (landedAs(checkout, key)) return true;
+  const branch = `refs/heads/agent/${key}`;
+  if (gitOrUndefined(checkout, "rev-parse", "--verify", "--quiet", branch) !== undefined) {
+    return gitOrUndefined(checkout, "merge-base", "--is-ancestor", branch, "refs/heads/main") !== undefined;
+  }
+  const naming = new RegExp(`(?<![A-Za-z0-9-])${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9])`);
+  const subjects = gitOrUndefined(checkout, "log", "--format=%s", "--fixed-strings", `--grep=${key}`, "refs/heads/main") ?? "";
+  return subjects.split("\n").some((s) => naming.test(s));
+};
+
 // Rebases the story's branch onto the checkout's main with every commit re-signed, runs `regate` on the result when main
 // has moved since the branch was built, and merges it with a signed merge commit, all in a throwaway worktree of the
 // clone. The checkout only ever fast-forwards: its main moves to the merge commit, and git refuses rather than overwrite
