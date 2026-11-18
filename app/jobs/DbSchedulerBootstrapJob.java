@@ -186,7 +186,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 // Task.status to LOST at the 60 s mark (2 missed heartbeats),
                 // so operator visibility consistently leads scheduler
                 // recovery by roughly 60 s. Floor of missedHeartbeatsLimit
-                // is 4 in db-scheduler 16.12 — pinning to the floor (rather
+                // is 4 (SchedulerBuilder refuses less) — pinning to the floor (rather
                 // than 2 to mirror the visibility threshold) keeps the
                 // safety margin db-scheduler's authors mandate for the
                 // re-fire path.
