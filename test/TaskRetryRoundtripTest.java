@@ -385,9 +385,9 @@ class TaskRetryRoundtripTest extends UnitTest {
         boolean stopped = false;
 
         RecordingExecutionOperations(Execution execution) {
-            // TaskRepository + SchedulerListeners are null because we
+            // TaskRepository, SchedulerListeners and Clock are null because we
             // override every method that would dereference them.
-            super(null, null, execution);
+            super(null, null, execution, null);
         }
 
         @Override

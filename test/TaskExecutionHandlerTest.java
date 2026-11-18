@@ -816,7 +816,7 @@ class TaskExecutionHandlerTest extends UnitTest {
         final Execution execution;
 
         RecordingExecutionOperations(Execution execution) {
-            super(null, null, execution);
+            super(null, null, execution, null);
             this.execution = execution;
         }
 

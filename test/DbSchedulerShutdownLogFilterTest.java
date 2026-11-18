@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 class DbSchedulerShutdownLogFilterTest extends UnitTest {
 
     private static final String RUNNER = "com.github.kagkarlsson.scheduler.RunUntilShutdown";
-    private static final String JDBC = "com.github.kagkarlsson.shaded.jdbc.JdbcRunner";
+    private static final String JDBC = "com.github.kagkarlsson.jdbc.JdbcRunner";
 
     private final List<String> reported = new ArrayList<>();
     private volatile boolean stopping;
