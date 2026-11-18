@@ -4,6 +4,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -223,10 +224,19 @@ test("./jclaw.sh test says so when it cannot tell, and leaves an explicit JCLAW_
 // at a temp directory it unpacked, so the frontend's install in `./jclaw.sh e2e` removed the build the Java tests pin.
 const FRONTEND_PLAYWRIGHT = join(ROOT, "frontend", "node_modules", ".bin", "playwright");
 
-function gcScratch() {
+// The builds the frontend's own Playwright pins, read from its playwright-core: a literal went stale at 1.65.1, whose
+// install then tried to download the build the scratch folder lacked. 1248 stands for the Java driver's build.
+function frontendBuilds() {
+  const front = createRequire(join(ROOT, "frontend", "package.json"));
+  const core = createRequire(front.resolve("@playwright/test/package.json")).resolve("playwright-core/package.json");
+  const pinned = pinnedRevisions(readFileSync(join(dirname(core), "browsers.json"), "utf8"));
+  return { chromium: `chromium-${pinned.chromium}`, shell: `chromium_headless_shell-${pinned["chromium-headless-shell"]}`,
+    ffmpeg: `ffmpeg-${pinned.ffmpeg}` };
+}
+
+function gcScratch(front) {
   const dir = mkdtempSync(join(tmpdir(), "playwright-gc-"));
-  for (const folder of ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254",
-    "chromium_headless_shell-1254", "ffmpeg-1013"]) {
+  for (const folder of ["chromium-1248", "chromium_headless_shell-1248", front.chromium, front.shell, front.ffmpeg]) {
     mkdirSync(join(dir, folder));
     writeFileSync(join(dir, folder, "INSTALLATION_COMPLETE"), "");
     writeFileSync(join(dir, folder, "DEPENDENCIES_VALIDATED"), "");
@@ -243,22 +253,23 @@ function frontendInstall(dir, extra) {
   return spawnSync(FRONTEND_PLAYWRIGHT, ["install", "chromium"], { env, encoding: "utf8", timeout: 60_000 });
 }
 
-const present = (dir) => ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254"]
+const present = (dir, front) => ["chromium-1248", "chromium_headless_shell-1248", front.chromium]
   .filter((folder) => spawnSync("test", ["-d", join(dir, folder)]).status === 0);
 
 test("a frontend Playwright install deletes the Java build a stale link names, unless PLAYWRIGHT_SKIP_BROWSER_GC is set",
   { skip: spawnSync("test", ["-x", FRONTEND_PLAYWRIGHT]).status !== 0 && "frontend/node_modules is not installed" }, () => {
-    const cleaned = gcScratch();
-    const kept = gcScratch();
+    const front = frontendBuilds();
+    const cleaned = gcScratch(front);
+    const kept = gcScratch(front);
     try {
       const plain = frontendInstall(cleaned, {});
       strictEqual(plain.status, 0, plain.stdout + plain.stderr);
-      deepStrictEqual(present(cleaned), ["chromium-1254"]);
+      deepStrictEqual(present(cleaned, front), [front.chromium]);
       strictEqual(plain.stdout.includes(`Removing unused browser at ${join(cleaned, "chromium-1248")}`), true, plain.stdout);
 
       const skipped = frontendInstall(kept, { PLAYWRIGHT_SKIP_BROWSER_GC: "1" });
       strictEqual(skipped.status, 0, skipped.stdout + skipped.stderr);
-      deepStrictEqual(present(kept), ["chromium-1248", "chromium_headless_shell-1248", "chromium-1254"]);
+      deepStrictEqual(present(kept, front), ["chromium-1248", "chromium_headless_shell-1248", front.chromium]);
       strictEqual(skipped.stdout.includes("Removing unused browser"), false, skipped.stdout);
     } finally {
       rmSync(cleaned, { recursive: true, force: true });
