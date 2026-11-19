@@ -2,8 +2,9 @@
 name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint). Includes sprint workflow helpers.
+  Jira text is stored exactly as sent, so write descriptions and comments in Jira wiki markup (h2. headings, *bold*, {{code}}), never Markdown.
 metadata:
-  version: "1.0.12"
+  version: "1.0.13"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec
@@ -33,6 +34,27 @@ For every operation:
 1. **Try MCP first** — it's cleaner, typed, and handles edge cases
 2. **If MCP fails with a known limitation**, fall back to REST API
 3. **Report which path succeeded**
+
+## Writing Jira Text: Wiki Markup, Never Markdown
+
+The `jira-confluence` server stores Jira text exactly as sent: a description, a comment (the `comment` of `jira_update_issue` and `jira_transition_issue` included) and a worklog. Write it in Jira wiki markup, even though those tools' descriptions say "Markdown format". Markdown is stored as typed, so `**bold**` and `## Heading` show their asterisks and hashes. Reads (`jira_get_issue`, `jira_search`) return the stored wiki markup unchanged, so an edit keeps the text's syntax.
+
+- Heading: `h2. Title` at the start of a line (`h1.` to `h6.`)
+- Bold and italic: `*bold*`, `_italic_`
+- An identifier, a path or inline code: `{{name}}` (a `{` inside it still needs its backslash)
+- A code block: `{code:java}` … `{code}`; a command line, a CLI flag or plain output: `{noformat}` … `{noformat}`
+- Bullets: `* item`, `** nested`; numbered: `# item`
+- A link: `[text|https://example.com]`; a table: `||Head||Head||`, then `|cell|cell|`
+
+Wiki markup reads some plain characters as formatting. A pair of `+`, `-`, `~` or `^` underlines, strikes through, subscripts or superscripts the words between them when the first starts a word and the second ends one: `a +b c+ d` underlines "b c", while `27+35` and `my_var_name` stay plain. ` -- ` between spaces becomes a dash. `{word}` is read as a macro and breaks the paragraph, even inside `{{…}}`. `[text]` becomes a link, or an error mark when it names nothing. Put a backslash before such a character (`\{issueKey}`, `\[draft]`, `a \+b c+ d`), or put the text in `{noformat}`, which shows everything as typed.
+
+To see how text renders without saving anything, send it to the renderer, which answers with the HTML (it refuses `Accept: application/json` with 406):
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" -H "Content-Type: application/json" -H "Accept: */*" \
+  -d '{"rendererType": "atlassian-wiki-renderer", "unrenderedMarkup": "h2. Title", "issueKey": "ISSUE-KEY"}' \
+  "$JIRA_URL/rest/api/1.0/render"
+```
 
 ## Operations
 
