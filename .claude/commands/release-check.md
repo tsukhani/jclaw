@@ -84,7 +84,7 @@ Then, never stopping: `node bin/jira-release.mjs audit` lists each JF ticket out
    ./jclaw.sh check
    (unset $(/usr/bin/git rev-parse --local-env-vars) && node --test bin/*.test.mjs)
    ```
-   Then, in the worktree, run `/secret-scan` with no argument, as written there: it scans every commit after the last `v*` tag up to this release commit, which is what the release publishes. Any finding it reports fails the gate, whatever its severity, because a reported finding has already passed the scan's own verification and the release would publish it to GitHub. Go to step 14 then. A CLEAN verdict counts only with its control passed, as the scan's report states.
+   Then, in the worktree, run `/secret-scan` with no argument, as written there: it scans every tracked file across every commit after the last `v*` tag up to this release commit, and those commits' messages, this one's release notes included, which is everything the release publishes. Any finding it reports fails the gate, whatever its severity, because a reported finding has already passed the scan's own verification and the release would publish it to GitHub. Go to step 14 then. A CLEAN verdict counts only with its control passed, as the scan's report states.
 
 **Run the candidate**
 
