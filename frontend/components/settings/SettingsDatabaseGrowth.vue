@@ -264,8 +264,9 @@ const growthHeader = computed(() => {
       v-if="parts.length"
       class="px-4 py-2.5 border-b border-border grid gap-1"
     >
+      <!-- One fixed height, or the bar and the table move out from under the pointer that changed the text (JF-526). -->
       <p
-        class="text-xs text-fg-muted"
+        class="h-[2lh] line-clamp-2 text-xs text-fg-muted"
         aria-live="polite"
         data-testid="db-growth-parts-readout"
       >

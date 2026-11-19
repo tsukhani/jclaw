@@ -92,4 +92,33 @@ test.describe('UAT-9 settings', () => {
     await page.getByTestId('settings-toc-item-maintenance').click()
     await expect(page.locator('main')).toBeVisible()
   })
+
+  // Layout, so jsdom cannot show it (JF-526): at 400 px the readout's idle text wraps to two lines and a
+  // part's to one, and a readout that changed height moved the bar and the table out from under the pointer.
+  test('the database card keeps a hovered part or table row under the pointer in a narrow window', async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 900 })
+    await gotoPage(page, '/settings?section=database')
+    const bar = page.getByTestId('db-growth-parts')
+    await bar.waitFor({ timeout: 30_000 }).catch(() => {})
+    test.skip((await bar.count()) === 0, 'this instance has no size history to draw yet')
+
+    const readout = page.getByTestId('db-growth-parts-readout')
+    const height = async () => Math.round((await readout.boundingBox())!.height)
+    const idle = await height()
+    for (const target of [page.locator('[data-testid^="db-growth-part-"]').first(),
+      page.locator('[data-testid^="db-growth-row-"]').first()]) {
+      await target.scrollIntoViewIfNeeded()
+      const box = (await target.boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      const heights = new Set<number>()
+      const texts = new Set<string>()
+      for (let k = 0; k < 12; k++) {
+        heights.add(await height())
+        texts.add((await readout.innerText()).trim())
+        await page.waitForTimeout(80)
+      }
+      expect([...heights], 'the readout changed height under a resting pointer').toEqual([idle])
+      expect(texts.size, `the readout flickered between ${[...texts].join(' | ')}`).toBe(1)
+    }
+  })
 })
