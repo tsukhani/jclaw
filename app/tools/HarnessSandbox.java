@@ -504,7 +504,7 @@ public final class HarnessSandbox {
      * Wrap a stdio MCP server's command in the Main Agent's fence (JF-396): the operator and the Main Agent both add
      * servers, so an unfenced one would be the Main Agent's route around {@link #wrapMainFence}. {@code readable} are
      * the files inside JClaw's hidden folders the operator lets this server read, canonical; they stay read-only. It
-     * fails closed as {@link #wrapMainFence} does, and honours {@link #setCustomAgentOverrideForTest} the same way.
+     * fails closed as {@link #wrapMainFence} does, and honors {@link #setCustomAgentOverrideForTest} the same way.
      *
      * @throws SandboxUnavailableException with the bare reason when no sandbox can start here
      */
