@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -600,6 +601,45 @@ class ApiSystemControllerTest extends FunctionalTest {
         var again = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, again.status.intValue());
         assertEquals("Java 25.0.5 will be installed at the next restart.", json(again).get("message").getAsString());
+        assertEquals(1, stagings.size());
+    }
+
+    @Test
+    void aZuluRespinOfTheRunningJavaVersionIsOfferedAndStagedByItsBuild() throws Exception {
+        login();
+        Files.createDirectories(tmp.resolve("jclaw/conf"));
+        JavaRuntimeService.setEnvironmentForTest(new JavaRuntimeService.Environment(tmp.resolve("jclaw"), jreHome(),
+                "25.0.5", "Azul Systems, Inc.", "Zulu25.38+105-CA", "Mac OS X", "aarch64", false));
+        var respin = new JavaRuntimeService.Release("25.0.5", "https://cdn.azul.com/zulu/bin/zulu-jre25.0.5.tar.gz",
+                "c3".repeat(32), "zulu-jre25.0.5.tar.gz", null, "25.38.107");
+        JavaRuntimeService.setLatestForTest(respin);
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
+            stagings.add(r);
+            writeStaging(home, r.version());
+            Files.writeString(home.resolve("jre.staged/manifest"), "build=" + r.build() + "\n", StandardOpenOption.APPEND);
+        });
+
+        var before = json(GET("/api/system/java-runtime"));
+        assertEquals("25.0.5", before.get("currentVersion").getAsString());
+        assertEquals("25.38.105", before.get("currentBuild").getAsString());
+        assertEquals("25.0.5", before.get("latestVersion").getAsString());
+        assertEquals("25.38.107", before.get("latestBuild").getAsString());
+        assertTrue(before.get("updateAvailable").getAsBoolean());
+
+        assertEquals(202, POST("/api/system/java-runtime", "application/json", "{}").status.intValue());
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(List.of(respin), stagings);
+        var ready = json(GET("/api/system/java-runtime"));
+        assertEquals("25.0.5", ready.get("stagedVersion").getAsString());
+        assertEquals("25.38.107", ready.get("stagedBuild").getAsString());
+
+        assertIsOk(DELETE("/api/system/java-runtime"));
+        JavaRuntimeService.setLatestForTest(new JavaRuntimeService.Release("25.0.5", respin.url(), respin.sha256(),
+                respin.archive(), null, "25.38.105"));
+        assertFalse(json(GET("/api/system/java-runtime")).get("updateAvailable").getAsBoolean());
+        var same = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals(409, same.status.intValue());
+        assertEquals("Java 25.0.5 is up to date.", json(same).get("message").getAsString());
         assertEquals(1, stagings.size());
     }
 

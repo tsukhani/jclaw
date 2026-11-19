@@ -3383,6 +3383,11 @@ jre_reported_version() {
     jre_version_norm "$v"
 }
 
+# The Zulu build "$@" -version reports, as Azul's catalog numbers it (Zulu25.38+107-CA is 25.38.107); empty for another vendor's Java.
+jre_reported_build() {
+    "$@" -version 2>&1 | sed -n 's/.* Zulu\([0-9][0-9.]*\)+\([0-9][0-9.]*\).*/\1.\2/p' | head -1 || true
+}
+
 # What unpacks a zip here: unzip, else Windows' own tar.exe (bsdtar reads zip; the GNU tar Git Bash ships does not).
 jre_zip_tool() {
     local tar_exe
@@ -3402,7 +3407,7 @@ JRE_MAJOR=25
 # touched nothing but $1/jre.new. Every check runs before the first rename. With no $1/jre yet, the
 # start runs on the host's Java, and the staging is the switch from it that Settings offers.
 jre_install_staged() {
-    local home="$1" staged="$1/jre.staged" version sha archive old_java current kept got tool javas new_java mods host=""
+    local home="$1" staged="$1/jre.staged" version sha archive build old_java current was kept got tool javas new_java mods host=""
     local version_re='^[0-9]+(\.[0-9]+)*$' sha_re='^[0-9a-f]{64}$' archive_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.(tar\.gz|zip)$'
     old_java=$(jre_javas_in "$home/jre" | head -1)
     current=""
@@ -3422,7 +3427,10 @@ jre_install_staged() {
     version=$(sed -n 's/^version=//p' "$staged/manifest" | head -1)
     sha=$(sed -n 's/^sha256=//p' "$staged/manifest" | head -1)
     archive=$(sed -n 's/^archive=//p' "$staged/manifest" | head -1)
-    if [[ ! "$version" =~ $version_re || ! "$sha" =~ $sha_re || ! "$archive" =~ $archive_re ]]; then
+    # A manifest an earlier release staged names no build, and installs on its version alone.
+    build=$(sed -n 's/^build=//p' "$staged/manifest" | head -1)
+    if [[ ! "$version" =~ $version_re || ! "$sha" =~ $sha_re || ! "$archive" =~ $archive_re ]] \
+        || [[ -n "$build" && ! "$build" =~ $version_re ]]; then
         echo "${kept}: the staged runtime's manifest is malformed"; return 1
     fi
     if [[ -z "$old_java" && -e "$home/jre" ]]; then
@@ -3480,6 +3488,16 @@ jre_install_staged() {
     if [[ "$got" != "$(jre_version_norm "$version")" ]]; then
         echo "${kept}: Java ${version} reported ${got:-no version} when it ran"; return 1
     fi
+    if [[ -n "$build" ]]; then
+        # shellcheck disable=SC2086
+        got=$(jre_reported_build "$new_java" $mods)
+        if [[ "$(jre_version_norm "$got")" != "$(jre_version_norm "$build")" ]]; then
+            echo "${kept}: Zulu ${build} reported ${got:+Zulu }${got:-no Zulu build} when it ran"; return 1
+        fi
+    fi
+    # A respin keeps the Java version, so only the builds tell the two apart.
+    was=""
+    if [[ -n "$build" && "$current" == "$(jre_version_norm "$version")" ]]; then was=$(jre_reported_build "$old_java"); fi
 
     if [[ -n "$old_java" ]]; then
         rm -rf "$home/jre.previous"
@@ -3492,7 +3510,9 @@ jre_install_staged() {
         if [[ -n "$old_java" ]]; then mv "$home/jre.previous" "$home/jre" 2>/dev/null || true; fi
         echo "${kept}: could not move Java ${version} into $home/jre"; return 1
     fi
-    if [[ -n "$old_java" ]]; then
+    if [[ -n "$was" ]]; then
+        echo "upgraded Zulu ${was} → Zulu ${build} (Java ${current})"
+    elif [[ -n "$old_java" ]]; then
         echo "upgraded ${current} → ${version}"
     elif [[ -n "$host" ]]; then
         echo "switched from the host's Java ${host} to Java ${version} at $home/jre"

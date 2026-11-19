@@ -305,16 +305,21 @@ public class ApiSystemController extends Controller {
      *                             the only one JClaw updates; {@code "external"} or {@code "container"}
      *                             otherwise
      * @param currentVersion       the running Java, {@code java.version}
+     * @param currentBuild         the running Java's Zulu build (25.38.105), or null for another vendor's
      * @param vendor               {@code java.vendor}, or null when the JVM names none
      * @param latestVersion        the newest patch of the running major in Azul's catalog, or null when
      *                             the catalog could not be reached
+     * @param latestBuild          {@code latestVersion}'s Zulu build, which alone tells a respin of the
+     *                             running Java version apart, or null
      * @param releaseType          what kind of release {@code latestVersion} is, in plain words ("a security
      *                             and bug-fix release"), or null when the catalog says nothing JClaw knows
      * @param releaseNotesUrl      Azul's notes for its latest release, which the panel links beside
      *                             {@code latestVersion} worded as Azul's latest, since the two can briefly
      *                             differ; null with no latest version
-     * @param updateAvailable      true when {@code latestVersion} is newer than {@code currentVersion}
+     * @param updateAvailable      true when the latest build is newer than the running one, by Java version
+     *                             and then by Zulu build
      * @param stagedVersion        a downloaded runtime waiting for the next start, or null
+     * @param stagedBuild          its Zulu build, or null
      * @param downloading          true while a download runs
      * @param downloadPercent      how far it is, or null when no download runs
      * @param downloadError        why the last download failed, or null
@@ -331,10 +336,12 @@ public class ApiSystemController extends Controller {
      * @param managedVersion       the Java that switch installs, or null when there is no switch or
      *                             Azul's catalog could not be reached
      */
-    public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String vendor,
-                                       @Nullable String latestVersion, @Nullable String releaseType,
+    public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String currentBuild,
+                                       @Nullable String vendor, @Nullable String latestVersion,
+                                       @Nullable String latestBuild, @Nullable String releaseType,
                                        @Nullable String releaseNotesUrl, boolean updateAvailable,
-                                       @Nullable String stagedVersion, boolean downloading,
+                                       @Nullable String stagedVersion, @Nullable String stagedBuild,
+                                       boolean downloading,
                                        @Nullable Integer downloadPercent, @Nullable String downloadError,
                                        @Nullable String lastStart, @Nullable String lastStartAt,
                                        boolean rebuildsStartupCache, boolean switchable,
@@ -367,11 +374,12 @@ public class ApiSystemController extends Controller {
         }
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
-                JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
+                JavaRuntimeService.kind(env).label, env.javaVersion(), env.build(), env.vendor(), latestVersion,
+                latest == null ? null : latest.build(),
                 latest == null ? null : JavaRuntimeService.releaseTypeInWords(latest.releaseType()),
                 latest == null ? null : JavaRuntimeService.RELEASE_NOTES,
                 JavaRuntimeService.isNewer(latest, env),
-                staged == null ? null : staged.version(),
+                staged == null ? null : staged.version(), staged == null ? null : staged.build(),
                 downloading, downloading ? progress.currentPercent() : null, progress.lastError(),
                 last == null ? null : last.line(), last == null ? null : last.at().toString(),
                 !env.windows() && RestartService.aotCacheState().enabled()

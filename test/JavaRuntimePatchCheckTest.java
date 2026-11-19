@@ -7,6 +7,7 @@ import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,7 +82,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul, new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
         assertEquals("a Zulu JRE", Files.readString(tmp.resolve("jre.staged/" + ARCHIVE)));
         assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded and installs "
                 + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
@@ -194,7 +195,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul(catalog(true, sha(JRE)), 200), new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
     }
 
     @Test
@@ -316,10 +317,36 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203"), JavaRuntimeService.staged(tmp));
         assertEquals(List.of(CATALOG_PATH, CDN_PATH, CATALOG_PATH, "cdn.azul.com/zulu/bin/" + RESPIN), requests);
         assertEquals(2, notices().size());
         assertEquals(List.of(ARCHIVE, RESPIN), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aRespinOfTheRunningJavaVersionIsStagedAndNamedByItsZuluBuild() throws IOException {
+        // Azul's out-of-cycle fix: Zulu 25.38.203 keeps the Java 25.0.5.1 that Zulu 25.38.201 runs.
+        var env = builtIn(VERSION, "Zulu25.38+201-CA");
+
+        check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
+
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203"), JavaRuntimeService.staged(tmp));
+        assertEquals(List.of("Java runtime | Zulu 25.38.203, a security and bug-fix release, is downloaded and installs "
+                + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
+                + LINK), notices());
+        assertEquals(List.of(CATALOG_PATH, "cdn.azul.com/zulu/bin/" + RESPIN), requests);
+        assertEquals(List.of(RESPIN), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void theRunningZuluBuildAndALaterOneOfItsJavaVersionAreNeitherStagedNorAnnounced() throws IOException {
+        check(builtIn(VERSION, "Zulu25.38+203-CA"), azul(respun(catalog(true, sha(JRE))), 200), new Download());
+        check(builtIn(VERSION, "Zulu25.38+204-CA"), azul(respun(catalog(true, sha(JRE))), 200), new Download());
+
+        assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        assertEquals(List.of(), notices());
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(tmp.resolve("jclaw")));
     }
 
     @Test
@@ -360,7 +387,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         check(env, azul, new Download());
         check(env, azul, new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
         assertEquals(List.of("manifest", ARCHIVE), listing(tmp.resolve("jre.staged")));
         assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded in place of "
                 + "Java 25.0.5 and installs the next time JClaw restarts. Restart from Settings > Maintenance > Java "
@@ -444,9 +471,14 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
     /** {@code <tmp>/jclaw} on {@code <tmp>/jre}, the installer's layout, running {@code version}. */
     private Environment builtIn(String version) throws IOException {
+        return builtIn(version, null);
+    }
+
+    /** As {@link #builtIn(String)}, the JVM reporting {@code vendorVersion} as its {@code java.vendor.version}. */
+    private Environment builtIn(String version, @Nullable String vendorVersion) throws IOException {
         var javaHome = Files.createDirectories(tmp.resolve("jre/zulu25-linux_x64"));
         Files.writeString(javaHome.resolve("release"), "JAVA_VERSION=\"" + version + "\"\nLIBC=\"default\"\n");
-        return new Environment(app(), javaHome, version, "Azul Systems, Inc.", "Linux", "amd64", false);
+        return new Environment(app(), javaHome, version, "Azul Systems, Inc.", vendorVersion, "Linux", "amd64", false);
     }
 
     private Path app() throws IOException {

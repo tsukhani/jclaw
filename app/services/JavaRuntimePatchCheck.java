@@ -72,7 +72,7 @@ public final class JavaRuntimePatchCheck {
 
         var message = JavaRuntimeService.kind(env) == Kind.BUILT_IN
                 ? builtIn(env, release, progress, stager)
-                : "Java " + named(release) + " is available for the Java JClaw runs on, Java " + env.javaVersion()
+                : named(env, release) + " is available for the Java JClaw runs on, Java " + env.javaVersion()
                         + " at " + env.javaHome() + ". Update that Java the way you installed it.";
         if (message != null && notify(recipient, message)) {
             EventLogger.info(CATEGORY, "Told the operator about Java " + release.version());
@@ -116,9 +116,9 @@ public final class JavaRuntimePatchCheck {
         if (progress.active()) return null;
         if (!ConfigService.getBoolean(AUTO_DOWNLOAD_KEY, true)) {
             return staged == null
-                    ? "Java " + named(release) + " is available. Download it from Settings > Maintenance > Java "
+                    ? named(env, release) + " is available. Download it from Settings > Maintenance > Java "
                             + "runtime; it installs the next time JClaw restarts."
-                    : "Java " + named(release) + " is available, newer than the Java " + staged.version()
+                    : named(env, release) + " is available, newer than the Java " + staged.version()
                             + " waiting for the next restart. To install it instead, cancel Java " + staged.version()
                             + " in Settings > Maintenance > Java runtime and download it there.";
         }
@@ -141,14 +141,19 @@ public final class JavaRuntimePatchCheck {
                     + e.getMessage());
             return null;
         }
-        return "Java " + named(release) + " is downloaded"
+        return named(env, release) + " is downloaded"
                 + (staged == null ? "" : " in place of Java " + staged.version()) + RESTART_HINT;
     }
 
-    // "Java 25.0.5.1, a security and bug-fix release," reads as one phrase; with no type it is the version alone.
-    private static String named(Release release) {
+    // "Java 25.0.5.1, a security and bug-fix release," reads as one phrase; with no type it is the name alone. A
+    // respin of the running Java version differs only in its Zulu build, so it is named by that, as the panel does.
+    private static String named(Environment env, Release release) {
+        var build = release.build();
+        var name = build != null && env.build() != null
+                && JavaRuntimeService.compareVersions(release.version(), env.javaVersion()) == 0
+                ? "Zulu " + build : "Java " + release.version();
         var words = JavaRuntimeService.releaseTypeInWords(release.releaseType());
-        return words == null ? release.version() : release.version() + ", " + words + ",";
+        return words == null ? name : name + ", " + words + ",";
     }
 
     private static boolean notify(String recipient, String message) {

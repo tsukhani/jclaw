@@ -99,12 +99,15 @@ function builtIn(over: Record<string, unknown> = {}) {
   return {
     kind: 'built-in',
     currentVersion: '25.0.4',
+    currentBuild: '25.36.15',
     vendor: 'Azul Systems, Inc.',
     latestVersion: '25.0.5',
+    latestBuild: '25.38.107',
     releaseType: 'a security and bug-fix release',
     releaseNotesUrl: 'https://docs.azul.com/core/release-notes',
     updateAvailable: true,
     stagedVersion: null,
+    stagedBuild: null,
     downloading: false,
     downloadPercent: null,
     downloadError: null,
@@ -410,6 +413,55 @@ describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
     expect(stagePosts).toBe(1)
     await vi.waitFor(() => expect(c.find('[role="status"]').text())
       .toBe('/opt/jclaw is not writable, so a new Java cannot be staged beside /opt/jclaw/jre.'))
+  })
+})
+
+describe('SettingsJavaRuntimePanel — a new build of the same Java version', () => {
+  const respin = { currentVersion: '25.0.5', currentBuild: '25.38.105', latestVersion: '25.0.5', latestBuild: '25.38.107' }
+
+  it('names both Zulu builds, and sends nothing when the download is cancelled', async () => {
+    runtime = builtIn(respin)
+    const c = await mounted()
+
+    expect(summary(c)).toBe('Zulu 25.38.107 is available to replace Zulu 25.38.105 (Java 25.0.5).')
+    expect(c.find('[data-testid="java-runtime-release"]').text())
+      .toBe('Zulu 25.38.107 is a security and bug-fix release. Azul\'s latest release notes')
+    await panelButton(c, 'Download Zulu 25.38.107')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Zulu 25.38.107 will be downloaded from Azul and checked against its SHA-256 '
+      + 'while JClaw keeps running on Zulu 25.38.105.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+
+    expect(stagePosts).toBe(0)
+  })
+
+  it('names the staged build in the summary and the restart dialog', async () => {
+    runtime = builtIn({ ...respin, stagedVersion: '25.0.5', stagedBuild: '25.38.107', rebuildsStartupCache: false })
+    const c = await mounted()
+
+    expect(summary(c)).toBe('Zulu 25.38.107 will be installed at the next restart.')
+    await panelButton(c, 'Restart now')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Zulu 25.38.107 is installed as JClaw starts again.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    expect(restartPosts).toBe(0)
+  })
+
+  it('names a new Java version by its version, whatever its build', async () => {
+    runtime = builtIn({ currentBuild: '25.38.105', latestVersion: '25.0.6', latestBuild: '25.36.1' })
+    const c = await mounted()
+
+    expect(summary(c)).toBe('Java 25.0.6 is available.')
+    expect(panelButton(c, 'Download Java 25.0.6')).toBeTruthy()
+  })
+
+  it('names the version when the running build is unknown', async () => {
+    runtime = builtIn({ ...respin, currentBuild: null, stagedVersion: '25.0.5', stagedBuild: '25.38.107', rebuildsStartupCache: false })
+    const c = await mounted()
+
+    expect(summary(c)).toBe('Java 25.0.5 will be installed at the next restart.')
   })
 })
 

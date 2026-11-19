@@ -76,6 +76,8 @@ public final class JavaRuntimeService {
     private static final Pattern VERSION = Pattern.compile("\\d+(?:\\.\\d+)*+");
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern ARCHIVE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.(tar\\.gz|zip)");
+    /** Zulu's {@code java.vendor.version} and {@code IMPLEMENTOR_VERSION}: {@code Zulu25.38+105-CA} is build 25.38.105. */
+    private static final Pattern ZULU = Pattern.compile("Zulu(\\d+(?:\\.\\d+)*+)\\+(\\d+(?:\\.\\d+)*+)");
 
     public enum Kind {
         /** The runtime the installer put at {@code <home>/jre}, the only one this class replaces. */
@@ -99,6 +101,7 @@ public final class JavaRuntimeService {
      * @param javaHome    {@code java.home}
      * @param javaVersion {@code java.version}
      * @param vendor      {@code java.vendor}
+     * @param vendorVersion {@code java.vendor.version}, or null when the JVM sets none
      * @param osName      {@code os.name}
      * @param osArch      {@code os.arch}
      * @param container   true inside a container
@@ -106,11 +109,22 @@ public final class JavaRuntimeService {
      *                        installs it
      */
     public record Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
-                              String osName, String osArch, boolean container, boolean wslWindowsDrive) {
+                              @Nullable String vendorVersion, String osName, String osArch, boolean container,
+                              boolean wslWindowsDrive) {
 
         public Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
                            String osName, String osArch, boolean container) {
-            this(app, javaHome, javaVersion, vendor, osName, osArch, container, false);
+            this(app, javaHome, javaVersion, vendor, null, osName, osArch, container, false);
+        }
+
+        public Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
+                           String osName, String osArch, boolean container, boolean wslWindowsDrive) {
+            this(app, javaHome, javaVersion, vendor, null, osName, osArch, container, wslWindowsDrive);
+        }
+
+        public Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
+                           @Nullable String vendorVersion, String osName, String osArch, boolean container) {
+            this(app, javaHome, javaVersion, vendor, vendorVersion, osName, osArch, container, false);
         }
 
         /** The directory that holds the install and its {@code jre/}. */
@@ -123,6 +137,14 @@ public final class JavaRuntimeService {
         public boolean windows() {
             return osName.toLowerCase(Locale.ROOT).contains("windows");
         }
+
+        /**
+         * The running Java's Zulu build, from {@code java.vendor.version} or, when the JVM sets none, the
+         * runtime's release file; null for another vendor's Java.
+         */
+        public @Nullable String build() {
+            return zuluBuild(vendorVersion != null ? vendorVersion : releaseField(javaHome, "IMPLEMENTOR_VERSION"));
+        }
     }
 
     /**
@@ -130,17 +152,33 @@ public final class JavaRuntimeService {
      *
      * @param releaseType the catalog's {@code release_type} ({@code PSU}, {@code CPU} or {@code LU}), or null
      *                    when the entry gives none
+     * @param build       the catalog's {@code distro_version}, Azul's own number for the build, or null when it
+     *                    gives none
      */
     public record Release(String version, String url, @Nullable String sha256, String archive,
-                          @Nullable String releaseType) {
+                          @Nullable String releaseType, @Nullable String build) {
 
         public Release(String version, String url, @Nullable String sha256, String archive) {
-            this(version, url, sha256, archive, null);
+            this(version, url, sha256, archive, null, null);
+        }
+
+        public Release(String version, String url, @Nullable String sha256, String archive,
+                       @Nullable String releaseType) {
+            this(version, url, sha256, archive, releaseType, null);
         }
     }
 
-    /** A finished, verified download in {@code jre.staged/}, waiting for the next start. */
-    public record Staged(String version, String sha256, String archive) {}
+    /**
+     * A finished, verified download in {@code jre.staged/}, waiting for the next start.
+     *
+     * @param build the Zulu build jclaw.sh checks the unpacked Java reports, or null when the manifest names none
+     */
+    public record Staged(String version, String sha256, String archive, @Nullable String build) {
+
+        public Staged(String version, String sha256, String archive) {
+            this(version, sha256, archive, null);
+        }
+    }
 
     /** jclaw.sh's line about what the last start did with a staged runtime, and when it wrote it. */
     public record LastStart(String line, Instant at) {}
@@ -255,6 +293,7 @@ public final class JavaRuntimeService {
         var osName = System.getProperty("os.name", "");
         return new Environment(app, Path.of(System.getProperty("java.home", "")),
                 System.getProperty("java.version", ""), System.getProperty("java.vendor"),
+                System.getProperty("java.vendor.version"),
                 osName, System.getProperty("os.arch", ""),
                 UpgradeService.isContainer(),
                 osName.toLowerCase(Locale.ROOT).contains("linux") && wslWindowsDrive(kernelRelease(), fileStoreType(app)));
@@ -405,6 +444,26 @@ public final class JavaRuntimeService {
         }
     }
 
+    /** {@code key}'s value in the runtime's release file, unquoted, or null when it has none. */
+    static @Nullable String releaseField(Path javaHome, String key) {
+        try {
+            for (var line : Files.readAllLines(javaHome.resolve("release"))) {
+                var l = line.strip();
+                if (l.startsWith(key + "=")) return l.substring(key.length() + 1).replace("\"", "");
+            }
+        } catch (IOException _) {
+            return null;
+        }
+        return null;
+    }
+
+    /** The build a Zulu version string names, 25.38.105 for {@code Zulu25.38+105-CA}; null for any other vendor's. */
+    private static @Nullable String zuluBuild(@Nullable String vendorVersion) {
+        if (vendorVersion == null) return null;
+        var m = ZULU.matcher(vendorVersion.strip());
+        return m.lookingAt() ? m.group(1) + "." + m.group(2) : null;
+    }
+
     /**
      * The newest plain JRE of {@code major} in a catalog payload. JavaFX (fx) and CRaC builds are skipped,
      * and musl builds unless this runtime is one, as install.sh skips them. The newest rather than the
@@ -412,7 +471,6 @@ public final class JavaRuntimeService {
      */
     public static @Nullable Release pickLatest(String payload, int major, boolean musl) {
         Release best = null;
-        int[] bestDistro = {};
         for (JsonElement el : JsonParser.parseString(payload).getAsJsonArray()) {
             if (!el.isJsonObject()) continue;
             var o = el.getAsJsonObject();
@@ -423,15 +481,11 @@ public final class JavaRuntimeService {
             var label = ((name == null ? "" : name) + " " + url).toLowerCase(Locale.ROOT);
             if (label.contains("fx") || label.contains("crac") || (!musl && label.contains("musl"))) continue;
             var sha = str(o, "sha256_hash");
-            var distro = parts(joined(o, "distro_version"));
+            var build = distro(joined(o, "distro_version"));
             var archive = name != null ? name : url.substring(url.lastIndexOf('/') + 1);
             var candidate = new Release(version, url, sha == null ? null : sha.toLowerCase(Locale.ROOT), archive,
-                    str(o, "release_type"));
-            int order = best == null ? 1 : compareVersions(version, best.version());
-            if (order > 0 || (order == 0 && compare(distro, bestDistro) > 0)) {
-                best = candidate;
-                bestDistro = distro;
-            }
+                    str(o, "release_type"), build);
+            if (best == null || compareBuilds(version, build, best.version(), best.build()) > 0) best = candidate;
         }
         return best;
     }
@@ -448,6 +502,14 @@ public final class JavaRuntimeService {
             case "CPU" -> "a security-fix release";
             default -> null;
         };
+    }
+
+    // distro_version's fourth part, 0 in every catalog entry (2026-11), is one Zulu's own version string leaves out:
+    // [25,38,107,0] runs as Zulu25.38+107-CA.
+    private static @Nullable String distro(@Nullable String joined) {
+        if (joined == null) return null;
+        var p = joined.split("\\.");
+        return p.length == 4 && "0".equals(p[3]) ? joined.substring(0, joined.lastIndexOf('.')) : joined;
     }
 
     private static @Nullable String str(JsonObject o, String key) {
@@ -486,11 +548,25 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * True when {@code candidate} is newer than the Java {@code env} runs: {@link #stageable}'s test of a patch to
-     * the built-in Java, which the panel and the daily check ask too, so none offers what another would not.
+     * Orders two builds by Java version and, at the same Java version, by Zulu build: Azul ships some fixes as a
+     * respin that keeps the Java version (25.38.107 over 25.38.105, both 25.0.5). With either build unknown, only
+     * the Java versions compare.
+     */
+    public static int compareBuilds(String version, @Nullable String build, String otherVersion,
+                                    @Nullable String otherBuild) {
+        int order = compareVersions(version, otherVersion);
+        if (order != 0 || build == null || otherBuild == null) return order;
+        return compareVersions(build, otherBuild);
+    }
+
+    /**
+     * True when {@code candidate} is a later build than the Java {@code env} runs, by {@link #compareBuilds}:
+     * {@link #stageable}'s test of a patch to the built-in Java, which the panel and the daily check ask too, so
+     * none offers what another would not.
      */
     public static boolean isNewer(@Nullable Release candidate, Environment env) {
-        return candidate != null && isNewer(candidate.version(), env.javaVersion());
+        return candidate != null
+                && compareBuilds(candidate.version(), candidate.build(), env.javaVersion(), env.build()) > 0;
     }
 
     private static int[] parts(@Nullable String version) {
@@ -531,12 +607,13 @@ public final class JavaRuntimeService {
         var version = fields.get("version");
         var sha = fields.get("sha256");
         var archive = fields.get("archive");
+        var build = fields.get("build");
         if (version == null || sha == null || archive == null || !VERSION.matcher(version).matches()
                 || !SHA256.matcher(sha).matches() || !ARCHIVE.matcher(archive).matches()
-                || !Files.isRegularFile(dir.resolve(archive))) {
+                || (build != null && !VERSION.matcher(build).matches()) || !Files.isRegularFile(dir.resolve(archive))) {
             return null;
         }
-        return new Staged(version, sha, archive);
+        return new Staged(version, sha, archive, build);
     }
 
     /** {@code <app>/data/java-runtime.status}, or null when the last start had no staged runtime to install. */
@@ -694,6 +771,9 @@ public final class JavaRuntimeService {
         if (!ARCHIVE.matcher(release.archive()).matches() || !VERSION.matcher(release.version()).matches()) {
             throw new IOException("refusing an archive named " + release.archive());
         }
+        if (release.build() != null && !VERSION.matcher(release.build()).matches()) {
+            throw new IOException("refusing a build numbered " + release.build());
+        }
         var dir = home.resolve(STAGED_DIR);
         deleteTree(dir);
         Files.createDirectories(dir);
@@ -703,7 +783,8 @@ public final class JavaRuntimeService {
             Files.move(part, dir.resolve(release.archive()), StandardCopyOption.ATOMIC_MOVE);
             var manifest = dir.resolve(MANIFEST + ".part");
             Files.writeString(manifest, "version=" + release.version() + "\nsha256=" + sha + "\narchive="
-                    + release.archive() + "\n", StandardCharsets.UTF_8);
+                    + release.archive() + "\n" + (release.build() == null ? "" : "build=" + release.build() + "\n"),
+                    StandardCharsets.UTF_8);
             Files.move(manifest, dir.resolve(MANIFEST), StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException | RuntimeException e) {
             try {
@@ -713,7 +794,7 @@ public final class JavaRuntimeService {
             }
             throw e;
         }
-        return new Staged(release.version(), sha, release.archive());
+        return new Staged(release.version(), sha, release.archive(), release.build());
     }
 
     private static void fetch(HttpUrl url, Path out, String sha256, Download progress) throws IOException {

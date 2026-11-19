@@ -10,12 +10,15 @@ import { interruptionSummary } from '~/composables/useRestartAndReconnect'
 interface JavaRuntimePreflight {
   kind: 'built-in' | 'external' | 'container'
   currentVersion: string
+  currentBuild: string | null
   vendor: string | null
   latestVersion: string | null
+  latestBuild: string | null
   releaseType: string | null
   releaseNotesUrl: string | null
   updateAvailable: boolean
   stagedVersion: string | null
+  stagedBuild: string | null
   downloading: boolean
   downloadPercent: number | null
   downloadError: string | null
@@ -40,6 +43,25 @@ const { data: runtime, refresh } = useLazyFetch<JavaRuntimePreflight>(ENDPOINT)
 const cacheNote = computed(() => runtime.value?.rebuildsStartupCache
   ? 'The first start on it rebuilds the startup cache, so it takes longer than usual. '
   : '')
+
+// Azul ships some fixes as a new build that keeps the Java version (Zulu 25.38.107 after 25.38.105, both
+// Java 25.0.5), so only the Zulu build number tells such a build from the running one.
+function keepsJava(version: string | null, build: string | null): boolean {
+  const r = runtime.value
+  const norm = (v: string) => v.replace(/(\.0)+$/, '')
+  return !!build && !!r?.currentBuild && !!version && norm(version) === norm(r.currentVersion)
+}
+
+function named(version: string | null, build: string | null): string {
+  return keepsJava(version, build) ? `Zulu ${build}` : `Java ${version}`
+}
+
+const latestName = computed(() => named(runtime.value?.latestVersion ?? null, runtime.value?.latestBuild ?? null))
+const stagedName = computed(() => named(runtime.value?.stagedVersion ?? null, runtime.value?.stagedBuild ?? null))
+const respin = computed(() => keepsJava(runtime.value?.latestVersion ?? null, runtime.value?.latestBuild ?? null))
+const currentName = computed(() => respin.value
+  ? `Zulu ${runtime.value?.currentBuild}`
+  : `Java ${runtime.value?.currentVersion}`)
 
 const failure = ref<string | null>(null)
 const checking = ref(false)
@@ -101,9 +123,9 @@ async function download() {
   const r = runtime.value
   if (!r?.latestVersion) return
   const ok = await confirm({
-    title: `Download Java ${r.latestVersion}`,
-    message: `Java ${r.latestVersion} will be downloaded from Azul and checked against its SHA-256 `
-      + `while JClaw keeps running on Java ${r.currentVersion}. It is installed the next time JClaw `
+    title: `Download ${latestName.value}`,
+    message: `${latestName.value} will be downloaded from Azul and checked against its SHA-256 `
+      + `while JClaw keeps running on ${currentName.value}. It is installed the next time JClaw `
       + 'starts, and the current Java is kept as jre.previous.',
     confirmText: 'Download',
   })
@@ -170,7 +192,7 @@ async function restartNow() {
 
   const ok = await confirm({
     title: 'Restart JClaw',
-    message: `${interruptionSummary(p)} Java ${staged} is installed as JClaw starts again. ${cacheNote.value}`
+    message: `${interruptionSummary(p)} ${stagedName.value} is installed as JClaw starts again. ${cacheNote.value}`
       + 'This page reconnects automatically once the backend is back.',
     confirmText: 'Restart',
     variant: 'danger',
@@ -191,19 +213,20 @@ const canSwitch = computed(() => {
 })
 
 // A switch downloads the managed Java, which on a host Java of another major is not latestVersion.
-const downloadingVersion = computed(() =>
-  runtime.value?.switchable ? runtime.value.managedVersion : runtime.value?.latestVersion)
+const downloadingName = computed(() =>
+  runtime.value?.switchable ? `Java ${runtime.value.managedVersion}` : latestName.value)
 
 const summaryLine = computed(() => {
   const r = runtime.value
   if (!r) return 'Checking for a newer Java…'
-  if (r.stagedVersion) return `Java ${r.stagedVersion} will be installed at the next restart. ${cacheNote.value}`.trim()
-  if (r.downloading) return `Downloading Java ${downloadingVersion.value}…`
+  if (r.stagedVersion) return `${stagedName.value} will be installed at the next restart. ${cacheNote.value}`.trim()
+  if (r.downloading) return `Downloading ${downloadingName.value}…`
   if (!r.latestVersion) return 'Couldn\'t check for a newer Java.'
   if (!r.updateAvailable) return 'Up to date.'
-  if (r.kind === 'container') return `Java ${r.latestVersion} is available. The runtime comes with the Docker image.`
-  if (r.kind === 'external') return `Java ${r.latestVersion} is available from your JDK's vendor.`
-  return `Java ${r.latestVersion} is available.`
+  if (r.kind === 'container') return `${latestName.value} is available. The runtime comes with the Docker image.`
+  if (r.kind === 'external') return `${latestName.value} is available from your JDK's vendor.`
+  if (respin.value) return `${latestName.value} is available to replace ${currentName.value} (Java ${r.currentVersion}).`
+  return `${latestName.value} is available.`
 })
 
 const lastStartAt = computed(() => {
@@ -248,7 +271,7 @@ const errorLine = computed(() =>
             data-testid="java-runtime-release"
           >
             <template v-if="runtime.releaseType">
-              Java {{ runtime.latestVersion }} is {{ runtime.releaseType }}.
+              {{ latestName }} is {{ runtime.releaseType }}.
             </template>
             <a
               :href="runtime.releaseNotesUrl"
@@ -292,7 +315,7 @@ const errorLine = computed(() =>
                    bg-emerald-600 hover:bg-emerald-700 rounded-full transition-colors"
             @click="download"
           >
-            Download Java {{ runtime?.latestVersion }}
+            Download {{ latestName }}
           </button>
           <button
             v-if="canSwitch"
@@ -333,7 +356,7 @@ const errorLine = computed(() =>
         <div
           class="flex-1 h-2 bg-muted border border-input overflow-hidden"
           role="progressbar"
-          :aria-label="`Downloading Java ${downloadingVersion}`"
+          :aria-label="`Downloading ${downloadingName}`"
           :aria-valuenow="runtime.downloadPercent ?? undefined"
           aria-valuemin="0"
           aria-valuemax="100"

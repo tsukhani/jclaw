@@ -124,7 +124,7 @@ class JavaRuntimeServiceTest extends UnitTest {
 
         var picked = JavaRuntimeService.pickLatest(payload, 25, false);
         assertEquals(new Release("25.0.4.1", "https://cdn.azul.com/zulu/bin/zulu25.36.205-ca-jre25.0.4.1-macosx_aarch64.tar.gz",
-                hash("C3"), "zulu25.36.205-ca-jre25.0.4.1-macosx_aarch64.tar.gz"), picked);
+                hash("C3"), "zulu25.36.205-ca-jre25.0.4.1-macosx_aarch64.tar.gz", null, "25.36.205"), picked);
 
         // A musl runtime takes the musl build install.sh would.
         assertEquals("zulu25.40.1-ca-jre25.0.6-linux_musl_aarch64.tar.gz",
@@ -140,7 +140,7 @@ class JavaRuntimeServiceTest extends UnitTest {
 
         assertEquals(new Release("25.0.5.1", "https://cdn.azul.com/zulu/bin/zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz",
                         "12277af4957cd249dc7aa50017ddde967a826fa48971b2411752fefe48e5ca8b",
-                        "zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz", "PSU"),
+                        "zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz", "PSU", "25.38.201"),
                 JavaRuntimeService.pickLatest(payload, 25, false));
     }
 
@@ -153,6 +153,16 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertNull(JavaRuntimeService.releaseTypeInWords("CPU_PLUS_PSU"));
         assertNull(JavaRuntimeService.releaseTypeInWords(""));
         assertNull(JavaRuntimeService.releaseTypeInWords(null));
+    }
+
+    @Test
+    void theHigherBuildOfOneJavaVersionIsPickedInEitherOrder() {
+        var older = entry("zulu25.38.105-ca-jre25.0.5-macosx_aarch64.tar.gz", "[25,0,5]", "[25,38,105,0]", "A1");
+        var respin = entry(ARCHIVE, "[25,0,5]", "[25,38,107,0]", "B2");
+        var expected = new Release("25.0.5", URL, hash("B2"), ARCHIVE, null, "25.38.107");
+
+        assertEquals(expected, JavaRuntimeService.pickLatest("[" + older + "," + respin + "]", 25, false));
+        assertEquals(expected, JavaRuntimeService.pickLatest("[" + respin + "," + older + "]", 25, false));
     }
 
     @Test
@@ -176,9 +186,9 @@ class JavaRuntimeServiceTest extends UnitTest {
         };
         var client = new OkHttpClient.Builder().addInterceptor(catalog).build();
 
-        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + glibcName, hash("A1"), glibcName),
+        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + glibcName, hash("A1"), glibcName, null, "25.38.107"),
                 latestFrom(client, linux(glibc)));
-        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + muslName, hash("B2"), muslName),
+        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + muslName, hash("B2"), muslName, null, "25.38.107"),
                 latestFrom(client, linux(musl)));
         var query = "https://api.azul.com/metadata/v1/zulu/packages/?java_version=25&os=%s&arch=x64&archive_type=tar.gz"
                 + "&java_package_type=jre&release_status=ga&include_fields=sha256_hash,release_type&page_size=20";
@@ -212,6 +222,18 @@ class JavaRuntimeServiceTest extends UnitTest {
         // A source checkout's Java is the developer's, even beside a jre/.
         Files.createDirectories(app.resolve("app"));
         assertEquals(Kind.EXTERNAL, JavaRuntimeService.kind(env(app, builtIn, "25.0.4", false)));
+    }
+
+    @Test
+    void theRunningZuluBuildIsReadFromItsVendorVersionOrElseItsReleaseFile() throws IOException {
+        var app = install();
+        var jre = zuluHome("zulu", "25.0.5", "Zulu25.38+201-CA");
+
+        assertEquals("25.38.105", env(app, jre, "25.0.5", "Zulu25.38+105-CA").build());
+        assertEquals("25.38.201", env(app, jre, "25.0.5", false).build());
+        assertNull(env(app, jre, "25.0.1", "Temurin-25.0.1+8").build());
+        assertNull(env(app, Files.createDirectories(tmp.resolve("no-release")), "25.0.5", false).build());
+        assertNull(env(app, zuluHome("temurin", "25.0.1", "Temurin-25.0.1+8"), "25.0.1", false).build());
     }
 
     // --- What a download may do ---
@@ -317,7 +339,7 @@ class JavaRuntimeServiceTest extends UnitTest {
 
         assertEquals(latest, HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host25, latest, true)));
         assertEquals(List.of(), asked);
-        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + name, hash("D4"), name),
+        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + name, hash("D4"), name, null, "25.38.107"),
                 HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host27, release("27.0.2"), true)));
         assertEquals(List.of("25"), asked);
     }
@@ -329,6 +351,51 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(expected, first(repo.resolve("install.sh"), "(?m)^MIN_JAVA=(\\d+)$"));
         assertEquals(expected, first(repo.resolve("install.ps1"), "(?m)^\\$MinJava\\s*=\\s*(\\d+)\\s*$"));
         assertEquals(expected, first(repo.resolve("jclaw.sh"), "(?m)^JRE_MAJOR=(\\d+)$"));
+    }
+
+    @Test
+    void aBuildIsOfferedOnlyWhenItIsLaterThanTheRunningOne() throws IOException {
+        var app = install();
+        var builtIn = Files.createDirectories(tmp.resolve("jre/Home"));
+        var running = env(app, builtIn, "25.0.5", "Zulu25.38+105-CA");
+
+        assertRefused("Java 25.0.5 is up to date.", running, release("25.0.5", "25.38.104"), null, false);
+        assertRefused("Java 25.0.5 is up to date.", running, release("25.0.5", "25.38.105"), null, false);
+        var respin = release("25.0.5", "25.38.106");
+        assertEquals(respin, JavaRuntimeService.stageable(running, respin, null, false));
+        // The Java version decides first, whichever build number is higher.
+        var patch = release("25.0.6", "25.36.1");
+        assertEquals(patch, JavaRuntimeService.stageable(running, patch, null, false));
+        assertRefused("Java 25.0.5 is up to date.", running, release("25.0.4.1", "25.40.9"), null, false);
+        // With either build unknown, only the Java versions compare.
+        assertRefused("Java 25.0.5 is up to date.", running, release("25.0.5"), null, false);
+        assertRefused("Java 25.0.5 is up to date.", env(app, builtIn, "25.0.5", "Temurin-25.0.5+8"), respin, null, false);
+        assertRefused("Java 25.0.5 is up to date.", env(app, builtIn, "25.0.5", false), respin, null, false);
+    }
+
+    @Test
+    void aZuluRespinThatKeepsTheJavaVersionIsOfferedAndStagedWithItsBuild() throws Exception {
+        // Azul's out-of-cycle fix: 25.38.107 and the 25.38.105 it replaces both report Java 25.0.5.
+        var app = install();
+        var env = env(app, zuluHome("jre/zulu25/Contents/Home", "25.0.5", "Zulu25.38+105-CA"), "25.0.5", false);
+        var bytes = "Zulu 25.38.107".getBytes(StandardCharsets.UTF_8);
+        var payload = "[" + entry("zulu25.38.105-ca-jre25.0.5-macosx_aarch64.tar.gz", "[25,0,5]", "[25,38,105,0]", "A1")
+                + "," + entry(ARCHIVE, "[25,0,5]", "[25,38,107,0]", sha(bytes)) + "]";
+        Interceptor azul = chain -> "api.azul.com".equals(chain.request().url().host())
+                ? answer(chain.request(), 200, payload)
+                : ok(chain.request(), ResponseBody.create(bytes, null));
+        var client = new OkHttpClient.Builder().addInterceptor(azul).build();
+        var latest = latestFrom(client, env);
+
+        assertEquals(ARCHIVE, JavaRuntimeService.stageable(env, latest, null, false).archive());
+
+        var progress = new Download();
+        JavaRuntimeService.requestStage(env, latest, progress, (r, home, p) -> stage(client, r, home, p));
+        waitUntil(() -> !progress.active());
+        assertNull(progress.lastError());
+        assertEquals("version=25.0.5\nsha256=" + sha(bytes) + "\narchive=" + ARCHIVE + "\nbuild=25.38.107\n",
+                Files.readString(tmp.resolve("jre.staged/manifest")));
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE, "25.38.107"), JavaRuntimeService.staged(tmp));
     }
 
     @Test
@@ -485,6 +552,9 @@ class JavaRuntimeServiceTest extends UnitTest {
         var climbing = assertThrows(IOException.class,
                 () -> stage(client, new Release("25.0.5", URL, sha(bytes), "../jre/x.tar.gz"), home, new Download()));
         assertEquals("refusing an archive named ../jre/x.tar.gz", climbing.getMessage());
+        var injected = assertThrows(IOException.class,
+                () -> stage(client, new Release("25.0.5", URL, sha(bytes), ARCHIVE, null, "25.38.107\nversion=26"), home, new Download()));
+        assertEquals("refusing a build numbered 25.38.107\nversion=26", injected.getMessage());
         assertEquals(0, requests.get());
     }
 
@@ -503,6 +573,11 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE), JavaRuntimeService.staged(home));
 
         Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=nothex\narchive=" + ARCHIVE + "\n");
+        assertNull(JavaRuntimeService.staged(home));
+
+        Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE + "\nbuild=25.38.107\n");
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE, "25.38.107"), JavaRuntimeService.staged(home));
+        Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE + "\nbuild=25.38-1\n");
         assertNull(JavaRuntimeService.staged(home));
     }
 
@@ -662,9 +737,21 @@ class JavaRuntimeServiceTest extends UnitTest {
         return new Environment(app, javaHome, "25.0.3", "Ubuntu", "Linux", "amd64", false, true);
     }
 
+    private static Environment env(Path app, Path javaHome, String version, String vendorVersion) {
+        return new Environment(app, javaHome, version, "Azul Systems, Inc.", vendorVersion, "Mac OS X", "aarch64", false);
+    }
+
     private Path javaHome(String name, String libc) throws IOException {
         var home = Files.createDirectories(tmp.resolve(name));
         Files.writeString(home.resolve("release"), "JAVA_VERSION=\"25.0.4\"\nLIBC=\"" + libc + "\"\n");
+        return home;
+    }
+
+    /** A runtime whose release file names its build in {@code IMPLEMENTOR_VERSION}, as Zulu 11 and later write it. */
+    private Path zuluHome(String path, String version, String implementorVersion) throws IOException {
+        var home = Files.createDirectories(tmp.resolve(path));
+        Files.writeString(home.resolve("release"), "IMPLEMENTOR=\"Azul Systems, Inc.\"\nIMPLEMENTOR_VERSION=\""
+                + implementorVersion + "\"\nJAVA_VERSION=\"" + version + "\"\n");
         return home;
     }
 
@@ -688,6 +775,10 @@ class JavaRuntimeServiceTest extends UnitTest {
 
     private static Release release(String version) {
         return new Release(version, URL, hash("C3"), ARCHIVE);
+    }
+
+    private static Release release(String version, String build) {
+        return new Release(version, URL, hash("C3"), ARCHIVE, null, build);
     }
 
     private static <T> T at(Instant instant, Supplier<T> body) {

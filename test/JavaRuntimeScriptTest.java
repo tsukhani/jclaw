@@ -35,7 +35,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("native_path", "jre_javas_in", "use_bundled_jre",
             "sha256_file", "conf_jvm_modules", "jre_status", "jre_version_norm", "jre_reported_version",
-            "jre_zip_tool", "jre_install_staged", "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase");
+            "jre_reported_build", "jre_zip_tool", "jre_install_staged", "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase");
     private static final List<String> VARIABLES = List.of("JRE_MAJOR");
 
     private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-macosx_aarch64";
@@ -72,6 +72,38 @@ class JavaRuntimeScriptTest extends UnitTest {
         assertTrue(second.contains("Java runtime: upgraded 25.0.5 → 25.0.6"), second);
         assertEquals(List.of(NEW_TOP), listing(home.resolve("jre.previous")));
         assertEquals(List.of(next), listing(home.resolve("jre")));
+    }
+
+    @Test
+    void aRespinOfTheSameJavaVersionIsInstalledAndTheLastStartNamesBothBuilds() throws Exception {
+        var oldTop = "zulu25.38.105-ca-jre25.0.5-macosx_aarch64";
+        var home = install(oldTop, "25.0.5", "Zulu25.38+105-CA");
+        stage(home, TARBALL, "25.0.5", "25.38.107", tarGz(runtime(NEW_TOP, "25.0.5", "Zulu25.38+107-CA", true)));
+
+        var out = run(home, Map.of(), "apply_staged_jre");
+
+        assertTrue(out.contains("    Java runtime: upgraded Zulu 25.38.105 → Zulu 25.38.107 (Java 25.0.5)\n"), out);
+        assertEquals("upgraded Zulu 25.38.105 → Zulu 25.38.107 (Java 25.0.5)", status(home));
+        assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
+        assertEquals(List.of(oldTop), listing(home.resolve("jre.previous")));
+
+        // A new Java version is named by its versions, builds or not.
+        var next = "zulu25.40.1-ca-jre25.0.6-macosx_aarch64";
+        stage(home, next + ".tar.gz", "25.0.6", "25.40.1", tarGz(runtime(next, "25.0.6", "Zulu25.40+1-CA", true)));
+        assertTrue(run(home, Map.of(), "apply_staged_jre").contains("    Java runtime: upgraded 25.0.5 → 25.0.6\n"));
+        assertEquals(List.of(next), listing(home.resolve("jre")));
+    }
+
+    @Test
+    void aRuntimeThatDoesNotReportTheStagedBuildKeepsTheCurrentJava() throws Exception {
+        var home = install();
+        stage(home, TARBALL, "25.0.5", "25.38.107", tarGz(runtime(NEW_TOP, "25.0.5", "Zulu25.38+106-CA", true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"),
+                "kept Java 25.0.4: Zulu 25.38.107 reported Zulu 25.38.106 when it ran");
+
+        stage(home, TARBALL, "25.0.5", "25.38.107", tarGz(runtime(NEW_TOP, "25.0.5", null, true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"),
+                "kept Java 25.0.4: Zulu 25.38.107 reported no Zulu build when it ran");
     }
 
     @Test
@@ -172,6 +204,9 @@ class JavaRuntimeScriptTest extends UnitTest {
         Files.writeString(home.resolve("jre.staged/manifest"),
                 "version=25.0.5\nsha256=" + "a".repeat(64) + "\narchive=../jre/evil.tar.gz\n");
 
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: the staged runtime's manifest is malformed");
+
+        stage(home, TARBALL, "25.0.5", "25.38+107", tarGz(runtime(NEW_TOP, "25.0.5", "Zulu25.38+107-CA", true)));
         assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: the staged runtime's manifest is malformed");
     }
 
@@ -367,10 +402,14 @@ class JavaRuntimeScriptTest extends UnitTest {
 
     /** {@code <home>/jclaw} with the jvm.memory module flag, and {@code <home>/jre} on Java 25.0.4. */
     private Path install() throws IOException {
+        return install(OLD_TOP, "25.0.4", null);
+    }
+
+    private Path install(String top, String version, String vendorVersion) throws IOException {
         var home = tmp.resolve("home");
         Files.createDirectories(home.resolve("jclaw/conf"));
         Files.writeString(home.resolve("jclaw/conf/application.conf"), "jvm.memory=--add-modules=jdk.incubator.vector\n");
-        for (var f : runtime(OLD_TOP, "25.0.4", true).entrySet()) {
+        for (var f : runtime(top, version, vendorVersion, true).entrySet()) {
             var path = home.resolve("jre/" + f.getKey());
             Files.createDirectories(path.getParent());
             if (f.getKey().endsWith("/bin/java")) executable(path, f.getValue());
@@ -380,6 +419,11 @@ class JavaRuntimeScriptTest extends UnitTest {
     }
 
     private static Map<String, String> runtime(String top, String version, boolean hasModule) {
+        return runtime(top, version, null, hasModule);
+    }
+
+    /** @param vendorVersion the build the stub's {@code -version} names, as Zulu's does, or null for a line naming none */
+    private static Map<String, String> runtime(String top, String version, String vendorVersion, boolean hasModule) {
         var files = new LinkedHashMap<String, String>();
         files.put(top + HOME_IN_ARCHIVE + "/release", "JAVA_VERSION=\"" + version + "\"\n");
         files.put(top + HOME_IN_ARCHIVE + "/bin/java", """
@@ -390,7 +434,8 @@ class JavaRuntimeScriptTest extends UnitTest {
                     esac
                 done
                 echo "openjdk version \\"%s\\" 2026-10-20 LTS" >&2
-                """.formatted(hasModule ? "yes" : "no", version));
+                echo "OpenJDK Runtime Environment %s (build %s+8-LTS)" >&2
+                """.formatted(hasModule ? "yes" : "no", version, vendorVersion == null ? "" : vendorVersion, version));
         return files;
     }
 
@@ -399,11 +444,16 @@ class JavaRuntimeScriptTest extends UnitTest {
     }
 
     private static void stage(Path home, String archive, String version, byte[] bytes) throws Exception {
+        stage(home, archive, version, null, bytes);
+    }
+
+    private static void stage(Path home, String archive, String version, String build, byte[] bytes) throws Exception {
         var dir = home.resolve("jre.staged");
         deleteTree(dir);
         Files.createDirectories(dir);
         Files.write(dir.resolve(archive), bytes);
-        Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + sha(bytes) + "\narchive=" + archive + "\n");
+        Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + sha(bytes) + "\narchive=" + archive
+                + "\n" + (build == null ? "" : "build=" + build + "\n"));
     }
 
     private static byte[] tarGz(Map<String, String> files) throws IOException {
