@@ -685,6 +685,8 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                 {{ formatTokensPerSec(msg.usage) }}
               </button>
             </PopoverTrigger>
+            <!-- On close reka focuses the trigger, whose focus handler reopens the card: closed by the pointer
+                 leaving, it stuck open with the keyboard ring on the pill, having taken focus from the message box. -->
             <PopoverContent
               side="top"
               align="start"
@@ -694,6 +696,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
               @mouseleave="emit('set-tok-stats-hover-key', null)"
               @focusin="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
               @focusout="emit('set-tok-stats-hover-key', null)"
+              @close-auto-focus="(event: Event) => event.preventDefault()"
             >
               <!--
                 Rows sit 2px apart and groups 16px apart, so each group reads as one. A rule marks a change of

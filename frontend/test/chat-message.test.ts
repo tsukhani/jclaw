@@ -341,4 +341,33 @@ describe('ChatMessage usage card', () => {
     expect(c.emitted('set-tok-stats-hover-key')).toEqual([[34], [null]])
     c.unmount()
   })
+
+  it('closes when the pointer leaves and leaves focus in the message box it was in', async () => {
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    composer.focus()
+    // The page owns the hover key: feed each request back in as chat.vue does.
+    const c = await mountSuspended(ChatMessage, {
+      props: props(msg({ id: 36, usage: twoCalls }), {
+        'onSet-tok-stats-hover-key': (key: number | null) => { void c.setProps({ tokStatsHoverKey: key }) },
+      }),
+      attachTo: document.body,
+    })
+    const trigger = c.findAll('button').find(b => b.text() === '193.5 tok/s')!
+    const card = () => document.body.querySelector('[data-testid="usage-card"]')
+    try {
+      await trigger.trigger('mouseenter')
+      expect(card()).not.toBeNull()
+
+      await trigger.trigger('mouseleave')
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      expect(document.activeElement).toBe(composer)
+      expect(card()).toBeNull()
+    }
+    finally {
+      c.unmount()
+      composer.remove()
+    }
+  })
 })
