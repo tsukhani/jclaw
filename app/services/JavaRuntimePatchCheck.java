@@ -38,8 +38,6 @@ public final class JavaRuntimePatchCheck {
     public static final String HANDLED_FILE = "java-runtime.notified";
 
     public static final String TITLE = "Java runtime";
-    /** Worded as Azul's latest notes, not the offered build's: a staged build or the catalog can briefly lag that page. */
-    public static final String LINK_LABEL = "Azul's latest release notes";
 
     private static final String CATEGORY = "java-runtime";
     // Years of patches; the oldest falls off first.
@@ -53,7 +51,8 @@ public final class JavaRuntimePatchCheck {
      * One look. A download that fails, or a {@code recipient} that does not exist yet, records nothing, so the
      * next run tries again.
      *
-     * @param latest    the newest patch of the running major, or null when the catalog cannot be reached
+     * @param latest    the newest patch of the running major from the running vendor's catalog, or null when
+     *                  it cannot be reached
      * @param recipient the agent the notification is filed under; the job passes main, which the operator's
      *                  notification bar shows
      */
@@ -74,7 +73,7 @@ public final class JavaRuntimePatchCheck {
                 ? builtIn(env, release, progress, stager)
                 : named(env, release) + " is available for the Java JClaw runs on, Java " + env.javaVersion()
                         + " at " + env.javaHome() + ". Update that Java the way you installed it.";
-        if (message != null && notify(recipient, message)) {
+        if (message != null && notify(recipient, message, release)) {
             EventLogger.info(CATEGORY, "Told the operator about Java " + release.version());
             markHandled(env.app(), release.archive());
         }
@@ -107,6 +106,8 @@ public final class JavaRuntimePatchCheck {
     /** On the installer's Java: stage {@code release} or say how to, or null when there is nothing to tell yet. */
     private static @Nullable String builtIn(Environment env, Release release, Download progress, Stager stager) {
         var staged = JavaRuntimeService.staged(env.home());
+        // A switch to the other vendor waits: the operator chose it, and a patch of the Java it leaves would undo it.
+        if (staged != null && staged.vendor() != null && staged.vendor() != release.vendor()) return null;
         if (staged != null && staged.archive().equals(release.archive())) {
             // Downloaded from Settings: the operator chose it, so there is nothing to download or tell.
             markHandled(env.app(), release.archive());
@@ -156,7 +157,7 @@ public final class JavaRuntimePatchCheck {
         return words == null ? name : name + ", " + words + ",";
     }
 
-    private static boolean notify(String recipient, String message) {
+    private static boolean notify(String recipient, String message, Release release) {
         return Tx.run(() -> {
             var agent = Agent.findByName(recipient);
             if (agent == null) return false;
@@ -164,8 +165,8 @@ public final class JavaRuntimePatchCheck {
             n.agent = agent;
             n.title = TITLE;
             n.content = message;
-            n.linkUrl = JavaRuntimeService.RELEASE_NOTES;
-            n.linkLabel = LINK_LABEL;
+            n.linkUrl = release.notesUrl();
+            n.linkLabel = release.notesLabel();
             n.save();
             return true;
         });

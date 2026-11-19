@@ -3388,6 +3388,18 @@ jre_reported_build() {
     "$@" -version 2>&1 | sed -n 's/.* Zulu\([0-9][0-9.]*\)+\([0-9][0-9.]*\).*/\1.\2/p' | head -1 || true
 }
 
+# The vendor "$@" -version names, as a staged manifest's vendor line does: "OpenJDK Runtime Environment
+# Zulu25.38+201-CA" or "... Temurin-25.0.5.1+2". Empty for a vendor JClaw never installs, or a Java that does not run.
+jre_reported_vendor() {
+    local out
+    out=$("$@" -version 2>&1 || true)
+    case "$out" in
+        *"Runtime Environment Zulu"*) echo Zulu ;;
+        *"Runtime Environment Temurin"*) echo Temurin ;;
+    esac
+    return 0
+}
+
 # What unpacks a zip here: unzip, else Windows' own tar.exe (bsdtar reads zip; the GNU tar Git Bash ships does not).
 jre_zip_tool() {
     local tar_exe
@@ -3407,7 +3419,7 @@ JRE_MAJOR=25
 # touched nothing but $1/jre.new. Every check runs before the first rename. With no $1/jre yet, the
 # start runs on the host's Java, and the staging is the switch from it that Settings offers.
 jre_install_staged() {
-    local home="$1" staged="$1/jre.staged" version sha archive build old_java current was kept got tool javas new_java mods host=""
+    local home="$1" staged="$1/jre.staged" version sha archive build vendor old_vendor="" old_java current was kept got tool javas new_java mods host=""
     local version_re='^[0-9]+(\.[0-9]+)*$' sha_re='^[0-9a-f]{64}$' archive_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.(tar\.gz|zip)$'
     old_java=$(jre_javas_in "$home/jre" | head -1)
     current=""
@@ -3427,10 +3439,12 @@ jre_install_staged() {
     version=$(sed -n 's/^version=//p' "$staged/manifest" | head -1)
     sha=$(sed -n 's/^sha256=//p' "$staged/manifest" | head -1)
     archive=$(sed -n 's/^archive=//p' "$staged/manifest" | head -1)
-    # A manifest an earlier release staged names no build, and installs on its version alone.
+    # A manifest an earlier release staged names no build or vendor, and installs on its version alone.
     build=$(sed -n 's/^build=//p' "$staged/manifest" | head -1)
+    vendor=$(sed -n 's/^vendor=//p' "$staged/manifest" | head -1)
     if [[ ! "$version" =~ $version_re || ! "$sha" =~ $sha_re || ! "$archive" =~ $archive_re ]] \
-        || [[ -n "$build" && ! "$build" =~ $version_re ]]; then
+        || [[ -n "$build" && ! "$build" =~ $version_re ]] \
+        || [[ -n "$vendor" && "$vendor" != Zulu && "$vendor" != Temurin ]]; then
         echo "${kept}: the staged runtime's manifest is malformed"; return 1
     fi
     if [[ -z "$old_java" && -e "$home/jre" ]]; then
@@ -3488,6 +3502,13 @@ jre_install_staged() {
     if [[ "$got" != "$(jre_version_norm "$version")" ]]; then
         echo "${kept}: Java ${version} reported ${got:-no version} when it ran"; return 1
     fi
+    if [[ -n "$vendor" ]]; then
+        # shellcheck disable=SC2086
+        got=$(jre_reported_vendor "$new_java" $mods)
+        if [[ "$got" != "$vendor" ]]; then
+            echo "${kept}: ${vendor} ${version} reported ${got:-another vendor} when it ran"; return 1
+        fi
+    fi
     if [[ -n "$build" ]]; then
         # shellcheck disable=SC2086
         got=$(jre_reported_build "$new_java" $mods)
@@ -3498,6 +3519,7 @@ jre_install_staged() {
     # A respin keeps the Java version, so only the builds tell the two apart.
     was=""
     if [[ -n "$build" && "$current" == "$(jre_version_norm "$version")" ]]; then was=$(jre_reported_build "$old_java"); fi
+    if [[ -n "$old_java" && -n "$vendor" ]]; then old_vendor=$(jre_reported_vendor "$old_java"); fi
 
     if [[ -n "$old_java" ]]; then
         rm -rf "$home/jre.previous"
@@ -3510,14 +3532,16 @@ jre_install_staged() {
         if [[ -n "$old_java" ]]; then mv "$home/jre.previous" "$home/jre" 2>/dev/null || true; fi
         echo "${kept}: could not move Java ${version} into $home/jre"; return 1
     fi
-    if [[ -n "$was" ]]; then
+    if [[ -n "$old_vendor" && "$old_vendor" != "$vendor" ]]; then
+        echo "switched ${old_vendor} ${current} → ${vendor} ${version}"
+    elif [[ -n "$was" ]]; then
         echo "upgraded Zulu ${was} → Zulu ${build} (Java ${current})"
     elif [[ -n "$old_java" ]]; then
         echo "upgraded ${current} → ${version}"
     elif [[ -n "$host" ]]; then
-        echo "switched from the host's Java ${host} to Java ${version} at $home/jre"
+        echo "switched from the host's Java ${host} to ${vendor:-Java} ${version} at $home/jre"
     else
-        echo "switched to Java ${version} at $home/jre"
+        echo "switched to ${vendor:-Java} ${version} at $home/jre"
     fi
 }
 

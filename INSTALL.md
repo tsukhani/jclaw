@@ -29,7 +29,9 @@ keep it running and keep it up to date. It also lists the optional extras you ca
 To run JClaw, you need:
 
 - **Java 25.** The one-line installer downloads a Zulu JRE 25 for JClaw, and JClaw keeps it
-  patched, so you do not need to install Java yourself. To run JClaw on your own Java 25 or later
+  patched, so you do not need to install Java yourself. **Settings → Maintenance → Java runtime**
+  can switch it to Eclipse Temurin from Adoptium, and back, and keeps patched whichever of the two
+  it runs. To run JClaw on your own Java 25 or later
   instead, such as [Zulu](https://www.azul.com/downloads/?version=java-25) or Temurin, set
   `JCLAW_NO_JRE=1` ([Installer options](#installer-options)).
 - **bash.** macOS and most Linux systems include it. On Alpine Linux, run `apk add bash`.
@@ -92,7 +94,7 @@ The installer does these steps:
 5. It starts JClaw on <http://localhost:9000>.
 
 Running the installer again over an existing install upgrades it, and keeps the Java it runs on.
-To move an install from your own Java to JClaw's, use **Switch to Java** in
+To move an install from your own Java to JClaw's, use **Switch to Zulu** or **Switch to Temurin** in
 **Settings → Maintenance → Java runtime**.
 
 On Windows, JClaw runs inside **Git Bash** or **WSL**, because its launcher is a bash script.

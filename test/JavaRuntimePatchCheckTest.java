@@ -23,6 +23,7 @@ import services.JavaRuntimePatchCheck;
 import services.JavaRuntimeService;
 import services.JavaRuntimeService.Download;
 import services.JavaRuntimeService.Environment;
+import services.JavaRuntimeService.Vendor;
 import services.Tx;
 import utils.HttpFactories;
 
@@ -58,6 +59,14 @@ class JavaRuntimePatchCheckTest extends UnitTest {
     private static final String AZUL_SHA = "12277af4957cd249dc7aa50017ddde967a826fa48971b2411752fefe48e5ca8b";
     private static final byte[] JRE = "a Zulu JRE".getBytes(StandardCharsets.UTF_8);
     private static final String LINK = " | Azul's latest release notes https://docs.azul.com/core/release-notes";
+    private static final String TEMURIN_ARCHIVE = "OpenJDK25U-jre_x64_linux_hotspot_25.0.5.1_2.tar.gz";
+    private static final String ADOPTIUM_PATH = "api.adoptium.net/v3/assets/latest/25/hotspot";
+    private static final String TEMURIN_DOWNLOAD_PATH = "github.com/adoptium/temurin25-binaries/releases/download/"
+            + "jdk-25.0.5.1%2B2/" + TEMURIN_ARCHIVE;
+    /** Adoptium's own hash for {@link #TEMURIN_ARCHIVE}, which the stub's bytes never match. */
+    private static final String TEMURIN_SHA = "2edef9e4f81ec5ee426d023336d4cfbd7b4644e99884e7a73a6a867b70b17acf";
+    private static final String TEMURIN_LINK = " | Release notes for Temurin 25.0.5.1 "
+            + "https://adoptium.net/temurin/release-notes/?version=jdk-25.0.5.1%2B2";
 
     @TempDir Path tmp;
 
@@ -82,7 +91,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul, new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201", Vendor.ZULU), JavaRuntimeService.staged(tmp));
         assertEquals("a Zulu JRE", Files.readString(tmp.resolve("jre.staged/" + ARCHIVE)));
         assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded and installs "
                 + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
@@ -127,7 +136,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
     @Test
     void aHostJavaIsToldOfThePatchOnceAndNothingIsDownloaded() throws IOException {
         var javaHome = Files.createDirectories(tmp.resolve("usr/lib/jvm/java-25"));
-        var env = new Environment(app(), javaHome, "25.0.4", "Eclipse Adoptium", "Linux", "amd64", false);
+        var env = new Environment(app(), javaHome, "25.0.4", "Ubuntu", "Linux", "amd64", false);
         var azul = azul(catalog(true, sha(JRE)), 200);
 
         check(env, azul, new Download());
@@ -166,7 +175,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         var events = EventLogger.captureForTest(() -> check(env, down, new Download()));
 
-        assertEquals(List.of("INFO Downloading Java 25.0.5.1 for the next start to install",
+        assertEquals(List.of("INFO Downloading Zulu 25.0.5.1 for the next start to install",
                 "WARN Java runtime download failed: HTTP 503 fetching https://" + CDN_PATH), runtimeEvents(events));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
         assertEquals(List.of(), notices());
@@ -186,7 +195,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         var events = EventLogger.captureForTest(() -> check(env, mismatched, new Download()));
 
-        assertEquals(List.of("INFO Downloading Java 25.0.5.1 for the next start to install",
+        assertEquals(List.of("INFO Downloading Zulu 25.0.5.1 for the next start to install",
                 "WARN Java runtime download failed: checksum mismatch: Azul's catalog gives " + AZUL_SHA
                         + ", the download is " + sha(JRE)), runtimeEvents(events));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
@@ -195,7 +204,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul(catalog(true, sha(JRE)), 200), new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201", Vendor.ZULU), JavaRuntimeService.staged(tmp));
     }
 
     @Test
@@ -317,7 +326,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203", Vendor.ZULU), JavaRuntimeService.staged(tmp));
         assertEquals(List.of(CATALOG_PATH, CDN_PATH, CATALOG_PATH, "cdn.azul.com/zulu/bin/" + RESPIN), requests);
         assertEquals(2, notices().size());
         assertEquals(List.of(ARCHIVE, RESPIN), JavaRuntimePatchCheck.handled(env.app()));
@@ -330,7 +339,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN, "25.38.203", Vendor.ZULU), JavaRuntimeService.staged(tmp));
         assertEquals(List.of("Java runtime | Zulu 25.38.203, a security and bug-fix release, is downloaded and installs "
                 + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
                 + LINK), notices());
@@ -387,7 +396,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         check(env, azul, new Download());
         check(env, azul, new Download());
 
-        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE, "25.38.201", Vendor.ZULU), JavaRuntimeService.staged(tmp));
         assertEquals(List.of("manifest", ARCHIVE), listing(tmp.resolve("jre.staged")));
         assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded in place of "
                 + "Java 25.0.5 and installs the next time JClaw restarts. Restart from Settings > Maintenance > Java "
@@ -412,6 +421,64 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
         assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(JRE), OLDER), JavaRuntimeService.staged(tmp));
         assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void onTemurinTheCheckAsksAdoptiumStagesItsPatchAndLinksThatReleasesOwnNotes() throws IOException {
+        var env = temurinBuiltIn("25.0.5");
+
+        check(env, adoptium(temurinCatalog(sha(JRE))), new Download());
+
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), TEMURIN_ARCHIVE, null, Vendor.TEMURIN),
+                JavaRuntimeService.staged(tmp));
+        assertEquals("version=" + VERSION + "\nsha256=" + sha(JRE) + "\narchive=" + TEMURIN_ARCHIVE + "\nvendor=Temurin\n",
+                Files.readString(tmp.resolve("jre.staged/manifest")));
+        assertEquals(List.of("Java runtime | Java 25.0.5.1 is downloaded and installs the next time JClaw restarts. "
+                + "Restart from Settings > Maintenance > Java runtime when it suits you." + TEMURIN_LINK), notices());
+        assertEquals(List.of(ADOPTIUM_PATH, TEMURIN_DOWNLOAD_PATH), requests);
+        assertEquals(List.of(TEMURIN_ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aTemurinDownloadThatFailsItsSha256StagesNothing() throws IOException {
+        var env = temurinBuiltIn("25.0.5");
+        var mismatched = adoptium(temurinCatalog(TEMURIN_SHA));
+
+        var events = EventLogger.captureForTest(() -> check(env, mismatched, new Download()));
+
+        assertEquals(List.of("INFO Downloading Temurin 25.0.5.1 for the next start to install",
+                "WARN Java runtime download failed: checksum mismatch: Adoptium's catalog gives " + TEMURIN_SHA
+                        + ", the download is " + sha(JRE)), runtimeEvents(events));
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        assertEquals(List.of(), notices());
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aHostTemurinIsToldOfAdoptiumsPatch() throws IOException {
+        var javaHome = Files.createDirectories(tmp.resolve("usr/lib/jvm/temurin-25-jdk"));
+        var env = new Environment(app(), javaHome, "25.0.4", "Eclipse Adoptium", "Linux", "amd64", false);
+
+        check(env, adoptium(temurinCatalog(sha(JRE))), new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1 is available for the Java JClaw runs on, Java 25.0.4 at "
+                + javaHome + ". Update that Java the way you installed it." + TEMURIN_LINK), notices());
+        assertEquals(List.of(ADOPTIUM_PATH), requests);
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+    }
+
+    @Test
+    void aSwitchWaitingForTheNextStartIsNeitherReplacedByAPatchOfTheJavaItLeavesNorAnnounced() throws IOException {
+        var env = builtIn("25.0.4");
+        stageByHand(VERSION, TEMURIN_ARCHIVE, "Temurin");
+
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), TEMURIN_ARCHIVE, null, Vendor.TEMURIN),
+                JavaRuntimeService.staged(tmp));
+        assertEquals(List.of(CATALOG_PATH), requests);
+        assertEquals(List.of(), notices());
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
     }
 
     @Test
@@ -440,10 +507,15 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
     /** A finished download in {@code jre.staged/}, as the Settings button leaves it. */
     private void stageByHand(String version, String archive) throws IOException {
+        stageByHand(version, archive, null);
+    }
+
+    /** As {@link #stageByHand(String, String)}, the manifest naming {@code vendor} unless it is null. */
+    private void stageByHand(String version, String archive, @Nullable String vendor) throws IOException {
         var dir = Files.createDirectories(tmp.resolve("jre.staged"));
         Files.write(dir.resolve(archive), JRE);
         Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + sha(JRE) + "\narchive="
-                + archive + "\n");
+                + archive + "\n" + (vendor == null ? "" : "vendor=" + vendor + "\n"));
     }
 
     /** {@code payload} with {@link #ARCHIVE} respun as {@link #RESPIN}: a newer Zulu build of the same Java. */
@@ -479,6 +551,39 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         var javaHome = Files.createDirectories(tmp.resolve("jre/zulu25-linux_x64"));
         Files.writeString(javaHome.resolve("release"), "JAVA_VERSION=\"" + version + "\"\nLIBC=\"default\"\n");
         return new Environment(app(), javaHome, version, "Azul Systems, Inc.", vendorVersion, "Linux", "amd64", false);
+    }
+
+    /** {@code <tmp>/jclaw} on a Temurin JRE at {@code <tmp>/jre}, as a switch from Settings leaves it. */
+    private Environment temurinBuiltIn(String version) throws IOException {
+        var javaHome = Files.createDirectories(tmp.resolve("jre/jdk-" + version + "+8-jre"));
+        Files.writeString(javaHome.resolve("release"), "IMPLEMENTOR=\"Eclipse Adoptium\"\nJAVA_VERSION=\"" + version
+                + "\"\nLIBC=\"default\"\n");
+        return new Environment(app(), javaHome, version, "Eclipse Adoptium", "Temurin-" + version + "+8", "Linux", "amd64",
+                false);
+    }
+
+    /** Adoptium's recorded answer for Java 25 on Linux x64, with its JRE's hash set to {@code sha}. */
+    private static String temurinCatalog(String sha) throws IOException {
+        return Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"))
+                .replace(TEMURIN_SHA, sha);
+    }
+
+    /**
+     * Adoptium's API answering {@code payload}, and GitHub redirecting its binary to the asset host that serves
+     * {@link #JRE}, as it does for every Adoptium download. Any other host fails.
+     */
+    private OkHttpClient adoptium(String payload) {
+        Interceptor canned = chain -> {
+            var request = chain.request();
+            requests.add(path(request));
+            return switch (request.url().host()) {
+                case "api.adoptium.net" -> answer(request, 200, payload.getBytes(StandardCharsets.UTF_8));
+                case "github.com" -> answer(request.newBuilder().url("https://release-assets.githubusercontent.com/"
+                        + "github-production-release-asset/901810329/19a11c1b").build(), 200, JRE);
+                default -> answer(request, 500, "unexpected".getBytes(StandardCharsets.UTF_8));
+            };
+        };
+        return new OkHttpClient.Builder().addInterceptor(canned).build();
     }
 
     private Path app() throws IOException {

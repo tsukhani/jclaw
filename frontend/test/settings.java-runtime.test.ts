@@ -3,14 +3,15 @@ import { mockNuxtImport, mountSuspended, registerEndpoint } from '@nuxt/test-uti
 import { flushPromises, type DOMWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
-import { setResponseStatus } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import SettingsJavaRuntimePanel from '~/components/settings/SettingsJavaRuntimePanel.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 /**
  * Settings → Maintenance → Java runtime. One case per row of the panel's matrix: what it says for
- * each kind of runtime, that only the installer's own Java is offered a download, that a cancelled
- * dialog sends nothing, and that a staged runtime offers the restart and the cancel.
+ * each kind of runtime, that only the installer's own Java is offered a download, the switches between
+ * Zulu and Temurin and the reason given for each it does not offer, that a cancelled dialog sends
+ * nothing, and that a staged runtime offers the restart and the cancel.
  *
  * The restart's reconnect poll is the Restart panel's, shared through useRestartAndReconnect and
  * covered there; here it is driven once, for the phases a staged runtime adds.
@@ -30,6 +31,7 @@ const Harness = defineComponent({
 let runtime: Record<string, unknown>
 let getQueries: Record<string, unknown>[] = []
 let stagePosts = 0
+let stageBodies: unknown[] = []
 let stageReply: { status: number, body: Record<string, unknown> }
 let cancels = 0
 let restartPosts = 0
@@ -45,13 +47,19 @@ registerEndpoint('/api/system/java-runtime', {
 })
 registerEndpoint('/api/system/java-runtime', {
   method: 'POST',
-  handler: (event) => {
+  handler: async (event) => {
     stagePosts += 1
+    const body = (await readBody(event)) as { vendor?: string } | undefined
+    stageBodies.push(body ?? null)
     if (stageReply.status !== 202) {
       setResponseStatus(event, stageReply.status)
       return stageReply.body
     }
-    runtime = { ...runtime, downloading: true, downloadPercent: 40 }
+    // As the backend does: a vendor is the switch it names, none the running vendor's newest patch.
+    const asked = (runtime.switches as { vendor: string, version: string }[]).find(s => s.vendor === body?.vendor)
+    runtime = { ...runtime, downloading: true, downloadPercent: 40,
+      downloadingVersion: asked ? asked.version : runtime.latestVersion,
+      downloadingVendor: asked ? asked.vendor : runtime.distribution }
     return stageReply.body
   },
 })
@@ -101,19 +109,25 @@ function builtIn(over: Record<string, unknown> = {}) {
     currentVersion: '25.0.4',
     currentBuild: '25.36.15',
     vendor: 'Azul Systems, Inc.',
+    distribution: 'Zulu',
     latestVersion: '25.0.5',
     latestBuild: '25.38.107',
     releaseType: 'a security and bug-fix release',
     releaseNotesUrl: 'https://docs.azul.com/core/release-notes',
+    releaseNotesLabel: 'Azul\'s latest release notes',
     updateAvailable: true,
     stagedVersion: null,
     stagedBuild: null,
+    stagedVendor: null,
     downloading: false,
+    downloadingVersion: null,
+    downloadingVendor: null,
     downloadPercent: null,
     downloadError: null,
     lastStart: null,
     lastStartAt: null,
     rebuildsStartupCache: true,
+    switches: [],
     ...over,
   }
 }
@@ -154,6 +168,7 @@ beforeEach(() => {
   runtime = builtIn()
   getQueries = []
   stagePosts = 0
+  stageBodies = []
   stageReply = { status: 202, body: { status: 'ok', version: '25.0.5' } }
   cancels = 0
   restartPosts = 0
@@ -176,7 +191,7 @@ describe('SettingsJavaRuntimePanel — what it reports', () => {
     const c = await mounted()
 
     expect(c.text()).toContain('Java 25.0.4')
-    expect(c.text()).toContain('Azul Systems, Inc.')
+    expect(c.find('[data-testid="java-runtime-vendor"]').text()).toBe('Zulu')
     expect(summary(c)).toBe('Java 25.0.5 is available.')
     expect(panelButton(c, 'Download Java 25.0.5')).toBeTruthy()
   })
@@ -190,10 +205,11 @@ describe('SettingsJavaRuntimePanel — what it reports', () => {
   })
 
   it('points an external JDK at its vendor without a download', async () => {
-    runtime = builtIn({ kind: 'external' })
+    runtime = builtIn({ kind: 'external', distribution: null, vendor: 'Ubuntu' })
     const c = await mounted()
 
     expect(summary(c)).toBe('Java 25.0.5 is available from your JDK\'s vendor.')
+    expect(c.find('[data-testid="java-runtime-vendor"]').text()).toBe('Ubuntu')
     expect(c.findAll('button')).toHaveLength(0)
   })
 
@@ -283,6 +299,20 @@ describe('SettingsJavaRuntimePanel — download', () => {
     expect(summary(c)).toBe('Java 25.0.5 is available.')
   })
 
+  it('asks for no vendor, so the backend stages the running vendor\'s patch', async () => {
+    const c = await mounted()
+
+    await panelButton(c, 'Download Java 25.0.5')!.trigger('click')
+    await flushPromises()
+    dialogButton('Download')!.click()
+    await flushPromises()
+
+    // The stub reads the body before it answers, so wait for the answer before reading what it got.
+    await vi.waitFor(() => expect(summary(c)).toBe('Downloading Java 25.0.5…'))
+    expect(stageBodies).toEqual([null])
+    c.unmount()
+  })
+
   it('posts once confirmed, follows the download, then offers the restart', async () => {
     const c = await mounted()
 
@@ -323,39 +353,48 @@ describe('SettingsJavaRuntimePanel — download', () => {
 })
 
 describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
+  const both = [{ vendor: 'Zulu', version: '25.0.5', refusal: null }, { vendor: 'Temurin', version: '25.0.5', refusal: null }]
+
   function hostJava(over: Record<string, unknown> = {}) {
-    return builtIn({ kind: 'external', currentVersion: '25.0.3', switchable: true, managedVersion: '25.0.5', ...over })
+    return builtIn({ kind: 'external', currentVersion: '25.0.3', switches: both, ...over })
   }
 
-  it('offers a bundle install on a Java it did not install the switch to one of its own', async () => {
+  it('offers a bundle install on a Java it did not install the switch to one of its own, from either vendor', async () => {
     runtime = hostJava()
     const c = await mounted()
 
     expect(summary(c)).toBe('Java 25.0.5 is available from your JDK\'s vendor.')
     expect(c.find('[data-testid="java-runtime-switch"]').text()).toBe('JClaw cannot patch a Java it did not install. '
-      + 'Switch to Java 25.0.5 from Azul, which JClaw installs beside itself and keeps patched.')
-    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Switch to Java 25.0.5'])
+      + 'Switch to Zulu 25.0.5 from Azul or Temurin 25.0.5 from Adoptium, which JClaw installs beside itself and '
+      + 'keeps patched.')
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim()))
+      .toEqual(['Switch to Zulu', 'Switch to Temurin'])
   })
 
   it('shows no switch on a source checkout or in a container', async () => {
-    runtime = hostJava({ switchable: false })
+    runtime = hostJava({ switches: [] })
     const checkout = await mounted()
     expect(checkout.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
     expect(checkout.findAll('button')).toHaveLength(0)
     checkout.unmount()
 
     clearNuxtData()
-    runtime = hostJava({ kind: 'container', switchable: false })
+    runtime = hostJava({ kind: 'container', switches: [] })
     const container = await mounted()
     expect(container.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
     expect(container.findAll('button')).toHaveLength(0)
   })
 
-  it('shows no switch when the catalog could not say which Java it would install', async () => {
-    runtime = hostJava({ latestVersion: null, updateAvailable: false, managedVersion: null })
+  it('shows no switch, and says why, when the catalogs could not say which Java they would install', async () => {
+    runtime = hostJava({ latestVersion: null, updateAvailable: false, switches: [
+      { vendor: 'Zulu', version: null, refusal: 'Couldn\'t check Azul\'s catalog for a newer Java.' },
+      { vendor: 'Temurin', version: null, refusal: 'Couldn\'t check Adoptium\'s catalog for a newer Java.' }] })
     const c = await mounted()
 
     expect(c.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(c.findAll('[data-testid="java-runtime-switch-refused"]').map((d: DOMWrapper<Element>) => d.text())).toEqual([
+      'No switch to Zulu. Couldn\'t check Azul\'s catalog for a newer Java.',
+      'No switch to Temurin. Couldn\'t check Adoptium\'s catalog for a newer Java.'])
     expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Check again'])
   })
 
@@ -363,35 +402,38 @@ describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
     runtime = hostJava()
     const c = await mounted()
 
-    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await panelButton(c, 'Switch to Zulu')!.trigger('click')
     await flushPromises()
-    expect(dialogText()).toContain('Java 25.0.5 will be downloaded from Azul and checked against its SHA-256 while JClaw '
+    expect(dialogText()).toContain('Zulu 25.0.5 will be downloaded from Azul and checked against its SHA-256 while JClaw '
       + 'keeps running on Java 25.0.3. The next time JClaw starts, it installs it in the jre folder beside JClaw and '
       + 'runs on it from then on, and this panel keeps it patched. Java 25.0.3 stays installed, unused by JClaw.')
     dialogButton('Cancel')!.click()
     await flushPromises()
 
     expect(stagePosts).toBe(0)
-    expect(panelButton(c, 'Switch to Java 25.0.5')).toBeTruthy()
+    expect(panelButton(c, 'Switch to Zulu')).toBeTruthy()
   })
 
-  it('switches a host Java of another major once confirmed, follows the download, then offers the restart', async () => {
-    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', managedVersion: '25.0.5' })
+  it('switches a host Java of another major to Temurin once confirmed, follows the download, then offers the restart', async () => {
+    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', distribution: 'Temurin', vendor: 'Eclipse Adoptium' })
     const c = await mounted()
 
-    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await panelButton(c, 'Switch to Temurin')!.trigger('click')
     await flushPromises()
+    expect(dialogText()).toContain('Temurin 25.0.5 will be downloaded from Adoptium and checked against its SHA-256')
     dialogButton('Switch')!.click()
     await flushPromises()
 
-    expect(stagePosts).toBe(1)
     await vi.waitFor(() => expect(c.find('[data-testid="java-runtime-progress"]').exists()).toBe(true))
-    expect(summary(c)).toBe('Downloading Java 25.0.5…')
-    expect(c.find('[role="progressbar"]').attributes('aria-label')).toBe('Downloading Java 25.0.5')
-    expect(panelButton(c, 'Switch to Java 25.0.5')).toBeUndefined()
+    expect(stagePosts).toBe(1)
+    expect(stageBodies).toEqual([{ vendor: 'Temurin' }])
+    expect(summary(c)).toBe('Downloading Temurin 25.0.5…')
+    expect(c.find('[role="progressbar"]').attributes('aria-label')).toBe('Downloading Temurin 25.0.5')
+    expect(panelButton(c, 'Switch to Temurin')).toBeUndefined()
 
-    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', stagedVersion: '25.0.5' })
-    await vi.waitFor(() => expect(summary(c)).toBe('Java 25.0.5 will be installed at the next restart. '
+    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', distribution: 'Temurin',
+      stagedVersion: '25.0.5', stagedVendor: 'Temurin' })
+    await vi.waitFor(() => expect(summary(c)).toBe('Temurin 25.0.5 will be installed at the next restart. '
       + 'The first start on it rebuilds the startup cache, so it takes longer than usual.'), { timeout: 3000 })
     expect(c.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
     expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Cancel', 'Restart now'])
@@ -405,14 +447,149 @@ describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
       message: '/opt/jclaw is not writable, so a new Java cannot be staged beside /opt/jclaw/jre.' } }
     const c = await mounted()
 
-    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await panelButton(c, 'Switch to Zulu')!.trigger('click')
     await flushPromises()
     dialogButton('Switch')!.click()
     await flushPromises()
 
-    expect(stagePosts).toBe(1)
     await vi.waitFor(() => expect(c.find('[role="status"]').text())
       .toBe('/opt/jclaw is not writable, so a new Java cannot be staged beside /opt/jclaw/jre.'))
+    expect(stagePosts).toBe(1)
+    expect(stageBodies).toEqual([{ vendor: 'Zulu' }])
+  })
+})
+
+describe('SettingsJavaRuntimePanel — the switch between Zulu and Temurin', () => {
+  const toTemurin = { vendor: 'Temurin', version: '25.0.5.1', refusal: null }
+
+  function zulu(over: Record<string, unknown> = {}) {
+    return builtIn({ currentVersion: '25.0.5.1', currentBuild: '25.38.201', latestVersion: '25.0.5.1',
+      latestBuild: '25.38.201', updateAvailable: false, switches: [toTemurin], ...over })
+  }
+
+  function temurin(over: Record<string, unknown> = {}) {
+    return builtIn({ currentVersion: '25.0.5', currentBuild: null, vendor: 'Eclipse Adoptium', distribution: 'Temurin',
+      latestVersion: '25.0.6', latestBuild: null, releaseType: null,
+      releaseNotesUrl: 'https://adoptium.net/temurin/release-notes/?version=jdk-25.0.6%2B7',
+      releaseNotesLabel: 'Release notes for Temurin 25.0.6',
+      switches: [{ vendor: 'Zulu', version: '25.0.6', refusal: null }], ...over })
+  }
+
+  it('shows the vendor and offers the built-in Zulu the switch to Temurin at the same version', async () => {
+    runtime = zulu()
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-vendor"]').text()).toBe('Zulu')
+    expect(summary(c)).toBe('Up to date.')
+    expect(c.find('[data-testid="java-runtime-switch"]').text())
+      .toBe('JClaw can run on Temurin 25.0.5.1 from Adoptium instead: a build of the same OpenJDK from another vendor.')
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Switch to Temurin'])
+  })
+
+  it('sends nothing when the switch is cancelled', async () => {
+    runtime = zulu()
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Temurin')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Temurin 25.0.5.1 will be downloaded from Adoptium and checked against its SHA-256 '
+      + 'while JClaw keeps running on Zulu 25.0.5.1. It is installed the next time JClaw starts, and Zulu 25.0.5.1 is '
+      + 'kept as jre.previous. From then on this panel keeps it patched from Adoptium.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+
+    expect(stagePosts).toBe(0)
+    expect(panelButton(c, 'Switch to Temurin')).toBeTruthy()
+  })
+
+  it('posts the vendor once confirmed, follows the download, then names it in the restart', async () => {
+    runtime = zulu()
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Temurin')!.trigger('click')
+    await flushPromises()
+    dialogButton('Switch')!.click()
+    await flushPromises()
+
+    await vi.waitFor(() => expect(summary(c)).toBe('Downloading Temurin 25.0.5.1…'))
+    expect(stageBodies).toEqual([{ vendor: 'Temurin' }])
+    expect(c.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+
+    runtime = zulu({ stagedVersion: '25.0.5.1', stagedVendor: 'Temurin', rebuildsStartupCache: false })
+    await vi.waitFor(() => expect(summary(c)).toBe('Temurin 25.0.5.1 will be installed at the next restart.'),
+      { timeout: 3000 })
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Cancel', 'Restart now'])
+    await panelButton(c, 'Restart now')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Temurin 25.0.5.1 is installed as JClaw starts again.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    expect(restartPosts).toBe(0)
+    c.unmount()
+  })
+
+  it('shows what the start after the switch did', async () => {
+    runtime = temurin({ lastStart: 'switched Zulu 25.0.5.1 → Temurin 25.0.5.1', lastStartAt: '2026-11-20T09:00:00Z' })
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-last-start"]').text())
+      .toContain('Last start: switched Zulu 25.0.5.1 → Temurin 25.0.5.1')
+  })
+
+  it('on Temurin offers Adoptium\'s patch with that release\'s notes, and the switch back to Zulu', async () => {
+    runtime = temurin()
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-vendor"]').text()).toBe('Temurin')
+    expect(summary(c)).toBe('Java 25.0.6 is available.')
+    const release = c.find('[data-testid="java-runtime-release"]')
+    expect(release.text()).toBe('Release notes for Temurin 25.0.6')
+    expect(release.find('a').attributes('href')).toBe('https://adoptium.net/temurin/release-notes/?version=jdk-25.0.6%2B7')
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim()))
+      .toEqual(['Download Java 25.0.6', 'Switch to Zulu'])
+
+    await panelButton(c, 'Download Java 25.0.6')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Java 25.0.6 will be downloaded from Adoptium and checked against its SHA-256 '
+      + 'while JClaw keeps running on Java 25.0.5.')
+    dialogButton('Download')!.click()
+    await flushPromises()
+    await vi.waitFor(() => expect(summary(c)).toBe('Downloading Java 25.0.6…'))
+    expect(stageBodies).toEqual([null])
+    c.unmount()
+  })
+
+  it('says why it offers no switch where Adoptium has no JRE, or where it would go back to an older Java', async () => {
+    runtime = zulu({ switches: [{ vendor: 'Temurin', version: null,
+      refusal: 'Adoptium\'s catalog lists no Java 25 runtime for windows/aarch64.' }] })
+    const none = await mounted()
+    expect(none.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(none.find('[data-testid="java-runtime-switch-refused"]').text())
+      .toBe('No switch to Temurin. Adoptium\'s catalog lists no Java 25 runtime for windows/aarch64.')
+    expect(none.findAll('button')).toHaveLength(0)
+    none.unmount()
+
+    clearNuxtData()
+    runtime = zulu({ switches: [{ vendor: 'Temurin', version: '25.0.5',
+      refusal: 'Temurin 25.0.5 is older than the Zulu 25.0.5.1 JClaw runs on, so switching to it would undo fixes.' }] })
+    const older = await mounted()
+    expect(older.find('[data-testid="java-runtime-switch-refused"]').text()).toBe('No switch to Temurin. Temurin 25.0.5 '
+      + 'is older than the Zulu 25.0.5.1 JClaw runs on, so switching to it would undo fixes.')
+    expect(older.findAll('button')).toHaveLength(0)
+  })
+
+  it('shows the refusal when the backend will not switch', async () => {
+    runtime = zulu()
+    stageReply = { status: 409, body: { status: 'error', code: 'conflict', message: 'A newer Java is already downloading.' } }
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Temurin')!.trigger('click')
+    await flushPromises()
+    dialogButton('Switch')!.click()
+    await flushPromises()
+
+    await vi.waitFor(() => expect(c.find('[role="status"]').text()).toBe('A newer Java is already downloading.'))
+    expect(stageBodies).toEqual([{ vendor: 'Temurin' }])
   })
 })
 

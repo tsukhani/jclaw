@@ -22,23 +22,28 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
  * Keeps the Java runtime under JClaw on the newest patch of its major version (Settings → Maintenance →
- * Java runtime). Only the runtime the installer put beside the install, {@code <home>/jre}, is ever
- * replaced, and never by this JVM: it downloads and verifies the release into {@code <home>/jre.staged/},
- * and jclaw.sh's {@code apply_staged_jre} unpacks it and swaps the folders at the next start, once this
- * JVM has stopped. A bundle install on a Java it did not install can switch to one of its own the same
- * way: the next start installs the download as the first {@code <home>/jre}. A container or a source
- * checkout only hears that a newer patch exists.
+ * Java runtime), from the vendor it runs: Azul's Zulu, which the installers put in, or Eclipse Adoptium's
+ * Temurin, which the panel switches it to and back. Only the runtime the installer put beside the install,
+ * {@code <home>/jre}, is ever replaced, and never by this JVM: it downloads and verifies the release into
+ * {@code <home>/jre.staged/}, and jclaw.sh's {@code apply_staged_jre} unpacks it and swaps the folders at the
+ * next start, once this JVM has stopped. A bundle install on a Java it did not install can switch to one of
+ * its own the same way: the next start installs the download as the first {@code <home>/jre}. A container or
+ * a source checkout only hears that a newer patch exists.
  */
 public final class JavaRuntimeService {
 
@@ -49,7 +54,7 @@ public final class JavaRuntimeService {
 
     /** The catalog install.sh and install.ps1 query; {@link #catalogUrl} asks it the same question. */
     static final String AZUL_API = "https://api.azul.com/metadata/v1/zulu/packages/";
-    static final String DOWNLOAD_HOST = "cdn.azul.com";
+    static final String ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/";
     /**
      * Azul's notes for its newest release, always this one address (JF-537): the catalog entry links none, and
      * no per-build page can be derived from one. The panel and the daily check offer only the catalog's newest
@@ -57,6 +62,8 @@ public final class JavaRuntimeService {
      * link is worded as Azul's latest notes, never as the offered build's.
      */
     public static final String RELEASE_NOTES = "https://docs.azul.com/core/release-notes";
+    /** Adoptium's notes page, which shows one release's notes given its {@code release_name} as {@code version}. */
+    static final String ADOPTIUM_NOTES = "https://adoptium.net/temurin/release-notes/";
     /** A Zulu JRE archive is about 50 MB. */
     static final long MAX_ARCHIVE_BYTES = 200L * 1024 * 1024;
 
@@ -78,6 +85,80 @@ public final class JavaRuntimeService {
     private static final Pattern ARCHIVE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.(tar\\.gz|zip)");
     /** Zulu's {@code java.vendor.version} and {@code IMPLEMENTOR_VERSION}: {@code Zulu25.38+105-CA} is build 25.38.105. */
     private static final Pattern ZULU = Pattern.compile("Zulu(\\d+(?:\\.\\d+)*+)\\+(\\d+(?:\\.\\d+)*+)");
+    /** Adoptium's {@code release_name}, {@code jdk-25.0.5.1+2}, the one value its notes page takes. */
+    private static final Pattern TEMURIN_RELEASE = Pattern.compile("jdk-\\d+(?:\\.\\d+)*+\\+\\d+");
+
+    /**
+     * The two builds of OpenJDK JClaw installs at {@code <home>/jre}. Each has its own catalog, download hosts and
+     * build numbers; across the two only the OpenJDK version compares.
+     */
+    public enum Vendor {
+        ZULU("Zulu", "Azul", "azul", "cdn.azul.com", "/", List.of()),
+        // Adoptium's binaries are GitHub release assets: each github.com link redirects there (measured 2026-11-20).
+        TEMURIN("Temurin", "Adoptium", "adoptium", "github.com", "/adoptium/",
+                List.of("release-assets.githubusercontent.com"));
+
+        /** The name a staged manifest, jclaw.sh and the panel use. */
+        public final String label;
+        /** Whose catalog and download it is. */
+        public final String owner;
+        private final String implementor;
+        private final String linkHost;
+        private final String linkPath;
+        private final List<String> assetHosts;
+
+        Vendor(String label, String owner, String implementor, String linkHost, String linkPath, List<String> assetHosts) {
+            this.label = label;
+            this.owner = owner;
+            this.implementor = implementor;
+            this.linkHost = linkHost;
+            this.linkPath = linkPath;
+            this.assetHosts = assetHosts;
+        }
+
+        public Vendor other() {
+            return this == ZULU ? TEMURIN : ZULU;
+        }
+
+        /** The vendor a {@code java.vendor} or a release file's {@code IMPLEMENTOR} names, or null for any other. */
+        public static @Nullable Vendor of(@Nullable String implementor) {
+            if (implementor == null) return null;
+            var name = implementor.toLowerCase(Locale.ROOT);
+            for (var v : values()) {
+                if (name.contains(v.implementor)) return v;
+            }
+            return null;
+        }
+
+        /** The vendor whose {@link #label} this is, case aside, or null. */
+        public static @Nullable Vendor named(@Nullable String label) {
+            for (var v : values()) {
+                if (v.label.equalsIgnoreCase(label == null ? "" : label.strip())) return v;
+            }
+            return null;
+        }
+
+        /** HTTPS to where the catalog's download links point. */
+        boolean allowsLink(HttpUrl url) {
+            return url.isHttps() && linkHost.equals(url.host()) && url.encodedPath().startsWith(linkPath);
+        }
+
+        /** Where a download may land once its redirects are followed: a link {@link #allowsLink} takes, or an asset host. */
+        boolean allowsLanding(HttpUrl url) {
+            return allowsLink(url) || (url.isHttps() && assetHosts.contains(url.host()));
+        }
+
+        String linkPlace() {
+            return linkHost + linkPath.substring(0, linkPath.length() - 1);
+        }
+
+        String landingPlaces() {
+            var places = new ArrayList<String>();
+            places.add(linkPlace());
+            places.addAll(assetHosts);
+            return String.join(" or ", places);
+        }
+    }
 
     public enum Kind {
         /** The runtime the installer put at {@code <home>/jre}, the only one this class replaces. */
@@ -145,18 +226,29 @@ public final class JavaRuntimeService {
         public @Nullable String build() {
             return zuluBuild(vendorVersion != null ? vendorVersion : releaseField(javaHome, "IMPLEMENTOR_VERSION"));
         }
+
+        /**
+         * The running Java's vendor, from {@code java.vendor} or, when the JVM sets none, the runtime's release file;
+         * null for a vendor JClaw never installs. Read from the Java itself, so it never disagrees with what runs.
+         */
+        public @Nullable Vendor distribution() {
+            return Vendor.of(vendor != null ? vendor : releaseField(javaHome, "IMPLEMENTOR"));
+        }
     }
 
     /**
-     * A Zulu JRE in the catalog; {@code sha256} is null when the catalog gave none, which the download refuses.
+     * A JRE in a vendor's catalog; {@code sha256} is null when the catalog gave none, which the download refuses.
      *
      * @param releaseType the catalog's {@code release_type} ({@code PSU}, {@code CPU} or {@code LU}), or null
-     *                    when the entry gives none
-     * @param build       the catalog's {@code distro_version}, Azul's own number for the build, or null when it
-     *                    gives none
+     *                    when the entry gives none, as Adoptium's never do
+     * @param build       Azul's {@code distro_version}, its own number for the build, or null when it gives none;
+     *                    a Temurin release has none, so it orders by Java version alone
+     * @param vendor      whose catalog listed it, and so where it may download from
+     * @param notes       this release's own notes page, or null where only the vendor's latest notes can be linked
      */
     public record Release(String version, String url, @Nullable String sha256, String archive,
-                          @Nullable String releaseType, @Nullable String build) {
+                          @Nullable String releaseType, @Nullable String build, Vendor vendor,
+                          @Nullable String notes) {
 
         public Release(String version, String url, @Nullable String sha256, String archive) {
             this(version, url, sha256, archive, null, null);
@@ -166,17 +258,60 @@ public final class JavaRuntimeService {
                        @Nullable String releaseType) {
             this(version, url, sha256, archive, releaseType, null);
         }
+
+        public Release(String version, String url, @Nullable String sha256, String archive,
+                       @Nullable String releaseType, @Nullable String build) {
+            this(version, url, sha256, archive, releaseType, build, Vendor.ZULU, null);
+        }
+
+        /** The notes page the panel and the notification link beside this release. */
+        public String notesUrl() {
+            if (notes != null) return notes;
+            return vendor == Vendor.ZULU ? RELEASE_NOTES : ADOPTIUM_NOTES;
+        }
+
+        /** The link's words: a page of this release's own notes says so, and a vendor's latest notes say that. */
+        public String notesLabel() {
+            return notes != null ? "Release notes for " + vendor.label + " " + version
+                    : vendor.owner + "'s latest release notes";
+        }
     }
 
     /**
      * A finished, verified download in {@code jre.staged/}, waiting for the next start.
      *
-     * @param build the Zulu build jclaw.sh checks the unpacked Java reports, or null when the manifest names none
+     * @param build  the Zulu build jclaw.sh checks the unpacked Java reports, or null when the manifest names none
+     * @param vendor the vendor jclaw.sh checks the unpacked Java reports, or null when the manifest, from a release
+     *               before JF-538, names none
      */
-    public record Staged(String version, String sha256, String archive, @Nullable String build) {
+    public record Staged(String version, String sha256, String archive, @Nullable String build,
+                         @Nullable Vendor vendor) {
 
         public Staged(String version, String sha256, String archive) {
-            this(version, sha256, archive, null);
+            this(version, sha256, archive, null, null);
+        }
+
+        public Staged(String version, String sha256, String archive, @Nullable String build) {
+            this(version, sha256, archive, build, null);
+        }
+    }
+
+    /**
+     * One catalog's answer for this system: its newest JRE or, with none, why: the catalog could not be reached, or
+     * it lists no JRE for this OS, C library and architecture.
+     */
+    public record Answer(@Nullable Release release, @Nullable String why) {}
+
+    /**
+     * A switch to {@code vendor}'s Java {@code version} that the panel offers, or with a {@code refusal}, does not,
+     * saying why. Each is judged by {@link #stageable}, so the panel never offers a switch the POST refuses.
+     */
+    public record Switch(Vendor vendor, @Nullable String version, @Nullable String refusal) {}
+
+    /** A catalog that answers but lists no JRE for this system: an answer, so it is cached rather than retried. */
+    static final class NoRuntimeException extends IOException {
+        NoRuntimeException(String message) {
+            super(message);
         }
     }
 
@@ -196,7 +331,7 @@ public final class JavaRuntimeService {
     @SuppressWarnings("java:S3077") // published whole and read once per call, never mutated
     private static volatile @Nullable Environment environmentOverride;
     @SuppressWarnings("java:S3077")
-    private static volatile @Nullable Release latestOverride;
+    private static volatile @Nullable Function<Vendor, Answer> catalogOverride;
     @SuppressWarnings("java:S3077")
     private static volatile @Nullable Stager stagerOverride;
 
@@ -205,9 +340,18 @@ public final class JavaRuntimeService {
         environmentOverride = override;
     }
 
-    /** Test seam: the catalog's answer, whichever major it is asked for, in place of a call to Azul; null clears it. */
+    /**
+     * Test seam: each vendor's catalog answer, whichever major it is asked for, in place of a call to Azul or
+     * Adoptium; null clears it.
+     */
+    public static void setCatalogForTest(@Nullable Function<Vendor, Answer> override) {
+        catalogOverride = override;
+    }
+
+    /** Test seam: {@code override} as its own vendor's catalog answer, the other vendor's catalog unreachable. */
     public static void setLatestForTest(@Nullable Release override) {
-        latestOverride = override;
+        catalogOverride = override == null ? null
+                : v -> v == override.vendor() ? new Answer(override, null) : unreachable(v);
     }
 
     /** Test seam: runs in place of {@link #download}. In test mode nothing downloads without it. */
@@ -220,12 +364,20 @@ public final class JavaRuntimeService {
         private final AtomicBoolean active = new AtomicBoolean();
         private volatile @Nullable Integer percent;
         private volatile @Nullable String error;
+        @SuppressWarnings("java:S3077") // published whole, never mutated
+        private volatile @Nullable Release target;
 
         /** False when a download is already running. */
         public boolean begin() {
+            return begin(null);
+        }
+
+        /** As {@link #begin()}, recording {@code release} as what downloads, which the panel names while it runs. */
+        public boolean begin(@Nullable Release release) {
             if (!active.compareAndSet(false, true)) return false;
             percent = 0;
             error = null;
+            target = release;
             return true;
         }
 
@@ -240,21 +392,36 @@ public final class JavaRuntimeService {
 
         public void end() {
             percent = null;
+            target = null;
             active.set(false);
         }
 
         public boolean active() { return active.get(); }
         public @Nullable Integer currentPercent() { return percent; }
         public @Nullable String lastError() { return error; }
+        /** What the running download stages, or null when none runs or it was begun without one. */
+        public @Nullable Release target() { return target; }
     }
 
     public static final Download CURRENT = new Download();
 
-    /** The newest patch, cached for {@link #CHECK_TTL}. The app shares {@link #LOOKUP}; tests build their own. */
+    /**
+     * One vendor's newest JRE of one major, cached for {@link #CHECK_TTL}. The app keeps one per vendor and major;
+     * tests build their own.
+     */
     public static final class Lookup {
-        private record Cached(Release release, Instant at) {}
+        private record Cached(Answer answer, Instant at) {}
 
+        private final Vendor vendor;
         private volatile @Nullable Cached cached;
+
+        public Lookup() {
+            this(Vendor.ZULU);
+        }
+
+        public Lookup(Vendor vendor) {
+            this.vendor = vendor;
+        }
 
         /**
          * @param refresh bypass the cache for an operator's re-check
@@ -262,24 +429,32 @@ public final class JavaRuntimeService {
          *         it never could
          */
         public @Nullable Release latest(boolean refresh, Catalog catalog) {
+            return answer(refresh, catalog).release();
+        }
+
+        /** As {@link #latest}, saying why when there is no release. */
+        public Answer answer(boolean refresh, Catalog catalog) {
             var c = cached;
             if (!refresh && c != null && Duration.between(c.at(), AppClock.now()).compareTo(CHECK_TTL) < 0) {
-                return c.release();
+                return c.answer();
             }
+            Answer answer;
             try {
-                var release = catalog.fetch();
-                cached = new Cached(release, AppClock.now());
-                return release;
+                answer = new Answer(catalog.fetch(), null);
+            } catch (NoRuntimeException e) {
+                answer = new Answer(null, e.getMessage());
             } catch (IOException | RuntimeException e) {
-                EventLogger.warn(CATEGORY, "Could not check Azul's catalog for a newer Java: " + e.getMessage());
-                return c != null ? c.release() : null;
+                EventLogger.warn(CATEGORY, "Could not check " + vendor.owner + "'s catalog for a newer Java: "
+                        + e.getMessage());
+                return c != null ? c.answer() : unreachable(vendor);
             }
+            cached = new Cached(answer, AppClock.now());
+            return answer;
         }
     }
 
-    static final Lookup LOOKUP = new Lookup();
-    /** {@link #MANAGED_MAJOR}'s newest, asked apart only while a host Java of another major runs. */
-    static final Lookup MANAGED_LOOKUP = new Lookup();
+    // Keyed by vendor and major: a host Java of another major asks for MANAGED_MAJOR apart from its own.
+    private static final ConcurrentHashMap<String, Lookup> LOOKUPS = new ConcurrentHashMap<>();
 
     // Held across the checks and the change, so a cancel never deletes a staging a new download is writing.
     private static final ReentrantLock STAGING = new ReentrantLock();
@@ -361,53 +536,101 @@ public final class JavaRuntimeService {
         return major(managed.version()) == major(env.javaVersion()) && isNewer(env.javaVersion(), managed.version());
     }
 
+    /**
+     * The vendor whose catalog a patch check asks: the running Java's, or Azul's, the installers' vendor, for a Java
+     * of a vendor JClaw never installs.
+     */
+    public static Vendor running(Environment env) {
+        var vendor = env.distribution();
+        return vendor != null ? vendor : Vendor.ZULU;
+    }
+
     // ── The catalog ──────────────────────────────────────────────────────────
 
-    /** The newest patch of the running major, from {@link #setLatestForTest} or the cached catalog check. */
+    /** The newest patch of the running major from the running vendor, from the test seam or the cached check. */
     public static @Nullable Release latest(boolean refresh) {
-        var test = latestOverride;
-        if (test != null) return test;
-        return LOOKUP.latest(refresh, () -> fetchLatest(environment()));
+        var env = environment();
+        return answer(env, running(env), major(env.javaVersion()), refresh).release();
     }
 
     /**
-     * The Java a switch from a host Java installs: the newest Zulu JRE of {@link #MANAGED_MAJOR}, whatever major
-     * runs now. The one place the switch picks its vendor.
+     * {@code vendor}'s newest JRE of {@code major} for {@code env}'s system, from the test seam or that vendor's
+     * cached catalog check.
      *
-     * @param latest  {@link #latest}'s answer, which is this one while the host's Java is of that major
      * @param refresh bypass the cache for an operator's re-check
      */
-    public static @Nullable Release managed(Environment env, @Nullable Release latest, boolean refresh) {
-        if (major(env.javaVersion()) == MANAGED_MAJOR) return latest;
-        var test = latestOverride;
-        if (test != null) return test;
-        return MANAGED_LOOKUP.latest(refresh, () -> fetchLatest(env, MANAGED_MAJOR));
+    public static Answer answer(Environment env, Vendor vendor, int major, boolean refresh) {
+        var test = catalogOverride;
+        if (test != null) return test.apply(vendor);
+        return LOOKUPS.computeIfAbsent(vendor.name() + ":" + major, _ -> new Lookup(vendor))
+                .answer(refresh, () -> fetchLatest(env, vendor, major));
     }
 
-    /** One catalog query for {@code env}'s major, OS, C library and architecture, bypassing the cache. */
+    /**
+     * The Java a switch from a host Java to {@code vendor} installs: its newest JRE of {@link #MANAGED_MAJOR},
+     * whatever major runs now.
+     */
+    public static Answer managed(Environment env, Vendor vendor, boolean refresh) {
+        return answer(env, vendor, MANAGED_MAJOR, refresh);
+    }
+
+    static Answer unreachable(Vendor vendor) {
+        return new Answer(null, unreachableWhy(vendor));
+    }
+
+    private static String unreachableWhy(Vendor vendor) {
+        return "Couldn't check " + vendor.owner + "'s catalog for a newer Java.";
+    }
+
+    /** One query of the running vendor's catalog for {@code env}'s major, OS, C library and architecture, bypassing the cache. */
     public static Release fetchLatest(Environment env) throws IOException {
-        return fetchLatest(env, major(env.javaVersion()));
+        return fetchLatest(env, running(env), major(env.javaVersion()));
     }
 
-    /** One catalog query for {@code major} on {@code env}'s OS, C library and architecture, bypassing the cache. */
-    public static Release fetchLatest(Environment env, int major) throws IOException {
+    /**
+     * One query of {@code vendor}'s catalog for {@code major} on {@code env}'s OS, C library and architecture,
+     * bypassing the cache.
+     *
+     * @throws NoRuntimeException when the vendor builds or lists no such JRE
+     */
+    public static Release fetchLatest(Environment env, Vendor vendor, int major) throws IOException {
         var musl = musl(env.javaHome());
-        var os = azulOs(env.osName(), musl);
+        var os = vendor == Vendor.ZULU ? azulOs(env.osName(), musl) : adoptiumOs(env.osName(), musl);
+        // Adoptium names the two architectures as Azul does.
         var arch = azulArch(env.osArch());
         if (os == null || arch == null) {
-            throw new IOException("Azul builds no Java for " + env.osName() + " on " + env.osArch());
+            throw new NoRuntimeException(vendor.owner + " builds no Java for " + env.osName() + " on " + env.osArch() + ".");
         }
-        var url = catalogUrl(major, os, arch);
+        var url = vendor == Vendor.ZULU ? catalogUrl(major, os, arch) : adoptiumUrl(major, os, arch);
         var call = HttpFactories.general().newCall(new Request.Builder().url(url).get().build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
-            if (!resp.isSuccessful()) throw new IOException("HTTP " + resp.code() + " from Azul's catalog");
-            var release = pickLatest(resp.body().string(), major, musl);
+            if (!resp.isSuccessful()) throw new IOException("HTTP " + resp.code() + " from " + vendor.owner + "'s catalog");
+            var body = resp.body().string();
+            var release = vendor == Vendor.ZULU ? pickLatest(body, major, musl) : pickTemurin(body, major, os, arch);
             if (release == null) {
-                throw new IOException("Azul's catalog lists no Java " + major + " runtime for " + os + "/" + arch);
+                throw new NoRuntimeException(vendor.owner + "'s catalog lists no Java " + major + " runtime for " + os
+                        + "/" + arch + ".");
             }
             return release;
         }
+    }
+
+    /**
+     * Adoptium's newest Temurin JRE of {@code major} for one OS and architecture: one entry, or none where it
+     * builds no such JRE.
+     */
+    public static String adoptiumUrl(int major, String os, String arch) {
+        return ADOPTIUM_API + major + "/hotspot?architecture=" + arch + "&image_type=jre&os=" + os + "&vendor=eclipse";
+    }
+
+    /** Adoptium's OS names; it lists musl builds as Alpine's. */
+    public static @Nullable String adoptiumOs(String osName, boolean musl) {
+        var name = osName.toLowerCase(Locale.ROOT);
+        if (name.contains("windows")) return "windows";
+        if (name.contains("mac")) return "mac";
+        if (name.contains("linux")) return musl ? "alpine-linux" : "linux";
+        return null;
     }
 
     /** install.sh's query; Windows asks for the zip, as install.ps1 does. */
@@ -485,9 +708,66 @@ public final class JavaRuntimeService {
             var archive = name != null ? name : url.substring(url.lastIndexOf('/') + 1);
             var candidate = new Release(version, url, sha == null ? null : sha.toLowerCase(Locale.ROOT), archive,
                     str(o, "release_type"), build);
-            if (best == null || compareBuilds(version, build, best.version(), best.build()) > 0) best = candidate;
+            if (best == null || compareBuilds(Vendor.ZULU, version, build, Vendor.ZULU, best.version(), best.build()) > 0) {
+                best = candidate;
+            }
         }
         return best;
+    }
+
+    /**
+     * The newest Temurin JRE of {@code major} for {@code os} and {@code arch} in an Adoptium payload. Its version is
+     * the OpenJDK version the Java reports (25.0.5.1 for {@code jdk-25.0.5.1+2}), and it carries no build: only Zulu's
+     * build number orders two releases of one Java version.
+     */
+    public static @Nullable Release pickTemurin(String payload, int major, String os, String arch) {
+        Release best = null;
+        for (JsonElement el : JsonParser.parseString(payload).getAsJsonArray()) {
+            if (!el.isJsonObject()) continue;
+            var o = el.getAsJsonObject();
+            var binary = obj(o, "binary");
+            var pkg = binary == null ? null : obj(binary, "package");
+            var v = obj(o, "version");
+            if (binary == null || pkg == null || v == null || !"jre".equals(str(binary, "image_type"))
+                    || !"hotspot".equals(str(binary, "jvm_impl")) || !os.equals(str(binary, "os"))
+                    || !arch.equals(str(binary, "architecture"))) {
+                continue;
+            }
+            var version = openjdkVersion(v);
+            var url = str(pkg, "link");
+            var name = str(pkg, "name");
+            if (version == null || url == null || name == null || major(version) != major) continue;
+            var sha = str(pkg, "checksum");
+            var candidate = new Release(version, url, sha == null ? null : sha.toLowerCase(Locale.ROOT), name, null,
+                    null, Vendor.TEMURIN, temurinNotes(str(o, "release_name")));
+            if (best == null || compareVersions(version, best.version()) > 0) best = candidate;
+        }
+        return best;
+    }
+
+    // major.minor.security, then patch where Adoptium gives one: the version java -version reports.
+    private static @Nullable String openjdkVersion(JsonObject v) {
+        var major = num(v, "major");
+        var minor = num(v, "minor");
+        var security = num(v, "security");
+        if (major == null || minor == null || security == null) return null;
+        var patch = num(v, "patch");
+        return major + "." + minor + "." + security + (patch == null || patch == 0 ? "" : "." + patch);
+    }
+
+    private static @Nullable String temurinNotes(@Nullable String releaseName) {
+        if (releaseName == null || !TEMURIN_RELEASE.matcher(releaseName).matches()) return null;
+        return HttpUrl.get(ADOPTIUM_NOTES).newBuilder().addQueryParameter("version", releaseName).build().toString();
+    }
+
+    private static @Nullable JsonObject obj(JsonObject o, String key) {
+        var v = o.get(key);
+        return v == null || !v.isJsonObject() ? null : v.getAsJsonObject();
+    }
+
+    private static @Nullable Integer num(JsonObject o, String key) {
+        var v = o.get(key);
+        return v == null || !v.isJsonPrimitive() || !v.getAsJsonPrimitive().isNumber() ? null : v.getAsInt();
     }
 
     /**
@@ -548,14 +828,14 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * Orders two builds by Java version and, at the same Java version, by Zulu build: Azul ships some fixes as a
-     * respin that keeps the Java version (25.38.107 over 25.38.105, both 25.0.5). With either build unknown, only
-     * the Java versions compare.
+     * Orders two builds by Java version and, at the same Java version from one vendor, by that vendor's build: Azul
+     * ships some fixes as a respin that keeps the Java version (25.38.107 over 25.38.105, both 25.0.5). Two vendors'
+     * build numbers are unrelated, so across vendors, or with either build unknown, only the Java versions compare.
      */
-    public static int compareBuilds(String version, @Nullable String build, String otherVersion,
-                                    @Nullable String otherBuild) {
+    public static int compareBuilds(@Nullable Vendor vendor, String version, @Nullable String build,
+                                    @Nullable Vendor otherVendor, String otherVersion, @Nullable String otherBuild) {
         int order = compareVersions(version, otherVersion);
-        if (order != 0 || build == null || otherBuild == null) return order;
+        if (order != 0 || vendor == null || vendor != otherVendor || build == null || otherBuild == null) return order;
         return compareVersions(build, otherBuild);
     }
 
@@ -565,8 +845,8 @@ public final class JavaRuntimeService {
      * none offers what another would not.
      */
     public static boolean isNewer(@Nullable Release candidate, Environment env) {
-        return candidate != null
-                && compareBuilds(candidate.version(), candidate.build(), env.javaVersion(), env.build()) > 0;
+        return candidate != null && compareBuilds(candidate.vendor(), candidate.version(), candidate.build(),
+                env.distribution(), env.javaVersion(), env.build()) > 0;
     }
 
     private static int[] parts(@Nullable String version) {
@@ -608,12 +888,16 @@ public final class JavaRuntimeService {
         var sha = fields.get("sha256");
         var archive = fields.get("archive");
         var build = fields.get("build");
+        var vendorLine = fields.get("vendor");
+        var vendor = Vendor.named(vendorLine);
         if (version == null || sha == null || archive == null || !VERSION.matcher(version).matches()
                 || !SHA256.matcher(sha).matches() || !ARCHIVE.matcher(archive).matches()
-                || (build != null && !VERSION.matcher(build).matches()) || !Files.isRegularFile(dir.resolve(archive))) {
+                || (build != null && !VERSION.matcher(build).matches())
+                || (vendorLine != null && (vendor == null || !vendor.label.equals(vendorLine)))
+                || !Files.isRegularFile(dir.resolve(archive))) {
             return null;
         }
-        return new Staged(version, sha, archive, build);
+        return new Staged(version, sha, archive, build, vendor);
     }
 
     /** {@code <app>/data/java-runtime.status}, or null when the last start had no staged runtime to install. */
@@ -633,15 +917,24 @@ public final class JavaRuntimeService {
     // ── Staging ──────────────────────────────────────────────────────────────
 
     /**
-     * The release a download would stage, or why there is none. Each refusal is a row of the panel's
-     * matrix, so the POST never accepts what the GET would not offer.
-     *
-     * @param latest the newest patch of the built-in Java's major or, where {@link #switchable}, the
-     *               {@link #managed} Java the switch installs
-     * @throws IllegalStateException naming why nothing can be staged
+     * As {@link #stageable(Environment, Answer, Staged, boolean)}, a null {@code latest} reading as the catalog
+     * a request with no vendor asks being unreachable.
      */
     public static Release stageable(Environment env, @Nullable Release latest, @Nullable Staged staged,
                                     boolean downloading) {
+        return stageable(env, answerOf(env, latest), staged, downloading);
+    }
+
+    /**
+     * The release a download would stage, or why there is none. Each refusal is a row of the panel's
+     * matrix, so the POST never accepts what the GET would not offer.
+     *
+     * @param offer the catalog's answer for what is asked: on the built-in Java, its vendor's newest patch of
+     *              its major, or the other vendor's newest of that major for a switch; where {@link #switchable},
+     *              the {@link #managed} Java the switch installs
+     * @throws IllegalStateException naming why nothing can be staged
+     */
+    public static Release stageable(Environment env, Answer offer, @Nullable Staged staged, boolean downloading) {
         var kind = kind(env);
         switch (kind) {
             case CONTAINER -> throw new IllegalStateException(
@@ -665,13 +958,23 @@ public final class JavaRuntimeService {
         if (staged != null) {
             throw new IllegalStateException("Java " + staged.version() + " will be installed at the next restart.");
         }
-        if (latest == null) throw new IllegalStateException("Couldn't check Azul's catalog for a newer Java.");
-        if (kind == Kind.BUILT_IN && !isNewer(latest, env)) {
+        var latest = offer.release();
+        if (latest == null) {
+            var why = offer.why();
+            throw new IllegalStateException(why != null ? why : unreachableWhy(Vendor.ZULU));
+        }
+        var running = running(env);
+        if (kind == Kind.BUILT_IN && latest.vendor() == running && !isNewer(latest, env)) {
             throw new IllegalStateException("Java " + env.javaVersion() + " is up to date.");
         }
+        // A switch to the other vendor at the same version is staged; an older one would take a fix away.
+        if (kind == Kind.BUILT_IN && latest.vendor() != running && compareVersions(latest.version(), env.javaVersion()) < 0) {
+            throw new IllegalStateException(latest.vendor().label + " " + latest.version() + " is older than the "
+                    + running.label + " " + env.javaVersion() + " JClaw runs on, so switching to it would undo fixes.");
+        }
         if (kind == Kind.EXTERNAL && undoesFixes(env, latest)) {
-            throw new IllegalStateException("Java " + latest.version() + " is older than the Java " + env.javaVersion()
-                    + " JClaw runs on, so switching to it would undo fixes.");
+            throw new IllegalStateException(latest.vendor().label + " " + latest.version() + " is older than the Java "
+                    + env.javaVersion() + " JClaw runs on, so switching to it would undo fixes.");
         }
         if (!Files.isWritable(env.home())) {
             throw new IllegalStateException(env.home() + " is not writable, so a new Java cannot be staged beside "
@@ -680,19 +983,69 @@ public final class JavaRuntimeService {
         return latest;
     }
 
+    // With no vendor asked for, a built-in Java asks its own vendor and a host Java's switch asks Azul.
+    private static Vendor defaultTarget(Environment env) {
+        return kind(env) == Kind.BUILT_IN ? running(env) : Vendor.ZULU;
+    }
+
+    private static Answer answerOf(Environment env, @Nullable Release latest) {
+        return latest != null ? new Answer(latest, null) : unreachable(defaultTarget(env));
+    }
+
     /**
-     * Start downloading the newest patch for the next start to install, returning as soon as it runs.
+     * What a request for {@code vendor} would stage, from that vendor's catalog: on the built-in Java, the newest of
+     * its major, a patch from its own vendor or a switch to the other; on a bundle install on a host Java, the
+     * {@link #managed} Java of {@code vendor}.
+     *
+     * @param vendor null for the built-in Java's own vendor, or for Azul on a host Java
+     */
+    public static Answer offer(Environment env, @Nullable Vendor vendor, boolean refresh) {
+        var target = vendor != null ? vendor : defaultTarget(env);
+        return switchable(env) ? managed(env, target, refresh) : answer(env, target, major(env.javaVersion()), refresh);
+    }
+
+    /**
+     * The switches this install offers, each judged by {@link #stageable} as its POST would be, a download already
+     * running or staged aside, which the panel shows apart: on the built-in Java, to the other vendor; on a bundle
+     * install on a host Java, to either; anywhere else none.
+     *
+     * @param refresh bypass the cache for an operator's re-check, as {@link #latest} has just done for its own
+     *                catalog, which is therefore not asked again
+     */
+    public static List<Switch> switches(Environment env, boolean refresh) {
+        boolean builtIn = kind(env) == Kind.BUILT_IN;
+        if (!builtIn && !switchable(env)) return List.of();
+        var targets = builtIn ? List.of(running(env).other()) : List.of(Vendor.ZULU, Vendor.TEMURIN);
+        int major = builtIn ? major(env.javaVersion()) : MANAGED_MAJOR;
+        var out = new ArrayList<Switch>();
+        for (var vendor : targets) {
+            boolean askedAlready = vendor == running(env) && major == major(env.javaVersion());
+            var answer = answer(env, vendor, major, refresh && !askedAlready);
+            String refusal = null;
+            try {
+                stageable(env, answer, null, false);
+            } catch (IllegalStateException e) {
+                refusal = e.getMessage();
+            }
+            var release = answer.release();
+            out.add(new Switch(vendor, release == null ? null : release.version(), refusal));
+        }
+        return out;
+    }
+
+    /**
+     * Start downloading what a request for {@code vendor} stages, {@link #offer}, for the next start to install,
+     * returning as soon as it runs.
      *
      * @throws IllegalStateException when {@link #stageable} refuses, checked before anything is written
      */
-    public static Release requestStage() {
+    public static Release requestStage(@Nullable Vendor vendor) {
         var stager = stagerOverride;
         if (stager == null) {
             stager = Play.runningInTestMode() ? JavaRuntimeService::refuseInTestMode : JavaRuntimeService::download;
         }
         var env = environment();
-        var latest = latest(false);
-        return requestStage(env, switchable(env) ? managed(env, latest, false) : latest, CURRENT, stager);
+        return requestStage(env, offer(env, vendor, false), CURRENT, stager);
     }
 
     // A request that outlives its test's seams must not delete or download anything.
@@ -701,7 +1054,11 @@ public final class JavaRuntimeService {
     }
 
     public static Release requestStage(Environment env, @Nullable Release latest, Download progress, Stager stager) {
-        var release = beginStage(env, latest, progress);
+        return requestStage(env, answerOf(env, latest), progress, stager);
+    }
+
+    public static Release requestStage(Environment env, Answer offer, Download progress, Stager stager) {
+        var release = beginStage(env, offer, progress);
         var home = env.home();
         Thread.ofVirtual().name("java-runtime-download").start(() -> {
             try {
@@ -722,22 +1079,22 @@ public final class JavaRuntimeService {
      */
     public static Release stageNow(Environment env, @Nullable Release latest, Download progress, Stager stager)
             throws IOException {
-        var release = beginStage(env, latest, progress);
+        var release = beginStage(env, answerOf(env, latest), progress);
         runStage(release, env.home(), progress, stager);
         return release;
     }
 
-    private static Release beginStage(Environment env, @Nullable Release latest, Download progress) {
+    private static Release beginStage(Environment env, Answer offer, Download progress) {
         Release release;
         STAGING.lock();
         try {
-            release = stageable(env, latest, staged(env.home()), progress.active());
-            if (!progress.begin()) throw new IllegalStateException("A newer Java is already downloading.");
+            release = stageable(env, offer, staged(env.home()), progress.active());
+            if (!progress.begin(release)) throw new IllegalStateException("A newer Java is already downloading.");
         } finally {
             STAGING.unlock();
         }
-        EventLogger.info(CATEGORY, "Downloading Java " + release.version() + " for the next start to install",
-                release.url());
+        EventLogger.info(CATEGORY, "Downloading " + release.vendor().label + " " + release.version()
+                + " for the next start to install", release.url());
         return release;
     }
 
@@ -755,18 +1112,19 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * Download {@code release} into {@code <home>/jre.staged/}, verifying it against the catalog's SHA-256
-     * as it arrives, and write the manifest last. Any failure removes the whole staging folder.
+     * Download {@code release} into {@code <home>/jre.staged/} from its vendor's own hosts, verifying it against
+     * the catalog's SHA-256 as it arrives, and write the manifest last. Any failure removes the whole staging folder.
      */
     public static Staged download(Release release, Path home, Download progress) throws IOException {
+        var vendor = release.vendor();
         var url = HttpUrl.parse(release.url());
-        if (url == null || !url.isHttps() || !DOWNLOAD_HOST.equals(url.host())) {
+        if (url == null || !vendor.allowsLink(url)) {
             throw new IOException("refusing " + release.url() + ": Java is only downloaded over HTTPS from "
-                    + DOWNLOAD_HOST);
+                    + vendor.linkPlace());
         }
         var sha = release.sha256();
         if (sha == null || !SHA256.matcher(sha).matches()) {
-            throw new IOException("Azul's catalog gave no SHA-256 for " + release.archive());
+            throw new IOException(vendor.owner + "'s catalog gave no SHA-256 for " + release.archive());
         }
         if (!ARCHIVE.matcher(release.archive()).matches() || !VERSION.matcher(release.version()).matches()) {
             throw new IOException("refusing an archive named " + release.archive());
@@ -779,12 +1137,12 @@ public final class JavaRuntimeService {
         Files.createDirectories(dir);
         try {
             var part = dir.resolve(release.archive() + ".part");
-            fetch(url, part, sha, progress);
+            fetch(url, part, sha, progress, vendor);
             Files.move(part, dir.resolve(release.archive()), StandardCopyOption.ATOMIC_MOVE);
             var manifest = dir.resolve(MANIFEST + ".part");
             Files.writeString(manifest, "version=" + release.version() + "\nsha256=" + sha + "\narchive="
-                    + release.archive() + "\n" + (release.build() == null ? "" : "build=" + release.build() + "\n"),
-                    StandardCharsets.UTF_8);
+                    + release.archive() + "\n" + (release.build() == null ? "" : "build=" + release.build() + "\n")
+                    + "vendor=" + vendor.label + "\n", StandardCharsets.UTF_8);
             Files.move(manifest, dir.resolve(MANIFEST), StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException | RuntimeException e) {
             try {
@@ -794,19 +1152,19 @@ public final class JavaRuntimeService {
             }
             throw e;
         }
-        return new Staged(release.version(), sha, release.archive(), release.build());
+        return new Staged(release.version(), sha, release.archive(), release.build(), vendor);
     }
 
-    private static void fetch(HttpUrl url, Path out, String sha256, Download progress) throws IOException {
+    private static void fetch(HttpUrl url, Path out, String sha256, Download progress, Vendor vendor) throws IOException {
         var call = HttpFactories.general().newCall(new Request.Builder().url(url).build());
         // general()'s 60 s call timeout spans the body, too short for ~60 MB below 8 Mbit/s; its read timeout still ends a stall.
         call.timeout().timeout(DOWNLOAD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
         try (var response = call.execute()) {
             // Redirects are followed, so the host is checked again where the bytes come from.
             var landed = response.request().url();
-            if (!landed.isHttps() || !DOWNLOAD_HOST.equals(landed.host())) {
+            if (!vendor.allowsLanding(landed)) {
                 throw new IOException("refusing a redirect to " + landed.host() + ": Java is only downloaded from "
-                        + DOWNLOAD_HOST);
+                        + vendor.landingPlaces());
             }
             if (!response.isSuccessful()) throw new IOException("HTTP " + response.code() + " fetching " + url);
             var body = response.body();
@@ -829,7 +1187,8 @@ public final class JavaRuntimeService {
             }
             var actual = HexFormat.of().formatHex(digest.digest());
             if (!actual.equals(sha256)) {
-                throw new IOException("checksum mismatch: Azul's catalog gives " + sha256 + ", the download is " + actual);
+                throw new IOException("checksum mismatch: " + vendor.owner + "'s catalog gives " + sha256
+                        + ", the download is " + actual);
             }
         }
     }

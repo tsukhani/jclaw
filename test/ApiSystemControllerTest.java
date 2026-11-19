@@ -504,8 +504,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(current, body.get("currentVersion").getAsString());
         assertEquals(current + ".1", body.get("latestVersion").getAsString());
         assertTrue(body.get("updateAvailable").getAsBoolean());
-        assertFalse(body.get("switchable").getAsBoolean());
-        assertTrue(body.get("managedVersion").isJsonNull());
+        assertEquals("[]", body.get("switches").toString());
 
         var refused = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, refused.status.intValue());
@@ -527,12 +526,13 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals("built-in", before.get("kind").getAsString());
         assertEquals("25.0.4", before.get("currentVersion").getAsString());
         assertEquals("Azul Systems, Inc.", before.get("vendor").getAsString());
+        assertEquals("Zulu", before.get("distribution").getAsString());
         assertEquals("25.0.5", before.get("latestVersion").getAsString());
         assertTrue(before.get("updateAvailable").getAsBoolean());
         assertTrue(before.get("stagedVersion").isJsonNull());
         assertTrue(before.get("rebuildsStartupCache").getAsBoolean());
-        assertFalse(before.get("switchable").getAsBoolean());
-        assertTrue(before.get("managedVersion").isJsonNull());
+        assertEquals("[{\"vendor\":\"Temurin\",\"version\":null,\"refusal\":\"Couldn't check Adoptium's catalog for a newer Java.\"}]",
+                before.get("switches").toString());
 
         var accepted = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(202, accepted.status.intValue());
@@ -569,6 +569,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         var described = json(GET("/api/system/java-runtime"));
         assertEquals("a security and bug-fix release", described.get("releaseType").getAsString());
         assertEquals("https://docs.azul.com/core/release-notes", described.get("releaseNotesUrl").getAsString());
+        assertEquals("Azul's latest release notes", described.get("releaseNotesLabel").getAsString());
 
         JavaRuntimeService.setLatestForTest(psu);
         var untyped = json(GET("/api/system/java-runtime"));
@@ -588,8 +589,8 @@ class ApiSystemControllerTest extends FunctionalTest {
         var before = json(GET("/api/system/java-runtime"));
         assertEquals("external", before.get("kind").getAsString());
         assertEquals("25.0.3", before.get("currentVersion").getAsString());
-        assertTrue(before.get("switchable").getAsBoolean());
-        assertEquals("25.0.5", before.get("managedVersion").getAsString());
+        assertEquals("[{\"vendor\":\"Zulu\",\"version\":\"25.0.5\",\"refusal\":null},{\"vendor\":\"Temurin\","
+                + "\"version\":null,\"refusal\":\"Couldn't check Adoptium's catalog for a newer Java.\"}]", before.get("switches").toString());
 
         var accepted = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(202, accepted.status.intValue());
@@ -651,12 +652,108 @@ class ApiSystemControllerTest extends FunctionalTest {
 
         var offered = json(GET("/api/system/java-runtime"));
         assertEquals("external", offered.get("kind").getAsString());
-        assertFalse(offered.get("switchable").getAsBoolean());
-        assertTrue(offered.get("managedVersion").isJsonNull());
+        var refusal = "Zulu 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.";
+        assertEquals("{\"vendor\":\"Zulu\",\"version\":\"25.0.5\",\"refusal\":\"" + refusal + "\"}",
+                offered.get("switches").getAsJsonArray().get(0).toString());
         var refused = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, refused.status.intValue());
-        assertEquals("Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.",
-                json(refused).get("message").getAsString());
+        assertEquals(refusal, json(refused).get("message").getAsString());
+        assertEquals(0, stagings.size());
+    }
+
+    @Test
+    void onTemurinThePanelAsksAdoptiumAndOffersItsPatchWithItsOwnNotesAndTheSwitchBackToZulu() throws Exception {
+        login();
+        Files.createDirectories(tmp.resolve("jclaw/conf"));
+        JavaRuntimeService.setEnvironmentForTest(new JavaRuntimeService.Environment(tmp.resolve("jclaw"), jreHome(),
+                "25.0.5", "Eclipse Adoptium", "Temurin-25.0.5+8", "Mac OS X", "aarch64", false));
+        var patch = temurin("25.0.5.1");
+        JavaRuntimeService.setCatalogForTest(v -> new JavaRuntimeService.Answer(
+                v == JavaRuntimeService.Vendor.TEMURIN ? patch : release("25.0.6"), null));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
+
+        var before = json(GET("/api/system/java-runtime"));
+        assertEquals("built-in", before.get("kind").getAsString());
+        assertEquals("Temurin", before.get("distribution").getAsString());
+        assertEquals("25.0.5.1", before.get("latestVersion").getAsString());
+        assertTrue(before.get("latestBuild").isJsonNull());
+        assertTrue(before.get("updateAvailable").getAsBoolean());
+        assertEquals("https://adoptium.net/temurin/release-notes/?version=jdk-25.0.5.1%2B2",
+                before.get("releaseNotesUrl").getAsString());
+        assertEquals("Release notes for Temurin 25.0.5.1", before.get("releaseNotesLabel").getAsString());
+        assertEquals("[{\"vendor\":\"Zulu\",\"version\":\"25.0.6\",\"refusal\":null}]", before.get("switches").toString());
+
+        assertEquals(202, POST("/api/system/java-runtime", "application/json", "{}").status.intValue());
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(202, POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"temurin\"}").status.intValue());
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        var back = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Zulu\"}");
+        assertEquals("{\"status\":\"ok\",\"version\":\"25.0.6\"}", getContent(back));
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(List.of(patch, patch, release("25.0.6")), stagings);
+    }
+
+    @Test
+    void aBuiltInZuluSwitchesToTemurinAtTheSameVersionAndWaitsForTheNextRestart() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.5.1", false));
+        var same = temurin("25.0.5.1");
+        JavaRuntimeService.setCatalogForTest(v -> new JavaRuntimeService.Answer(
+                v == JavaRuntimeService.Vendor.TEMURIN ? same : release("25.0.5.1"), null));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
+            stagings.add(r);
+            writeStaging(home, r.version());
+            Files.writeString(home.resolve("jre.staged/manifest"), "vendor=" + r.vendor().label + "\n",
+                    StandardOpenOption.APPEND);
+        });
+
+        var before = json(GET("/api/system/java-runtime"));
+        assertFalse(before.get("updateAvailable").getAsBoolean());
+        assertEquals("[{\"vendor\":\"Temurin\",\"version\":\"25.0.5.1\",\"refusal\":null}]", before.get("switches").toString());
+        var sameVendor = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Zulu\"}");
+        assertEquals("Java 25.0.5.1 is up to date.", json(sameVendor).get("message").getAsString());
+
+        var accepted = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
+        assertEquals(202, accepted.status.intValue());
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(List.of(same), stagings);
+        var ready = json(GET("/api/system/java-runtime"));
+        assertEquals("25.0.5.1", ready.get("stagedVersion").getAsString());
+        assertEquals("Temurin", ready.get("stagedVendor").getAsString());
+
+        var waiting = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
+        assertEquals(409, waiting.status.intValue());
+        assertEquals("Java 25.0.5.1 will be installed at the next restart.", json(waiting).get("message").getAsString());
+        assertEquals(1, stagings.size());
+    }
+
+    @Test
+    void aSwitchToAnOlderJavaOrToAVendorWithNoJreHereIsNeitherOfferedNorStaged() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.5.1", false));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
+
+        JavaRuntimeService.setCatalogForTest(v -> new JavaRuntimeService.Answer(
+                v == JavaRuntimeService.Vendor.TEMURIN ? temurin("25.0.5") : release("25.0.5.1"), null));
+        var older = "Temurin 25.0.5 is older than the Zulu 25.0.5.1 JClaw runs on, so switching to it would undo fixes.";
+        assertEquals("[{\"vendor\":\"Temurin\",\"version\":\"25.0.5\",\"refusal\":\"" + older + "\"}]",
+                json(GET("/api/system/java-runtime")).get("switches").toString());
+        var refused = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
+        assertEquals(409, refused.status.intValue());
+        assertEquals(older, json(refused).get("message").getAsString());
+
+        var none = "Adoptium's catalog lists no Java 25 runtime for mac/aarch64.";
+        JavaRuntimeService.setCatalogForTest(v -> v == JavaRuntimeService.Vendor.TEMURIN
+                ? new JavaRuntimeService.Answer(null, none) : new JavaRuntimeService.Answer(release("25.0.5.1"), null));
+        assertEquals("[{\"vendor\":\"Temurin\",\"version\":null,\"refusal\":\"" + none + "\"}]",
+                json(GET("/api/system/java-runtime")).get("switches").toString());
+        var noJre = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
+        assertEquals(409, noJre.status.intValue());
+        assertEquals(none, json(noJre).get("message").getAsString());
+
+        var unknown = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Corretto\"}");
+        assertEquals(400, unknown.status.intValue());
+        assertEquals("Field 'vendor' must be \"Zulu\" or \"Temurin\".", json(unknown).get("message").getAsString());
         assertEquals(0, stagings.size());
     }
 
@@ -670,9 +767,8 @@ class ApiSystemControllerTest extends FunctionalTest {
 
         var offered = json(GET("/api/system/java-runtime"));
         assertEquals("external", offered.get("kind").getAsString());
-        assertFalse(offered.get("switchable").getAsBoolean());
-        assertTrue(offered.get("managedVersion").isJsonNull());
-        var refused = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals("[]", offered.get("switches").toString());
+        var refused = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
         assertEquals(409, refused.status.intValue());
         assertEquals("JClaw runs in WSL from a Windows folder, where a start from Git Bash would also pick up a Java at "
                 + tmp.resolve("jre") + ", so it stays on the distro's Java; install JClaw with install.sh inside the "
@@ -708,6 +804,11 @@ class ApiSystemControllerTest extends FunctionalTest {
             var twice = POST("/api/system/java-runtime", "application/json", "{}");
             assertEquals(409, twice.status.intValue());
             assertEquals("A newer Java is already downloading.", json(twice).get("message").getAsString());
+            var aSwitch = POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}");
+            assertEquals(409, aSwitch.status.intValue());
+            assertEquals("A newer Java is already downloading.", json(aSwitch).get("message").getAsString());
+            assertEquals("25.0.5", running.get("downloadingVersion").getAsString());
+            assertEquals("Zulu", running.get("downloadingVendor").getAsString());
         } finally {
             release.countDown();
             waitUntil(() -> !JavaRuntimeService.CURRENT.active());
@@ -780,6 +881,13 @@ class ApiSystemControllerTest extends FunctionalTest {
     private static JavaRuntimeService.Release release(String version) {
         return new JavaRuntimeService.Release(version, "https://cdn.azul.com/zulu/bin/zulu-jre" + version + ".tar.gz",
                 "c3".repeat(32), "zulu-jre" + version + ".tar.gz");
+    }
+
+    private static JavaRuntimeService.Release temurin(String version) {
+        var name = "OpenJDK25U-jre_aarch64_mac_hotspot_" + version + "_2.tar.gz";
+        return new JavaRuntimeService.Release(version, "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-"
+                + version + "%2B2/" + name, "d4".repeat(32), name, null, null, JavaRuntimeService.Vendor.TEMURIN,
+                "https://adoptium.net/temurin/release-notes/?version=jdk-" + version + "%2B2");
     }
 
     /** {@code <tmp>/jclaw} running on {@code <tmp>/jre}: the installer's layout. */

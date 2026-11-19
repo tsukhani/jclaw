@@ -307,20 +307,26 @@ public class ApiSystemController extends Controller {
      * @param currentVersion       the running Java, {@code java.version}
      * @param currentBuild         the running Java's Zulu build (25.38.105), or null for another vendor's
      * @param vendor               {@code java.vendor}, or null when the JVM names none
-     * @param latestVersion        the newest patch of the running major in Azul's catalog, or null when
-     *                             the catalog could not be reached
+     * @param distribution         the running Java's vendor as JClaw installs it, {@code "Zulu"} or
+     *                             {@code "Temurin"}, or null for another vendor's
+     * @param latestVersion        the newest patch of the running major in the running vendor's catalog
+     *                             (Azul's for another vendor's Java), or null when it could not be reached
      * @param latestBuild          {@code latestVersion}'s Zulu build, which alone tells a respin of the
      *                             running Java version apart, or null
      * @param releaseType          what kind of release {@code latestVersion} is, in plain words ("a security
      *                             and bug-fix release"), or null when the catalog says nothing JClaw knows
-     * @param releaseNotesUrl      Azul's notes for its latest release, which the panel links beside
-     *                             {@code latestVersion} worded as Azul's latest, since the two can briefly
-     *                             differ; null with no latest version
+     * @param releaseNotesUrl      the notes the panel links beside {@code latestVersion}: that Temurin
+     *                             release's own, or Azul's latest, since Azul links none per build; null
+     *                             with no latest version
+     * @param releaseNotesLabel    the link's words, which say which of the two it is
      * @param updateAvailable      true when the latest build is newer than the running one, by Java version
      *                             and then by Zulu build
      * @param stagedVersion        a downloaded runtime waiting for the next start, or null
      * @param stagedBuild          its Zulu build, or null
+     * @param stagedVendor         its vendor, or null when its manifest names none
      * @param downloading          true while a download runs
+     * @param downloadingVersion   what it downloads, or null
+     * @param downloadingVendor    whose Java that is, or null
      * @param downloadPercent      how far it is, or null when no download runs
      * @param downloadError        why the last download failed, or null
      * @param lastStart            jclaw.sh's line about what the last start did with a staged runtime,
@@ -329,77 +335,98 @@ public class ApiSystemController extends Controller {
      * @param rebuildsStartupCache true when the first start on a new runtime rebuilds the AOT cache:
      *                             false on Windows, which has none, and while it is switched off in
      *                             Settings or by {@code JCLAW_AOT=off}
-     * @param switchable           true on a bundle install running a Java it did not install, where the
-     *                             POST stages a Java of JClaw's own that the next start installs as
-     *                             {@code <home>/jre}: false on install.ps1's WSL route, and when that Java
-     *                             is an older patch of the host's major
-     * @param managedVersion       the Java that switch installs, or null when there is no switch or
-     *                             Azul's catalog could not be reached
+     * @param switches             the switches the POST's {@code vendor} asks for: on the built-in Java, to
+     *                             the other vendor's newest of its major, installed at the next start in
+     *                             place of it; on a bundle install on a host Java, to either vendor's newest
+     *                             Java 25, installed as the first {@code <home>/jre}; empty anywhere else
      */
     public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String currentBuild,
-                                       @Nullable String vendor, @Nullable String latestVersion,
+                                       @Nullable String vendor, @Nullable String distribution,
+                                       @Nullable String latestVersion,
                                        @Nullable String latestBuild, @Nullable String releaseType,
-                                       @Nullable String releaseNotesUrl, boolean updateAvailable,
+                                       @Nullable String releaseNotesUrl, @Nullable String releaseNotesLabel,
+                                       boolean updateAvailable,
                                        @Nullable String stagedVersion, @Nullable String stagedBuild,
-                                       boolean downloading,
+                                       @Nullable String stagedVendor, boolean downloading,
+                                       @Nullable String downloadingVersion, @Nullable String downloadingVendor,
                                        @Nullable Integer downloadPercent, @Nullable String downloadError,
                                        @Nullable String lastStart, @Nullable String lastStartAt,
-                                       boolean rebuildsStartupCache, boolean switchable,
-                                       @Nullable String managedVersion) {}
+                                       boolean rebuildsStartupCache, List<JavaRuntimeSwitch> switches) {}
 
     /**
-     * GET /api/system/java-runtime — the running Java, the newest patch of its major and any download
-     * staged for the next start. Performs nothing.
+     * @param vendor  {@code "Zulu"} or {@code "Temurin"}, the POST's {@code vendor} for it
+     * @param version the Java it installs, or null when that vendor's catalog gave none
+     * @param refusal why the POST would refuse it, which the panel shows in place of the button, or null
+     */
+    public record JavaRuntimeSwitch(String vendor, @Nullable String version, @Nullable String refusal) {}
+
+    /**
+     * GET /api/system/java-runtime — the running Java, the newest patch of its major, the switches to
+     * another vendor's Java and any download staged for the next start. Performs nothing.
      *
-     * @param refresh bypass the cached catalog check (the "Check again" control)
+     * @param refresh bypass the cached catalog checks (the "Check again" control)
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JavaRuntimePreflight.class)))
     @AgentAccess(value = OPEN, reason = "the operator and main only (JF-292): the host's Java runtime, and a catalog "
             + "check that dials out")
     public static void javaRuntime(Boolean refresh) {
         RequestPrincipal.requireOperatorOrMain(READ_STATUS);
+        boolean fresh = Boolean.TRUE.equals(refresh);
         var env = JavaRuntimeService.environment();
-        var latest = JavaRuntimeService.latest(Boolean.TRUE.equals(refresh));
+        var latest = JavaRuntimeService.latest(fresh);
         var latestVersion = latest == null ? null : latest.version();
         var staged = JavaRuntimeService.staged(env.home());
+        var stagedVendor = staged == null ? null : staged.vendor();
         var progress = JavaRuntimeService.CURRENT;
         boolean downloading = progress.active();
+        var target = downloading ? progress.target() : null;
         var last = JavaRuntimeService.lastStart(env.app());
-        boolean switchable = JavaRuntimeService.switchable(env);
-        var managed = switchable ? JavaRuntimeService.managed(env, latest, Boolean.TRUE.equals(refresh)) : null;
-        // The POST refuses a switch back to an older patch, so the GET never offers one.
-        if (managed != null && JavaRuntimeService.undoesFixes(env, managed)) {
-            switchable = false;
-            managed = null;
-        }
+        var distribution = env.distribution();
+        var switches = JavaRuntimeService.switches(env, fresh).stream()
+                .map(s -> new JavaRuntimeSwitch(s.vendor().label, s.version(), s.refusal())).toList();
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
-                JavaRuntimeService.kind(env).label, env.javaVersion(), env.build(), env.vendor(), latestVersion,
+                JavaRuntimeService.kind(env).label, env.javaVersion(), env.build(), env.vendor(),
+                distribution == null ? null : distribution.label, latestVersion,
                 latest == null ? null : latest.build(),
                 latest == null ? null : JavaRuntimeService.releaseTypeInWords(latest.releaseType()),
-                latest == null ? null : JavaRuntimeService.RELEASE_NOTES,
+                latest == null ? null : latest.notesUrl(), latest == null ? null : latest.notesLabel(),
                 JavaRuntimeService.isNewer(latest, env),
                 staged == null ? null : staged.version(), staged == null ? null : staged.build(),
-                downloading, downloading ? progress.currentPercent() : null, progress.lastError(),
+                stagedVendor == null ? null : stagedVendor.label, downloading,
+                target == null ? null : target.version(), target == null ? null : target.vendor().label,
+                downloading ? progress.currentPercent() : null, progress.lastError(),
                 last == null ? null : last.line(), last == null ? null : last.at().toString(),
                 !env.windows() && RestartService.aotCacheState().enabled()
                         && !"off".equals(System.getenv("JCLAW_AOT")),
-                switchable, managed == null ? null : managed.version())));
+                switches)));
     }
 
     /**
-     * POST /api/system/java-runtime — download the newest patch for the next start to install, and ack.
-     * Returns 202 while the download runs in this JVM; the GET reports its progress. On a bundle install
-     * running a Java it did not install, the download is the switch to a Java of JClaw's own. 409 when
-     * there is nothing this install may download: a source checkout, a container, install.ps1's WSL
-     * route, a download already running or staged, no newer patch, or a switch that would go back to an
-     * older patch.
+     * POST /api/system/java-runtime {@code {"vendor": "Zulu"|"Temurin"}} — download a Java for the next
+     * start to install, and ack. Without a vendor, or with the running one's, it is the newest patch of
+     * the built-in Java; with the other, the switch to that vendor's Java. On a bundle install running a
+     * Java it did not install, it is the switch to a Java of JClaw's own, Zulu unless the vendor says
+     * Temurin. Returns 202 while the download runs in this JVM; the GET reports its progress. 400 for
+     * another vendor. 409 when there is nothing this install may download: a source checkout, a
+     * container, install.ps1's WSL route, a download already running or staged, no newer patch, a
+     * vendor with no JRE for this system, or a switch that would go back to an older Java.
      */
     @AgentAccess(value = OPERATOR_ONLY, reason = "downloads a Java runtime that the next start installs")
     public static void stageJavaRuntime() {
+        var body = JsonBodyReader.readJsonBody();
+        var field = body == null ? null : body.get("vendor");
+        JavaRuntimeService.Vendor vendor = null;
+        if (field != null && !field.isJsonNull()) {
+            vendor = field.isJsonPrimitive() ? JavaRuntimeService.Vendor.named(field.getAsString()) : null;
+            if (vendor == null) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'vendor' must be \"Zulu\" or \"Temurin\".");
+                return;
+            }
+        }
         JavaRuntimeService.Release release;
         try {
-            release = JavaRuntimeService.requestStage();
+            release = JavaRuntimeService.requestStage(vendor);
         } catch (IllegalStateException e) {
             ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
             return;

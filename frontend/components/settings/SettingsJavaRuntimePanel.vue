@@ -2,32 +2,47 @@
 // Java runtime panel. On the Java the installer put beside JClaw, POST /api/system/java-runtime
 // downloads the newest patch of the same major into jre.staged/ while JClaw keeps running, and
 // jclaw.sh installs it at the next start; the restart that does it stays the operator's choice.
-// A bundle install on a Java it did not install gets the same POST as a switch: the next start
-// installs a Java of JClaw's own at jre/. Anywhere else the panel only says whether a newer patch exists.
+// The same POST with the other vendor switches it between Zulu and Temurin. A bundle install on a
+// Java it did not install gets it as a switch: the next start installs a Java of JClaw's own at jre/.
+// Anywhere else the panel only says whether a newer patch exists.
 import type { RestartPreflight } from '~/composables/useRestartAndReconnect'
 import { interruptionSummary } from '~/composables/useRestartAndReconnect'
+
+type Vendor = 'Zulu' | 'Temurin'
+
+interface JavaRuntimeSwitch {
+  vendor: Vendor
+  version: string | null
+  refusal: string | null
+}
 
 interface JavaRuntimePreflight {
   kind: 'built-in' | 'external' | 'container'
   currentVersion: string
   currentBuild: string | null
   vendor: string | null
+  distribution: Vendor | null
   latestVersion: string | null
   latestBuild: string | null
   releaseType: string | null
   releaseNotesUrl: string | null
+  releaseNotesLabel: string | null
   updateAvailable: boolean
   stagedVersion: string | null
   stagedBuild: string | null
+  stagedVendor: Vendor | null
   downloading: boolean
+  downloadingVersion: string | null
+  downloadingVendor: Vendor | null
   downloadPercent: number | null
   downloadError: string | null
   lastStart: string | null
   lastStartAt: string | null
   rebuildsStartupCache: boolean
-  switchable: boolean
-  managedVersion: string | null
+  switches: JavaRuntimeSwitch[]
 }
+
+const OWNER: Record<Vendor, string> = { Zulu: 'Azul', Temurin: 'Adoptium' }
 
 const ENDPOINT = '/api/system/java-runtime'
 const POLL_MS = 1000
@@ -56,8 +71,17 @@ function named(version: string | null, build: string | null): string {
   return keepsJava(version, build) ? `Zulu ${build}` : `Java ${version}`
 }
 
+// A Java of another vendor than the one running, or the first one JClaw installs on a host, is named by its vendor.
+function namedFor(vendor: Vendor | null | undefined, version: string | null, build: string | null): string {
+  const r = runtime.value
+  if (vendor && (r?.kind !== 'built-in' || vendor !== r.distribution)) return `${vendor} ${version}`
+  return named(version, build)
+}
+
 const latestName = computed(() => named(runtime.value?.latestVersion ?? null, runtime.value?.latestBuild ?? null))
-const stagedName = computed(() => named(runtime.value?.stagedVersion ?? null, runtime.value?.stagedBuild ?? null))
+const stagedName = computed(() => namedFor(runtime.value?.stagedVendor, runtime.value?.stagedVersion ?? null,
+  runtime.value?.stagedBuild ?? null))
+const owner = computed(() => OWNER[runtime.value?.distribution ?? 'Zulu'])
 const respin = computed(() => keepsJava(runtime.value?.latestVersion ?? null, runtime.value?.latestBuild ?? null))
 const currentName = computed(() => respin.value
   ? `Zulu ${runtime.value?.currentBuild}`
@@ -124,7 +148,7 @@ async function download() {
   if (!r?.latestVersion) return
   const ok = await confirm({
     title: `Download ${latestName.value}`,
-    message: `${latestName.value} will be downloaded from Azul and checked against its SHA-256 `
+    message: `${latestName.value} will be downloaded from ${owner.value} and checked against its SHA-256 `
       + `while JClaw keeps running on ${currentName.value}. It is installed the next time JClaw `
       + 'starts, and the current Java is kept as jre.previous.',
     confirmText: 'Download',
@@ -138,21 +162,27 @@ async function download() {
   await refresh()
 }
 
-async function switchJava() {
+async function switchJava(s: JavaRuntimeSwitch) {
   failure.value = null
   const r = runtime.value
-  if (!r?.managedVersion) return
+  if (!r || !s.version) return
+  const target = `${s.vendor} ${s.version}`
+  const running = r.distribution ? `${r.distribution} ${r.currentVersion}` : `Java ${r.currentVersion}`
   const ok = await confirm({
-    title: `Switch to Java ${r.managedVersion}`,
-    message: `Java ${r.managedVersion} will be downloaded from Azul and checked against its SHA-256 `
-      + `while JClaw keeps running on Java ${r.currentVersion}. The next time JClaw starts, it installs it `
-      + 'in the jre folder beside JClaw and runs on it from then on, and this panel keeps it patched. '
-      + `Java ${r.currentVersion} stays installed, unused by JClaw.`,
+    title: `Switch to ${target}`,
+    message: r.kind === 'built-in'
+      ? `${target} will be downloaded from ${OWNER[s.vendor]} and checked against its SHA-256 while JClaw keeps `
+      + `running on ${running}. It is installed the next time JClaw starts, and ${running} is kept as `
+      + `jre.previous. From then on this panel keeps it patched from ${OWNER[s.vendor]}.`
+      : `${target} will be downloaded from ${OWNER[s.vendor]} and checked against its SHA-256 `
+        + `while JClaw keeps running on Java ${r.currentVersion}. The next time JClaw starts, it installs it `
+        + 'in the jre folder beside JClaw and runs on it from then on, and this panel keeps it patched. '
+        + `Java ${r.currentVersion} stays installed, unused by JClaw.`,
     confirmText: 'Switch',
   })
   if (!ok) return
 
-  const res = await mutate(ENDPOINT, { method: 'POST' })
+  const res = await mutate(ENDPOINT, { method: 'POST', body: { vendor: s.vendor } })
   if (!res) {
     failure.value = mutationError.value ?? 'The switch was refused.'
   }
@@ -207,14 +237,35 @@ const canDownload = computed(() => {
   return !!r && r.kind === 'built-in' && r.updateAvailable && !r.stagedVersion && !r.downloading
 })
 
-const canSwitch = computed(() => {
+// Each switch the backend would refuse comes with its reason, shown in place of its button.
+const offeredSwitches = computed(() => {
   const r = runtime.value
-  return !!r && r.switchable && !!r.managedVersion && !r.stagedVersion && !r.downloading
+  if (!r || r.stagedVersion || r.downloading) return []
+  return (r.switches ?? []).filter(s => !!s.version && !s.refusal)
+})
+const refusedSwitches = computed(() => {
+  const r = runtime.value
+  if (!r || r.stagedVersion || r.downloading) return []
+  return (r.switches ?? []).filter(s => !!s.refusal)
 })
 
-// A switch downloads the managed Java, which on a host Java of another major is not latestVersion.
-const downloadingName = computed(() =>
-  runtime.value?.switchable ? `Java ${runtime.value.managedVersion}` : latestName.value)
+const switchLine = computed(() => {
+  const r = runtime.value
+  const offered = offeredSwitches.value.map(s => `${s.vendor} ${s.version} from ${OWNER[s.vendor]}`)
+  if (!r || !offered.length) return null
+  if (r.kind === 'built-in') {
+    return `JClaw can run on ${offered.join(' or ')} instead: a build of the same OpenJDK from another vendor.`
+  }
+  return `JClaw cannot patch a Java it did not install. Switch to ${offered.join(' or ')}, which JClaw `
+    + 'installs beside itself and keeps patched.'
+})
+
+// A switch downloads another vendor's Java, or on a host Java of another major one that is not latestVersion.
+const downloadingName = computed(() => {
+  const r = runtime.value
+  if (!r?.downloadingVersion) return latestName.value
+  return namedFor(r.downloadingVendor, r.downloadingVersion, r.downloadingVersion === r.latestVersion ? r.latestBuild : null)
+})
 
 const summaryLine = computed(() => {
   const r = runtime.value
@@ -248,7 +299,8 @@ const errorLine = computed(() =>
     <p class="text-xs text-fg-muted">
       The Java that JClaw runs on. When it is the Java the installer set up, JClaw can download the
       newest patch of the same version while it keeps running, and installs it the next time it starts.
-      The previous Java is kept beside it as <code>jre.previous</code>.
+      It can also switch it between Zulu, from Azul, and Temurin, from Adoptium, two builds of the same
+      OpenJDK. The previous Java is kept beside it as <code>jre.previous</code>.
     </p>
 
     <div class="bg-surface-elevated border border-border">
@@ -256,9 +308,10 @@ const errorLine = computed(() =>
         <div class="min-w-0">
           <span class="text-sm font-medium text-fg-strong">Java {{ runtime?.currentVersion ?? '' }}</span>
           <span
-            v-if="runtime?.vendor"
+            v-if="runtime?.distribution || runtime?.vendor"
             class="ml-2 text-xs text-fg-muted"
-          >{{ runtime.vendor }}</span>
+            data-testid="java-runtime-vendor"
+          >{{ runtime.distribution ?? runtime.vendor }}</span>
           <div
             class="text-xs text-fg-muted mt-0.5"
             data-testid="java-runtime-summary"
@@ -278,15 +331,22 @@ const errorLine = computed(() =>
               target="_blank"
               rel="noopener noreferrer"
               class="underline hover:text-fg-strong"
-            >Azul's latest release notes</a>
+            >{{ runtime.releaseNotesLabel }}</a>
           </div>
           <div
-            v-if="canSwitch"
+            v-if="switchLine"
             class="text-xs text-fg-muted mt-0.5"
             data-testid="java-runtime-switch"
           >
-            JClaw cannot patch a Java it did not install. Switch to Java {{ runtime?.managedVersion }} from Azul,
-            which JClaw installs beside itself and keeps patched.
+            {{ switchLine }}
+          </div>
+          <div
+            v-for="s in refusedSwitches"
+            :key="s.vendor"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="java-runtime-switch-refused"
+          >
+            No switch to {{ s.vendor }}. {{ s.refusal }}
           </div>
           <div
             v-if="runtime?.lastStart"
@@ -318,12 +378,13 @@ const errorLine = computed(() =>
             Download {{ latestName }}
           </button>
           <button
-            v-if="canSwitch"
+            v-for="s in offeredSwitches"
+            :key="s.vendor"
             class="px-3 py-1.5 text-xs font-medium text-white
                    bg-emerald-600 hover:bg-emerald-700 rounded-full transition-colors"
-            @click="switchJava"
+            @click="switchJava(s)"
           >
-            Switch to Java {{ runtime?.managedVersion }}
+            Switch to {{ s.vendor }}
           </button>
           <template v-if="runtime?.stagedVersion">
             <button

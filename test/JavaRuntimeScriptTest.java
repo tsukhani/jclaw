@@ -35,7 +35,8 @@ class JavaRuntimeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("native_path", "jre_javas_in", "use_bundled_jre",
             "sha256_file", "conf_jvm_modules", "jre_status", "jre_version_norm", "jre_reported_version",
-            "jre_reported_build", "jre_zip_tool", "jre_install_staged", "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase");
+            "jre_reported_build", "jre_reported_vendor", "jre_zip_tool", "jre_install_staged", "apply_staged_jre",
+            "restart_status", "restart_phase_end", "restart_phase", "aot_fingerprint", "upgrade_install_kind");
     private static final List<String> VARIABLES = List.of("JRE_MAJOR");
 
     private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-macosx_aarch64";
@@ -43,6 +44,8 @@ class JavaRuntimeScriptTest extends UnitTest {
     private static final String HOME_IN_ARCHIVE = "/zulu-25.jre/Contents/Home";
     private static final String TARBALL = NEW_TOP + ".tar.gz";
     private static final String ZIP = "zulu25.38.107-ca-jre25.0.5-win_x64.zip";
+    private static final String TEMURIN_TOP = "jdk-25.0.5.1+2-jre";
+    private static final String TEMURIN_TARBALL = "OpenJDK25U-jre_aarch64_mac_hotspot_25.0.5.1_2.tar.gz";
 
     @TempDir Path tmp;
 
@@ -92,6 +95,97 @@ class JavaRuntimeScriptTest extends UnitTest {
         stage(home, next + ".tar.gz", "25.0.6", "25.40.1", tarGz(runtime(next, "25.0.6", "Zulu25.40+1-CA", true)));
         assertTrue(run(home, Map.of(), "apply_staged_jre").contains("    Java runtime: upgraded 25.0.5 → 25.0.6\n"));
         assertEquals(List.of(next), listing(home.resolve("jre")));
+    }
+
+    @Test
+    void aSwitchToTemurinAndBackIsInstalledAndTheLastStartNamesBothVendors() throws Exception {
+        var zuluTop = "zulu25.38.201-ca-jre25.0.5.1-macosx_aarch64";
+        var home = install(zuluTop, "25.0.5.1", "Zulu25.38+201-CA");
+        stage(home, TEMURIN_TARBALL, "25.0.5.1", null, "Temurin",
+                tarGz(runtime(TEMURIN_TOP, "25.0.5.1", "Temurin-25.0.5.1+2", true)));
+
+        var out = run(home, Map.of(), "apply_staged_jre; echo \"JAVA=$(command -v java)\"");
+
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+                + "    Java runtime: switched Zulu 25.0.5.1 → Temurin 25.0.5.1\n"
+                + "JAVA=" + home.resolve("jre/" + TEMURIN_TOP + HOME_IN_ARCHIVE + "/bin/java") + "\n", out);
+        assertEquals("switched Zulu 25.0.5.1 → Temurin 25.0.5.1", status(home));
+        assertEquals(List.of(TEMURIN_TOP), listing(home.resolve("jre")));
+        assertEquals(List.of(zuluTop), listing(home.resolve("jre.previous")));
+
+        var backTop = "zulu25.38.203-ca-jre25.0.5.1-macosx_aarch64";
+        stage(home, backTop + ".tar.gz", "25.0.5.1", "25.38.203", "Zulu",
+                tarGz(runtime(backTop, "25.0.5.1", "Zulu25.38+203-CA", true)));
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+                + "    Java runtime: switched Temurin 25.0.5.1 → Zulu 25.0.5.1\n", run(home, Map.of(), "apply_staged_jre"));
+        assertEquals(List.of(backTop), listing(home.resolve("jre")));
+        assertEquals(List.of(TEMURIN_TOP), listing(home.resolve("jre.previous")));
+
+        // A patch from the vendor it runs reads as an upgrade, as before.
+        var nextTop = "zulu25.40.1-ca-jre25.0.6-macosx_aarch64";
+        stage(home, nextTop + ".tar.gz", "25.0.6", "25.40.1", "Zulu", tarGz(runtime(nextTop, "25.0.6", "Zulu25.40+1-CA", true)));
+        assertTrue(run(home, Map.of(), "apply_staged_jre").contains("    Java runtime: upgraded 25.0.5.1 → 25.0.6\n"));
+    }
+
+    @Test
+    void aStagedJavaThatReportsAnotherVendorKeepsTheCurrentJava() throws Exception {
+        var home = install();
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(runtime(TEMURIN_TOP, "25.0.5", "Zulu25.38+107-CA", true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"),
+                "kept Java 25.0.4: Temurin 25.0.5 reported Zulu when it ran");
+
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(runtime(TEMURIN_TOP, "25.0.5", null, true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"),
+                "kept Java 25.0.4: Temurin 25.0.5 reported another vendor when it ran");
+
+        // The vendor is checked after the version, so a Java that reports neither says the version first.
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(runtime(TEMURIN_TOP, "25.0.3", "Zulu25.38+107-CA", true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: Java 25.0.5 reported 25.0.3 when it ran");
+
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Corretto", tarGz(runtime(TEMURIN_TOP, "25.0.5", "Temurin-25.0.5+8", true)));
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: the staged runtime's manifest is malformed");
+    }
+
+    @Test
+    void aTemurinStagingThatFailsItsChecksumKeepsTheCurrentJava() throws Exception {
+        var home = install(OLD_TOP, "25.0.4", "Zulu25.36+15-CA");
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(runtime(TEMURIN_TOP, "25.0.5", "Temurin-25.0.5+8", true)));
+        Files.write(home.resolve("jre.staged/" + TEMURIN_TARBALL), "tampered".getBytes(StandardCharsets.UTF_8));
+
+        assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: Java 25.0.5 failed its SHA-256 check");
+    }
+
+    @Test
+    void aSwitchFromAHostJavaNamesTheVendorItInstalls() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(runtime(TEMURIN_TOP, "25.0.5", "Temurin-25.0.5+8", true)));
+
+        var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre");
+
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: switched from the "
+                + "host's Java 25.0.3 to Temurin 25.0.5 at " + home + "/jre\n", out);
+        assertEquals(List.of(TEMURIN_TOP), listing(home.resolve("jre")));
+        assertFalse(Files.exists(home.resolve("jre.previous")));
+    }
+
+    @Test
+    void theStartupCacheFingerprintNamesTheVendorSoTheFirstStartAfterASwitchRetrainsIt() throws Exception {
+        var zuluTop = "zulu25.38.201-ca-jre25.0.5.1-macosx_aarch64";
+        var home = install(zuluTop, "25.0.5.1", "Zulu25.38+201-CA");
+        var onZulu = run(home, Map.of("PATH", home.resolve("jre/" + zuluTop + HOME_IN_ARCHIVE + "/bin")
+                + File.pathSeparator + System.getenv("PATH"), "JAVA_TOOL_OPTIONS", ""), "aot_fingerprint");
+        stage(home, TEMURIN_TARBALL, "25.0.5.1", null, "Temurin",
+                tarGz(runtime(TEMURIN_TOP, "25.0.5.1", "Temurin-25.0.5.1+2", true)));
+        run(home, Map.of(), "apply_staged_jre");
+
+        var onTemurin = run(home, Map.of("PATH", home.resolve("jre/" + TEMURIN_TOP + HOME_IN_ARCHIVE + "/bin")
+                + File.pathSeparator + System.getenv("PATH"), "JAVA_TOOL_OPTIONS", ""), "aot_fingerprint");
+
+        assertTrue(onZulu.startsWith("openjdk version \"25.0.5.1\" 2026-10-20 LTS\n"
+                + "OpenJDK Runtime Environment Zulu25.38+201-CA (build 25.0.5.1+8-LTS)\n"), onZulu);
+        // The same Java version and the same install: only the vendor's line tells the two apart, and it does.
+        assertEquals(onZulu.replace("Zulu25.38+201-CA", "Temurin-25.0.5.1+2"), onTemurin);
     }
 
     @Test
@@ -448,12 +542,18 @@ class JavaRuntimeScriptTest extends UnitTest {
     }
 
     private static void stage(Path home, String archive, String version, String build, byte[] bytes) throws Exception {
+        stage(home, archive, version, build, null, bytes);
+    }
+
+    /** As the JVM stages it: {@code vendor} is the manifest's vendor line, or null for one an earlier release wrote. */
+    private static void stage(Path home, String archive, String version, String build, String vendor, byte[] bytes)
+            throws Exception {
         var dir = home.resolve("jre.staged");
         deleteTree(dir);
         Files.createDirectories(dir);
         Files.write(dir.resolve(archive), bytes);
         Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + sha(bytes) + "\narchive=" + archive
-                + "\n" + (build == null ? "" : "build=" + build + "\n"));
+                + "\n" + (build == null ? "" : "build=" + build + "\n") + (vendor == null ? "" : "vendor=" + vendor + "\n"));
     }
 
     private static byte[] tarGz(Map<String, String> files) throws IOException {

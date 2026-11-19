@@ -1,3 +1,4 @@
+import okhttp3.HttpUrl;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -11,10 +12,13 @@ import org.junit.jupiter.api.io.TempDir;
 import play.Play;
 import play.test.UnitTest;
 import services.JavaRuntimeService;
+import services.JavaRuntimeService.Answer;
 import services.JavaRuntimeService.Download;
 import services.JavaRuntimeService.Environment;
 import services.JavaRuntimeService.Kind;
 import services.JavaRuntimeService.Release;
+import services.JavaRuntimeService.Switch;
+import services.JavaRuntimeService.Vendor;
 import utils.AppClock;
 import utils.HttpFactories;
 
@@ -236,6 +240,200 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertNull(env(app, zuluHome("temurin", "25.0.1", "Temurin-25.0.1+8"), "25.0.1", false).build());
     }
 
+    // --- Vendors ---
+
+    @Test
+    void theVendorIsReadFromJavaVendorOrElseTheReleaseFilesImplementor() throws IOException {
+        var app = install();
+        var zulu = zuluHome("zulu", "25.0.5", "Zulu25.38+201-CA");
+        var temurin = Files.createDirectories(tmp.resolve("temurin"));
+        // The release file a Temurin JRE 25.0.5.1 ships, as downloaded from Adoptium on 2026-11-20.
+        Files.writeString(temurin.resolve("release"), "IMPLEMENTOR=\"Eclipse Adoptium\"\n"
+                + "IMPLEMENTOR_VERSION=\"Temurin-25.0.5.1+2\"\nJAVA_VERSION=\"25.0.5.1\"\nLIBC=\"default\"\n");
+
+        assertEquals(Vendor.ZULU, vendored(app, zulu, "Azul Systems, Inc.").distribution());
+        assertEquals(Vendor.TEMURIN, vendored(app, temurin, "Eclipse Adoptium").distribution());
+        // The JVM's own java.vendor decides, even over a release file that says otherwise.
+        assertNull(vendored(app, temurin, "Oracle Corporation").distribution());
+        assertEquals(Vendor.TEMURIN, vendored(app, temurin, null).distribution());
+        assertEquals(Vendor.ZULU, vendored(app, zulu, null).distribution());
+        assertNull(vendored(app, tmp.resolve("no-release"), null).distribution());
+
+        // A patch check asks the running vendor's catalog, and Azul's for a vendor JClaw never installs.
+        assertEquals(Vendor.TEMURIN, JavaRuntimeService.running(vendored(app, temurin, "Eclipse Adoptium")));
+        assertEquals(Vendor.ZULU, JavaRuntimeService.running(vendored(app, temurin, "Oracle Corporation")));
+        assertEquals(Vendor.TEMURIN, Vendor.named(" temurin "));
+        assertNull(Vendor.named("Corretto"));
+        assertNull(Vendor.named(null));
+    }
+
+    @Test
+    void theLiveAdoptiumPayloadsJreIsPickedWithItsOwnReleaseNotes() throws IOException {
+        // Adoptium's answer to adoptiumUrl(25, "linux", "x64") on 2026-11-20.
+        var payload = Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"));
+        var name = "OpenJDK25U-jre_x64_linux_hotspot_25.0.5.1_2.tar.gz";
+
+        var picked = JavaRuntimeService.pickTemurin(payload, 25, "linux", "x64");
+
+        assertEquals(new Release("25.0.5.1", "https://github.com/adoptium/temurin25-binaries/releases/download/"
+                        + "jdk-25.0.5.1%2B2/" + name, "2edef9e4f81ec5ee426d023336d4cfbd7b4644e99884e7a73a6a867b70b17acf",
+                        name, null, null, Vendor.TEMURIN,
+                        "https://adoptium.net/temurin/release-notes/?version=jdk-25.0.5.1%2B2"), picked);
+        assertEquals("Release notes for Temurin 25.0.5.1", picked.notesLabel());
+        assertNull(JavaRuntimeService.pickTemurin(payload, 26, "linux", "x64"));
+        assertNull(JavaRuntimeService.pickTemurin(payload, 25, "alpine-linux", "x64"));
+        assertNull(JavaRuntimeService.pickTemurin(payload, 25, "linux", "aarch64"));
+        assertNull(JavaRuntimeService.pickTemurin("[]", 25, "linux", "x64"));
+        // A JDK, an OpenJ9 build, or an entry with no release name for its notes.
+        assertNull(JavaRuntimeService.pickTemurin(payload.replace("\"image_type\": \"jre\"", "\"image_type\": \"jdk\""),
+                25, "linux", "x64"));
+        assertNull(JavaRuntimeService.pickTemurin(payload.replace("\"jvm_impl\": \"hotspot\"", "\"jvm_impl\": \"openj9\""),
+                25, "linux", "x64"));
+        var unnamed = JavaRuntimeService.pickTemurin(payload.replace("\"release_name\": \"jdk-25.0.5.1+2\"",
+                "\"release_name\": \"../x\""), 25, "linux", "x64");
+        assertEquals("https://adoptium.net/temurin/release-notes/", unnamed.notesUrl());
+        assertEquals("Adoptium's latest release notes", unnamed.notesLabel());
+    }
+
+    @Test
+    void aTemurinVersionIsTheOpenJdkVersionAndTheNewestIsPicked() {
+        var payload = "[" + temurinEntry("jdk-25.0.5+8", 25, 0, 5, null, 8) + ","
+                + temurinEntry("jdk-25.0.5.1+2", 25, 0, 5, 1, 2) + "," + temurinEntry("jdk-25.0.4+7", 25, 0, 4, 0, 7) + "]";
+
+        var picked = JavaRuntimeService.pickTemurin(payload, 25, "linux", "x64");
+
+        assertEquals("25.0.5.1", picked.version());
+        assertEquals("OpenJDK25U-jre_x64_linux_hotspot_25.0.5.1_2.tar.gz", picked.archive());
+        assertEquals("25.0.4", JavaRuntimeService.pickTemurin("[" + temurinEntry("jdk-25.0.4+7", 25, 0, 4, 0, 7) + "]",
+                25, "linux", "x64").version());
+        assertNull(picked.build(), "a Temurin release orders by Java version alone");
+    }
+
+    @Test
+    void onTemurinThePatchCheckAsksAdoptiumsCatalogAndNeverAzuls() throws IOException {
+        var app = install();
+        var jre = Files.createDirectories(tmp.resolve("jre/jdk-25.0.5+8-jre"));
+        Files.writeString(jre.resolve("release"), "IMPLEMENTOR=\"Eclipse Adoptium\"\nLIBC=\"default\"\n");
+        var env = new Environment(app, jre, "25.0.5", "Eclipse Adoptium", "Temurin-25.0.5+8", "Linux", "amd64", false);
+        var asked = new ArrayList<String>();
+        var payload = Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"));
+        Interceptor catalogs = chain -> {
+            asked.add(chain.request().url().toString());
+            return answer(chain.request(), "api.adoptium.net".equals(chain.request().url().host()) ? 200 : 500, payload);
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(catalogs).build();
+
+        var latest = latestFrom(client, env);
+
+        assertEquals(List.of("https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre"
+                + "&os=linux&vendor=eclipse"), asked);
+        assertEquals(Vendor.TEMURIN, latest.vendor());
+        assertEquals("25.0.5.1", latest.version());
+        assertEquals(latest, JavaRuntimeService.stageable(env, latest, null, false));
+        assertRefused("Java 25.0.5.1 is up to date.", new Environment(app, jre, "25.0.5.1", "Eclipse Adoptium",
+                "Linux", "amd64", false), latest, null, false);
+
+        // A musl runtime asks for Alpine's build.
+        Files.writeString(jre.resolve("release"), "IMPLEMENTOR=\"Eclipse Adoptium\"\nLIBC=\"musl\"\n");
+        asked.clear();
+        assertThrows(IOException.class, () -> latestFrom(client, env));
+        assertEquals(List.of("https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre"
+                + "&os=alpine-linux&vendor=eclipse"), asked);
+    }
+
+    @Test
+    void aSystemAdoptiumHasNoJreForIsAnAnswerThatRefusesTheSwitchWithItsReason() throws IOException {
+        var app = install();
+        var jre = zuluHome("jre/zulu25-win_aarch64", "25.0.5.1", "Zulu25.38+201-CA");
+        var windows = new Environment(app, jre, "25.0.5.1", "Azul Systems, Inc.", "Windows 11", "aarch64", false);
+        var calls = new AtomicInteger();
+        Interceptor empty = chain -> {
+            calls.incrementAndGet();
+            return answer(chain.request(), 200, "[]");
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(empty).build();
+        var lookup = new JavaRuntimeService.Lookup(Vendor.TEMURIN);
+        JavaRuntimeService.Catalog adoptium = () -> JavaRuntimeService.fetchLatest(windows, Vendor.TEMURIN, 25);
+        var why = "Adoptium's catalog lists no Java 25 runtime for windows/aarch64.";
+
+        assertEquals(new Answer(null, why), HttpFactories.callWith(client, () -> lookup.answer(true, adoptium)));
+        // An answer, so it is kept like a release rather than asked again at every look.
+        assertEquals(new Answer(null, why), HttpFactories.callWith(client, () -> lookup.answer(false, adoptium)));
+        assertEquals(1, calls.get());
+        var e = assertThrows(IllegalStateException.class,
+                () -> JavaRuntimeService.stageable(windows, new Answer(null, why), null, false));
+        assertEquals(why, e.getMessage());
+        assertEquals(List.of(new Switch(Vendor.TEMURIN, null, why)),
+                HttpFactories.callWith(client, () -> JavaRuntimeService.switches(windows, true)));
+        assertEquals(2, calls.get());
+
+        var bsd = new Environment(app, jre, "25.0.5.1", "Azul Systems, Inc.", "FreeBSD", "amd64", false);
+        assertEquals(List.of(new Switch(Vendor.TEMURIN, null, "Adoptium builds no Java for FreeBSD on amd64.")),
+                HttpFactories.callWith(client, () -> JavaRuntimeService.switches(bsd, true)));
+        assertEquals(2, calls.get(), "a system with no name in Adoptium's catalog is never asked about");
+
+        // Unreachable is not an answer: the panel says it could not check.
+        Interceptor down = chain -> answer(chain.request(), 503, "unavailable");
+        assertEquals(new Answer(null, "Couldn't check Adoptium's catalog for a newer Java."),
+                HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(down).build(),
+                        () -> new JavaRuntimeService.Lookup(Vendor.TEMURIN).answer(true, adoptium)));
+    }
+
+    @Test
+    void aSwitchToTheOtherVendorIsStagedAtTheSameVersionAndRefusedForAnOlderOne() throws IOException {
+        var app = install();
+        var zulu = env(app, zuluHome("jre/zulu25/Contents/Home", "25.0.5.1", "Zulu25.38+201-CA"), "25.0.5.1",
+                "Zulu25.38+201-CA");
+
+        var same = temurin("25.0.5.1");
+        assertEquals(same, JavaRuntimeService.stageable(zulu, same, null, false));
+        assertRefused("Java 25.0.5.1 is up to date.", zulu, release("25.0.5.1", "25.38.201"), null, false);
+        var newer = temurin("25.0.6");
+        assertEquals(newer, JavaRuntimeService.stageable(zulu, newer, null, false));
+        assertRefused("Temurin 25.0.5 is older than the Zulu 25.0.5.1 JClaw runs on, so switching to it would undo fixes.",
+                zulu, temurin("25.0.5"), null, false);
+        assertRefused("A newer Java is already downloading.", zulu, same, null, true);
+        assertRefused("Java 25.0.6 will be installed at the next restart.", zulu, same,
+                new JavaRuntimeService.Staged("25.0.6", hash("C3"), ARCHIVE, null, Vendor.TEMURIN), false);
+
+        var onTemurin = new Environment(app, zulu.javaHome(), "25.0.5.1", "Eclipse Adoptium", "Mac OS X", "aarch64", false);
+        assertRefused("Zulu 25.0.5 is older than the Temurin 25.0.5.1 JClaw runs on, so switching to it would undo fixes.",
+                onTemurin, release("25.0.5", "25.38.107"), null, false);
+        assertEquals(release("25.0.5.1", "25.38.201"),
+                JavaRuntimeService.stageable(onTemurin, release("25.0.5.1", "25.38.201"), null, false));
+    }
+
+    @Test
+    void theSwitchesAreTheOtherVendorOnTheBuiltInJavaEitherOnAHostJavaAndNoneElsewhere() throws IOException {
+        var app = install();
+        var payload = Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"));
+        var zuluName = "zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz";
+        Interceptor catalogs = chain -> "api.azul.com".equals(chain.request().url().host())
+                ? answer(chain.request(), 200, "[" + entry(zuluName, "[25,0,5,1]", "[25,38,201,0]", "A1") + "]")
+                : answer(chain.request(), 200, payload);
+        var client = new OkHttpClient.Builder().addInterceptor(catalogs).build();
+        var jre = Files.createDirectories(tmp.resolve("jre/Home"));
+        var system = Files.createDirectories(tmp.resolve("system"));
+
+        assertEquals(List.of(new Switch(Vendor.TEMURIN, "25.0.5.1", null)), switches(client,
+                new Environment(app, jre, "25.0.5.1", "Azul Systems, Inc.", "Linux", "amd64", false)));
+        assertEquals(List.of(new Switch(Vendor.ZULU, "25.0.5.1", null)), switches(client,
+                new Environment(app, jre, "25.0.5.1", "Eclipse Adoptium", "Linux", "amd64", false)));
+        assertEquals(List.of(new Switch(Vendor.ZULU, "25.0.5.1", null), new Switch(Vendor.TEMURIN, "25.0.5.1", null)),
+                switches(client, new Environment(app, system, "27.0.1", "Oracle Corporation", "Linux", "amd64", false)));
+        assertEquals(List.of(new Switch(Vendor.ZULU, "25.0.5.1",
+                                "Zulu 25.0.5.1 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes."),
+                        new Switch(Vendor.TEMURIN, "25.0.5.1",
+                                "Temurin 25.0.5.1 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.")),
+                switches(client, new Environment(app, system, "25.0.6", "Oracle Corporation", "Linux", "amd64", false)));
+
+        assertEquals(List.of(), switches(client, new Environment(app, jre, "25.0.5.1", "Azul Systems, Inc.", "Linux",
+                "amd64", true)));
+        assertEquals(List.of(), switches(client, new Environment(checkout(), system, "25.0.5.1", "Azul Systems, Inc.",
+                "Linux", "amd64", false)));
+        assertEquals(List.of(), switches(client, wsl(app, system)));
+    }
+
     // --- What a download may do ---
 
     @Test
@@ -294,7 +492,7 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "25.0.3", false), managed, null, false));
         assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "25.0.5", false), managed, null, false));
         assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "27.0.1", false), managed, null, false));
-        assertRefused("Java 25.0.5 is older than the Java 25.0.5.1 JClaw runs on, so switching to it would undo fixes.",
+        assertRefused("Zulu 25.0.5 is older than the Java 25.0.5.1 JClaw runs on, so switching to it would undo fixes.",
                 env(app, system, "25.0.5.1", false), managed, null, false);
 
         var host = env(app, system, "25.0.3", false);
@@ -323,25 +521,29 @@ class JavaRuntimeServiceTest extends UnitTest {
     }
 
     @Test
-    void theSwitchInstallsTheManagedMajorWhateverMajorTheHostRuns() throws IOException {
-        var latest = release("25.0.5");
+    void theSwitchInstallsTheManagedMajorFromTheVendorAskedForWhateverMajorTheHostRuns() throws IOException {
         var asked = new ArrayList<String>();
         var name = "zulu25.38.107-ca-jre25.0.5-linux_x64.tar.gz";
-        Interceptor catalog = chain -> {
-            asked.add(chain.request().url().queryParameter("java_version"));
-            return answer(chain.request(), 200, "[" + entry(name, "[25,0,5]", "[25,38,107,0]", "D4") + "]");
+        var adoptium = Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"));
+        Interceptor catalogs = chain -> {
+            var url = chain.request().url();
+            asked.add(url.toString());
+            return "api.azul.com".equals(url.host())
+                    ? answer(chain.request(), 200, "[" + entry(name, "[25,0,5]", "[25,38,107,0]", "D4") + "]")
+                    : answer(chain.request(), 200, adoptium);
         };
-        var client = new OkHttpClient.Builder().addInterceptor(catalog).build();
-        var host25 = new Environment(tmp.resolve("jclaw"), javaHome("host25", "default"), "25.0.3", "Eclipse Adoptium",
-                "Linux", "amd64", false);
+        var client = new OkHttpClient.Builder().addInterceptor(catalogs).build();
         var host27 = new Environment(tmp.resolve("jclaw"), javaHome("host27", "default"), "27.0.1", "Eclipse Adoptium",
                 "Linux", "amd64", false);
 
-        assertEquals(latest, HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host25, latest, true)));
-        assertEquals(List.of(), asked);
-        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + name, hash("D4"), name, null, "25.38.107"),
-                HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host27, release("27.0.2"), true)));
-        assertEquals(List.of("25"), asked);
+        assertEquals(new Answer(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + name, hash("D4"), name, null,
+                        "25.38.107"), null),
+                HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host27, Vendor.ZULU, true)));
+        assertEquals("25.0.5.1", HttpFactories.callWith(client,
+                () -> JavaRuntimeService.managed(host27, Vendor.TEMURIN, true)).release().version());
+        assertEquals(List.of(JavaRuntimeService.catalogUrl(25, "linux", "x64"),
+                "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre&os=linux&vendor=eclipse"),
+                asked);
     }
 
     @Test
@@ -393,9 +595,10 @@ class JavaRuntimeServiceTest extends UnitTest {
         JavaRuntimeService.requestStage(env, latest, progress, (r, home, p) -> stage(client, r, home, p));
         waitUntil(() -> !progress.active());
         assertNull(progress.lastError());
-        assertEquals("version=25.0.5\nsha256=" + sha(bytes) + "\narchive=" + ARCHIVE + "\nbuild=25.38.107\n",
+        assertEquals("version=25.0.5\nsha256=" + sha(bytes) + "\narchive=" + ARCHIVE + "\nbuild=25.38.107\nvendor=Zulu\n",
                 Files.readString(tmp.resolve("jre.staged/manifest")));
-        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE, "25.38.107"), JavaRuntimeService.staged(tmp));
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE, "25.38.107", Vendor.ZULU),
+                JavaRuntimeService.staged(tmp));
     }
 
     @Test
@@ -461,9 +664,9 @@ class JavaRuntimeServiceTest extends UnitTest {
 
         var staged = stage(serving(bytes), new Release("25.0.5", URL, sha(bytes), ARCHIVE), home, progress);
 
-        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE), staged);
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE, null, Vendor.ZULU), staged);
         assertEquals(staged, JavaRuntimeService.staged(home));
-        assertEquals("version=25.0.5\nsha256=" + sha(bytes) + "\narchive=" + ARCHIVE + "\n",
+        assertEquals("version=25.0.5\nsha256=" + sha(bytes) + "\narchive=" + ARCHIVE + "\nvendor=Zulu\n",
                 Files.readString(home.resolve("jre.staged/manifest")));
         assertEquals(List.of("manifest", ARCHIVE), listing(home.resolve("jre.staged")));
         assertEquals("a Zulu JRE", Files.readString(home.resolve("jre.staged/" + ARCHIVE)));
@@ -512,7 +715,7 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertFalse(Files.exists(home.resolve("jre.staged")));
 
         var at = stage(declaring(cap, bytes), new Release("25.0.5", URL, sha(bytes), ARCHIVE), home, new Download());
-        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE), at);
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(bytes), ARCHIVE, null, Vendor.ZULU), at);
     }
 
     @Test
@@ -537,6 +740,70 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals("refusing a redirect to downloads.example.org: Java is only downloaded from cdn.azul.com",
                 redirected.getMessage());
         assertFalse(Files.exists(home.resolve("jre.staged")));
+    }
+
+    @Test
+    void temurinIsFetchedOnlyFromAdoptiumsGitHubReleasesAndTheAssetHostTheyRedirectTo() throws IOException {
+        var home = Files.createDirectories(tmp.resolve("home"));
+        var bytes = "a Temurin JRE".getBytes(StandardCharsets.UTF_8);
+        var release = temurin("25.0.5.1");
+        var good = new Release(release.version(), release.url(), sha(bytes), release.archive(), null, null,
+                Vendor.TEMURIN, null);
+        var requests = new AtomicInteger();
+
+        for (var url : List.of("https://github.com/someone/temurin25-binaries/releases/download/x/" + good.archive(),
+                "http://github.com/adoptium/temurin25-binaries/" + good.archive(),
+                "https://release-assets.githubusercontent.com/github-production-release-asset/1/2",
+                "https://cdn.azul.com/zulu/bin/" + good.archive())) {
+            var e = assertThrows(IOException.class, () -> stage(counting(requests, bytes),
+                    new Release(good.version(), url, good.sha256(), good.archive(), null, null, Vendor.TEMURIN, null),
+                    home, new Download()));
+            assertEquals("refusing " + url + ": Java is only downloaded over HTTPS from github.com/adoptium", e.getMessage());
+        }
+        assertEquals(0, requests.get());
+
+        for (var landed : List.of("https://objects.githubusercontent.com/x", "https://github.com/someone/x",
+                "https://cdn.azul.com/zulu/bin/" + good.archive())) {
+            var e = assertThrows(IOException.class, () -> stage(landingOn(landed, bytes), good, home, new Download()));
+            assertEquals("refusing a redirect to " + HttpUrl.get(landed).host() + ": Java is only downloaded from "
+                    + "github.com/adoptium or release-assets.githubusercontent.com", e.getMessage());
+            assertFalse(Files.exists(home.resolve("jre.staged")));
+        }
+
+        var wrong = sha("another".getBytes(StandardCharsets.UTF_8));
+        var mismatch = assertThrows(IOException.class, () -> stage(serving(bytes), new Release(good.version(), good.url(),
+                wrong, good.archive(), null, null, Vendor.TEMURIN, null), home, new Download()));
+        assertEquals("checksum mismatch: Adoptium's catalog gives " + wrong + ", the download is " + sha(bytes),
+                mismatch.getMessage());
+        var noHash = assertThrows(IOException.class, () -> stage(serving(bytes), new Release(good.version(), good.url(),
+                null, good.archive(), null, null, Vendor.TEMURIN, null), home, new Download()));
+        assertEquals("Adoptium's catalog gave no SHA-256 for " + good.archive(), noHash.getMessage());
+        assertFalse(Files.exists(home.resolve("jre.staged")));
+
+        // Where GitHub sends every Adoptium binary, measured 2026-11-20.
+        var staged = stage(landingOn("https://release-assets.githubusercontent.com/github-production-release-asset/"
+                + "901810329/59ebb207", bytes), good, home, new Download());
+        assertEquals(new JavaRuntimeService.Staged("25.0.5.1", sha(bytes), good.archive(), null, Vendor.TEMURIN), staged);
+        assertEquals("version=25.0.5.1\nsha256=" + sha(bytes) + "\narchive=" + good.archive() + "\nvendor=Temurin\n",
+                Files.readString(home.resolve("jre.staged/manifest")));
+        assertEquals(staged, JavaRuntimeService.staged(home));
+    }
+
+    @Test
+    void acrossVendorsOnlyTheJavaVersionsCompare() throws IOException {
+        assertEquals(1, Integer.signum(JavaRuntimeService.compareBuilds(Vendor.ZULU, "25.0.5", "25.38.107",
+                Vendor.ZULU, "25.0.5", "25.38.105")));
+        assertEquals(0, JavaRuntimeService.compareBuilds(Vendor.ZULU, "25.0.5", "25.38.107",
+                Vendor.TEMURIN, "25.0.5", "25.38.105"));
+        assertEquals(0, JavaRuntimeService.compareBuilds(null, "25.0.5", "25.38.107", null, "25.0.5", "25.38.105"));
+        assertEquals(1, Integer.signum(JavaRuntimeService.compareBuilds(Vendor.TEMURIN, "25.0.5.1", null,
+                Vendor.ZULU, "25.0.5", "25.38.107")));
+
+        var app = install();
+        var zulu = env(app, Files.createDirectories(tmp.resolve("jre/Home")), "25.0.5", "Zulu25.38+105-CA");
+        var numbered = new Release("25.0.5", URL, hash("C3"), ARCHIVE, null, "25.38.107", Vendor.TEMURIN, null);
+        assertFalse(JavaRuntimeService.isNewer(numbered, zulu), "another vendor's build number orders nothing");
+        assertTrue(JavaRuntimeService.isNewer(release("25.0.5", "25.38.107"), zulu));
     }
 
     @Test
@@ -579,6 +846,15 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE, "25.38.107"), JavaRuntimeService.staged(home));
         Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE + "\nbuild=25.38-1\n");
         assertNull(JavaRuntimeService.staged(home));
+
+        Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE + "\nvendor=Temurin\n");
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE, null, Vendor.TEMURIN), JavaRuntimeService.staged(home));
+        // jclaw.sh takes the two names exactly as written, so the panel does too.
+        for (var vendor : List.of("temurin", "Corretto", "")) {
+            Files.writeString(dir.resolve("manifest"), "version=25.0.5\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE
+                    + "\nvendor=" + vendor + "\n");
+            assertNull(JavaRuntimeService.staged(home), vendor);
+        }
     }
 
     @Test
@@ -775,6 +1051,31 @@ class JavaRuntimeServiceTest extends UnitTest {
 
     private static Release release(String version) {
         return new Release(version, URL, hash("C3"), ARCHIVE);
+    }
+
+    private static Release temurin(String version) {
+        var name = "OpenJDK25U-jre_aarch64_mac_hotspot_" + version + "_2.tar.gz";
+        return new Release(version, "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-" + version
+                + "%2B2/" + name, hash("D4"), name, null, null, Vendor.TEMURIN, null);
+    }
+
+    private static Environment vendored(Path app, Path javaHome, String vendor) {
+        return new Environment(app, javaHome, "25.0.5", vendor, "Mac OS X", "aarch64", false);
+    }
+
+    private static List<Switch> switches(OkHttpClient client, Environment env) {
+        return HttpFactories.callWith(client, () -> JavaRuntimeService.switches(env, true));
+    }
+
+    /** One entry of Adoptium's {@code assets/latest} answer, shaped as its live payload is. */
+    private static String temurinEntry(String releaseName, int major, int minor, int security, Integer patch, int build) {
+        var name = "OpenJDK25U-jre_x64_linux_hotspot_" + major + "." + minor + "." + security
+                + (patch != null && patch > 0 ? "." + patch : "") + "_" + build + ".tar.gz";
+        return "{\"binary\":{\"architecture\":\"x64\",\"image_type\":\"jre\",\"jvm_impl\":\"hotspot\",\"os\":\"linux\","
+                + "\"package\":{\"checksum\":\"" + hash("E5") + "\",\"link\":\"https://github.com/adoptium/temurin25-binaries/"
+                + "releases/download/" + releaseName.replace("+", "%2B") + "/" + name + "\",\"name\":\"" + name + "\"}},"
+                + "\"release_name\":\"" + releaseName + "\",\"version\":{\"build\":" + build + ",\"major\":" + major
+                + ",\"minor\":" + minor + (patch == null ? "" : ",\"patch\":" + patch) + ",\"security\":" + security + "}}";
     }
 
     private static Release release(String version, String build) {
