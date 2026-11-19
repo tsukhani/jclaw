@@ -158,6 +158,7 @@ const endLabels = computed(() => {
 })
 
 const TIP_W = 224
+const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1)}%`
 const active = ref<number | null>(null)
 const activeSlot = computed(() => (active.value === null ? null : slots.value[active.value]!))
 const tipLeft = computed(() => {
@@ -171,15 +172,19 @@ function onPointer(e: PointerEvent) {
   const left = svg.getBoundingClientRect().left
   active.value = Math.max(0, Math.min(SLOTS - 1, Math.floor((e.clientX - left - ML) / slotW.value)))
 }
-function onKey(e: KeyboardEvent) {
-  const days = recorded.value.map(s => s.i)
-  if (!days.length) return
-  const at = active.value === null ? -1 : days.indexOf(active.value)
-  if (e.key === 'ArrowLeft') active.value = days[Math.max(0, at - 1)]!
-  else if (e.key === 'ArrowRight') active.value = days[Math.min(days.length - 1, at + 1)]!
-  else if (e.key === 'Escape') active.value = null
-  else return
-  e.preventDefault()
+// The range steps through the sampled days only; a day the pointer picked without a sample reads as the newest.
+const dayIndex = computed(() => {
+  const at = recorded.value.findIndex(s => s.i === active.value)
+  return at === -1 ? recorded.value.length - 1 : at
+})
+const dayText = computed(() => {
+  const s = recorded.value[dayIndex.value]
+  if (!s) return ''
+  return `${dayLabel(s.day, true)}: data file ${formatSize(s.file)}, in use ${formatSize(s.live)}, free space `
+    + `${formatSize(s.file - s.live)}, ${pct(s.file - s.live, s.file)}`
+})
+function onDay(e: Event) {
+  active.value = recorded.value[Number((e.target as HTMLInputElement).value)]?.i ?? null
 }
 function onFocus() {
   if (active.value === null) active.value = recorded.value.at(-1)?.i ?? null
@@ -195,10 +200,8 @@ const summary = computed(() => {
   }
   return `The data file by day, ${dayLabel(a.day)} to ${dayLabel(z.day, true)}: from ${formatSize(a.file)} to `
     + `${formatSize(z.file)}; in use from ${formatSize(a.live)} to ${formatSize(z.live)}; free space from `
-    + `${formatSize(a.file - a.live)} to ${formatSize(z.file - z.live)}. Arrow keys step through the days.`
+    + `${formatSize(a.file - a.live)} to ${formatSize(z.file - z.live)}.`
 })
-
-const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1)}%`
 </script>
 
 <template>
@@ -224,10 +227,8 @@ const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1
           />Free space a compaction would remove
         </span>
       </div>
-      <!-- One switch of two pressed-state buttons, named as a group like the other view toggles; a fieldset would make it a form section. -->
-      <div
+      <fieldset
         class="inline-flex border border-border text-xs"
-        role="group"
         aria-label="Chart form"
       >
         <button
@@ -242,27 +243,22 @@ const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1
         >
           {{ f === 'columns' ? 'Columns' : 'Area' }}
         </button>
-      </div>
+      </fieldset>
     </div>
 
     <div
       ref="box"
-      class="relative"
+      class="relative focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-fg-strong"
     >
-      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- a focusable chart: the arrow keys step the tooltip through the days, and role img keeps the summary as its name -->
       <svg
         :viewBox="`0 0 ${width} ${H}`"
         :width="width"
         :height="H"
-        class="block w-full overflow-visible focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg-strong"
+        class="block w-full overflow-visible"
         role="img"
         :aria-label="summary"
-        tabindex="0"
         @pointermove="onPointer"
         @pointerleave="active = null"
-        @keydown="onKey"
-        @focus="onFocus"
-        @blur="active = null"
       >
         <g
           v-for="t in axis.ticks"
@@ -419,12 +415,29 @@ const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1
           >in use</tspan></text>
         </g>
       </svg>
+      <input
+        v-if="recorded.length"
+        type="range"
+        class="sr-only"
+        aria-label="Day shown in the chart"
+        min="0"
+        :max="recorded.length - 1"
+        step="1"
+        :value="dayIndex"
+        :aria-valuetext="dayText"
+        data-testid="db-growth-day"
+        @input="onDay"
+        @focus="onFocus"
+        @blur="active = null"
+        @keydown.esc="active = null"
+      >
 
+      <!-- Hidden from screen readers: the range above speaks the same day, and a live region would say it twice. -->
       <div
         v-if="activeSlot"
         class="pointer-events-none absolute z-10 border border-border bg-surface px-2.5 py-2 text-xs tabular-nums whitespace-nowrap shadow-lg"
         :style="{ left: `${tipLeft}px`, top: `${MT}px`, width: `${TIP_W}px` }"
-        aria-live="polite"
+        aria-hidden="true"
         data-testid="db-growth-tip"
       >
         <div class="mb-0.5 font-medium text-fg-strong">

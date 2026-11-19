@@ -197,6 +197,22 @@ describe('Settings → Database → Where the space goes', () => {
     expect(c.find('[data-testid="db-growth-part-MESSAGE"]').classes()).toContain('opacity-30')
   })
 
+  it('keeps a tapped part named after the pointer leaves it, until focus moves on', async () => {
+    growth = sampled()
+    const c = await mount()
+    const readout = c.find('[data-testid="db-growth-parts-readout"]')
+    const part = c.find('[data-testid="db-growth-part-EVENT_LOG"]')
+    expect([c.find('[data-testid="db-growth-parts"]').element.tagName, part.element.parentElement!.tagName,
+      part.element.tagName]).toEqual(['UL', 'LI', 'BUTTON'])
+
+    await part.trigger('pointerenter')
+    await part.trigger('pointerleave')
+    await part.trigger('click')
+    expect(readout.text()).toBe('EVENT_LOG: 150.0 MB, 15.0% of the file')
+    await part.trigger('blur')
+    expect(readout.text()).toBe('The file today, by part. Each row below wears its part\'s color.')
+  })
+
   it('keeps the ten largest tables in view and sums the rest in one row that expands', async () => {
     const tables = Array.from({ length: 12 }, (_, i) => table(`T${String(i).padStart(2, '0')}`, (12 - i) * MB, i + 1,
       { day: { bytes: MB, rows: 1 } }))
@@ -221,29 +237,43 @@ describe('Settings → Database → Where the space goes', () => {
     expect(chart.attributes('data-form')).toBe('columns')
     expect(chart.findAll('[data-testid="db-growth-column"]')).toHaveLength(2)
     expect(chart.find('svg').attributes('aria-label')).toBe('The data file by day, 16 Nov to 17 Nov 2026: from 900.0 MB '
-      + 'to 1000.0 MB; in use from 700.0 MB to 750.0 MB; free space from 200.0 MB to 250.0 MB. Arrow keys step through the days.')
+      + 'to 1000.0 MB; in use from 700.0 MB to 750.0 MB; free space from 200.0 MB to 250.0 MB.')
     expect(chart.findAll('svg text').map(t => t.text())).toContain('No samples before 16 Nov')
     expect(chart.find('[data-testid="db-growth-area-note"]').exists()).toBe(false)
   })
 
-  it('steps a tooltip through the sampled days from the keyboard', async () => {
+  it('steps a tooltip through the sampled days with a native range, which reads each day out', async () => {
     growth = sampled({ fileTrend: [fileDay('2026-11-16', 900, 700), fileDay('2026-11-17', 1000, 750)] })
     const c = await mount()
-    const svg = c.find('[data-testid="db-growth-file"] svg')
-    await svg.trigger('focus')
+    const chart = c.find('[data-testid="db-growth-file"]')
+    expect(chart.find('svg').attributes('tabindex'), 'the chart itself takes no focus').toBeUndefined()
+    const day = chart.find('[data-testid="db-growth-day"]')
+    expect([day.attributes('type'), day.attributes('min'), day.attributes('max'), day.attributes('aria-label')])
+      .toEqual(['range', '0', '1', 'Day shown in the chart'])
+
+    await day.trigger('focus')
     expect(childTexts(c.find('[data-testid="db-growth-tip"]').element))
       .toEqual(['17 Nov 2026', 'Data file1000.0 MB', 'In use750.0 MB', 'Free space250.0 MB · 25.0%'])
-    await svg.trigger('keydown', { key: 'ArrowLeft' })
+    expect(c.find('[data-testid="db-growth-tip"]').attributes('aria-hidden')).toBe('true')
+    expect(day.attributes('aria-valuetext'))
+      .toBe('17 Nov 2026: data file 1000.0 MB, in use 750.0 MB, free space 250.0 MB, 25.0%')
+
+    await day.setValue('0')
     expect(childTexts(c.find('[data-testid="db-growth-tip"]').element)[0]).toBe('16 Nov 2026')
-    await svg.trigger('keydown', { key: 'ArrowLeft' })
-    expect(childTexts(c.find('[data-testid="db-growth-tip"]').element)[0], 'the oldest day is the end').toBe('16 Nov 2026')
-    await svg.trigger('keydown', { key: 'Escape' })
+    expect(day.attributes('aria-valuetext'))
+      .toBe('16 Nov 2026: data file 900.0 MB, in use 700.0 MB, free space 200.0 MB, 22.2%')
+    await day.trigger('keydown', { key: 'Escape' })
     expect(c.find('[data-testid="db-growth-tip"]').exists()).toBe(false)
+
+    await day.trigger('focus')
+    await day.trigger('blur')
+    expect(c.find('[data-testid="db-growth-tip"]').exists(), 'leaving the range closes the tooltip').toBe(false)
   })
 
   it('switches to an area, says how to read it, and keeps the choice for the next visit', async () => {
     growth = sampled({ fileTrend: [fileDay('2026-11-16', 900, 700), fileDay('2026-11-17', 1000, 750)] })
     const c = await mount()
+    expect(c.find('fieldset[aria-label="Chart form"]').findAll('button').map(b => b.text())).toEqual(['Columns', 'Area'])
     await c.find('[data-testid="db-growth-form-area"]').trigger('click')
     const chart = c.find('[data-testid="db-growth-file"]')
     expect(chart.attributes('data-form')).toBe('area')
@@ -276,6 +306,7 @@ describe('Settings → Database → Where the space goes', () => {
       .toBe('The area starts with the second day\'s sample; until then each day shows as points.')
     expect(chart.find('svg').attributes('aria-label'))
       .toBe('The data file on 17 Nov 2026: 1000.0 MB, of which 750.0 MB in use and 250.0 MB free.')
+    expect(chart.find('[data-testid="db-growth-day"]').attributes('max'), 'one sampled day is a range of one').toBe('0')
   })
 
   it('opens on Columns and still switches when the browser refuses storage', async () => {

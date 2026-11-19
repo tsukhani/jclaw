@@ -271,30 +271,34 @@ const growthHeader = computed(() => {
       >
         {{ partReadout ?? 'The file today, by part. Each row below wears its part\'s color.' }}
       </p>
-      <!-- Each part takes focus so the keyboard reaches the readout above, as the pointer does. -->
-      <div
+      <ul
         class="flex items-center gap-0.5 h-6"
-        role="list"
         aria-label="The data file today, by part"
         data-testid="db-growth-parts"
       >
-        <div
-          v-for="p in parts"
+        <li
+          v-for="(p, i) in parts"
           :key="p.key"
-          role="listitem"
-          tabindex="0"
-          class="relative h-2 min-w-0.5 basis-0 first:rounded-l-full last:rounded-r-full transition-opacity motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg-strong after:absolute after:inset-x-0 after:-inset-y-2"
-          :class="[p.free ? 'ring-1 ring-inset ring-fg-muted' : '', activePart && activePart !== p.key ? 'opacity-30' : '']"
-          :style="{ flexGrow: p.bytes, background: p.color }"
-          :aria-label="`${p.label}: ${formatSize(p.bytes)}, ${percent(shareOf(p.bytes))} of the file`"
-          :data-testid="`db-growth-part-${p.key}`"
-          :data-bytes="p.bytes"
-          @pointerenter="activePart = p.key"
-          @pointerleave="activePart = null"
-          @focus="activePart = p.key"
-          @blur="activePart = null"
-        />
-      </div>
+          class="flex min-w-0.5 basis-0"
+          :style="{ flexGrow: p.bytes }"
+        >
+          <!-- A tap leaves the pointer before the click arrives, so the click keeps the part named until focus moves on. -->
+          <button
+            type="button"
+            class="relative block h-2 w-full transition-opacity motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg-strong after:absolute after:inset-x-0 after:-inset-y-2"
+            :class="[i === 0 ? 'rounded-l-full' : '', i === parts.length - 1 ? 'rounded-r-full' : '', p.free ? 'ring-1 ring-inset ring-fg-muted' : '', activePart && activePart !== p.key ? 'opacity-30' : '']"
+            :style="{ background: p.color }"
+            :aria-label="`${p.label}: ${formatSize(p.bytes)}, ${percent(shareOf(p.bytes))} of the file`"
+            :data-testid="`db-growth-part-${p.key}`"
+            :data-bytes="p.bytes"
+            @pointerenter="activePart = p.key"
+            @pointerleave="activePart = null"
+            @click="activePart = p.key"
+            @focus="activePart = p.key"
+            @blur="activePart = null"
+          />
+        </li>
+      </ul>
     </div>
 
     <div
