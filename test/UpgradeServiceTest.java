@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import services.UpgradeService;
 
@@ -58,13 +59,24 @@ class UpgradeServiceTest extends UnitTest {
 
     @Test
     void planPinsTheTargetVersionIntoTheArgv() {
-        var plan = UpgradeService.plan("0.17.50");
+        var plan = UpgradeService.planFor("/opt/jclaw/jclaw.sh", 9100, "0.17.50");
 
-        var command = plan.command();
-        assertTrue(command.get(0).endsWith("jclaw.sh"), "helper is jclaw.sh: " + command);
-        assertEquals(List.of("upgrade", "--yes", "--version", "v0.17.50"),
-                command.subList(1, command.size()));
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "upgrade", "--yes", "--version",
+                "v0.17.50"), plan.command());
         assertEquals("0.17.50", plan.targetVersion());
+        assertTrue(UpgradeService.plan("0.17.50").command().getFirst().endsWith("jclaw.sh"));
+    }
+
+    @Test
+    void anUpgradeOnTheDefaultPortStillNamesIt() {
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9000", "upgrade", "--yes", "--version",
+                "v0.17.50"), UpgradeService.planFor("/opt/jclaw/jclaw.sh", 9000, "0.17.50").command());
+    }
+
+    @Test
+    void anUpgradeHandsJclawShThePortThisInstanceListensOn() {
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")),
+                UpgradeService.plan("0.17.50").command().subList(1, 3));
     }
 
     @Test
@@ -77,10 +89,8 @@ class UpgradeServiceTest extends UnitTest {
 
     @Test
     void planWithoutATargetLetsTheHelperResolveTheLatest() {
-        var command = UpgradeService.plan(null).command();
-
-        assertEquals(List.of("upgrade", "--yes"), command.subList(1, command.size()));
-        assertFalse(command.contains("--version"));
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "upgrade", "--yes"),
+                UpgradeService.planFor("/opt/jclaw/jclaw.sh", 9100, null).command());
     }
 
     @Test

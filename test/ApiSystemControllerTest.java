@@ -147,6 +147,8 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(expectedNote(body.get("mode").getAsString()), body.get("note").getAsString());
         assertEquals(1, spawned.size());
         assertTrue(spawned.getFirst().command().contains("restart"));
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")),
+                spawned.getFirst().command().subList(1, 3));
         assertFalse(Files.exists(RestartService.requestFile()), "the operator's restart has no asking conversation");
     }
 

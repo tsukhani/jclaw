@@ -380,6 +380,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         assertTrue(command.contains("jclaw-20260909T120000Z.zip"), () -> "command: " + command);
         assertTrue(command.contains("--yes"), () -> "command: " + command);
         assertTrue(command.getFirst().endsWith("jclaw.sh"), () -> "command: " + command);
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")), command.subList(1, 3));
     }
 
     // --- repair and cleanup ---
@@ -393,6 +394,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         var command = spawned.getFirst().command();
         assertTrue(command.contains("repair"), () -> "command: " + command);
         assertTrue(command.contains("--yes"), () -> "command: " + command);
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")), command.subList(1, 3));
     }
 
     @Test
@@ -403,6 +405,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         assertEquals(1, spawned.size());
         var command = spawned.getFirst().command();
         assertTrue(command.contains("compact") && command.contains("--yes"), () -> "command: " + command);
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")), command.subList(1, 3));
     }
 
     // --- the credentials' old copies (JCLAW-1455) ---

@@ -298,9 +298,21 @@ public final class UpgradeService {
      * @throws IllegalArgumentException if {@code targetVersion} is not a release version
      */
     public static Plan plan(String targetVersion) {
+        return planFor(script().getAbsolutePath(), RestartService.backendPort(), targetVersion);
+    }
+
+    /**
+     * {@link #plan}'s composition with the script and this instance's port passed in, so the argv is assertable
+     * for any port.
+     *
+     * @throws IllegalArgumentException if {@code targetVersion} is not a release version
+     */
+    public static Plan planFor(String scriptPath, int backendPort, String targetVersion) {
         requireReleaseVersion(targetVersion);
         var args = new ArrayList<String>();
-        args.add(script().getAbsolutePath());
+        args.add(scriptPath);
+        args.add("--backend-port");
+        args.add(Integer.toString(backendPort));
         args.add("upgrade");
         args.add("--yes");
         if (targetVersion != null && !targetVersion.isBlank()) {

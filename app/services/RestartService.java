@@ -151,25 +151,36 @@ public final class RestartService {
      * it for its preflight response and tests can assert the argv.
      */
     public static Plan plan() {
-        return planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone());
+        return planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(), backendPort());
+    }
+
+    /**
+     * The port this instance listens on, which every hand-off names: {@code jclaw.sh} starts the replacement on
+     * 9000 unless told otherwise (JF-518). The launcher's {@code --http.port} reaches {@code http.port} through
+     * {@code Play.extractHttpPort}.
+     */
+    public static int backendPort() {
+        return Integer.parseInt(Play.configuration.getProperty("http.port", "9000").trim());
     }
 
     /**
      * The plan-composition rules, with every environment read passed in — so
      * both mode branches are assertable without a live Play in that mode.
      */
-    public static Plan planFor(String scriptPath, boolean dev, boolean developerClone) {
-        return planFor(scriptPath, dev, developerClone, "restart", List.of());
+    public static Plan planFor(String scriptPath, boolean dev, boolean developerClone, int backendPort) {
+        return planFor(scriptPath, dev, developerClone, backendPort, "restart", List.of());
     }
 
     /**
      * The same composition for any subcommand that stops and starts the instance —
      * {@code restore} and {@code repair} (JCLAW-1165) as well as {@code restart}.
      */
-    public static Plan planFor(String scriptPath, boolean dev, boolean developerClone,
+    public static Plan planFor(String scriptPath, boolean dev, boolean developerClone, int backendPort,
                                String subcommand, List<String> extraArgs) {
         var args = new ArrayList<String>();
         args.add(scriptPath);
+        args.add("--backend-port");
+        args.add(Integer.toString(backendPort));
         if (dev) {
             // Dev runs two processes; only the Play backend is ours to bounce.
             // Restarting Nuxt would tear down the dev server that served the
@@ -224,7 +235,7 @@ public final class RestartService {
         if (unavailable != null) {
             throw new IllegalStateException("Cannot run " + subcommand + ": " + unavailable);
         }
-        var plan = planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(),
+        var plan = planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(), backendPort(),
                 subcommand, extraArgs);
         return handOff(plan, "Handing off to jclaw.sh " + subcommand, null);
     }

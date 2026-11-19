@@ -75,9 +75,9 @@ class UpgradeVersionValidationTest extends UnitTest {
     @Test
     void releaseVersionsStillReachTheArgv() {
         for (var version : RELEASE_VERSIONS) {
-            var command = UpgradeService.plan(version).command();
-            assertEquals(List.of("upgrade", "--yes", "--version", "v" + version.replaceFirst("^v", "")),
-                    command.subList(1, command.size()));
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "upgrade", "--yes", "--version",
+                            "v" + version.replaceFirst("^v", "")),
+                    UpgradeService.planFor("/opt/jclaw/jclaw.sh", 9100, version).command());
         }
     }
 
@@ -86,8 +86,8 @@ class UpgradeVersionValidationTest extends UnitTest {
         // Null and blank are the "upgrade me to whatever is newest" path the
         // Settings button takes; rejecting them would take the feature with it.
         for (var version : new String[] {null, "", "   "}) {
-            var command = UpgradeService.plan(version).command();
-            assertEquals(List.of("upgrade", "--yes"), command.subList(1, command.size()));
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "upgrade", "--yes"),
+                    UpgradeService.planFor("/opt/jclaw/jclaw.sh", 9100, version).command());
         }
     }
 }

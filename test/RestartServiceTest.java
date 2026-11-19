@@ -1,6 +1,7 @@
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import services.EventLogger;
 import services.RestartService;
@@ -220,7 +221,7 @@ class RestartServiceTest extends UnitTest {
         assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
                         + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
                         + "for.\", and GET /api/system/restart/progress reports how the restart went.",
-                RestartService.planFor("/opt/jclaw/jclaw.sh", false, false).restartNote());
+                RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, 9000).restartNote());
     }
 
     @Test
@@ -228,7 +229,7 @@ class RestartServiceTest extends UnitTest {
         assertEquals("JClaw stops within a few seconds, and the turn that asked for the restart ends with it. Once "
                         + "JClaw is back, the conversation that asked gets \"JClaw is back after the restart you asked "
                         + "for.\" A dev-mode restart records no progress.",
-                RestartService.planFor("/opt/jclaw/jclaw.sh", true, true).restartNote());
+                RestartService.planFor("/opt/jclaw/jclaw.sh", true, true, 9000).restartNote());
     }
 
     /** The record as any later boot would take it. */
@@ -249,9 +250,9 @@ class RestartServiceTest extends UnitTest {
 
     @Test
     void prodRestartBouncesTheWholeInstance() {
-        var plan = RestartService.planFor("/opt/jclaw/jclaw.sh", false, false);
+        var plan = RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, 9100);
 
-        assertEquals(List.of("/opt/jclaw/jclaw.sh", "restart"), plan.command());
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "restart"), plan.command());
         assertEquals("PROD", plan.mode());
         // Prod is one JVM serving both API and SPA, so there is no second
         // process to spare — backendOnly is meaningless here and stays false.
@@ -263,23 +264,44 @@ class RestartServiceTest extends UnitTest {
     void maintenanceHandoffsCarryTheSubcommandAndItsArguments() {
         // Restore and repair (JCLAW-1165) ride the same helper: the subcommand and its
         // arguments sit where "restart" would, and dev mode still spares the Nuxt server.
-        var prod = RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, "restore", List.of("jclaw-1.zip", "--yes"));
-        assertEquals(List.of("/opt/jclaw/jclaw.sh", "restore", "jclaw-1.zip", "--yes"), prod.command());
+        var prod = RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, 9100, "restore",
+                List.of("jclaw-1.zip", "--yes"));
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", "9100", "restore", "jclaw-1.zip", "--yes"),
+                prod.command());
         assertEquals("PROD", prod.mode());
 
-        var dev = RestartService.planFor("/src/jclaw/jclaw.sh", true, true, "repair", List.of("--yes"));
-        assertEquals(List.of("/src/jclaw/jclaw.sh", "--dev", "repair", "--yes", "--backend-only"), dev.command());
+        var dev = RestartService.planFor("/src/jclaw/jclaw.sh", true, true, 9100, "repair", List.of("--yes"));
+        assertEquals(List.of("/src/jclaw/jclaw.sh", "--backend-port", "9100", "--dev", "repair", "--yes",
+                "--backend-only"), dev.command());
         assertTrue(dev.backendOnly());
     }
 
     @Test
+    void everyHandOffNamesThePortOnAnotherPortAndOnTheDefault() {
+        for (var port : List.of(9100, 9000)) {
+            var p = Integer.toString(port);
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", p, "restart"),
+                    RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, port).command());
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", p, "restore", "jclaw-1.zip", "--yes"),
+                    RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, port, "restore",
+                            List.of("jclaw-1.zip", "--yes")).command());
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", p, "repair", "--yes"),
+                    RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, port, "repair", List.of("--yes"))
+                            .command());
+            assertEquals(List.of("/opt/jclaw/jclaw.sh", "--backend-port", p, "compact", "--yes"),
+                    RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, port, "compact", List.of("--yes"))
+                            .command());
+        }
+    }
+
+    @Test
     void devRestartSparesTheNuxtDevServer() {
-        var plan = RestartService.planFor("/src/jclaw/jclaw.sh", true, true);
+        var plan = RestartService.planFor("/src/jclaw/jclaw.sh", true, true, 9000);
 
         // --backend-only is the whole point in dev: bouncing Nuxt would kill
         // the dev server that served the page issuing the restart, so the
         // browser could never observe the result.
-        assertEquals(List.of("/src/jclaw/jclaw.sh", "--dev", "restart", "--backend-only"),
+        assertEquals(List.of("/src/jclaw/jclaw.sh", "--backend-port", "9000", "--dev", "restart", "--backend-only"),
                 plan.command());
         assertEquals("DEV", plan.mode());
         assertTrue(plan.backendOnly());
@@ -290,12 +312,12 @@ class RestartServiceTest extends UnitTest {
         // A source tree pays precompile + SPA build on a prod restart (minutes);
         // a dist install boots straight from precompiled/ (seconds). The UI
         // words its warning off this flag, so the two must not be conflated.
-        assertTrue(RestartService.planFor("/src/jclaw.sh", false, true).rebuildExpected());
-        assertFalse(RestartService.planFor("/opt/jclaw.sh", false, false).rebuildExpected());
+        assertTrue(RestartService.planFor("/src/jclaw.sh", false, true, 9000).rebuildExpected());
+        assertFalse(RestartService.planFor("/opt/jclaw.sh", false, false, 9000).rebuildExpected());
 
         // Dev never rebuilds the SPA — Nuxt is untouched and Play recompiles
         // lazily on the next request.
-        assertFalse(RestartService.planFor("/src/jclaw.sh", true, true).rebuildExpected());
+        assertFalse(RestartService.planFor("/src/jclaw.sh", true, true, 9000).rebuildExpected());
     }
 
     @Test
@@ -309,6 +331,28 @@ class RestartServiceTest extends UnitTest {
         assertEquals(returned.command(), captured.getFirst().command());
         assertTrue(captured.getFirst().command().getFirst().endsWith("jclaw.sh"));
         assertTrue(captured.getFirst().command().contains("restart"));
+    }
+
+    @Test
+    void aRestartHandsJclawShThePortThisInstanceListensOn() throws Exception {
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        RestartService.requestRestart("the operator", null);
+
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")),
+                captured.getFirst().command().subList(1, 3));
+    }
+
+    @Test
+    void aMaintenanceHandOffHandsJclawShThePortThisInstanceListensOn() throws Exception {
+        var captured = new ArrayList<RestartService.Plan>();
+        RestartService.spawnerForTest = captured::add;
+
+        RestartService.requestMaintenance("compact", List.of("--yes"));
+
+        assertEquals(List.of("--backend-port", Play.configuration.getProperty("http.port")),
+                captured.getFirst().command().subList(1, 3));
     }
 
     @Test
