@@ -324,7 +324,7 @@ public final class ToolResultPruner {
     public static @Nullable String preview(String body, int stored, int thresholdChars) {
         if (stored <= Math.max(thresholdChars, USER_PREVIEW_HEAD_CHARS + USER_PREVIEW_TAIL_CHARS)) return null;
         var handle = ContentHash.handle(stored == body.length() ? body : body.substring(0, stored));
-        return Strings.cutMiddle(body, USER_PREVIEW_HEAD_CHARS, stored - USER_PREVIEW_TAIL_CHARS, left ->
+        return Strings.cutMiddle(body, USER_PREVIEW_HEAD_CHARS, stored - USER_PREVIEW_TAIL_CHARS, _ ->
                 String.format(Locale.ROOT, "\n[message shortened: %,d characters, the middle left out; "
                         + "call ccr_retrieve(\"%s\") for the full text]\n", stored, handle));
     }

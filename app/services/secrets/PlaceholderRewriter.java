@@ -65,7 +65,7 @@ final class PlaceholderRewriter {
         void add(SecretGrant.Binding binding) {
             if (binding.value().isEmpty()) return;
             counts.merge(new Key(binding.skill(), binding.name()), new Count(binding.placeholder(), 1),
-                    (was, one) -> new Count(was.placeholder(), was.times() + 1));
+                    (was, _) -> new Count(was.placeholder(), was.times() + 1));
         }
 
         int times(String skill, String name) {
