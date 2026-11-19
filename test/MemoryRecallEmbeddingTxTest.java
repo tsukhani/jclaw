@@ -85,7 +85,7 @@ class MemoryRecallEmbeddingTxTest extends UnitTest {
 
     @Test
     void withoutAPrecomputedEmbeddingTheCallHappensInsideTheTransaction() {
-        // Control arm. This is the pre-960 behaviour, still reachable through the three-arg
+        // Control arm. This is the pre-960 behavior, still reachable through the three-arg
         // recall — correct for the operator introspection and eval endpoints, which own no
         // transaction boundary to hoist the call out of. Its value here is proving the
         // assertion above is not vacuous.

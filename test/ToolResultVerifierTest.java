@@ -14,7 +14,7 @@ import utils.LatencyTrace;
  * <p>Exercises {@code check} rather than {@code verify} for the verdict cases, so
  * nothing here writes {@code verification.enabled} or {@code verification.skipTools} —
  * play1 runs test classes concurrently and a flipped process-global setting would
- * silently change tool behaviour under whatever else is mid-run.
+ * silently change tool behavior under whatever else is mid-run.
  */
 class ToolResultVerifierTest extends UnitTest {
 

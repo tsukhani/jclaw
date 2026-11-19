@@ -152,7 +152,7 @@ class StreamingToolRoundTest extends UnitTest {
     void cancelledReturnPreservesNonBlankPriorContent() throws Exception {
         // When the round-1 model emitted a preamble before the tool calls
         // ("Looking that up for you…"), the user already saw it streamed.
-        // A cancellation must not replace it with a "(cancelled)" marker.
+        // A cancellation must not replace it with a "(canceled)" marker.
         var emitted = new java.util.concurrent.atomic.AtomicReference<String>();
         var cb = recordingCallbacks(emitted);
         var agent = new models.Agent();

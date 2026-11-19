@@ -160,7 +160,7 @@ class CompactionGateTest extends UnitTest {
     @Test
     void perModelContextWindow_smallWindowTriggers_largeWindowDoesNot() {
         // Two models on the same provider, the conversation override flips
-        // between them and the gate honours each one's window independently.
+        // between them and the gate honors each one's window independently.
         // Tight reserve so we can keep estimated tokens small.
         ConfigService.set("chat.compactionReserveTokens", "500");
         ConfigService.set("chat.compactionReserveTokensFloor", "500");
@@ -216,7 +216,7 @@ class CompactionGateTest extends UnitTest {
         // through to "return current". The key thing this guards: the
         // contextWindow=2000 path was at least evaluated against the right
         // model. We verify model-specific resolution via the no-op-but-distinct
-        // branch by checking that adding more messages CHANGES behaviour.
+        // branch by checking that adding more messages CHANGES behavior.
         var resultGemini = CompactionGate.maybeCompactAndRebuild(
                 agent, conv.id, Set.of(), primary, current);
         // result is still `current` because compact() skipped (no safe boundary),
@@ -232,7 +232,7 @@ class CompactionGateTest extends UnitTest {
         // The gate delegates token counting to ContextWindowManager.estimateTokens
         // which sums tool-call function names + arguments alongside content.
         // We pin this contract here so a regression to "content-only" estimation
-        // would surface as a failing assertion via a behavioural diff.
+        // would surface as a failing assertion via a behavioral diff.
         ConfigService.set("chat.compactionReserveTokens", "100");
         ConfigService.set("chat.compactionReserveTokensFloor", "100");
         configureProviderWithModel("test-model", 400, 256);

@@ -791,7 +791,7 @@ class ParallelToolExecutionTest extends UnitTest {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
 
-        var cancelled = new AtomicBoolean(true); // already cancelled
+        var cancelled = new AtomicBoolean(true); // already canceled
         var calls = List.of(
                 new ToolCall("x", "function", new FunctionCall("slow_a", "{}")),
                 new ToolCall("y", "function", new FunctionCall("slow_b", "{}")));

@@ -116,7 +116,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
 
     @Test
     void anAnswerPerMemoryOrNoAnswersAtAll() {
-        // Answers land on memories by position, so a short array would recategorise the wrong rows.
+        // Answers land on memories by position, so a short array would recategorize the wrong rows.
         assertThrows(JsonParseException.class, () -> CoreMemoryCapMigration.parseAnswers("[\"fact\"]", 3));
         assertThrows(JsonParseException.class,
                 () -> CoreMemoryCapMigration.parseAnswers("[\"fact\",\"lesson\",\"decision\"]", 2));

@@ -668,7 +668,7 @@ class TaskToolTest extends UnitTest {
         assertEquals("markdown", fresh.payloadType);
     }
 
-    // === JCLAW-1407: arguments whose fire-time behaviour is not built ===
+    // === JCLAW-1407: arguments whose fire-time behavior is not built ===
 
     private static final java.util.Map<String, String> UNBUILT_VALUES = java.util.Map.of(
             "repeatLimit", "3", "preCheck", "\"true\"", "contextFromTaskIds", "\"[1]\"",

@@ -16,7 +16,7 @@ import services.ConfigService;
 import java.util.List;
 
 /**
- * JCLAW-1196: the per-turn thinking resolution honours a conversation override ahead of the
+ * JCLAW-1196: the per-turn thinking resolution honors a conversation override ahead of the
  * agent's default, and still intersects with what the effective model advertises.
  */
 class ModelResolverThinkingTest extends UnitTest {

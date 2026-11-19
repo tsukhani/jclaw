@@ -333,7 +333,7 @@ class H2MaintenanceTest extends UnitTest {
         assertEquals(0, H2Maintenance.run(new String[]{"backup", good.toString(), goodZip.toString()}, print));
         assertEquals("checked: a copy of it kept a test write across a reopen", lastLine(out));
 
-        // A closed file that is itself the modelled copy: its offline backup copies it as it is.
+        // A closed file that is itself the modeled copy: its offline backup copies it as it is.
         var torn = BackupFixtures.extractDatabase(BackupFixtures.aCopyTakenWhileWritesLanded(tmp), tmp.resolve("torn"));
         var tornZip = tmp.resolve("torn-backup.zip");
         out.reset();

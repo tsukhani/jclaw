@@ -85,7 +85,7 @@ class PrivilegedConfigTest extends UnitTest {
         assertEquals("deny", PrivilegedConfig.reconcile(POLICY, "deny", "ask"));
         assertEquals("ask", PrivilegedConfig.reconcile(POLICY, "allow", "ask"));
         assertEquals("ask", PrivilegedConfig.reconcile(POLICY, "ask", "allow"));
-        // Unrecognised reads as "allow" at the gate, so it must rank that way here too.
+        // Unrecognized reads as "allow" at the gate, so it must rank that way here too.
         assertEquals("ask", PrivilegedConfig.reconcile(POLICY, "nonsense", "ask"));
     }
 

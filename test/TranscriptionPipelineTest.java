@@ -131,7 +131,7 @@ class TranscriptionPipelineTest extends UnitTest {
     void userMessageForDefaultOverloadStillEmitsInputAudio() throws Exception {
         // Back-compat: the no-supportsAudio-arg overload (existing callers
         // like buildMessages-inside-Tx and VisionAudioAssemblyTest) keeps
-        // pre-JCLAW-165 behaviour. Without this guarantee the streaming
+        // pre-JCLAW-165 behavior. Without this guarantee the streaming
         // path's tests would change shape uninvitedly.
         persistAudioAttachment("clip.mp3", "audio/mpeg", new byte[]{1, 2}, null);
         var fresh = Message.<Message>findById(message.id);

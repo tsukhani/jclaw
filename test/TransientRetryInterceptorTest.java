@@ -109,7 +109,7 @@ class TransientRetryInterceptorTest extends UnitTest {
 
     @Test
     void aRetryAfterOfZeroStillWaits() throws IOException {
-        // Honouring it literally means retrying instantly against a limiter that has
+        // Honoring it literally means retrying instantly against a limiter that has
         // just refused us — the outcome the class's own scoping rationale rules out.
         canned.add(new Canned(429, "0"));
         canned.add(200);

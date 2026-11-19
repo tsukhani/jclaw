@@ -292,7 +292,7 @@ class SubagentYieldToolTest extends UnitTest {
         // wiped the config, so unset returns the hard-coded default.
         assertEquals(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS,
                 SubagentYieldTool.defaultYieldTimeoutSeconds());
-        // A configured value is honoured.
+        // A configured value is honored.
         ConfigService.set(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY, "600");
         assertEquals(600, SubagentYieldTool.defaultYieldTimeoutSeconds());
         // 0 is preserved — it disables the yield watchdog, the exact JCLAW-812

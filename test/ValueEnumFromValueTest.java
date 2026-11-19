@@ -8,7 +8,7 @@ import play.test.UnitTest;
  * replaced the hand-written switch on {@link ChannelType} and
  * {@link MessageRole}. Pins the exact prior semantics: every constant
  * round-trips through its {@code value}, {@code null} input yields
- * {@code null}, and an unrecognised string yields {@code null} (the old
+ * {@code null}, and an unrecognized string yields {@code null} (the old
  * {@code default} arm) rather than throwing.
  */
 class ValueEnumFromValueTest extends UnitTest {

@@ -87,7 +87,7 @@ class NullnessGateConformanceTest extends UnitTest {
     @Test
     void modelsStaysOutOfScope() throws Exception {
         // JPA populates entity fields reflectively after construction, so every non-null
-        // column would report as uninitialised. Re-adding it needs a plan, not a typo.
+        // column would report as uninitialized. Re-adding it needs a plan, not a typo.
         assertFalse(annotatedPackages().contains("models"),
                 "models is excluded on purpose — see the comment in build.gradle.kts. Remove it from "
                         + "NullAway:AnnotatedPackages");

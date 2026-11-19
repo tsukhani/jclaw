@@ -63,7 +63,7 @@ class PrintRenderingTest extends UnitTest {
 
         assertEquals(PrintRenderer.PageSize.a4().width(), fitted.getWidth());
         assertEquals(PrintRenderer.PageSize.a4().height(), fitted.getHeight());
-        // Corners stay white (the letterbox), centre carries the image.
+        // Corners stay white (the letterbox), center carries the image.
         assertEquals(Color.WHITE.getRGB(), fitted.getRGB(5, 5));
         assertEquals(Color.RED.getRGB(),
                 fitted.getRGB(PrintRenderer.PageSize.a4().width() / 2, PrintRenderer.PageSize.a4().height() / 2));
@@ -209,7 +209,7 @@ class PrintRenderingTest extends UnitTest {
         assertEquals(2550, letter.width());
         assertEquals(3300, letter.height());
 
-        // Anything unrecognised is A4 rather than a guessed size — a subtly wrong
+        // Anything unrecognized is A4 rather than a guessed size — a subtly wrong
         // page wastes paper more quietly than an obvious failure.
         var a4 = PrintRenderer.PageSize.a4();
         assertEquals(a4, PrintRenderer.PageSize.fromMedia("iso_a4_210x297mm", 300));
@@ -348,7 +348,7 @@ class PrintRenderingTest extends UnitTest {
         assertEquals("image/pwg-raster", gray.format());
         assertTrue(gray.explanation().contains("600 DPI"), gray.explanation());
         assertTrue(gray.explanation().contains("grayscale"), gray.explanation());
-        // Asking for colour must actually get colour, not be silently overridden.
+        // Asking for color must actually get color, not be silently overridden.
         assertTrue(color.explanation().contains("color"), color.explanation());
         assertTrue(gray.document().length < color.document().length,
                 "grayscale should be smaller: %d vs %d"

@@ -103,7 +103,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         assertEquals(1, ch.sent.size());
         // JCLAW-1133: a 3-part notice, plain — WhatsApp formatting is its own dialect, so the
         // renderer emits none. The old assertion pinned the word "error", which the template
-        // deliberately avoids: naming what broke beats labelling it.
+        // deliberately avoids: naming what broke beats labeling it.
         var sent = ch.sent.get(0);
         assertTrue(sent.contains("What broke"), sent);
         assertTrue(sent.contains("How to retry"), sent);

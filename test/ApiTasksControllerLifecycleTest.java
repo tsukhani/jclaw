@@ -194,7 +194,7 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
     void reenableRejectsLiveTaskWith400() {
         var agentId = seedAgent();
         var taskId = seedTask(agentId, "reenable-live", "every 1h");
-        // Never cancelled — reenable on a live task is a client error.
+        // Never canceled — reenable on a live task is a client error.
         var resp = POST("/api/tasks/" + taskId + "/reenable", "application/json", "");
         assertEquals(400, resp.status.intValue());
     }

@@ -298,7 +298,7 @@ class PrinterToolTest extends UnitTest {
     @Test
     void printerIsNotParallelSafe() {
         // Two jobs racing to one device interleave at the printer, where there is
-        // no undo. Serialisation is the point, not an oversight.
+        // no undo. Serialization is the point, not an oversight.
         assertFalse(new PrinterTool().parallelSafe());
     }
 

@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * JCLAW-215 coverage for the image-caption fallback — the vision analogue of
+ * JCLAW-215 coverage for the image-caption fallback — the vision analog of
  * {@code TranscriptionPipelineTest}. Two layers:
  *
  * <ul>
@@ -133,7 +133,7 @@ class CaptionPipelineTest extends UnitTest {
     @Test
     void defaultOverloadStillEmitsImageUrl() throws Exception {
         // Back-compat: the no-supportsVision-arg overloads keep the pre-JCLAW-215
-        // image_url behaviour so existing callers/tests don't change shape.
+        // image_url behavior so existing callers/tests don't change shape.
         persistImageAttachment("shot.png", "image/png", new byte[]{1, 2}, null);
         var fresh = Message.<Message>findById(message.id);
 

@@ -69,7 +69,7 @@ class GeneratedMediaFileTest extends UnitTest {
 
     /**
      * A caller-supplied name reaches the write straight from model output, so traversal
-     * must be rejected rather than sanitised into something surprising.
+     * must be rejected rather than sanitized into something surprising.
      */
     @Test
     void refusesToWriteOutsideTheWorkspace() {

@@ -17,7 +17,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * Live-capture behaviour (JCLAW-883): what a captured record carries, and that it
+ * Live-capture behavior (JCLAW-883): what a captured record carries, and that it
  * feeds the offline scorer unchanged.
  *
  * <p>Hermetic by construction — every turn here is a substituted

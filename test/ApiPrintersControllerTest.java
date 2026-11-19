@@ -13,7 +13,7 @@ import java.util.List;
  * JCLAW-911's printer endpoints. Everything here runs without a printer on the network:
  * discovery is a live mDNS browse that legitimately finds nothing on a test host, and
  * reachability probes legitimately fail — those are real branches, not degraded ones, and
- * the contract each has to honour is that an absent printer is reported as absent rather
+ * the contract each has to honor is that an absent printer is reported as absent rather
  * than as an error.
  */
 class ApiPrintersControllerTest extends FunctionalTest {

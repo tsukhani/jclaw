@@ -13,7 +13,7 @@ import play.test.UnitTest;
  * carrying the operator's session. Strict withholds the cookie from that navigation.
  *
  * <p>A configuration test on purpose, and the same argument as {@code LogRetentionConfigTest}:
- * whether a browser honours SameSite is the browser's contract, but whether JClaw still asks for
+ * whether a browser honors SameSite is the browser's contract, but whether JClaw still asks for
  * Strict is ours, and it is one commented-out line away from silently reverting to the default.
  * PF-170 fixes the override itself in the fork; this is the layer that does not depend on it.
  */

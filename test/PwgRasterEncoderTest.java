@@ -140,7 +140,7 @@ class PwgRasterEncoderTest extends UnitTest {
     @Test
     void rleRoundTripsRunsAndAlternationAtTheBoundary() throws Exception {
         // Long runs, then strict alternation — the two shapes the encoder switches
-        // between. A wrong boundary here shears colour channels rather than
+        // between. A wrong boundary here shears color channels rather than
         // failing loudly, which is why this decodes rather than eyeballs sizes.
         var w = 300;
         var page = image(w, 2, (x, y) -> x < 200 ? Color.BLACK : (x % 2 == 0 ? Color.RED : Color.BLUE));

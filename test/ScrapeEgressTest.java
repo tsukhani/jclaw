@@ -249,7 +249,7 @@ class ScrapeEgressTest extends UnitTest {
     @Test
     void aDirectCrawlSaysSo() {
         config.set(WebScrapeSettings.PROXY_ENABLED, "false");
-        // Stopped before its first fetch, so nothing is dialled, and still told where it goes out.
+        // Stopped before its first fetch, so nothing is dialed, and still told where it goes out.
         var listener = new Recording(false, true);
 
         crawl("http://8.8.8.8/", listener);

@@ -96,8 +96,8 @@ class GraphEvalHarnessTest extends UnitTest {
     }
 
     /**
-     * The committed set made certifiable: each {@code holds_view_on} labelled with the valence its preference frame
-     * gives, and one {@code unasserted} relation added on an unlabelled pair per case, so the trap set is not empty.
+     * The committed set made certifiable: each {@code holds_view_on} labeled with the valence its preference frame
+     * gives, and one {@code unasserted} relation added on an unlabeled pair per case, so the trap set is not empty.
      */
     private static List<Case> certifiable() throws Exception {
         var known = owner() == null ? List.<String>of() : List.of(owner());

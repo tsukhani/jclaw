@@ -67,7 +67,7 @@ class MemoryToolTest extends UnitTest {
 
     @Test
     void storeWithoutQuestionsLeavesNoKeyRatherThanFailing() {
-        // Pre-529 behaviour: the row is still stored and embeds its statement alone.
+        // Pre-529 behavior: the row is still stored and embeds its statement alone.
         // MemoryKeyBackfillService can key it later.
         call("{\"action\":\"store\",\"text\":\"The staging cluster runs nightly builds\"}");
 
@@ -559,7 +559,7 @@ class MemoryToolTest extends UnitTest {
 
     @Test
     void forgetLeavesMerelyRelatedMemoriesAlone() {
-        // The risk in "remove all matching": a topical query deleting a neighbourhood.
+        // The risk in "remove all matching": a topical query deleting a neighborhood.
         // Matching is the same-fact test capture dedups on, not topical similarity.
         seed("The user keeps the NAS in the basement");
         seed("The user backs up photos to the NAS every Sunday");

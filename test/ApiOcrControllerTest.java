@@ -77,7 +77,7 @@ class ApiOcrControllerTest extends FunctionalTest {
     void statusReflectsProbeAvailability() {
         // Force the probe into both states via the test seam and verify
         // available flips independently of the enabled config row. This is
-        // the key invariant the Settings page depends on for greying out
+        // the key invariant the Settings page depends on for graying out
         // the toggle when the binary is missing.
         var saved = OcrHealthProbe.lastResult();
         try {

@@ -229,7 +229,7 @@ class CredentialReadGateConformanceTest extends UnitTest {
         assertFalse(recordComponentsByType().isEmpty(), "the record index is empty: fix the record pattern in "
                 + "recordComponentsByType for how app/ now declares records");
 
-        // A known credential-shaped member must be recognised, or the predicate proves nothing.
+        // A known credential-shaped member must be recognized, or the predicate proves nothing.
         assertTrue(CREDENTIAL_NAME.matcher("botToken").find(), "CREDENTIAL_NAME no longer matches botToken: fix it");
         assertTrue(CREDENTIAL_NAME.matcher("signingSecret").find(),
                 "CREDENTIAL_NAME no longer matches signingSecret: fix it");

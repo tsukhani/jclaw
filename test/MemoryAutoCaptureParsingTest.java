@@ -155,7 +155,7 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
 
     @Test
     void omittedOrMalformedQuestionsLeaveNoKeyRatherThanFailing() {
-        // Absent is the pre-JCLAW-529 behaviour: the row embeds its statement alone.
+        // Absent is the pre-JCLAW-529 behavior: the row embeds its statement alone.
         assertNull(MemoryAutoCapture.parseCandidates(
                 "[{\"text\":\"t\",\"category\":\"fact\",\"importance\":0.5}]").getFirst().retrievalKey());
         assertNull(MemoryAutoCapture.parseCandidates(
@@ -267,7 +267,7 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
 
     @Test
     void anInventedCategoryTakesTheCoercedBucketsDefaultImportance() {
-        // The latent half of this bug: with no explicit importance, an unrecognised label
+        // The latent half of this bug: with no explicit importance, an unrecognized label
         // fell through defaultImportanceFor to BASELINE rather than to a bucket default.
         var got = MemoryAutoCapture.parseCandidates(
                 "{\"memories\":[{\"text\":\"The user ships on Fridays\",\"category\":\"project\"}]}");

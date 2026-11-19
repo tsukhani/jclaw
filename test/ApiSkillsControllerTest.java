@@ -142,7 +142,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
     /**
      * Write a minimal valid SKILL.md to the global skills registry. The
-     * promote/sanitize pipeline is bypassed — these are the on-disk artefacts
+     * promote/sanitize pipeline is bypassed — these are the on-disk artifacts
      * the controller's read endpoints should report on.
      */
     private Path seedGlobalSkill(String folder, String name, String description) throws Exception {
@@ -912,7 +912,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
     /**
      * Copy is refused with 400 when the global skill declares a tool the
-     * canonical {@code ToolRegistry} doesn't recognise. Verifies the
+     * canonical {@code ToolRegistry} doesn't recognize. Verifies the
      * controller surfaces the validator's message verbatim via renderText.
      */
     @Test

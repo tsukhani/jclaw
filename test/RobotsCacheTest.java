@@ -130,7 +130,7 @@ class RobotsCacheTest extends UnitTest {
 
     @Test
     void aLargeCrawlDelayIsClampedRatherThanParkingTheCrawl() {
-        // Sites do declare tens of seconds. Honouring that literally would park the
+        // Sites do declare tens of seconds. Honoring that literally would park the
         // thread for the whole budget; the cap lets the wall-clock budget end the crawl
         // instead, so the outcome is fewer pages rather than a stalled tool call.
         routes.put(HOST + "/robots.txt", "User-agent: *\nCrawl-delay: 30\n", "text/plain");

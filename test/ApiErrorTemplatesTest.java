@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * Wording defects the JCLAW-60 rubric scoring found in the API templates: a remedy that promised
- * UI behaviour nothing implements, and limits the operator had to go and look up.
+ * UI behavior nothing implements, and limits the operator had to go and look up.
  */
 class ApiErrorTemplatesTest extends UnitTest {
 

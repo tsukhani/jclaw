@@ -47,7 +47,7 @@ class ProviderLocalityTest extends UnitTest {
     @Test
     void ipv6UniqueLocalIsLocal() {
         // Java's isSiteLocalAddress only covers the deprecated fec0::/10 for v6, so
-        // fc00::/7 has to be recognised separately or a ULA host reads as remote.
+        // fc00::/7 has to be recognized separately or a ULA host reads as remote.
         assertTrue(ProviderLocality.isLocalUrl("http://[fd12:3456:789a::1]:11434"));
     }
 
@@ -106,7 +106,7 @@ class ProviderLocalityTest extends UnitTest {
         ConfigService.set(DECLARED_KEY, "false");
         assertFalse(ProviderLocality.isLocal(PROVIDER));
 
-        // Boolean.parseBoolean maps anything unrecognised to false, so a value that slipped
+        // Boolean.parseBoolean maps anything unrecognized to false, so a value that slipped
         // past validation fails closed rather than opening the gate.
         ConfigService.set(DECLARED_KEY, "yes");
         assertFalse(ProviderLocality.isLocal(PROVIDER));

@@ -502,7 +502,7 @@ class ConfigServiceTest extends UnitTest {
     @Test
     void setWithSideEffectsRejectsNonFiniteMinCosine() {
         // getDouble refuses non-finite values since JCLAW-1016, so this guard is not the last
-        // line of defence — it is what turns a silent fallback into an error the operator sees.
+        // line of defense — it is what turns a silent fallback into an error the operator sees.
         var error = ConfigService.setWithSideEffects(
                 memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE, "NaN");
         assertNotNull(error, "a NaN minCosine must be rejected");

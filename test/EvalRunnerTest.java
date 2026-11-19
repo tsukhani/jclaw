@@ -20,7 +20,7 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyP
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 /**
- * Runner and report behaviour (JCLAW-875): suite order, per-case latency and call
+ * Runner and report behavior (JCLAW-875): suite order, per-case latency and call
  * counts, failure isolation, and the JSON round-trip that lets one run become the
  * next run's regression baseline.
  */

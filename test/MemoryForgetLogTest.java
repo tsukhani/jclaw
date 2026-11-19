@@ -67,7 +67,7 @@ class MemoryForgetLogTest extends UnitTest {
         advance(Duration.ofMinutes(10).plusSeconds(1));
 
         // Deliberately a window, not a tombstone: re-learning a fact the operator raises
-        // again later is correct behaviour.
+        // again later is correct behavior.
         assertFalse(MemoryForgetLog.recentlyForgotten(AGENT, FIRST),
                 "the window must expire — this is not a permanent tombstone");
     }

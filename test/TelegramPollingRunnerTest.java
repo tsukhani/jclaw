@@ -385,7 +385,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // still has the old entity. Without clear(), the next reconcile()'s
         // findAllEnabledByTransport returns the cached binding (still
         // tokenA), so the rotation branch never trips. delete- and
-        // disable-flavoured tests don't hit this because their filters
+        // disable-flavored tests don't hit this because their filters
         // exclude the row entirely after the mutation, so cache hit is
         // moot.
         play.db.jpa.JPA.em().clear();

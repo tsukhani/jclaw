@@ -361,7 +361,7 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void whatsappUntrustedOriginDoesNotSpendAStandingGrant() {
         // JCLAW-1226: the grant is the operator's own approval, keyed only by (agent, tool).
-        // Honouring it before the origin was resolved let an untrusted peer on a granted pair
+        // Honoring it before the origin was resolved let an untrusted peer on a granted pair
         // reach an unsandboxed shell without the origin-trust branch ever running. The
         // operator's own use of the same grant is pinned by
         // webConversationDenyPolicyHonorsStandingGrant.
@@ -890,7 +890,7 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void ownerInitiatedTurnSkipsThePromptEntirely() {
         // TelegramAccessPolicy serves a DM only to the binding owner, so by the time a turn
-        // reaches the gate that question is settled. Asking again is noise, not defence.
+        // reaches the gate that question is settled. Asking again is noise, not defense.
         var agent = boundAgent("gate-owner-initiated");
         var convId = telegramConvId(agent);
 

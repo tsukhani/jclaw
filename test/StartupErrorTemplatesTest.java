@@ -186,7 +186,7 @@ class StartupErrorTemplatesTest extends UnitTest {
 
     @Test
     void theConsoleRenderingCarriesNoMarkup() {
-        // The destination is a terminal and a log file: no markup parser, no colour support.
+        // The destination is a terminal and a log file: no markup parser, no color support.
         for (var template : new ErrorTemplate[] {
                 StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"),
                 StartupErrorTemplates.appConfigParseFailure("a.key", "x", "a whole number", "1"),

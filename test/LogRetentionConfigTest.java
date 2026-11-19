@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * so these tests pin both halves apart: retention comes from {@code Delete}, and
  * {@code max} is only the index cap.
  *
- * <p>Testing configuration rather than behaviour is deliberate: whether log4j2 honours a
+ * <p>Testing configuration rather than behavior is deliberate: whether log4j2 honors a
  * {@code Delete} action is log4j2's contract to keep, but whether JClaw still *asks* for
  * one is ours, and that is the half that regressed. Mirrors
  * {@code EvalSuiteConformanceTest}, which fails the build on a malformed dataset for the

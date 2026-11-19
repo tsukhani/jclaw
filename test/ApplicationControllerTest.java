@@ -120,7 +120,7 @@ class ApplicationControllerTest extends FunctionalTest {
      * {@code no-cache} on every response in DEV. If that ran under
      * {@link FunctionalTest}, the shell assertions would still pass with
      * {@code Application.index}'s {@code setHeader} deleted, and this whole
-     * regression guard would be theatre. A content-hashed chunk coming back
+     * regression guard would be theater. A content-hashed chunk coming back
      * {@code immutable} is only possible when nothing is rewriting the header,
      * so this test failing invalidates the two above rather than standing
      * alone — hence the shared assertion message.

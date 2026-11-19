@@ -125,7 +125,7 @@ class MemoryAutoCaptureTest extends UnitTest {
     /**
      * JCLAW-942: the per-turn cap used to keep whichever candidates the extractor emitted
      * first, so a turn stating more facts than the cap allows lost them by position rather
-     * than by worth. Emission order here is worst-first, so the pre-fix behaviour keeps the
+     * than by worth. Emission order here is worst-first, so the pre-fix behavior keeps the
      * coffee machine and discards the build cluster.
      */
     @Test
@@ -441,7 +441,7 @@ class MemoryAutoCaptureTest extends UnitTest {
 
     @Test
     void unknownChannelStaysEligible() {
-        // Capture has always been the default; an unrecognised channel is not a
+        // Capture has always been the default; an unrecognized channel is not a
         // reason to silently drop memories.
         assertTrue(MemoryAutoCapture.channelEligible("some-future-channel"));
         assertTrue(MemoryAutoCapture.channelEligible(null));

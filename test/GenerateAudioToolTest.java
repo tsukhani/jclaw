@@ -186,7 +186,7 @@ class GenerateAudioToolTest extends UnitTest {
     }
 
     /** Skip the codec assertions where ffmpeg is absent (CI images without it) —
-     *  the fallback behaviour is covered separately and is what runs there. */
+     *  the fallback behavior is covered separately and is what runs there. */
     private static void assumeFfmpeg() {
         org.junit.jupiter.api.Assumptions.assumeTrue(FfmpegProbe.probe().available(),
                 "ffmpeg not available; codec selection is untestable here");

@@ -131,7 +131,7 @@ class PrintBackendTest extends UnitTest {
 
             // The daemon read both payloads using ONLY the declared byte counts, so
             // arriving intact proves the length headers were correct — a wrong count
-            // desynchronises the stream and fails in readExactly.
+            // desynchronizes the stream and fails in readExactly.
             assertArrayEquals(document, seen.data());
             assertTrue(seen.control().contains("Ptester"), seen.control());
             assertTrue(seen.control().contains("Jinvoice.pdf"), seen.control());
@@ -166,7 +166,7 @@ class PrintBackendTest extends UnitTest {
                 LpdClient.buildControlFile("h", "u", "job\nHattacker", "dfA001h"),
                 StandardCharsets.US_ASCII);
 
-        // The invariant is about RECORDS, not substrings. Sanitising turns
+        // The invariant is about RECORDS, not substrings. Sanitizing turns
         // "job\nHattacker" into "job_Hattacker", so the text "Hattacker" still
         // appears — harmlessly, inside the J record. What must not happen is a
         // second line STARTING with H, which is what the daemon would parse as a
@@ -415,7 +415,7 @@ class PrintBackendTest extends UnitTest {
 
     @Test
     void aPinnedProtocolIsTheOnlyBackendTried() {
-        // One destination became three dialled ports — 631, 9100 and 515. That is the
+        // One destination became three dialed ports — 631, 9100 and 515. That is the
         // fallback's value for a printer the operator chose, and pure reach for an
         // address the model named, so a named protocol switches the ladder off.
         var raw = PrinterDiscovery.direct("192.0.2.9", 9100, PrintProtocol.RAW);

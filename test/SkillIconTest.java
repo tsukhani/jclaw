@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Covers JCLAW-71's skill-icon behaviour: frontmatter parsing, backward
+ * Covers JCLAW-71's skill-icon behavior: frontmatter parsing, backward
  * compatibility on SkillInfo constructors, and default-icon substitution
  * in the formatted skill entry the system prompt injects.
  */

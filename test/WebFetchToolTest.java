@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Verifies {@link WebFetchTool}'s post-SsrfGuard HTTP path: the manual redirect
  * loop, error surfaces (too many redirects, blank Location, SSL), body
- * truncation, and the {@code html} mode workspace-save filename sanitisation.
+ * truncation, and the {@code html} mode workspace-save filename sanitization.
  *
  * <p>Tests swap {@code WebFetchTool.CLIENT} (package-private test seam) for a
  * client whose {@link Interceptor} returns pre-enqueued responses without
@@ -302,7 +302,7 @@ class WebFetchToolTest extends UnitTest {
         // Note: we intentionally do NOT try to feed weird chars (tilde, etc.)
         // through the host to demonstrate regex replacement — Java's
         // {@link java.net.URI} rejects most sub-delim/unreserved-extended
-        // chars at parse time, so they never reach the sanitisation regex.
+        // chars at parse time, so they never reach the sanitization regex.
         // A normal host exercises the branch; the regex protects against the
         // edge case where a future URI parser is more permissive.
         var body = "z".repeat(70_000);

@@ -54,7 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *       TaskRun and removes its row.</li>
  *   <li>CRON fire self-rescheduling: a successful fire invokes
  *       {@code SchedulerClient.scheduleIfNotExists} with the next cron tick.</li>
- *   <li>CRON fire cancelled-skip: a Task whose status flipped to
+ *   <li>CRON fire canceled-skip: a Task whose status flipped to
  *       CANCELLED is skipped without producing a TaskRun.</li>
  *   <li>INTERVAL drift: completion handler schedules the next fire at
  *       roughly {@code completionTime + intervalSeconds}.</li>
@@ -223,7 +223,7 @@ class TaskExecutionHandlerTest extends UnitTest {
                 stub.schedules.stream().map(s -> s.when).toList());
     }
 
-    // === CRON cancelled-skip ===
+    // === CRON canceled-skip ===
 
     @Test
     void cancelledCronTaskIsSkippedWithoutOpeningRun() throws Exception {
@@ -243,7 +243,7 @@ class TaskExecutionHandlerTest extends UnitTest {
         assertTrue(runs.isEmpty(),
                 "CANCELLED CRON Task must not open a TaskRun");
         // The handler is OnCompleteRemove (defaultCompletion path) — no
-        // self-reschedule because the cancelled-skip falls through to
+        // self-reschedule because the canceled-skip falls through to
         // defaultCompletion() per the handler body.
         assertTrue(handler instanceof CompletionHandler.OnCompleteRemove,
                 "canceled-skip returns OnCompleteRemove; got: " + handler);

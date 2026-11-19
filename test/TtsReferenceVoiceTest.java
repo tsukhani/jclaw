@@ -27,7 +27,7 @@ class TtsReferenceVoiceTest extends UnitTest {
 
     @Test
     void unknownModelIdDoesNotClone() {
-        // Guards the router: an unrecognised id must not cause a clip to be sent to
+        // Guards the router: an unrecognized id must not cause a clip to be sent to
         // an engine that cannot use it.
         assertFalse(TtsModel.cloningById("not-a-model"));
         assertFalse(TtsModel.cloningById(null));

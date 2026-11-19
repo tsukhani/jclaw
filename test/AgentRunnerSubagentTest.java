@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * </ul>
  *
  * <p>The AC "cancellation mid-tool-call stops the loop at the next safe
- * checkpoint and surfaces a cancelled status" is pinned at the lowest
+ * checkpoint and surfaces a canceled status" is pinned at the lowest
  * layer here: the checkpoint itself. The integration between the
  * checkpoint and {@code SubagentSyncRunner}'s outer catch (which marks the
  * SubagentRun KILLED) is already covered in SubagentSpawnToolTest's
@@ -234,7 +234,7 @@ class AgentRunnerSubagentTest extends UnitTest {
     /**
      * AC: "Cancellation mid-tool-call: a cancellation arriving while a
      * tool is mid-execution stops the loop at the next safe checkpoint,
-     * persists the partial state, and surfaces a cancelled status to the
+     * persists the partial state, and surfaces a canceled status to the
      * caller."
      *
      * <p>At the AgentRunner level this AC reduces to: a kill that lands

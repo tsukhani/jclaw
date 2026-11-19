@@ -24,7 +24,7 @@ import tools.WebSearchTool;
  * overridden to point at the local mock; all other providers are forced
  * disabled and de-keyed so the auto-selection candidate list contains
  * exactly one entry. This pins {@code doSearch} to the provider under test
- * regardless of priority-comparator behaviour.
+ * regardless of priority-comparator behavior.
  *
  * <p>The deferred ACs from JCLAW-312 (SSRF guard on result fetching,
  * rate-limit retry/backoff) reflect features that don't exist in the

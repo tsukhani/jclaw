@@ -17,7 +17,7 @@ import java.time.temporal.ChronoUnit;
  * process-global config row that {@link controllers.AuthCheck} reads on every authenticated
  * request, and play1 runs test classes concurrently — a test that bumped it would sign every
  * sibling class's session out mid-run. The comparison itself is one equality in AuthCheck; what
- * would need a live check is the reset path, and that belongs in a serialised harness rather
+ * would need a live check is the reset path, and that belongs in a serialized harness rather
  * than bought at the cost of making the suite flaky.
  */
 class CredentialLifecycleTest extends UnitTest {

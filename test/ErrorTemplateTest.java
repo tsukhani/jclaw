@@ -11,7 +11,7 @@ import java.util.ArrayList;
 /**
  * JCLAW-1130: the error-template mechanism, before any surface depends on it.
  *
- * <p>What is pinned here is the behaviour the ~800 call sites in the rest of the epic will
+ * <p>What is pinned here is the behavior the ~800 call sites in the rest of the epic will
  * assume: that a lookup always yields a usable template, that a template with no retry path
  * renders two sections rather than an empty third, and that a newly added error code on
  * {@link ApiResponses} cannot ship without a remedy.
@@ -132,7 +132,7 @@ class ErrorTemplateTest extends UnitTest {
     @Test
     void aBlankRetryIsRejectedRatherThanTreatedAsAbsent() {
         // Otherwise "no retry" would have two representations and rendering would have to
-        // test for both — the exact bug the omit-the-section behaviour above exists to avoid.
+        // test for both — the exact bug the omit-the-section behavior above exists to avoid.
         assertThrows(IllegalArgumentException.class,
                 () -> new ErrorTemplate("c", "broke", "check", "   "));
     }

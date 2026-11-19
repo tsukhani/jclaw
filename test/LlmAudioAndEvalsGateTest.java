@@ -48,7 +48,7 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
 
     @Test
     void anUnrecognizedTypeStillCarriesTheAudioButYieldsNoFormatToken() throws Exception {
-        // Pins observed behaviour, not a desired contract: an unknown MIME with an unknown
+        // Pins observed behavior, not a desired contract: an unknown MIME with an unknown
         // extension comes back with the bytes intact but an EMPTY format. Callers therefore
         // have to cope with a blank token — worth confirming against the provider adapters,
         // since sending format="" is not obviously better than falling back to a default.
@@ -122,7 +122,7 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
     }
 
     // Deliberately no test pinning TtsSidecarManager.IDENTITY. Asserting a constant equals
-    // its own literal cannot fail for any behavioural break, and the thing that actually
+    // its own literal cannot fail for any behavioral break, and the thing that actually
     // matters — CONFIG_PREFIX, which every tts.local.* setting is keyed off — is
     // package-private and so unreachable from here.
 }

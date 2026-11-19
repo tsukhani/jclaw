@@ -40,7 +40,7 @@ class ConversationSearchToolTest extends UnitTest {
         LuceneTestSync.openForTest();
         Fixtures.deleteDatabase();
         // MessageSearch returns an empty list until a repository is installed, and test
-        // mode never initialises one — without this every search silently finds nothing
+        // mode never initializes one — without this every search silently finds nothing
         // and the boundary assertions below would pass without exercising the boundary.
         MessageSearchTestHooks.setRepository(new DirectLuceneMessageSearchRepository());
         tool = new ConversationSearchTool();

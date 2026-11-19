@@ -383,7 +383,7 @@ class AgentSystemTest extends UnitTest {
     }
 
     /** A stand-in is classified as the name underneath it, so the skill file tree offers
-     *  ".env.example" for viewing instead of greying it out as a binary. */
+     *  ".env.example" for viewing instead of graying it out as a binary. */
     @Test
     void isTextFileSeesThroughAStandInSuffix() {
         assertTrue(SkillLoader.isTextFile("nas.env.example"));

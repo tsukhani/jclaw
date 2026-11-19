@@ -220,14 +220,14 @@ class SubagentSlashCommandsTest extends UnitTest {
         // spawn path does at start). The kill primitive flips the
         // cooperative-cancel flag and cancels the Future; it must NOT
         // interrupt any thread. We assert the flag is set + the Future is
-        // cancelled, but make no claim about thread state — the H2
+        // canceled, but make no claim about thread state — the H2
         // FileChannel-close bug we're fixing was caused by interrupting the
         // carrier thread mid-blocking-I/O, so the production code MUST NOT
         // do that and this test MUST NOT assert it.
         var fut = new java.util.concurrent.CompletableFuture<Void>();
         SubagentRegistry.register(run.id, fut);
 
-        // Sanity: registry observes the entry as active and not yet cancelled.
+        // Sanity: registry observes the entry as active and not yet canceled.
         assertTrue(SubagentRegistry.isActive(run.id),
                 "register must place the entry in the active map");
         assertFalse(SubagentRegistry.isCancelled(run.id),
@@ -255,7 +255,7 @@ class SubagentSlashCommandsTest extends UnitTest {
         assertEquals(1, killEvents.size(),
                 "exactly one SUBAGENT_KILL event after kill");
 
-        // Future was cancelled (so awaiting callers unblock with
+        // Future was canceled (so awaiting callers unblock with
         // CancellationException instead of waiting to the full timeout).
         assertTrue(fut.isCancelled(),
                 "registered Future must be canceled after kill");

@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
 /**
  * JCLAW-1122: the pre-storage safety filters are a declared table walked by one loop.
  *
- * <p>The per-shape behaviour of each filter is covered by {@code MemorySafetyTest} and the
+ * <p>The per-shape behavior of each filter is covered by {@code MemorySafetyTest} and the
  * per-ticket capture tests. What is pinned here is the properties the shared loop owns, none
  * of which any other test would notice breaking: one log line per <em>filter</em> rather than
  * per candidate, the warn/info split between the security filters and the hygiene ones, and

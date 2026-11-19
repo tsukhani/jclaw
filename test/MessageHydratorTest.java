@@ -28,7 +28,7 @@ import java.util.Map;
  *
  * <p>Pruning ACs from the JCLAW-309 ticket ("oldest non-pinned messages
  * drop in order until the budget fits", "Pinned system or first-user
- * messages survive pruning") are deferred — those behaviours live in
+ * messages survive pruning") are deferred — those behaviors live in
  * {@link agents.ContextWindowManager#trimToContextWindow}, not in
  * {@link MessageHydrator}. {@code MessageHydrator} unconditionally hydrates
  * every persisted row returned by {@code ConversationService.loadRecentMessages}
@@ -376,7 +376,7 @@ class MessageHydratorTest extends UnitTest {
 
     @Test
     void buildMessagesUsesUserAsDefaultForUnknownRoleString() {
-        // MessageRole.fromValue returns null for unrecognised strings; the
+        // MessageRole.fromValue returns null for unrecognized strings; the
         // hydrator's elvis ?: USER fallback must kick in. Direct entity write
         // so the role string is not normalized.
         var conv = ConversationService.create(agent, "web", "user1");

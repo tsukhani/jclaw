@@ -248,7 +248,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     // =========================================================
     // AC: Partial / truncated JSON tool arguments
     //   ToolRegistry must surface a parse-error tool result (the JCLAW-291
-    //   anti-EOFException defence-in-depth). Distinct from the
+    //   anti-EOFException defense-in-depth). Distinct from the
     //   AgentRunnerCoreTest case where the loop merely doesn't crash; here
     //   we verify the user-facing parse-error hint actually appears in the
     //   continuation request.
@@ -423,7 +423,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     }
 
     // =========================================================
-    // AC: Cancellation token honoured between tool calls
+    // AC: Cancellation token honored between tool calls
     //   A flipped SubagentRegistry cancel flag for a RUNNING SubagentRun
     //   pointing at this conversation must short-circuit the loop at the
     //   next checkpoint.

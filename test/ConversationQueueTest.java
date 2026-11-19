@@ -527,7 +527,7 @@ class ConversationQueueTest extends UnitTest {
     @Test
     void evictIdleRemovesQuiescentStateAfterThreshold() throws Exception {
         // A conversation that has been touched but is fully idle (no pending,
-        // not processing, not cancelled) and whose lastActivityMs is older
+        // not processing, not canceled) and whose lastActivityMs is older
         // than the threshold must be evicted by evictIdle.
         long convId = 8001L;
         ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));

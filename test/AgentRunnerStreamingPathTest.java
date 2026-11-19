@@ -1016,7 +1016,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         // A supportsAudio model rejects the audio FORMAT (Xiaomi: mp3/flac/m4a/wav/ogg only) on the
         // round-1 passthrough, BEFORE any tokens stream. streamRound1WithAudioFallback must await the
         // Whisper transcript, rewrite audio→text, and re-stream — recovering the turn instead of
-        // surfacing the 400 as onError (the old behaviour, which interactive voice notes always hit).
+        // surfacing the 400 as onError (the old behavior, which interactive voice notes always hit).
         var requestBodies = new CopyOnWriteArrayList<String>();
         var calls = new AtomicInteger(0);
         startAudioRejectThenSucceedServer(requestBodies, calls);

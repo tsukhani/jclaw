@@ -24,7 +24,7 @@ import java.util.Set;
  * JCLAW-312: server-level handle coverage for {@link McpServerTool}.
  *
  * <p>{@link McpServerTool} is the single function-calling entry per connected
- * MCP server. It carries five behavioural surfaces:
+ * MCP server. It carries five behavioral surfaces:
  *
  * <ul>
  *   <li>Identity metadata ({@code name}, {@code description}, {@code group},
@@ -175,7 +175,7 @@ class McpServerToolTest extends UnitTest {
     @Test
     void nullArgsTreatedAsEmptyObject() {
         // The streaming accumulator can hand the tool a null argsJson when the
-        // model emits an empty tool call. McpServerTool normalises to "{}".
+        // model emits an empty tool call. McpServerTool normalizes to "{}".
         var tool = new McpServerTool("ghost-server-" + System.nanoTime());
         var result = tool.executeRich(null, null);
         assertNotNull(result);

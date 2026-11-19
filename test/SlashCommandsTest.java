@@ -1353,7 +1353,7 @@ class SlashCommandsTest extends UnitTest {
     @Test
     void findLatestAssistantUsageSkipsDurationOnlyRows() throws Exception {
         // assistant row whose usageJson lacks "prompt" must be skipped — it's
-        // a cancelled-turn artifact. Scanner walks back to the earlier good row.
+        // a canceled-turn artifact. Scanner walks back to the earlier good row.
         var messages = new java.util.ArrayList<models.Message>();
         var good = new models.Message();
         good.role = "assistant";

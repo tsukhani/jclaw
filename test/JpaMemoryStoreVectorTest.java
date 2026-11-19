@@ -308,7 +308,7 @@ class JpaMemoryStoreVectorTest extends UnitTest {
     @Test
     void aQueryWithNothingRelevantRecallsNothingRatherThanTheFullBudget() {
         // Before the gate, recall returned the full budget for any query at all: both
-        // vector legs took the k nearest regardless of distance, and RRF then normalised
+        // vector legs took the k nearest regardless of distance, and RRF then normalized
         // the best hit to 1.0 whatever its true similarity. Live, four invented words and
         // a bare "hey" each returned ten memories.
         var agent = agentId("gate-empty");

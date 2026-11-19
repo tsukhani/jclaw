@@ -375,7 +375,7 @@ class SsrfGuardTest extends UnitTest {
         // RFC 5735 hardening. InetAddress.getByName("0177.0.0.1") yields
         // 177.0.0.1, NOT 127.0.0.1. If this assertion ever fails, the JDK
         // has re-introduced octal parsing and SsrfGuard needs an explicit
-        // pre-DNS normaliser to catch `0177` → 127 before resolution.
+        // pre-DNS normalizer to catch `0177` → 127 before resolution.
         var resolved = InetAddress.getByName("0177.0.0.1");
         assertEquals("177.0.0.1", resolved.getHostAddress(),
                 "JDK must not interpret leading-zero octets as octal");

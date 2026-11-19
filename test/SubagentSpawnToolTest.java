@@ -153,7 +153,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     // An inline child embeds in a conversation and a fire has none. It runs as a session and says
-    // so: an error would cost an unattended run a round, and the old behaviour wrote the child's
+    // so: an error would cost an unattended run a round, and the old behavior wrote the child's
     // turns into whichever chat was most recent.
     @Test
     void anInlineSpawnInATaskFireRunsAsASessionAndSaysSo() throws Exception {
@@ -589,7 +589,7 @@ class SubagentSpawnToolTest extends UnitTest {
     @Test
     void batchChildrenCarryTheTopLevelModelOverride() throws Exception {
         // JCLAW-1231: executeBatch built each child's args by hand with null for the model
-        // override, so modelProvider/modelId were honoured on a single spawn and dropped
+        // override, so modelProvider/modelId were honored on a single spawn and dropped
         // on a batch. The child conversation's override is where the drop shows.
         startLlmServer(simpleResponse("BATCH_MODEL_OK"));
         configureProvider();
@@ -1281,7 +1281,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // setup() wiped the config, so unset returns the hard-coded default.
         assertEquals(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS,
                 SubagentSpawnTool.defaultRunTimeoutSeconds());
-        // A configured value is honoured — e.g. long-running fan-out.
+        // A configured value is honored — e.g. long-running fan-out.
         ConfigService.set(SubagentSpawnTool.DEFAULT_RUN_TIMEOUT_KEY, "1200");
         assertEquals(1200, SubagentSpawnTool.defaultRunTimeoutSeconds());
         // A run always needs a positive idle budget, so 0 / negative coerce to
@@ -1461,7 +1461,7 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(parentConv.id, childConv.parentConversation.id);
         // JCLAW-327 AC-5: child Conversation inherits parent channelType + peerId
         // so the new MessageTool can default the delivery target from the
-        // active conversation. The old behaviour (channelType="subagent",
+        // active conversation. The old behavior (channelType="subagent",
         // peerId=null) prevented a subagent spawned in a Telegram thread
         // from pushing progress back to that thread without hardcoding ids.
         assertEquals(parentConv.channelType, childConv.channelType,
@@ -2635,7 +2635,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // JCLAW-291: register against a real RUNNING SubagentRun row, drive
         // the registry's kill(), and verify (a) the cancel flag is set, (b)
         // the audit row is KILLED with the operator reason, (c) the Future
-        // is cancelled, and (d) NO thread interrupt happened (the H2
+        // is canceled, and (d) NO thread interrupt happened (the H2
         // FileChannel close-on-interrupt is the bug we're fixing — the
         // production code must never interrupt the carrier thread, and
         // this test must not assert it does).

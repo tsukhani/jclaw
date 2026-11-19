@@ -13,7 +13,7 @@ import tools.DeliveryResolver;
  * single source for both {@link tools.TaskTool} (a created task's default
  * output {@code delivery} target) and {@link tools.MessageTool} (a mid-turn
  * send's channel + peer). Previously each tool carried its own copy that had
- * to be "kept agreeing" by hand; these assertions lock the merged behaviour so
+ * to be "kept agreeing" by hand; these assertions lock the merged behavior so
  * a regression in either tool surfaces here.
  */
 class DeliveryResolverTest extends UnitTest {

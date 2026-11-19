@@ -414,7 +414,7 @@ class ShellExecSandboxTest extends UnitTest {
     }
 
     /**
-     * main keeps today's behaviour under its key whatever the custom-agent override says: where no sandbox
+     * main keeps today's behavior under its key whatever the custom-agent override says: where no sandbox
      * starts, its exec throws the same SandboxUnavailableException; where one does, the argv is the one the
      * real sandbox builds.
      */

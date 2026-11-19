@@ -137,7 +137,7 @@ class ApiEvalsControllerTest extends FunctionalTest {
      * {@code local} selects the untracked dataset directory instead of the tracked one
      * (JCLAW-942). Whether that directory exists on a given machine decides which error
      * comes back, so the assertion is on the directory named — that is what proves the
-     * switch was honoured.
+     * switch was honored.
      */
     @Test
     void captureLooksInTheLocalDatasetWhenAskedTo() {

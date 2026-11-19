@@ -99,7 +99,7 @@ class WallClockDisciplineTest extends UnitTest {
      *
      * <p>Frozen rather than strict because the {@code System.currentTimeMillis()} sites are
      * not all wall-clock reads: most are interval baselines for a throttle, a rate-limit
-     * window or a duration, where migrating them would change throttle behaviour for no gain.
+     * window or a duration, where migrating them would change throttle behavior for no gain.
      * They are recorded in {@code archunit_store} so the exception list is explicit and
      * shrinkable, and so a <em>new</em> read of either kind still fails here.
      *

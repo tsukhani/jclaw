@@ -40,7 +40,7 @@ class ApiTasksPausedFilterTest extends FunctionalTest {
         assertTrue(body.contains("paused-cron"), body);
         assertTrue(body.contains("paused-oneshot"), body);
         assertFalse(body.contains("live-cron"), body);
-        // A cancelled task keeps its paused flag (only re-enable clears it) but
+        // A canceled task keeps its paused flag (only re-enable clears it) but
         // has no schedule left to suspend, so it is not a paused schedule.
         assertFalse(body.contains("canceled-stale-flag"), body);
         assertEquals("2", resp.headers.get("X-Total-Count").value());

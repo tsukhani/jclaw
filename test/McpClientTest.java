@@ -1201,7 +1201,7 @@ class McpClientTest extends UnitTest {
         }
     }
 
-    /** Cancelling the probe could reach a handshake-era stdio server before initialize, which the spec forbids. */
+    /** Canceling the probe could reach a handshake-era stdio server before initialize, which the spec forbids. */
     @Test
     void aStdioProbeThatRunsOutItsBudgetIsFollowedByInitializeAndNoCancellation() throws Exception {
         var t = new ScriptedTransport(handshakeEra(null));

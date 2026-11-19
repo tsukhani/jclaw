@@ -19,9 +19,9 @@ class MemoryRetrievalRulesTest extends UnitTest {
     @Test
     void prefixesOnlyWhenAModelNeedsIt() {
         // Measured on a live corpus with snowflake-arctic-embed: the memory answering
-        // "what do I call my children?" was the 54th nearest neighbour of that query
+        // "what do I call my children?" was the 54th nearest neighbor of that query
         // unprefixed and the 16th prefixed, so a KNN leg capped at the recall limit could
-        // never return it. The index was returning its true nearest neighbours throughout.
+        // never return it. The index was returning its true nearest neighbors throughout.
         assertEquals("Q: hello", JpaMemoryStore.prefixQuery("Q: ", "hello"));
         assertEquals("hello", JpaMemoryStore.prefixQuery("", "hello"),
                 "empty is the default: the right string is model-specific, and a wrong one is worse than none");
@@ -43,7 +43,7 @@ class MemoryRetrievalRulesTest extends UnitTest {
         assertEquals("stmt", JpaMemoryStore.searchText("stmt", "   "));
     }
 
-    // --- entity names: what the key backfill uses to find a memory's neighbours ---
+    // --- entity names: what the key backfill uses to find a memory's neighbors ---
 
     @Test
     void liftsCapitalizedEntityNames() {

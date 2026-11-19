@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
-/** JF-16: the boot reconcile runs async, before the server binds, so it waits for the funnelled port to answer. */
+/** JF-16: the boot reconcile runs async, before the server binds, so it waits for the funneled port to answer. */
 class TailscaleFunnelBootJobTest extends UnitTest {
 
     private static final BooleanSupplier RUNNING = () -> false;

@@ -439,7 +439,7 @@ class ScannerTest extends UnitTest {
         // Pin the documented admin-trust boundary: scanner.*.url is treated as
         // operator-configured and has no scheme/host allowlist enforced in code.
         // If a future change introduces such an allowlist, this test will need
-        // to move to asserting the allowlist behaviour instead — and the
+        // to move to asserting the allowlist behavior instead — and the
         // class-level JavaDoc on ScannerTest + the JCLAW-147 ticket need an
         // update explaining why the posture changed.
         wireVirusTotal();

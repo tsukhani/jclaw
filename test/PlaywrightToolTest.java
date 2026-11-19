@@ -1359,7 +1359,7 @@ class PlaywrightToolTest extends UnitTest {
      * 2026-09-23, dropping {@code --proxy-bypass-list=<-loopback>} sends it direct and this reds,
      * while the same address behind a worker's plain {@code fetch} keeps passing because the route
      * does see that one. There is no control half — a control would be an unscreened browser
-     * dialling 169.254.169.254 for real.
+     * dialing 169.254.169.254 for real.
      */
     @Test
     void aWorkersSocketToTheCloudMetadataAddressIsRefusedBelowTheRoute() throws Exception {
@@ -1448,7 +1448,7 @@ class PlaywrightToolTest extends UnitTest {
     }
 
     /**
-     * Fail closed: with the session's proxy gone, Chromium reports a failure rather than dialling the
+     * Fail closed: with the session's proxy gone, Chromium reports a failure rather than dialing the
      * destination itself. Every response from this fixture closes its connection, so the navigation
      * needs a fresh one through the proxy rather than reusing a pooled tunnel.
      */
@@ -1679,7 +1679,7 @@ class PlaywrightToolTest extends UnitTest {
      * Construct a {@code SessionHolder} with no live {@code session} (null) and
      * the supplied {@code lastUsed} timestamp — the per-agent slot the
      * {@code sessions} map holds since JCLAW-821 moved the browser launch out of
-     * the ConcurrentHashMap bin lock. The constructor initialises the final lock
+     * the ConcurrentHashMap bin lock. The constructor initializes the final lock
      * and screen log and defaults {@code session}/{@code removed}; only
      * {@code lastUsed} is overridden reflectively to drive the idle-timeout math.
      */

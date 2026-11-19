@@ -12,7 +12,7 @@ import services.imagegen.ReplicateImageModelCatalog;
 
 /**
  * Coverage for the Replicate text-to-image model discovery used by the Settings model dropdown — the
- * image-gen analogue of {@code ReplicateVideoModelCatalogTest}. Exercises
+ * image-gen analog of {@code ReplicateVideoModelCatalogTest}. Exercises
  * {@link ReplicateImageModelCatalog#fetch()} (the uncached, client-injectable path) against a mocked
  * {@code GET /v1/collections/text-to-image}: parses owner/name slugs, skips malformed entries, and
  * degrades to an empty list on a missing key or an HTTP error.

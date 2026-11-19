@@ -155,7 +155,7 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     /**
-     * Auth only. The behaviour is covered by {@code LogFootprintTest} against a temp
+     * Auth only. The behavior is covered by {@code LogFootprintTest} against a temp
      * directory — exercising the real endpoint here would delete this working tree's
      * actual log archives, on every run.
      */

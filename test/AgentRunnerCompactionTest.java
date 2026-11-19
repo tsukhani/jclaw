@@ -218,7 +218,7 @@ class AgentRunnerCompactionTest extends UnitTest {
     /**
      * Persistence-coherency: after compaction fires the user message AND
      * the assistant reply for THIS turn still land in the DB. Compaction is
-     * a context-trimming optimisation, not a persistence-shape change —
+     * a context-trimming optimization, not a persistence-shape change —
      * the chat-UI's scrollback must still contain every turn since the
      * conversation began. Without this, a UI reload after the
      * compaction-triggering turn would render with the user input missing.

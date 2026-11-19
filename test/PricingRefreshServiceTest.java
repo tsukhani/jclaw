@@ -342,7 +342,7 @@ class PricingRefreshServiceTest extends UnitTest {
         assertEquals(4.2, model.get("promptPrice").getAsDouble(), 0.0001);
     }
 
-    // ─── JCLAW-1077: capabilities from the same catalogue ─────────────
+    // ─── JCLAW-1077: capabilities from the same catalog ─────────────
 
     /** LiteLLM capability shape. Unknown flags are null there, not false. */
     private static String capsJson(String... flags) {
@@ -373,7 +373,7 @@ class PricingRefreshServiceTest extends UnitTest {
 
     @Test
     void neverClearsACapabilityTheProviderAlreadyReported() {
-        // Upward only: a community catalogue may add to what the provider said,
+        // Upward only: a community catalog may add to what the provider said,
         // never contradict it.
         seedProviderModels("together", """
                 [{"id":"some-model","supportsVision":true,"supportsThinking":true}]""");

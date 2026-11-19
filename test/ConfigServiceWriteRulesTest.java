@@ -536,7 +536,7 @@ class ConfigServiceWriteRulesTest extends UnitTest {
             assertRefused("subagent.acp.mode must be 'batch', 'json' or 'rpc'; blank means batch.",
                     SubagentSpawnTool.ACP_MODE_KEY, value);
         }
-        // The neighbouring rules still answer as before.
+        // The neighboring rules still answer as before.
         assertAccepted("shell.allowlist", "ls,cat,grep");
         assertRefused("Provider 'jclaw1406-none' is not configured. subagent.acp.modelProvider must name a "
                 + "provider from Settings > LLM Providers.", SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY, "jclaw1406-none");

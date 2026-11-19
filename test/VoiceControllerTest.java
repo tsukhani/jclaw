@@ -228,7 +228,7 @@ class VoiceControllerTest extends UnitTest {
         var overlay = new Overlay();
 
         try (var _ = VoiceTurnSpeaker.endOnStop(current, cancel, 3, overlay)) {
-            // As cancelCurrent does for each of them: the slot is cleared before the flag is cancelled.
+            // As cancelCurrent does for each of them: the slot is cleared before the flag is canceled.
             TurnCancellation.cancel(current.getAndSet(null));
             assertFalse(overlay.ended.await(500, TimeUnit.MILLISECONDS), "the overlay got " + overlay.frames);
         }

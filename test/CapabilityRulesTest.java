@@ -341,7 +341,7 @@ class CapabilityRulesTest extends UnitTest {
      *
      * <p>This is a heuristic and it cuts both ways — it cannot tell a real guard from an
      * incidental read of the flag, so a method that checks it and then reaches the DB anyway
-     * would pass. Recognising the idiom beats a hard-coded name list, which would go stale.
+     * would pass. Recognizing the idiom beats a hard-coded name list, which would go stale.
      */
     private static boolean guardsOnShutdownFlag(JavaMethod method) {
         return method.getCallsFromSelf().stream().anyMatch(call ->
@@ -433,7 +433,7 @@ class CapabilityRulesTest extends UnitTest {
 
     private static final int ADJUDICATED_API_ROUTES = 249;
     /**
-     * The two ways an {@code OWN_ONLY} action can honour its level. A row route refuses one it
+     * The two ways an {@code OWN_ONLY} action can honor its level. A row route refuses one it
      * does not own; a list route has no row to refuse, so it pins the query to the caller
      * instead — a list that 403s on someone else's rows would have had to read them first.
      * {@code scopedAgentId} is that pin, shared by every list route, and pins through

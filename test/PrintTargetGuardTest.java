@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * {@link PrintTargetGuard} decides whether a destination the model named may be
- * dialled (JCLAW-1229). Its three verdicts are pinned here rather than through
+ * dialed (JCLAW-1229). Its three verdicts are pinned here rather than through
  * {@code PrinterTool.dangerous}, because {@code classify} takes the discovered list
  * as a parameter and the tool browses mDNS for it — only this level can assert what
  * a discovered printer does to the answer without a network.

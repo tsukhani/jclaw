@@ -9,7 +9,7 @@ import services.video.VideoInterpretationRouter;
 /**
  * The {@code video.provider} config key selects the dedicated video-model backend — single-select,
  * mirroring {@code CaptionRouter}. Presence is the master enable; resolved per call so a Settings
- * change applies without a restart. Empty/unrecognised → the dispatcher falls back to the chat model.
+ * change applies without a restart. Empty/unrecognized → the dispatcher falls back to the chat model.
  */
 class VideoInterpretationRouterTest extends UnitTest {
 

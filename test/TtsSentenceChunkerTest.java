@@ -5,7 +5,7 @@ import services.tts.TtsSentenceChunker;
 import java.util.List;
 
 /**
- * Chunking behaviour for streaming TTS (JCLAW-790): blank input is empty, short
+ * Chunking behavior for streaming TTS (JCLAW-790): blank input is empty, short
  * fragments merge, run-on sentences are hard-wrapped under the cap, paragraphs
  * split, and words survive in reading order.
  */

@@ -23,7 +23,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-/** JCLAW-1356: sampling reads an agent's memories into a file without touching them; loading skips unlabelled rows. */
+/** JCLAW-1356: sampling reads an agent's memories into a file without touching them; loading skips unlabeled rows. */
 class HeldOutTest extends UnitTest {
 
     private String agentId;
@@ -184,7 +184,7 @@ class HeldOutTest extends UnitTest {
 
     // ---- JCLAW-1374: coverage labels ----
 
-    /** A one-case file whose labelled case carries {@code extra}'s keys beside its labels. */
+    /** A one-case file whose labeled case carries {@code extra}'s keys beside its labels. */
     private Path labeledWith(Consumer<JsonObject> extra) throws Exception {
         var file = dir.resolve("coverage-" + UUID.randomUUID() + ".json");
         HeldOut.sample(file, agentId, 1, 7);

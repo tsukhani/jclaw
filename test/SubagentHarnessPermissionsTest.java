@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets;
  * points are reached via reflection; {@link HarnessEvent} and {@link Agent} are
  * public and imported directly.
  *
- * <p>Coverage centres on {@code detectPermission}, the tolerant frame parser:
+ * <p>Coverage centers on {@code detectPermission}, the tolerant frame parser:
  * every early-return arm (null event, null raw, no discriminator, non-permission
  * discriminator) and every extraction path (top-level vs nested envelope, id
  * fallback, tool-name fallback, args fallback to the payload). Plus the

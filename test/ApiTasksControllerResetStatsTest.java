@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Functional HTTP tests for {@code POST /api/task-runs/reset}: hard-delete
  * terminal (non-RUNNING) task runs to reset the run-derived KPIs, keeping
- * in-flight runs and honouring the same {@code payloadType} scope the stats
+ * in-flight runs and honoring the same {@code payloadType} scope the stats
  * endpoint uses.
  */
 class ApiTasksControllerResetStatsTest extends FunctionalTest {

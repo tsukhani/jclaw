@@ -5,7 +5,7 @@ import services.telemetry.OtelRuntime;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Serialises tests that touch the process-global OpenTelemetry runtime (JCLAW-34): the
+ * Serializes tests that touch the process-global OpenTelemetry runtime (JCLAW-34): the
  * {@code otel.*} keys, {@link OtelRuntime#applyConfig()} and the capture seam. The play1
  * fork runs test classes concurrently, so two such tests interleaving would see each
  * other's sampler and exporter. The sibling of {@code ShellSandboxSync}.

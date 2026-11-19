@@ -4,7 +4,7 @@ import play.test.UnitTest;
 
 import java.util.List;
 
-/** Write-time rules for the Telegram behaviour keys edited on the Channels > Telegram page. */
+/** Write-time rules for the Telegram behavior keys edited on the Channels > Telegram page. */
 class TelegramSettingsTest extends UnitTest {
 
     @Test

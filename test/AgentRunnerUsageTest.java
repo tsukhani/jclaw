@@ -118,7 +118,7 @@ class AgentRunnerUsageTest extends UnitTest {
     @Test
     void buildUsageJsonSingleRoundIsUnchangedFromPreFixBehavior() {
         // AC5 regression guard: a turn with zero tool rounds must produce
-        // byte-equivalent numbers to pre-fix behaviour. Everything lines up
+        // byte-equivalent numbers to pre-fix behavior. Everything lines up
         // with round 1's numbers because there are no later rounds to fold.
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(500, 300, 800, 50, 100, 0)));
@@ -135,7 +135,7 @@ class AgentRunnerUsageTest extends UnitTest {
 
     @Test
     void buildUsageJsonOmitsTokenFieldsWhenNoProviderUsage() {
-        // When no round returned Usage (e.g. cancelled pre-first-chunk), the
+        // When no round returned Usage (e.g. canceled pre-first-chunk), the
         // emitted JSON drops to a compact durationMs-only shape so the
         // frontend stats pills stay in a valid "no usage info" state instead
         // of misleading zero counts.

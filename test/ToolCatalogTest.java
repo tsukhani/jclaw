@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Verifies JCLAW-71 behaviour: the system-prompt Tool Catalog groups tools by
+ * Verifies JCLAW-71 behavior: the system-prompt Tool Catalog groups tools by
  * category in canonical order (System → Files → Web → Utilities), excludes
  * system tools, and respects the per-agent disabled set.
  */

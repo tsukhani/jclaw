@@ -9,7 +9,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * JCLAW-405: the static {@code PendingTranscripts} map must not retain a
  * future once its resolved value has been consumed under the
- * single-reader contract. These tests pin the eviction behaviour added
+ * single-reader contract. These tests pin the eviction behavior added
  * to stop the slow heap leak — the value is still returned to the
  * consumer first, then the entry drops, covering both the transcript and
  * the empty-string failure sentinel.

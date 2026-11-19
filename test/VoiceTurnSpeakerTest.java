@@ -15,14 +15,14 @@ import java.util.function.LongConsumer;
 /**
  * Characterization tests for the speaking half of a voice turn (JCLAW-869).
  *
- * <p>These pin behaviour that was arrived at by fixing real bugs, so that the
+ * <p>These pin behavior that was arrived at by fixing real bugs, so that the
  * decomposition out of {@code VoiceController.runTurn} — and anything later —
  * has something to fail against. Each test names the failure it guards.
  *
  * <p>Written against {@link VoiceTurnSpeaker} rather than {@code runTurn} itself
  * because runTurn also drives STT and the agent, both reached through statics,
  * and the build excludes Mockito. Extracting the speaker is what made these
- * behaviours reachable at all; all four of the behaviours worth pinning live here.
+ * behaviors reachable at all; all four of the behaviors worth pinning live here.
  */
 class VoiceTurnSpeakerTest extends UnitTest {
 
@@ -112,7 +112,7 @@ class VoiceTurnSpeakerTest extends UnitTest {
 
     @Test
     void reportsNotCompletedWhenCancelledSoNoTurnCompleteFollows() {
-        // Barge-in: the operator spoke over the reply. A cancelled turn must never
+        // Barge-in: the operator spoke over the reply. A canceled turn must never
         // emit turn_complete, which would hand the floor back as if it had finished.
         var cancel = new AtomicBoolean(true);
         var sink = new RecordingSink();
