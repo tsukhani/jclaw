@@ -336,7 +336,9 @@ class JavaRuntimeServiceTest extends UnitTest {
         // A musl runtime asks for Alpine's build.
         Files.writeString(jre.resolve("release"), "IMPLEMENTOR=\"Eclipse Adoptium\"\nLIBC=\"musl\"\n");
         asked.clear();
-        assertThrows(IOException.class, () -> latestFrom(client, env));
+        assertEquals(new Answer(null, "Adoptium's catalog lists no Java 25 runtime for alpine-linux/x64."),
+                HttpFactories.callWith(client, () -> new JavaRuntimeService.Lookup(Vendor.TEMURIN)
+                        .answer(true, () -> JavaRuntimeService.fetchLatest(env))));
         assertEquals(List.of("https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre"
                 + "&os=alpine-linux&vendor=eclipse"), asked);
     }
@@ -621,7 +623,7 @@ class JavaRuntimeServiceTest extends UnitTest {
     // --- The cached check ---
 
     @Test
-    void theCheckIsCachedForAnHourAndKeepsTheLastGoodAnswerWhenAzulIsDown() {
+    void theCheckIsCachedForAnHourAndAFailedOneForFiveMinutesKeepingTheLastGoodAnswer() {
         var lookup = new JavaRuntimeService.Lookup();
         var calls = new AtomicInteger();
         var up = new AtomicReference<>(release("25.0.5"));
@@ -633,21 +635,34 @@ class JavaRuntimeServiceTest extends UnitTest {
         };
         var start = Instant.parse("2026-10-25T09:00:00Z");
 
-        assertNull(at(start, () -> new JavaRuntimeService.Lookup().latest(false, () -> {
+        var never = new JavaRuntimeService.Lookup();
+        var tries = new AtomicInteger();
+        JavaRuntimeService.Catalog unreachable = () -> {
+            tries.incrementAndGet();
             throw new IOException("never reached Azul");
-        })));
+        };
+        var couldNot = new Answer(null, "Couldn't check Azul's catalog for a newer Java.");
+        assertEquals(couldNot, at(start, () -> never.answer(false, unreachable)));
+        assertEquals(couldNot, at(start.plusSeconds(299), () -> never.answer(false, unreachable)));
+        assertEquals(1, tries.get());
+        assertEquals(couldNot, at(start.plusSeconds(300), () -> never.answer(false, unreachable)));
+        assertEquals(2, tries.get());
+
         assertEquals("25.0.5", at(start, () -> lookup.latest(false, catalog)).version());
         assertEquals("25.0.5", at(start.plusSeconds(3599), () -> lookup.latest(false, catalog)).version());
         assertEquals(1, calls.get());
 
         up.set(null);
         assertEquals("25.0.5", at(start.plusSeconds(3600), () -> lookup.latest(false, catalog)).version());
-        assertEquals("25.0.5", at(start.plusSeconds(3601), () -> lookup.latest(true, catalog)).version());
-        assertEquals(3, calls.get());
+        assertEquals("25.0.5", at(start.plusSeconds(3899), () -> lookup.latest(false, catalog)).version());
+        assertEquals(2, calls.get());
+        assertEquals("25.0.5", at(start.plusSeconds(3900), () -> lookup.latest(false, catalog)).version());
+        assertEquals("25.0.5", at(start.plusSeconds(3901), () -> lookup.latest(true, catalog)).version());
+        assertEquals(4, calls.get());
 
         up.set(release("25.0.6"));
-        assertEquals("25.0.6", at(start.plusSeconds(3602), () -> lookup.latest(true, catalog)).version());
-        assertEquals(4, calls.get());
+        assertEquals("25.0.6", at(start.plusSeconds(3902), () -> lookup.latest(true, catalog)).version());
+        assertEquals(5, calls.get());
     }
 
     // --- The download ---

@@ -820,6 +820,50 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
+    void whileAJavaDownloadsOrWaitsForTheRestartTheGetOffersNoSwitchAndAsksOnlyItsOwnCatalog() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
+        var asked = new CopyOnWriteArrayList<JavaRuntimeService.Vendor>();
+        JavaRuntimeService.setCatalogForTest(v -> {
+            asked.add(v);
+            return new JavaRuntimeService.Answer(v == JavaRuntimeService.Vendor.TEMURIN ? temurin("25.0.5")
+                    : release("25.0.5"), null);
+        });
+        var release = new CountDownLatch(1);
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
+            stagings.add(r);
+            p.percent(40);
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            writeStaging(home, r.version());
+        });
+
+        assertEquals("[{\"vendor\":\"Temurin\",\"version\":\"25.0.5\",\"refusal\":null}]",
+                json(GET("/api/system/java-runtime")).get("switches").toString());
+        try {
+            assertEquals(202, POST("/api/system/java-runtime", "application/json", "{}").status.intValue());
+            waitUntil(() -> Integer.valueOf(40).equals(JavaRuntimeService.CURRENT.currentPercent()));
+            asked.clear();
+            var running = json(GET("/api/system/java-runtime"));
+            assertTrue(running.get("downloading").getAsBoolean());
+            assertEquals("[]", running.get("switches").toString());
+            assertEquals(List.of(JavaRuntimeService.Vendor.ZULU), asked);
+        } finally {
+            release.countDown();
+            waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        }
+
+        asked.clear();
+        var ready = json(GET("/api/system/java-runtime"));
+        assertEquals("25.0.5", ready.get("stagedVersion").getAsString());
+        assertEquals("[]", ready.get("switches").toString());
+        assertEquals(List.of(JavaRuntimeService.Vendor.ZULU), asked);
+    }
+
+    @Test
     void aContainerOrAnUpToDateJavaIsOfferedNoDownload() throws IOException {
         login();
         JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));

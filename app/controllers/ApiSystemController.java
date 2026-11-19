@@ -338,7 +338,8 @@ public class ApiSystemController extends Controller {
      * @param switches             the switches the POST's {@code vendor} asks for: on the built-in Java, to
      *                             the other vendor's newest of its major, installed at the next start in
      *                             place of it; on a bundle install on a host Java, to either vendor's newest
-     *                             Java 25, installed as the first {@code <home>/jre}; empty anywhere else
+     *                             Java 25, installed as the first {@code <home>/jre}; empty anywhere else,
+     *                             and while a download runs or waits for the next start
      */
     public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String currentBuild,
                                        @Nullable String vendor, @Nullable String distribution,
@@ -382,8 +383,10 @@ public class ApiSystemController extends Controller {
         var target = downloading ? progress.target() : null;
         var last = JavaRuntimeService.lastStart(env.app());
         var distribution = env.distribution();
-        var switches = JavaRuntimeService.switches(env, fresh).stream()
-                .map(s -> new JavaRuntimeSwitch(s.vendor().label, s.version(), s.refusal())).toList();
+        // The panel's one-second download poll lands here, so it never waits on the other vendor's catalog.
+        List<JavaRuntimeSwitch> switches = downloading || staged != null ? List.of()
+                : JavaRuntimeService.switches(env, fresh).stream()
+                        .map(s -> new JavaRuntimeSwitch(s.vendor().label, s.version(), s.refusal())).toList();
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
                 JavaRuntimeService.kind(env).label, env.javaVersion(), env.build(), env.vendor(),

@@ -78,6 +78,9 @@ public final class JavaRuntimeService {
     private static final int DOWNLOAD_TIMEOUT_MINUTES = 30;
     /** Polled by every settings-page mount, like the release check in {@link UpgradeService}. */
     private static final Duration CHECK_TTL = Duration.ofHours(1);
+    // A network that drops a catalog's packets costs TIMEOUT_SECONDS a call, so a failed check holds this long
+    // rather than stalling every load of the panel.
+    private static final Duration RETRY_AFTER = Duration.ofMinutes(5);
 
     // The shapes apply_staged_jre in jclaw.sh accepts, so a manifest written here is one it reads.
     private static final Pattern VERSION = Pattern.compile("\\d+(?:\\.\\d+)*+");
@@ -406,14 +409,15 @@ public final class JavaRuntimeService {
     public static final Download CURRENT = new Download();
 
     /**
-     * One vendor's newest JRE of one major, cached for {@link #CHECK_TTL}. The app keeps one per vendor and major;
-     * tests build their own.
+     * One vendor's newest JRE of one major, cached for {@link #CHECK_TTL}, and a check that could not reach the
+     * catalog for {@link #RETRY_AFTER}. The app keeps one per vendor and major; tests build their own.
      */
     public static final class Lookup {
         private record Cached(Answer answer, Instant at) {}
 
         private final Vendor vendor;
         private volatile @Nullable Cached cached;
+        private volatile @Nullable Instant failedAt;
 
         public Lookup() {
             this(Vendor.ZULU);
@@ -435,8 +439,13 @@ public final class JavaRuntimeService {
         /** As {@link #latest}, saying why when there is no release. */
         public Answer answer(boolean refresh, Catalog catalog) {
             var c = cached;
-            if (!refresh && c != null && Duration.between(c.at(), AppClock.now()).compareTo(CHECK_TTL) < 0) {
+            var now = AppClock.now();
+            if (!refresh && c != null && Duration.between(c.at(), now).compareTo(CHECK_TTL) < 0) {
                 return c.answer();
+            }
+            var failed = failedAt;
+            if (!refresh && failed != null && Duration.between(failed, now).compareTo(RETRY_AFTER) < 0) {
+                return c != null ? c.answer() : unreachable(vendor);
             }
             Answer answer;
             try {
@@ -444,10 +453,12 @@ public final class JavaRuntimeService {
             } catch (NoRuntimeException e) {
                 answer = new Answer(null, e.getMessage());
             } catch (IOException | RuntimeException e) {
+                failedAt = AppClock.now();
                 EventLogger.warn(CATEGORY, "Could not check " + vendor.owner + "'s catalog for a newer Java: "
                         + e.getMessage());
                 return c != null ? c.answer() : unreachable(vendor);
             }
+            failedAt = null;
             cached = new Cached(answer, AppClock.now());
             return answer;
         }
@@ -983,7 +994,6 @@ public final class JavaRuntimeService {
         return latest;
     }
 
-    // With no vendor asked for, a built-in Java asks its own vendor and a host Java's switch asks Azul.
     private static Vendor defaultTarget(Environment env) {
         return kind(env) == Kind.BUILT_IN ? running(env) : Vendor.ZULU;
     }

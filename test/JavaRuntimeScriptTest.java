@@ -124,7 +124,11 @@ class JavaRuntimeScriptTest extends UnitTest {
         // A patch from the vendor it runs reads as an upgrade, as before.
         var nextTop = "zulu25.40.1-ca-jre25.0.6-macosx_aarch64";
         stage(home, nextTop + ".tar.gz", "25.0.6", "25.40.1", "Zulu", tarGz(runtime(nextTop, "25.0.6", "Zulu25.40+1-CA", true)));
-        assertTrue(run(home, Map.of(), "apply_staged_jre").contains("    Java runtime: upgraded 25.0.5.1 → 25.0.6\n"));
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+                + "    Java runtime: upgraded 25.0.5.1 → 25.0.6\n", run(home, Map.of(), "apply_staged_jre"));
+        assertEquals("upgraded 25.0.5.1 → 25.0.6", status(home));
+        assertEquals(List.of(nextTop), listing(home.resolve("jre")));
+        assertEquals(List.of(backTop), listing(home.resolve("jre.previous")));
     }
 
     @Test
