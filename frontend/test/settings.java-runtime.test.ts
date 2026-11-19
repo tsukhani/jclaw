@@ -319,6 +319,100 @@ describe('SettingsJavaRuntimePanel — download', () => {
   })
 })
 
+describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
+  function hostJava(over: Record<string, unknown> = {}) {
+    return builtIn({ kind: 'external', currentVersion: '25.0.3', switchable: true, managedVersion: '25.0.5', ...over })
+  }
+
+  it('offers a bundle install on a Java it did not install the switch to one of its own', async () => {
+    runtime = hostJava()
+    const c = await mounted()
+
+    expect(summary(c)).toBe('Java 25.0.5 is available from your JDK\'s vendor.')
+    expect(c.find('[data-testid="java-runtime-switch"]').text()).toBe('JClaw cannot patch a Java it did not install. '
+      + 'Switch to Java 25.0.5 from Azul, which JClaw installs beside itself and keeps patched.')
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Switch to Java 25.0.5'])
+  })
+
+  it('shows no switch on a source checkout or in a container', async () => {
+    runtime = hostJava({ switchable: false })
+    const checkout = await mounted()
+    expect(checkout.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(checkout.findAll('button')).toHaveLength(0)
+    checkout.unmount()
+
+    clearNuxtData()
+    runtime = hostJava({ kind: 'container', switchable: false })
+    const container = await mounted()
+    expect(container.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(container.findAll('button')).toHaveLength(0)
+  })
+
+  it('shows no switch when the catalog could not say which Java it would install', async () => {
+    runtime = hostJava({ latestVersion: null, updateAvailable: false, managedVersion: null })
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Check again'])
+  })
+
+  it('sends nothing when the switch is cancelled', async () => {
+    runtime = hostJava()
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await flushPromises()
+    expect(dialogText()).toContain('Java 25.0.5 will be downloaded from Azul and checked against its SHA-256 while JClaw '
+      + 'keeps running on Java 25.0.3. The next time JClaw starts, it installs it in the jre folder beside JClaw and '
+      + 'runs on it from then on, and this panel keeps it patched. Java 25.0.3 stays installed, unused by JClaw.')
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+
+    expect(stagePosts).toBe(0)
+    expect(panelButton(c, 'Switch to Java 25.0.5')).toBeTruthy()
+  })
+
+  it('switches a host Java of another major once confirmed, follows the download, then offers the restart', async () => {
+    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', managedVersion: '25.0.5' })
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await flushPromises()
+    dialogButton('Switch')!.click()
+    await flushPromises()
+
+    expect(stagePosts).toBe(1)
+    await vi.waitFor(() => expect(c.find('[data-testid="java-runtime-progress"]').exists()).toBe(true))
+    expect(summary(c)).toBe('Downloading Java 25.0.5…')
+    expect(c.find('[role="progressbar"]').attributes('aria-label')).toBe('Downloading Java 25.0.5')
+    expect(panelButton(c, 'Switch to Java 25.0.5')).toBeUndefined()
+
+    runtime = hostJava({ currentVersion: '27.0.1', latestVersion: '27.0.2', stagedVersion: '25.0.5' })
+    await vi.waitFor(() => expect(summary(c)).toBe('Java 25.0.5 will be installed at the next restart. '
+      + 'The first start on it rebuilds the startup cache, so it takes longer than usual.'), { timeout: 3000 })
+    expect(c.find('[data-testid="java-runtime-switch"]').exists()).toBe(false)
+    expect(c.findAll('button').map((b: DOMWrapper<Element>) => b.text().trim())).toEqual(['Cancel', 'Restart now'])
+    expect(restartPosts).toBe(0)
+    c.unmount()
+  })
+
+  it('shows the refusal when the backend will not switch', async () => {
+    runtime = hostJava({ currentVersion: '25.0.6', updateAvailable: false, latestVersion: '25.0.6' })
+    stageReply = { status: 409, body: { status: 'error', code: 'conflict',
+      message: 'Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.' } }
+    const c = await mounted()
+
+    await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
+    await flushPromises()
+    dialogButton('Switch')!.click()
+    await flushPromises()
+
+    expect(stagePosts).toBe(1)
+    await vi.waitFor(() => expect(c.find('[role="status"]').text())
+      .toBe('Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.'))
+  })
+})
+
 describe('SettingsJavaRuntimePanel — a runtime waiting for the next start', () => {
   it('cancels it, and offers the download again', async () => {
     runtime = builtIn({ stagedVersion: '25.0.5' })

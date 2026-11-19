@@ -304,10 +304,10 @@ Re-running the one-line installer over an existing install delegates here too, s
 
 Shows the Java version JClaw runs on and checks Azul's catalog for the newest patch of the same version, for example 25.0.5 when you run 25.0.4. It never offers a new major version. Like the release check, the answer is kept for an hour.
 
-JClaw updates only the Java that the one-line installer set up for it (the `jre` folder beside the install, such as `~/.jclaw/jre`). Everywhere else the panel only tells you what is available:
+JClaw updates only its own Java: the `jre` folder beside the install, such as `~/.jclaw/jre`, which the one-line installer sets up. On a Java you installed yourself, JClaw can switch to its own. In a container or a source checkout, the panel only tells you what is available:
 
 - **On the installer's Java**, a newer patch shows **Download Java 25.0.5**. JClaw downloads it from Azul while it keeps running, checks it against the SHA-256 that Azul publishes, and keeps it waiting beside the current one. The panel then says **Java 25.0.5 will be installed at the next restart.**
-- **On a Java you installed yourself**: **Java 25.0.5 is available from your JDK's vendor.** Update it the way you installed it.
+- **On a Java you installed yourself**: **Java 25.0.5 is available from your JDK's vendor.** Update it the way you installed it, or use **Switch to Java 25.0.5**. This downloads Azul's newest Zulu JRE 25 and checks it in the same way, and the next start installs it as the `jre` folder beside the install. JClaw runs on it from then on and keeps it patched. Your own Java stays installed. JClaw switches only to Java 25, the version it is tested on, and it never switches to an older patch of the version you run. A source checkout shows no switch, because its Java belongs to its developer.
 - **In a container**: **The runtime comes with the Docker image.** Pull a newer image instead.
 - When there is nothing newer, the panel says **Up to date.** If Azul cannot be reached, it says **Couldn't check for a newer Java.** and offers **Check again**.
 
@@ -317,9 +317,9 @@ JClaw also checks on its own, each time it starts and then once a day, with no p
 
 The new Java is installed the next time JClaw starts, whatever starts it. Nothing restarts on its own, not even after a download JClaw started itself: use **Restart now** when it suits you, or **Cancel** to throw the download away. The first start on the new Java takes longer, because JClaw rebuilds its startup cache (the AOT cache under **Restart**). On Windows there is no cache, so the panel does not mention it.
 
-At that start, `jclaw.sh` checks the download's SHA-256 again, unpacks it, and runs the new `java` before it swaps the folders. The Java it replaces is kept as `jre.previous`, one copy, replaced at the next update. If any check fails, JClaw keeps the current Java, starts normally and drops the download. **Last start:** in the panel shows what happened, for example `upgraded 25.0.4 → 25.0.5` or `kept Java 25.0.4: Java 25.0.5 failed its SHA-256 check`. On Windows the download is a zip, which `jclaw.sh` unpacks with `unzip` or, without it, Windows' own `tar.exe`.
+At that start, `jclaw.sh` checks the download's SHA-256 again, unpacks it, and runs the new `java` before it swaps the folders. The Java it replaces is kept as `jre.previous`, one copy, replaced at the next update. If any check fails, JClaw keeps the current Java, starts normally and drops the download. **Last start:** in the panel shows what happened, for example `upgraded 25.0.4 → 25.0.5` or `kept Java 25.0.4: Java 25.0.5 failed its SHA-256 check`. After a switch it shows, for example, `switched from the host's Java 25.0.3 to Java 25.0.5 at /home/me/.jclaw/jre`, and if a check fails, JClaw keeps running on your own Java and says why, for example `kept the host's Java 25.0.3: Java 25.0.5 failed its SHA-256 check`. On Windows the download is a zip, which `jclaw.sh` unpacks with `unzip` or, without it, Windows' own `tar.exe`.
 
-To go back to the previous Java by hand, stop JClaw, then in the install's home folder rename `jre` to something else and `jre.previous` to `jre`, and start JClaw again.
+To go back to the previous Java by hand, stop JClaw, then in the install's home folder rename `jre` to something else and `jre.previous` to `jre`, and start JClaw again. A switch keeps no `jre.previous`: to go back to your own Java after one, stop JClaw, rename `jre` to something else, and start JClaw again.
 
 ### Restart
 

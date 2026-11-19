@@ -3,19 +3,22 @@
 
     irm https://github.com/tsukhani/jclaw/releases/latest/download/install.ps1 | iex
 
-  Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
-  Java 25+ runtime (the bundle's only dependency), extracts it to %USERPROFILE%\.jclaw,
-  and starts JClaw on http://localhost:9000.
+  Downloads the self-contained jclaw-bundle.zip from GitHub Releases, installs the
+  Java runtime it needs, extracts it to %USERPROFILE%\.jclaw, and starts JClaw on
+  http://localhost:9000.
 
   The bundle's launcher is jclaw.sh (a POSIX shell script), so JClaw runs through
   Git Bash or WSL. This installer prefers Git Bash (it reuses the Windows Java we
   verify); if only WSL is present it launches there (and checks WSL's own Java);
   if neither is found it installs and prints how to run it.
 
-  When the Git Bash / Windows path has no Java 25+, the installer offers to
-  download a self-contained Zulu JRE 25 into %USERPROFILE%\.jclaw\jre (no admin,
-  no system change); jclaw.sh finds it there on every later start. The WSL path
-  uses WSL's own Java, so install that inside your distro.
+  On the Git Bash / Windows path a fresh install downloads a self-contained Zulu
+  JRE 25 into %USERPROFILE%\.jclaw\jre (no admin, no system change), even when
+  Windows has a usable Java: jclaw.sh finds it there on every later start, and
+  Settings keeps it patched. Windows' own Java 25+ is used only with JCLAW_NO_JRE=1,
+  or where Azul has no JRE for this machine. An upgrade keeps the Java the install
+  runs on. The WSL path uses WSL's own Java, so install that inside your distro, or
+  run install.sh inside the distro for a JRE that JClaw keeps patched.
 
   Configuration (all optional, via environment variables):
     JCLAW_HOME        install directory        (default: %USERPROFILE%\.jclaw)
@@ -23,7 +26,7 @@
     JCLAW_PORT        port to report on launch  (default: 9000)
     JCLAW_NO_START    set to 1 to install only, not start
     JCLAW_INSTALL_JRE set to 1 to download the Zulu JRE without prompting
-    JCLAW_NO_JRE      set to 1 to never auto-install a JRE (fail if Java is missing)
+    JCLAW_NO_JRE      set to 1 to use my own Java 25+ instead of the Zulu JRE (fail if it is missing)
     JCLAW_NO_RC_EDIT  set to 1 to generate completion scripts but not edit your shell rc
     JCLAW_FORCE_REINSTALL  replace an existing install from scratch, DISCARDING its
                       database, workspace and credentials. Without it, an existing
@@ -49,6 +52,8 @@ $MinJava   = 25
 $JavaModule = 'jdk.incubator.vector'
 $AppDir    = Join-Path $JclawHome 'jclaw'   # bundle zip extracts under a jclaw\ prefix
 $JreDir    = Join-Path $JclawHome 'jre'     # managed Zulu JRE, sibling of jclaw\ (jclaw.sh finds it)
+# An existing install is upgraded in place by its own jclaw.sh, and keeps the Java it runs on.
+$Upgrading = (Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $env:JCLAW_FORCE_REINSTALL
 $AzulApi   = 'https://api.azul.com/metadata/v1/zulu/packages/'
 # Azul arch token for this host (x64 / aarch64); '' means an arch we don't auto-install for.
 $WinArch   = switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -127,20 +132,25 @@ function Test-WantJre($reason) {
         $ans = Read-Host "Download a self-contained Zulu JRE $MinJava (~50 MB) into $JreDir? [Y/n]"
         return ($ans -notmatch '^(?i)n')
     }
-    Substep "$reason Auto-installing Zulu JRE $MinJava (set JCLAW_NO_JRE=1 to skip)"
+    Substep "$reason Auto-installing Zulu JRE $MinJava (set JCLAW_NO_JRE=1 to use your own Java)"
     return $true
 }
 
-# Resolve, download, checksum-verify, and unpack the newest GA plain Zulu JRE
-# (windows/$WinArch) into $JreDir, then confirm it runs. Throws on any failure.
-function Get-ZuluJre {
-    Step "Installing Zulu JRE $MinJava (windows/$WinArch)"
+# The newest GA plain Zulu JRE (windows/$WinArch) in Azul's catalog, or $null with
+# $script:NoJreWhy saying why there is none.
+function Find-ZuluJre {
     $api = "${AzulApi}?java_version=$MinJava&os=windows&arch=$WinArch&archive_type=zip" +
            "&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
-    try { $pkgs = Invoke-RestMethod -Uri $api } catch { throw "couldn't reach the Azul JRE catalog: $($_.Exception.Message)" }
+    try { $pkgs = Invoke-RestMethod -Uri $api } catch { $script:NoJreWhy = "couldn't reach the Azul JRE catalog: $($_.Exception.Message)"; return $null }
     # Skip the JavaFX-bundled (fx) and CRaC variants — take the first plain JRE.
     $pkg = $pkgs | Where-Object { $_.name -notmatch '(?i)fx|crac' } | Select-Object -First 1
-    if (-not $pkg -or -not $pkg.download_url) { throw "no Zulu JRE $MinJava found for windows/$WinArch in the Azul catalog." }
+    if (-not $pkg -or -not $pkg.download_url) { $script:NoJreWhy = "no Zulu JRE $MinJava found for windows/$WinArch in the Azul catalog"; return $null }
+    return $pkg
+}
+
+# Download, checksum-verify, and unpack $pkg into $JreDir, then confirm it runs.
+# Throws on any failure.
+function Get-ZuluJre($pkg) {
     Substep ([System.IO.Path]::GetFileName($pkg.download_url))
 
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jclaw-jre-" + [System.Guid]::NewGuid().ToString('N'))
@@ -249,15 +259,27 @@ if ($useWsl) {
 } else {
     $jv = Get-JavaMajor { java -version }
     $lacksModule = $null -ne $jv -and $jv -ge $MinJava -and -not (Test-JavaModule { java "--add-modules=$JavaModule" -version })
-    if ($null -ne $jv -and $jv -ge $MinJava -and -not $lacksModule) {
+    $hostJava = $null -ne $jv -and $jv -ge $MinJava -and -not $lacksModule
+    if ($hostJava -and ($Upgrading -or $NoJre -or -not $WinArch)) {
         Substep "Java $jv detected"
     } else {
-        $reason = if ($null -eq $jv) { 'Java was not found on your PATH.' }
+        $reason = if ($hostJava) { "Found Java $jv, but JClaw runs on a Zulu JRE $MinJava of its own, which it keeps patched." }
+                  elseif ($null -eq $jv) { 'Java was not found on your PATH.' }
                   elseif ($lacksModule) { "Found Java $jv, but it lacks the $JavaModule module JClaw starts with." }
                   else { "Found Java $jv, but JClaw needs $MinJava or newer." }
         if (-not $NoJre -and $WinArch -and (Test-WantJre $reason)) {
-            try { Get-ZuluJre; Substep "Java $MinJava ready (managed JRE)" }
-            catch { Show-JavaHelp -Auto:([bool]$WinArch); Die $_.Exception.Message }
+            Step "Installing Zulu JRE $MinJava (windows/$WinArch)"
+            $pkg = Find-ZuluJre
+            if ($pkg) {
+                try { Get-ZuluJre $pkg; Substep "Java $MinJava ready (managed JRE)" }
+                catch { Show-JavaHelp -Auto:([bool]$WinArch); Die $_.Exception.Message }
+            } elseif ($hostJava) {
+                Warn "$script:NoJreWhy, so JClaw runs on Java $jv."
+            } else {
+                Show-JavaHelp -Auto:([bool]$WinArch); Die "$script:NoJreWhy - install Java $MinJava yourself and re-run."
+            }
+        } elseif ($hostJava) {
+            Substep "Java $jv detected"
         } else {
             Show-JavaHelp -Auto:([bool]$WinArch); Die $reason
         }
@@ -272,7 +294,7 @@ if ($useWsl) {
 # "delete the database, the agent workspace and the session-signing secret".
 # jclaw.sh upgrade carries all of that across, backs the database up first, and
 # rolls back a release that fails to start.
-if ((Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $env:JCLAW_FORCE_REINSTALL) {
+if ($Upgrading) {
     if (-not ($gitBash -or $useWsl)) {
         Die "an install already exists at $AppDir, but neither Git Bash nor WSL is available to upgrade it. Install one, then re-run."
     }

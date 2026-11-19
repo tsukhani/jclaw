@@ -36,11 +36,16 @@ import java.util.regex.Pattern;
  * Java runtime). Only the runtime the installer put beside the install, {@code <home>/jre}, is ever
  * replaced, and never by this JVM: it downloads and verifies the release into {@code <home>/jre.staged/},
  * and jclaw.sh's {@code apply_staged_jre} unpacks it and swaps the folders at the next start, once this
- * JVM has stopped. Anywhere else this class only reports that a newer patch exists.
+ * JVM has stopped. A bundle install on a Java it did not install can switch to one of its own the same
+ * way: the next start installs the download as the first {@code <home>/jre}. A container or a source
+ * checkout only hears that a newer patch exists.
  */
 public final class JavaRuntimeService {
 
     private static final String CATEGORY = "java-runtime";
+
+    /** The major JClaw installs and is tested on: install.sh's MIN_JAVA, install.ps1's $MinJava, jclaw.sh's JRE_MAJOR. */
+    public static final int MANAGED_MAJOR = 25;
 
     /** The catalog install.sh and install.ps1 query; {@link #catalogUrl} asks it the same question. */
     static final String AZUL_API = "https://api.azul.com/metadata/v1/zulu/packages/";
@@ -75,7 +80,7 @@ public final class JavaRuntimeService {
     public enum Kind {
         /** The runtime the installer put at {@code <home>/jre}, the only one this class replaces. */
         BUILT_IN("built-in"),
-        /** A Java the operator installed, or a source checkout's: its vendor updates it. */
+        /** A Java the operator installed, or a source checkout's: its vendor updates it, until a bundle install {@link JavaRuntimeService#switchable switches}. */
         EXTERNAL("external"),
         /** The image brings the runtime. */
         CONTAINER("container");
@@ -155,7 +160,7 @@ public final class JavaRuntimeService {
         environmentOverride = override;
     }
 
-    /** Test seam: the catalog's answer, in place of a call to Azul; null clears it. */
+    /** Test seam: the catalog's answer, whichever major it is asked for, in place of a call to Azul; null clears it. */
     public static void setLatestForTest(@Nullable Release override) {
         latestOverride = override;
     }
@@ -228,6 +233,8 @@ public final class JavaRuntimeService {
     }
 
     static final Lookup LOOKUP = new Lookup();
+    /** {@link #MANAGED_MAJOR}'s newest, asked apart only while a host Java of another major runs. */
+    static final Lookup MANAGED_LOOKUP = new Lookup();
 
     // Held across the checks and the change, so a cancel never deletes a staging a new download is writing.
     private static final ReentrantLock STAGING = new ReentrantLock();
@@ -262,6 +269,14 @@ public final class JavaRuntimeService {
         return Files.isDirectory(app.resolve("app")) || Files.exists(app.resolve(".git"));
     }
 
+    /**
+     * True on a bundle install that runs on a Java it did not install. A download there is the switch to a
+     * Java of JClaw's own, {@link #managed}, which the next start installs as {@code <home>/jre}.
+     */
+    public static boolean switchable(Environment env) {
+        return kind(env) == Kind.EXTERNAL && !sourceCheckout(env.app());
+    }
+
     // ── The catalog ──────────────────────────────────────────────────────────
 
     /** The newest patch of the running major, from {@link #setLatestForTest} or the cached catalog check. */
@@ -271,15 +286,33 @@ public final class JavaRuntimeService {
         return LOOKUP.latest(refresh, () -> fetchLatest(environment()));
     }
 
+    /**
+     * The Java a switch from a host Java installs: the newest Zulu JRE of {@link #MANAGED_MAJOR}, whatever major
+     * runs now. The one place the switch picks its vendor.
+     *
+     * @param latest  {@link #latest}'s answer, which is this one while the host's Java is of that major
+     * @param refresh bypass the cache for an operator's re-check
+     */
+    public static @Nullable Release managed(Environment env, @Nullable Release latest, boolean refresh) {
+        if (major(env.javaVersion()) == MANAGED_MAJOR) return latest;
+        var test = latestOverride;
+        if (test != null) return test;
+        return MANAGED_LOOKUP.latest(refresh, () -> fetchLatest(env, MANAGED_MAJOR));
+    }
+
     /** One catalog query for {@code env}'s major, OS, C library and architecture, bypassing the cache. */
     public static Release fetchLatest(Environment env) throws IOException {
+        return fetchLatest(env, major(env.javaVersion()));
+    }
+
+    /** One catalog query for {@code major} on {@code env}'s OS, C library and architecture, bypassing the cache. */
+    public static Release fetchLatest(Environment env, int major) throws IOException {
         var musl = musl(env.javaHome());
         var os = azulOs(env.osName(), musl);
         var arch = azulArch(env.osArch());
         if (os == null || arch == null) {
             throw new IOException("Azul builds no Java for " + env.osName() + " on " + env.osArch());
         }
-        int major = major(env.javaVersion());
         var url = catalogUrl(major, os, arch);
         var call = HttpFactories.general().newCall(new Request.Builder().url(url).get().build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -481,15 +514,22 @@ public final class JavaRuntimeService {
      * The release a download would stage, or why there is none. Each refusal is a row of the panel's
      * matrix, so the POST never accepts what the GET would not offer.
      *
+     * @param latest the newest patch of the built-in Java's major or, where {@link #switchable}, the
+     *               {@link #managed} Java the switch installs
      * @throws IllegalStateException naming why nothing can be staged
      */
     public static Release stageable(Environment env, @Nullable Release latest, @Nullable Staged staged,
                                     boolean downloading) {
-        switch (kind(env)) {
+        var kind = kind(env);
+        switch (kind) {
             case CONTAINER -> throw new IllegalStateException(
                     "The runtime comes with the Docker image; pull a newer image to update Java.");
-            case EXTERNAL -> throw new IllegalStateException("JClaw runs on a Java it did not install ("
-                    + env.javaHome() + "), so that Java's vendor provides its updates.");
+            case EXTERNAL -> {
+                if (sourceCheckout(env.app())) {
+                    throw new IllegalStateException("JClaw runs on a Java it did not install ("
+                            + env.javaHome() + "), so that Java's vendor provides its updates.");
+                }
+            }
             case BUILT_IN -> { }
         }
         if (downloading) throw new IllegalStateException("A newer Java is already downloading.");
@@ -497,8 +537,14 @@ public final class JavaRuntimeService {
             throw new IllegalStateException("Java " + staged.version() + " will be installed at the next restart.");
         }
         if (latest == null) throw new IllegalStateException("Couldn't check Azul's catalog for a newer Java.");
-        if (!isNewer(latest, env)) {
+        if (kind == Kind.BUILT_IN && !isNewer(latest, env)) {
             throw new IllegalStateException("Java " + env.javaVersion() + " is up to date.");
+        }
+        // A host Java of another major gives way to the one JClaw is tested on; one of the same major never to an older patch.
+        if (kind == Kind.EXTERNAL && major(latest.version()) == major(env.javaVersion())
+                && isNewer(env.javaVersion(), latest.version())) {
+            throw new IllegalStateException("Java " + latest.version() + " is older than the Java " + env.javaVersion()
+                    + " JClaw runs on, so switching to it would undo fixes.");
         }
         if (!Files.isWritable(env.home())) {
             throw new IllegalStateException(env.home() + " is not writable, so a new Java cannot be staged beside "
@@ -518,7 +564,8 @@ public final class JavaRuntimeService {
             stager = Play.runningInTestMode() ? JavaRuntimeService::refuseInTestMode : JavaRuntimeService::download;
         }
         var env = environment();
-        return requestStage(env, latest(false), CURRENT, stager);
+        var latest = latest(false);
+        return requestStage(env, switchable(env) ? managed(env, latest, false) : latest, CURRENT, stager);
     }
 
     // A request that outlives its test's seams must not delete or download anything.

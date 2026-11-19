@@ -28,8 +28,10 @@ keep it running and keep it up to date. It also lists the optional extras you ca
 
 To run JClaw, you need:
 
-- **Java 25 or later.** Use [Zulu](https://www.azul.com/downloads/?version=java-25) or Temurin.
-  If you do not have it, the installer can download it for you.
+- **Java 25.** The one-line installer downloads a Zulu JRE 25 for JClaw, and JClaw keeps it
+  patched, so you do not need to install Java yourself. To run JClaw on your own Java 25 or later
+  instead, such as [Zulu](https://www.azul.com/downloads/?version=java-25) or Temurin, set
+  `JCLAW_NO_JRE=1` ([Installer options](#installer-options)).
 - **bash.** macOS and most Linux systems include it. On Alpine Linux, run `apk add bash`.
 - **On Windows only: Git Bash or WSL** (the Windows Subsystem for Linux). JClaw's launcher is a
   bash script, so it runs inside one of them.
@@ -76,9 +78,11 @@ irm https://github.com/tsukhani/jclaw/releases/latest/download/install.ps1 | iex
 
 The installer does these steps:
 
-1. It looks for Java 25 or later with the `jdk.incubator.vector` module. If it finds none, or the
-   Java it finds lacks the module, it offers to download Java for you. It puts a self-contained
-   Zulu JRE 25 into `~/.jclaw/jre`.
+1. It downloads a self-contained Zulu JRE 25 from Azul into `~/.jclaw/jre`, and checks it against
+   the SHA-256 that Azul publishes. JClaw runs on this Java, and
+   **Settings → Maintenance → Java runtime** keeps it patched. The installer does this even when
+   Java is already installed. It uses your own Java 25 or later, with the `jdk.incubator.vector`
+   module, only when you set `JCLAW_NO_JRE=1`, or when Azul has no JRE for your system.
 2. It downloads `jclaw-bundle.zip` from the latest GitHub Release. This self-contained bundle
    holds everything JClaw needs.
 3. It checks the download. [How the installer checks the download](#how-the-installer-checks-the-download)
@@ -86,9 +90,18 @@ The installer does these steps:
 4. It unpacks the bundle into `~/.jclaw`.
 5. It starts JClaw on <http://localhost:9000>.
 
+Running the installer again over an existing install upgrades it, and keeps the Java it runs on.
+To move an install from your own Java to JClaw's, use **Switch to Java** in
+**Settings → Maintenance → Java runtime**.
+
 On Windows, JClaw runs inside **Git Bash** or **WSL**, because its launcher is a bash script.
 The installer uses Git Bash if it finds it. If it finds only WSL, it starts JClaw there.
 If it finds neither, it still installs JClaw, and then tells you how to run it.
+
+With WSL, JClaw runs on the Java inside your WSL distro, and `install.ps1` downloads no Java for
+it. Install Java 25 inside the distro first. For the Java that JClaw keeps patched, run the
+`install.sh` one-liner inside the distro instead: it installs JClaw in the distro's home folder,
+with its own Zulu JRE.
 
 ### How the installer checks the download
 
@@ -108,8 +121,8 @@ You can change what the installer does with these environment variables. All of 
 | `JCLAW_VERSION` | `latest` | The release to install, for example `v0.14.7`. |
 | `JCLAW_PORT` | `9000` | The port the installer reports when it starts JClaw. |
 | `JCLAW_NO_START` | — | Set to `1` to install JClaw without starting it. |
-| `JCLAW_INSTALL_JRE` | — | Set to `1` to download the Zulu JRE without asking, when no Java 25+ with `jdk.incubator.vector` is found. |
-| `JCLAW_NO_JRE` | — | Set to `1` to never download a JRE. |
+| `JCLAW_INSTALL_JRE` | — | Set to `1` to download the Zulu JRE without asking. |
+| `JCLAW_NO_JRE` | — | Use my own Java: set to `1` to run JClaw on your Java 25 or later, with `jdk.incubator.vector`, instead of downloading the Zulu JRE. |
 | `JCLAW_NO_RC_EDIT` | — | Set to `1` to make the completion scripts without editing your shell's startup (rc) file. |
 | `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install with a new one. **This deletes its database, workspace and credentials.** Without it, the installer upgrades an existing install in place. |
 | `JCLAW_BIN_DIR` | `~/.local/bin` | Where the installer puts the `jclaw` command (`install.sh` only). |

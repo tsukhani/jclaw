@@ -28,14 +28,15 @@ import java.util.stream.Stream;
 
 /**
  * Runs jclaw.sh's staged-runtime functions against a scratch install ({@code <home>/jclaw},
- * {@code <home>/jre}) whose runtimes are stub {@code java} scripts, so the swap, every way it refuses,
- * and the zip branches are tested as written rather than restated.
+ * {@code <home>/jre}) whose runtimes are stub {@code java} scripts, so the swap, the first install on
+ * a host Java, every way they refuse, and the zip branches are tested as written rather than restated.
  */
 class JavaRuntimeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("native_path", "jre_javas_in", "use_bundled_jre",
             "sha256_file", "conf_jvm_modules", "jre_status", "jre_version_norm", "jre_reported_version",
             "jre_zip_tool", "jre_install_staged", "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase");
+    private static final List<String> VARIABLES = List.of("JRE_MAJOR");
 
     private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-macosx_aarch64";
     private static final String NEW_TOP = "zulu25.38.107-ca-jre25.0.5-macosx_aarch64";
@@ -212,15 +213,95 @@ class JavaRuntimeScriptTest extends UnitTest {
     }
 
     @Test
-    void withNoBuiltInJavaToReplaceNothingIsInstalled() throws Exception {
-        var home = install();
-        deleteTree(home.resolve("jre"));
+    void onAHostJavaOfAnotherMajorTheStagedJava25BecomesTheFirstBuiltInJava() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("27.0.1");
         stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
 
-        var out = run(home, Map.of(), "apply_staged_jre");
+        var out = run(home, Map.of("JAVA_HOME", host.toString()),
+                "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"; echo \"JAVA=$(command -v java)\"");
 
-        assertTrue(out.contains("Java runtime: kept the current Java: there is no built-in Java at " + home + "/jre to replace"), out);
+        var line = "switched from the host's Java 27.0.1 to Java 25.0.5 at " + home + "/jre";
+        var newHome = home.resolve("jre/" + NEW_TOP + HOME_IN_ARCHIVE);
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+                + "JAVA_HOME=" + newHome + "\nJAVA=" + newHome + "/bin/java\n", out);
+        assertEquals(line, status(home));
+        assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
+        assertFalse(Files.exists(home.resolve("jre.previous")), "nothing was replaced, so nothing is kept");
+        assertFalse(Files.exists(home.resolve("jre.staged")));
+        assertFalse(Files.exists(home.resolve("jre.new")));
+    }
+
+    @Test
+    void withoutJavaHomeTheHostsJavaIsTheOneOnThePath() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
+
+        var out = run(home, Map.of("JAVA_HOME", "", "PATH", host.resolve("bin") + File.pathSeparator + System.getenv("PATH")),
+                "apply_staged_jre");
+
+        assertTrue(out.contains("    Java runtime: switched from the host's Java 25.0.3 to Java 25.0.5 at " + home + "/jre\n"), out);
+        assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
+    }
+
+    @Test
+    void aStagingThatFailsOnAHostJavaLeavesTheStartOnItAndSaysWhy() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        var kept = "kept the host's Java 25.0.3: ";
+
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
+        Files.write(home.resolve("jre.staged/" + TARBALL), "tampered".getBytes(StandardCharsets.UTF_8));
+        assertHostKept(home, host, kept + "Java 25.0.5 failed its SHA-256 check");
+
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", false)));
+        assertHostKept(home, host, kept + "Java 25.0.5 reported no version when it ran");
+
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.3", true)));
+        assertHostKept(home, host, kept + "Java 25.0.5 reported 25.0.3 when it ran");
+
+        var top = "zulu26.30.1-ca-jre26.0.1-macosx_aarch64";
+        stage(home, top + ".tar.gz", "26.0.1", tarGz(runtime(top, "26.0.1", true)));
+        assertHostKept(home, host, kept + "Java 26.0.1 is not the Java 25 JClaw installs");
+
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
+        Files.writeString(home.resolve("jre.staged/manifest"), "version=25.0.5\nsha256=" + "a".repeat(64) + "\narchive=../evil.tar.gz\n");
+        assertHostKept(home, host, kept + "the staged runtime's manifest is malformed");
+    }
+
+    @Test
+    void aMoveIntoJreThatFailsOnAHostJavaLeavesNoJreBehind() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
+        var failing = Files.createDirectories(tmp.resolve("failing-mv"));
+        executable(failing.resolve("mv"), "#!/bin/sh\ncase \"$1\" in */jre.new) exit 1 ;; esac\nexec '"
+                + which("mv") + "' \"$@\"\n");
+
+        var out = run(home, Map.of("JAVA_HOME", host.toString(), "PATH", failing + File.pathSeparator + System.getenv("PATH")),
+                "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"");
+
+        var line = "kept the host's Java 25.0.3: could not move Java 25.0.5 into " + home + "/jre";
+        assertTrue(out.contains("    Java runtime: " + line + "\nJAVA_HOME=" + host + "\n"), out);
+        assertEquals(line, status(home));
         assertFalse(Files.exists(home.resolve("jre")));
+        assertFalse(Files.exists(home.resolve("jre.new")));
+    }
+
+    @Test
+    void aJreFolderWithNoJavaInItIsNeverReplaced() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        Files.createDirectories(home.resolve("jre/notes"));
+        stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", true)));
+
+        var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre");
+
+        var line = "kept the host's Java 25.0.3: " + home + "/jre holds no Java; move it away to install Java 25.0.5";
+        assertTrue(out.contains("    Java runtime: " + line + "\n"), out);
+        assertEquals(line, status(home));
+        assertEquals(List.of("notes"), listing(home.resolve("jre")));
         assertFalse(Files.exists(home.resolve("jre.staged")));
     }
 
@@ -254,6 +335,32 @@ class JavaRuntimeScriptTest extends UnitTest {
         assertFalse(Files.exists(home.resolve("jre.previous")));
         assertFalse(Files.exists(home.resolve("jre.new")));
         assertFalse(Files.exists(home.resolve("jre.staged")), "a staging that failed is dropped, not retried");
+    }
+
+    private void assertHostKept(Path home, Path host, String line) throws Exception {
+        var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"");
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+                + "JAVA_HOME=" + host + "\n", out);
+        assertEquals(line, status(home));
+        assertFalse(Files.exists(home.resolve("jre")));
+        assertFalse(Files.exists(home.resolve("jre.previous")));
+        assertFalse(Files.exists(home.resolve("jre.new")));
+        assertFalse(Files.exists(home.resolve("jre.staged")), "a staging that failed is dropped, not retried");
+    }
+
+    /** An install that runs on a Java it did not install: {@code <home>/jclaw} and no {@code <home>/jre}. */
+    private Path hostInstall() throws IOException {
+        var home = install();
+        deleteTree(home.resolve("jre"));
+        return home;
+    }
+
+    /** A host Java's home, outside {@code <home>}, whose {@code bin/java} reports {@code version}. */
+    private Path hostJava(String version) throws IOException {
+        var javaHome = tmp.resolve("host-java-" + version);
+        Files.createDirectories(javaHome.resolve("bin"));
+        executable(javaHome.resolve("bin/java"), "#!/bin/sh\necho \"openjdk version \\\"" + version + "\\\" 2026-04-21\" >&2\n");
+        return javaHome;
     }
 
     /** {@code <home>/jclaw} with the jvm.memory module flag, and {@code <home>/jre} on Java 25.0.4. */
@@ -331,6 +438,11 @@ class JavaRuntimeScriptTest extends UnitTest {
         var script = Files.readString(repo().resolve("jclaw.sh"));
         var harness = new StringBuilder("set -euo pipefail\nSCRIPT_DIR='" + home.resolve("jclaw")
                 + "'\nIS_WINDOWS=" + env.getOrDefault("IS_WINDOWS", "0") + "\n");
+        for (var name : VARIABLES) {
+            var m = Pattern.compile("(?m)^" + Pattern.quote(name) + "=.*\\n").matcher(script);
+            assertTrue(m.find(), "jclaw.sh no longer sets " + name);
+            harness.append(m.group());
+        }
         for (var name : FUNCTIONS) {
             var m = Pattern.compile("(?ms)^" + Pattern.quote(name) + "\\(\\) \\{\\n.*?^\\}\\n").matcher(script);
             assertTrue(m.find(), "jclaw.sh no longer defines " + name);

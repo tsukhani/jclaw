@@ -324,6 +324,11 @@ public class ApiSystemController extends Controller {
      * @param rebuildsStartupCache true when the first start on a new runtime rebuilds the AOT cache:
      *                             false on Windows, which has none, and while it is switched off in
      *                             Settings or by {@code JCLAW_AOT=off}
+     * @param switchable           true on a bundle install running a Java it did not install, where the
+     *                             POST stages a Java of JClaw's own that the next start installs as
+     *                             {@code <home>/jre}
+     * @param managedVersion       the Java that switch installs, or null when there is no switch or
+     *                             Azul's catalog could not be reached
      */
     public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String vendor,
                                        @Nullable String latestVersion, @Nullable String releaseType,
@@ -331,7 +336,8 @@ public class ApiSystemController extends Controller {
                                        @Nullable String stagedVersion, boolean downloading,
                                        @Nullable Integer downloadPercent, @Nullable String downloadError,
                                        @Nullable String lastStart, @Nullable String lastStartAt,
-                                       boolean rebuildsStartupCache) {}
+                                       boolean rebuildsStartupCache, boolean switchable,
+                                       @Nullable String managedVersion) {}
 
     /**
      * GET /api/system/java-runtime — the running Java, the newest patch of its major and any download
@@ -351,6 +357,8 @@ public class ApiSystemController extends Controller {
         var progress = JavaRuntimeService.CURRENT;
         boolean downloading = progress.active();
         var last = JavaRuntimeService.lastStart(env.app());
+        boolean switchable = JavaRuntimeService.switchable(env);
+        var managed = switchable ? JavaRuntimeService.managed(env, latest, Boolean.TRUE.equals(refresh)) : null;
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
                 JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
@@ -361,14 +369,16 @@ public class ApiSystemController extends Controller {
                 downloading, downloading ? progress.currentPercent() : null, progress.lastError(),
                 last == null ? null : last.line(), last == null ? null : last.at().toString(),
                 !env.windows() && RestartService.aotCacheState().enabled()
-                        && !"off".equals(System.getenv("JCLAW_AOT")))));
+                        && !"off".equals(System.getenv("JCLAW_AOT")),
+                switchable, managed == null ? null : managed.version())));
     }
 
     /**
      * POST /api/system/java-runtime — download the newest patch for the next start to install, and ack.
-     * Returns 202 while the download runs in this JVM; the GET reports its progress. 409 when there is
-     * nothing this install may download: another vendor's Java, a container, a download already running
-     * or staged, or no newer patch.
+     * Returns 202 while the download runs in this JVM; the GET reports its progress. On a bundle install
+     * running a Java it did not install, the download is the switch to a Java of JClaw's own. 409 when
+     * there is nothing this install may download: a source checkout, a container, a download already
+     * running or staged, no newer patch, or a switch that would go back to an older patch.
      */
     @AgentAccess(value = OPERATOR_ONLY, reason = "downloads a Java runtime that the next start installs")
     public static void stageJavaRuntime() {

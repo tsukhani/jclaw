@@ -503,6 +503,8 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertEquals(current, body.get("currentVersion").getAsString());
         assertEquals(current + ".1", body.get("latestVersion").getAsString());
         assertTrue(body.get("updateAvailable").getAsBoolean());
+        assertFalse(body.get("switchable").getAsBoolean());
+        assertTrue(body.get("managedVersion").isJsonNull());
 
         var refused = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, refused.status.intValue());
@@ -528,6 +530,8 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertTrue(before.get("updateAvailable").getAsBoolean());
         assertTrue(before.get("stagedVersion").isJsonNull());
         assertTrue(before.get("rebuildsStartupCache").getAsBoolean());
+        assertFalse(before.get("switchable").getAsBoolean());
+        assertTrue(before.get("managedVersion").isJsonNull());
 
         var accepted = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(202, accepted.status.intValue());
@@ -569,6 +573,48 @@ class ApiSystemControllerTest extends FunctionalTest {
         var untyped = json(GET("/api/system/java-runtime"));
         assertTrue(untyped.get("releaseType").isJsonNull());
         assertEquals("https://docs.azul.com/core/release-notes", untyped.get("releaseNotesUrl").getAsString());
+    }
+
+    @Test
+    void aBundleOnAHostJavaOffersTheSwitchAndStagesTheManagedJava() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(hostJava("25.0.3"));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
+            stagings.add(r);
+            writeStaging(home, r.version());
+        });
+
+        var before = json(GET("/api/system/java-runtime"));
+        assertEquals("external", before.get("kind").getAsString());
+        assertEquals("25.0.3", before.get("currentVersion").getAsString());
+        assertTrue(before.get("switchable").getAsBoolean());
+        assertEquals("25.0.5", before.get("managedVersion").getAsString());
+
+        var accepted = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals(202, accepted.status.intValue());
+        assertEquals("{\"status\":\"ok\",\"version\":\"25.0.5\"}", getContent(accepted));
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(List.of("25.0.5"), stagings.stream().map(JavaRuntimeService.Release::version).toList());
+        assertEquals("25.0.5", json(GET("/api/system/java-runtime")).get("stagedVersion").getAsString());
+
+        var again = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals(409, again.status.intValue());
+        assertEquals("Java 25.0.5 will be installed at the next restart.", json(again).get("message").getAsString());
+        assertEquals(1, stagings.size());
+    }
+
+    @Test
+    void aSwitchThatWouldGoBackToAnOlderPatchIsRefused() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(hostJava("25.0.6"));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
+
+        assertEquals("25.0.5", json(GET("/api/system/java-runtime")).get("managedVersion").getAsString());
+        var refused = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals(409, refused.status.intValue());
+        assertEquals("Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.",
+                json(refused).get("message").getAsString());
+        assertEquals(0, stagings.size());
     }
 
     @Test
@@ -678,6 +724,14 @@ class ApiSystemControllerTest extends FunctionalTest {
         Files.createDirectories(tmp.resolve("jclaw/conf"));
         return new JavaRuntimeService.Environment(tmp.resolve("jclaw"), jreHome(), version, "Azul Systems, Inc.",
                 "Mac OS X", "aarch64", container);
+    }
+
+    /** {@code <tmp>/jclaw} running on a Java outside {@code <tmp>/jre}: an install on the host's Java. */
+    private JavaRuntimeService.Environment hostJava(String version) throws IOException {
+        Files.createDirectories(tmp.resolve("jclaw/conf"));
+        return new JavaRuntimeService.Environment(tmp.resolve("jclaw"),
+                Files.createDirectories(tmp.resolve("host/zulu-25.jdk/Contents/Home")), version, "Azul Systems, Inc.",
+                "Mac OS X", "aarch64", false);
     }
 
     private Path jreHome() throws IOException {

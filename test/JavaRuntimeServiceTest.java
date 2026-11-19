@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -227,13 +228,80 @@ class JavaRuntimeServiceTest extends UnitTest {
                 env(app, builtIn, "25.0.4", true), latest, null, false);
         var system = Files.createDirectories(tmp.resolve("system"));
         assertRefused("JClaw runs on a Java it did not install (" + system + "), so that Java's vendor provides its updates.",
-                env(app, system, "25.0.4", false), latest, null, false);
+                env(checkout(), system, "25.0.4", false), latest, null, false);
         assertRefused("A newer Java is already downloading.", env, latest, null, true);
         assertRefused("Java 25.0.5 will be installed at the next restart.",
                 env, latest, new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE), false);
         assertRefused("Couldn't check Azul's catalog for a newer Java.", env, null, null, false);
         assertRefused("Java 25.0.5 is up to date.", env(app, builtIn, "25.0.5", false), latest, null, false);
         assertRefused("Java 25.0.4.1 is up to date.", env(app, builtIn, "25.0.4.1", false), release("25.0.4"), null, false);
+    }
+
+    @Test
+    void onlyABundleInstallOnAHostJavaCanSwitch() throws IOException {
+        var app = install();
+        var builtIn = Files.createDirectories(tmp.resolve("jre/Home"));
+        var system = Files.createDirectories(tmp.resolve("Library/Java/zulu-25.jdk/Contents/Home"));
+
+        assertTrue(JavaRuntimeService.switchable(env(app, system, "25.0.3", false)));
+        assertFalse(JavaRuntimeService.switchable(env(app, builtIn, "25.0.3", false)));
+        assertFalse(JavaRuntimeService.switchable(env(app, system, "25.0.3", true)));
+        assertFalse(JavaRuntimeService.switchable(env(checkout(), system, "25.0.3", false)));
+        var clone = Files.createDirectories(tmp.resolve("clone"));
+        Files.createDirectories(clone.resolve(".git"));
+        assertFalse(JavaRuntimeService.switchable(env(clone, system, "25.0.3", false)));
+    }
+
+    @Test
+    void theSwitchStagesTheManagedJavaUnlessItWouldUndoAFix() throws IOException {
+        var app = install();
+        var system = Files.createDirectories(tmp.resolve("system"));
+        var managed = release("25.0.5");
+
+        assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "25.0.3", false), managed, null, false));
+        assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "25.0.5", false), managed, null, false));
+        assertEquals(managed, JavaRuntimeService.stageable(env(app, system, "27.0.1", false), managed, null, false));
+        assertRefused("Java 25.0.5 is older than the Java 25.0.5.1 JClaw runs on, so switching to it would undo fixes.",
+                env(app, system, "25.0.5.1", false), managed, null, false);
+
+        var host = env(app, system, "25.0.3", false);
+        assertRefused("A newer Java is already downloading.", host, managed, null, true);
+        assertRefused("Java 25.0.5 will be installed at the next restart.",
+                host, managed, new JavaRuntimeService.Staged("25.0.5", hash("C3"), ARCHIVE), false);
+        assertRefused("Couldn't check Azul's catalog for a newer Java.", host, null, null, false);
+        assertRefused("The runtime comes with the Docker image; pull a newer image to update Java.",
+                env(app, system, "25.0.3", true), managed, null, false);
+    }
+
+    @Test
+    void theSwitchInstallsTheManagedMajorWhateverMajorTheHostRuns() throws IOException {
+        var latest = release("25.0.5");
+        var asked = new ArrayList<String>();
+        var name = "zulu25.38.107-ca-jre25.0.5-linux_x64.tar.gz";
+        Interceptor catalog = chain -> {
+            asked.add(chain.request().url().queryParameter("java_version"));
+            return answer(chain.request(), 200, "[" + entry(name, "[25,0,5]", "[25,38,107,0]", "D4") + "]");
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(catalog).build();
+        var host25 = new Environment(tmp.resolve("jclaw"), javaHome("host25", "default"), "25.0.3", "Eclipse Adoptium",
+                "Linux", "amd64", false);
+        var host27 = new Environment(tmp.resolve("jclaw"), javaHome("host27", "default"), "27.0.1", "Eclipse Adoptium",
+                "Linux", "amd64", false);
+
+        assertEquals(latest, HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host25, latest, true)));
+        assertEquals(List.of(), asked);
+        assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + name, hash("D4"), name),
+                HttpFactories.callWith(client, () -> JavaRuntimeService.managed(host27, release("27.0.2"), true)));
+        assertEquals(List.of("25"), asked);
+    }
+
+    @Test
+    void theInstallersAndTheStartInstallTheMajorTheSwitchAsksFor() throws IOException {
+        var repo = Path.of(Play.applicationPath.getAbsolutePath());
+        var expected = String.valueOf(JavaRuntimeService.MANAGED_MAJOR);
+        assertEquals(expected, first(repo.resolve("install.sh"), "(?m)^MIN_JAVA=(\\d+)$"));
+        assertEquals(expected, first(repo.resolve("install.ps1"), "(?m)^\\$MinJava\\s*=\\s*(\\d+)\\s*$"));
+        assertEquals(expected, first(repo.resolve("jclaw.sh"), "(?m)^JRE_MAJOR=(\\d+)$"));
     }
 
     @Test
@@ -246,6 +314,8 @@ class JavaRuntimeServiceTest extends UnitTest {
         try {
             assertRefused(home + " is not writable, so a new Java cannot be staged beside " + home.resolve("jre") + ".",
                     env, release("25.0.5"), null, false);
+            assertRefused(home + " is not writable, so a new Java cannot be staged beside " + home.resolve("jre") + ".",
+                    env(app, tmp.resolve("system"), "25.0.3", false), release("25.0.5"), null, false);
         } finally {
             Files.setPosixFilePermissions(home, PosixFilePermissions.fromString("rwxr-xr-x"));
         }
@@ -540,6 +610,19 @@ class JavaRuntimeServiceTest extends UnitTest {
     private Path install() throws IOException {
         var app = tmp.resolve("jclaw");
         Files.createDirectories(app.resolve("conf"));
+        return app;
+    }
+
+    private static String first(Path file, String regex) throws IOException {
+        var m = Pattern.compile(regex).matcher(Files.readString(file));
+        assertTrue(m.find(), file + " no longer matches " + regex);
+        return m.group(1);
+    }
+
+    /** A source checkout, known by its {@code app/}. */
+    private Path checkout() throws IOException {
+        var app = tmp.resolve("checkout");
+        Files.createDirectories(app.resolve("app"));
         return app;
     }
 

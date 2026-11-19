@@ -2,7 +2,8 @@
 // Java runtime panel. On the Java the installer put beside JClaw, POST /api/system/java-runtime
 // downloads the newest patch of the same major into jre.staged/ while JClaw keeps running, and
 // jclaw.sh installs it at the next start; the restart that does it stays the operator's choice.
-// Anywhere else the panel only says whether a newer patch exists.
+// A bundle install on a Java it did not install gets the same POST as a switch: the next start
+// installs a Java of JClaw's own at jre/. Anywhere else the panel only says whether a newer patch exists.
 import type { RestartPreflight } from '~/composables/useRestartAndReconnect'
 import { interruptionSummary } from '~/composables/useRestartAndReconnect'
 
@@ -21,6 +22,8 @@ interface JavaRuntimePreflight {
   lastStart: string | null
   lastStartAt: string | null
   rebuildsStartupCache: boolean
+  switchable: boolean
+  managedVersion: string | null
 }
 
 const ENDPOINT = '/api/system/java-runtime'
@@ -113,6 +116,27 @@ async function download() {
   await refresh()
 }
 
+async function switchJava() {
+  failure.value = null
+  const r = runtime.value
+  if (!r?.managedVersion) return
+  const ok = await confirm({
+    title: `Switch to Java ${r.managedVersion}`,
+    message: `Java ${r.managedVersion} will be downloaded from Azul and checked against its SHA-256 `
+      + `while JClaw keeps running on Java ${r.currentVersion}. The next time JClaw starts, it installs it `
+      + 'in the jre folder beside JClaw and runs on it from then on, and this panel keeps it patched. '
+      + `Java ${r.currentVersion} stays installed, unused by JClaw.`,
+    confirmText: 'Switch',
+  })
+  if (!ok) return
+
+  const res = await mutate(ENDPOINT, { method: 'POST' })
+  if (!res) {
+    failure.value = mutationError.value ?? 'The switch was refused.'
+  }
+  await refresh()
+}
+
 async function cancelStaged() {
   failure.value = null
   cancelling.value = true
@@ -161,11 +185,20 @@ const canDownload = computed(() => {
   return !!r && r.kind === 'built-in' && r.updateAvailable && !r.stagedVersion && !r.downloading
 })
 
+const canSwitch = computed(() => {
+  const r = runtime.value
+  return !!r && r.switchable && !!r.managedVersion && !r.stagedVersion && !r.downloading
+})
+
+// A switch downloads the managed Java, which on a host Java of another major is not latestVersion.
+const downloadingVersion = computed(() =>
+  runtime.value?.switchable ? runtime.value.managedVersion : runtime.value?.latestVersion)
+
 const summaryLine = computed(() => {
   const r = runtime.value
   if (!r) return 'Checking for a newer Java…'
   if (r.stagedVersion) return `Java ${r.stagedVersion} will be installed at the next restart. ${cacheNote.value}`.trim()
-  if (r.downloading) return `Downloading Java ${r.latestVersion}…`
+  if (r.downloading) return `Downloading Java ${downloadingVersion.value}…`
   if (!r.latestVersion) return 'Couldn\'t check for a newer Java.'
   if (!r.updateAvailable) return 'Up to date.'
   if (r.kind === 'container') return `Java ${r.latestVersion} is available. The runtime comes with the Docker image.`
@@ -225,6 +258,14 @@ const errorLine = computed(() =>
             >Azul's latest release notes</a>
           </div>
           <div
+            v-if="canSwitch"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="java-runtime-switch"
+          >
+            JClaw cannot patch a Java it did not install. Switch to Java {{ runtime?.managedVersion }} from Azul,
+            which JClaw installs beside itself and keeps patched.
+          </div>
+          <div
             v-if="runtime?.lastStart"
             class="text-xs text-fg-muted mt-0.5"
             data-testid="java-runtime-last-start"
@@ -252,6 +293,14 @@ const errorLine = computed(() =>
             @click="download"
           >
             Download Java {{ runtime?.latestVersion }}
+          </button>
+          <button
+            v-if="canSwitch"
+            class="px-3 py-1.5 text-xs font-medium text-white
+                   bg-emerald-600 hover:bg-emerald-700 rounded-full transition-colors"
+            @click="switchJava"
+          >
+            Switch to Java {{ runtime?.managedVersion }}
           </button>
           <template v-if="runtime?.stagedVersion">
             <button
@@ -284,7 +333,7 @@ const errorLine = computed(() =>
         <div
           class="flex-1 h-2 bg-muted border border-input overflow-hidden"
           role="progressbar"
-          :aria-label="`Downloading Java ${runtime.latestVersion}`"
+          :aria-label="`Downloading Java ${downloadingVersion}`"
           :aria-valuenow="runtime.downloadPercent ?? undefined"
           aria-valuemin="0"
           aria-valuemax="100"

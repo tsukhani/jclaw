@@ -111,10 +111,11 @@ jre_javas_in() {
     find "$1" -type f \( -name java -o -name java.exe \) 2>/dev/null | grep -E '/bin/java(\.exe)?$' || true
 }
 
-# Co-located managed JRE. The one-line installers (install.sh / install.ps1) drop a
-# self-contained Zulu JRE 25 at <home>/jre — a sibling of this script's dir — when the
-# host has no system Java 25. Prefer it on PATH so `jclaw start/restart/...` run without
-# a system-wide Java. No-op in a dev clone (no ../jre) and whenever JCLAW_JRE_SKIP is set.
+# Co-located managed JRE. A fresh install by the one-line installers (install.sh / install.ps1)
+# puts a self-contained Zulu JRE 25 at <home>/jre — a sibling of this script's dir — unless
+# JCLAW_NO_JRE=1 or Azul has no build for the host, and Settings can switch an install on a
+# host Java to one. Prefer it on PATH so `jclaw start/restart/...` run without a system-wide
+# Java. No-op in a dev clone (no ../jre) and whenever JCLAW_JRE_SKIP is set.
 # apply_staged_jre runs it again after it swaps the folder.
 use_bundled_jre() {
     [[ -z "${JCLAW_JRE_SKIP:-}" && -d "$SCRIPT_DIR/../jre" ]] || return 0
@@ -3394,16 +3395,29 @@ jre_zip_tool() {
     return 0
 }
 
+# The major of every built-in runtime: install.sh's MIN_JAVA, install.ps1's $MinJava, JavaRuntimeService.MANAGED_MAJOR.
+JRE_MAJOR=25
+
 # Installs $1/jre.staged into $1/jre and prints what it did, or prints why not and returns 1 having
-# touched nothing but $1/jre.new. Every check runs before the first rename.
+# touched nothing but $1/jre.new. Every check runs before the first rename. With no $1/jre yet, the
+# start runs on the host's Java, and the staging is the switch from it that Settings offers.
 jre_install_staged() {
-    local home="$1" staged="$1/jre.staged" version sha archive old_java current kept got tool javas new_java mods
+    local home="$1" staged="$1/jre.staged" version sha archive old_java current kept got tool javas new_java mods host=""
     local version_re='^[0-9]+(\.[0-9]+)*$' sha_re='^[0-9a-f]{64}$' archive_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.(tar\.gz|zip)$'
     old_java=$(jre_javas_in "$home/jre" | head -1)
     current=""
     if [[ -n "$old_java" ]]; then current=$(jre_reported_version "$old_java"); fi
     kept="kept the current Java"
     if [[ -n "$current" ]]; then kept="kept Java ${current}"; fi
+    # The java the launcher runs, as Play picks it: JAVA_HOME's, else the PATH's.
+    if [[ -z "$old_java" ]]; then
+        if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+            host=$(jre_reported_version "$JAVA_HOME/bin/java")
+        elif command -v java >/dev/null 2>&1; then
+            host=$(jre_reported_version java)
+        fi
+        kept="kept the host's Java${host:+ ${host}}"
+    fi
 
     version=$(sed -n 's/^version=//p' "$staged/manifest" | head -1)
     sha=$(sed -n 's/^sha256=//p' "$staged/manifest" | head -1)
@@ -3411,13 +3425,15 @@ jre_install_staged() {
     if [[ ! "$version" =~ $version_re || ! "$sha" =~ $sha_re || ! "$archive" =~ $archive_re ]]; then
         echo "${kept}: the staged runtime's manifest is malformed"; return 1
     fi
-    if [[ -z "$old_java" ]]; then
-        echo "${kept}: there is no built-in Java at $home/jre to replace"; return 1
-    fi
-    if [[ -z "$current" ]]; then
+    if [[ -z "$old_java" && -e "$home/jre" ]]; then
+        echo "${kept}: $home/jre holds no Java; move it away to install Java ${version}"; return 1
+    elif [[ -z "$old_java" ]]; then
+        if [[ "${version%%.*}" != "$JRE_MAJOR" ]]; then
+            echo "${kept}: Java ${version} is not the Java ${JRE_MAJOR} JClaw installs"; return 1
+        fi
+    elif [[ -z "$current" ]]; then
         echo "${kept}: $old_java does not report its version"; return 1
-    fi
-    if [[ "${version%%.*}" != "${current%%.*}" ]]; then
+    elif [[ "${version%%.*}" != "${current%%.*}" ]]; then
         echo "${kept}: Java ${version} is not a patch of the Java it runs on"; return 1
     fi
     got=$(sha256_file "$staged/$archive" || true)
@@ -3465,16 +3481,24 @@ jre_install_staged() {
         echo "${kept}: Java ${version} reported ${got:-no version} when it ran"; return 1
     fi
 
-    rm -rf "$home/jre.previous"
-    # mv into an existing directory would nest the runtime inside it.
-    if [[ -e "$home/jre.previous" ]] || ! mv "$home/jre" "$home/jre.previous"; then
-        echo "${kept}: could not move $home/jre aside to jre.previous"; return 1
+    if [[ -n "$old_java" ]]; then
+        rm -rf "$home/jre.previous"
+        # mv into an existing directory would nest the runtime inside it.
+        if [[ -e "$home/jre.previous" ]] || ! mv "$home/jre" "$home/jre.previous"; then
+            echo "${kept}: could not move $home/jre aside to jre.previous"; return 1
+        fi
     fi
     if ! mv "$home/jre.new" "$home/jre"; then
-        mv "$home/jre.previous" "$home/jre" 2>/dev/null || true
+        if [[ -n "$old_java" ]]; then mv "$home/jre.previous" "$home/jre" 2>/dev/null || true; fi
         echo "${kept}: could not move Java ${version} into $home/jre"; return 1
     fi
-    echo "upgraded ${current} → ${version}"
+    if [[ -n "$old_java" ]]; then
+        echo "upgraded ${current} → ${version}"
+    elif [[ -n "$host" ]]; then
+        echo "switched from the host's Java ${host} to Java ${version} at $home/jre"
+    else
+        echo "switched to Java ${version} at $home/jre"
+    fi
 }
 
 # The runtime Settings > Maintenance > Java runtime downloaded into <home>/jre.staged/ replaces <home>/jre/,

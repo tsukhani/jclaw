@@ -3,9 +3,9 @@
 #
 #   curl -fsSL https://github.com/tsukhani/jclaw/releases/latest/download/install.sh | sh
 #
-# Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
-# Java 25+ runtime (the bundle's only dependency) — auto-installing a self-contained
-# Zulu JRE 25 into ~/.jclaw/jre when none is found — extracts the bundle to ~/.jclaw,
+# Downloads the self-contained jclaw-bundle.zip from GitHub Releases, installs the
+# Java runtime it needs — a self-contained Zulu JRE 25 in ~/.jclaw/jre, which JClaw
+# keeps patched, unless you ask for your own Java 25+ — extracts the bundle to ~/.jclaw,
 # installs a `jclaw` command with bash/zsh tab-completion, and starts JClaw on
 # http://localhost:9000.
 #
@@ -19,8 +19,8 @@
 #   JCLAW_BIN_DIR   where the `jclaw` shim goes (default: $HOME/.local/bin)
 #   JCLAW_NO_START  set to 1 to install only, not start
 #   JCLAW_ASSUME_YES  set to 1 to answer yes to every question (bubblewrap, the AppArmor profile)
-#   JCLAW_NO_JRE    set to 1 to never auto-install a JRE (just print instructions)
-#   JCLAW_INSTALL_JRE  set to 1 to auto-install the JRE without prompting
+#   JCLAW_NO_JRE    set to 1 to use my own Java 25+ instead of the Zulu JRE
+#   JCLAW_INSTALL_JRE  set to 1 to install the Zulu JRE without prompting
 #   JCLAW_NO_RC_EDIT   set to 1 to generate completion scripts but not edit your shell rc
 #   JCLAW_BUNDLE_URL   override the bundle source (any URL, incl. file://) for
 #                      air-gapped / mirror / fork / test installs
@@ -50,14 +50,14 @@ JCLAW_VERSION="${JCLAW_VERSION:-latest}"
 JCLAW_PORT="${JCLAW_PORT:-9000}"
 JCLAW_BIN_DIR="${JCLAW_BIN_DIR:-$HOME/.local/bin}"
 JCLAW_NO_START="${JCLAW_NO_START:-}"
-JCLAW_NO_JRE="${JCLAW_NO_JRE:-}"            # skip the auto JRE download
+JCLAW_NO_JRE="${JCLAW_NO_JRE:-}"            # run on the host's Java instead of the Zulu JRE
 JCLAW_INSTALL_JRE="${JCLAW_INSTALL_JRE:-}"  # auto-install the JRE without prompting
 JCLAW_NO_RC_EDIT="${JCLAW_NO_RC_EDIT:-}"    # don't touch shell rc files (PATH + completion wiring)
 JCLAW_BUNDLE_URL="${JCLAW_BUNDLE_URL:-}"    # override bundle source (URL or file://) — air-gap/mirror/test
 JCLAW_FORCE_REINSTALL="${JCLAW_FORCE_REINSTALL:-}"  # wipe and reinstall instead of upgrading in place
 
 APP_DIR="$JCLAW_HOME/jclaw"     # bundle zip extracts under a jclaw/ prefix
-JRE_DIR="$JCLAW_HOME/jre"       # self-contained Zulu JRE lands here when Java is missing
+JRE_DIR="$JCLAW_HOME/jre"       # the self-contained Zulu JRE JClaw runs on and keeps patched
 ASSET="jclaw-bundle.zip"
 MIN_JAVA=25
 # The module JClaw starts java with: jvm.memory in the bundle's conf/application.conf, not here yet when Java is checked.
@@ -241,17 +241,24 @@ detect_os() {
     esac
 }
 
-# ─── Dependency: a Java 25+ runtime ──────────────────────────────────────────
-# Use the host's Java when it's 25+. Otherwise (with consent) download a
-# self-contained Zulu JRE 25 into $JRE_DIR and put it on PATH for this run; the
-# bundle's jclaw.sh finds it there on every later `jclaw` call. No sudo, no system
-# change — uninstall is just `rm -rf "$JCLAW_HOME"`.
+# ─── Dependency: a Java 25 runtime ───────────────────────────────────────────
+# A fresh install downloads a self-contained Zulu JRE 25 into $JRE_DIR and puts it
+# on PATH for this run, even when the host has a usable Java: the bundle's jclaw.sh
+# finds it there on every later `jclaw` call, and Settings keeps it patched, which it
+# cannot do for a Java it did not install. The host's Java 25+ is used only with
+# JCLAW_NO_JRE=1, or where Azul has no JRE for this system. An upgrade keeps the Java
+# the install runs on: switching it is the operator's choice, in Settings. No sudo, no
+# system change — uninstall is just `rm -rf "$JCLAW_HOME"`.
 check_java() {
+    HOST_JAVA=''
     if java_ok; then
-        substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
-        return
-    fi
-    if [ -n "$JAVA_LACKS_MODULE" ]; then
+        if upgrading || [ -n "$JCLAW_NO_JRE" ] || [ -z "$ARCH" ]; then
+            substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
+            return
+        fi
+        HOST_JAVA="Java $JV at $(command -v java)"
+        REASON="Found $HOST_JAVA, but JClaw runs on a Zulu JRE $MIN_JAVA of its own, which it keeps patched."
+    elif [ -n "$JAVA_LACKS_MODULE" ]; then
         REASON="Found Java $JV at $(command -v java), but it lacks the $JAVA_MODULE module JClaw starts with."
     elif command -v java >/dev/null 2>&1; then
         REASON="Found Java ${JV:-?}, but JClaw needs Java $MIN_JAVA or newer."
@@ -259,7 +266,11 @@ check_java() {
         REASON="Java was not found on your PATH."
     fi
     if [ -z "$JCLAW_NO_JRE" ] && [ -n "$ARCH" ] && want_jre; then
-        provision_jre
+        if ! provision_jre; then
+            [ -n "$HOST_JAVA" ] || die "$NO_JRE_WHY — install Java $MIN_JAVA yourself and re-run."
+            warn "$NO_JRE_WHY, so JClaw runs on $HOST_JAVA."
+            return
+        fi
         if ! java_ok; then
             # A java that does not run at all was built for another C library or CPU.
             "$JAVA_HOME/bin/java" -version >/dev/null 2>&1 \
@@ -270,7 +281,16 @@ check_java() {
         substep "Java $JV ready ${DIM}(managed JRE)${RESET}"
         return
     fi
+    if [ -n "$HOST_JAVA" ]; then
+        substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
+        return
+    fi
     java_missing "$REASON"
+}
+
+# An existing install is upgraded in place, by its own jclaw.sh, rather than replaced.
+upgrading() {
+    [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]
 }
 
 # True when a Java >= MIN_JAVA is on PATH. Sets JV to the major version.
@@ -297,24 +317,29 @@ want_jre() {
     # node even with no controlling tty (CI, `docker run` without -t), which would
     # then make the prompt's redirect fail under `set -e`. In a subshell, because dash
     # exits outright when a redirection fails on `:`, a special builtin.
-    if ( : >/dev/tty ) 2>/dev/null; then
-        printf '\n%s%s%s\n' "$YELLOW" "$REASON" "$RESET" >/dev/tty
+    if ( : >>"$TTY" ) 2>/dev/null; then
+        printf '\n%s%s%s\n' "$YELLOW" "$REASON" "$RESET" >>"$TTY"
         printf 'Download a self-contained Zulu JRE %s (~50 MB) into %s? [Y/n] ' \
-            "$MIN_JAVA" "$JRE_DIR" >/dev/tty
+            "$MIN_JAVA" "$JRE_DIR" >>"$TTY"
         ans=''
-        read ans </dev/tty 2>/dev/null || ans=''
+        read ans <"$TTY" 2>/dev/null || ans=''
         case "$ans" in [Nn]*) return 1 ;; *) return 0 ;; esac
     fi
-    substep "${YELLOW}$REASON${RESET} Auto-installing Zulu JRE $MIN_JAVA ${DIM}(set JCLAW_NO_JRE=1 to skip)${RESET}"
+    substep "${YELLOW}$REASON${RESET} Auto-installing Zulu JRE $MIN_JAVA ${DIM}(set JCLAW_NO_JRE=1 to use your own Java)${RESET}"
     return 0
 }
 
 # Resolve, download, checksum-verify, and unpack the newest GA plain Zulu JRE for
-# this os/arch into $JRE_DIR, then put it on PATH for the rest of this run.
+# this os/arch into $JRE_DIR, then put it on PATH for the rest of this run. Returns 1,
+# with NO_JRE_WHY saying why, only when the catalog offers no JRE; after that, a
+# failure is fatal.
 provision_jre() {
     step "Installing Zulu JRE $MIN_JAVA ${DIM}($AZUL_OS/$ARCH)${RESET}"
     _api="${AZUL_API}?java_version=${MIN_JAVA}&os=${AZUL_OS}&arch=${ARCH}&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
-    _json=$(http_get "$_api") || die "couldn't reach the Azul JRE catalog — install Java $MIN_JAVA yourself and re-run."
+    if ! _json=$(http_get "$_api"); then
+        NO_JRE_WHY="couldn't reach the Azul JRE catalog"
+        return 1
+    fi
     # Collapse to one object per line, then take the first plain JRE — skip the
     # JavaFX-bundled (fx) and CRaC variants, and on glibc the musl builds the catalog lists beside them.
     _skip='fx|crac|musl'
@@ -323,7 +348,10 @@ provision_jre() {
 {/g' | grep '"download_url"' | grep -viE "$_skip" | head -n1)
     JRE_URL=$(printf '%s' "$_obj" | sed -n 's/.*"download_url":"\([^"]*\)".*/\1/p')
     JRE_SHA=$(printf '%s' "$_obj" | sed -n 's/.*"sha256_hash":"\([0-9a-f]*\)".*/\1/p')
-    [ -n "$JRE_URL" ] || die "no Zulu JRE $MIN_JAVA found for $AZUL_OS/$ARCH in the Azul catalog."
+    if [ -z "$JRE_URL" ]; then
+        NO_JRE_WHY="no Zulu JRE $MIN_JAVA found for $AZUL_OS/$ARCH in the Azul catalog"
+        return 1
+    fi
     substep "$(basename "$JRE_URL")"
 
     TMP_JRE=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-jre.XXXXXX")
@@ -550,7 +578,7 @@ setup_sandbox
 # "delete the database, the agent workspace and the session-signing secret".
 # `jclaw.sh upgrade` carries all of that across, backs the database up first,
 # and rolls back a release that fails to start.
-if [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]; then
+if upgrading; then
     upgrade_args="upgrade --yes"
     [ "$JCLAW_VERSION" != "latest" ] && upgrade_args="$upgrade_args --version $JCLAW_VERSION"
 
