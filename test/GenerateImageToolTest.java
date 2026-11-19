@@ -256,7 +256,7 @@ class GenerateImageToolTest extends UnitTest {
     }
 
     @Test
-    void anUncataloguedModelIsRefusedWithTheChoices() {
+    void anUncatalogedModelIsRefusedWithTheChoices() {
         replicateBackend(true);
 
         var result = new GenerateImageTool().executeRich(
