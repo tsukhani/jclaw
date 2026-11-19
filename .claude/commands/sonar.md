@@ -95,10 +95,20 @@ Present a **triage table** (rule/file, severity/probability/density, count, verd
 
 ---
 
+**Run by /deploy**
+
+When `/deploy`'s candidate fails only on open Sonar issues, it runs this command on exactly those issues (its candidate preflight). Run that way, it asks nothing (the operator's instruction, 2026-11-19), and the triage table goes into `/deploy`'s report rather than to a confirmation:
+
+- Every verdict is applied as triaged. A FIX stays a FIX: never trade one for a mark because the mark is quicker or because rewriting the flagged line might reopen the issue. The known-FP list and the other FALSE_POSITIVE / ACCEPT verdicts are marked with their justification, as an inline comment where the code carries none.
+- The fixes are tested as Phase 4 says, plus the classes `/usr/bin/git grep -l '"<function>"' -- test` finds for each changed `jclaw.sh` function and each of its callers. They are committed signed, then landed as AGENTS.md lands any worktree: rebase onto `main`, `/usr/bin/git merge --ff-only sonar-fixes` from the main checkout, then remove the worktree and the branch. Never push: `/deploy` ships the fix with the release commit it makes next.
+- A fix whose tests will not pass is not landed and not traded for a mark: say so, and `/deploy` stops.
+
+---
+
 **Hard rules**
-- Triage BEFORE mutating — no bulk status changes or code edits without the per-rule verdict and a quick confirmation.
+- Triage BEFORE mutating — no bulk status changes or code edits without the per-rule verdict and a quick confirmation, except when `/deploy` runs this command (see Run by /deploy), where the verdicts are applied as triaged.
 - Fixes live in the `../jclaw-sonar` worktree only; never edit the primary working tree.
-- Never `git push` or merge — that's the user's call (`/deploy` or a manual merge).
+- Never `git push`. Never merge, either — that's the user's call (`/deploy` or a manual merge) — except when `/deploy` runs this command, which lands its fixes on `main` by fast-forward.
 - Every FALSE_POSITIVE / ACCEPT / SAFE / ACKNOWLEDGED carries a justification; never silently suppress.
 - Mark a hotspot FIXED only after its code fix actually lands and tests pass — never pre-emptively.
 - Duplication >60% is a *consideration gate*, not an auto-fix mandate — REMEDIATE only when a clean, non-coupling shared abstraction genuinely exists; otherwise ACCEPT (the wrong abstraction is worse than the duplication) and document why. Any remediation must be behavior-preserving and leave tests green.
