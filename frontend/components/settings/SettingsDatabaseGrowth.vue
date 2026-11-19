@@ -271,6 +271,7 @@ const growthHeader = computed(() => {
       >
         {{ partReadout ?? 'The file today, by part. Each row below wears its part\'s color.' }}
       </p>
+      <!-- Each part takes focus so the keyboard reaches the readout above, as the pointer does. -->
       <div
         class="flex items-center gap-0.5 h-6"
         role="list"

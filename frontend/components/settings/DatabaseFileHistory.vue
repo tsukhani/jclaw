@@ -224,6 +224,7 @@ const pct = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1
           />Free space a compaction would remove
         </span>
       </div>
+      <!-- One switch of two pressed-state buttons, named as a group like the other view toggles; a fieldset would make it a form section. -->
       <div
         class="inline-flex border border-border text-xs"
         role="group"
