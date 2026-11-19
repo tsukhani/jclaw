@@ -50,7 +50,10 @@ class RestartProgressScriptTest extends UnitTest {
             "print_startup_error_block", "wait_for_backend_ready",
             "restart_status", "restart_phase_end", "restart_phase", "restart_begin", "restart_finish", "restart_on_exit", "funnel_reset_kept",
             "narrator_running", "narrator_bound", "restart_shell_pid", "narrator_start", "narrator_stop", "narrator_is",
-            "narrator_reap_stale", "restart_narrate", "do_restart_prod", "do_stop_prod", "do_start_prod");
+            "narrator_reap_stale", "restart_narrate", "do_restart_prod", "do_stop_prod", "do_start_prod",
+            "sha256_file", "upgrade_current_version", "is_developer_clone", "is_container", "release_path_is_yours",
+            "listed_sha", "retire_unlisted_release_files");
+    private static final List<String> SETTINGS = List.of("RELEASE_FILES", "RETIRED_RELEASE_FILES");
 
     /** What the stubs leave out of a real start; wait_for_backend_ready stays real where a test asks for it. */
     private static final String STUBBED = """
@@ -510,6 +513,11 @@ class RestartProgressScriptTest extends UnitTest {
         var globals = Pattern.compile("(?m)^RESTART_STATUS_FILE=\"\"\\n(?:[A-Z_]+=.*\\n)+").matcher(script);
         assertTrue(globals.find(), "jclaw.sh no longer declares the restart progress globals");
         harness.append(globals.group());
+        for (var name : SETTINGS) {
+            var m = Pattern.compile("(?m)^" + Pattern.quote(name) + "=.*$").matcher(script);
+            assertTrue(m.find(), "jclaw.sh no longer sets " + name);
+            harness.append(m.group()).append('\n');
+        }
         for (var name : FUNCTIONS) {
             var m = Pattern.compile("(?ms)^" + Pattern.quote(name) + "\\(\\) \\{\\n.*?^\\}\\n").matcher(script);
             assertTrue(m.find(), "jclaw.sh no longer defines " + name);
