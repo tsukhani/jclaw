@@ -3783,6 +3783,7 @@ do_start_prod() {
 
     # After the two checks above, so no JVM of this install holds the runtime being replaced.
     apply_staged_jre
+    retire_unlisted_release_files
     restart_narrate
 
     # Reap any stale H2 lock from a prior ungraceful shutdown (Docker rm
@@ -6421,14 +6422,50 @@ upgrade_status() {
     mv -f "$dir/upgrade-status.json.tmp" "$dir/upgrade-status.json" 2>/dev/null || true
 }
 
+# Where a release zip lists every file it ships with its sha256, path<TAB>sha256,
+# and the frozen table of what releases up to v1.0.23, which listed nothing,
+# shipped at paths later ones dropped (bin/retired-release-files.mjs).
+RELEASE_FILES="release-files.tsv"
+RETIRED_RELEASE_FILES="conf/retired-release-files.tsv"
+
+# The operator's, whatever a release once put there: early releases seeded
+# workspace/main's persona files, and a skill's credentials/ holds its secrets.
+# bin/retired-release-files.mjs skips the same paths.
+release_path_is_yours() {
+    case "$1" in
+        workspace|workspace/*|workspace-test|workspace-test/*|data|data/*|logs|logs/*|certs|certs/*|tmp|tmp/*) return 0 ;;
+        skills/*/credentials|skills/*/credentials/*) return 0 ;;
+    esac
+    return 1
+}
+
+# The sha256 the list $1 records for path $2, or nothing when it lists none.
+listed_sha() {
+    awk -F'\t' -v p="$2" '$1 == p { print $2; exit }' "$1"
+}
+
+# Whether the list $1 records any file under directory $2.
+listed_under() {
+    awk -F'\t' -v p="$2/" 'index($1, p) == 1 { found = 1; exit } END { exit !found }' "$1"
+}
+
 # Move everything under $1 that $2 doesn't already have into $2. A whole
 # subtree absent from the release moves in one mv (so a sidecar .venv with
 # 30k files costs one rename, not 30k); a directory present in both recurses;
 # a file present in both is left behind, because the release owns it.
 #
+# A file $2 lacks stays behind too when $1's own release shipped it, as its
+# release-files.tsv records, and it still matches: the newer release dropped it
+# (JF-522). A copy the operator changed moves, and is named in MERGE_KEPT; a
+# file the list does not name is the operator's and moves as before. A tree
+# from a release with no list carries everything, as it always did.
+#
 # The glob options are set once here rather than inside the recursion: an
 # inner call's `shopt -u` on return would switch dotglob off for the rest of
 # the *outer* loop, silently skipping every remaining dotfile.
+MERGE_SHIPPED=""
+MERGE_KEPT=""
+MERGE_LEFT=0
 merge_absent() {
     local saved
     # `|| true` is load-bearing, and it has to be INSIDE the substitution:
@@ -6438,6 +6475,8 @@ merge_absent() {
     # swapped but no state carried across.
     saved=$(shopt -p nullglob dotglob || true)
     shopt -s nullglob dotglob
+    MERGE_SHIPPED="" MERGE_KEPT="" MERGE_LEFT=0
+    [[ -f "$1/$RELEASE_FILES" ]] && MERGE_SHIPPED="$1/$RELEASE_FILES"
     _merge_absent "$1" "$2" "${3:-}"
     eval "$saved"
 }
@@ -6446,19 +6485,84 @@ merge_absent() {
 _merge_absent() {
     local old="$1" new="$2" rel="$3"
     [[ -d "$old" ]] || return 0
-    local entry base childrel
+    local entry base childrel shipped
     for entry in "$old"/*; do
         base="${entry##*/}"
         childrel="${rel:+$rel/}$base"
         case " $UPGRADE_NO_MERGE " in
             *" $childrel "*) continue ;;
         esac
-        if [[ ! -e "$new/$base" && ! -L "$new/$base" ]]; then
+        # Release metadata, and the list this merge is reading.
+        [[ "$childrel" == "$RELEASE_FILES" ]] && continue
+        if [[ -e "$new/$base" || -L "$new/$base" ]]; then
+            if [[ -d "$entry" && -d "$new/$base" ]]; then
+                _merge_absent "$entry" "$new/$base" "$childrel"
+            fi
+        elif [[ -z "$MERGE_SHIPPED" ]] || release_path_is_yours "$childrel"; then
             mv "$entry" "$new/$base"
-        elif [[ -d "$entry" && -d "$new/$base" ]]; then
-            _merge_absent "$entry" "$new/$base" "$childrel"
+        elif [[ -d "$entry" && ! -L "$entry" ]]; then
+            if listed_under "$MERGE_SHIPPED" "$childrel" && mkdir "$new/$base"; then
+                _merge_absent "$entry" "$new/$base" "$childrel"
+                # Nothing of the operator's was in it, so it goes with the release that shipped it.
+                rmdir "$new/$base" 2>/dev/null || true
+            else
+                mv "$entry" "$new/$base"
+            fi
+        else
+            shipped=$(listed_sha "$MERGE_SHIPPED" "$childrel")
+            if [[ -z "$shipped" ]]; then
+                mv "$entry" "$new/$base"
+            elif [[ ! -L "$entry" && "$(sha256_file "$entry")" == "$shipped" ]]; then
+                MERGE_LEFT=$((MERGE_LEFT + 1))
+            else
+                mv "$entry" "$new/$base"
+                MERGE_KEPT="${MERGE_KEPT}${childrel}"$'\n'
+            fi
         fi
     done
+}
+
+# After an upgrade from a release up to v1.0.23, whose own upgrader carried
+# every file it found, remove each copy of a file such a release shipped where
+# this release ships none and the copy still matches (JF-522); a changed copy
+# stays and is named. The upgrade is run by the old release's jclaw.sh, so the
+# merge above cannot do it: this release's first start does. Once per version,
+# and only in an install unpacked from a release zip, the one tree that holds
+# release-files.tsv.
+retire_unlisted_release_files() {
+    local table="$SCRIPT_DIR/$RETIRED_RELEASE_FILES" listed="$SCRIPT_DIR/$RELEASE_FILES"
+    local marker="$SCRIPT_DIR/.jclaw-retired" version rel file sha dir removed=0 kept=""
+    [[ -f "$table" && -f "$listed" ]] || return 0
+    if is_developer_clone || [[ -d "$SCRIPT_DIR/app" ]] || is_container; then
+        return 0
+    fi
+    version=$(upgrade_current_version || true)
+    [[ -n "$version" && "$(cat "$marker" 2>/dev/null || true)" != "$version" ]] || return 0
+    while IFS= read -r rel; do
+        file="$SCRIPT_DIR/$rel"
+        [[ -f "$file" && ! -L "$file" ]] || continue
+        release_path_is_yours "$rel" && continue
+        [[ -n "$(listed_sha "$listed" "$rel")" ]] && continue
+        sha=$(sha256_file "$file" || true)
+        if [[ -n "$sha" ]] && grep -qxF "$rel"$'\t'"$sha" "$table"; then
+            rm -f "$file" && removed=$((removed + 1))
+            dir="$rel"
+            while [[ "$dir" == */* ]]; do
+                dir="${dir%/*}"
+                rmdir "$SCRIPT_DIR/$dir" 2>/dev/null || break
+            done
+        else
+            kept="${kept}${rel}"$'\n'
+        fi
+    done < <(awk -F'\t' '!/^#/ && NF == 2 && !seen[$1]++ { print $1 }' "$table")
+    printf '%s\n' "$version" >"$marker" 2>/dev/null || true
+    if [[ "$removed" -gt 0 ]]; then
+        echo "==> Removed $removed file(s) an earlier release shipped and $version does not."
+    fi
+    if [[ -n "$kept" ]]; then
+        echo "    Kept these, which $version does not ship either, because they differ from what any release shipped:"
+        printf '%s' "$kept" | sed 's/^/      /'
+    fi
 }
 
 # Download with a coarse percentage. curl's own progress bar can't be read
@@ -6747,6 +6851,13 @@ do_upgrade() {
     # Carry state forward. db_backup was written under data/, so it rides along.
     merge_absent "$prev" "$SCRIPT_DIR" "" || upgrade_abort "could not carry your data across"
     [[ -n "$db_backup" ]] && db_backup="$SCRIPT_DIR/data/backups/${db_backup##*/}"
+    if [[ "$MERGE_LEFT" -gt 0 ]]; then
+        echo "    left out $MERGE_LEFT file(s) $current shipped and $installed does not"
+    fi
+    if [[ -n "$MERGE_KEPT" ]]; then
+        echo "    kept these, which $installed does not ship, because you changed them:"
+        printf '%s' "$MERGE_KEPT" | sed 's/^/      /'
+    fi
 
     local conf_preserved=false
     if [[ -z "$recorded" || "$recorded" != "$old_conf_sha" ]]; then

@@ -29,6 +29,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `playwright-chromium.test.mjs` | Its tests, the gate's lines among them: `node --test bin/playwright-chromium.test.mjs` |
 | `ghcr-prune.mjs` | Deletes the GHCR package versions no listed Release needs, in a release build's cleanup — see below |
 | `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
+| `retired-release-files.mjs` | Writes `conf/retired-release-files.tsv`, what releases up to v1.0.23 shipped at paths this tree no longer ships — see below |
+| `retired-release-files.test.mjs` | Its tests, a stale table among them: `node --test bin/retired-release-files.test.mjs` |
 | `eslint.config.mjs` | ESLint's recommended rules for these scripts, which `./jclaw.sh check` runs; it loads ESLint from `frontend/`'s dependencies |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
@@ -415,7 +417,10 @@ build therefore upgrades a populated install, the way users upgrade (JF-450):
    rolling back if the candidate does not answer. The installed `jclaw.sh` must then be the candidate's, so the swap
    is proven even when the two carry the same version.
 5. **The checks.** The candidate must report its version on `/api/status`. Its boot must log no failed schema
-   change: Hibernate logs one and boots on regardless. The snapshot must read back unchanged.
+   change: Hibernate logs one and boots on regardless. The snapshot must read back unchanged. No file the release's
+   zip shipped and the candidate's does not may be left in the install, unchanged, outside the operator's folders
+   (JF-522): the upgrade leaves it out, or the candidate's first start removes it after an upgrade from a release
+   that recorded no file list.
 
 A failure names the step and the evidence: the log line of a failed schema change, else the failed boot's first
 error, or the difference in what read back. The scratch install, its processes and the stand-in provider go when the
@@ -431,3 +436,26 @@ and seed, and 11 s to upgrade. A bundle with a planted `@Column(nullable = false
 | 1 | A step failed, named with its evidence |
 | 2 | Not given a bundle that exists |
 
+
+## retired-release-files.mjs
+
+```bash
+node bin/retired-release-files.mjs           # rewrite conf/retired-release-files.tsv
+node bin/retired-release-files.mjs --check   # exit 1 when it is stale
+```
+
+Every release zip carries `release-files.tsv`, each file it ships with its sha256, which
+`gradle/release-files.gradle.kts` writes after `playBundle` and `playDist`. An upgrade reads the installed copy and
+leaves out a file the old release shipped, the new one does not, and the operator never changed (JF-522). Releases up
+to v1.0.23 carried no list, and the upgrade from one is run by that release's own `jclaw.sh`, which carries
+everything. So the newer release's first start removes those leftovers itself, against this table: every content a
+release up to v1.0.23 shipped at a path this tree no longer ships, `path<TAB>sha256`.
+
+It reads each `v*` tag up to v1.0.23, applies that tag's own `.distignore` the way the packager does, and leaves out
+what an upgrade replaces wholesale (`precompiled/`, `lib/`, `framework/`, `modules/`, `public/spa/`) and the operator's
+folders (`workspace/`, `data/`, `logs/`, `certs/`, `tmp/`, a skill's `credentials/`), which `jclaw.sh` never removes
+either. A path the index ships stays out. Rerun it when a commit stops shipping a file v1.0.23 shipped:
+`retired-release-files.test.mjs` fails until then, naming the file.
+
+Exit 0 wrote the table or found it current, exit 1 `--check` found it stale, exit 2 git failed or the clone has no
+`v*` tag up to v1.0.23.

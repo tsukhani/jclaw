@@ -227,4 +227,19 @@ if [[ "$after" != "$before" ]]; then
     diff <(echo "$before") <(echo "$after") > "$work/diff.txt" || true
     fail "the upgraded $candidate reads back the seeded data differently (before < > after)" "$work/diff.txt"
 fi
+
+# A file $prev shipped and the candidate does not goes with the upgrade, or, after one from a release that listed no
+# files, with the candidate's first start (JF-522). Only an unchanged copy counts: one the install changed stays.
+step="looking for what $prev shipped and $candidate does not"
+entries() { unzip -Z1 "$1" | sed -n 's|^jclaw/||p' | grep -v '/$' | sort; }
+entries "$candidate_zip" > "$work/candidate-files.txt"
+left=$(entries "$work/download/jclaw-bundle.zip" \
+    | grep -v -E '^(precompiled|lib|framework|modules|public/spa|workspace|data|logs|certs|tmp)/|^\.classpath$|^skills/[^/]+/credentials/' \
+    | comm -23 - "$work/candidate-files.txt" \
+    | while IFS= read -r rel; do
+        [[ -f "$app/$rel" ]] || continue
+        [[ "$(shasum -a 256 < "$app/$rel" | cut -d' ' -f1)" \
+            == "$(unzip -p "$work/download/jclaw-bundle.zip" "jclaw/$rel" | shasum -a 256 | cut -d' ' -f1)" ]] && echo "$rel"
+    done || true)
+[[ -z "$left" ]] || fail "the upgraded install still holds, unchanged, files $prev shipped and $candidate does not: $(tr '\n' ' ' <<< "$left")"
 say "$prev upgraded to $candidate in $((SECONDS - upgrading)) s and read back everything it stored unchanged; $((SECONDS - started)) s in all."

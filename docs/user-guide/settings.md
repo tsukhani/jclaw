@@ -268,6 +268,8 @@ JClaw carries across everything the release does not ship, so an upgrade never r
 
 The rule is inverted on purpose. Rather than listing directories to preserve, a list that goes stale the moment a release adds one, the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
 
+There is one more exception. Each release records the files it ships. When a newer release stops shipping one of them, such as a bundled skill it removes, the upgrade leaves it out, as long as it is still the copy the old release installed. If you changed it, it is kept, and the upgrade's output names it. The workspace, a skill's `credentials/` folder, `data/`, `logs/` and `certs/` are always yours and always kept. Releases up to 1.0.23 recorded no list, so after an upgrade from one of them, the first start of the new version removes the files those releases left behind in the same way, and names any it kept.
+
 `conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The upgrade's output in `logs/upgrade.log` says when this happens.
 
 ### If it goes wrong

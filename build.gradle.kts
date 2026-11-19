@@ -818,3 +818,6 @@ tasks.named<play.gradle.PlayBundleTask>("playBundle") {
 
 // THIRD-PARTY-NOTICES.md: the license of everything the bundle ships, which playBundle and playDist regenerate.
 apply(from = "gradle/third-party-notices.gradle.kts")
+
+// release-files.tsv: what each release zip ships, for the next upgrade to leave behind what a newer one drops.
+apply(from = "gradle/release-files.gradle.kts")
