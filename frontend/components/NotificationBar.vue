@@ -23,6 +23,15 @@ interface NotificationView {
   sourceTaskId: number | null
   createdAt: string
   acknowledgedAt: string | null
+  // Null for a reminder; a notice JClaw raises itself, such as a Java patch, carries its own.
+  title: string | null
+  linkUrl: string | null
+  linkLabel: string | null
+}
+
+// The server writes only its own https links; anything else is shown as text, never as an href.
+function safeLink(t: NotificationView): string | null {
+  return t.linkUrl?.startsWith('https://') ? t.linkUrl : null
 }
 
 const NOTIFICATION_POLL_MS = 10_000
@@ -156,7 +165,7 @@ onUnmounted(() => {
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                  Reminder
+                  {{ t.title ?? 'Reminder' }}
                 </span>
                 <span
                   v-if="t.createdAt"
@@ -168,6 +177,13 @@ onUnmounted(() => {
               <p class="mt-1 whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-100">
                 {{ t.content }}
               </p>
+              <a
+                v-if="safeLink(t)"
+                :href="safeLink(t)!"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="mt-1 inline-block text-xs font-medium text-amber-700 underline hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+              >{{ t.linkLabel ?? t.linkUrl }}</a>
               <div class="mt-2 flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
                   <button
@@ -177,7 +193,7 @@ onUnmounted(() => {
                     Mark as seen
                   </button>
                   <button
-                    v-if="t.agentId != null"
+                    v-if="t.agentId != null && t.title == null"
                     data-testid="reminder-reply"
                     class="text-xs font-medium text-amber-700 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
                     @click="replyInChat(t)"
@@ -187,8 +203,8 @@ onUnmounted(() => {
                 </div>
                 <button
                   class="rounded p-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30 dark:hover:text-amber-300"
-                  title="Delete reminder"
-                  aria-label="Delete reminder"
+                  :title="t.title == null ? 'Delete reminder' : 'Delete notification'"
+                  :aria-label="t.title == null ? 'Delete reminder' : 'Delete notification'"
                   @click="dismiss(t.id)"
                 >
                   <TrashIcon

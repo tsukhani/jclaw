@@ -22,7 +22,8 @@ import static utils.GsonHolder.GSON;
  * toast component (mounted in {@code layouts/default.vue}).
  *
  * <p>Notifications are written by {@link services.ReminderDispatcher}
- * when a reminder task fires on the {@code web} channel. They persist
+ * when a reminder task fires on the {@code web} channel, and by
+ * {@link services.JavaRuntimePatchCheck} for a newer Java patch. They persist
  * forever (operator's choice — reminders are by definition things the
  * user wants to keep around) and are removed only by an explicit
  * {@link #delete} call from the UI's dismiss button. {@link #ack} marks
@@ -40,7 +41,8 @@ public class ApiNotificationsController extends Controller {
      *  even if we add internal columns to {@link Notification} later. */
     public record NotificationView(Long id, @Nullable Long agentId, @Nullable String agentName, String content,
                                     Long sourceTaskRunId, Long sourceTaskId,
-                                    @Nullable String createdAt, @Nullable String acknowledgedAt) {
+                                    @Nullable String createdAt, @Nullable String acknowledgedAt,
+                                    @Nullable String title, @Nullable String linkUrl, @Nullable String linkLabel) {
 
         public static NotificationView of(Notification n) {
             return new NotificationView(
@@ -51,7 +53,10 @@ public class ApiNotificationsController extends Controller {
                     n.sourceTaskRunId,
                     n.sourceTaskId,
                     n.createdAt != null ? n.createdAt.toString() : null,
-                    n.acknowledgedAt != null ? n.acknowledgedAt.toString() : null);
+                    n.acknowledgedAt != null ? n.acknowledgedAt.toString() : null,
+                    n.title,
+                    n.linkUrl,
+                    n.linkLabel);
         }
     }
 

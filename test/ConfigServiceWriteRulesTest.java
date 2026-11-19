@@ -8,6 +8,7 @@ import org.apache.logging.log4j.LogManager;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.JavaRuntimePatchCheck;
 import services.OperatorAlerts;
 import services.PrivilegedConfig;
 import services.SessionCompactor;
@@ -280,6 +281,17 @@ class ConfigServiceWriteRulesTest extends UnitTest {
             assertRefused("visual.enabled must be 'true' or 'false'.", key, value);
         }
         for (var value : List.of("true", "false", " TRUE ", "FALSE", "")) {
+            assertAccepted(key, value);
+        }
+    }
+
+    @Test
+    void theJavaPatchDownloadSwitchMustBeTrueOrFalse() {
+        var key = JavaRuntimePatchCheck.AUTO_DOWNLOAD_KEY;
+        for (var value : List.of("no", "0", "off", "")) {
+            assertRefused("javaRuntime.autoDownload must be 'true' or 'false'.", key, value);
+        }
+        for (var value : List.of("true", "false", " FALSE ")) {
             assertAccepted(key, value);
         }
     }

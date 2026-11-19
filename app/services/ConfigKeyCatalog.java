@@ -89,6 +89,7 @@ public final class ConfigKeyCatalog {
             imagegen.local.*
             imagegen.provider
             imagegen.timeoutSeconds
+            javaRuntime.autoDownload
             jtokkit.safetyMultiplier.*
             latency.metrics.retentionDays
             llm.breaker.consecutive-failures

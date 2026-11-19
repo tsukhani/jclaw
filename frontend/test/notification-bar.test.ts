@@ -103,3 +103,68 @@ describe('NotificationBar — Reply in chat (JCLAW-1299)', () => {
     useChatReplyHandoff().value = null
   })
 })
+
+describe('NotificationBar — a notice JClaw raises itself (JF-536)', () => {
+  async function mountWithNotice(linkUrl: string) {
+    unregister.push(registerEndpoint('/api/notifications', () => [
+      {
+        id: 9, agentId: 1, agentName: 'main', content: 'Java 25.0.5.1 is downloaded and installs the next time JClaw restarts.',
+        sourceTaskRunId: null, sourceTaskId: null, createdAt: new Date().toISOString(), acknowledgedAt: null,
+        title: 'Java runtime', linkUrl, linkLabel: 'Release notes',
+      },
+    ]))
+    await mountSuspended(NotificationBar)
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Java 25.0.5.1 is downloaded'))
+  }
+
+  it('is headed by its own title, links its page, and offers no reply in chat', async () => {
+    await mountWithNotice('https://docs.azul.com/core/release-notes')
+
+    const toast = document.body.querySelector('article')!
+    expect(toast.querySelector('span')!.textContent!.trim()).toBe('Java runtime')
+    const link = toast.querySelector('a')!
+    expect(link.textContent!.trim()).toBe('Release notes')
+    expect(link.getAttribute('href')).toBe('https://docs.azul.com/core/release-notes')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(document.body.querySelector('[data-testid="reminder-reply"]')).toBeNull()
+    expect(button('Delete notification')).toBeTruthy()
+  })
+
+  it('deletes only the notification, since no reminder stands behind it', async () => {
+    let tasksDeleted = 0
+    let notificationDeleted = false
+    stub('/api/tasks/null', 'DELETE', () => {
+      tasksDeleted++
+      return { status: 'ok' }
+    })
+    stub('/api/notifications/9', 'DELETE', () => {
+      notificationDeleted = true
+      return { status: 'ok' }
+    })
+    await mountWithNotice('https://docs.azul.com/core/release-notes')
+
+    button('Delete notification').click()
+
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain('Java 25.0.5.1 is downloaded'))
+    expect(notificationDeleted).toBe(true)
+    expect(tasksDeleted).toBe(0)
+  })
+
+  it('never turns a link that is not https into an href', async () => {
+    await mountWithNotice('javascript:alert(1)')
+
+    expect(document.body.querySelector('article a')).toBeNull()
+  })
+})
+
+describe('NotificationBar — a reminder keeps its own heading', () => {
+  it('is headed Reminder and carries no link', async () => {
+    await mountWithReminder()
+
+    const toast = document.body.querySelector('article')!
+    expect(toast.querySelector('span')!.textContent!.trim()).toBe('Reminder')
+    expect(toast.querySelector('a')).toBeNull()
+    expect(button('Delete reminder')).toBeTruthy()
+  })
+})

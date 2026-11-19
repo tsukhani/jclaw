@@ -307,6 +307,9 @@ public class ApiSystemController extends Controller {
      * @param vendor               {@code java.vendor}, or null when the JVM names none
      * @param latestVersion        the newest patch of the running major in Azul's catalog, or null when
      *                             the catalog could not be reached
+     * @param releaseType          what kind of release {@code latestVersion} is, in plain words ("a security
+     *                             and bug-fix release"), or null when the catalog says nothing JClaw knows
+     * @param releaseNotesUrl      the release notes for {@code latestVersion}, or null with no latest version
      * @param updateAvailable      true when {@code latestVersion} is newer than {@code currentVersion}
      * @param stagedVersion        a downloaded runtime waiting for the next start, or null
      * @param downloading          true while a download runs
@@ -320,7 +323,8 @@ public class ApiSystemController extends Controller {
      *                             Settings or by {@code JCLAW_AOT=off}
      */
     public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String vendor,
-                                       @Nullable String latestVersion, boolean updateAvailable,
+                                       @Nullable String latestVersion, @Nullable String releaseType,
+                                       @Nullable String releaseNotesUrl, boolean updateAvailable,
                                        @Nullable String stagedVersion, boolean downloading,
                                        @Nullable Integer downloadPercent, @Nullable String downloadError,
                                        @Nullable String lastStart, @Nullable String lastStartAt,
@@ -347,6 +351,8 @@ public class ApiSystemController extends Controller {
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
                 JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
+                latest == null ? null : JavaRuntimeService.releaseTypeInWords(latest.releaseType()),
+                latest == null ? null : JavaRuntimeService.RELEASE_NOTES,
                 JavaRuntimeService.isNewer(latestVersion, env.javaVersion()),
                 staged == null ? null : staged.version(),
                 downloading, downloading ? progress.currentPercent() : null, progress.lastError(),

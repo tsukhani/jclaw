@@ -17,11 +17,12 @@ import java.util.List;
 
 /**
  * User-visible notification, surfaced through the global notification bar
- * (toast overlay in {@code layouts/default.vue}). Currently only reminder
- * fires produce Notification rows — when a {@link Task} with
+ * (toast overlay in {@code layouts/default.vue}). A reminder fire produces
+ * most of them — when a {@link Task} with
  * {@code payloadType="reminder"} fires on the {@code web} channel,
  * {@link services.ReminderDispatcher} writes one of these instead of
- * appending a {@link Message} to a Conversation.
+ * appending a {@link Message} to a Conversation — and
+ * {@link services.JavaRuntimePatchCheck} writes one, with a {@link #title}, for a newer Java patch.
  *
  * <p>Telegram-channel reminders bypass this entity entirely — they go
  * straight to the user's bot binding via {@link channels.TelegramChannel#sendText}.
@@ -55,6 +56,18 @@ public class Notification extends Model {
      */
     @Column(nullable = false, columnDefinition = "TEXT")
     public String content;
+
+    /** The toast's heading; null for a reminder, which the bar heads "Reminder". */
+    @Column(name = "title")
+    public String title;
+
+    /** A page the toast links to, such as a Java patch's release notes; null for none. */
+    @Column(name = "link_url", length = 2048)
+    public String linkUrl;
+
+    /** The link's text, shown in place of {@link #linkUrl}. */
+    @Column(name = "link_label")
+    public String linkLabel;
 
     /**
      * Optional link back to the {@link TaskRun} that produced this

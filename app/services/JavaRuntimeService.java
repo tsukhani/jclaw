@@ -45,6 +45,12 @@ public final class JavaRuntimeService {
     /** The catalog install.sh and install.ps1 query; {@link #catalogUrl} asks it the same question. */
     static final String AZUL_API = "https://api.azul.com/metadata/v1/zulu/packages/";
     static final String DOWNLOAD_HOST = "cdn.azul.com";
+    /**
+     * Azul's notes for its newest release. The catalog links none, and Azul files its notes by month,
+     * with a respin such as 25.0.5.0.3 on no month's page, so no per-build page can be derived from an
+     * entry; the newest patch, the one the panel offers, is always on this page.
+     */
+    public static final String RELEASE_NOTES = "https://docs.azul.com/core/release-notes";
     /** A Zulu JRE archive is about 50 MB. */
     static final long MAX_ARCHIVE_BYTES = 200L * 1024 * 1024;
 
@@ -106,8 +112,19 @@ public final class JavaRuntimeService {
         }
     }
 
-    /** A Zulu JRE in the catalog; {@code sha256} is null when the catalog gave none, which the download refuses. */
-    public record Release(String version, String url, @Nullable String sha256, String archive) {}
+    /**
+     * A Zulu JRE in the catalog; {@code sha256} is null when the catalog gave none, which the download refuses.
+     *
+     * @param releaseType the catalog's {@code release_type} ({@code PSU}, {@code CPU} or {@code LU}), or null
+     *                    when the entry gives none
+     */
+    public record Release(String version, String url, @Nullable String sha256, String archive,
+                          @Nullable String releaseType) {
+
+        public Release(String version, String url, @Nullable String sha256, String archive) {
+            this(version, url, sha256, archive, null);
+        }
+    }
 
     /** A finished, verified download in {@code jre.staged/}, waiting for the next start. */
     public record Staged(String version, String sha256, String archive) {}
@@ -228,7 +245,7 @@ public final class JavaRuntimeService {
     /** Compares real paths, so a link to the install or a {@code ..} in {@code java.home} still counts. */
     public static Kind kind(Environment env) {
         if (env.container()) return Kind.CONTAINER;
-        if (Files.isDirectory(env.app().resolve("app")) || Files.exists(env.app().resolve(".git"))) {
+        if (sourceCheckout(env.app())) {
             return Kind.EXTERNAL;
         }
         try {
@@ -237,6 +254,11 @@ public final class JavaRuntimeService {
         } catch (IOException _) {
             return Kind.EXTERNAL;
         }
+    }
+
+    /** A clone runs on its developer's Java, which JClaw never replaces. */
+    static boolean sourceCheckout(Path app) {
+        return Files.isDirectory(app.resolve("app")) || Files.exists(app.resolve(".git"));
     }
 
     // ── The catalog ──────────────────────────────────────────────────────────
@@ -274,7 +296,7 @@ public final class JavaRuntimeService {
     public static String catalogUrl(int major, String os, String arch) {
         var archive = "windows".equals(os) ? "zip" : "tar.gz";
         return AZUL_API + "?java_version=" + major + "&os=" + os + "&arch=" + arch + "&archive_type=" + archive
-                + "&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20";
+                + "&java_package_type=jre&release_status=ga&include_fields=sha256_hash,release_type&page_size=20";
     }
 
     /** install.sh's OS names; Azul lists musl builds under an OS of their own. */
@@ -324,7 +346,8 @@ public final class JavaRuntimeService {
             var sha = str(o, "sha256_hash");
             var distro = parts(joined(o, "distro_version"));
             var archive = name != null ? name : url.substring(url.lastIndexOf('/') + 1);
-            var candidate = new Release(version, url, sha == null ? null : sha.toLowerCase(Locale.ROOT), archive);
+            var candidate = new Release(version, url, sha == null ? null : sha.toLowerCase(Locale.ROOT), archive,
+                    str(o, "release_type"));
             int order = best == null ? 1 : compareVersions(version, best.version());
             if (order > 0 || (order == 0 && compare(distro, bestDistro) > 0)) {
                 best = candidate;
@@ -332,6 +355,20 @@ public final class JavaRuntimeService {
             }
         }
         return best;
+    }
+
+    /**
+     * A catalog {@code release_type} in plain words, in Azul's own terms: a PSU carries the CPU's security fixes
+     * plus the quarter's other bug fixes, a CPU only the security fixes. Null for none, and for one Azul has not
+     * defined (LU) or a code this build does not know, so the panel and the notification show the link alone.
+     */
+    public static @Nullable String releaseTypeInWords(@Nullable String releaseType) {
+        if (releaseType == null) return null;
+        return switch (releaseType.strip().toUpperCase(Locale.ROOT)) {
+            case "PSU" -> "a security and bug-fix release";
+            case "CPU" -> "a security-fix release";
+            default -> null;
+        };
     }
 
     private static @Nullable String str(JsonObject o, String key) {
@@ -481,6 +518,33 @@ public final class JavaRuntimeService {
     }
 
     public static Release requestStage(Environment env, @Nullable Release latest, Download progress, Stager stager) {
+        var release = beginStage(env, latest, progress);
+        var home = env.home();
+        Thread.ofVirtual().name("java-runtime-download").start(() -> {
+            try {
+                runStage(release, home, progress, stager);
+            } catch (IOException | RuntimeException _) {
+                // runStage recorded it for the panel and logged it
+            }
+        });
+        return release;
+    }
+
+    /**
+     * {@link #requestStage} in the caller's thread, for the daily check: the same refusals, the same lock and
+     * the same progress the panel follows, so the check and the Settings button never stage at once.
+     *
+     * @throws IllegalStateException when {@link #stageable} refuses, checked before anything is written
+     * @throws IOException           when the download or its check fails, which leaves nothing staged
+     */
+    public static Release stageNow(Environment env, @Nullable Release latest, Download progress, Stager stager)
+            throws IOException {
+        var release = beginStage(env, latest, progress);
+        runStage(release, env.home(), progress, stager);
+        return release;
+    }
+
+    private static Release beginStage(Environment env, @Nullable Release latest, Download progress) {
         Release release;
         STAGING.lock();
         try {
@@ -491,19 +555,20 @@ public final class JavaRuntimeService {
         }
         EventLogger.info(CATEGORY, "Downloading Java " + release.version() + " for the next start to install",
                 release.url());
-        var home = env.home();
-        Thread.ofVirtual().name("java-runtime-download").start(() -> {
-            try {
-                stager.stage(release, home, progress);
-                EventLogger.info(CATEGORY, "Java " + release.version() + " is staged; the next start installs it");
-            } catch (IOException | RuntimeException e) {
-                progress.failed("Java " + release.version() + " could not be downloaded: " + e.getMessage());
-                EventLogger.warn(CATEGORY, "Java runtime download failed: " + e.getMessage(), release.url());
-            } finally {
-                progress.end();
-            }
-        });
         return release;
+    }
+
+    private static void runStage(Release release, Path home, Download progress, Stager stager) throws IOException {
+        try {
+            stager.stage(release, home, progress);
+            EventLogger.info(CATEGORY, "Java " + release.version() + " is staged; the next start installs it");
+        } catch (IOException | RuntimeException e) {
+            progress.failed("Java " + release.version() + " could not be downloaded: " + e.getMessage());
+            EventLogger.warn(CATEGORY, "Java runtime download failed: " + e.getMessage(), release.url());
+            throw e;
+        } finally {
+            progress.end();
+        }
     }
 
     /**

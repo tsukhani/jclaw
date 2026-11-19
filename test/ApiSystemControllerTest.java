@@ -551,6 +551,24 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
+    void theNewestPatchIsDescribedInPlainWordsWithItsReleaseNotes() throws Exception {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
+        var psu = release("25.0.5");
+        JavaRuntimeService.setLatestForTest(new JavaRuntimeService.Release(psu.version(), psu.url(), psu.sha256(),
+                psu.archive(), "PSU"));
+
+        var described = json(GET("/api/system/java-runtime"));
+        assertEquals("a security and bug-fix release", described.get("releaseType").getAsString());
+        assertEquals("https://docs.azul.com/core/release-notes", described.get("releaseNotesUrl").getAsString());
+
+        JavaRuntimeService.setLatestForTest(psu);
+        var untyped = json(GET("/api/system/java-runtime"));
+        assertTrue(untyped.get("releaseType").isJsonNull());
+        assertEquals("https://docs.azul.com/core/release-notes", untyped.get("releaseNotesUrl").getAsString());
+    }
+
+    @Test
     void aDownloadInFlightCannotBeCancelledOrStartedTwice() throws Exception {
         login();
         JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));

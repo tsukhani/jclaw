@@ -108,6 +108,39 @@ class ApiNotificationsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aNoticeCarriesItsHeadingAndLinkAndAReminderNone() {
+        login();
+        var agentId = fetchInFreshTx(() -> AgentService.create("notif-link", "openrouter", "gpt-4.1").id);
+        seedNotification(agentId, "Call the dentist", false);
+        fetchInFreshTx(() -> {
+            var n = new Notification();
+            n.agent = Agent.findById(agentId);
+            n.title = "Java runtime";
+            n.content = "Java 25.0.5.1 is available.";
+            n.linkUrl = "https://docs.azul.com/core/release-notes";
+            n.linkLabel = "Release notes";
+            n.save();
+            return n.id;
+        });
+
+        var rows = com.google.gson.JsonParser.parseString(getContent(GET("/api/notifications?status=all")))
+                .getAsJsonArray();
+        assertEquals(2, rows.size());
+        // Both rows can share a createdAt, so they are told apart by their heading, not their order.
+        var first = rows.get(0).getAsJsonObject();
+        var notice = first.get("title").isJsonNull() ? rows.get(1).getAsJsonObject() : first;
+        var reminder = notice == first ? rows.get(1).getAsJsonObject() : first;
+        assertEquals("Java 25.0.5.1 is available.", notice.get("content").getAsString());
+        assertEquals("Java runtime", notice.get("title").getAsString());
+        assertEquals("https://docs.azul.com/core/release-notes", notice.get("linkUrl").getAsString());
+        assertEquals("Release notes", notice.get("linkLabel").getAsString());
+        assertEquals("Call the dentist", reminder.get("content").getAsString());
+        assertTrue(reminder.get("title").isJsonNull());
+        assertTrue(reminder.get("linkUrl").isJsonNull());
+        assertTrue(reminder.get("linkLabel").isJsonNull());
+    }
+
+    @Test
     void invalidStatusReturns400() {
         login();
         var resp = GET("/api/notifications?status=bogus");

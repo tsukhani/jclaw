@@ -8,6 +8,7 @@ import okio.Buffer;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import play.Play;
 import play.test.UnitTest;
 import services.JavaRuntimeService;
 import services.JavaRuntimeService.Download;
@@ -76,10 +77,10 @@ class JavaRuntimeServiceTest extends UnitTest {
     @Test
     void theCatalogIsAskedWhatInstallShAsksAndWindowsAsksForTheZip() {
         assertEquals("https://api.azul.com/metadata/v1/zulu/packages/?java_version=25&os=macos&arch=aarch64"
-                        + "&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20",
+                        + "&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash,release_type&page_size=20",
                 JavaRuntimeService.catalogUrl(25, "macos", "aarch64"));
         assertEquals("https://api.azul.com/metadata/v1/zulu/packages/?java_version=25&os=windows&arch=x64"
-                        + "&archive_type=zip&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20",
+                        + "&archive_type=zip&java_package_type=jre&release_status=ga&include_fields=sha256_hash,release_type&page_size=20",
                 JavaRuntimeService.catalogUrl(25, "windows", "x64"));
     }
 
@@ -132,6 +133,28 @@ class JavaRuntimeServiceTest extends UnitTest {
     }
 
     @Test
+    void theLiveCatalogsNewestPlainJreCarriesItsReleaseType() throws IOException {
+        // Azul's answer to catalogUrl(25, "linux", "x64") on 2026-11-19, CRaC, FX and musl builds among the plain ones.
+        var payload = Files.readString(Play.applicationPath.toPath().resolve("test/azul-catalog-jre25-linux-x64.json"));
+
+        assertEquals(new Release("25.0.5.1", "https://cdn.azul.com/zulu/bin/zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz",
+                        "12277af4957cd249dc7aa50017ddde967a826fa48971b2411752fefe48e5ca8b",
+                        "zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz", "PSU"),
+                JavaRuntimeService.pickLatest(payload, 25, false));
+    }
+
+    @Test
+    void aReleaseTypeIsPutInPlainWordsAndOneAzulNeverDefinedInNone() {
+        assertEquals("a security and bug-fix release", JavaRuntimeService.releaseTypeInWords("PSU"));
+        assertEquals("a security-fix release", JavaRuntimeService.releaseTypeInWords("CPU"));
+        assertEquals("a security and bug-fix release", JavaRuntimeService.releaseTypeInWords(" psu "));
+        assertNull(JavaRuntimeService.releaseTypeInWords("LU"));
+        assertNull(JavaRuntimeService.releaseTypeInWords("CPU_PLUS_PSU"));
+        assertNull(JavaRuntimeService.releaseTypeInWords(""));
+        assertNull(JavaRuntimeService.releaseTypeInWords(null));
+    }
+
+    @Test
     void aBuildFromTheCatalogWithNoHashIsStillTheNewestButCarriesNone() {
         var payload = "[{\"name\":\"" + ARCHIVE + "\",\"download_url\":\"" + URL + "\",\"java_version\":[25,0,5]}]";
         assertEquals(new Release("25.0.5", URL, null, ARCHIVE), JavaRuntimeService.pickLatest(payload, 25, false));
@@ -157,7 +180,7 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(new Release("25.0.5", "https://cdn.azul.com/zulu/bin/" + muslName, hash("B2"), muslName),
                 latestFrom(client, linux(musl)));
         var query = "https://api.azul.com/metadata/v1/zulu/packages/?java_version=25&os=%s&arch=x64&archive_type=tar.gz"
-                + "&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20";
+                + "&java_package_type=jre&release_status=ga&include_fields=sha256_hash,release_type&page_size=20";
         assertEquals(List.of(query.formatted("linux"), query.formatted("linux-musl")), asked);
 
         Interceptor down = chain -> answer(chain.request(), 503, "unavailable");
@@ -456,6 +479,52 @@ class JavaRuntimeServiceTest extends UnitTest {
         waitUntil(() -> !progress.active());
         assertEquals(tmp, staging.get());
         assertNull(progress.currentPercent());
+        assertEquals("Java 25.0.5 could not be downloaded: the network went away", progress.lastError());
+    }
+
+    @Test
+    void aDownloadStagedInTheCallersThreadIsReadyWhenItReturns() throws IOException {
+        var app = install();
+        var env = env(app, Files.createDirectories(tmp.resolve("jre/Home")), "25.0.4", false);
+        var progress = new Download();
+        var thread = new AtomicReference<Thread>();
+
+        var staged = JavaRuntimeService.stageNow(env, release("25.0.5"), progress, (r, home, p) -> {
+            thread.set(Thread.currentThread());
+            p.percent(100);
+        });
+
+        assertEquals("25.0.5", staged.version());
+        assertEquals(Thread.currentThread(), thread.get());
+        assertFalse(progress.active());
+        assertNull(progress.currentPercent());
+        assertNull(progress.lastError());
+    }
+
+    @Test
+    void aDownloadInTheCallersThreadIsRefusedAsTheButtonsIsAndAFailureIsThrownAndKept() throws IOException {
+        var app = install();
+        var env = env(app, Files.createDirectories(tmp.resolve("jre/Home")), "25.0.4", false);
+        var calls = new AtomicInteger();
+        JavaRuntimeService.Stager counting = (r, home, p) -> calls.incrementAndGet();
+
+        var running = new Download();
+        running.begin();
+        var busy = assertThrows(IllegalStateException.class,
+                () -> JavaRuntimeService.stageNow(env, release("25.0.5"), running, counting));
+        assertEquals("A newer Java is already downloading.", busy.getMessage());
+        var current = assertThrows(IllegalStateException.class,
+                () -> JavaRuntimeService.stageNow(env, release("25.0.4"), new Download(), counting));
+        assertEquals("Java 25.0.4 is up to date.", current.getMessage());
+        assertEquals(0, calls.get());
+
+        var progress = new Download();
+        var failed = assertThrows(IOException.class, () -> JavaRuntimeService.stageNow(env, release("25.0.5"), progress,
+                (r, home, p) -> {
+                    throw new IOException("the network went away");
+                }));
+        assertEquals("the network went away", failed.getMessage());
+        assertFalse(progress.active());
         assertEquals("Java 25.0.5 could not be downloaded: the network went away", progress.lastError());
     }
 

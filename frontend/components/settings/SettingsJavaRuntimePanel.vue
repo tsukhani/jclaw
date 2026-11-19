@@ -11,6 +11,8 @@ interface JavaRuntimePreflight {
   currentVersion: string
   vendor: string | null
   latestVersion: string | null
+  releaseType: string | null
+  releaseNotesUrl: string | null
   updateAvailable: boolean
   stagedVersion: string | null
   downloading: boolean
@@ -206,6 +208,21 @@ const errorLine = computed(() =>
             data-testid="java-runtime-summary"
           >
             {{ summaryLine }}
+          </div>
+          <div
+            v-if="runtime?.updateAvailable && runtime.releaseNotesUrl"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="java-runtime-release"
+          >
+            <template v-if="runtime.releaseType">
+              Java {{ runtime.latestVersion }} is {{ runtime.releaseType }}.
+            </template>
+            <a
+              :href="runtime.releaseNotesUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="underline hover:text-fg-strong"
+            >Release notes</a>
           </div>
           <div
             v-if="runtime?.lastStart"

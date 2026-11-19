@@ -101,6 +101,8 @@ function builtIn(over: Record<string, unknown> = {}) {
     currentVersion: '25.0.4',
     vendor: 'Azul Systems, Inc.',
     latestVersion: '25.0.5',
+    releaseType: 'a security and bug-fix release',
+    releaseNotesUrl: 'https://docs.azul.com/core/release-notes',
     updateAvailable: true,
     stagedVersion: null,
     downloading: false,
@@ -213,6 +215,31 @@ describe('SettingsJavaRuntimePanel — what it reports', () => {
 
     expect(getQueries.at(-1)).toEqual({ refresh: 'true' })
     expect(summary(c)).toBe('Java 25.0.5 is available.')
+  })
+
+  it('says what kind of release the newer patch is and links its release notes', async () => {
+    const c = await mounted()
+
+    const release = c.find('[data-testid="java-runtime-release"]')
+    expect(release.text()).toBe('Java 25.0.5 is a security and bug-fix release. Release notes')
+    const link = release.find('a')
+    expect(link.attributes('href')).toBe('https://docs.azul.com/core/release-notes')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('links the release notes alone when the catalog gives no release type', async () => {
+    runtime = builtIn({ releaseType: null })
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-release"]').text()).toBe('Release notes')
+  })
+
+  it('says nothing about a release when there is no newer patch', async () => {
+    runtime = builtIn({ latestVersion: '25.0.4', updateAvailable: false })
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-release"]').exists()).toBe(false)
   })
 
   it('shows what the last start did with a staged runtime', async () => {
