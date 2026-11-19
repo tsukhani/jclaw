@@ -8,8 +8,9 @@ import services.database.DatabaseGrowth.TableRow;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
-/** The growth table's arithmetic over the daily samples, and the retention window (JF-496). */
+/** The growth table's arithmetic over the daily samples, and the retention window (JF-496, JF-525). */
 class DatabaseGrowthTest extends UnitTest {
 
     private static final LocalDate TODAY = LocalDate.parse("2026-11-17");
@@ -23,9 +24,11 @@ class DatabaseGrowthTest extends UnitTest {
         return new FilePoint(TODAY.minusDays(daysAgo), fileBytes, liveBytes, fileBytes - liveBytes);
     }
 
+    /** The oldest day among the samples is the history's start, as it is when a day's table and file rows land together. */
     private static DatabaseGrowth.Growth compute(List<TableRow> tables, List<FilePoint> files) {
-        return DatabaseGrowth.compute(tables, files, TAKEN, files.isEmpty() ? TODAY
-                : files.stream().map(FilePoint::day).min(LocalDate::compareTo).orElseThrow());
+        var since = Stream.concat(tables.stream().map(TableRow::day), files.stream().map(FilePoint::day))
+                .min(LocalDate::compareTo).orElse(TODAY);
+        return DatabaseGrowth.compute(tables, files, TAKEN, since);
     }
 
     @Test
@@ -50,8 +53,8 @@ class DatabaseGrowthTest extends UnitTest {
         assertEquals(259.0 / 565, message.share(), "its part of the whole file, so every row adds up to it");
         assertNull(message.day());
         assertNull(message.week());
-        assertNull(message.month());
-        assertEquals(List.of(259L), message.trend());
+        assertEquals(0, g.growthDays());
+        assertNull(message.growth(), "one day of history has no window to grow over");
         assertEquals(432 - 259 - 46 - 1, g.otherLiveBytes());
     }
 
@@ -62,8 +65,39 @@ class DatabaseGrowthTest extends UnitTest {
         var message = g.tables().getFirst();
         assertEquals(new Change(9, 1), message.day());
         assertEquals(new Change(59, 6), message.week());
-        assertEquals(new Change(159, 16), message.month());
-        assertEquals(List.of(200L, 250L, 259L), message.trend(), "the 30-day trend starts 29 days back");
+        assertEquals(30, g.growthDays());
+        assertEquals(new Change(159, 16), message.growth(), "thirty days kept: the growth is the 30-day change");
+    }
+
+    @Test
+    void beforeThirtyDaysTheGrowthReachesBackToTheOldestSample() {
+        var two = compute(List.of(row(2, "MESSAGE", 240, 24), row(1, "MESSAGE", 250, 25), row(0, "MESSAGE", 259, 26)),
+                List.of(file(0, 565, 432)));
+        assertEquals(2, two.growthDays());
+        assertEquals(new Change(19, 2), two.tables().getFirst().growth());
+
+        var week = compute(List.of(row(7, "MESSAGE", 200, 20), row(0, "MESSAGE", 259, 26)), List.of(file(0, 565, 432)));
+        assertEquals(7, week.growthDays());
+        assertEquals(week.tables().getFirst().week(), week.tables().getFirst().growth());
+    }
+
+    @Test
+    void theGrowthWindowIsTheHistoryUpToThirtyDays() {
+        for (int[] c : new int[][] {{1, 1}, {29, 29}, {30, 30}, {31, 30}, {45, 30}}) {
+            var g = compute(List.of(row(c[0], "MESSAGE", 100, 10), row(0, "MESSAGE", 259, 26)),
+                    List.of(file(0, 565, 432)));
+            assertEquals(c[1], g.growthDays(), c[0] + " days of history");
+            assertEquals(new Change(159, 16), g.tables().getFirst().growth(), c[0] + " days of history");
+        }
+    }
+
+    @Test
+    void aTableFirstSeenAfterTheOldestSampleHasNoGrowth() {
+        var g = compute(List.of(row(2, "MESSAGE", 240, 24), row(0, "MESSAGE", 259, 26),
+                row(1, "DATABASE_FILE_SAMPLE", 0, 0), row(0, "DATABASE_FILE_SAMPLE", 16, 1)), List.of(file(0, 565, 432)));
+        var t = g.tables().stream().filter(r -> r.name().equals("DATABASE_FILE_SAMPLE")).findFirst().orElseThrow();
+        assertEquals(new Change(16, 1), t.day());
+        assertNull(t.growth(), "it has no sample at the window's start, the same as the other columns");
     }
 
     @Test
@@ -86,10 +120,10 @@ class DatabaseGrowthTest extends UnitTest {
     @Test
     void aSampleOlderThanTheLookBackIsNoReference() {
         var g = compute(List.of(row(62, "MESSAGE", 100, 10), row(0, "MESSAGE", 259, 26)), List.of(file(0, 565, 432)));
-        assertNull(g.tables().getFirst().month(), "62 days is past twice the 30-day column");
+        assertNull(g.tables().getFirst().growth(), "62 days is past twice the 30-day window");
         var within = compute(List.of(row(61, "MESSAGE", 100, 10), row(0, "MESSAGE", 259, 26)),
                 List.of(file(0, 565, 432)));
-        assertEquals(new Change(159, 16), within.tables().getFirst().month());
+        assertEquals(new Change(159, 16), within.tables().getFirst().growth());
     }
 
     @Test

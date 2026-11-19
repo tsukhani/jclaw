@@ -8,6 +8,7 @@ import play.db.jpa.JPA;
 import utils.AppClock;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -17,14 +18,14 @@ import java.util.TreeMap;
 
 /**
  * Where the database grows (JF-496): one sample a day of each table's size and the data file's, and each table's
- * change over a day, a week and 30 days from them.
+ * change over a day, a week and up to 30 days from them.
  */
 public final class DatabaseGrowth {
 
     public static final String KEY_RETENTION = "db.sizeHistory.retentionDays";
     public static final int DEFAULT_RETENTION_DAYS = 365;
     static final int MAX_RETENTION_DAYS = 3650;
-    /** The days the trend columns and the file's view cover, and the longest change column. */
+    /** The days the file's view covers, and the longest growth window. */
     public static final int TREND_DAYS = 30;
     // The oldest sample a change is read from: a reference older than twice the longest column reads as none.
     private static final int LOOKBACK_DAYS = 2 * TREND_DAYS + 1;
@@ -60,21 +61,23 @@ public final class DatabaseGrowth {
      * One table now, and its change against its newest sample at least that many days older; a change is null when
      * there is none within the look-back.
      *
-     * @param share the table's part of the data file, from 0 to 1, or null when the file reported no size
-     * @param trend its bytes on each sampled day of the last {@value #TREND_DAYS}, oldest first
+     * @param share  the table's part of the data file, from 0 to 1, or null when the file reported no size
+     * @param growth its change over {@link Growth#growthDays()}, null when that is 0
      */
     public record TableGrowth(String name, long bytes, long rows, @Nullable Double share,
-                              @Nullable Change day, @Nullable Change week, @Nullable Change month, List<Long> trend) {}
+                              @Nullable Change day, @Nullable Change week, @Nullable Change growth) {}
 
     /**
      * The growth table, as of the newest sample.
      *
-     * @param otherLiveBytes the live data no table's figure counts, such as its indexes; null without the file's figures
      * @param historySince   the oldest sample still kept
+     * @param growthDays     the window every table's growth covers: the days back to the oldest sample, at most
+     *                       {@value #TREND_DAYS}, so it reads as the 30-day change once that much history is kept
+     * @param otherLiveBytes the live data no table's figure counts, such as its indexes; null without the file's figures
      */
     public record Growth(@Nullable String sampledOn, @Nullable String takenAt, @Nullable String historySince,
-                         @Nullable FileDay file, @Nullable Long otherLiveBytes, List<TableGrowth> tables,
-                         List<FileDay> fileTrend) {}
+                         int growthDays, @Nullable FileDay file, @Nullable Long otherLiveBytes,
+                         List<TableGrowth> tables, List<FileDay> fileTrend) {}
 
     private DatabaseGrowth() {}
 
@@ -154,7 +157,7 @@ public final class DatabaseGrowth {
     public static Growth growth() {
         DatabaseFileSample newest = DatabaseFileSample.find("ORDER BY sampledOn DESC").first();
         if (newest == null) {
-            return new Growth(null, null, null, null, null, List.of(), List.of());
+            return new Growth(null, null, null, 0, null, null, List.of(), List.of());
         }
         var from = newest.sampledOn.minusDays(LOOKBACK_DAYS);
         var tables = new ArrayList<TableRow>();
@@ -176,9 +179,10 @@ public final class DatabaseGrowth {
                                  LocalDate historySince) {
         var latestFile = files.stream().max(Comparator.comparing(FilePoint::day)).orElse(null);
         if (latestFile == null) {
-            return new Growth(null, takenAt, historySince.toString(), null, null, List.of(), List.of());
+            return new Growth(null, takenAt, historySince.toString(), 0, null, null, List.of(), List.of());
         }
         var today = latestFile.day();
+        var growthDays = Math.clamp(ChronoUnit.DAYS.between(historySince, today), 0, TREND_DAYS);
         var byTable = new HashMap<String, TreeMap<LocalDate, TableRow>>();
         for (var row : tables) {
             if (!row.day().isAfter(today)) {
@@ -196,16 +200,15 @@ public final class DatabaseGrowth {
                 continue;
             }
             counted += now.bytes();
-            var trend = e.getValue().tailMap(trendFrom, true).values().stream().map(TableRow::bytes).toList();
             out.add(new TableGrowth(now.name(), now.bytes(), now.rows(),
                     size == null || size <= 0 ? null : (double) now.bytes() / size,
-                    change(e.getValue(), now, 1), change(e.getValue(), now, 7), change(e.getValue(), now, TREND_DAYS),
-                    trend));
+                    change(e.getValue(), now, 1), change(e.getValue(), now, 7),
+                    growthDays == 0 ? null : change(e.getValue(), now, growthDays)));
         }
         out.sort(Comparator.comparingLong(TableGrowth::bytes).reversed().thenComparing(TableGrowth::name));
         var fileTrend = files.stream().filter(f -> !f.day().isBefore(trendFrom) && !f.day().isAfter(today))
                 .sorted(Comparator.comparing(FilePoint::day)).map(FileDay::of).toList();
-        return new Growth(today.toString(), takenAt, historySince.toString(), FileDay.of(latestFile),
+        return new Growth(today.toString(), takenAt, historySince.toString(), growthDays, FileDay.of(latestFile),
                 live == null ? null : Math.max(0, live - counted), out, fileTrend);
     }
 

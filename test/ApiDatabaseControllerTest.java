@@ -200,6 +200,7 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         assertTrue(json.get("sampledOn") == null || json.get("sampledOn").isJsonNull());
         assertEquals(0, json.getAsJsonArray("tables").size());
         assertEquals(0, json.getAsJsonArray("fileTrend").size());
+        assertEquals(0, json.get("growthDays").getAsInt());
     }
 
     @Test
@@ -223,7 +224,11 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         assertEquals(9_326_923L, message.getAsJsonObject("day").get("bytes").getAsLong());
         assertEquals(1_226L, message.getAsJsonObject("day").get("rows").getAsLong());
         assertTrue(message.get("week") == null || message.get("week").isJsonNull());
-        assertEquals(2, message.getAsJsonArray("trend").size());
+        assertEquals(1, json.get("growthDays").getAsInt());
+        assertEquals(9_326_923L, message.getAsJsonObject("growth").get("bytes").getAsLong());
+        assertEquals(1_226L, message.getAsJsonObject("growth").get("rows").getAsLong());
+        assertNull(message.get("month"));
+        assertNull(message.get("trend"));
         assertEquals("2026-11-16", json.getAsJsonArray("fileTrend").get(0).getAsJsonObject().get("day").getAsString());
     }
 
