@@ -222,7 +222,7 @@ const errorLine = computed(() =>
               target="_blank"
               rel="noopener noreferrer"
               class="underline hover:text-fg-strong"
-            >Release notes</a>
+            >Azul's latest release notes</a>
           </div>
           <div
             v-if="runtime?.lastStart"

@@ -46,9 +46,10 @@ public final class JavaRuntimeService {
     static final String AZUL_API = "https://api.azul.com/metadata/v1/zulu/packages/";
     static final String DOWNLOAD_HOST = "cdn.azul.com";
     /**
-     * Azul's notes for its newest release. The catalog links none, and Azul files its notes by month,
-     * with a respin such as 25.0.5.0.3 on no month's page, so no per-build page can be derived from an
-     * entry; the newest patch, the one the panel offers, is always on this page.
+     * Azul's notes for its newest release, always this one address (JF-537): the catalog entry links none, and
+     * no per-build page can be derived from one. The panel and the daily check offer only the catalog's newest
+     * build, the release this page shows, but the two update apart and a staged build can be overtaken, so the
+     * link is worded as Azul's latest notes, never as the offered build's.
      */
     public static final String RELEASE_NOTES = "https://docs.azul.com/core/release-notes";
     /** A Zulu JRE archive is about 50 MB. */
@@ -406,6 +407,14 @@ public final class JavaRuntimeService {
         return candidate != null && compareVersions(candidate, current) > 0;
     }
 
+    /**
+     * True when {@code candidate} is newer than the Java {@code env} runs: {@link #stageable}'s test, which the
+     * panel and the daily check ask too, so none offers what another would not.
+     */
+    public static boolean isNewer(@Nullable Release candidate, Environment env) {
+        return candidate != null && isNewer(candidate.version(), env.javaVersion());
+    }
+
     private static int[] parts(@Nullable String version) {
         if (version == null || version.isBlank()) return new int[0];
         var split = version.strip().split("\\.");
@@ -488,7 +497,7 @@ public final class JavaRuntimeService {
             throw new IllegalStateException("Java " + staged.version() + " will be installed at the next restart.");
         }
         if (latest == null) throw new IllegalStateException("Couldn't check Azul's catalog for a newer Java.");
-        if (!isNewer(latest.version(), env.javaVersion())) {
+        if (!isNewer(latest, env)) {
             throw new IllegalStateException("Java " + env.javaVersion() + " is up to date.");
         }
         if (!Files.isWritable(env.home())) {
@@ -648,15 +657,12 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * Remove the runtime waiting for the next start.
+     * Remove the runtime waiting for the next start. Settings cancels through {@link JavaRuntimePatchCheck#cancel},
+     * which also keeps the daily check from downloading it again.
      *
      * @return false when none is waiting
      * @throws IllegalStateException while a download runs
      */
-    public static boolean cancel() throws IOException {
-        return cancel(environment().home(), CURRENT);
-    }
-
     public static boolean cancel(Path home, Download progress) throws IOException {
         STAGING.lock();
         try {

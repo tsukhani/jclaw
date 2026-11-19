@@ -48,11 +48,15 @@ class JavaRuntimePatchCheckTest extends UnitTest {
     private static final String VERSION = "25.0.5.1";
     private static final String ARCHIVE = "zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz";
     private static final String CDN_PATH = "cdn.azul.com/zulu/bin/" + ARCHIVE;
+    /** A later Zulu build of the same Java 25.0.5.1, as Azul ships an out-of-cycle fix. */
+    private static final String RESPIN = "zulu25.38.203-ca-jre25.0.5.1-linux_x64.tar.gz";
+    /** An earlier patch, waiting in {@code jre.staged/} for the next restart. */
+    private static final String OLDER = "zulu25.36.11-ca-jre25.0.5-linux_x64.tar.gz";
     private static final String CATALOG_PATH = "api.azul.com/metadata/v1/zulu/packages/";
     /** The catalog's own hash for {@link #ARCHIVE}, which the stub's bytes never match. */
     private static final String AZUL_SHA = "12277af4957cd249dc7aa50017ddde967a826fa48971b2411752fefe48e5ca8b";
     private static final byte[] JRE = "a Zulu JRE".getBytes(StandardCharsets.UTF_8);
-    private static final String LINK = " | Release notes https://docs.azul.com/core/release-notes";
+    private static final String LINK = " | Azul's latest release notes https://docs.azul.com/core/release-notes";
 
     @TempDir Path tmp;
 
@@ -82,7 +86,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded and installs "
                 + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
                 + LINK), notices());
-        assertEquals(VERSION, JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
         assertEquals(List.of(CATALOG_PATH, CDN_PATH), requests);
         // All it leaves: no restart is asked for, and nothing beside the install changes.
         assertEquals(List.of("jclaw", "jre", "jre.staged"), listing(tmp));
@@ -149,7 +153,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         assertEquals(List.of(), requests);
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(checkout.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(checkout.app()));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
     }
 
@@ -165,7 +169,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
                 "WARN Java runtime download failed: HTTP 503 fetching https://" + CDN_PATH), runtimeEvents(events));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
 
         check(env, azul(catalog(true, sha(JRE)), 200), new Download());
 
@@ -186,7 +190,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
                         + ", the download is " + sha(JRE)), runtimeEvents(events));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
 
         check(env, azul(catalog(true, sha(JRE)), 200), new Download());
 
@@ -215,41 +219,40 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
     }
 
     @Test
     void aPatchStagedFromSettingsIsNotDownloadedAgainNorAnnouncedNorStagedAgainOnceCanceled() throws IOException {
         var env = builtIn("25.0.4");
-        var dir = Files.createDirectories(tmp.resolve("jre.staged"));
-        Files.write(dir.resolve(ARCHIVE), JRE);
-        Files.writeString(dir.resolve("manifest"), "version=" + VERSION + "\nsha256=" + sha(JRE) + "\narchive=" + ARCHIVE + "\n");
+        stageByHand(VERSION, ARCHIVE);
         var azul = azul(catalog(true, sha(JRE)), 200);
 
         check(env, azul, new Download());
 
         assertEquals(List.of(CATALOG_PATH), requests);
         assertEquals(List.of(), notices());
-        assertEquals(VERSION, JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
 
-        assertTrue(JavaRuntimeService.cancel(tmp, new Download()));
+        assertTrue(JavaRuntimePatchCheck.cancel(env, new Download()));
         check(env, azul, new Download());
 
         assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
-        assertFalse(Files.exists(dir));
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
     }
 
     @Test
-    void aPatchNewerThanTheOneLastHandledIsStaged() throws IOException {
+    void aPatchNewerThanTheOnesHandledIsStagedAndRecordedBesideThem() throws IOException {
         var env = builtIn("25.0.4");
         Files.createDirectories(env.app().resolve("data"));
-        Files.writeString(env.app().resolve("data/java-runtime.notified"), "25.0.5\n");
+        Files.writeString(env.app().resolve("data/java-runtime.notified"), OLDER + "\n");
 
         check(env, azul(catalog(true, sha(JRE)), 200), new Download());
 
         assertEquals(VERSION, JavaRuntimeService.staged(tmp).version());
-        assertEquals(VERSION, JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(OLDER, ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
     }
 
     @Test
@@ -263,7 +266,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         assertEquals(List.of(CATALOG_PATH), requests);
         assertTrue(running.active());
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
     }
 
     @Test
@@ -276,7 +279,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
         assertEquals(List.of("WARN No agent 'jf536-operator' to tell about Java 25.0.5.1"), runtimeEvents(events));
         assertEquals(List.of(CATALOG_PATH), requests);
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
 
         Tx.run(() -> AgentService.create(recipient, "openrouter", "gpt-4.1"));
         check(env, azul, new Download());
@@ -302,10 +305,135 @@ class JavaRuntimePatchCheckTest extends UnitTest {
                 + "Java cannot be staged beside " + tmp.resolve("jre") + "."), runtimeEvents(events));
         assertEquals(List.of(CATALOG_PATH), requests);
         assertEquals(List.of(), notices());
-        assertNull(JavaRuntimePatchCheck.handled(env.app()));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aRespinOfAVersionAlreadyHandledIsABuildOfItsOwnAndIsStaged() throws IOException {
+        var env = builtIn("25.0.4");
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+        assertTrue(JavaRuntimePatchCheck.cancel(env, new Download()));
+
+        check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
+
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), RESPIN), JavaRuntimeService.staged(tmp));
+        assertEquals(List.of(CATALOG_PATH, CDN_PATH, CATALOG_PATH, "cdn.azul.com/zulu/bin/" + RESPIN), requests);
+        assertEquals(2, notices().size());
+        assertEquals(List.of(ARCHIVE, RESPIN), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aPatchCanceledInSettingsBeforeTheCheckRanIsNotDownloadedAgain() throws IOException {
+        var env = builtIn("25.0.4");
+        stageByHand(VERSION, ARCHIVE);
+
+        assertTrue(JavaRuntimePatchCheck.cancel(env, new Download()));
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+
+        assertEquals(List.of(CATALOG_PATH), requests);
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        assertEquals(List.of(), notices());
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void withTheKeyOffAPatchAlreadyDownloadedFromSettingsIsNotAnnounced() throws IOException {
+        ConfigService.set(JavaRuntimePatchCheck.AUTO_DOWNLOAD_KEY, "false");
+        var env = builtIn("25.0.4");
+        stageByHand(VERSION, ARCHIVE);
+
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+
+        assertEquals(List.of(), notices());
+        assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE), JavaRuntimeService.staged(tmp));
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aNewerPatchReplacesAnOlderOneWaitingForTheRestartAndIsAnnouncedOnce() throws IOException {
+        var env = builtIn("25.0.4");
+        stageByHand("25.0.5", OLDER);
+        var azul = azul(catalog(true, sha(JRE)), 200);
+
+        check(env, azul, new Download());
+        check(env, azul, new Download());
+
+        assertEquals(new JavaRuntimeService.Staged(VERSION, sha(JRE), ARCHIVE), JavaRuntimeService.staged(tmp));
+        assertEquals(List.of("manifest", ARCHIVE), listing(tmp.resolve("jre.staged")));
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded in place of "
+                + "Java 25.0.5 and installs the next time JClaw restarts. Restart from Settings > Maintenance > Java "
+                + "runtime when it suits you." + LINK), notices());
+        assertEquals(List.of(CATALOG_PATH, CDN_PATH, CATALOG_PATH), requests);
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void withTheKeyOffANewerPatchThanTheOneWaitingIsAnnouncedOnceAndNothingIsDownloaded() throws IOException {
+        ConfigService.set(JavaRuntimePatchCheck.AUTO_DOWNLOAD_KEY, "false");
+        var env = builtIn("25.0.4");
+        stageByHand("25.0.5", OLDER);
+        var azul = azul(catalog(true, sha(JRE)), 200);
+
+        check(env, azul, new Download());
+        check(env, azul, new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is available, newer than "
+                + "the Java 25.0.5 waiting for the next restart. To install it instead, cancel Java 25.0.5 in Settings "
+                + "> Maintenance > Java runtime and download it there." + LINK), notices());
+        assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
+        assertEquals(new JavaRuntimeService.Staged("25.0.5", sha(JRE), OLDER), JavaRuntimeService.staged(tmp));
+        assertEquals(List.of(ARCHIVE), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void theRecordKeepsTheNewest32BuildsAndDropsTheOldestFirst() throws IOException {
+        var env = builtIn("25.0.4");
+        var data = Files.createDirectories(env.app().resolve("data"));
+        var earlier = new ArrayList<String>();
+        for (int i = 0; i < 31; i++) earlier.add("zulu25.0." + i + "-ca-jre25.0.0-linux_x64.tar.gz");
+        Files.write(data.resolve("java-runtime.notified"), earlier);
+
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+
+        var all32 = new ArrayList<>(earlier);
+        all32.add(ARCHIVE);
+        assertEquals(all32, JavaRuntimePatchCheck.handled(env.app()));
+
+        assertTrue(JavaRuntimePatchCheck.cancel(env, new Download()));
+        check(env, azul(respun(catalog(true, sha(JRE))), 200), new Download());
+
+        var newest32 = new ArrayList<>(all32.subList(1, 32));
+        newest32.add(RESPIN);
+        assertEquals(newest32, JavaRuntimePatchCheck.handled(env.app()));
     }
 
     // --- helpers ---
+
+    /** A finished download in {@code jre.staged/}, as the Settings button leaves it. */
+    private void stageByHand(String version, String archive) throws IOException {
+        var dir = Files.createDirectories(tmp.resolve("jre.staged"));
+        Files.write(dir.resolve(archive), JRE);
+        Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + sha(JRE) + "\narchive="
+                + archive + "\n");
+    }
+
+    /** {@code payload} with {@link #ARCHIVE} respun as {@link #RESPIN}: a newer Zulu build of the same Java. */
+    private static String respun(String payload) {
+        var entries = JsonParser.parseString(payload).getAsJsonArray();
+        for (var el : entries) {
+            var o = el.getAsJsonObject();
+            if (!ARCHIVE.equals(o.get("name").getAsString())) continue;
+            o.addProperty("name", RESPIN);
+            o.addProperty("download_url", "https://cdn.azul.com/zulu/bin/" + RESPIN);
+            var distro = new JsonArray();
+            for (int part : new int[] {25, 38, 203, 0}) distro.add(part);
+            o.add("distro_version", distro);
+        }
+        return entries.toString();
+    }
+
 
     private void check(Environment env, OkHttpClient azul, Download progress) {
         var lookup = new JavaRuntimeService.Lookup();

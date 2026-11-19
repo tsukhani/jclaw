@@ -14,6 +14,7 @@ import play.test.FunctionalTest;
 import services.AgentService;
 import services.ConversationService;
 import services.InternalApiTokenService;
+import services.JavaRuntimePatchCheck;
 import services.JavaRuntimeService;
 import services.RestartService;
 import services.Tx;
@@ -546,6 +547,8 @@ class ApiSystemControllerTest extends FunctionalTest {
 
         assertIsOk(DELETE("/api/system/java-runtime"));
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        // The daily check never downloads again what the operator canceled.
+        assertEquals(List.of("zulu-jre25.0.5.tar.gz"), JavaRuntimePatchCheck.handled(tmp.resolve("jclaw")));
         assertTrue(json(GET("/api/system/java-runtime")).get("stagedVersion").isJsonNull());
         assertEquals(404, DELETE("/api/system/java-runtime").status.intValue());
     }

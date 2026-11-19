@@ -29,7 +29,7 @@ interface NotificationView {
   linkLabel: string | null
 }
 
-// The server writes only its own https links; anything else is shown as text, never as an href.
+// The server writes only its own https links; anything else is left out, label and all, never made an href.
 function safeLink(t: NotificationView): string | null {
   return t.linkUrl?.startsWith('https://') ? t.linkUrl : null
 }

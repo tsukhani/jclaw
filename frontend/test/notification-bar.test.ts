@@ -110,7 +110,7 @@ describe('NotificationBar — a notice JClaw raises itself (JF-536)', () => {
       {
         id: 9, agentId: 1, agentName: 'main', content: 'Java 25.0.5.1 is downloaded and installs the next time JClaw restarts.',
         sourceTaskRunId: null, sourceTaskId: null, createdAt: new Date().toISOString(), acknowledgedAt: null,
-        title: 'Java runtime', linkUrl, linkLabel: 'Release notes',
+        title: 'Java runtime', linkUrl, linkLabel: 'Azul\'s latest release notes',
       },
     ]))
     await mountSuspended(NotificationBar)
@@ -123,7 +123,7 @@ describe('NotificationBar — a notice JClaw raises itself (JF-536)', () => {
     const toast = document.body.querySelector('article')!
     expect(toast.querySelector('span')!.textContent!.trim()).toBe('Java runtime')
     const link = toast.querySelector('a')!
-    expect(link.textContent!.trim()).toBe('Release notes')
+    expect(link.textContent!.trim()).toBe('Azul\'s latest release notes')
     expect(link.getAttribute('href')).toBe('https://docs.azul.com/core/release-notes')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
@@ -151,10 +151,13 @@ describe('NotificationBar — a notice JClaw raises itself (JF-536)', () => {
     expect(tasksDeleted).toBe(0)
   })
 
-  it('never turns a link that is not https into an href', async () => {
+  it('leaves out a link that is not https, label and all', async () => {
     await mountWithNotice('javascript:alert(1)')
 
-    expect(document.body.querySelector('article a')).toBeNull()
+    const toast = document.body.querySelector('article')!
+    expect(toast.querySelector('a')).toBeNull()
+    expect(toast.textContent).not.toContain('release notes')
+    expect(toast.textContent).not.toContain('javascript:')
   })
 })
 

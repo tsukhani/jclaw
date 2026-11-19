@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.GitCheckout;
+import services.JavaRuntimePatchCheck;
 import services.JavaRuntimeService;
 import services.RestartService;
 import services.SubagentRegistry;
@@ -309,7 +310,9 @@ public class ApiSystemController extends Controller {
      *                             the catalog could not be reached
      * @param releaseType          what kind of release {@code latestVersion} is, in plain words ("a security
      *                             and bug-fix release"), or null when the catalog says nothing JClaw knows
-     * @param releaseNotesUrl      the release notes for {@code latestVersion}, or null with no latest version
+     * @param releaseNotesUrl      Azul's notes for its latest release, which the panel links beside
+     *                             {@code latestVersion} worded as Azul's latest, since the two can briefly
+     *                             differ; null with no latest version
      * @param updateAvailable      true when {@code latestVersion} is newer than {@code currentVersion}
      * @param stagedVersion        a downloaded runtime waiting for the next start, or null
      * @param downloading          true while a download runs
@@ -353,7 +356,7 @@ public class ApiSystemController extends Controller {
                 JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
                 latest == null ? null : JavaRuntimeService.releaseTypeInWords(latest.releaseType()),
                 latest == null ? null : JavaRuntimeService.RELEASE_NOTES,
-                JavaRuntimeService.isNewer(latestVersion, env.javaVersion()),
+                JavaRuntimeService.isNewer(latest, env),
                 staged == null ? null : staged.version(),
                 downloading, downloading ? progress.currentPercent() : null, progress.lastError(),
                 last == null ? null : last.line(), last == null ? null : last.at().toString(),
@@ -388,7 +391,7 @@ public class ApiSystemController extends Controller {
     public static void cancelJavaRuntime() {
         boolean removed;
         try {
-            removed = JavaRuntimeService.cancel();
+            removed = JavaRuntimePatchCheck.cancel(JavaRuntimeService.environment(), JavaRuntimeService.CURRENT);
         } catch (IllegalStateException e) {
             ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
             return;

@@ -217,22 +217,22 @@ describe('SettingsJavaRuntimePanel — what it reports', () => {
     expect(summary(c)).toBe('Java 25.0.5 is available.')
   })
 
-  it('says what kind of release the newer patch is and links its release notes', async () => {
+  it('says what kind of release the newer patch is and links Azul\'s latest release notes', async () => {
     const c = await mounted()
 
     const release = c.find('[data-testid="java-runtime-release"]')
-    expect(release.text()).toBe('Java 25.0.5 is a security and bug-fix release. Release notes')
+    expect(release.text()).toBe('Java 25.0.5 is a security and bug-fix release. Azul\'s latest release notes')
     const link = release.find('a')
     expect(link.attributes('href')).toBe('https://docs.azul.com/core/release-notes')
     expect(link.attributes('target')).toBe('_blank')
     expect(link.attributes('rel')).toBe('noopener noreferrer')
   })
 
-  it('links the release notes alone when the catalog gives no release type', async () => {
+  it('links Azul\'s latest release notes alone when the catalog gives no release type', async () => {
     runtime = builtIn({ releaseType: null })
     const c = await mounted()
 
-    expect(c.find('[data-testid="java-runtime-release"]').text()).toBe('Release notes')
+    expect(c.find('[data-testid="java-runtime-release"]').text()).toBe('Azul\'s latest release notes')
   })
 
   it('says nothing about a release when there is no newer patch', async () => {
