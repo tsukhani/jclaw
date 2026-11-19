@@ -615,10 +615,14 @@ pipeline {
                     qemuPrelude()
                     candidateRegistry()
                     // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tag is idempotent.
+                    // The runtime stage is rebuilt from a fresh pull every time: a reused apt layer shipped v1.0.24
+                    // with a Zulu older than the Java4Shell fix (JF-533). The bundle stage stays cached.
                     retry(2) {
                         sh """
                             docker buildx build \\
                                 --builder jclaw-candidate-builder \\
+                                --pull \\
+                                --no-cache-filter runtime \\
                                 --provenance=false \\
                                 --platform linux/amd64,linux/arm64 \\
                                 -t ${env.CANDIDATE_IMAGE}:${env.BUILD_COMMIT.substring(0, 12)} \\
@@ -654,6 +658,15 @@ pipeline {
                         exit 1
                     fi
                     echo "The candidate image boots and reports $APP_VERSION: $image"
+                '''
+                // Each release's Java, read off its build log. The arm64 half runs under the QEMU the build set up.
+                sh '''
+                    image=$(cat dist/CANDIDATE_IMAGE)
+                    for platform in linux/amd64 linux/arm64; do
+                        docker pull -q --platform "$platform" "$image" > /dev/null
+                        echo "Java in the candidate image, $platform:"
+                        docker run --rm --platform "$platform" --entrypoint sh "$image" -c 'exec "$JAVA_HOME/bin/java" -version' 2>&1
+                    done
                 '''
                 archiveArtifacts artifacts: 'dist/CANDIDATE_IMAGE', fingerprint: true
             }
@@ -859,10 +872,13 @@ pipeline {
                         // publish cadence is negligible; if it ever becomes a
                         // storage concern, add a cleanup stage modeled on
                         // `Cleanup Old Releases` below.
+                        // --no-cache: every publish reruns apt, so it ships the newest zulu25-jdk and OS packages
+                        // rather than a layer an earlier publish cached (JF-533).
                         dockerPrelude()
                         retry(2) {
                             sh '''
                                 docker buildx build \\
+                                    --no-cache \\
                                     --provenance=false \\
                                     --platform linux/amd64,linux/arm64 \\
                                     -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\

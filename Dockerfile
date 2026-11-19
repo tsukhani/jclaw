@@ -207,13 +207,18 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
 #   - curl                        docker-compose healthcheck probe
 #   - bash                        ./play launcher (already in base)
 #
-# Layer order is engineered for cache stability across source-only
+# Layer order is engineered for cache stability across source-only local
 # rebuilds. The volatile bundle COPY (~880 MB unpacked) sits at the end
 # so apt installs, ENV declarations, the entrypoint COPY, and `mkdir` all stay cached when only application
 # code changes. Metadata instructions (ENTRYPOINT, EXPOSE, CMD) sit
 # after the bundle COPY because they re-stamp cheaply (no filesystem
 # diff) — a quick CMD edit shouldn't drag the bundle COPY into a
 # cache-miss.
+#
+# A release candidate skips that cache for this stage on purpose, pulling
+# the base fresh and naming the stage in --no-cache-filter (JF-533), so
+# each release takes that day's Zulu and OS patches. Keep the installs
+# unpinned, and the stage name in step with the Jenkinsfile.
 FROM ubuntu:26.04 AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
