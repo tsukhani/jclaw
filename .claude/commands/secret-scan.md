@@ -1,5 +1,5 @@
 ---
-description: Scan the CONTENTS of source-code files (app/, test/, frontend/, sidecar/ by default) for hardcoded secrets, API keys, tokens, private keys, connection strings, and PII — project-aware false-positive filtering, redacted evidence, rotate-first remediation. Read-only.
+description: Scan what the source code (app/, test/, frontend/, sidecar/) gained since the last release, the newest v* tag, across every commit in that range, for hardcoded secrets, API keys, tokens, private keys, connection strings, and PII — project-aware false-positive filtering, redacted evidence, rotate-first remediation. /release-check runs it on every release. Read-only.
 ---
 
 **Secret & sensitive-data scan (source code)**
@@ -8,22 +8,24 @@ Surface anything sensitive hardcoded **inside source-code files**: API keys, tok
 
 **Scope — source code only.** This command applies to the *contents of source-code files* across all four of JClaw's source trees by default: **`app/`** (backend Java), **`test/`** (test Java), **`frontend/`** (`.vue`/`.ts`/`.js`), and **`sidecar/`** (the Python ASR/diarize/TTS/image/video sidecars). It deliberately does **not** audit non-source files — `conf/` config, `certs/`, `.env*`, `package.json`/lockfiles, docs, CI, or build files — nor does it do file-name-based checks: those vectors are already handled by `.gitignore` (which excludes `certs/*`, `.env*`, `*.key`, `*.pem`, `*.p12`, `*.jks`) and the pre-commit hook. The value here is catching a secret that a developer typed *into code*, where no file-pattern rule would ever stop it.
 
+**Range — since the last release.** By default the scan covers only what changed after the last version `/deploy` shipped: the commits after the newest `v*` tag reachable from `HEAD`, since `/deploy` tags each version it ships. What that tag holds has already shipped, and `history` audits it; scanning it again on every release only buries the new lines. Every commit in the range is scanned, not only the tree at `HEAD`, because `/deploy` publishes each commit to the public GitHub mirror: a secret added and deleted again before the release still ships in history. `/release-check` runs this scan on every release (its step 9), and a finding fails that release.
+
 The bar is **signal over noise**: verify every candidate in context before reporting it, and suppress this repo's known-safe patterns (below). Do **not** dump a wall of raw grep hits.
 
 ---
 
 **Arguments** — `$ARGUMENTS` may be:
 
-- *(empty)* → scan **all four source trees**: `app/`, `test/`, `frontend/`, and `sidecar/`.
-- a **source path** (e.g. `app/services`, `test/`, `frontend/`, `sidecar/asr`) → scan that source subtree instead.
+- *(empty)* → scan **all four source trees**, `app/`, `test/`, `frontend/` and `sidecar/`, over **every commit since the last release**: `BASE=$(/usr/bin/git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD)` and the commits `$BASE..HEAD`. With no `v*` tag there is no release yet: say so and run `history` instead.
+- a **source path** (e.g. `app/services`, `test/`, `frontend/`, `sidecar/asr`) → scan that source subtree instead, over the same range.
 - `staged` → scan only the **staged** source changes (`git diff --cached`) — a pre-commit gate against typing a secret into code.
-- `history` → scan the **git history** of the source files. A secret that was committed to code and later removed is **still in history and is compromised**; run this before making the repo public or after any suspected leak.
+- `history` → scan the **git history** of the source files, every reachable commit. A secret that was committed to code and later removed is **still in history and is compromised**; run this before making the repo public, after any suspected leak, or to audit what shipped before the last release.
 
 Reject anything else with a clear message; do not guess.
 
 **Phase 1 — Establish the source scope**
 
-Enumerate the target source files with `git ls-files -- <scope>` restricted to source extensions — `*.java`, `*.vue`, `*.ts`, `*.js`, `*.mjs`, `*.py` (default scope: `app/ test/ frontend/ sidecar/`). Use `git grep` for the detection passes; it searches exactly the tracked set and is fast. Exclude this command file itself (`.claude/commands/secret-scan.md`) — it documents the regexes below and would self-match. For `staged`, use `git diff --cached`; for `history`, plan the cross-revision pass (Phase 4).
+Enumerate the target source files with `git ls-files -- <scope>` restricted to source extensions — `*.java`, `*.vue`, `*.ts`, `*.js`, `*.mjs`, `*.py` (default scope: `app/ test/ frontend/ sidecar/`). Use `git grep` for the detection passes; it searches exactly the tracked set and is fast. Exclude this command file itself (`.claude/commands/secret-scan.md`) — it documents the regexes below and would self-match. For the range, record `BASE` and the commit count `/usr/bin/git rev-list --count "$BASE"..HEAD -- app test frontend sidecar`, both for the report; a count of 0 means no source change since `BASE`, so the verdict is CLEAN once the control below has passed. For `staged`, use `git diff --cached`; for `history`, plan the cross-revision pass (Phase 4).
 
 **Phase 2 — Detection battery (grep source files, then verify each hit in context)**
 
@@ -37,7 +39,22 @@ Three more invocation traps with the same false-CLEAN signature:
 - **`-e` before any pattern starting with `-`.** The two `-----BEGIN` patterns are otherwise parsed as command-line options: `git grep -nIP -e '-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----'`.
 - **Never `2>/dev/null` a detection pass.** It hides precisely these errors, which is what makes a broken scan indistinguishable from a clean repo.
 
-**Prove the harness before trusting a zero.** Before reporting anything, run a known-positive control — `git grep -cP 'looksLikeSecret' -- test` must be non-zero, and each tree's source-file count must be non-zero. A pass that has not been shown capable of matching is not evidence of absence (AGENTS.md §6: *a green result you did not scope is not evidence*). State in the report that the control passed, so the CLEAN verdict is falsifiable.
+**The range (the default): new lines only.** Run each pattern over every commit in the range and over `BASE`, and keep what `BASE` did not hold, in a temporary directory `T` (the session's scratchpad when it has one):
+
+```bash
+/usr/bin/git grep -nIP -e "$P" $(/usr/bin/git rev-list "$BASE"..HEAD) -- app test frontend sidecar > "$T/range.txt"
+/usr/bin/git grep -nIP -e "$P" "$BASE" -- app test frontend sidecar > "$T/base.txt"
+awk -F: 'FILENAME == ARGV[1] { base[$2 FS substr($0, length($1)+length($2)+length($3)+4)]; next }
+         { k = $2 FS substr($0, length($1)+length($2)+length($3)+4)
+           if (!(k in base) && !(k in seen)) { seen[k]; print } }' "$T/base.txt" "$T/range.txt"
+```
+
+Each line reads `<sha>:<path>:<line>:<text>`. A path and text `BASE` already held shipped before and are dropped; what is left was added in the range. `git grep` reports the trees in the order given, newest first, so the SHA on a kept line is the newest commit holding it: `HEAD`'s SHA means the line is in the tree, and any other means a later commit deleted it while the range's history still carries it. Two traps, each found while writing this recipe, and each a false CLEAN:
+
+- **`FILENAME == ARGV[1]`, never `FNR == NR`.** A pattern with no hit at `BASE` leaves the baseline file empty, so `FNR == NR` stays true through the range file and every new hit is filed as baseline. That is a CLEAN in exactly the case the scan exists for.
+- **The revision list inline**, as `$(/usr/bin/git rev-list …)`. zsh does not word-split a variable holding it, so git receives every SHA as one revision, prints `unable to resolve revision` and matches nothing, which is the pathspec trap above in another place.
+
+**Prove the harness before trusting a zero.** Before reporting anything, run a known-positive control — `git grep -cP 'looksLikeSecret' -- test` must be non-zero, and each tree's source-file count must be non-zero. For the range, run the control over the range's commits (`/usr/bin/git grep -cP 'looksLikeSecret' $(/usr/bin/git rev-list "$BASE"..HEAD) -- test`, non-zero), and prove the filter as well: put one distinctive line the range added through the recipe as a fixed string (`-F` for `-P`), choosing a line `/usr/bin/git grep -F` does not find at `BASE`, and it must come out. A pass that has not been shown capable of matching is not evidence of absence (AGENTS.md §6: *a green result you did not scope is not evidence*). State in the report that the control passed, so the CLEAN verdict is falsifiable.
 
 *Cryptographic material (CRITICAL — a private key literal in code):*
 - `-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----` · `-----BEGIN PGP PRIVATE KEY BLOCK-----`
@@ -71,6 +88,8 @@ Do **not** report a candidate that is any of the following. Note it in the "chec
 - **PII noise**: `@example.com` / `@test` addresses, `noreply@`, the org's own domains (e.g. `abundent.com`) used as config defaults, obviously-fabricated fixture data.
 - **Phone numbers — only the fiction-reserved ranges are dismissible**: US `555-01xx` / `(…) 555-xxxx`, UK Ofcom drama `+44 7700 900xxx` and `+44 20 7946 0xxx`, and clearly-sequential placeholders (`+60 12-345 6789`, `123-456-7890`). Any *other* real-format number is a MEDIUM PII finding — **do not** wave it through just because it's in a test. Malaysia (`+60`) and most countries have **no** 555-style fiction range, so a plausibly-real `+<country-code>` number, or any number tied to a person's name, must be reported.
 
+- **Already released** (the range only): the recipe drops a line `BASE` held, but one moved or re-indented in the range comes back. When `git log -S<value>` shows the value was already in `BASE`, list it among the dismissed as released in `BASE`, which a `history` scan audits.
+
 A real-looking secret is still a finding **even inside a test file** — it's committed and, if live, compromised. Fake-but-real-shaped test data is not.
 
 **Phase 4 — (history mode only) scan the source history**
@@ -86,12 +105,12 @@ Run the Phase-2 high-signal patterns across history — `git grep -nIP '<pattern
 Lead with the verdict, then findings grouped by severity, then the appendix. For every reported secret, **redact the value** — show only enough to locate it, e.g. `AKIA1234…(len 20)`, never the full credential.
 
 ```
-Secret scan — source scope: <default: app/ test/ frontend/ sidecar/ | path | staged | history> · <N> source files searched
-Harness: git grep -P · control '<pattern>' matched <N> — detection proven live
+Secret scan — source scope: <app/ test/ frontend/ sidecar/ | path> since <BASE> (<N> commits) | staged | history · <N> source files searched
+Harness: git grep -P · control '<pattern>' matched <N> · new-line filter passed '<line>' — detection proven live
 Verdict: <CLEAN | N findings (C critical / H high / M medium / L low)>
 
 CRITICAL
-  <path>:<line> · <category> · `<redacted>` — <why it's live/sensitive>
+  <path>:<line> · <category> · `<redacted>` — <why it's live/sensitive> · <in the tree | removed in a later commit, still in <sha>>
     Fix: ROTATE immediately (assume compromised), then <remove + externalize + purge>.
 HIGH / MEDIUM / LOW …
 
@@ -102,4 +121,6 @@ Most urgent action: <the single thing to do first>
 
 **Remediation always leads with rotation.** A secret that reached the repo is compromised the moment it's pushed or cloned — deleting the line does **not** un-leak it (it survives in git history and in every existing clone/CI cache). Order: **(1) rotate/revoke the credential at its source**, (2) replace the literal with an env/secret-manager reference (the pattern already used across `app/`), (3) if it was ever committed, purge it from history (`git filter-repo` or BFG) and force-push — flag this as a coordinated action, don't do it as a side effect. For PII: remove it and note any retention/deletion obligations.
 
-**Rules of engagement:** read-only — do not edit, stage, commit, or fetch/send anything. Redact all secrets in the output. If a CRITICAL live credential is present, say so plainly and put rotation at the very top. If nothing survives verification, report **CLEAN** with the scope and the categories checked, so the green result is trustworthy rather than a shrug.
+A finding from the range has not reached GitHub yet, since `/deploy` is the only push of `main`, but it is in this clone and on `origin` in any candidate branch that carries it, so rotate it all the same. A new commit fixes the tree, not the range: `/deploy` would still publish the commit that added it. Whether to rewrite the unreleased commits so the value never reaches GitHub is the operator's call, made before the release and never as a side effect; nothing here force-pushes.
+
+**Rules of engagement:** read-only — do not edit, stage, commit, or fetch/send anything. Redact all secrets in the output. If a CRITICAL live credential is present, say so plainly and put rotation at the very top. If nothing survives verification, report **CLEAN** with the scope and the categories checked, so the green result is trustworthy rather than a shrug. Run by `/release-check`, the scan changes nothing either: the release check acts on its verdict.
