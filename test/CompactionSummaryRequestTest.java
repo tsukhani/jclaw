@@ -108,7 +108,7 @@ class CompactionSummaryRequestTest extends UnitTest {
             run(agent, convo, "Third question");
         });
 
-        assertEquals(4, requests.size(), "three turns and one summary");
+        assertEquals(4, requests.size(), () -> "three turns and one summary, but: " + describe(requests));
         var summaries = requests.stream().filter(CompactionSummaryRequestTest::isSummary).toList();
         var turnRequests = requests.stream().filter(r -> !isSummary(r)).toList();
         assertEquals(1, summaries.size());
@@ -569,6 +569,22 @@ class CompactionSummaryRequestTest extends UnitTest {
         assertFalse(thread.isAlive(), "the turn must finish within 60 s");
         if (error.get() != null) throw error.get();
         return result.get();
+    }
+
+    /** Each request in order: a summary, or a turn named by its question, the message ahead of the trailing clock. */
+    private static String describe(List<JsonObject> sent) {
+        var out = new ArrayList<String>();
+        for (var request : sent) {
+            var messages = request.getAsJsonArray("messages");
+            if (isSummary(request)) {
+                out.add("summary(" + messages.size() + " messages)");
+                continue;
+            }
+            // Shown however it is shaped: the request this names is the one the test did not expect.
+            var question = messages.size() < 2 ? "?" : String.valueOf(messages.get(messages.size() - 2).getAsJsonObject().get("content"));
+            out.add("turn(" + (question.length() > 40 ? question.substring(0, 40) + "..." : question) + ", " + messages.size() + " messages)");
+        }
+        return String.join("; ", out);
     }
 
     /** Whether {@code request} is a summary call: its instruction is last, or the system prompt of a transcript. */
