@@ -17,10 +17,10 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 
 | License | Java libraries | Web interface packages | Skills | Other files |
 |---|---:|---:|---:|---:|
-| Apache-2.0 | 188 | 2 | 1 | 1 |
+| Apache-2.0 | 189 | 2 | 1 | 1 |
 | MIT | 21 | 44 | 3 | 3 |
 | BSD-2-Clause | 33 | 0 | 0 | 0 |
-| BSD-3-Clause | 19 | 1 | 0 | 0 |
+| BSD-3-Clause | 15 | 1 | 0 | 0 |
 | BSD | 8 | 0 | 0 | 0 |
 | MIT-0 | 1 | 0 | 6 | 0 |
 | LGPL-2.1 | 5 | 0 | 0 | 0 |
@@ -51,17 +51,17 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.aayushatharva.brotli4j:native-windows-x86_64 | 1.24.0 | Apache-2.0 | below | https://github.com/hyperxpro/Brotli4j |
 | com.aayushatharva.brotli4j:service | 1.24.0 | Apache-2.0 | below | https://github.com/hyperxpro/Brotli4j |
 | com.adobe.xmp:xmpcore | 6.1.11 | BSD-3-Clause | below | https://www.adobe.com/devnet/xmp/library/eula-xmp-library-java.html |
-| com.agentclientprotocol:acp-annotations | 0.80.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
-| com.agentclientprotocol:acp-core | 0.80.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
-| com.agentclientprotocol:acp-json-jackson2 | 0.80.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
+| com.agentclientprotocol:acp-annotations | 0.81.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
+| com.agentclientprotocol:acp-core | 0.81.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
+| com.agentclientprotocol:acp-json-jackson2 | 0.81.0 | Apache-2.0 | in the jar | https://github.com/agentclientprotocol/java-sdk |
 | com.alibaba.fastjson2:fastjson2 | 2.0.57 | Apache-2.0 | below | https://github.com/alibaba/fastjson2 |
 | com.beust:jcommander | 1.82 | Apache-2.0 | below | https://jcommander.org |
 | com.drewnoakes:metadata-extractor | 2.22.0 | Apache-2.0 | below | https://drewnoakes.com/code/exif/ |
 | com.epam:parso | 2.0.14 | Apache-2.0 | below | https://github.com/epam/parso |
-| com.fasterxml.jackson.core:jackson-annotations | 2.22 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
-| com.fasterxml.jackson.core:jackson-core | 2.22.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
-| com.fasterxml.jackson.core:jackson-databind | 2.22.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
-| com.fasterxml.jackson.datatype:jackson-datatype-jsr310 | 2.22.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-modules-java8 |
+| com.fasterxml.jackson.core:jackson-annotations | 2.23 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
+| com.fasterxml.jackson.core:jackson-core | 2.23.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
+| com.fasterxml.jackson.core:jackson-databind | 2.23.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
+| com.fasterxml.jackson.datatype:jackson-datatype-jsr310 | 2.23.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-modules-java8 |
 | com.fasterxml.woodstox:woodstox-core | 7.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/woodstox |
 | com.fasterxml:classmate | 1.8.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/java-classmate |
 | com.github.auties00:cobalt | 0.0.10 | MIT | below | https://github.com/Auties00/Cobalt |
@@ -74,13 +74,13 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.github.crawler-commons:crawler-commons | 1.6 | Apache-2.0 | below | https://github.com/crawler-commons/crawler-commons |
 | com.github.jai-imageio:jai-imageio-core | 1.4.0 | BSD-3-Clause | in the jar | https://github.com/jai-imageio/jai-imageio-core |
 | com.github.javaparser:javaparser-core | 3.28.2 | LGPL-2.1 / Apache-2.0 | below | https://github.com/javaparser |
-| com.github.kagkarlsson:db-scheduler | 16.12.0 | Apache-2.0 | below | https://github.com/kagkarlsson/db-scheduler |
+| com.github.kagkarlsson:db-scheduler | 17.1.0 | Apache-2.0 | below | https://github.com/kagkarlsson/db-scheduler |
 | com.github.kokorin.jaffree:jaffree | 2023.09.10 | Apache-2.0 | below | https://github.com/kokorin/Jaffree |
 | com.github.librepdf:openpdf | 1.3.35 | LGPL-2.1 / MPL-2.0 | below | https://github.com/LibrePDF/OpenPDF |
 | com.github.mangstadt:vinnie | 2.0.2 | MIT | below | http://github.com/mangstadt/vinnie |
 | com.github.virtuald:curvesapi | 1.08 | BSD | below | https://github.com/virtuald/curvesapi |
 | com.google.code.gson:gson | 2.15.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.code.gson/gson |
-| com.google.errorprone:error_prone_annotations | 2.51.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations |
+| com.google.errorprone:error_prone_annotations | 2.52.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations |
 | com.google.protobuf:protobuf-java | 4.36.2 | BSD-3-Clause | below | https://developers.google.com/protocol-buffers/ |
 | com.google.zxing:core | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
 | com.google.zxing:javase | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
@@ -93,8 +93,8 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.jamonapi:jamon | 2.82 | JAMon License (BSD) | below | http://jamonapi.sourceforge.net/ |
 | com.k2fsa.sherpa.onnx:sherpa-onnx | 1.13.4 | Apache-2.0 | below | https://github.com/k2-fsa/sherpa-onnx |
 | com.knuddels:jtokkit | 1.1.0 | MIT | below | https://github.com/knuddelsgmbh/jtokkit |
-| com.microsoft.playwright:driver | 1.64.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
-| com.microsoft.playwright:playwright | 1.64.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
+| com.microsoft.playwright:driver | 1.65.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
+| com.microsoft.playwright:playwright | 1.65.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
 | com.pff:java-libpst | 0.9.3 | Apache-2.0 | below | https://github.com/rjohnsondev/java-libpst |
 | com.rometools:rome | 2.1.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.rometools/rome |
 | com.rometools:rome-utils | 2.1.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.rometools/rome-utils |
@@ -153,21 +153,21 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | io.micrometer:micrometer-observation | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
 | io.micrometer:micrometer-registry-otlp | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
 | io.micrometer:micrometer-registry-prometheus | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
-| io.netty:netty-buffer | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-base | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-classes-quic | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-compression | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-http | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-http2 | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-codec-http3 | 4.2.20.Final | Apache-2.0 | below | https://netty.io/netty-codec-http3/ |
-| io.netty:netty-codec-native-quic | 4.2.20.Final | Apache-2.0 | in the jar | https://netty.io/netty-codec-native-quic/ |
-| io.netty:netty-common | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-handler | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-resolver | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-tcnative-boringssl-static | 2.0.85.Final | Apache-2.0 | in the jar | https://github.com/netty/netty-tcnative/netty-tcnative-boringssl-static/ |
-| io.netty:netty-tcnative-classes | 2.0.85.Final | Apache-2.0 | below | https://github.com/netty/netty-tcnative/ |
-| io.netty:netty-transport | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
-| io.netty:netty-transport-native-unix-common | 4.2.20.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-buffer | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-base | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-classes-quic | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-compression | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-http | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-http2 | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-codec-http3 | 4.2.21.Final | Apache-2.0 | below | https://netty.io/netty-codec-http3/ |
+| io.netty:netty-codec-native-quic | 4.2.21.Final | Apache-2.0 | in the jar | https://netty.io/netty-codec-native-quic/ |
+| io.netty:netty-common | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-handler | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-resolver | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-tcnative-boringssl-static | 2.0.86.Final | Apache-2.0 | in the jar | https://github.com/netty/netty-tcnative/netty-tcnative-boringssl-static/ |
+| io.netty:netty-tcnative-classes | 2.0.86.Final | Apache-2.0 | below | https://github.com/netty/netty-tcnative/ |
+| io.netty:netty-transport | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
+| io.netty:netty-transport-native-unix-common | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
 | io.opentelemetry.instrumentation:opentelemetry-instrumentation-api | 2.33.1 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
 | io.opentelemetry.instrumentation:opentelemetry-instrumentation-api-incubator | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
 | io.opentelemetry.instrumentation:opentelemetry-jdbc | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
@@ -220,7 +220,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.apache.commons:commons-email2-core | 2.0.0-M1 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-email/ |
 | org.apache.commons:commons-email2-jakarta | 2.0.0-M1 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-email/ |
 | org.apache.commons:commons-exec | 1.6.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-exec/ |
-| org.apache.commons:commons-lang3 | 3.21.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-lang/ |
+| org.apache.commons:commons-lang3 | 3.22.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-lang/ |
 | org.apache.commons:commons-math3 | 3.6.1 | Apache-2.0 | in the jar | http://commons.apache.org/proper/commons-math/ |
 | org.apache.commons:commons-secure-xml | 1.1.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-secure-xml/ |
 | org.apache.commons:commons-text | 1.15.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-text |
@@ -231,8 +231,8 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.apache.logging.log4j:log4j-jul | 2.26.1 | Apache-2.0 | in the jar | https://logging.apache.org/log4j/2.x/ |
 | org.apache.logging.log4j:log4j-layout-template-json | 2.26.1 | Apache-2.0 | in the jar | https://logging.apache.org/log4j/2.x/ |
 | org.apache.logging.log4j:log4j-slf4j2-impl | 2.26.1 | Apache-2.0 | in the jar | https://logging.apache.org/log4j/2.x/ |
-| org.apache.lucene:lucene-analysis-common | 10.5.2 | Apache-2.0 | in the jar | https://lucene.apache.org/ |
-| org.apache.lucene:lucene-core | 10.5.2 | Apache-2.0 | in the jar | https://lucene.apache.org/ |
+| org.apache.lucene:lucene-analysis-common | 10.6.0 | Apache-2.0 | in the jar | https://lucene.apache.org/ |
+| org.apache.lucene:lucene-core | 10.6.0 | Apache-2.0 | in the jar | https://lucene.apache.org/ |
 | org.apache.pdfbox:fontbox | 3.0.8 | Apache-2.0 | in the jar | http://pdfbox.apache.org/ |
 | org.apache.pdfbox:jbig2-imageio | 3.0.5 | Apache-2.0 | in the jar | https://git-wip-us.apache.org/repos/asf?p=pdfbox-jbig2.git |
 | org.apache.pdfbox:pdfbox | 3.0.8 | Apache-2.0 | in the jar | https://svn.apache.org/viewvc/pdfbox/tags/3.0.8/pdfbox |
@@ -269,9 +269,9 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.apache.tika:tika-parser-xmp-commons | 4.2.0 | Apache-2.0 | in the jar | https://tika.apache.org/ |
 | org.apache.tika:tika-parser-zip-commons | 4.2.0 | Apache-2.0 | in the jar | https://tika.apache.org/ |
 | org.apache.xmlbeans:xmlbeans | 5.3.0 | Apache-2.0 | in the jar | https://xmlbeans.apache.org/ |
-| org.bouncycastle:bcpkix-jdk18on | 1.86 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
-| org.bouncycastle:bcprov-jdk18on | 1.86 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
-| org.bouncycastle:bcutil-jdk18on | 1.86 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
+| org.bouncycastle:bcpkix-jdk18on | 1.87 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
+| org.bouncycastle:bcprov-jdk18on | 1.87 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
+| org.bouncycastle:bcutil-jdk18on | 1.87 | MIT | in the jar | https://www.bouncycastle.org/download/bouncy-castle-java/ |
 | org.brotli:dec | 0.1.2 | MIT | below | http://brotli.org |
 | org.checkerframework:checker-qual | 3.41.0 | MIT | in the jar | https://checkerframework.org/ |
 | org.codehaus.groovy:groovy | 3.0.25 | Apache-2.0 | in the jar | https://groovy-lang.org |
@@ -287,9 +287,9 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.glassfish.jaxb:jaxb-runtime | 4.0.9 | BSD-3-Clause | in the jar | https://eclipse-ee4j.github.io/jaxb-ri/ |
 | org.glassfish.jaxb:txw2 | 4.0.9 | BSD-3-Clause | in the jar | https://eclipse-ee4j.github.io/jaxb-ri/ |
 | org.hdrhistogram:HdrHistogram | 2.2.2 | Public Domain / BSD-2-Clause | in the jar | http://hdrhistogram.github.io/HdrHistogram/ |
-| org.hibernate.models:hibernate-models | 1.3.4 | Apache-2.0 | in the jar | https://github.com/hibernate/hibernate-models |
-| org.hibernate.orm:hibernate-core | 7.4.14.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
-| org.hibernate.orm:hibernate-jcache | 7.4.14.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
+| org.hibernate.models:hibernate-models | 1.3.5 | Apache-2.0 | in the jar | https://github.com/hibernate/hibernate-models |
+| org.hibernate.orm:hibernate-core | 7.4.16.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
+| org.hibernate.orm:hibernate-jcache | 7.4.16.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
 | org.hibernate.validator:hibernate-validator | 9.1.6.Final | Apache-2.0 | in the jar | https://hibernate.org/validator |
 | org.java-websocket:Java-WebSocket | 1.6.0 | MIT | below | https://github.com/TooTallNate/Java-WebSocket |
 | org.javassist:javassist | 3.33.0-GA | MPL-1.1 / LGPL-2.1 / Apache-2.0 | below | https://www.javassist.org/ |
@@ -297,17 +297,13 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.jdom:jdom2 | 2.0.6.1 | Similar to Apache License but with the acknowledgment clause removed | in the jar | http://www.jdom.org |
 | org.jetbrains.kotlin:kotlin-stdlib | 2.4.21 | Apache-2.0 | below | https://kotlinlang.org/ |
 | org.jetbrains:annotations | 24.0.1 | Apache-2.0 | below | https://github.com/JetBrains/java-annotations |
-| org.jmdns:jmdns | 3.6.4 | Apache-2.0 | below | https://jmdns.org |
-| org.jsoup:jsoup | 1.23.2 | MIT | in the jar | https://jsoup.org/ |
+| org.jmdns:jmdns | 3.6.5 | Apache-2.0 | below | https://jmdns.org |
+| org.jsoup:jsoup | 1.24.1 | MIT | in the jar | https://jsoup.org/ |
 | org.jspecify:jspecify | 1.0.1 | Apache-2.0 | below | https://jspecify.dev/ |
 | org.latencyutils:LatencyUtils | 2.0.3 | Public Domain | below | http://latencyutils.github.io/LatencyUtils/ |
 | org.netpreserve:jwarc | 0.37.0 | Apache-2.0 | below | https://github.com/iipc/jwarc |
 | org.nibor.autolink:autolink | 0.6.0 | MIT | below | https://github.com/robinst/autolink-java |
 | org.ow2.asm:asm | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
-| org.ow2.asm:asm-analysis | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
-| org.ow2.asm:asm-commons | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
-| org.ow2.asm:asm-tree | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
-| org.ow2.asm:asm-util | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
 | org.postgresql:postgresql | 42.7.14 | BSD-2-Clause | in the jar | https://jdbc.postgresql.org |
 | org.reactivestreams:reactive-streams | 1.0.4 | MIT-0 | below | http://www.reactive-streams.org/ |
 | org.slf4j:slf4j-api | 2.0.20 | MIT | in the jar | http://www.slf4j.org |
@@ -320,11 +316,12 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.xhtmlrenderer:flying-saucer-core | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-core |
 | org.xhtmlrenderer:flying-saucer-pdf | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-pdf |
 | org.yaml:snakeyaml | 2.7 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml |
-| Play Framework 1.x (tsukhani/play1 fork) | 1.13.93 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
-| tools.jackson.core:jackson-core | 3.2.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
-| tools.jackson.core:jackson-databind | 3.2.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
-| tools.jackson.dataformat:jackson-dataformat-xml | 3.2.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformat-xml |
-| tools.jackson.dataformat:jackson-dataformat-yaml | 3.2.4 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-text |
+| Play Framework 1.x (tsukhani/play1 fork) | 1.13.106 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
+| tools.jackson.core:jackson-core | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
+| tools.jackson.core:jackson-databind | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
+| tools.jackson.dataformat:jackson-dataformat-cbor | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-binary |
+| tools.jackson.dataformat:jackson-dataformat-xml | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformat-xml |
+| tools.jackson.dataformat:jackson-dataformat-yaml | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-text |
 
 ## Web interface packages
 
@@ -338,47 +335,47 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | @fontsource-variable/inter | 5.3.0 | OFL-1.1 | https://fontsource.org/fonts/inter |
 | @fontsource/caveat | 5.3.0 | OFL-1.1 | https://fontsource.org/fonts/caveat |
 | @heroicons/vue | 2.2.0 | MIT | https://github.com/tailwindlabs/heroicons#readme |
-| @lucide/vue | 1.66.0 | ISC | https://lucide.dev |
+| @lucide/vue | 1.75.0 | ISC | https://lucide.dev |
 | @tanstack/store | 0.11.2 | MIT | https://tanstack.com/store |
 | @tanstack/table-core | 9.3.1 | MIT | https://tanstack.com/table |
 | @tanstack/vue-table | 9.3.1 | MIT | https://tanstack.com/table |
 | @unhead/vue | 3.4.3 | MIT | https://unhead.unjs.io |
-| @vitejs/plugin-vue | 6.0.10 | MIT | https://github.com/vitejs/vite-plugin-vue/tree/main/packages/plugin-vue#readme |
-| @vue/reactivity | 3.5.44 | MIT | https://github.com/vuejs/core/tree/main/packages/reactivity#readme |
-| @vue/runtime-core | 3.5.44 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-core#readme |
-| @vue/runtime-dom | 3.5.44 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme |
-| @vue/shared | 3.5.44 | MIT | https://github.com/vuejs/core/tree/main/packages/shared#readme |
+| @vitejs/plugin-vue | 6.0.11 | MIT | https://github.com/vitejs/vite-plugin-vue/tree/main/packages/plugin-vue#readme |
+| @vue/reactivity | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/reactivity#readme |
+| @vue/runtime-core | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-core#readme |
+| @vue/runtime-dom | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme |
+| @vue/shared | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/shared#readme |
 | @vueuse/core | 14.4.0, 15.0.0 | MIT | https://github.com/vueuse/vueuse#readme |
 | @vueuse/shared | 14.4.0, 15.0.0 | MIT | https://github.com/vueuse/vueuse/tree/main/packages/shared#readme |
 | aria-hidden | 1.2.6 | MIT | https://github.com/theKashey/aria-hidden#readme |
 | class-variance-authority | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | clsx | 2.1.1 | MIT | lukeed/clsx |
-| cronstrue | 3.38.0 | MIT | https://github.com/bradymholt/cronstrue |
+| cronstrue | 3.41.0 | MIT | https://github.com/bradymholt/cronstrue |
 | defu | 6.1.7 | MIT | unjs/defu |
 | destr | 2.0.5 | MIT | unjs/destr |
 | dijkstrajs | 1.0.3 | MIT | https://github.com/tcort/dijkstrajs |
-| dompurify | 3.4.17 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
-| driver.js | 1.10.2 | MIT | https://driverjs.com |
+| dompurify | 3.4.18 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
+| driver.js | 1.14.0 | MIT | https://driverjs.com |
 | fnv1a-64 | 0.1.2 | MIT | danielroe/fnv1a-64 |
 | h3 | 1.15.11 | MIT | h3js/h3 |
 | hookable | 6.1.2 | MIT | unjs/hookable |
 | katex | 0.19.1 | MIT | https://katex.org |
-| marked | 18.1.2 | MIT | https://marked.js.org |
-| nostics | 1.3.0 | MIT | https://github.com/vercel-labs/nostics#readme |
-| nuxt | 4.6.3 | MIT | https://nuxt.com |
+| marked | 18.2.1 | MIT | https://marked.js.org |
+| nostics | 1.4.0 | MIT | https://github.com/vercel-labs/nostics#readme |
+| nuxt | 4.6.4 | MIT | https://nuxt.com |
 | object-identity | 0.2.3 | MIT | https://github.com/maraisr/object-identity |
 | ofetch | 1.5.1 | MIT | unjs/ofetch |
 | ohash | 2.0.12 | MIT | unjs/ohash |
 | qrcode | 1.5.4 | MIT | http://github.com/soldair/node-qrcode |
 | reka-ui | 2.11.0 | MIT | https://github.com/unovue/reka-ui |
-| rolldown | 1.2.16 | MIT | https://rolldown.rs/ |
+| rolldown | 1.2.19 | MIT | https://rolldown.rs/ |
 | smiles-drawer | 2.4.1 | MIT | https://github.com/reymond-group/smilesDrawer |
 | tailwind-merge | 3.7.0 | MIT | https://github.com/dcastil/tailwind-merge |
-| tailwindcss | 4.3.3 | MIT | https://tailwindcss.com |
+| tailwindcss | 4.3.5 | MIT | https://tailwindcss.com |
 | ufo | 1.6.4 | MIT | unjs/ufo |
 | unhead | 3.4.3 | MIT | https://unhead.unjs.io |
-| vite | 8.3.5 | MIT | https://vite.dev |
-| vue-router | 5.4.0 | MIT | https://router.vuejs.org |
+| vite | 8.3.8 | MIT | https://vite.dev |
+| vue-router | 5.5.1 | MIT | https://router.vuejs.org |
 | web-vitals | 6.2.3 | Apache-2.0 | https://github.com/GoogleChrome/web-vitals |
 | zod | 4.6.7 | MIT | https://zod.dev |
 
@@ -2592,8 +2589,8 @@ Apache License 2.0
     - Gson
     - Hibernate ORM (core, jcache, models, validator)
     - HikariCP
-    - Jackson (annotations, core, databind, dataformat-xml,
-      dataformat-yaml, datatype-jsr310)
+    - Jackson (annotations, core, databind, dataformat-cbor,
+      dataformat-xml, dataformat-yaml, datatype-jsr310)
     - JaMon (Java Monitoring API)
     - Jandex
     - JBoss Logging
@@ -2627,8 +2624,7 @@ Eclipse Public License 2.0
     - JAXB Runtime (dual EPL-2.0 / EDL-1.0)
 
 BSD-style licenses
-    - ASM and ASM utilities (BSD-3) — asm, asm-analysis, asm-commons,
-      asm-tree, asm-util
+    - ASM (BSD-3) — asm
     - ANTLR runtime (BSD-3)
     - Hamcrest (BSD-3)
     - Protocol Buffers Java (BSD-3)
@@ -2714,15 +2710,27 @@ Copyright © 2023 Werner Randelshofer, Switzerland. MIT License.
 See FastDoubleParser-LICENSE and also FastDoubleParser-ThirdParty-LICENSE for details of other source code
 included in FastDoubleParser and the licenses and copyrights that apply to that code.
 
-## Schubfach
+## jsoniter-scala
 
-jackson-core bundles a copy of the Schubfach number writing code <https://github.com/c4f7fcce9cb06515/Schubfach>.
-That code is available under an MIT license <https://github.com/c4f7fcce9cb06515/Schubfach/blob/master/todec/LICENSE>
+jackson-core bundles a Java port of the float/double-to-decimal-string code from
+jsoniter-scala <https://github.com/plokhotnyuk/jsoniter-scala> (its `JsonWriter`).
+That code is available under an MIT license <https://github.com/plokhotnyuk/jsoniter-scala/blob/master/LICENSE>
 under the following copyright.
 
-Copyright 2018-2020 Raffaello Giulietti
+Copyright (c) 2017-2026 Andriy Plokhotnyuk, and respective contributors
 
-See Schubfach-LICENSE.
+See jsoniter-scala-LICENSE.
+
+## xjb
+
+The jsoniter-scala code above implements the "xjb: Fast Float to String Algorithm" by
+Xiang JunBo and Wang TieJun <https://github.com/xjb714/xjb>.
+That reference implementation is available under the Apache License 2.0
+<https://github.com/xjb714/xjb/blob/main/LICENSE> under the following copyright.
+
+Copyright 2026 xjb714 and contributors
+
+See xjb-LICENSE.
 ```
 
 **tools.jackson.core:jackson-databind**
@@ -2751,7 +2759,7 @@ in some artifacts (usually source distributions); but is always available
 from the source code management (SCM) system project uses.
 ```
 
-**tools.jackson.dataformat:jackson-dataformat-xml, tools.jackson.dataformat:jackson-dataformat-yaml**
+**tools.jackson.dataformat:jackson-dataformat-cbor, tools.jackson.dataformat:jackson-dataformat-xml, tools.jackson.dataformat:jackson-dataformat-yaml**
 
 ``` text
 # Jackson JSON processor
@@ -5772,6 +5780,31 @@ Full text: https://spdx.org/licenses/BSD-2-Clause.html
 - jaxen:jaxen
 - net.dongliu:apk-parser
 
+### BSD
+
+Full text: https://spdx.org/licenses/BSD.html
+
+- com.github.virtuald:curvesapi
+- com.twelvemonkeys.common:common-image
+- com.twelvemonkeys.common:common-io
+- com.twelvemonkeys.common:common-lang
+- com.twelvemonkeys.imageio:imageio-core
+- com.twelvemonkeys.imageio:imageio-metadata
+- com.twelvemonkeys.imageio:imageio-webp
+- org.tallison:jmatio
+
+### MIT-0
+
+Full text: https://spdx.org/licenses/MIT-0.html
+
+- org.reactivestreams:reactive-streams
+- claude-designer
+- git
+- in-depth-research
+- powerpoint-pptx
+- research-paper-writer-pro
+- youtube-transcript
+
 ### BSD-3-Clause
 
 - 3dmol: Copyright (c) 2014, University of Pittsburgh and contributors; (C) Copyright 2011-2012, biochem_fan; Copyright (c) 2010-2012 three.js Authors. All rights reserved.; Copyright (c) 2011 John Resig
@@ -5780,10 +5813,6 @@ Full text: https://spdx.org/licenses/BSD-2-Clause.html
 - com.sun.istack:istack-commons-runtime
 - org.antlr:antlr4-runtime
 - org.ow2.asm:asm
-- org.ow2.asm:asm-analysis
-- org.ow2.asm:asm-commons
-- org.ow2.asm:asm-tree
-- org.ow2.asm:asm-util
 
 ``` text
 3Dmol.js incorporates code from GLmol, Three.js, and jQuery and
@@ -5872,31 +5901,6 @@ is licensed under a BSD-3-Clause license.
      OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
      WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
-
-### BSD
-
-Full text: https://spdx.org/licenses/BSD.html
-
-- com.github.virtuald:curvesapi
-- com.twelvemonkeys.common:common-image
-- com.twelvemonkeys.common:common-io
-- com.twelvemonkeys.common:common-lang
-- com.twelvemonkeys.imageio:imageio-core
-- com.twelvemonkeys.imageio:imageio-metadata
-- com.twelvemonkeys.imageio:imageio-webp
-- org.tallison:jmatio
-
-### MIT-0
-
-Full text: https://spdx.org/licenses/MIT-0.html
-
-- org.reactivestreams:reactive-streams
-- claude-designer
-- git
-- in-depth-research
-- powerpoint-pptx
-- research-paper-writer-pro
-- youtube-transcript
 
 ### EPL-1.0
 
