@@ -360,7 +360,7 @@ describe('ChatMessage usage card', () => {
       expect(card()).not.toBeNull()
 
       await trigger.trigger('mouseleave')
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise(resolve => setTimeout(resolve, 300))
 
       expect(document.activeElement).toBe(composer)
       expect(card()).toBeNull()
@@ -368,6 +368,87 @@ describe('ChatMessage usage card', () => {
     finally {
       c.unmount()
       composer.remove()
+    }
+  })
+
+  it('shows the card on a click and never hides it on one: hovered, clicked, dismissed by Escape, clicked again', async () => {
+    const c = await mountSuspended(ChatMessage, {
+      props: props(msg({ id: 37, usage: twoCalls }), {
+        'onSet-tok-stats-hover-key': (key: number | null) => { void c.setProps({ tokStatsHoverKey: key }) },
+      }),
+      attachTo: document.body,
+    })
+    const trigger = c.findAll('button').find(b => b.text() === '193.5 tok/s')!
+    const card = () => document.body.querySelector('[data-testid="usage-card"]')
+    try {
+      await trigger.trigger('mouseenter')
+      await trigger.trigger('click')
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(card()).not.toBeNull()
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(card()).toBeNull()
+
+      await trigger.trigger('click')
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(card()).not.toBeNull()
+    }
+    finally {
+      c.unmount()
+    }
+  })
+
+  it('stays open while the pointer crosses from the pill into the card, and closes once it has left both', async () => {
+    const c = await mountSuspended(ChatMessage, {
+      props: props(msg({ id: 38, usage: twoCalls }), {
+        'onSet-tok-stats-hover-key': (key: number | null) => { void c.setProps({ tokStatsHoverKey: key }) },
+      }),
+      attachTo: document.body,
+    })
+    const trigger = c.findAll('button').find(b => b.text() === '193.5 tok/s')!
+    const card = () => document.body.querySelector('[data-testid="usage-card"]')
+    try {
+      await trigger.trigger('mouseenter')
+      await trigger.trigger('mouseleave')
+      const content = document.body.querySelector('[data-slot="popover-content"]')
+      expect(content).not.toBeNull()
+
+      content!.dispatchEvent(new MouseEvent('mouseenter'))
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(card()).not.toBeNull()
+
+      content!.dispatchEvent(new MouseEvent('mouseleave'))
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(card()).toBeNull()
+    }
+    finally {
+      c.unmount()
+    }
+  })
+
+  it('keeps the card another reply\'s pill opened when the pointer moves on to it from this one', async () => {
+    // One hover key for the transcript, as chat.vue holds it.
+    function setKey(key: number | null) {
+      for (const row of rows) void row.setProps({ tokStatsHoverKey: key })
+    }
+    const mountRow = (id: number) => mountSuspended(ChatMessage, {
+      props: props(msg({ id, usage: twoCalls }), { 'onSet-tok-stats-hover-key': setKey }),
+      attachTo: document.body,
+    })
+    const rows = [await mountRow(39), await mountRow(40)]
+    const [first, second] = rows.map(row => row.findAll('button').find(b => b.text() === '193.5 tok/s')!)
+    try {
+      await first!.trigger('mouseenter')
+      await first!.trigger('mouseleave')
+      await second!.trigger('mouseenter')
+      await new Promise(resolve => setTimeout(resolve, 300))
+
+      expect(rows.map(row => row.props('tokStatsHoverKey'))).toEqual([40, 40])
+      expect(document.body.querySelectorAll('[data-testid="usage-card"]')).toHaveLength(1)
+    }
+    finally {
+      for (const row of rows) row.unmount()
     }
   })
 })

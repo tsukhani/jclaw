@@ -142,6 +142,27 @@ function speedLabel(tokensPerSecond: number | null): string {
   return tokensPerSecond == null ? '' : tokensPerSecond.toFixed(1)
 }
 
+// The usage card sits 8px off its pill and unmounts the instant it closes (the animate-out classes are inert:
+// tw-animate-css is not installed), so closing on mouseleave left the pointer no way across the gap into the card.
+const USAGE_CARD_CLOSE_DELAY_MS = 200
+let usageCardCloseTimer: ReturnType<typeof setTimeout> | undefined
+
+function showUsageCard() {
+  clearTimeout(usageCardCloseTimer)
+  emit('set-tok-stats-hover-key', props.msg.id ?? props.msg._key ?? null)
+}
+
+function hideUsageCardSoon() {
+  clearTimeout(usageCardCloseTimer)
+  const key = props.msg.id ?? props.msg._key ?? null
+  // The hover key is the transcript's: by now it may name another reply's card, which this one must not close.
+  usageCardCloseTimer = setTimeout(() => {
+    if (props.tokStatsHoverKey === key) emit('set-tok-stats-hover-key', null)
+  }, USAGE_CARD_CLOSE_DELAY_MS)
+}
+
+onBeforeUnmount(() => clearTimeout(usageCardCloseTimer))
+
 // Read-aloud (TTS) playback, shared across messages so only one plays at a time
 // (JCLAW-789/793). The engine is the operator's Settings > Speech selection.
 const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
@@ -673,28 +694,34 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
               <!-- JCLAW-175: tok/s is informational, so it keeps no clickable look: a button only so a
                    keyboard reaches it, with no button styling, so nothing a mouse user sees changes. The
                    breakdown opens on hover through the controlled :open binding, and on keyboard focus too
-                   (WCAG 2.1.1), with a ring drawn only for keyboard focus. -->
+                   (WCAG 2.1.1), with a ring drawn only for keyboard focus. A click shows it and never hides it:
+                   as-child runs reka's toggle ahead of this @click, which undoes its close before Vue renders, so a
+                   tap, whose mouseenter has already opened the card, leaves it open. -->
               <button
                 type="button"
                 class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
-                @mouseleave="emit('set-tok-stats-hover-key', null)"
-                @focus="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
+                @mouseenter="showUsageCard"
+                @mouseleave="hideUsageCardSoon"
+                @focus="showUsageCard"
                 @blur="emit('set-tok-stats-hover-key', null)"
+                @click="showUsageCard"
               >
                 {{ formatTokensPerSec(msg.usage) }}
               </button>
             </PopoverTrigger>
             <!-- On close reka focuses the trigger, whose focus handler reopens the card: closed by the pointer
-                 leaving, it stuck open with the keyboard ring on the pill, having taken focus from the message box. -->
+                 leaving, it stuck open with the keyboard ring on the pill, having taken focus from the message box.
+                 The card is about 510px tall, so a pill mid-screen in a short window has room on neither side:
+                 capped at the space left, it scrolls instead of running off the edge. -->
             <PopoverContent
               side="top"
               align="start"
               :side-offset="8"
-              class="w-72 max-w-[calc(100vw-2rem)] p-4 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
-              @mouseenter="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
-              @mouseleave="emit('set-tok-stats-hover-key', null)"
-              @focusin="emit('set-tok-stats-hover-key', msg.id ?? msg._key ?? null)"
+              :collision-padding="8"
+              class="w-72 max-w-[calc(100vw-2rem)] max-h-(--reka-popover-content-available-height) overflow-y-auto p-4 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+              @mouseenter="showUsageCard"
+              @mouseleave="hideUsageCardSoon"
+              @focusin="showUsageCard"
               @focusout="emit('set-tok-stats-hover-key', null)"
               @close-auto-focus="(event: Event) => event.preventDefault()"
             >
