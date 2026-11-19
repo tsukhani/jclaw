@@ -593,12 +593,16 @@ function isAncestor(dir, rev, of) {
   }
 }
 
-// One parent, on main, and only conf/application.conf changed from it: the shape of the commit /release-check makes.
+// The shape of the commit /release-check makes: one parent, on main, changing conf/application.conf and, when the release
+// ships other components than the committed copy lists, the regenerated THIRD-PARTY-NOTICES.md (JF-502), and nothing else.
+const RELEASE_COMMIT_FILES = new Set(["conf/application.conf", "THIRD-PARTY-NOTICES.md"]);
+
 function releaseOverMain(dir, rev) {
   try {
     const [commit, parent, ...more] = git(dir, "rev-list", "--parents", "-n", "1", rev).split(" ");
-    return parent !== undefined && more.length === 0 && isAncestor(dir, parent, "refs/heads/main")
-      && git(dir, "diff", "--name-only", parent, commit) === "conf/application.conf";
+    if (parent === undefined || more.length !== 0 || !isAncestor(dir, parent, "refs/heads/main")) return false;
+    const changed = git(dir, "diff", "--name-only", parent, commit).split("\n");
+    return changed.includes("conf/application.conf") && changed.every((path) => RELEASE_COMMIT_FILES.has(path));
   } catch {
     return false;
   }

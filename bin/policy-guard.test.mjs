@@ -632,6 +632,29 @@ test("through git itself, a candidate that is main's own commit, or carries more
   });
 });
 
+test("through git itself, a candidate may also carry the regenerated THIRD-PARTY-NOTICES.md, and nothing more", () => {
+  inScratchRepo(({ scratch, work, git }) => {
+    const pushed = () => git(scratch, "--git-dir=origin.git", "branch", "--list", "candidate/*").stdout.trim();
+    const notices = { "THIRD-PARTY-NOTICES.md": "# Third-party notices\n\n| acp | 0.81.0 |\n" };
+    const withNotices = releaseCommitOverMain(work, git, notices);
+    strictEqual(git(work, "push", "origin", `${withNotices}:refs/heads/candidate/v0.0.1-rc.1`).status, 0);
+    strictEqual(pushed(), "candidate/v0.0.1-rc.1");
+
+    const withAnotherDoc = releaseCommitOverMain(work, git, { ...notices, "README.md": "# JClaw\n" });
+    const another = git(work, "push", "origin", `${withAnotherDoc}:refs/heads/candidate/v0.0.1-rc.2`);
+    strictEqual(another.stderr.split("\n")[0], `[jclaw pre-push] Refused refs/heads/candidate/v0.0.1-rc.2: ${REASONS.push}`);
+
+    mkdirSync(join(work, "conf"), { recursive: true });
+    writeFileSync(join(work, "conf/application.conf"), "application.version=0.0.1\n");
+    git(work, "add", "-A");
+    git(work, "commit", "-q", "-m", "chore: version 0.0.1 on main");
+    const noticesAlone = releaseCommitOverMain(work, git, notices);
+    strictEqual(git(work, "push", "origin", `${noticesAlone}:refs/heads/candidate/v0.0.1-rc.3`).status, 1,
+      "without the version bump it is no release commit");
+    strictEqual(pushed(), "candidate/v0.0.1-rc.1");
+  });
+});
+
 test("a commit landing between /deploy's two pushes neither blocks the release nor goes out with it", () => {
   inScratchRepo(({ scratch, work, git, env }) => {
     const tip = (remote) => git(scratch, `--git-dir=${remote}.git`, "rev-parse", "main").stdout.trim();

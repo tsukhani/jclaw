@@ -54,7 +54,7 @@ head=$(/usr/bin/git rev-parse HEAD)
 
 Each line is a release commit over this `HEAD`: its full SHA is `<REL>` and its subject names the version. Then find its build among the newest 30 of `JClaw-candidate`, where candidates build (JF-453) (`mcp__jenkins__getJob` with `jobFullName: "JClaw-candidate"` and `tree: "builds[number,result,displayName,description]{0,30}"`): `result` is `SUCCESS` and `description` is `tested <REL>`. Its `displayName`, such as `v1.0.22-rc.2`, is the label the report and the Jira version name (JF-465).
 
-- **One line, with a green build:** that commit is the release. `/usr/bin/git status --porcelain -- conf/application.conf` must print nothing, or the fast-forward fails. Other uncommitted work stays out of the release, so name it in the report.
+- **One line, with a green build:** that commit is the release. `/usr/bin/git status --porcelain -- $(/usr/bin/git diff --name-only HEAD <REL>)` must print nothing, or the fast-forward fails: those are the files the release changes, `conf/application.conf` and, when the release regenerated it, `THIRD-PARTY-NOTICES.md`. Other uncommitted work stays out of the release, so name it in the report.
 - **Several lines:** a check ran more than once over this `HEAD`. Use one with a green build, of the version asked if a version argument was given, and of those the newest build's.
 - **None, no green build, or none of the version asked:** run the check here. Run `/release-check` in this session with this command's version argument; its step 15 then removes its worktree and hands its release commit back as `<REL>` instead of offering `/deploy`, since the operator chose by typing this command. It takes about 30 minutes, the candidate build and the Mac run side by side. When the check fails, its step 14 has already dropped the release commit, with `main` and both remotes as they were: stop, with what failed in the report. A commit landing on `main` after a check leaves its release commit over an older `HEAD`, so it is no longer found here and the check runs again.
 
@@ -76,7 +76,7 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 **Phase 1: Fast-forward `main` to the release commit**
 
 1. Confirm the main checkout is on `main` (`/usr/bin/git rev-parse --abbrev-ref HEAD`); releases go out only from `main`.
-2. `/usr/bin/git merge --ff-only <REL>`, then check that `/usr/bin/git rev-parse HEAD` prints `<REL>`. The commit changes only `conf/application.conf`, so the checkout moves by that one line. If git refuses because `main` has moved, another session committed since the check: nothing changed, so run the check again over the new `HEAD`, as the candidate preflight does, which makes a new release commit for the same version. Do it once: if `main` moves again before that commit's fast-forward, stop.
+2. `/usr/bin/git merge --ff-only <REL>`, then check that `/usr/bin/git rev-parse HEAD` prints `<REL>`. The commit changes `conf/application.conf` and at most `THIRD-PARTY-NOTICES.md`, so the checkout moves by the version line and, when the release regenerated them, the notices. If git refuses because `main` has moved, another session committed since the check: nothing changed, so run the check again over the new `HEAD`, as the candidate preflight does, which makes a new release commit for the same version. Do it once: if `main` moves again before that commit's fast-forward, stop.
 
 **Phase 2: Push the release commit to both remotes**
 
@@ -166,6 +166,6 @@ The tag waits for the release commit's own push build: a version whose build fai
 - Never use `--force`, `--force-with-lease`, `--no-verify`, or any flag that bypasses hooks, signing, or history.
 - Never amend, recreate or add to the release commit: what ships is the commit the candidate tested, by sha.
 - Never push to `main` with `--force` even if a hook rejects; report the hook failure and let the user decide.
-- Nothing uncommitted ships: the fast-forward moves only `conf/application.conf`, and other work in the checkout stays out of the release.
+- Nothing uncommitted ships: the fast-forward moves only `conf/application.conf` and the regenerated `THIRD-PARTY-NOTICES.md`, and other work in the checkout stays out of the release.
 - If the current branch is not `main`, stop before anything moves and report the branch — releases go out only from `main`.
 - Never tag a release commit before its Jenkins build has passed, and never move or delete a tag once it is pushed.

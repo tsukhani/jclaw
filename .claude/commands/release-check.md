@@ -62,7 +62,12 @@ Then, never stopping: `node bin/jira-release.mjs audit` lists each JF ticket out
 **Make the release commit**
 
 7. **A detached worktree at `HEAD`**, so neither `main` nor the shared checkout moves: `/usr/bin/git worktree add --detach .claude/worktrees/release/v<NEW_VERSION> HEAD`, and record `BASE=$(/usr/bin/git rev-parse HEAD)`. Its `post-checkout` hook seeds `certs/.env` with a test port of its own. Run steps 8 to 9 and 12 inside it.
-8. **Bump and commit.** In the worktree's `conf/application.conf`, replace the `application.version=` line with the Edit tool, so exactly one line changes. Then create the **signed** commit with a HEREDOC so line breaks survive the shell:
+8. **Bump, refresh the notices, and commit.** In the worktree's `conf/application.conf`, replace the `application.version=` line with the Edit tool, so exactly one line changes. Then regenerate `THIRD-PARTY-NOTICES.md` for what this release ships, so each tag's copy matches its bundle (JF-502). The task reads the web bundle's packages, so install the frontend from its lockfile (the pnpm store already holds it) and build the SPA first, with no `-PtargetArch`, as the release zip is built:
+    ```bash
+    (cd frontend && pnpm install --frozen-lockfile)
+    ./gradlew --quiet playFrontendSpa thirdPartyNotices
+    ```
+    `/usr/bin/git status --porcelain` must now list `conf/application.conf` and, only when the release ships components other than the committed copy lists, `THIRD-PARTY-NOTICES.md`. Anything else is a tracked file the build wrote: go to step 14. Then create the **signed** commit with a HEREDOC so line breaks survive the shell; `-a` takes the notices when they changed:
     ```bash
     /usr/bin/git commit -S -am "$(cat <<'EOF'
     Release v<NEW_VERSION>
@@ -73,10 +78,9 @@ Then, never stopping: `node bin/jira-release.mjs audit` lists each JF ticket out
     EOF
     )"
     ```
-    Record `REL=$(/usr/bin/git rev-parse HEAD)`. Check its shape before anything goes out: `/usr/bin/git diff --name-only <BASE> <REL>` prints only `conf/application.conf`, and `/usr/bin/git log -1 --format='%G? %ce' <REL>` prints `G` and your committer email.
-9. **The gates Jenkins never runs, on this commit.** Lint, Stylelint, the typecheck and the `bin/` tests run nowhere on Jenkins (JF-445). In the worktree, install the frontend from its lockfile (the pnpm store already holds it), then run both, and on a failure go to step 14:
+    Record `REL=$(/usr/bin/git rev-parse HEAD)`. Check its shape before anything goes out: `/usr/bin/git diff --name-only <BASE> <REL>` prints `conf/application.conf`, with `THIRD-PARTY-NOTICES.md` above it when the notices changed, and nothing else, and `/usr/bin/git log -1 --format='%G? %ce' <REL>` prints `G` and your committer email.
+9. **The gates Jenkins never runs, on this commit.** Lint, Stylelint, the typecheck and the `bin/` tests run nowhere on Jenkins (JF-445). In the worktree, with the frontend step 8 installed, run both, and on a failure go to step 14:
    ```bash
-   (cd frontend && pnpm install --frozen-lockfile)
    ./jclaw.sh check
    (unset $(/usr/bin/git rev-parse --local-env-vars) && node --test bin/*.test.mjs)
    ```
@@ -87,7 +91,7 @@ Then, never stopping: `node bin/jira-release.mjs audit` lists each JF ticket out
     ```bash
     /usr/bin/git push origin <REL>:refs/heads/candidate/v<NEW_VERSION>-rc.<N>
     ```
-    The guard passes this form only: a `Release vX.Y.Z` commit whose one parent is on `main`, which changes only `conf/application.conf` and carries `<NEW_VERSION>` there, pushed from the main checkout on `main` to `origin`, on a branch `origin` does not hold yet, created once and never moved. The pre-push hook skips the local tests, which the candidate build and step 12 run. This branch is what keeps the commit once the worktree is gone.
+    The guard passes this form only: a `Release vX.Y.Z` commit whose one parent is on `main`, which changes `conf/application.conf`, carrying `<NEW_VERSION>` there, and at most `THIRD-PARTY-NOTICES.md` besides, pushed from the main checkout on `main` to `origin`, on a branch `origin` does not hold yet, created once and never moved. The pre-push hook skips the local tests, which the candidate build and step 12 run. This branch is what keeps the commit once the worktree is gone.
 11. **Start the build** in the `JClaw-candidate` job: `mcp__jenkins__triggerBuild` with `jobFullName: "JClaw-candidate"` and `parameters: {"CANDIDATE": "<REL>", "CANDIDATE_BRANCH": "candidate/v<NEW_VERSION>-rc.<N>"}`, then follow the queue item (`mcp__jenkins__getQueueItem`) to its build number. That job checks out the candidate branch, so the build runs the release commit's own Jenkinsfile and its Bitbucket status lands on that commit (JF-453). It names itself after its branch, `v<NEW_VERSION>-rc.<N>`, and refuses a branch naming another version (JF-471). It is analysed as the version the commit carries: the rc is a label, never in the artifact (JF-465). If Jenkins has no such job, `node bin/candidate-job.mjs --apply` creates it from the `JClaw` job.
 12. **Meanwhile, run on this Mac the tests the candidate cannot** (JF-447): the live-browser classes, which only `./jclaw.sh test` turns on, and the macOS sides of tests that branch on the OS, since Jenkins runs on Linux. It is the backend classes `bin/select-tests.mjs` picks from the range since `origin/main`, run in the worktree, so the Mac tests the release commit itself. Wait until `pgrep -fl 'gradle-wrapper[.]jar playAutotest' | grep -v -e -Ptests=` and `pgrep -fl '[.]githooks/pre-push'` print nothing, then run it in the background, redirected to a file and never piped:
     ```bash
